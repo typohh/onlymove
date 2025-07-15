@@ -191,8 +191,8 @@ class DifficultyAssessor:
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
-        Adjusts position by having player play suboptimal moves until solution leads to 0.5 win.
-        Tries multiple rounds of adjustments if needed.
+        Adjusts position to ensure solution leads to ~0.5 win.
+        Always picks the move that brings score closest to 0.5.
         
         Args:
             moves (list): Current move sequence
@@ -204,19 +204,17 @@ class DifficultyAssessor:
         """
         current_moves = moves.copy()
         initial_score = self._get_score_after_move(current_moves, player, correct_move)
-        MAX_ADJUSTMENTS = 5  # Increased from 3 to allow more refinement
-        TARGET_RANGE = (0.0, 1.0)  # Target range that will round to 0.5
+        MAX_ADJUSTMENTS = 5
         
         print(f"\n  Adjusting position to reach 0.5 point win...", flush=True)
         print(f"  Initial score after solution: {initial_score:.1f}", flush=True)
         
-        # Check initial score before any adjustments
+        # Check initial score
         if 0 <= initial_score <= 1:
-            print(f"  ✅ Initial score is already in target range [0,1] (Black lead)", flush=True)
-            print(f"  DEBUG: Skipping adjustments", flush=True)
+            print(f"  ✅ Initial score is already in target range [0,1]", flush=True)
             return current_moves
-        else:
-            print(f"  Initial score is outside target range [0,1] ({initial_score:.1f}), starting adjustments...", flush=True)
+        
+        print(f"  Starting adjustments...", flush=True)
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Get current score after solution
@@ -227,14 +225,12 @@ class DifficultyAssessor:
                 
             print(f"  Adjustment {adjustment_num}: Current score after solution: {score:.1f}", flush=True)
             
-            # We want the score to be in [0,1] (Black lead) regardless of player
+            # We want the score to be in [0,1] (Black perspective)
             if 0 <= score <= 1:
-                print(f"  ✅ Reached target score range (0-1 Black lead)", flush=True)
+                print(f"  ✅ Reached target score range", flush=True)
                 return current_moves
-            else:
-                print(f"  Score is still outside target range [0,1] ({score:.1f}), continuing adjustments...", flush=True)
             
-            # Find adjustment moves
+            # Query for top moves in current position
             query = {
                 "id": f"adjust_{adjustment_num}",
                 "moves": current_moves,
@@ -250,67 +246,48 @@ class DifficultyAssessor:
             if not response or "moveInfos" not in response:
                 return current_moves
                 
-            # Try moves that move score toward target
-            best_adjustment = None
             best_score_diff = float('inf')
+            best_adjustment = None
             
-            for move_info in response["moveInfos"][:5]:  # Try top 5 alternatives
-                if move_info["move"] == correct_move:
+            # Try top 5 candidate moves
+            for move_info in response["moveInfos"][:5]:
+                candidate_move = move_info["move"]
+                if candidate_move == correct_move:
                     continue
                     
-                # Have player play this move
-                test_moves = current_moves + [[player, move_info["move"]]]
+                # Create test sequence: current + candidate move + best response
+                test_moves = current_moves + [[player, candidate_move]]
+                opponent = "W" if player == "B" else "B"
+                opponent_move = self._get_best_response(test_moves)
+                test_moves.append([opponent, opponent_move])
                 
-                # Have opponent respond suboptimally to help adjust score
-                # For Black problems (player=="B"): if score is too high (Black leads too much), we want to reduce Black's lead -> Black plays a bad move and White responds optimally to maximize reduction
-                # For Black problems: if score is too low (Black trails), we want to increase Black's lead -> Black plays optimally and White plays a bad move to minimize reduction
-                # For White problems: similar logic but with signs reversed
-                # For Black problems: if score > 1 (Black leads too much), we want Black to lose points
-                # For White problems: if score < 0 (Black trails), we want White to lose points
-                if (player == "B" and score > 1) or (player == "W" and score < 0):
-                    # Case: Black leads too much OR Black trails -> we want opponent to respond optimally to maximize point loss
-                    opponent_move = self._get_best_response(test_moves)
-                else:
-                    # Case: Black trails too much OR Black leads slightly -> we want opponent to respond suboptimally to minimize point loss
-                    opponent_move = self._get_worst_response(test_moves)
-                
-                test_moves.append(["W" if player == "B" else "B", opponent_move])
-                
-                # Check resulting score
+                # Get new score after solution
                 test_score = self._get_score_after_move(test_moves, player, correct_move)
                 if test_score is None:
                     continue
                     
-                # Calculate how much closer this gets us to target
-                if player == "B":
-                    target = 0.5
-                    score_diff = abs(test_score - target)
-                else:
-                    target = -0.5
-                    score_diff = abs(test_score - target)
+                # Calculate distance to ideal 0.5
+                score_diff = abs(test_score - 0.5)
+                
+                print(f"    Candidate: {player} {candidate_move} -> {opponent} {opponent_move} "
+                      f"(score: {test_score:.1f}, diff: {score_diff:.1f})", flush=True)
                 
                 if score_diff < best_score_diff:
                     best_score_diff = score_diff
                     best_adjustment = test_moves
-                    print(f"    Found adjustment: {player} {move_info['move']} -> {'W' if player=='B' else 'B'} {opponent_move} "
-                          f"(new score: {test_score:.1f})", flush=True)
-                else:
-                    print(f"    Skipping adjustment: {player} {move_info['move']} -> {'W' if player=='B' else 'B'} {opponent_move} "
-                          f"(new score: {test_score:.1f}, diff {score_diff:.1f})", flush=True)
+                    print(f"      NEW BEST: diff {best_score_diff:.1f}", flush=True)
             
             if best_adjustment:
                 current_moves = best_adjustment
+                print(f"  Applied adjustment: new score diff {best_score_diff:.1f}", flush=True)
             else:
-                print("    No suitable adjustment found in top moves", flush=True)
+                print("  No suitable adjustment found", flush=True)
                 break
                 
         final_score = self._get_score_after_move(current_moves, player, correct_move)
-        print(f"\n  Score adjustment results:", flush=True)
-        print(f"  - Initial score: {initial_score:.1f}", flush=True)
-        print(f"  - Final score: {final_score:.1f}", flush=True)
-        print(f"  - Target range: 0.0-1.0 (Black lead)", flush=True)
+        print(f"\n  Final score: {final_score:.1f}", flush=True)
         if 0 <= final_score <= 1:
-            print("  ✅ Score within target range (will round to 0.5)", flush=True)
+            print("  ✅ Score within target range", flush=True)
         else:
             print("  ❌ Failed to reach target score range", flush=True)
         return current_moves
