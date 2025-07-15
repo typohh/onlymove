@@ -223,7 +223,7 @@ class DifficultyAssessor:
                 print(f"  ✅ Reached target score range (0-1 Black lead)", flush=True)
                 return current_moves
             else:
-                print(f"  Score is still outside target range [0,1], continuing adjustments...", flush=True)
+                print(f"  Score is still outside target range [0,1] ({score:.1f}), continuing adjustments...", flush=True)
             
             # Find adjustment moves
             query = {
@@ -256,11 +256,13 @@ class DifficultyAssessor:
                 # For Black problems (player=="B"): if score is too high (Black leads too much), we want to reduce Black's lead -> Black plays a bad move and White responds optimally to maximize reduction
                 # For Black problems: if score is too low (Black trails), we want to increase Black's lead -> Black plays optimally and White plays a bad move to minimize reduction
                 # For White problems: similar logic but with signs reversed
-                if (player == "B" and score > 1) or (player == "W" and score < -1):
-                    # Case: Black leads too much OR White trails too much -> we want to reduce the absolute lead
+                # For Black problems: if score > 1 (Black leads too much), we want Black to lose points
+                # For White problems: if score < 0 (Black trails), we want White to lose points
+                if (player == "B" and score > 1) or (player == "W" and score < 0):
+                    # Case: Black leads too much OR Black trails -> we want opponent to respond optimally to maximize point loss
                     opponent_move = self._get_best_response(test_moves)
                 else:
-                    # Case: Black trails OR White leads too much -> we want to increase the absolute lead
+                    # Case: Black trails too much OR Black leads slightly -> we want opponent to respond suboptimally to minimize point loss
                     opponent_move = self._get_worst_response(test_moves)
                 
                 test_moves.append(["W" if player == "B" else "B", opponent_move])
@@ -282,7 +284,10 @@ class DifficultyAssessor:
                     best_score_diff = score_diff
                     best_adjustment = test_moves
                     print(f"    Found adjustment: {player} {move_info['move']} -> {'W' if player=='B' else 'B'} {opponent_move} "
-                          f"(new score: {test_score:.1f})")
+                          f"(new score: {test_score:.1f})", flush=True)
+                else:
+                    print(f"    Skipping adjustment: {player} {move_info['move']} -> {'W' if player=='B' else 'B'} {opponent_move} "
+                          f"(new score: {test_score:.1f}, diff {score_diff:.1f})", flush=True)
             
             if best_adjustment:
                 current_moves = best_adjustment
@@ -362,6 +367,7 @@ class DifficultyAssessor:
         if not response or "rootInfo" not in response:
             return None
         score_lead = response["rootInfo"]["scoreLead"]
+        # Always return score from Black's perspective
         return -score_lead
 
     def _get_best_response(self, moves):
