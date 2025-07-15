@@ -323,6 +323,17 @@ class DifficultyAssessor:
             # Apply opponent's move
             current_moves = current_moves + [[opponent, best_opponent]]
             print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
+            
+            # Check if we've reached target score
+            new_score = self._get_score_after_move(current_moves, player, correct_move)
+            if new_score is None:
+                print("    Failed to get new score after adjustment")
+                break
+                
+            print(f"  New score after adjustment: {new_score:.1f}")
+            if 0 <= new_score <= 1:
+                print("  ✅ Reached target score range after adjustment")
+                break
                 
         return current_moves
 
