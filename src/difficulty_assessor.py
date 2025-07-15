@@ -137,20 +137,7 @@ class DifficultyAssessor:
 
     def is_valid_tsumego(self, moves, player_to_move, correct_move):
         """
-        Checks if position is valid tsumego and returns (is_valid, final_score)
-        """
-        """
-        Checks if a position is a valid tsumego and adjusts it to ensure:
-        1. Only one correct first move (others lose)
-        2. Correct move leads to score in 0-1 range (rounds to 0.5)
-        
-        Args:
-            moves (list): The list of moves in the game.
-            player_to_move (str): The player to move ("B" or "W").
-            correct_move (str): The correct move.
-
-        Returns:
-            bool: True if position meets criteria after adjustment, False otherwise
+        Checks if position is valid tsumego and returns (is_valid, final_score, adjusted_moves)
         """
         print(f"\n  Verifying tsumego criteria for {player_to_move} at move {len(moves)+1}...")
         initial_score = self._get_score_after_move(moves, player_to_move, correct_move)
@@ -173,7 +160,7 @@ class DifficultyAssessor:
             }
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
-                return False
+                return False, None, None
 
             # Find all moves with winrate >= 0.5
             winning_moves = []
@@ -185,14 +172,14 @@ class DifficultyAssessor:
             if winning_moves == [correct_move]:
                 # Adjust position to reach 0.5 point win
                 adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-                # After adjustment, return with final score
+                # After adjustment, return with final score and adjusted_moves
                 final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
-                return True, final_score
+                return True, final_score, adjusted_moves
             
             # If multiple winning moves, make others lose
             adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
         
-        return False, None  # Failed after max attempts
+        return False, None, None  # Failed after max attempts
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
@@ -223,10 +210,9 @@ class DifficultyAssessor:
                 
             print(f"  Adjustment {adjustment_num}: Current score after solution: {score:.1f}")
             
-            # Check if score is in target range (0-1 for Black)
-            if (player == "B" and TARGET_RANGE[0] <= score <= TARGET_RANGE[1]) or \
-               (player == "W" and -TARGET_RANGE[1] <= score <= -TARGET_RANGE[0]):
-                print(f"  ✅ Reached target score range (will round to 0.5)")
+            # We want the score to be in [0,1] (Black lead) regardless of player
+            if 0 <= score <= 1:
+                print(f"  ✅ Reached target score range (0-1 Black lead)")
                 return current_moves
             
             # Find adjustment moves

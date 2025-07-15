@@ -29,68 +29,61 @@ class ProblemFinder:
             list: A list of identified problems.
         """
         problems = []
-        difficulties = []
+        # Pre-allocate difficulties array
+        difficulties = [None] * len(game_moves)
+        adjusted_moves_list = [None] * len(game_moves)
 
-        # First, calculate the difficulty of all Black moves in the game (skip first 25 moves)
+        # For each Black move starting at move 25, validate and assess difficulty
         for i in range(25, len(game_moves)):
-            # Skip White moves
             if game_moves[i][0] != "B":
                 continue
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
             
-            print(f"\nAnalyzing move {i+1}/{len(game_moves)} ({player_to_move} to play)...")
-            difficulty = self.difficulty_assessor.assess_move_difficulty(moves_so_far, player_to_move, correct_move)
-            difficulties.append(difficulty)
-            
-            # Get the score after the move from the moving player's perspective
-            score = self.difficulty_assessor._get_score_after_move(moves_so_far, player_to_move, correct_move)
-            score_str = f"{score:.1f}" if score is not None else "None"
-            print(f"  Difficulty: {difficulty if difficulty else 'None'}")
-            print(f"  Move: {correct_move}")
-            print(f"  Score after move: {score_str}")
+            print(f"\nValidating tsumego at move {i+1}/{len(game_moves)}...")
+            is_valid, adjusted_score, adjusted_moves = self.difficulty_assessor.is_valid_tsumego(moves_so_far, player_to_move, correct_move)
+            if not is_valid:
+                print(f"  ❌ Not a valid tsumego.")
+                continue
+
+            print(f"  ✅ Valid tsumego. Adjusted score: {adjusted_score:.1f}")
+            print(f"  Assessing difficulty on adjusted position...")
+            difficulty = self.difficulty_assessor.assess_move_difficulty(adjusted_moves, player_to_move, correct_move)
+            difficulties[i] = difficulty
+            adjusted_moves_list[i] = adjusted_moves
+            print(f"  Difficulty: {difficulty}")
 
         # Now, identify problems by looking for difficulty spikes in Black moves
         if len(game_moves) < 26:  # Need at least 25 moves to start analyzing
             return problems
 
-        for i in range(25, min(len(game_moves), len(difficulties))):
-            # Skip White moves
-            if game_moves[i][0] != "B":
+        for i in range(25, len(game_moves)):
+            if game_moves[i][0] != "B" or difficulties[i] is None:
                 continue
-            # Entry Condition
-            if self._is_significant_increase(difficulties[i-1], difficulties[i]):
-                # New Tsumego Validation
-                moves_so_far = game_moves[:i]
-                player_to_move = game_moves[i][0]
-                correct_move = game_moves[i][1]
-                # Get and show initial position score
-                initial_score = self._get_position_score(moves_so_far)
-                print(f"  Initial position score: {initial_score:.1f} (Black perspective)")
-            
-                # Validate tsumego and show scores
-                is_valid, adjusted_score = self.difficulty_assessor.is_valid_tsumego(moves_so_far, player_to_move, correct_move)
-                if is_valid:
-                    print(f"  Final adjusted score: {adjusted_score:.1f} (Black perspective)")
-                    # Crux Condition
-                    is_crux = True
-                    for j in range(i + 1, len(difficulties)):
+            # Entry Condition: significant increase from previous Black move
+            if i > 25 and difficulties[i-1] is not None and self._is_significant_increase(difficulties[i-1], difficulties[i]):
+                # Crux Condition: no significant increase in next Black moves
+                is_crux = True
+                j = i + 1
+                while j < len(game_moves):
+                    if game_moves[j][0] == "B" and difficulties[j] is not None:
                         if self._is_significant_increase(difficulties[i], difficulties[j]):
                             is_crux = False
                             break
-                    if is_crux:
-                        problem_data = {
-                            "moves": game_moves[:i],
-                            "solution": game_moves[i],
-                            "difficulty": difficulties[i],
-                            "move_number": i+1
-                        }
-                        problems.append(problem_data)
-                        print(f"  ✅ Found tsumego at move {i+1}/{len(game_moves)}!")
-                        print(f"  Solution: {game_moves[i][1]}")
-                        print(f"  Difficulty: {difficulties[i]}")
-                        print(f"  Position score: {self._get_position_score(game_moves[:i])}")
+                    j += 1
+
+                if is_crux:
+                    problem_data = {
+                        "moves": adjusted_moves_list[i],
+                        "solution": game_moves[i],
+                        "difficulty": difficulties[i],
+                        "move_number": i+1
+                    }
+                    problems.append(problem_data)
+                    print(f"  ✅ Found tsumego at move {i+1}/{len(game_moves)}!")
+                    print(f"  Solution: {game_moves[i][1]}")
+                    print(f"  Difficulty: {difficulties[i]}")
 
         return problems
 
