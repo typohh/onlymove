@@ -206,6 +206,7 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
+        initial_score = self._get_score_after_move(current_moves, player, correct_move)
         MAX_ADJUSTMENTS = 5  # Increased from 3 to allow more refinement
         TARGET_RANGE = (0.0, 1.0)  # Target range that will round to 0.5
         
