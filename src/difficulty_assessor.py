@@ -184,6 +184,7 @@ class DifficultyAssessor:
             # If only solution move wins, check 0.5 point condition
             if winning_moves == [correct_move]:
                 if self._verify_0_5_win(adjusted_moves, player_to_move, correct_move):
+                    final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
                     return True, final_score
                 else:
                     # Adjust position to reach 0.5 point win
