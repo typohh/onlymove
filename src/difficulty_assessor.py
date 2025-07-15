@@ -233,6 +233,13 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
+        initial_score = self._get_score_after_move(current_moves, player, correct_move)
+        
+        # Check if initial score is already in target range
+        if initial_score is not None and 0 <= initial_score <= 1:
+            print(f"    Initial score {initial_score:.1f} already in [0,1] - no adjustment needed")
+            return current_moves
+            
         MAX_ADJUSTMENTS = 5
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
