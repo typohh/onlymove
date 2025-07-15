@@ -145,7 +145,7 @@ class DifficultyAssessor:
             "boardXSize": 9,
             "boardYSize": 9,
             "maxVisits": 49,
-            "rootPolicyTemperature": 0.49
+            "rootPolicyTemperature": 49
         }
         query.update(kwargs)
         return query
@@ -279,17 +279,6 @@ class DifficultyAssessor:
                 
         return current_moves
 
-    def _get_worst_response(self, moves):
-        """Helper to get worst reasonable response to a move (for helping Black)"""
-        query = self._build_query(
-            moves,
-            id="worst_response"
-        )
-        response = self.strong_controller.send_query(query)
-        if not response or "moveInfos" not in response or len(response["moveInfos"]) < 2:
-            return "pass"
-        # Return the worst move among the candidates
-        return response["moveInfos"][-1]["move"]
 
     def _make_alternatives_lose(self, moves, player, correct_move, winning_moves):
         """
