@@ -137,6 +137,9 @@ class DifficultyAssessor:
 
     def is_valid_tsumego(self, moves, player_to_move, correct_move):
         """
+        Checks if position is valid tsumego and returns (is_valid, final_score)
+        """
+        """
         Checks if a position is a valid tsumego and adjusts it to ensure:
         1. Only one correct first move (others lose)
         2. Correct move leads to score in 0-1 range (rounds to 0.5)
@@ -181,7 +184,7 @@ class DifficultyAssessor:
             # If only solution move wins, check 0.5 point condition
             if winning_moves == [correct_move]:
                 if self._verify_0_5_win(adjusted_moves, player_to_move, correct_move):
-                    return True
+                    return True, final_score
                 else:
                     # Adjust position to reach 0.5 point win
                     adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
@@ -190,7 +193,7 @@ class DifficultyAssessor:
             # If multiple winning moves, make others lose
             adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
         
-        return False  # Failed after max attempts
+        return False, None  # Failed after max attempts
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
