@@ -163,11 +163,15 @@ class DifficultyAssessor:
         if not response or "rootInfo" not in response or "moveInfos" not in response:
             return False
 
-        # 2. Check the score condition
-        score = response["rootInfo"]["scoreLead"]
+        # 2. Check initial score is within reasonable range
+        initial_score = response["rootInfo"]["scoreLead"]
         if player_to_move == "W":
-            score = -score
-        if not (-5 <= score <= 5):
+            initial_score = -initial_score
+        if not (-5 <= initial_score <= 5):
+            return False
+
+        # Verify solution leads to exactly 0.5 point win
+        if not self._verify_0_5_win(moves, player_to_move, correct_move):
             return False
 
         # 3. Verify the winrate conditions
@@ -215,3 +219,37 @@ class DifficultyAssessor:
                     return False # Found an alternative move that doesn't lose
 
         return True
+
+    def _verify_0_5_win(self, moves, player, correct_move):
+        """
+        Verifies that playing the correct move leads to exactly 0.5 point win.
+        
+        Args:
+            moves (list): Current move sequence
+            player (str): Player to move
+            correct_move (str): Proposed solution move
+            
+        Returns:
+            bool: True if move leads to 0.5 point win, False otherwise
+        """
+        query = {
+            "id": "verify_0_5_win",
+            "moves": moves + [[player, correct_move]],
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1000  # Need accurate score reading
+        }
+        
+        response = self.strong_controller.send_query(query)
+        if not response or "rootInfo" not in response:
+            return False
+            
+        final_score = response["rootInfo"]["scoreLead"]
+        if player == "W":
+            final_score = -final_score
+            
+        # Allow small floating point tolerance
+        return abs(final_score - 0.5) < 0.1
