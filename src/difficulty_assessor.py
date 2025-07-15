@@ -135,12 +135,13 @@ class DifficultyAssessor:
         # Allow a small drop in winrate
         return new_winrate >= (initial_winrate - 0.1)
 
-    def is_valid_tsumego(self, moves, player_to_move, correct_move):
+    def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
         """
-        Checks if position is valid tsumego and returns (is_valid, final_score, adjusted_moves)
+        Validates and adjusts position to meet tsumego criteria.
+        Returns (is_valid, final_score, adjusted_moves)
         """
-        print(f"\n  Verifying tsumego criteria for {player_to_move} at move {len(moves)+1}...")
-        MAX_ATTEMPTS = 5  # Limit adjustment attempts
+        print(f"\n  Validating tsumego at move {len(moves)+1}...")
+        MAX_ATTEMPTS = 5
         adjusted_moves = moves.copy()
         
         # Phase 1: Adjust score to 0-1 range
@@ -174,7 +175,7 @@ class DifficultyAssessor:
                 "komi": 7.5,
                 "boardXSize": 9,
                 "boardYSize": 9,
-                "maxVisits": 1000,
+                "maxVisits": 1,
                 "analysisPVLen": 10
             }
             response = self.strong_controller.send_query(query)
@@ -219,7 +220,7 @@ class DifficultyAssessor:
         MAX_ADJUSTMENTS = 5
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
-            # Query for top moves in current position
+            # Query for moves in current position
             query = {
                 "id": f"adjust_{adjustment_num}",
                 "moves": current_moves,
@@ -228,7 +229,7 @@ class DifficultyAssessor:
                 "komi": 7.5,
                 "boardXSize": 9,
                 "boardYSize": 9,
-                "maxVisits": 1000,
+                "maxVisits": 1,
                 "analysisPVLen": 5
             }
             response = self.strong_controller.send_query(query)
@@ -285,12 +286,12 @@ class DifficultyAssessor:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 100
+            "maxVisits": 1
         }
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response or len(response["moveInfos"]) < 2:
             return "pass"
-        # Return the worst move among the top 5 candidates
+        # Return the worst move among the candidates
         return response["moveInfos"][-1]["move"]
 
     def _make_alternatives_lose(self, moves, player, correct_move, winning_moves):
@@ -330,7 +331,7 @@ class DifficultyAssessor:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1000
+            "maxVisits": 1
         }
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
@@ -349,7 +350,7 @@ class DifficultyAssessor:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 100
+            "maxVisits": 1
         }
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
