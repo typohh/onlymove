@@ -360,8 +360,8 @@ class DifficultyAssessor:
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
             return None
-        score = response["rootInfo"]["scoreLead"]
-        return -score if player == "W" else score
+        score_lead = response["rootInfo"]["scoreLead"]
+        return -score_lead
 
     def _get_best_response(self, moves):
         """Helper to get best response to a move"""

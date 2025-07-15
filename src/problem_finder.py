@@ -44,8 +44,12 @@ class ProblemFinder:
             difficulty = self.difficulty_assessor.assess_move_difficulty(moves_so_far, player_to_move, correct_move)
             difficulties.append(difficulty)
             
+            # Get the score after the move from the moving player's perspective
+            score = self.difficulty_assessor._get_score_after_move(moves_so_far, player_to_move, correct_move)
+            score_str = f"{score:.1f}" if score is not None else "None"
             print(f"  Difficulty: {difficulty if difficulty else 'None'}")
             print(f"  Move: {correct_move}")
+            print(f"  Score after move: {score_str}")
 
         # Now, identify problems by looking for difficulty spikes in Black moves
         if len(game_moves) < 26:  # Need at least 25 moves to start analyzing
