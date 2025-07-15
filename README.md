@@ -6,8 +6,8 @@ Generation strategy is to play out a single game, then evaluate each black posit
 - We can start this evaluation at the last position, and proceed backwards in the game. When we reach 1 dan difficulty, we can stop as we do not want harder than 1 dan tsumegos.
 
 We may try to alter the position to ensure following goals are met:
-- There is only one correct first move. This can be managed by having black play a move that is above 50% winrate, other than the best move, and having white respond. Repeating this until there is only one remaining 50% winrate move for black.
 - The correct move leads to black winning by 0.5 points. This can be managed by having black play a move that loses enough points to drop the point margin of win to 0.5, and have white respond.
+- There is only one correct first move. This can be managed by having black play a move that is above 50% winrate, other than the best move, and having white respond. Repeating this until there is only one remaining 50% winrate move for black.
 
 Also we evaluate the tsumego quality and difficulty, by using katago human network to see which rank humans have a reasonable chance of winning against the full strength katago network.
 - This should be done with multiple plays to the end with each rank human network.
