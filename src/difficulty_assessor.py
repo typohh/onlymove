@@ -146,7 +146,14 @@ class DifficultyAssessor:
         adjusted_moves = moves.copy()
         
         for attempt in range(MAX_ATTEMPTS):
-            # 1. Check if we have exactly one winning move (the solution)
+            # DEBUG: Step 1 - Adjust score to 0-1 range
+            print(f"  DEBUG: Attempt {attempt+1}/{MAX_ATTEMPTS}: Adjusting score first...")
+            adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+            final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+            print(f"  DEBUG: After score adjustment: {final_score:.1f} (Black perspective)")
+            
+            # DEBUG: Step 2 - Check for single winning move
+            print(f"  DEBUG: Checking for single winning move...")
             query = {
                 "id": "tsumego_check",
                 "moves": adjusted_moves,
@@ -160,6 +167,7 @@ class DifficultyAssessor:
             }
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
+                print("  DEBUG: Error in tsumego check query")
                 return False, None, None
 
             # Find all moves with winrate >= 0.5
@@ -168,15 +176,15 @@ class DifficultyAssessor:
                 if move_info["winrate"] >= 0.5:
                     winning_moves.append(move_info["move"])
             
-            # If only solution move wins, proceed to score adjustment
+            print(f"  DEBUG: Winning moves: {winning_moves} (correct: {correct_move})")
+            
+            # If only solution move wins, we're done
             if winning_moves == [correct_move]:
-                # Adjust position to reach 0.5 point win
-                adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-                # After adjustment, return with final score and adjusted_moves
-                final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+                print(f"  DEBUG: Only solution move wins - validation successful!")
                 return True, final_score, adjusted_moves
             
             # If multiple winning moves, make others lose
+            print(f"  DEBUG: Multiple winning moves - making alternatives lose...")
             adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
         
         return False, None, None  # Failed after max attempts
@@ -205,9 +213,10 @@ class DifficultyAssessor:
         # Check initial score before any adjustments
         if 0 <= initial_score <= 1:
             print(f"  ✅ Initial score is already in target range [0,1] (Black lead)", flush=True)
+            print(f"  DEBUG: Skipping adjustments", flush=True)
             return current_moves
         else:
-            print(f"  Initial score is outside target range [0,1], starting adjustments...", flush=True)
+            print(f"  Initial score is outside target range [0,1] ({initial_score:.1f}), starting adjustments...", flush=True)
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Get current score after solution
