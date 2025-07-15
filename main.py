@@ -18,10 +18,10 @@ RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
-    parser.add_argument("--board_size", type=int, default=9, help="The size of the board (e.g., 9, 13, 19).")
-    parser.add_argument("--komi", type=float, default=7.5, help="The komi for the game.")
     parser.add_argument("--sgf", type=str, default=None, help="Path to an existing SGF file to analyze.")
     args = parser.parse_args()
+    args.board_size = 9  # Fixed board size
+    args.komi = 7.5      # Fixed komi
     human_controller = None
     strong_controller = None
     try:
