@@ -219,6 +219,45 @@ class DifficultyAssessor:
         print("    Failed to achieve single winning move after max attempts")
         return False, None, None
 
+    def _get_quick_position_score(self, moves):
+        """Helper to get the current position score with maxVisits=1 for stability"""
+        query = {
+            "id": "position_score_quick",
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1   # Only one visit for stability
+        }
+        response = self.strong_controller.send_query(query)
+        if response and "rootInfo" in response:
+            return response["rootInfo"]["scoreLead"]
+        return None
+
+    def _get_current_score_black(self, moves):
+        """
+        Helper to get the current position score from Black's perspective.
+        Returns None if failed.
+        """
+        score_lead = self._get_quick_position_score(moves)
+        if score_lead is None:
+            return None
+
+        # Determine current player to move
+        if not moves:
+            current_player = "B"
+        else:
+            last_player = moves[-1][0]
+            current_player = "W" if last_player == "B" else "B"
+
+        # Convert to Black's perspective
+        if current_player == "B":
+            return score_lead
+        else:
+            return -score_lead
+
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
         Adjusts position to ensure solution leads to ~0.5 win.
@@ -233,16 +272,18 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
-        initial_score = self._get_score_after_move(current_moves, player, correct_move)
-        
-        # Check if initial score is already in target range
-        if initial_score is not None and 0 <= initial_score <= 1:
-            print(f"    Initial score {initial_score:.1f} already in [0,1] - no adjustment needed")
-            return current_moves
-            
         MAX_ADJUSTMENTS = 5
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
+            # First, check current score and break if in range
+            current_score = self._get_current_score_black(current_moves)
+            if current_score is None:
+                print("    Failed to get current score")
+                break
+            if 0 <= current_score <= 1:
+                print(f"    Current score {current_score:.1f} already in [0,1] - no adjustment needed")
+                break
+
             print(f"  Adjustment round {adjustment_num}:")
             # Query for moves in current position (player's turn)
             query = self._build_query(
@@ -323,17 +364,6 @@ class DifficultyAssessor:
             # Apply opponent's move
             current_moves = current_moves + [[opponent, best_opponent]]
             print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
-            
-            # Check if we've reached target score
-            new_score = self._get_score_after_move(current_moves, player, correct_move)
-            if new_score is None:
-                print("    Failed to get new score after adjustment")
-                break
-                
-            print(f"  New score after adjustment: {new_score:.1f}")
-            if 0 <= new_score <= 1:
-                print("  ✅ Reached target score range after adjustment")
-                break
                 
         return current_moves
 
