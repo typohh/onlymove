@@ -18,7 +18,7 @@ RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-
 
 def main():
     # Check if running in virtual environment
-    if not hasattr(sys, 'real_prefix') and not (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+    if not (hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix == sys.prefix)):
         print("ERROR: Please run this script inside a virtual environment as per README.md instructions")
         print("To activate virtual environment, run:")
         print("source .venv/bin/activate")
