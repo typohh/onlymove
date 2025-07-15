@@ -1,1 +1,2 @@
-sgfmill
+sgfmill>=1.1.1
+numpy>=1.21.0
