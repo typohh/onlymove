@@ -61,7 +61,14 @@ class ProblemFinder:
                 moves_so_far = game_moves[:i]
                 player_to_move = game_moves[i][0]
                 correct_move = game_moves[i][1]
+                # Show initial position score
+                initial_score = self._get_position_score(moves_so_far)
+                print(f"  Initial position score: {initial_score:.1f}")
+            
+                # Validate tsumego and show adjusted score
                 if self.difficulty_assessor.is_valid_tsumego(moves_so_far, player_to_move, correct_move):
+                    final_score = self._get_position_score(moves_so_far + [[player_to_move, correct_move]])
+                    print(f"  Final position score: {final_score:.1f}")
                     # Crux Condition
                     is_crux = True
                     for j in range(i + 1, len(difficulties)):

@@ -287,7 +287,10 @@ class DifficultyAssessor:
                 break
                 
         final_score = self._get_score_after_move(current_moves, player, correct_move)
-        print(f"  Final score after adjustments: {final_score:.1f}")
+        print(f"\n  Score adjustment results:")
+        print(f"  - Initial score: {initial_score:.1f}")
+        print(f"  - Final score: {final_score:.1f}")
+        print(f"  - Target range: {'0.0-1.0' if player == 'B' else '-1.0-0.0'}")
         if (player == "B" and 0 <= final_score <= 1) or (player == "W" and -1 <= final_score <= 0):
             print("  ✅ Score within target range (will round to 0.5)")
         return current_moves
