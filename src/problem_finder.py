@@ -31,8 +31,8 @@ class ProblemFinder:
         problems = []
         difficulties = []
 
-        # First, calculate the difficulty of all moves in the game
-        for i in range(len(game_moves)):
+        # First, calculate the difficulty of all moves in the game (skip first 25 moves)
+        for i in range(25, len(game_moves)):
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
@@ -43,7 +43,7 @@ class ProblemFinder:
         if len(game_moves) < 2:
             return problems
 
-        for i in range(1, len(game_moves) - 1):
+        for i in range(25, len(game_moves) - 1):
             # Entry Condition
             if self._is_significant_increase(difficulties[i-1], difficulties[i]):
                 # New Tsumego Validation
