@@ -166,28 +166,23 @@ class DifficultyAssessor:
         else:
             print(f"    Initial score: {initial_score:.1f}")
         
-        # If initial score is already in [0,1], skip adjustment
-        if initial_score is not None and 0 <= initial_score <= 1:
-            print("    ✅ Score within target range initially - no adjustment needed")
-        else:
-            # Phase 1: Adjust score to 0-1 range
-            print(f"  Phase 1: Adjusting score to 0-1 range...")
-            for attempt in range(MAX_ATTEMPTS):
-                print(f"    Score adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
-                adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-                score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
-                if score is None:
-                    print("    Score is None, aborting adjustment")
-                    return False, None, None
-                print(f"    Current score after solution: {score:.1f}")
-                if 0 <= score <= 1:
-                    print("    ✅ Score within target range")
-                    break
-                else:
-                    print("    ❌ Score still outside target range")
-            else:
-                print("    Failed to adjust score after max attempts")
+        # Phase 1: Adjust score to 0-1 range
+        print(f"  Phase 1: Adjusting score to 0-1 range...")
+        for attempt in range(MAX_ATTEMPTS):
+            score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+            if score is None:
+                print("    Score is None, aborting adjustment")
                 return False, None, None
+            print(f"    Current score: {score:.1f}")
+            if 0 <= score <= 1:
+                print("    ✅ Score within target range")
+                break
+                
+            print(f"    Score adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
+            adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        else:
+            print("    Failed to adjust score after max attempts")
+            return False, None, None
         
         # Phase 2: Ensure only one winning move
         print(f"  Phase 2: Ensuring single winning move...")
