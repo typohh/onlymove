@@ -25,6 +25,7 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
+    parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
     args = parser.parse_args()
     args.board_size = 9  # Fixed board size
     args.komi = 7.5      # Fixed komi
@@ -39,8 +40,8 @@ def main():
         strong_controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH)
 
         print("Starting KataGo engines...")
-        human_controller.start_engine()
-        strong_controller.start_engine()
+        human_controller.start_engine(verbose=args.verbose)
+        strong_controller.start_engine(verbose=args.verbose)
         print("KataGo engines started.")
 
         print("Initializing game generator...")

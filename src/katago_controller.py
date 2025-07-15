@@ -20,9 +20,12 @@ class KatagoController:
         self.process = None
         self.stderr_thread = None
 
-    def start_engine(self):
+    def start_engine(self, verbose=False):
         """
         Starts the KataGo analysis engine as a subprocess.
+        
+        Args:
+            verbose (bool): If True, shows KataGo stderr output
         """
         try:
             command = [
@@ -32,6 +35,8 @@ class KatagoController:
                 "/home/ootakamoku/Repositories/YoseTsumego/analysis.cfg",
                 "-model",
                 self.model_path
+            ]
+            stderr = None if verbose else subprocess.DEVNULL
             ]
             if self.human_model_path:
                 command.extend(["-human-model", self.human_model_path])
