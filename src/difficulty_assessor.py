@@ -135,6 +135,21 @@ class DifficultyAssessor:
         # Allow a small drop in winrate
         return new_winrate >= (initial_winrate - 0.1)
 
+    def _build_query(self, moves, **kwargs):
+        """Helper to build standardized query object"""
+        query = {
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 49,
+            "rootPolicyTemperature": 0.49
+        }
+        query.update(kwargs)
+        return query
+
     def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
         """
         Validates and adjusts position to meet tsumego criteria.
@@ -167,17 +182,11 @@ class DifficultyAssessor:
         print(f"  Phase 2: Ensuring single winning move...")
         for attempt in range(MAX_ATTEMPTS):
             print(f"    Winning move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
-            query = {
-                "id": "tsumego_check",
-                "moves": adjusted_moves,
-                "initialStones": [],
-                "rules": "tromp-taylor",
-                "komi": 7.5,
-                "boardXSize": 9,
-                "boardYSize": 9,
-                "maxVisits": 1,
-                "analysisPVLen": 10
-            }
+            query = self._build_query(
+                adjusted_moves,
+                id="tsumego_check",
+                analysisPVLen=10
+            )
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
                 print("    Error in tsumego check query")
@@ -221,17 +230,11 @@ class DifficultyAssessor:
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Query for moves in current position
-            query = {
-                "id": f"adjust_{adjustment_num}",
-                "moves": current_moves,
-                "initialStones": [],
-                "rules": "tromp-taylor",
-                "komi": 7.5,
-                "boardXSize": 9,
-                "boardYSize": 9,
-                "maxVisits": 1,
-                "analysisPVLen": 5
-            }
+            query = self._build_query(
+                current_moves,
+                id=f"adjust_{adjustment_num}",
+                analysisPVLen=5
+            )
             response = self.strong_controller.send_query(query)
             if not response or "moveInfos" not in response:
                 return current_moves
@@ -278,16 +281,10 @@ class DifficultyAssessor:
 
     def _get_worst_response(self, moves):
         """Helper to get worst reasonable response to a move (for helping Black)"""
-        query = {
-            "id": "worst_response",
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor", 
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1
-        }
+        query = self._build_query(
+            moves,
+            id="worst_response"
+        )
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response or len(response["moveInfos"]) < 2:
             return "pass"
@@ -323,16 +320,10 @@ class DifficultyAssessor:
 
     def _get_score_after_move(self, moves, player, move):
         """Helper to get score after playing a move"""
-        query = {
-            "id": "get_score",
-            "moves": moves + [[player, move]],
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1
-        }
+        query = self._build_query(
+            moves + [[player, move]],
+            id="get_score"
+        )
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
             return None
@@ -342,16 +333,10 @@ class DifficultyAssessor:
 
     def _get_best_response(self, moves):
         """Helper to get best response to a move"""
-        query = {
-            "id": "best_response",
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1
-        }
+        query = self._build_query(
+            moves,
+            id="best_response"
+        )
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
             return "pass"
