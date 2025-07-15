@@ -50,10 +50,15 @@ class KatagoController:
             # Read stderr in a non-blocking way to catch startup errors
             # This is a simple approach, for production, consider a separate thread for stderr
             import threading
-            def read_stderr(process):
-                for line in process.stderr:
-                    print(f"KataGo STDERR: {line.strip()}")
-            self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process,))
+            def read_stderr(process, verbose):
+                if verbose:
+                    for line in process.stderr:
+                        print(f"KataGo STDERR: {line.strip()}")
+                else:
+                    # Just consume stderr without printing
+                    for _ in process.stderr:
+                        pass
+            self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process, verbose))
             self.stderr_thread.daemon = True # Allow main program to exit even if thread is still running
             self.stderr_thread.start()
         except FileNotFoundError:
