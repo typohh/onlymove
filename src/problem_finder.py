@@ -31,8 +31,11 @@ class ProblemFinder:
         problems = []
         difficulties = []
 
-        # First, calculate the difficulty of all moves in the game (skip first 25 moves)
+        # First, calculate the difficulty of all Black moves in the game (skip first 25 moves)
         for i in range(25, len(game_moves)):
+            # Skip White moves
+            if game_moves[i][0] != "B":
+                continue
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
@@ -44,11 +47,14 @@ class ProblemFinder:
             print(f"  Difficulty: {difficulty if difficulty else 'None'}")
             print(f"  Move: {correct_move}")
 
-        # Now, identify problems by looking for difficulty spikes
+        # Now, identify problems by looking for difficulty spikes in Black moves
         if len(game_moves) < 2:
             return problems
 
         for i in range(25, len(game_moves) - 1):
+            # Skip White moves
+            if game_moves[i][0] != "B":
+                continue
             # Entry Condition
             if self._is_significant_increase(difficulties[i-1], difficulties[i]):
                 # New Tsumego Validation
