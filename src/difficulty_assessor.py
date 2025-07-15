@@ -181,15 +181,13 @@ class DifficultyAssessor:
                 if move_info["winrate"] >= 0.5:
                     winning_moves.append(move_info["move"])
             
-            # If only solution move wins, check 0.5 point condition
+            # If only solution move wins, proceed to score adjustment
             if winning_moves == [correct_move]:
-                if self._verify_0_5_win(adjusted_moves, player_to_move, correct_move):
-                    final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
-                    return True, final_score
-                else:
-                    # Adjust position to reach 0.5 point win
-                    adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-                    continue
+                # Adjust position to reach 0.5 point win
+                adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+                # After adjustment, return with final score
+                final_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+                return True, final_score
             
             # If multiple winning moves, make others lose
             adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
@@ -215,6 +213,7 @@ class DifficultyAssessor:
         TARGET_RANGE = (0.0, 1.0)  # Target range that will round to 0.5
         
         print(f"\n  Adjusting position to reach 0.5 point win...")
+        print(f"  Initial score after solution: {initial_score:.1f}")
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Get current score after solution
@@ -257,12 +256,15 @@ class DifficultyAssessor:
                 # Have player play this move
                 test_moves = current_moves + [[player, move_info["move"]]]
                 
-                # Have opponent respond (optimally if we're helping Black, suboptimally if helping White)
-                if player == "B":
-                    # For Black problems, opponent responds optimally
+                # Have opponent respond suboptimally to help adjust score
+                # For Black problems (player=="B"): if score is too high (Black leads too much), we want to reduce Black's lead -> Black plays a bad move and White responds optimally to maximize reduction
+                # For Black problems: if score is too low (Black trails), we want to increase Black's lead -> Black plays optimally and White plays a bad move to minimize reduction
+                # For White problems: similar logic but with signs reversed
+                if (player == "B" and score > 1) or (player == "W" and score < -1):
+                    # Case: Black leads too much OR White trails too much -> we want to reduce the absolute lead
                     opponent_move = self._get_best_response(test_moves)
                 else:
-                    # For White problems, opponent responds suboptimally to help Black
+                    # Case: Black trails OR White leads too much -> we want to increase the absolute lead
                     opponent_move = self._get_worst_response(test_moves)
                 
                 test_moves.append(["W" if player == "B" else "B", opponent_move])
@@ -283,12 +285,13 @@ class DifficultyAssessor:
                 if score_diff < best_score_diff:
                     best_score_diff = score_diff
                     best_adjustment = test_moves
-                    print(f"    Found adjustment: {move_info['move']} -> {opponent_move} "
+                    print(f"    Found adjustment: {player} {move_info['move']} -> {'W' if player=='B' else 'B'} {opponent_move} "
                           f"(new score: {test_score:.1f})")
             
             if best_adjustment:
                 current_moves = best_adjustment
             else:
+                print("    No suitable adjustment found in top moves")
                 break
                 
         final_score = self._get_score_after_move(current_moves, player, correct_move)
@@ -298,6 +301,8 @@ class DifficultyAssessor:
         print(f"  - Target range: {'0.0-1.0' if player == 'B' else '-1.0-0.0'}")
         if (player == "B" and 0 <= final_score <= 1) or (player == "W" and -1 <= final_score <= 0):
             print("  ✅ Score within target range (will round to 0.5)")
+        else:
+            print("  ❌ Failed to reach target score range")
         return current_moves
 
     def _get_worst_response(self, moves):
