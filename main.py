@@ -17,11 +17,20 @@ SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
 
 def main():
+    # Check if running in virtual environment
+    if not hasattr(sys, 'real_prefix') and not (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        print("ERROR: Please run this script inside a virtual environment as per README.md instructions")
+        print("To activate virtual environment, run:")
+        print("source .venv/bin/activate")
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
-    parser.add_argument("--sgf", type=str, default=None, help="Path to an existing SGF file to analyze.")
     args = parser.parse_args()
     args.board_size = 9  # Fixed board size
     args.komi = 7.5      # Fixed komi
+
+    # Always use existing game.sgf if present
+    game_filename = "./generated_games/game.sgf"
     human_controller = None
     strong_controller = None
     try:
@@ -43,16 +52,14 @@ def main():
         print("Initializing problem finder...")
         problem_finder = ProblemFinder(difficulty_assessor, game_generator)
 
-        if args.sgf:
-            game_filename = args.sgf
+        if os.path.exists(game_filename):
             print(f"Using existing game file: {game_filename}")
         else:
-            print("Generating game...")
+            print("Generating new game...")
             game_output_dir = "./generated_games"
             os.makedirs(game_output_dir, exist_ok=True)
-            game_filename = os.path.join(game_output_dir, "game.sgf")
             game_generator.generate_game(board_size=args.board_size, komi=args.komi, filename=game_filename)
-            print(f"Generated game and saved to {game_filename}.")
+            print(f"Generated game and saved to {game_filename}")
 
         print("Loading game for analysis...")
         game_moves = problem_finder.load_sgf(game_filename)
