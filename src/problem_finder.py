@@ -36,8 +36,13 @@ class ProblemFinder:
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
+            
+            print(f"\nAnalyzing move {i+1} ({player_to_move} to play)...")
             difficulty = self.difficulty_assessor.assess_move_difficulty(moves_so_far, player_to_move, correct_move)
             difficulties.append(difficulty)
+            
+            print(f"  Difficulty: {difficulty if difficulty else 'None'}")
+            print(f"  Move: {correct_move}")
 
         # Now, identify problems by looking for difficulty spikes
         if len(game_moves) < 2:
@@ -58,11 +63,17 @@ class ProblemFinder:
                             is_crux = False
                             break
                     if is_crux:
-                        problems.append({
+                        problem_data = {
                             "moves": game_moves[:i],
                             "solution": game_moves[i],
-                            "difficulty": difficulties[i]
-                        })
+                            "difficulty": difficulties[i],
+                            "move_number": i+1
+                        }
+                        problems.append(problem_data)
+                        print(f"  ✅ Found tsumego at move {i+1}!")
+                        print(f"  Solution: {game_moves[i][1]}")
+                        print(f"  Difficulty: {difficulties[i]}")
+                        print(f"  Position score: {self._get_position_score(game_moves[:i])}")
 
         return problems
 
@@ -106,6 +117,23 @@ class ProblemFinder:
 
         with open(filename, "wb") as f:
             f.write(game.serialise())
+
+    def _get_position_score(self, moves):
+        """Helper to get the current position score from strong network"""
+        query = {
+            "id": "position_score",
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 100
+        }
+        response = self.difficulty_assessor.strong_controller.send_query(query)
+        if response and "rootInfo" in response:
+            return response["rootInfo"]["scoreLead"]
+        return None
 
     def _is_significant_increase(self, rank1, rank2):
         """
