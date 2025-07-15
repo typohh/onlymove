@@ -40,7 +40,7 @@ class ProblemFinder:
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
             
-            print(f"\nAnalyzing move {i+1} ({player_to_move} to play)...")
+            print(f"\nAnalyzing move {i+1}/{len(game_moves)} ({player_to_move} to play)...")
             difficulty = self.difficulty_assessor.assess_move_difficulty(moves_so_far, player_to_move, correct_move)
             difficulties.append(difficulty)
             
@@ -76,7 +76,7 @@ class ProblemFinder:
                             "move_number": i+1
                         }
                         problems.append(problem_data)
-                        print(f"  ✅ Found tsumego at move {i+1}!")
+                        print(f"  ✅ Found tsumego at move {i+1}/{len(game_moves)}!")
                         print(f"  Solution: {game_moves[i][1]}")
                         print(f"  Difficulty: {difficulties[i]}")
                         print(f"  Position score: {self._get_position_score(game_moves[:i])}")
