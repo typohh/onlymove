@@ -279,11 +279,12 @@ class DifficultyAssessor:
             if current_score is None:
                 print("    Failed to get current score")
                 break
+            print(f"  Adjustment round {adjustment_num}:")
+            print(f"    Current score: {current_score:.1f}")
             if 0 <= current_score <= 1:
-                print(f"    Current score {current_score:.1f} already in [0,1] - no adjustment needed")
+                print("    Current score already in [0,1] - no adjustment needed")
                 break
 
-            print(f"  Adjustment round {adjustment_num}:")
             # Query for moves in current position (player's turn)
             query = self._build_query(
                 current_moves,
