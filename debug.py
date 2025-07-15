@@ -46,7 +46,7 @@ def main():
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 100,
+            "maxVisits": 1,
             "analysisPVLen": 10
         }
         
