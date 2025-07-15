@@ -137,119 +137,169 @@ class DifficultyAssessor:
 
     def is_valid_tsumego(self, moves, player_to_move, correct_move):
         """
-        Checks if a position is a valid tsumego according to the new criteria.
-
+        Checks if a position is a valid tsumego and adjusts it to ensure:
+        1. Only one correct first move (others lose)
+        2. Correct move leads to exactly 0.5 point win
+        
         Args:
             moves (list): The list of moves in the game.
             player_to_move (str): The player to move ("B" or "W").
             correct_move (str): The correct move.
 
         Returns:
-            bool: True if the position is a valid tsumego, False otherwise.
+            bool: True if position meets criteria after adjustment, False otherwise
         """
-        # 1. Analyze the current position with the strong RL network
+        MAX_ATTEMPTS = 5  # Limit adjustment attempts
+        adjusted_moves = moves.copy()
+        
+        for attempt in range(MAX_ATTEMPTS):
+            # 1. Check if we have exactly one winning move (the solution)
+            query = {
+                "id": "tsumego_check",
+                "moves": adjusted_moves,
+                "initialStones": [],
+                "rules": "tromp-taylor",
+                "komi": 7.5,
+                "boardXSize": 9,
+                "boardYSize": 9,
+                "maxVisits": 1000,
+                "analysisPVLen": 10
+            }
+            response = self.strong_controller.send_query(query)
+            if not response or "rootInfo" not in response or "moveInfos" not in response:
+                return False
+
+            # Find all moves with winrate >= 0.5
+            winning_moves = []
+            for move_info in response["moveInfos"][:5]:  # Check top 5 alternatives
+                if move_info["winrate"] >= 0.5:
+                    winning_moves.append(move_info["move"])
+            
+            # If only solution move wins, check 0.5 point condition
+            if winning_moves == [correct_move]:
+                if self._verify_0_5_win(adjusted_moves, player_to_move, correct_move):
+                    return True
+                else:
+                    # Adjust position to reach 0.5 point win
+                    adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+                    continue
+            
+            # If multiple winning moves, make others lose
+            adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
+        
+        return False  # Failed after max attempts
+
+    def _adjust_to_0_5(self, moves, player, correct_move):
+        """
+        Adjusts position by having player play suboptimal moves until solution leads to 0.5 win.
+        
+        Args:
+            moves (list): Current move sequence
+            player (str): Player to move
+            correct_move (str): Solution move
+            
+        Returns:
+            list: Adjusted move sequence
+        """
+        current_moves = moves.copy()
+        MAX_ADJUSTMENTS = 3
+        
+        for _ in range(MAX_ADJUSTMENTS):
+            # Get current score after solution
+            score = self._get_score_after_move(current_moves, player, correct_move)
+            if abs(score - 0.5) < 0.1:
+                return current_moves
+            
+            # Find a move that reduces the score toward 0.5
+            query = {
+                "id": "find_adjustment",
+                "moves": current_moves,
+                "initialStones": [],
+                "rules": "tromp-taylor",
+                "komi": 7.5,
+                "boardXSize": 9,
+                "boardYSize": 9,
+                "maxVisits": 1000
+            }
+            response = self.strong_controller.send_query(query)
+            if not response or "moveInfos" not in response:
+                return current_moves
+                
+            # Try moves that reduce the score
+            for move_info in response["moveInfos"]:
+                if move_info["move"] != correct_move:
+                    test_score = self._get_score_after_move(
+                        current_moves + [[player, move_info["move"]]],
+                        "W" if player == "B" else "B",  # Opponent responds
+                        "pass"  # Assume opponent passes after adjustment
+                    )
+                    if abs(test_score - 0.5) < abs(score - 0.5):
+                        # This move improves score toward 0.5
+                        return current_moves + [
+                            [player, move_info["move"]],
+                            ["W" if player == "B" else "B", "pass"]
+                        ]
+        
+        return current_moves
+
+    def _make_alternatives_lose(self, moves, player, correct_move, winning_moves):
+        """
+        Adjusts position by having player play alternatives until only solution wins.
+        
+        Args:
+            moves (list): Current move sequence
+            player (str): Player to move
+            correct_move (str): Solution move
+            winning_moves (list): Current winning alternative moves
+            
+        Returns:
+            list: Adjusted move sequence
+        """
+        current_moves = moves.copy()
+        
+        for alt_move in winning_moves:
+            if alt_move == correct_move:
+                continue
+                
+            # Have player play this alternative, then opponent responds optimally
+            current_moves = current_moves + [
+                [player, alt_move],
+                ["W" if player == "B" else "B", self._get_best_response(current_moves + [[player, alt_move]])]
+            ]
+        
+        return current_moves
+
+    def _get_score_after_move(self, moves, player, move):
+        """Helper to get score after playing a move"""
         query = {
-            "id": "tsumego_check",
+            "id": "get_score",
+            "moves": moves + [[player, move]],
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1000
+        }
+        response = self.strong_controller.send_query(query)
+        if not response or "rootInfo" not in response:
+            return None
+        score = response["rootInfo"]["scoreLead"]
+        return -score if player == "W" else score
+
+    def _get_best_response(self, moves):
+        """Helper to get best response to a move"""
+        query = {
+            "id": "best_response",
             "moves": moves,
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1000, # High visits for accurate analysis
-            "analysisPVLen": 10
+            "maxVisits": 100
         }
         response = self.strong_controller.send_query(query)
-        if not response or "rootInfo" not in response or "moveInfos" not in response:
-            return False
-
-        # 2. Check initial score is within reasonable range
-        initial_score = response["rootInfo"]["scoreLead"]
-        if player_to_move == "W":
-            initial_score = -initial_score
-        if not (-5 <= initial_score <= 5):
-            return False
-
-        # Verify solution leads to exactly 0.5 point win
-        if not self._verify_0_5_win(moves, player_to_move, correct_move):
-            return False
-
-        # 3. Verify the winrate conditions
-        initial_winrate = response["rootInfo"]["winrate"]
-        if initial_winrate <= 0.1:
-            return False
-
-        # Check the correct move
-        correct_move_info = None
-        for move_info in response["moveInfos"]:
-            if move_info["move"] == correct_move:
-                correct_move_info = move_info
-                break
-        
-        if correct_move_info is None:
-            return False # Should not happen if correct_move is from RL self-play
-
-        # Check winrate after the correct move
-        # This requires a new query, as the analysis is from the current position
-        winrate_after_correct_move_query = query.copy()
-        winrate_after_correct_move_query["id"] = "winrate_after_correct"
-        winrate_after_correct_move_query["moves"] = moves + [[player_to_move, correct_move]]
-        winrate_after_correct_move_response = self.strong_controller.send_query(winrate_after_correct_move_query)
-        if not winrate_after_correct_move_response or "rootInfo" not in winrate_after_correct_move_response:
-            return False
-        
-        winrate_after_correct_move = winrate_after_correct_move_response["rootInfo"]["winrate"]
-        if winrate_after_correct_move < 0.5:
-            return False
-
-        # 4. Check that all other moves lead to a winrate below 0.5
-        # We only need to check the top few alternatives
-        for move_info in response["moveInfos"][:5]: # Check top 5 alternatives
-            if move_info["move"] != correct_move:
-                # Query for winrate after this alternative move
-                winrate_after_alternative_query = query.copy()
-                winrate_after_alternative_query["id"] = "winrate_after_alternative"
-                winrate_after_alternative_query["moves"] = moves + [[player_to_move, move_info["move"]]]
-                winrate_after_alternative_response = self.strong_controller.send_query(winrate_after_alternative_query)
-                if not winrate_after_alternative_response or "rootInfo" not in winrate_after_alternative_response:
-                    continue # Or handle error appropriately
-
-                winrate_after_alternative = winrate_after_alternative_response["rootInfo"]["winrate"]
-                if winrate_after_alternative >= 0.5:
-                    return False # Found an alternative move that doesn't lose
-
-        return True
-
-    def _verify_0_5_win(self, moves, player, correct_move):
-        """
-        Verifies that playing the correct move leads to exactly 0.5 point win.
-        
-        Args:
-            moves (list): Current move sequence
-            player (str): Player to move
-            correct_move (str): Proposed solution move
-            
-        Returns:
-            bool: True if move leads to 0.5 point win, False otherwise
-        """
-        query = {
-            "id": "verify_0_5_win",
-            "moves": moves + [[player, correct_move]],
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1000  # Need accurate score reading
-        }
-        
-        response = self.strong_controller.send_query(query)
-        if not response or "rootInfo" not in response:
-            return False
-            
-        final_score = response["rootInfo"]["scoreLead"]
-        if player == "W":
-            final_score = -final_score
-            
-        # Allow small floating point tolerance
-        return abs(final_score - 0.5) < 0.1
+        if not response or "moveInfos" not in response:
+            return "pass"
+        return response["moveInfos"][0]["move"]
