@@ -256,6 +256,7 @@ class DifficultyAssessor:
                 return current_moves
                 
             best_candidate = None
+            best_candidate_score = None
             best_candidate_diff = float('inf')
             
             # Find best candidate move for player
@@ -270,17 +271,16 @@ class DifficultyAssessor:
                 candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
                 score_diff = abs(candidate_score - 0.5)
                 
-                print(f"    Player {player} candidate: {candidate_move} (score: {candidate_score:.1f}, diff: {score_diff:.1f})", flush=True)
-                
                 if score_diff < best_candidate_diff:
                     best_candidate_diff = score_diff
                     best_candidate = candidate_move
-                    print(f"      NEW BEST: diff {best_candidate_diff:.1f}", flush=True)
+                    best_candidate_score = candidate_score
             
             if not best_candidate:
                 print("    No suitable candidate move found")
                 return current_moves
                 
+            print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
             # Apply player's candidate move
             current_moves = current_moves + [[player, best_candidate]]
             opponent = "W" if player == "B" else "B"
@@ -297,6 +297,7 @@ class DifficultyAssessor:
                 return current_moves
                 
             best_opponent = None
+            best_opponent_score = None
             best_opponent_diff = float('inf')
             
             # Find best opponent move
@@ -309,17 +310,16 @@ class DifficultyAssessor:
                 opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
                 score_diff = abs(opponent_score - 0.5)
                 
-                print(f"    Opponent {opponent} candidate: {opponent_move} (score: {opponent_score:.1f}, diff: {score_diff:.1f})", flush=True)
-                
                 if score_diff < best_opponent_diff:
                     best_opponent_diff = score_diff
                     best_opponent = opponent_move
-                    print(f"      NEW BEST: diff {best_opponent_diff:.1f}", flush=True)
+                    best_opponent_score = opponent_score
             
             if not best_opponent:
                 print("    No suitable opponent move found")
                 return current_moves
                 
+            print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
             # Apply opponent's move
             current_moves = current_moves + [[opponent, best_opponent]]
             print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
