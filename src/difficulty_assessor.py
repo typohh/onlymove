@@ -149,7 +149,9 @@ class DifficultyAssessor:
         Returns:
             bool: True if position meets criteria after adjustment, False otherwise
         """
-        print(f"\n  Verifying tsumego criteria for {player_to_move} at move...")
+        print(f"\n  Verifying tsumego criteria for {player_to_move} at move {len(moves)+1}...")
+        initial_score = self._get_score_after_move(moves, player_to_move, correct_move)
+        print(f"  Initial score after solution: {initial_score:.1f}")
         MAX_ATTEMPTS = 5  # Limit adjustment attempts
         adjusted_moves = moves.copy()
         
@@ -284,7 +286,10 @@ class DifficultyAssessor:
             else:
                 break
                 
-        print(f"  Final score after adjustments: {self._get_score_after_move(current_moves, player, correct_move):.1f}")
+        final_score = self._get_score_after_move(current_moves, player, correct_move)
+        print(f"  Final score after adjustments: {final_score:.1f}")
+        if (player == "B" and 0 <= final_score <= 1) or (player == "W" and -1 <= final_score <= 0):
+            print("  ✅ Score within target range (will round to 0.5)")
         return current_moves
 
     def _get_worst_response(self, moves):

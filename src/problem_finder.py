@@ -48,10 +48,10 @@ class ProblemFinder:
             print(f"  Move: {correct_move}")
 
         # Now, identify problems by looking for difficulty spikes in Black moves
-        if len(game_moves) < 2:
+        if len(game_moves) < 26:  # Need at least 25 moves to start analyzing
             return problems
 
-        for i in range(25, len(game_moves) - 1):
+        for i in range(25, min(len(game_moves), len(difficulties))):
             # Skip White moves
             if game_moves[i][0] != "B":
                 continue
