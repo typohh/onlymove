@@ -37,7 +37,6 @@ class KatagoController:
                 self.model_path
             ]
             stderr = None if verbose else subprocess.DEVNULL
-            ]
             if self.human_model_path:
                 command.extend(["-human-model", self.human_model_path])
             self.process = subprocess.Popen(
