@@ -159,6 +159,13 @@ class DifficultyAssessor:
         MAX_ATTEMPTS = 5
         adjusted_moves = moves.copy()
         
+        # Get and print initial score before adjustments
+        initial_score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+        if initial_score is None:
+            print("    Initial score: None")
+        else:
+            print(f"    Initial score: {initial_score:.1f}")
+        
         # Phase 1: Adjust score to 0-1 range
         print(f"  Phase 1: Adjusting score to 0-1 range...")
         for attempt in range(MAX_ATTEMPTS):
