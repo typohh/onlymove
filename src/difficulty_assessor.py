@@ -199,21 +199,31 @@ class DifficultyAssessor:
         MAX_ADJUSTMENTS = 5  # Increased from 3 to allow more refinement
         TARGET_RANGE = (0.0, 1.0)  # Target range that will round to 0.5
         
-        print(f"\n  Adjusting position to reach 0.5 point win...")
-        print(f"  Initial score after solution: {initial_score:.1f}")
+        print(f"\n  Adjusting position to reach 0.5 point win...", flush=True)
+        print(f"  Initial score after solution: {initial_score:.1f}", flush=True)
+        
+        # Check initial score before any adjustments
+        if 0 <= initial_score <= 1:
+            print(f"  ✅ Initial score is already in target range [0,1] (Black lead)", flush=True)
+            return current_moves
+        else:
+            print(f"  Initial score is outside target range [0,1], starting adjustments...", flush=True)
         
         for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Get current score after solution
             score = self._get_score_after_move(current_moves, player, correct_move)
             if score is None:
+                print("  Score is None, aborting adjustment", flush=True)
                 return current_moves
                 
-            print(f"  Adjustment {adjustment_num}: Current score after solution: {score:.1f}")
+            print(f"  Adjustment {adjustment_num}: Current score after solution: {score:.1f}", flush=True)
             
             # We want the score to be in [0,1] (Black lead) regardless of player
             if 0 <= score <= 1:
-                print(f"  ✅ Reached target score range (0-1 Black lead)")
+                print(f"  ✅ Reached target score range (0-1 Black lead)", flush=True)
                 return current_moves
+            else:
+                print(f"  Score is still outside target range [0,1], continuing adjustments...", flush=True)
             
             # Find adjustment moves
             query = {
@@ -277,18 +287,18 @@ class DifficultyAssessor:
             if best_adjustment:
                 current_moves = best_adjustment
             else:
-                print("    No suitable adjustment found in top moves")
+                print("    No suitable adjustment found in top moves", flush=True)
                 break
                 
         final_score = self._get_score_after_move(current_moves, player, correct_move)
-        print(f"\n  Score adjustment results:")
-        print(f"  - Initial score: {initial_score:.1f}")
-        print(f"  - Final score: {final_score:.1f}")
-        print(f"  - Target range: {'0.0-1.0' if player == 'B' else '-1.0-0.0'}")
-        if (player == "B" and 0 <= final_score <= 1) or (player == "W" and -1 <= final_score <= 0):
-            print("  ✅ Score within target range (will round to 0.5)")
+        print(f"\n  Score adjustment results:", flush=True)
+        print(f"  - Initial score: {initial_score:.1f}", flush=True)
+        print(f"  - Final score: {final_score:.1f}", flush=True)
+        print(f"  - Target range: 0.0-1.0 (Black lead)", flush=True)
+        if 0 <= final_score <= 1:
+            print("  ✅ Score within target range (will round to 0.5)", flush=True)
         else:
-            print("  ❌ Failed to reach target score range")
+            print("  ❌ Failed to reach target score range", flush=True)
         return current_moves
 
     def _get_worst_response(self, moves):
