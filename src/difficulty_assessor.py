@@ -139,7 +139,7 @@ class DifficultyAssessor:
         """
         Checks if a position is a valid tsumego and adjusts it to ensure:
         1. Only one correct first move (others lose)
-        2. Correct move leads to exactly 0.5 point win
+        2. Correct move leads to score in 0-1 range (rounds to 0.5)
         
         Args:
             moves (list): The list of moves in the game.
@@ -149,6 +149,7 @@ class DifficultyAssessor:
         Returns:
             bool: True if position meets criteria after adjustment, False otherwise
         """
+        print(f"\n  Verifying tsumego criteria for {player_to_move} at move...")
         MAX_ATTEMPTS = 5  # Limit adjustment attempts
         adjusted_moves = moves.copy()
         
@@ -192,55 +193,117 @@ class DifficultyAssessor:
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
         Adjusts position by having player play suboptimal moves until solution leads to 0.5 win.
+        Tries multiple rounds of adjustments if needed.
         
         Args:
             moves (list): Current move sequence
-            player (str): Player to move
+            player (str): Player to move ("B" or "W")
             correct_move (str): Solution move
             
         Returns:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
-        MAX_ADJUSTMENTS = 3
+        MAX_ADJUSTMENTS = 5  # Increased from 3 to allow more refinement
+        TARGET_RANGE = (0.0, 1.0)  # Target range that will round to 0.5
         
-        for _ in range(MAX_ADJUSTMENTS):
+        print(f"\n  Adjusting position to reach 0.5 point win...")
+        
+        for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
             # Get current score after solution
             score = self._get_score_after_move(current_moves, player, correct_move)
-            if abs(score - 0.5) < 0.1:
+            if score is None:
+                return current_moves
+                
+            print(f"  Adjustment {adjustment_num}: Current score after solution: {score:.1f}")
+            
+            # Check if score is in target range (0-1 for Black)
+            if (player == "B" and TARGET_RANGE[0] <= score <= TARGET_RANGE[1]) or \
+               (player == "W" and -TARGET_RANGE[1] <= score <= -TARGET_RANGE[0]):
+                print(f"  ✅ Reached target score range (will round to 0.5)")
                 return current_moves
             
-            # Find a move that reduces the score toward 0.5
+            # Find adjustment moves
             query = {
-                "id": "find_adjustment",
+                "id": f"adjust_{adjustment_num}",
                 "moves": current_moves,
                 "initialStones": [],
                 "rules": "tromp-taylor",
                 "komi": 7.5,
                 "boardXSize": 9,
                 "boardYSize": 9,
-                "maxVisits": 1000
+                "maxVisits": 1000,
+                "analysisPVLen": 5
             }
             response = self.strong_controller.send_query(query)
             if not response or "moveInfos" not in response:
                 return current_moves
                 
-            # Try moves that reduce the score
-            for move_info in response["moveInfos"]:
-                if move_info["move"] != correct_move:
-                    test_score = self._get_score_after_move(
-                        current_moves + [[player, move_info["move"]]],
-                        "W" if player == "B" else "B",  # Opponent responds
-                        "pass"  # Assume opponent passes after adjustment
-                    )
-                    if abs(test_score - 0.5) < abs(score - 0.5):
-                        # This move improves score toward 0.5
-                        return current_moves + [
-                            [player, move_info["move"]],
-                            ["W" if player == "B" else "B", "pass"]
-                        ]
-        
+            # Try moves that move score toward target
+            best_adjustment = None
+            best_score_diff = float('inf')
+            
+            for move_info in response["moveInfos"][:5]:  # Try top 5 alternatives
+                if move_info["move"] == correct_move:
+                    continue
+                    
+                # Have player play this move
+                test_moves = current_moves + [[player, move_info["move"]]]
+                
+                # Have opponent respond (optimally if we're helping Black, suboptimally if helping White)
+                if player == "B":
+                    # For Black problems, opponent responds optimally
+                    opponent_move = self._get_best_response(test_moves)
+                else:
+                    # For White problems, opponent responds suboptimally to help Black
+                    opponent_move = self._get_worst_response(test_moves)
+                
+                test_moves.append(["W" if player == "B" else "B", opponent_move])
+                
+                # Check resulting score
+                test_score = self._get_score_after_move(test_moves, player, correct_move)
+                if test_score is None:
+                    continue
+                    
+                # Calculate how much closer this gets us to target
+                if player == "B":
+                    target = 0.5
+                    score_diff = abs(test_score - target)
+                else:
+                    target = -0.5
+                    score_diff = abs(test_score - target)
+                
+                if score_diff < best_score_diff:
+                    best_score_diff = score_diff
+                    best_adjustment = test_moves
+                    print(f"    Found adjustment: {move_info['move']} -> {opponent_move} "
+                          f"(new score: {test_score:.1f})")
+            
+            if best_adjustment:
+                current_moves = best_adjustment
+            else:
+                break
+                
+        print(f"  Final score after adjustments: {self._get_score_after_move(current_moves, player, correct_move):.1f}")
         return current_moves
+
+    def _get_worst_response(self, moves):
+        """Helper to get worst reasonable response to a move (for helping Black)"""
+        query = {
+            "id": "worst_response",
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor", 
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 100
+        }
+        response = self.strong_controller.send_query(query)
+        if not response or "moveInfos" not in response or len(response["moveInfos"]) < 2:
+            return "pass"
+        # Return the worst move among the top 5 candidates
+        return response["moveInfos"][-1]["move"]
 
     def _make_alternatives_lose(self, moves, player, correct_move, winning_moves):
         """
