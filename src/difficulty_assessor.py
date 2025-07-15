@@ -83,8 +83,25 @@ class DifficultyAssessor:
         if not sl_response or "policy" not in sl_response:
             return False
 
-        # Check if the correct move is in the top few proposals
-        proposed_moves = [move_info[0] for move_info in sl_response["policy"][:3]]
+        # Get the policy from the response
+        policy = sl_response["humanPolicy"] if "humanPolicy" in sl_response else sl_response["policy"]
+
+        # Get the top N moves based on policy probabilities
+        top_n = 3 # Check top 3 moves
+        # Create a list of (probability, index) tuples
+        indexed_policy = []
+        for i, prob in enumerate(policy):
+            indexed_policy.append((prob, i))
+
+        # Sort by probability in descending order
+        indexed_policy.sort(key=lambda x: x[0], reverse=True)
+
+        # Get the top N move indices
+        top_move_indices = [idx for prob, idx in indexed_policy[:top_n]]
+
+        # Convert indices to Go coordinates
+        proposed_moves = [self.human_controller.get_move_from_idx(idx) for idx in top_move_indices]
+
         if correct_move not in proposed_moves:
             return False
 
@@ -117,3 +134,84 @@ class DifficultyAssessor:
 
         # Allow a small drop in winrate
         return new_winrate >= (initial_winrate - 0.1)
+
+    def is_valid_tsumego(self, moves, player_to_move, correct_move):
+        """
+        Checks if a position is a valid tsumego according to the new criteria.
+
+        Args:
+            moves (list): The list of moves in the game.
+            player_to_move (str): The player to move ("B" or "W").
+            correct_move (str): The correct move.
+
+        Returns:
+            bool: True if the position is a valid tsumego, False otherwise.
+        """
+        # 1. Analyze the current position with the strong RL network
+        query = {
+            "id": "tsumego_check",
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1000, # High visits for accurate analysis
+            "analysisPVLen": 10
+        }
+        response = self.strong_controller.send_query(query)
+        if not response or "rootInfo" not in response or "moveInfos" not in response:
+            return False
+
+        # 2. Check the score condition
+        score = response["rootInfo"]["scoreLead"]
+        if player_to_move == "W":
+            score = -score
+        if not (-5 <= score <= 5):
+            return False
+
+        # 3. Verify the winrate conditions
+        initial_winrate = response["rootInfo"]["winrate"]
+        if initial_winrate <= 0.1:
+            return False
+
+        # Check the correct move
+        correct_move_info = None
+        for move_info in response["moveInfos"]:
+            if move_info["move"] == correct_move:
+                correct_move_info = move_info
+                break
+        
+        if correct_move_info is None:
+            return False # Should not happen if correct_move is from RL self-play
+
+        # Check winrate after the correct move
+        # This requires a new query, as the analysis is from the current position
+        winrate_after_correct_move_query = query.copy()
+        winrate_after_correct_move_query["id"] = "winrate_after_correct"
+        winrate_after_correct_move_query["moves"] = moves + [[player_to_move, correct_move]]
+        winrate_after_correct_move_response = self.strong_controller.send_query(winrate_after_correct_move_query)
+        if not winrate_after_correct_move_response or "rootInfo" not in winrate_after_correct_move_response:
+            return False
+        
+        winrate_after_correct_move = winrate_after_correct_move_response["rootInfo"]["winrate"]
+        if winrate_after_correct_move < 0.5:
+            return False
+
+        # 4. Check that all other moves lead to a winrate below 0.5
+        # We only need to check the top few alternatives
+        for move_info in response["moveInfos"][:5]: # Check top 5 alternatives
+            if move_info["move"] != correct_move:
+                # Query for winrate after this alternative move
+                winrate_after_alternative_query = query.copy()
+                winrate_after_alternative_query["id"] = "winrate_after_alternative"
+                winrate_after_alternative_query["moves"] = moves + [[player_to_move, move_info["move"]]]
+                winrate_after_alternative_response = self.strong_controller.send_query(winrate_after_alternative_query)
+                if not winrate_after_alternative_response or "rootInfo" not in winrate_after_alternative_response:
+                    continue # Or handle error appropriately
+
+                winrate_after_alternative = winrate_after_alternative_response["rootInfo"]["winrate"]
+                if winrate_after_alternative >= 0.5:
+                    return False # Found an alternative move that doesn't lose
+
+        return True

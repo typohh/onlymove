@@ -40,21 +40,29 @@ class ProblemFinder:
             difficulties.append(difficulty)
 
         # Now, identify problems by looking for difficulty spikes
-        for i in range(1, len(difficulties)):
+        if len(game_moves) < 2:
+            return problems
+
+        for i in range(1, len(game_moves) - 1):
             # Entry Condition
             if self._is_significant_increase(difficulties[i-1], difficulties[i]):
-                # Crux Condition
-                is_crux = True
-                for j in range(i + 1, len(difficulties)):
-                    if self._is_significant_increase(difficulties[i], difficulties[j]):
-                        is_crux = False
-                        break
-                if is_crux:
-                    problems.append({
-                        "moves": game_moves[:i],
-                        "solution": game_moves[i],
-                        "difficulty": difficulties[i]
-                    })
+                # New Tsumego Validation
+                moves_so_far = game_moves[:i]
+                player_to_move = game_moves[i][0]
+                correct_move = game_moves[i][1]
+                if self.difficulty_assessor.is_valid_tsumego(moves_so_far, player_to_move, correct_move):
+                    # Crux Condition
+                    is_crux = True
+                    for j in range(i + 1, len(difficulties)):
+                        if self._is_significant_increase(difficulties[i], difficulties[j]):
+                            is_crux = False
+                            break
+                    if is_crux:
+                        problems.append({
+                            "moves": game_moves[:i],
+                            "solution": game_moves[i],
+                            "difficulty": difficulties[i]
+                        })
 
         return problems
 
@@ -85,14 +93,13 @@ class ProblemFinder:
         game.root.set("GN", f"Problem Difficulty: {problem["difficulty"]}")
 
         # Add initial moves
-        current_node = game.root
         for player, move in problem["moves"]:
-            current_node = current_node.extend_main_sequence()
-            current_node.set_move(player.lower(), self.game_generator._katago_to_sgf_coords(move, board_size))
+            node = game.extend_main_sequence()
+            node.set_move(player.lower(), self.game_generator._katago_to_sgf_coords(move, board_size))
 
         # Add the solution move and annotations
         solution_player, solution_move = problem["solution"]
-        solution_node = current_node.extend_main_sequence()
+        solution_node = game.extend_main_sequence()
         solution_node.set_move(solution_player.lower(), self.game_generator._katago_to_sgf_coords(solution_move, board_size))
         solution_node.set("C", f"Solution move for {problem["difficulty"]} problem.")
         solution_node.set("MA", [self.game_generator._katago_to_sgf_coords(solution_move, board_size)])
@@ -102,7 +109,7 @@ class ProblemFinder:
 
     def _is_significant_increase(self, rank1, rank2):
         """
-        Checks if there is a significant increase in difficulty between two ranks.
+        Checks if there is a significant change in difficulty between two ranks.
         This is a simple implementation and can be improved.
         """
         if rank1 is None or rank2 is None:
@@ -113,6 +120,47 @@ class ProblemFinder:
         try:
             index1 = self.difficulty_assessor._SUPPORTED_RANKS.index(rank1)
             index2 = self.difficulty_assessor._SUPPORTED_RANKS.index(rank2)
-            return (index2 - index1) > 3 # A jump of more than 3 ranks is significant
+            return abs(index2 - index1) > 1 # A jump of more than 1 rank is significant
         except ValueError:
             return False
+
+    def load_sgf(self, filename):
+        """
+        Loads a game from an SGF file.
+
+        Args:
+            filename (str): The name of the SGF file.
+
+        Returns:
+            list: A list of moves representing the game sequence.
+        """
+        with open(filename, 'rb') as f:
+            sgf_game = sgf.Sgf_game.from_bytes(f.read())
+
+        moves = []
+        for node in sgf_game.get_main_sequence():
+            player, move = node.get_move()
+            if player is not None:
+                moves.append([player.upper(), self._sgf_to_katago_coords(move, sgf_game.get_size())])
+        return moves
+
+    def _sgf_to_katago_coords(self, sgf_move, board_size):
+        """
+        Converts SGF coordinates to KataGo coordinates.
+
+        Args:
+            sgf_move (tuple): The move in SGF coordinate format (row, col).
+            board_size (int): The size of the board.
+
+        Returns:
+            str: The move in KataGo's coordinate format (e.g., 'A1', 'B2').
+        """
+        if sgf_move is None:
+            return "pass"
+
+        row, col = sgf_move
+        col_str = chr(ord('A') + col)
+        if col >= 8:
+            col_str = chr(ord('A') + col + 1)
+        row_str = str(board_size - row)
+        return col_str + row_str

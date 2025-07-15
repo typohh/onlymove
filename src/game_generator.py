@@ -14,7 +14,7 @@ class GroundTruthGenerator:
         """
         self.controller = controller
 
-    def generate_game(self, board_size=9, komi=7.5):
+    def generate_game(self, board_size=9, komi=7.5, filename=None):
         """
         Generates a single optimal game.
 
@@ -38,11 +38,18 @@ class GroundTruthGenerator:
                 "komi": komi,
                 "boardXSize": board_size,
                 "boardYSize": board_size,
-                "maxVisits": 1000  # High visits for optimal play
+                "maxVisits": 1,  # High visits for optimal play
+                "includePolicy": True
             }
 
             response = self.controller.send_query(query)
-            best_move = response["moveInfos"][0]["move"]
+            if response and "policy" in response and response["policy"]:
+                best_move_idx = response['policy'].index(max(response['policy']))
+                best_move = self.controller.get_move_from_idx(best_move_idx)
+            elif response and "moveInfos" in response and response["moveInfos"]:
+                best_move = response["moveInfos"][0]["move"]
+            else:
+                best_move = "pass"
 
             if best_move == "pass":
                 consecutive_passes += 1
@@ -51,6 +58,9 @@ class GroundTruthGenerator:
 
             moves.append([player, best_move])
             player = "W" if player == "B" else "B"
+
+        if filename:
+            self.save_sgf(moves, filename, board_size, komi)
 
         return moves
 

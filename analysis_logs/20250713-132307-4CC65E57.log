@@ -1,0 +1,62 @@
+2025-07-13 13:23:07+0300: Running with following config:
+dynamicScoreUtilityFactor = 0.5
+logDir = analysis_logs
+maxBoardXSizeForNNBuffer = 9
+maxBoardYSizeForNNBuffer = 9
+maxVisits = 500
+nnCacheSizePowerOfTwo = 23
+nnMaxBatchSize = 64
+nnMutexPoolSizePowerOfTwo = 17
+nnRandomize = true
+numAnalysisThreads = 2
+numSearchThreads = 16
+reportAnalysisWinratesAs = BLACK
+requireMaxBoardSize = true
+staticScoreUtilityFactor = 0.2
+winLossUtilityFactor = 0.5
+
+2025-07-13 13:23:07+0300: Analysis Engine starting...
+2025-07-13 13:23:07+0300: KataGo v1.16.3
+2025-07-13 13:23:07+0300: nnRandSeed0 = 11659621642583818332
+2025-07-13 13:23:07+0300: After dedups: nnModelFile0 = /home/ootakamoku/Repositories/YoseTsumego/weights/kata1-b18c384nbt-s9996604416-d4316597426.bin.gz useFP16 auto useNHWC auto
+2025-07-13 13:23:07+0300: Initializing neural net buffer to be size 9 * 9 exactly
+2025-07-13 13:23:08+0300: Found OpenCL Platform 0: NVIDIA CUDA (NVIDIA Corporation) (OpenCL 3.0 CUDA 12.2.149)
+2025-07-13 13:23:08+0300: Found 1 device(s) on platform 0 with type CPU or GPU or Accelerator
+2025-07-13 13:23:08+0300: Found OpenCL Device 0: Quadro M2200 (NVIDIA Corporation) (score 11000300)
+2025-07-13 13:23:08+0300: Creating context for OpenCL Platform: NVIDIA CUDA (NVIDIA Corporation) (OpenCL 3.0 CUDA 12.2.149)
+2025-07-13 13:23:08+0300: Using OpenCL Device 0: Quadro M2200 (NVIDIA Corporation) OpenCL 3.0 CUDA (Extensions: cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics cl_khr_fp64 cl_khr_3d_image_writes cl_khr_byte_addressable_store cl_khr_icd cl_khr_gl_sharing cl_nv_compiler_options cl_nv_device_attribute_query cl_nv_pragma_unroll cl_nv_copy_opts cl_khr_gl_event cl_nv_create_buffer cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_nv_kernel_attribute cl_khr_device_uuid cl_khr_pci_bus_info cl_khr_external_semaphore cl_khr_external_memory cl_khr_external_semaphore_opaque_fd cl_khr_external_memory_opaque_fd)
+2025-07-13 13:23:08+0300: Loaded tuning parameters from: /home/ootakamoku/.katago/opencltuning/tune11_gpuQuadroM2200_x19_y19_c384_mv14.txt
+2025-07-13 13:23:08+0300: OpenCL backend thread 0: Model version 14
+2025-07-13 13:23:08+0300: OpenCL backend thread 0: Model name: kata1-b18c384nbt-s9996604416-d4316597426
+2025-07-13 13:23:09+0300: OpenCL backend thread 0: FP16Storage false FP16Compute false FP16TensorCores false FP16TensorCoresFor1x1 false
+2025-07-13 13:23:09+0300: Loaded config /home/ootakamoku/Repositories/YoseTsumego/analysis.cfg
+2025-07-13 13:23:09+0300: Loaded model /home/ootakamoku/Repositories/YoseTsumego/weights/kata1-b18c384nbt-s9996604416-d4316597426.bin.gz
+2025-07-13 13:23:09+0300: Analyzing up to 2 positions at a time in parallel
+2025-07-13 13:23:09+0300: Started, ready to begin handling requests
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}
+2025-07-13 13:24:06+0300: Warning: {"field":"includePVs","id":"tsumego_check","warning":"Unexpected or unused field, do you have a typo? (set warnUnusedFields=false in the config to disable this warning)"}

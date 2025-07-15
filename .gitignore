@@ -1,2 +1,4 @@
 KataGo/
 .venv/
+weights/
+.aider*
