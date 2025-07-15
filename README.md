@@ -32,9 +32,14 @@ Also we evaluate the tsumego quality and difficulty, by using katago human netwo
 
 ## Usage
 
-To generate Go problems, run the `main.py` script:
+To generate Go problems, run the `main.py` script using the virtual environment's Python:
 
 ```bash
-source .venv/bin/activate
-python3 main.py
+.venv/bin/python3 main.py
+```
+
+To see KataGo engine output during generation, add the `--verbose` flag:
+
+```bash
+.venv/bin/python3 main.py --verbose
 ```
