@@ -156,27 +156,15 @@ class DifficultyAssessor:
         Returns (is_valid, final_score, adjusted_moves)
         """
         print(f"\n  Validating tsumego at move {len(moves)+1}...")
-        MAX_ATTEMPTS = 5
         adjusted_moves = moves.copy()
-        
-        # Phase 1: Adjust score to 0-1 range
-        print(f"  Phase 1: Adjusting score to 0-1 range...")
-        # Do a single call to _adjust_to_0_5 which handles up to 5 adjustment rounds
-        adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-        # Check final score
-        score = self._get_score_after_move(adjusted_moves, player_to_move, correct_move)
+        score = self._get_current_score_black(adjusted_moves)
         if score is None:
-            print("    Score is None after adjustment")
+            print("    Score is None")
             return False, None, None
-        print(f"    Final score: {score:.1f}")
-        if 0 <= score <= 1:
-            print("    ✅ Score within target range")
-        else:
-            print("    ❌ Failed to adjust score to target range")
-            return False, None, None
-        
-        # Phase 2: Ensure only one winning move
-        print(f"  Phase 2: Ensuring single winning move...")
+        print(f"    Current score: {score:.1f} (no adjustment)")
+        MAX_ATTEMPTS = 5
+        # Phase 1: Ensure only one winning move
+        print(f"  Phase 1: Ensuring single winning move...")
         for attempt in range(MAX_ATTEMPTS):
             print(f"    Winning move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
             query = self._build_query(
