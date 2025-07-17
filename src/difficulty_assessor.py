@@ -221,8 +221,12 @@ class DifficultyAssessor:
             
             # If only solution move is best, we're done
             if best_moves == [correct_move]:
-                print("    ✅ Only solution move is best")
-                return True, score_after_adjust, adjusted_moves
+                final_score, final_winrate = self._get_position_info(adjusted_moves)
+                if final_score is None or final_winrate is None:
+                    print("    Failed to get final position info")
+                    return False, None, None
+                print(f"    ✅ Only solution move is best. Final score: {final_score:.1f}, winrate: {final_winrate:.3f}")
+                return True, final_score, adjusted_moves
             
             # If multiple best moves, remove one alternative at a time
             print("    Multiple best moves - removing one alternative...")
