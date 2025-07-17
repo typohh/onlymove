@@ -224,9 +224,14 @@ class DifficultyAssessor:
                 print("    ✅ Only solution move is best")
                 return True, score_after_adjust, adjusted_moves
             
-            # If multiple best moves, make others worse
-            print("    Multiple best moves - making alternatives worse...")
-            adjusted_moves = self._remove_alternatives(adjusted_moves, player_to_move, correct_move, best_moves)
+            # If multiple best moves, remove one alternative at a time
+            print("    Multiple best moves - removing one alternative...")
+            # Find the first alternative move that is not the correct move
+            for alt_move in best_moves:
+                if alt_move != correct_move:
+                    adjusted_moves = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
+                    print(f"    Removed alternative: {alt_move}")
+                    break
         
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
@@ -366,31 +371,26 @@ class DifficultyAssessor:
         return current_moves
 
 
-    def _remove_alternatives(self, moves, player, correct_move, winning_moves):
+    def _remove_alternative(self, moves, player, correct_move, alternative_move):
         """
-        Adjusts position by having player play alternatives until only solution wins.
+        Adjusts position by having player play one alternative move and then opponent responds optimally.
         
         Args:
             moves (list): Current move sequence
             player (str): Player to move
             correct_move (str): Solution move
-            winning_moves (list): Current winning alternative moves
+            alternative_move (str): One alternative move to remove
             
         Returns:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
-        
-        for alt_move in winning_moves:
-            if alt_move == correct_move:
-                continue
-                
-            # Have player play this alternative, then opponent responds optimally
-            current_moves = current_moves + [
-                [player, alt_move],
-                ["W" if player == "B" else "B", self._get_best_response(current_moves + [[player, alt_move]])]
-            ]
-        
+        # Have player play the alternative
+        current_moves.append([player, alternative_move])
+        # Then opponent responds optimally
+        opponent = "W" if player == "B" else "B"
+        response = self._get_best_response(current_moves)
+        current_moves.append([opponent, response])
         return current_moves
 
     def _get_score_after_move(self, moves, player, move):
