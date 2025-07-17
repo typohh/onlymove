@@ -165,25 +165,40 @@ class DifficultyAssessor:
         print(f"    Initial position: score={initial_score:.1f}, winrate={initial_winrate:.3f}")
 
         # Phase: Adjusting Score
-        print(f"  Attempting score adjustment...")
-        adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-        
-        # Get position after adjustment
-        score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
-        if score_after_adjust is None or winrate_after_adjust is None:
-            print("    Failed to get position info after adjustment")
+        print(f"  Adjusting Score")
+        # Get status before adjustment
+        pre_score, pre_winrate = self._get_position_info(adjusted_moves)
+        if pre_score is None or pre_winrate is None:
+            print("    Failed to get pre-adjustment position info")
             return False, None, None
+        print(f"    Before: score={pre_score:.1f}, winrate={pre_winrate:.3f}")
+        
+        adjusted_moves, candidate_move, opponent_move = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        
+        if candidate_move and opponent_move:
+            print(f"    {player_to_move} {candidate_move}")
+            opponent = "W" if player_to_move == "B" else "B"
+            print(f"    {opponent} {opponent_move}")
+        
+        # Get status after adjustment
+        post_score, post_winrate = self._get_position_info(adjusted_moves)
+        if post_score is None or post_winrate is None:
+            print("    Failed to get post-adjustment position info")
+            return False, None, None
+        print(f"    After: score={post_score:.1f}, winrate={post_winrate:.3f}")
 
         # Check if adjustment was successful
-        if 0 <= score_after_adjust <= 1:
-            print(f"    ✅ Score adjustment successful: score={score_after_adjust:.1f}, winrate={winrate_after_adjust:.3f}")
+        if 0 <= post_score <= 1:
+            print("    ✅ Score in [0,1] range")
         else:
-            print(f"    ❌ Score adjustment failed: score={score_after_adjust:.1f}, winrate={winrate_after_adjust:.3f}")
+            print("    ❌ Score not in [0,1] range")
             return False, None, None
 
-        # After score adjustment, check winrate
-        if winrate_after_adjust < 0.5:
-            print(f"    ❌ Position is losing (winrate={winrate_after_adjust:.3f} < 0.5)")
+        # Check winrate
+        if post_winrate >= 0.5:
+            print("    ✅ Winrate >= 0.5")
+        else:
+            print("    ❌ Winrate < 0.5")
             return False, None, None
 
         MAX_ATTEMPTS = 5
@@ -231,12 +246,24 @@ class DifficultyAssessor:
             # Find the first alternative move that is not the correct move
             for alt_move in best_moves:
                 if alt_move != correct_move:
-                    print(f"    Removing alternative: {alt_move}")
-                    adjusted_moves = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
-                    # Get new position info
-                    current_score, current_winrate = self._get_position_info(adjusted_moves)
-                    if current_score is not None and current_winrate is not None:
-                        print(f"      After exchange: score={current_score:.1f}, winrate={current_winrate:.3f}")
+                    print(f"  Removing choices")
+                    # Get status before removal
+                    pre_score, pre_winrate = self._get_position_info(adjusted_moves)
+                    if pre_score is not None and pre_winrate is not None:
+                        print(f"    Before: score={pre_score:.1f}, winrate={pre_winrate:.3f}")
+                
+                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
+                
+                    if alt_played and response_played:
+                        print(f"    {player_to_move} {alt_played}")
+                        opponent = "W" if player_to_move == "B" else "B"
+                        print(f"    {opponent} {response_played}")
+                
+                    # Get status after removal
+                    post_score, post_winrate = self._get_position_info(adjusted_moves)
+                    if post_score is not None and post_winrate is not None:
+                        print(f"    After: score={post_score:.1f}, winrate={post_winrate:.3f}")
+                
                     break
 
         print("    Failed to achieve single best move after max attempts")
@@ -296,7 +323,7 @@ class DifficultyAssessor:
         score, _ = self._get_position_info(moves)
         if score is not None and 0 <= score <= 1:
             print("    Current score already in [0,1] - no adjustment needed")
-            return moves
+            return moves, None, None
 
         # Query for moves in current position (player's turn)
         query = self._build_query(
@@ -307,7 +334,7 @@ class DifficultyAssessor:
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
             print("    No response or no moveInfos in response")
-            return moves
+            return moves, None, None
 
         best_candidate = None
         best_candidate_score = None
@@ -332,7 +359,7 @@ class DifficultyAssessor:
 
         if not best_candidate:
             print("    No suitable candidate move found")
-            return moves
+            return moves, None, None
 
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
@@ -375,7 +402,7 @@ class DifficultyAssessor:
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
 
-        return adjusted_moves
+        return adjusted_moves, best_candidate, best_opponent
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
@@ -476,7 +503,7 @@ class DifficultyAssessor:
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
 
-        return adjusted_moves
+        return adjusted_moves, best_candidate, best_opponent
 
 
     def _remove_alternative(self, moves, player, correct_move, alternative_move):
@@ -507,7 +534,7 @@ class DifficultyAssessor:
 
         # Apply opponent's response
         adjusted_moves = adjusted_moves + [[opponent, response]]
-        return adjusted_moves
+        return adjusted_moves, alternative_move, response
 
     def _get_score_after_move(self, moves, player, move):
         """Helper to get score after playing a move"""
