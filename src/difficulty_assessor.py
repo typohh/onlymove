@@ -156,12 +156,18 @@ class DifficultyAssessor:
 
         # Phase: Adjusting Score
         print(f"    Adjusting Score")
-        adjusted_moves, candidate_move, opponent_move = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         
         if candidate_move and opponent_move:
-            print(f"    {player_to_move} {candidate_move}")
-            opponent = "W" if player_to_move == "B" else "B"
-            print(f"    {opponent} {opponent_move}")
+            # Print candidate move with score/winrate
+            cand_winrate = candidate_winrate if player_to_move == "B" else 1 - candidate_winrate
+            cand_score = candidate_score
+            print(f"    {player_to_move} {candidate_move} (score: {cand_score:.1f}, winrate: {cand_winrate:.3f})")
+            
+            # Print opponent response with score/winrate
+            opp_winrate = opponent_winrate if opponent == "B" else 1 - opponent_winrate
+            opp_score = opponent_score
+            print(f"    {opponent} {opponent_move} (score: {opp_score:.1f}, winrate: {opp_winrate:.3f})")
         
         # Get status after adjustment
         self._print_position_info(adjusted_moves, "After adjustment")
@@ -218,13 +224,57 @@ class DifficultyAssessor:
             response_played = None
             for alt_move in best_moves:
                 if alt_move != correct_move:
-                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
+                    # Get move info for alternative move
+                    alt_query = self.strong_controller.build_query(
+                        moves,
+                        id="alt_move_info",
+                        includeMoveInfos=True
+                    )
+                    alt_response = self.strong_controller.send_query(alt_query)
+                    if not alt_response or "moveInfos" not in alt_response:
+                        raise Exception("Failed to get move info for alternative move")
+        
+                    alt_move_info = None
+                    for move_info in alt_response["moveInfos"]:
+                        if move_info["move"] == alt_move:
+                            alt_move_info = move_info
+                            break
+        
+                    if not alt_move_info:
+                        raise Exception(f"Alternative move {alt_move} not found in moveInfos")
+        
+                    # Apply alternative move
+                    adjusted_moves = moves + [[player_to_move, alt_move]]
+                    opponent = "W" if player_to_move == "B" else "B"
+        
+                    # Get best response and its info
+                    resp_query = self.strong_controller.build_query(
+                        adjusted_moves,
+                        id="resp_move_info",
+                        includeMoveInfos=True
+                    )
+                    resp_response = self.strong_controller.send_query(resp_query)
+                    if not resp_response or "moveInfos" not in resp_response or not resp_response["moveInfos"]:
+                        raise Exception("Failed to get response move info")
+        
+                    resp_move_info = resp_response["moveInfos"][0]
+                    response_played = resp_move_info["move"]
+        
+                    # Apply opponent's response
+                    adjusted_moves = adjusted_moves + [[opponent, response_played]]
+                    adjusted_moves, alt_played, response_played = adjusted_moves, alt_move, response_played
                     break
             
             if alt_played and response_played:
-                print(f"    {player_to_move} {alt_played}")
-                opponent = "W" if player_to_move == "B" else "B"
-                print(f"    {opponent} {response_played}")
+                # Print alternative move with score/winrate
+                alt_winrate = alt_move_info["winrate"] if player_to_move == "B" else 1 - alt_move_info["winrate"]
+                alt_score = alt_move_info["scoreLead"] if player_to_move == "B" else -alt_move_info["scoreLead"]
+                print(f"    {player_to_move} {alt_played} (score: {alt_score:.1f}, winrate: {alt_winrate:.3f})")
+            
+                # Print opponent response with score/winrate
+                resp_winrate = resp_move_info["winrate"] if opponent == "B" else 1 - resp_move_info["winrate"]
+                resp_score = resp_move_info["scoreLead"] if opponent == "B" else -resp_move_info["scoreLead"]
+                print(f"    {opponent} {response_played} (score: {resp_score:.1f}, winrate: {resp_winrate:.3f})")
             
             # Get status after removal
             self._print_position_info(adjusted_moves, "After removal")
@@ -364,12 +414,13 @@ class DifficultyAssessor:
 
         best_opponent = None
         best_opponent_score = None
+        best_opponent_winrate = None
         best_opponent_diff = float('inf')
 
         # Find best opponent move
         for move_info in opponent_response["moveInfos"]:
             opponent_move = move_info["move"]
-            if "scoreLead" not in move_info:
+            if "scoreLead" not in move_info or "winrate" not in move_info:
                 continue
 
             # Convert score to Black's perspective
@@ -380,6 +431,7 @@ class DifficultyAssessor:
                 best_opponent_diff = score_diff
                 best_opponent = opponent_move
                 best_opponent_score = opponent_score
+                best_opponent_winrate = move_info["winrate"]
 
         if not best_opponent:
             raise Exception("No suitable opponent move found")
@@ -387,7 +439,7 @@ class DifficultyAssessor:
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
 
-        return adjusted_moves, best_candidate, best_opponent
+        return adjusted_moves, best_candidate, best_opponent, candidate_winrate, best_opponent_winrate, candidate_score, best_opponent_score
 
 
 
