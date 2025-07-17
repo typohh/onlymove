@@ -380,7 +380,7 @@ class DifficultyAssessor:
         opponent_response = self.strong_controller.send_query(opponent_query)
         if not opponent_response or "moveInfos" not in opponent_response:
             print("    No response or no moveInfos for opponent")
-            return moves
+            return moves, None, None
 
         best_opponent = None
         best_opponent_score = None
@@ -403,7 +403,7 @@ class DifficultyAssessor:
 
         if not best_opponent:
             print("    No suitable opponent move found")
-            return moves
+            return moves, None, None
 
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
