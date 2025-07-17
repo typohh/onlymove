@@ -190,7 +190,6 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
-        print(f"    Attempting move adjustments...")
         for attempt in range(MAX_ATTEMPTS):
             query = self._build_query(
                 adjusted_moves,
@@ -217,19 +216,15 @@ class DifficultyAssessor:
                 if best_winrate - move_info["winrate"] <= threshold:
                     best_moves.append(move_info["move"])
 
-            print(f"    Best moves: {best_moves} (correct: {correct_move}, best winrate: {best_winrate:.3f})")
-
             # If only solution move is best, we're done
             if best_moves == [correct_move]:
                 final_score, final_winrate = self._get_position_info(adjusted_moves)
                 if final_score is None or final_winrate is None:
                     print("    Failed to get final position info")
                     return False, None, None
-                print(f"    ✅ Only solution move is best. Final score: {final_score:.1f}, winrate: {final_winrate:.3f}")
                 return True, final_score, adjusted_moves
 
             # If multiple best moves, remove one alternative at a time
-            print("    Multiple best moves - removing one alternative...")
             print(f"    Removing choices")
             # Find the first alternative move that is not the correct move
             for alt_move in best_moves:
