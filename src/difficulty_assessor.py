@@ -190,6 +190,7 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
+        print(f"    Removing choices")
         for attempt in range(MAX_ATTEMPTS):
             query = self._build_query(
                 adjusted_moves,
@@ -225,7 +226,6 @@ class DifficultyAssessor:
                 return True, final_score, adjusted_moves
 
             # If multiple best moves, remove one alternative at a time
-            print(f"    Removing choices")
             # Find the first alternative move that is not the correct move
             alt_played = None
             response_played = None
