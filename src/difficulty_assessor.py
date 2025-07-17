@@ -283,6 +283,9 @@ class DifficultyAssessor:
         if not response:
             raise Exception("No response from KataGo for moves above 50%")
         if "moveInfos" not in response:
+            # For debugging, print the query and the response
+            print(f"Debug: Query that caused missing 'moveInfos': {query}")
+            print(f"Debug: Response: {response}")
             raise Exception("Response missing 'moveInfos' for moves above 50%")
 
         num_moves_above_50 = 0
