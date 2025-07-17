@@ -1,5 +1,7 @@
-- write compact SERACH and REPLACEs. split up large SEARCH and REPLACE into multiple smaller ones.
-- avoid writing SEARCH for many lines if you are not actually changing those lines
+- write compact SEARCH and REPLACE blocks
+- split large changes into multiple smaller blocks
+- only include lines being changed in SEARCH
+- ensure REPLACE has no trailing whitespace
 - add debug prints that will help you determine the cause, rather than taking wild guesses when attempting to fix a bug. 
 - add early termination to code when debugging, to avoid massive and impractical logs, with a debug print statement to explain why we are terminating.
 - mark debug prints clearly as such, so you do not later confuse them with intended prints.
