@@ -36,31 +36,26 @@ class KatagoController:
                 "-model",
                 self.model_path
             ]
-            stderr = None if verbose else subprocess.DEVNULL
+            stderr_setting = subprocess.PIPE if verbose else subprocess.DEVNULL
             if self.human_model_path:
                 command.extend(["-human-model", self.human_model_path])
             self.process = subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr_setting,
                 text=True,
                 bufsize=1 # Line-buffered
             )
-            # Read stderr in a non-blocking way to catch startup errors
-            # This is a simple approach, for production, consider a separate thread for stderr
-            import threading
-            def read_stderr(process, verbose):
-                if verbose:
+            # Only start a thread to read stderr if verbose
+            if verbose:
+                import threading
+                def read_stderr(process):
                     for line in process.stderr:
                         print(f"KataGo STDERR: {line.strip()}")
-                else:
-                    # Just consume stderr without printing
-                    for _ in process.stderr:
-                        pass
-            self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process, verbose))
-            self.stderr_thread.daemon = True # Allow main program to exit even if thread is still running
-            self.stderr_thread.start()
+                self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process,))
+                self.stderr_thread.daemon = True # Allow main program to exit even if thread is still running
+                self.stderr_thread.start()
         except FileNotFoundError:
             raise Exception(f"KataGo executable not found at: {self.katago_path}")
         except Exception as e:
