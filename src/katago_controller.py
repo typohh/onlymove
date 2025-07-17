@@ -89,6 +89,24 @@ class KatagoController:
 
         return self._read_response()
 
+    def build_query(self, moves, **kwargs):
+        """
+        Builds a standardized query object.
+        Note: You cannot use root score or winrate from this query.
+        """
+        query = {
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 49,
+            "rootPolicyTemperature": 49
+        }
+        query.update(kwargs)
+        return query
+
     def _read_response(self):
         """
         Reads and parses a JSON response from the KataGo engine.

@@ -135,20 +135,6 @@ class DifficultyAssessor:
         # Allow a small drop in winrate
         return new_winrate >= (initial_winrate - 0.1)
 
-    def _build_query(self, moves, **kwargs):
-        """Helper to build standardized query object, you CANNOT use root score or winrate from this."""
-        query = {
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 49,
-            "rootPolicyTemperature": 49
-        }
-        query.update(kwargs)
-        return query
 
     def _print_position_info(self, moves, label):
         """
@@ -195,7 +181,7 @@ class DifficultyAssessor:
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
         for attempt in range(MAX_ATTEMPTS):
-            query = self._build_query(
+            query = self.strong_controller.build_query(
                 adjusted_moves,
                 id="tsumego_check",
                 analysisPVLen=10,
@@ -287,7 +273,7 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        query = self._build_query(
+        query = self.strong_controller.build_query(
             moves,
             id="moves_above_50",
             maxVisits=20,
@@ -327,7 +313,7 @@ class DifficultyAssessor:
             return moves, None, None
 
         # Query for moves in current position (player's turn)
-        query = self._build_query(
+        query = self.strong_controller.build_query(
             moves,
             id="adjust_to_0_5",
             analysisPVLen=5
@@ -366,7 +352,7 @@ class DifficultyAssessor:
         opponent = "W" if player == "B" else "B"
 
         # Query for opponent's moves
-        opponent_query = self._build_query(
+        opponent_query = self.strong_controller.build_query(
             adjusted_moves,
             id="adjust_to_0_5_opponent",
             analysisPVLen=5
