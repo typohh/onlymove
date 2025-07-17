@@ -165,6 +165,17 @@ class DifficultyAssessor:
         print(f"    Initial score: {initial_score:.1f}")
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
 
+        # Quick winrate check to avoid wasting time on losing positions
+        winrate = self._get_initial_winrate(adjusted_moves)
+        if winrate is None:
+            print("    Failed to get initial winrate")
+            return False, None, None
+        print(f"    Initial winrate: {winrate:.3f}")
+
+        if winrate < 0.5:
+            print("    ❌ Position is losing (winrate < 0.5) - skipping adjustment")
+            return False, None, None
+
         # Phase 0: Adjust the score to be in [0,1] for Black
         print(f"  Phase 0: Adjusting score to [0,1] for Black...")
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
@@ -227,6 +238,23 @@ class DifficultyAssessor:
         
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
+
+    def _get_initial_winrate(self, moves):
+        """Helper to get the current position winrate with maxVisits=10"""
+        query = {
+            "id": "initial_winrate_check",
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 10   # Quick check
+        }
+        response = self.strong_controller.send_query(query)
+        if response and "rootInfo" in response:
+            return response["rootInfo"]["winrate"]
+        return None
 
     def _get_quick_position_score(self, moves):
         """Helper to get the current position score with maxVisits=1 for stability"""
