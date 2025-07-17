@@ -14,10 +14,9 @@ Also we evaluate the tsumego quality and difficulty, by using katago human netwo
 - The tsumego rank is according to the the rank human network that exceeds 50% wins in plays to the ends.
 - Next move as a single move should be at most 90% policy candidate for the tsumego rank human network. I.e we want it to be difficult enough.
 
-## Coding guidelines.
+## Implementation
 
-- use debug.py to construct isolated test cases as needed to avoid long runs of the whole code.
-- avoid excessive edge case testing, we want the code to crash when something is wrong, so we cant test it. it doenst have to gracefully handle wrong inputs.
+...
 
 ## Setup
 
@@ -28,7 +27,6 @@ Also we evaluate the tsumego quality and difficulty, by using katago human netwo
     python3 -m venv .venv
     source .venv/bin/activate
     pip install -r requirements.txt
-    pip install sgfmill
     ```
 
 2.  **KataGo Executable and Models:**
