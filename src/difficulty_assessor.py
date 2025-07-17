@@ -174,12 +174,14 @@ class DifficultyAssessor:
             return False, None, None
         print(f"    Adjusted score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
-        # Early termination if score not in target range or winrate too low
+        # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
             print("    ❌ Score adjustment failed to reach [0,1] range")
             return False, None, None
+
+        # After score adjustment, check winrate
         if winrate_after_adjust < 0.5:
-            print("    ❌ Position is still losing (winrate < 0.5) - skipping")
+            print("    ❌ Position is losing (winrate < 0.5) - skipping")
             return False, None, None
 
         MAX_ATTEMPTS = 5
@@ -204,13 +206,8 @@ class DifficultyAssessor:
                 if move_info["winrate"] > best_winrate:
                     best_winrate = move_info["winrate"]
 
-            # Adjust threshold based on position type
-            if best_winrate >= 0.5:
-                # Winning position: use relative threshold
-                threshold = 0.01
-            else:
-                # Losing position: use tighter absolute threshold
-                threshold = 0.005
+            # Use a fixed relative threshold of 0.01 (1%) for all positions
+            threshold = 0.01
 
             best_moves = []
             for move_info in response["moveInfos"]:
