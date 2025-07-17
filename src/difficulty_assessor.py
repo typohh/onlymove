@@ -172,7 +172,7 @@ class DifficultyAssessor:
         if score_after_adjust is None or winrate_after_adjust is None:
             print("    Failed to get position info after adjustment")
             return False, None, None
-        print(f"    After adjustment: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
+        print(f"    After exchange: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
         # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
@@ -231,13 +231,12 @@ class DifficultyAssessor:
             for alt_move in best_moves:
                 if alt_move != correct_move:
                     adjusted_moves = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
-                    print(f"    Removed alternative: {alt_move}")
                     # After removal, get new position info
                     current_score, current_winrate = self._get_position_info(adjusted_moves)
                     if current_score is None or current_winrate is None:
-                        print("    Failed to get position info after alternative removal")
+                        print("    Failed to get position info after alternative exchange")
                     else:
-                        print(f"    After removal: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
+                        print(f"    After exchange: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
                     break
         
         print("    Failed to achieve single best move after max attempts")
