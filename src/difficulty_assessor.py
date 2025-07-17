@@ -376,14 +376,11 @@ class DifficultyAssessor:
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-        # Get actual position info after player's candidate move
+        # Get actual position info after exchange
         temp_score, temp_winrate = self._get_position_info(adjusted_moves)
         if temp_score is not None and temp_winrate is not None:
-            print(f"    After {player} {best_candidate}: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
+            print(f"    After exchange: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
 
-        print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
-        # Apply opponent's move
-        adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
         print(f"  Candidate Exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
 
         return adjusted_moves
