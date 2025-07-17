@@ -159,13 +159,7 @@ class DifficultyAssessor:
         print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
         initial_score, initial_winrate = self._get_position_info(adjusted_moves)
-        if initial_score is None or initial_winrate is None:
-            print("    Failed to get initial position info")
-            return False, None, None
         initial_num_above = self._get_num_moves_above_50(adjusted_moves)
-        if initial_num_above is None:
-            print("    Failed to get initial move count")
-            return False, None, None
         print(f"    {initial_score:.1f}, {initial_winrate:.3f}, moves_above_50={initial_num_above}")
 
         # Phase: Adjusting Score
@@ -179,13 +173,7 @@ class DifficultyAssessor:
         
         # Get status after adjustment
         post_score, post_winrate = self._get_position_info(adjusted_moves)
-        if post_score is None or post_winrate is None:
-            print("    Failed to get post-adjustment position info")
-            return False, None, None
         post_num_above = self._get_num_moves_above_50(adjusted_moves)
-        if post_num_above is None:
-            print("    Failed to get post-adjustment move count")
-            return False, None, None
         print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
 
         # Print "Removing choices" unconditionally as per user request
@@ -251,14 +239,8 @@ class DifficultyAssessor:
             
             # Get status after removal
             post_score, post_winrate = self._get_position_info(adjusted_moves)
-            if post_score is None or post_winrate is None:
-                print("    Failed to get position info after removal")
-            else:
-                post_num_above = self._get_num_moves_above_50(adjusted_moves)
-                if post_num_above is None:
-                    print("    Failed to get move count after removal")
-                else:
-                    print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
+            post_num_above = self._get_num_moves_above_50(adjusted_moves)
+            print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
 
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
