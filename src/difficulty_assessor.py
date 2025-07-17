@@ -158,17 +158,32 @@ class DifficultyAssessor:
         move_num = len(moves)+1
         print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
-        score = self._get_current_score_black(adjusted_moves)
-        if score is None:
+        initial_score = self._get_current_score_black(adjusted_moves)
+        if initial_score is None:
             print("    Score is None")
             return False, None, None
-        print(f"    Current score: {score:.1f} (no adjustment)")
+        print(f"    Initial score: {initial_score:.1f}")
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
+
+        # Phase 0: Adjust the score to be in [0,1] for Black
+        print(f"  Phase 0: Adjusting score to [0,1] for Black...")
+        adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        score_after_adjust = self._get_current_score_black(adjusted_moves)
+        if score_after_adjust is None:
+            print("    Failed to get score after adjustment")
+            return False, None, None
+        print(f"    Adjusted score: {score_after_adjust:.1f}")
+
+        # Early termination if score not in target range
+        if score_after_adjust < 0 or score_after_adjust > 1:
+            print("    ❌ Score adjustment failed to reach [0,1] range")
+            return False, None, None
+
         MAX_ATTEMPTS = 5
-        # Phase 1: Ensure only one winning move
-        print(f"  Phase 1: Ensuring single winning move...")
+        # Phase 1: Ensure only one best move
+        print(f"  Phase 1: Ensuring single best move...")
         for attempt in range(MAX_ATTEMPTS):
-            print(f"    Winning move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
+            print(f"    Best move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
             query = self._build_query(
                 adjusted_moves,
                 id="tsumego_check",
@@ -180,7 +195,6 @@ class DifficultyAssessor:
                 print("    Error in tsumego check query")
                 return False, None, None
 
-            # Find all moves with winrate >= 0.5
             # Find best winrate
             best_winrate = -1
             for move_info in response["moveInfos"]:
@@ -205,13 +219,13 @@ class DifficultyAssessor:
             # If only solution move is best, we're done
             if best_moves == [correct_move]:
                 print("    ✅ Only solution move is best")
-                return True, score, adjusted_moves
+                return True, score_after_adjust, adjusted_moves
             
             # If multiple best moves, make others worse
             print("    Multiple best moves - making alternatives worse...")
             adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, best_moves)
         
-        print("    Failed to achieve single winning move after max attempts")
+        print("    Failed to achieve single best move after max attempts")
         return False, None, None
 
     def _get_quick_position_score(self, moves):
