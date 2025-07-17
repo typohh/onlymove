@@ -203,8 +203,7 @@ class DifficultyAssessor:
             )
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
-                print("    Error in tsumego check query")
-                return False, None, None
+                raise Exception("Error in tsumego check query")
 
             # Find best winrate
             best_winrate = -1
@@ -224,8 +223,7 @@ class DifficultyAssessor:
             if best_moves == [correct_move]:
                 final_score, final_winrate = self._get_position_info(adjusted_moves)
                 if final_score is None or final_winrate is None:
-                    print("    Failed to get final position info")
-                    return False, None, None
+                    raise Exception("Failed to get final position info")
                 return True, final_score, adjusted_moves
 
             # If multiple best moves, remove one alternative at a time
@@ -266,7 +264,7 @@ class DifficultyAssessor:
         }
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
-            return None, None
+            raise Exception("Failed to get position info from KataGo")
 
         score_lead = response["rootInfo"]["scoreLead"]
         winrate = response["rootInfo"]["winrate"]
@@ -302,7 +300,7 @@ class DifficultyAssessor:
         }
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
-            return None
+            raise Exception("Failed to get moves above 50% from KataGo")
 
         num_moves_above_50 = 0
         for move_info in response["moveInfos"]:
@@ -447,7 +445,7 @@ class DifficultyAssessor:
         )
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
-            return None
+            raise Exception("Failed to get score after move")
         score_lead = response["rootInfo"]["scoreLead"]
         # Always return score from Black's perspective
         return -score_lead
@@ -460,5 +458,5 @@ class DifficultyAssessor:
         )
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
-            return "pass"
+            raise Exception("Failed to get best response")
         return response["moveInfos"][0]["move"]
