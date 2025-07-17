@@ -231,48 +231,28 @@ class DifficultyAssessor:
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
 
-    def _get_initial_winrate(self, moves):
-        """Helper to get the current position winrate with maxVisits=10"""
+    def _get_position_info(self, moves):
+        """
+        Helper to get the current position score and winrate from Black's perspective.
+        Returns (score, winrate) or (None, None) if failed.
+        Uses maxVisits=10 for a quick but reliable read.
+        """
         query = {
-            "id": "initial_winrate_check",
+            "id": "position_info",
             "moves": moves,
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 10   # Quick check
+            "maxVisits": 10   # Quick but reliable
         }
         response = self.strong_controller.send_query(query)
-        if response and "rootInfo" in response:
-            return response["rootInfo"]["winrate"]
-        return None
+        if not response or "rootInfo" not in response:
+            return None, None
 
-    def _get_quick_position_score(self, moves):
-        """Helper to get the current position score with maxVisits=1 for stability"""
-        query = {
-            "id": "position_score_quick",
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1   # Only one visit for stability
-        }
-        response = self.strong_controller.send_query(query)
-        if response and "rootInfo" in response:
-            return response["rootInfo"]["scoreLead"]
-        return None
-
-    def _get_current_score_black(self, moves):
-        """
-        Helper to get the current position score from Black's perspective.
-        Returns None if failed.
-        """
-        score_lead = self._get_quick_position_score(moves)
-        if score_lead is None:
-            return None
+        score_lead = response["rootInfo"]["scoreLead"]
+        winrate = response["rootInfo"]["winrate"]
 
         # Determine current player to move
         if not moves:
@@ -283,9 +263,9 @@ class DifficultyAssessor:
 
         # Convert to Black's perspective
         if current_player == "B":
-            return score_lead
+            return score_lead, winrate
         else:
-            return -score_lead
+            return -score_lead, 1 - winrate
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
