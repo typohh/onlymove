@@ -2,10 +2,10 @@
 - split large changes into multiple smaller blocks
 - only include lines being changed in SEARCH
 - ensure REPLACE has no trailing whitespace
-- add debug prints that will help you determine the cause, rather than taking wild guesses when attempting to fix a bug. 
+- add debug prints that will help you determine the cause, rather than taking wild guesses when attempting to fix a bug.
 - add early termination to code when debugging, to avoid massive and impractical logs, with a debug print statement to explain why we are terminating.
 - mark debug prints clearly as such, so you do not later confuse them with intended prints.
-- you can run the app yourself after adding debug info, so you can see the output. 
+- you can run the app yourself after adding debug info, so you can see the output.
 - when making changes to code, remember to update those to README.md if relevant.
 - use debug.py to construct isolated test cases as needed to avoid long runs of the whole code.
 - avoid excessive edge case testing, we want the code to crash when something is wrong, so we cant test it. it doenst have to gracefully handle wrong inputs.

@@ -1,6 +1,6 @@
 # YoseTsumego
 
-This project generates Go problems using KataGo. 
+This project generates Go problems using KataGo.
 
 Generation strategy is to play out a single game, then evaluate each black position during the game as posible tsumego candidate.
 - We can start this evaluation at the last position, and proceed backwards in the game. When we reach 1 dan difficulty, we can stop as we do not want harder than 1 dan tsumegos.

@@ -23,20 +23,20 @@ def main():
         print(f"Error: Game file not found at {GAME_FILE}")
         return
     game_moves = problem_finder.load_sgf(GAME_FILE)
-    
+
     # Get moves up to move 26 (index 26) for analysis at move 27
     if len(game_moves) < 27:
         print(f"Error: Game only has {len(game_moves)} moves, need at least 27")
         return
     moves_so_far = game_moves[:26]
-    
+
     # Initialize and start KataGo
     controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH)
     try:
         print("Starting KataGo engine...")
         controller.start_engine()
         print("KataGo engine started.")
-        
+
         # Create analysis query
         query = {
             "id": "debug_move_27",
@@ -49,13 +49,13 @@ def main():
             "maxVisits": 1,
             "analysisPVLen": 10
         }
-        
+
         # Send query and print response
         print("Sending analysis query for position after 26 moves...")
         response = controller.send_query(query)
         print("\nAnalysis Output:")
         print(json.dumps(response, indent=2))
-        
+
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:

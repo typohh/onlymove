@@ -40,7 +40,7 @@ class ProblemFinder:
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
             correct_move = game_moves[i][1]
-            
+
             print(f"\nValidating tsumego at move {i+1}/{len(game_moves)}...")
             is_valid, adjusted_score, adjusted_moves = self.difficulty_assessor.validate_and_adjust_tsumego(moves_so_far, player_to_move, correct_move)
             if not is_valid:
@@ -121,7 +121,7 @@ class ProblemFinder:
         """
         if rank1 is None or rank2 is None:
             return False
-            
+
         # For simplicity, we can compare the index of the ranks in the supported ranks list.
         # A larger index means a higher rank (more difficult).
         try:

@@ -23,7 +23,7 @@ class KatagoController:
     def start_engine(self, verbose=False):
         """
         Starts the KataGo analysis engine as a subprocess.
-        
+
         Args:
             verbose (bool): If True, shows KataGo stderr output
         """

@@ -213,9 +213,9 @@ class DifficultyAssessor:
             for move_info in response["moveInfos"]:
                 if best_winrate - move_info["winrate"] <= threshold:
                     best_moves.append(move_info["move"])
-            
+
             print(f"    Best moves: {best_moves} (correct: {correct_move}, best winrate: {best_winrate:.3f})")
-            
+
             # If only solution move is best, we're done
             if best_moves == [correct_move]:
                 final_score, final_winrate = self._get_position_info(adjusted_moves)
@@ -224,7 +224,7 @@ class DifficultyAssessor:
                     return False, None, None
                 print(f"    ✅ Only solution move is best. Final score: {final_score:.1f}, winrate: {final_winrate:.3f}")
                 return True, final_score, adjusted_moves
-            
+
             # If multiple best moves, remove one alternative at a time
             print("    Multiple best moves - removing one alternative...")
             # Find the first alternative move that is not the correct move
@@ -238,7 +238,7 @@ class DifficultyAssessor:
                     else:
                         print(f"    After exchange: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
                     break
-        
+
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
 
@@ -283,12 +283,12 @@ class DifficultyAssessor:
         Adjusts position to ensure solution leads to ~0.5 win.
         Performs a single exchange (player move + opponent response) if needed.
         Returns original sequence if no adjustments were needed or possible.
-        
+
         Args:
             moves (list): Current move sequence
             player (str): Player to move ("B" or "W")
             correct_move (str): Solution move
-            
+
         Returns:
             list: Adjusted move sequence
         """
@@ -308,11 +308,11 @@ class DifficultyAssessor:
         if not response or "moveInfos" not in response:
             print("    No response or no moveInfos in response")
             return moves
-            
+
         best_candidate = None
         best_candidate_score = None
         best_candidate_diff = float('inf')
-        
+
         # Find best candidate move for player
         for move_info in response["moveInfos"]:
             candidate_move = move_info["move"]
@@ -320,20 +320,20 @@ class DifficultyAssessor:
                 continue
             if "scoreLead" not in move_info:
                 continue
-                
+
             # Convert score to Black's perspective
             candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
             score_diff = abs(candidate_score - 0.5)
-            
+
             if score_diff < best_candidate_diff:
                 best_candidate_diff = score_diff
                 best_candidate = candidate_move
                 best_candidate_score = candidate_score
-        
+
         if not best_candidate:
             print("    No suitable candidate move found")
             return moves
-            
+
         print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
@@ -354,35 +354,35 @@ class DifficultyAssessor:
         if not opponent_response or "moveInfos" not in opponent_response:
             print("    No response or no moveInfos for opponent")
             return moves
-            
+
         best_opponent = None
         best_opponent_score = None
         best_opponent_diff = float('inf')
-        
+
         # Find best opponent move
         for move_info in opponent_response["moveInfos"]:
             opponent_move = move_info["move"]
             if "scoreLead" not in move_info:
                 continue
-                
+
             # Convert score to Black's perspective
             opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
             score_diff = abs(opponent_score - 0.5)
-            
+
             if score_diff < best_opponent_diff:
                 best_opponent_diff = score_diff
                 best_opponent = opponent_move
                 best_opponent_score = opponent_score
-        
+
         if not best_opponent:
             print("    No suitable opponent move found")
             return moves
-            
+
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
         print(f"  Applied exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
-            
+
         return adjusted_moves
 
 
@@ -390,28 +390,28 @@ class DifficultyAssessor:
         """
         Adjusts position by having player play one alternative move and then opponent responds optimally.
         Returns original sequence if no adjustments were needed or possible.
-        
+
         Args:
             moves (list): Current move sequence
             player (str): Player to move
             correct_move (str): Solution move
             alternative_move (str): One alternative move to remove
-            
+
         Returns:
             list: Adjusted move sequence
         """
         # First, check if alternative is already removed
         # We'll let the caller decide if removal is needed
-        
+
         # Apply player's alternative move
         adjusted_moves = moves + [[player, alternative_move]]
-        
+
         # Get best opponent response
         opponent = "W" if player == "B" else "B"
         response = self._get_best_response(adjusted_moves)
         if not response:
             return moves
-            
+
         # Apply opponent's response
         adjusted_moves = adjusted_moves + [[opponent, response]]
         return adjusted_moves
