@@ -150,6 +150,14 @@ class DifficultyAssessor:
         query.update(kwargs)
         return query
 
+    def _print_position_info(self, moves, label):
+        """
+        Helper to get and print position info (score, winrate, num_moves_above_50).
+        """
+        score, winrate = self._get_position_info(moves)
+        num_above = self._get_num_moves_above_50(moves)
+        print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
+
     def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
         """
         Validates and adjusts position to meet tsumego criteria.
@@ -158,9 +166,7 @@ class DifficultyAssessor:
         move_num = len(moves)+1
         print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
-        initial_score, initial_winrate = self._get_position_info(adjusted_moves)
-        initial_num_above = self._get_num_moves_above_50(adjusted_moves)
-        print(f"    {initial_score:.1f}, {initial_winrate:.3f}, {initial_num_above}")
+        self._print_position_info(adjusted_moves, "Initial")
 
         # Phase: Adjusting Score
         print(f"    Adjusting Score")
@@ -172,14 +178,13 @@ class DifficultyAssessor:
             print(f"    {opponent} {opponent_move}")
         
         # Get status after adjustment
-        post_score, post_winrate = self._get_position_info(adjusted_moves)
-        post_num_above = self._get_num_moves_above_50(adjusted_moves)
-        print(f"    {post_score:.1f}, {post_winrate:.3f}, {post_num_above}")
+        self._print_position_info(adjusted_moves, "After adjustment")
 
         # Print "Removing choices" unconditionally as per user request
         print(f"    Removing choices")
 
         # Early termination if score not in target range
+        post_score, post_winrate = self._get_position_info(adjusted_moves)
         if not (0 <= post_score <= 1):
             return False, None, None
 
@@ -238,9 +243,7 @@ class DifficultyAssessor:
                 print(f"    {opponent} {response_played}")
             
             # Get status after removal
-            post_score, post_winrate = self._get_position_info(adjusted_moves)
-            post_num_above = self._get_num_moves_above_50(adjusted_moves)
-            print(f"    {post_score:.1f}, {post_winrate:.3f}, {post_num_above}")
+            self._print_position_info(adjusted_moves, "After removal")
 
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
