@@ -160,7 +160,7 @@ class DifficultyAssessor:
         adjusted_moves = moves.copy()
         initial_score, initial_winrate = self._get_position_info(adjusted_moves)
         initial_num_above = self._get_num_moves_above_50(adjusted_moves)
-        print(f"    {initial_score:.1f}, {initial_winrate:.3f}, moves_above_50={initial_num_above}")
+        print(f"    {initial_score:.1f}, {initial_winrate:.3f}, {initial_num_above}")
 
         # Phase: Adjusting Score
         print(f"    Adjusting Score")
@@ -174,7 +174,7 @@ class DifficultyAssessor:
         # Get status after adjustment
         post_score, post_winrate = self._get_position_info(adjusted_moves)
         post_num_above = self._get_num_moves_above_50(adjusted_moves)
-        print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
+        print(f"    {post_score:.1f}, {post_winrate:.3f}, {post_num_above}")
 
         # Print "Removing choices" unconditionally as per user request
         print(f"    Removing choices")
@@ -240,7 +240,7 @@ class DifficultyAssessor:
             # Get status after removal
             post_score, post_winrate = self._get_position_info(adjusted_moves)
             post_num_above = self._get_num_moves_above_50(adjusted_moves)
-            print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
+            print(f"    {post_score:.1f}, {post_winrate:.3f}, {post_num_above}")
 
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
