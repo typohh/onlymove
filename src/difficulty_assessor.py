@@ -191,6 +191,7 @@ class DifficultyAssessor:
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
         print(f"    Removing choices")
+        # We'll now proceed with move adjustment regardless of score/winrate checks
         for attempt in range(MAX_ATTEMPTS):
             query = self._build_query(
                 adjusted_moves,
