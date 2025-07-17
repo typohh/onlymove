@@ -158,9 +158,13 @@ class DifficultyAssessor:
         move_num = len(moves)+1
         print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
-        initial_score, initial_winrate, initial_num_above = self._get_extended_position_info(adjusted_moves)
-        if initial_score is None or initial_winrate is None or initial_num_above is None:
+        initial_score, initial_winrate = self._get_position_info(adjusted_moves)
+        if initial_score is None or initial_winrate is None:
             print("    Failed to get initial position info")
+            return False, None, None
+        initial_num_above = self._get_num_moves_above_50(adjusted_moves)
+        if initial_num_above is None:
+            print("    Failed to get initial move count")
             return False, None, None
         print(f"    {initial_score:.1f}, {initial_winrate:.3f}, moves_above_50={initial_num_above}")
 
@@ -174,9 +178,13 @@ class DifficultyAssessor:
             print(f"    {opponent} {opponent_move}")
         
         # Get status after adjustment
-        post_score, post_winrate, post_num_above = self._get_extended_position_info(adjusted_moves)
-        if post_score is None or post_winrate is None or post_num_above is None:
+        post_score, post_winrate = self._get_position_info(adjusted_moves)
+        if post_score is None or post_winrate is None:
             print("    Failed to get post-adjustment position info")
+            return False, None, None
+        post_num_above = self._get_num_moves_above_50(adjusted_moves)
+        if post_num_above is None:
+            print("    Failed to get post-adjustment move count")
             return False, None, None
         print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
 
@@ -242,9 +250,15 @@ class DifficultyAssessor:
                 print(f"    {opponent} {response_played}")
             
             # Get status after removal
-            post_score, post_winrate, post_num_above = self._get_extended_position_info(adjusted_moves)
-            if post_score is not None and post_winrate is not None and post_num_above is not None:
-                print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
+            post_score, post_winrate = self._get_position_info(adjusted_moves)
+            if post_score is None or post_winrate is None:
+                print("    Failed to get position info after removal")
+            else:
+                post_num_above = self._get_num_moves_above_50(adjusted_moves)
+                if post_num_above is None:
+                    print("    Failed to get move count after removal")
+                else:
+                    print(f"    {post_score:.1f}, {post_winrate:.3f}, moves_above_50={post_num_above}")
 
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
@@ -285,48 +299,32 @@ class DifficultyAssessor:
         else:
             return -score_lead, 1 - winrate
 
-    def _get_extended_position_info(self, moves):
+    def _get_num_moves_above_50(self, moves):
         """
-        Helper to get extended position info (score, winrate, num_moves_above_50) 
-        from Black's perspective. Returns (None, None, None) if failed.
+        Helper to get the number of moves with winrate above 50% for the current player.
+        Returns None if failed.
         """
         query = {
-            "id": "extended_position_info",
+            "id": "moves_above_50",
             "moves": moves,
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 10,
+            "maxVisits": 20,   # Increased for reliability
             "includeMoveInfos": True
         }
         response = self.strong_controller.send_query(query)
-        if not response or "rootInfo" not in response or "moveInfos" not in response:
-            return None, None, None
+        if not response or "moveInfos" not in response:
+            return None
 
-        score_lead = response["rootInfo"]["scoreLead"]
-        winrate = response["rootInfo"]["winrate"]
-
-        # Determine current player to move
-        if not moves:
-            current_player = "B"
-        else:
-            last_player = moves[-1][0]
-            current_player = "W" if last_player == "B" else "B"
-
-        # Convert to Black's perspective
-        if current_player == "W":
-            score_lead = -score_lead
-            winrate = 1 - winrate
-
-        # Count moves with winrate above 50% (from current player's perspective)
         num_moves_above_50 = 0
         for move_info in response["moveInfos"]:
             if move_info["winrate"] > 0.5:
                 num_moves_above_50 += 1
 
-        return score_lead, winrate, num_moves_above_50
+        return num_moves_above_50
 
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
