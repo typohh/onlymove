@@ -230,10 +230,10 @@ class DifficultyAssessor:
 
             # If multiple best moves, remove one alternative at a time
             print("    Multiple best moves - removing one alternative...")
+            print(f"    Removing choices")
             # Find the first alternative move that is not the correct move
             for alt_move in best_moves:
                 if alt_move != correct_move:
-                    print(f"    Removing choices")
                     adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
                 
                     if alt_played and response_played:
@@ -245,7 +245,6 @@ class DifficultyAssessor:
                     post_score, post_winrate = self._get_position_info(adjusted_moves)
                     if post_score is not None and post_winrate is not None:
                         print(f"    {post_score:.1f}, {post_winrate:.3f}")
-                
                     break
 
         print("    Failed to achieve single best move after max attempts")
