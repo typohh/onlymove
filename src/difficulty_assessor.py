@@ -165,14 +165,14 @@ class DifficultyAssessor:
         print(f"    Initial score: {initial_score:.1f}, winrate: {initial_winrate:.3f}")
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
 
-        # Phase 0: Adjust the score to be in [0,1] for Black with one exchange
-        print(f"  Phase 0: Adjusting score to [0,1] for Black (one exchange)...")
+        # Phase: Adjusting Score
+        print(f"  Phase: Adjusting Score...")
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
         if score_after_adjust is None or winrate_after_adjust is None:
             print("    Failed to get position info after adjustment")
             return False, None, None
-        print(f"    Adjusted score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
+        print(f"    After adjustment: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
         # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
@@ -185,10 +185,10 @@ class DifficultyAssessor:
             return False, None, None
 
         MAX_ATTEMPTS = 5
-        # Phase 1: Ensure only one best move
-        print(f"  Phase 1: Ensuring single best move...")
+        # Phase: Adjusting Moves
+        print(f"  Phase: Adjusting Moves...")
         for attempt in range(MAX_ATTEMPTS):
-            print(f"    Best move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
+            print(f"    Move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
             query = self._build_query(
                 adjusted_moves,
                 id="tsumego_check",
@@ -232,6 +232,12 @@ class DifficultyAssessor:
                 if alt_move != correct_move:
                     adjusted_moves = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
                     print(f"    Removed alternative: {alt_move}")
+                    # After removal, get new position info
+                    current_score, current_winrate = self._get_position_info(adjusted_moves)
+                    if current_score is None or current_winrate is None:
+                        print("    Failed to get position info after alternative removal")
+                    else:
+                        print(f"    After removal: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
                     break
         
         print("    Failed to achieve single best move after max attempts")
