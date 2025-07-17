@@ -275,7 +275,8 @@ class DifficultyAssessor:
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
         Adjusts position to ensure solution leads to ~0.5 win.
-        Performs just one exchange (player move + opponent response).
+        Performs a single exchange (player move + opponent response) if needed.
+        Returns original sequence if no adjustments were needed or possible.
         
         Args:
             moves (list): Current move sequence
@@ -285,19 +286,22 @@ class DifficultyAssessor:
         Returns:
             list: Adjusted move sequence
         """
-        current_moves = moves.copy()
-        adjustment_num = 1
-        
+        # First, check if the score is already in [0,1] for Black
+        score, _ = self._get_position_info(moves)
+        if score is not None and 0 <= score <= 1:
+            print("    Current score already in [0,1] - no adjustment needed")
+            return moves
+
         # Query for moves in current position (player's turn)
         query = self._build_query(
-            current_moves,
-            id=f"adjust_{adjustment_num}",
+            moves,
+            id="adjust_to_0_5",
             analysisPVLen=5
         )
         response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
             print("    No response or no moveInfos in response")
-            return current_moves
+            return moves
             
         best_candidate = None
         best_candidate_score = None
@@ -322,23 +326,23 @@ class DifficultyAssessor:
         
         if not best_candidate:
             print("    No suitable candidate move found")
-            return current_moves
+            return moves
             
         print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
         # Apply player's candidate move
-        current_moves = current_moves + [[player, best_candidate]]
+        adjusted_moves = moves + [[player, best_candidate]]
         opponent = "W" if player == "B" else "B"
         
         # Query for opponent's moves
         opponent_query = self._build_query(
-            current_moves,
-            id=f"adjust_{adjustment_num}_opponent",
+            adjusted_moves,
+            id="adjust_to_0_5_opponent",
             analysisPVLen=5
         )
         opponent_response = self.strong_controller.send_query(opponent_query)
         if not opponent_response or "moveInfos" not in opponent_response:
             print("    No response or no moveInfos for opponent")
-            return current_moves
+            return moves
             
         best_opponent = None
         best_opponent_score = None
@@ -361,19 +365,20 @@ class DifficultyAssessor:
         
         if not best_opponent:
             print("    No suitable opponent move found")
-            return current_moves
+            return moves
             
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
-        current_moves = current_moves + [[opponent, best_opponent]]
+        adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
         print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
             
-        return current_moves
+        return adjusted_moves
 
 
     def _remove_alternative(self, moves, player, correct_move, alternative_move):
         """
         Adjusts position by having player play one alternative move and then opponent responds optimally.
+        Returns original sequence if no adjustments were needed or possible.
         
         Args:
             moves (list): Current move sequence
@@ -384,14 +389,21 @@ class DifficultyAssessor:
         Returns:
             list: Adjusted move sequence
         """
-        current_moves = moves.copy()
-        # Have player play the alternative
-        current_moves.append([player, alternative_move])
-        # Then opponent responds optimally
+        # First, check if alternative is already removed
+        # We'll let the caller decide if removal is needed
+        
+        # Apply player's alternative move
+        adjusted_moves = moves + [[player, alternative_move]]
+        
+        # Get best opponent response
         opponent = "W" if player == "B" else "B"
-        response = self._get_best_response(current_moves)
-        current_moves.append([opponent, response])
-        return current_moves
+        response = self._get_best_response(adjusted_moves)
+        if not response:
+            return moves
+            
+        # Apply opponent's response
+        adjusted_moves = adjusted_moves + [[opponent, response]]
+        return adjusted_moves
 
     def _get_score_after_move(self, moves, player, move):
         """Helper to get score after playing a move"""
