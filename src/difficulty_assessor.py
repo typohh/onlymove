@@ -276,8 +276,7 @@ class DifficultyAssessor:
         query = self.strong_controller.build_query(
             moves,
             id="moves_above_50",
-            maxVisits=20,
-            includeMoveInfo=True
+            maxVisits=20
         )
         response = self.strong_controller.send_query(query)
         if not response:
