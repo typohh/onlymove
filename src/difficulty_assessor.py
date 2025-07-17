@@ -176,12 +176,12 @@ class DifficultyAssessor:
 
         # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
-            print("    ❌ Score adjustment failed to reach [0,1] range")
+            print(f"    ❌ Score adjustment failed to reach [0,1] range (score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f})")
             return False, None, None
 
         # After score adjustment, check winrate
         if winrate_after_adjust < 0.5:
-            print("    ❌ Position is losing (winrate < 0.5) - skipping")
+            print(f"    ❌ Position is losing (winrate < 0.5) - skipping (score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f})")
             return False, None, None
 
         MAX_ATTEMPTS = 5
@@ -339,11 +339,6 @@ class DifficultyAssessor:
         adjusted_moves = moves + [[player, best_candidate]]
         opponent = "W" if player == "B" else "B"
 
-        # Get intermediate position info after player's candidate move
-        temp_score, temp_winrate = self._get_position_info(adjusted_moves)
-        if temp_score is not None and temp_winrate is not None:
-            print(f"    After player move: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
-
         # Query for opponent's moves
         opponent_query = self._build_query(
             adjusted_moves,
@@ -381,7 +376,7 @@ class DifficultyAssessor:
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-        print(f"  Applied exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
+        print(f"  Phase 1: Applied exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
 
         return adjusted_moves
 
