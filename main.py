@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import traceback
 
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
@@ -93,6 +94,7 @@ def main():
 
     except Exception as e:
         print(f"An error occurred: {e}")
+        traceback.print_exc()
     finally:
         print("Stopping KataGo engines...")
         if human_controller:
