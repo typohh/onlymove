@@ -180,6 +180,9 @@ class DifficultyAssessor:
             return False, None, None
         print(f"    {post_score:.1f}, {post_winrate:.3f}")
 
+        # Print "Removing choices" unconditionally as per user request
+        print(f"    Removing choices")
+
         # Early termination if score not in target range
         if not (0 <= post_score <= 1):
             return False, None, None
@@ -190,8 +193,6 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
-        print(f"    Removing choices")
-        # We'll now proceed with move adjustment regardless of score/winrate checks
         for attempt in range(MAX_ATTEMPTS):
             query = self._build_query(
                 adjusted_moves,
