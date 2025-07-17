@@ -226,7 +226,7 @@ class DifficultyAssessor:
             
             # If multiple best moves, make others worse
             print("    Multiple best moves - making alternatives worse...")
-            adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, best_moves)
+            adjusted_moves = self._remove_alternatives(adjusted_moves, player_to_move, correct_move, best_moves)
         
         print("    Failed to achieve single best move after max attempts")
         return False, None, None
@@ -366,7 +366,7 @@ class DifficultyAssessor:
         return current_moves
 
 
-    def _make_alternatives_lose(self, moves, player, correct_move, winning_moves):
+    def _remove_alternatives(self, moves, player, correct_move, winning_moves):
         """
         Adjusts position by having player play alternatives until only solution wins.
         
