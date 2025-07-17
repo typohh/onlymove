@@ -159,6 +159,8 @@ class DifficultyAssessor:
         adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         
         if candidate_move and opponent_move:
+            # Compute opponent color
+            opponent = "W" if player_to_move == "B" else "B"
             # Print candidate move with score/winrate
             cand_winrate = candidate_winrate if player_to_move == "B" else 1 - candidate_winrate
             cand_score = candidate_score
@@ -327,6 +329,7 @@ class DifficultyAssessor:
 
         best_candidate = None
         best_candidate_score = None
+        best_candidate_winrate = None
         best_candidate_diff = float('inf')
 
         # Find best candidate move for player
@@ -345,6 +348,7 @@ class DifficultyAssessor:
                 best_candidate_diff = score_diff
                 best_candidate = candidate_move
                 best_candidate_score = candidate_score
+                best_candidate_winrate = move_info["winrate"]
 
         if not best_candidate:
             raise Exception("No suitable candidate move found")
@@ -390,7 +394,7 @@ class DifficultyAssessor:
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
 
-        return adjusted_moves, best_candidate, best_opponent, candidate_winrate, best_opponent_winrate, candidate_score, best_opponent_score
+        return adjusted_moves, best_candidate, best_opponent, best_candidate_winrate, best_opponent_winrate, best_candidate_score, best_opponent_score
 
 
 
