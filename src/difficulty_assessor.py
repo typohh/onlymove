@@ -287,20 +287,17 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        query = {
-            "id": "moves_above_50",
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 20,   # Increased for reliability
-            "includeMoveInfos": True
-        }
+        query = self._build_query(
+            moves,
+            id="moves_above_50",
+            maxVisits=20,
+            includeMoveInfos=True
+        )
         response = self.strong_controller.send_query(query)
-        if not response or "moveInfos" not in response:
-            raise Exception("Failed to get moves above 50% from KataGo")
+        if not response:
+            raise Exception("No response from KataGo for moves above 50%")
+        if "moveInfos" not in response:
+            raise Exception("Response missing 'moveInfos' for moves above 50%")
 
         num_moves_above_50 = 0
         for move_info in response["moveInfos"]:
