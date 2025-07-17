@@ -338,7 +338,12 @@ class DifficultyAssessor:
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
         opponent = "W" if player == "B" else "B"
-        
+
+        # Get intermediate position info after player's candidate move
+        temp_score, temp_winrate = self._get_position_info(adjusted_moves)
+        if temp_score is not None and temp_winrate is not None:
+            print(f"    After player move: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
+
         # Query for opponent's moves
         opponent_query = self._build_query(
             adjusted_moves,
@@ -376,7 +381,7 @@ class DifficultyAssessor:
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-        print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
+        print(f"  Applied exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
             
         return adjusted_moves
 
