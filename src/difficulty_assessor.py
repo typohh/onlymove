@@ -187,23 +187,29 @@ class DifficultyAssessor:
                 if move_info["winrate"] > best_winrate:
                     best_winrate = move_info["winrate"]
 
-            # Consider moves within 1% of best winrate as winning
-            threshold = 0.01
-            winning_moves = []
+            # Adjust threshold based on position type
+            if best_winrate >= 0.5:
+                # Winning position: use relative threshold
+                threshold = 0.01
+            else:
+                # Losing position: use tighter absolute threshold
+                threshold = 0.005
+
+            best_moves = []
             for move_info in response["moveInfos"]:
                 if best_winrate - move_info["winrate"] <= threshold:
-                    winning_moves.append(move_info["move"])
+                    best_moves.append(move_info["move"])
             
-            print(f"    Winning moves: {winning_moves} (correct: {correct_move}, best winrate: {best_winrate:.3f})")
+            print(f"    Best moves: {best_moves} (correct: {correct_move}, best winrate: {best_winrate:.3f})")
             
-            # If only solution move wins, we're done
-            if winning_moves == [correct_move]:
-                print("    ✅ Only solution move wins")
+            # If only solution move is best, we're done
+            if best_moves == [correct_move]:
+                print("    ✅ Only solution move is best")
                 return True, score, adjusted_moves
             
-            # If multiple winning moves, make others lose
-            print("    Multiple winning moves - making alternatives lose...")
-            adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, winning_moves)
+            # If multiple best moves, make others worse
+            print("    Multiple best moves - making alternatives worse...")
+            adjusted_moves = self._make_alternatives_lose(adjusted_moves, player_to_move, correct_move, best_moves)
         
         print("    Failed to achieve single winning move after max attempts")
         return False, None, None
