@@ -166,7 +166,7 @@ class DifficultyAssessor:
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
 
         # Phase: Adjusting Score
-        print(f"  Phase: Adjusting Score...")
+        print(f"  Phase 1: Score Adjustment")
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
         if score_after_adjust is None or winrate_after_adjust is None:
@@ -186,9 +186,9 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
-        print(f"  Phase: Adjusting Moves...")
+        print(f"  Phase 2: Move Adjustment")
         for attempt in range(MAX_ATTEMPTS):
-            print(f"    Move adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
+            print(f"    Adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
             query = self._build_query(
                 adjusted_moves,
                 id="tsumego_check",
@@ -236,7 +236,7 @@ class DifficultyAssessor:
                     if current_score is None or current_winrate is None:
                         print("    Failed to get position info after alternative exchange")
                     else:
-                        print(f"    After exchange: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
+                        print(f"    After move adjustment: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
                     break
 
         print("    Failed to achieve single best move after max attempts")
