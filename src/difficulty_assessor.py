@@ -224,57 +224,8 @@ class DifficultyAssessor:
             response_played = None
             for alt_move in best_moves:
                 if alt_move != correct_move:
-                    # Get move info for alternative move
-                    alt_query = self.strong_controller.build_query(
-                        moves,
-                        id="alt_move_info",
-                        includeMoveInfos=True
-                    )
-                    alt_response = self.strong_controller.send_query(alt_query)
-                    if not alt_response or "moveInfos" not in alt_response:
-                        raise Exception("Failed to get move info for alternative move")
-        
-                    alt_move_info = None
-                    for move_info in alt_response["moveInfos"]:
-                        if move_info["move"] == alt_move:
-                            alt_move_info = move_info
-                            break
-        
-                    if not alt_move_info:
-                        raise Exception(f"Alternative move {alt_move} not found in moveInfos")
-        
-                    # Apply alternative move
-                    adjusted_moves = moves + [[player_to_move, alt_move]]
-                    opponent = "W" if player_to_move == "B" else "B"
-        
-                    # Get best response and its info
-                    resp_query = self.strong_controller.build_query(
-                        adjusted_moves,
-                        id="resp_move_info",
-                        includeMoveInfos=True
-                    )
-                    resp_response = self.strong_controller.send_query(resp_query)
-                    if not resp_response or "moveInfos" not in resp_response or not resp_response["moveInfos"]:
-                        raise Exception("Failed to get response move info")
-        
-                    resp_move_info = resp_response["moveInfos"][0]
-                    response_played = resp_move_info["move"]
-        
-                    # Apply opponent's response
-                    adjusted_moves = adjusted_moves + [[opponent, response_played]]
-                    adjusted_moves, alt_played, response_played = adjusted_moves, alt_move, response_played
+                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
                     break
-            
-            if alt_played and response_played:
-                # Print alternative move with score/winrate
-                alt_winrate = alt_move_info["winrate"] if player_to_move == "B" else 1 - alt_move_info["winrate"]
-                alt_score = alt_move_info["scoreLead"] if player_to_move == "B" else -alt_move_info["scoreLead"]
-                print(f"    {player_to_move} {alt_played} (score: {alt_score:.1f}, winrate: {alt_winrate:.3f})")
-            
-                # Print opponent response with score/winrate
-                resp_winrate = resp_move_info["winrate"] if opponent == "B" else 1 - resp_move_info["winrate"]
-                resp_score = resp_move_info["scoreLead"] if opponent == "B" else -resp_move_info["scoreLead"]
-                print(f"    {opponent} {response_played} (score: {resp_score:.1f}, winrate: {resp_winrate:.3f})")
             
             # Get status after removal
             self._print_position_info(adjusted_moves, "After removal")
@@ -460,18 +411,55 @@ class DifficultyAssessor:
         # First, check if alternative is already removed
         # We'll let the caller decide if removal is needed
 
+        # Get move info for alternative move
+        alt_query = self.strong_controller.build_query(
+            moves,
+            id="alt_move_info",
+            includeMoveInfos=True
+        )
+        alt_response = self.strong_controller.send_query(alt_query)
+        if not alt_response or "moveInfos" not in alt_response:
+            raise Exception("Failed to get move info for alternative move")
+    
+        alt_move_info = None
+        for move_info in alt_response["moveInfos"]:
+            if move_info["move"] == alternative_move:
+                alt_move_info = move_info
+                break
+    
+        if not alt_move_info:
+            raise Exception(f"Alternative move {alternative_move} not found in moveInfos")
+
         # Apply player's alternative move
         adjusted_moves = moves + [[player, alternative_move]]
-
-        # Get best opponent response
         opponent = "W" if player == "B" else "B"
-        response = self._get_best_response(adjusted_moves)
-        if not response:
-            return moves
+
+        # Get best response and its info
+        resp_query = self.strong_controller.build_query(
+            adjusted_moves,
+            id="resp_move_info",
+            includeMoveInfos=True
+        )
+        resp_response = self.strong_controller.send_query(resp_query)
+        if not resp_response or "moveInfos" not in resp_response or not resp_response["moveInfos"]:
+            raise Exception("Failed to get response move info")
+    
+        resp_move_info = resp_response["moveInfos"][0]
+        response_played = resp_move_info["move"]
+
+        # Print alternative move with score/winrate
+        alt_winrate = alt_move_info["winrate"] if player == "B" else 1 - alt_move_info["winrate"]
+        alt_score = alt_move_info["scoreLead"] if player == "B" else -alt_move_info["scoreLead"]
+        print(f"    {player} {alternative_move} (score: {alt_score:.1f}, winrate: {alt_winrate:.3f})")
+        
+        # Print opponent response with score/winrate
+        resp_winrate = resp_move_info["winrate"] if opponent == "B" else 1 - resp_move_info["winrate"]
+        resp_score = resp_move_info["scoreLead"] if opponent == "B" else -resp_move_info["scoreLead"]
+        print(f"    {opponent} {response_played} (score: {resp_score:.1f}, winrate: {resp_winrate:.3f})")
 
         # Apply opponent's response
-        adjusted_moves = adjusted_moves + [[opponent, response]]
-        return adjusted_moves, alternative_move, response
+        adjusted_moves = adjusted_moves + [[opponent, response_played]]
+        return adjusted_moves, alternative_move, response_played
 
     def _get_score_after_move(self, moves, player, move):
         """Helper to get score after playing a move"""
