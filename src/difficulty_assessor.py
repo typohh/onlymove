@@ -136,7 +136,7 @@ class DifficultyAssessor:
         return new_winrate >= (initial_winrate - 0.1)
 
     def _build_query(self, moves, **kwargs):
-        """Helper to build standardized query object"""
+        """Helper to build standardized query object, you CANNOT use root score or winrate from this."""
         query = {
             "moves": moves,
             "initialStones": [],
