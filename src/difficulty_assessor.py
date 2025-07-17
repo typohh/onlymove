@@ -167,12 +167,14 @@ class DifficultyAssessor:
 
         # Phase: Adjusting Score
         print(f"  Adjusting Score")
+        original_score, original_winrate = initial_score, initial_winrate
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        
+        # Get position after adjustment
         score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
         if score_after_adjust is None or winrate_after_adjust is None:
             print("    Failed to get position info after adjustment")
             return False, None, None
-        print(f"    After candidate exchange: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
         # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
@@ -231,12 +233,6 @@ class DifficultyAssessor:
             for alt_move in best_moves:
                 if alt_move != correct_move:
                     adjusted_moves = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
-                    # After removal, get new position info
-                    current_score, current_winrate = self._get_position_info(adjusted_moves)
-                    if current_score is None or current_winrate is None:
-                        print("    Failed to get position info after alternative exchange")
-                    else:
-                        print(f"    After move adjustment: score: {current_score:.1f}, winrate: {current_winrate:.3f}")
                     break
 
         print("    Failed to achieve single best move after max attempts")
@@ -334,7 +330,6 @@ class DifficultyAssessor:
             print("    No suitable candidate move found")
             return moves
 
-        print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
         opponent = "W" if player == "B" else "B"
@@ -373,15 +368,8 @@ class DifficultyAssessor:
             print("    No suitable opponent move found")
             return moves
 
-        print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-        # Get actual position info after exchange
-        temp_score, temp_winrate = self._get_position_info(adjusted_moves)
-        if temp_score is not None and temp_winrate is not None:
-            print(f"    After exchange: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
-
-        print(f"  Candidate Exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
 
         return adjusted_moves
 
