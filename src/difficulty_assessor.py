@@ -155,13 +155,15 @@ class DifficultyAssessor:
         Validates and adjusts position to meet tsumego criteria.
         Returns (is_valid, final_score, adjusted_moves)
         """
-        print(f"\n  Validating tsumego at move {len(moves)+1}...")
+        move_num = len(moves)+1
+        print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
         score = self._get_current_score_black(adjusted_moves)
         if score is None:
             print("    Score is None")
             return False, None, None
         print(f"    Current score: {score:.1f} (no adjustment)")
+        print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
         MAX_ATTEMPTS = 5
         # Phase 1: Ensure only one winning move
         print(f"  Phase 1: Ensuring single winning move...")
@@ -170,7 +172,8 @@ class DifficultyAssessor:
             query = self._build_query(
                 adjusted_moves,
                 id="tsumego_check",
-                analysisPVLen=10
+                analysisPVLen=10,
+                maxVisits=100   # More visits for reliable winrate
             )
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
@@ -178,12 +181,20 @@ class DifficultyAssessor:
                 return False, None, None
 
             # Find all moves with winrate >= 0.5
+            # Find best winrate
+            best_winrate = -1
+            for move_info in response["moveInfos"]:
+                if move_info["winrate"] > best_winrate:
+                    best_winrate = move_info["winrate"]
+
+            # Consider moves within 1% of best winrate as winning
+            threshold = 0.01
             winning_moves = []
             for move_info in response["moveInfos"]:
-                if move_info["winrate"] >= 0.5:
+                if best_winrate - move_info["winrate"] <= threshold:
                     winning_moves.append(move_info["move"])
             
-            print(f"    Winning moves: {winning_moves} (correct: {correct_move})")
+            print(f"    Winning moves: {winning_moves} (correct: {correct_move}, best winrate: {best_winrate:.3f})")
             
             # If only solution move wins, we're done
             if winning_moves == [correct_move]:
