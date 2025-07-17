@@ -158,36 +158,28 @@ class DifficultyAssessor:
         move_num = len(moves)+1
         print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
-        initial_score = self._get_current_score_black(adjusted_moves)
-        if initial_score is None:
-            print("    Score is None")
+        initial_score, initial_winrate = self._get_position_info(adjusted_moves)
+        if initial_score is None or initial_winrate is None:
+            print("    Failed to get initial position info")
             return False, None, None
-        print(f"    Initial score: {initial_score:.1f}")
+        print(f"    Initial score: {initial_score:.1f}, winrate: {initial_winrate:.3f}")
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
 
-        # Phase 0: Adjust the score to be in [0,1] for Black
-        print(f"  Phase 0: Adjusting score to [0,1] for Black...")
+        # Phase 0: Adjust the score to be in [0,1] for Black with one exchange
+        print(f"  Phase 0: Adjusting score to [0,1] for Black (one exchange)...")
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
-        score_after_adjust = self._get_current_score_black(adjusted_moves)
-        if score_after_adjust is None:
-            print("    Failed to get score after adjustment")
+        score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
+        if score_after_adjust is None or winrate_after_adjust is None:
+            print("    Failed to get position info after adjustment")
             return False, None, None
-        print(f"    Adjusted score: {score_after_adjust:.1f}")
+        print(f"    Adjusted score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
-        # Early termination if score not in target range
+        # Early termination if score not in target range or winrate too low
         if score_after_adjust < 0 or score_after_adjust > 1:
             print("    ❌ Score adjustment failed to reach [0,1] range")
             return False, None, None
-
-        # Get winrate AFTER score adjustment
-        winrate_after_adjust = self._get_initial_winrate(adjusted_moves)
-        if winrate_after_adjust is None:
-            print("    Failed to get winrate after adjustment")
-            return False, None, None
-        print(f"    Winrate after adjustment: {winrate_after_adjust:.3f}")
-
         if winrate_after_adjust < 0.5:
-            print("    ❌ Position is still losing after adjustment (winrate < 0.5) - skipping")
+            print("    ❌ Position is still losing (winrate < 0.5) - skipping")
             return False, None, None
 
         MAX_ATTEMPTS = 5
@@ -298,7 +290,7 @@ class DifficultyAssessor:
     def _adjust_to_0_5(self, moves, player, correct_move):
         """
         Adjusts position to ensure solution leads to ~0.5 win.
-        Always picks the move that brings score closest to 0.5.
+        Performs just one exchange (player move + opponent response).
         
         Args:
             moves (list): Current move sequence
@@ -309,100 +301,88 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         current_moves = moves.copy()
-        MAX_ADJUSTMENTS = 5
+        adjustment_num = 1
         
-        for adjustment_num in range(1, MAX_ADJUSTMENTS + 1):
-            # First, check current score and break if in range
-            current_score = self._get_current_score_black(current_moves)
-            if current_score is None:
-                print("    Failed to get current score")
-                break
-            print(f"  Adjustment round {adjustment_num}:")
-            print(f"    Current score: {current_score:.1f}")
-            if 0 <= current_score <= 1:
-                print("    Current score already in [0,1] - no adjustment needed")
-                break
-
-            # Query for moves in current position (player's turn)
-            query = self._build_query(
-                current_moves,
-                id=f"adjust_{adjustment_num}",
-                analysisPVLen=5
-            )
-            response = self.strong_controller.send_query(query)
-            if not response or "moveInfos" not in response:
-                print("    No response or no moveInfos in response")
-                return current_moves
-                
-            best_candidate = None
-            best_candidate_score = None
-            best_candidate_diff = float('inf')
+        # Query for moves in current position (player's turn)
+        query = self._build_query(
+            current_moves,
+            id=f"adjust_{adjustment_num}",
+            analysisPVLen=5
+        )
+        response = self.strong_controller.send_query(query)
+        if not response or "moveInfos" not in response:
+            print("    No response or no moveInfos in response")
+            return current_moves
             
-            # Find best candidate move for player
-            for move_info in response["moveInfos"]:
-                candidate_move = move_info["move"]
-                if candidate_move == correct_move:
-                    continue
-                if "scoreLead" not in move_info:
-                    continue
-                    
-                # Convert score to Black's perspective
-                candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
-                score_diff = abs(candidate_score - 0.5)
+        best_candidate = None
+        best_candidate_score = None
+        best_candidate_diff = float('inf')
+        
+        # Find best candidate move for player
+        for move_info in response["moveInfos"]:
+            candidate_move = move_info["move"]
+            if candidate_move == correct_move:
+                continue
+            if "scoreLead" not in move_info:
+                continue
                 
-                if score_diff < best_candidate_diff:
-                    best_candidate_diff = score_diff
-                    best_candidate = candidate_move
-                    best_candidate_score = candidate_score
+            # Convert score to Black's perspective
+            candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
+            score_diff = abs(candidate_score - 0.5)
             
-            if not best_candidate:
-                print("    No suitable candidate move found")
-                return current_moves
-                
-            print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
-            # Apply player's candidate move
-            current_moves = current_moves + [[player, best_candidate]]
-            opponent = "W" if player == "B" else "B"
+            if score_diff < best_candidate_diff:
+                best_candidate_diff = score_diff
+                best_candidate = candidate_move
+                best_candidate_score = candidate_score
+        
+        if not best_candidate:
+            print("    No suitable candidate move found")
+            return current_moves
             
-            # Query for opponent's moves
-            opponent_query = self._build_query(
-                current_moves,
-                id=f"adjust_{adjustment_num}_opponent",
-                analysisPVLen=5
-            )
-            opponent_response = self.strong_controller.send_query(opponent_query)
-            if not opponent_response or "moveInfos" not in opponent_response:
-                print("    No response or no moveInfos for opponent")
-                return current_moves
-                
-            best_opponent = None
-            best_opponent_score = None
-            best_opponent_diff = float('inf')
+        print(f"    Selected {player} move: {best_candidate} (expected score: {best_candidate_score:.1f})", flush=True)
+        # Apply player's candidate move
+        current_moves = current_moves + [[player, best_candidate]]
+        opponent = "W" if player == "B" else "B"
+        
+        # Query for opponent's moves
+        opponent_query = self._build_query(
+            current_moves,
+            id=f"adjust_{adjustment_num}_opponent",
+            analysisPVLen=5
+        )
+        opponent_response = self.strong_controller.send_query(opponent_query)
+        if not opponent_response or "moveInfos" not in opponent_response:
+            print("    No response or no moveInfos for opponent")
+            return current_moves
             
-            # Find best opponent move
-            for move_info in opponent_response["moveInfos"]:
-                opponent_move = move_info["move"]
-                if "scoreLead" not in move_info:
-                    continue
-                    
-                # Convert score to Black's perspective
-                opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
-                score_diff = abs(opponent_score - 0.5)
+        best_opponent = None
+        best_opponent_score = None
+        best_opponent_diff = float('inf')
+        
+        # Find best opponent move
+        for move_info in opponent_response["moveInfos"]:
+            opponent_move = move_info["move"]
+            if "scoreLead" not in move_info:
+                continue
                 
-                if score_diff < best_opponent_diff:
-                    best_opponent_diff = score_diff
-                    best_opponent = opponent_move
-                    best_opponent_score = opponent_score
+            # Convert score to Black's perspective
+            opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
+            score_diff = abs(opponent_score - 0.5)
             
-            if not best_opponent:
-                print("    No suitable opponent move found")
-                return current_moves
-                
-            print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
-            # Apply opponent's move
-            current_moves = current_moves + [[opponent, best_opponent]]
-            print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
-                
+            if score_diff < best_opponent_diff:
+                best_opponent_diff = score_diff
+                best_opponent = opponent_move
+                best_opponent_score = opponent_score
+        
+        if not best_opponent:
+            print("    No suitable opponent move found")
+            return current_moves
+            
+        print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
+        # Apply opponent's move
+        current_moves = current_moves + [[opponent, best_opponent]]
+        print(f"  Applied adjustment: {player} {best_candidate} -> {opponent} {best_opponent}")
+            
         return current_moves
 
 
