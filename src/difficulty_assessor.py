@@ -162,7 +162,7 @@ class DifficultyAssessor:
         if initial_score is None or initial_winrate is None:
             print("    Failed to get initial position info")
             return False, None, None
-        print(f"    Initial position: score={initial_score:.1f}, winrate={initial_winrate:.3f}")
+        print(f"    {initial_score:.1f}, {initial_winrate:.3f}")
 
         # Phase: Adjusting Score
         print(f"  Adjusting Score")
@@ -178,20 +178,14 @@ class DifficultyAssessor:
         if post_score is None or post_winrate is None:
             print("    Failed to get post-adjustment position info")
             return False, None, None
-        print(f"    After: score={post_score:.1f}, winrate={post_winrate:.3f}")
+        print(f"    {post_score:.1f}, {post_winrate:.3f}")
 
-        # Check if adjustment was successful
-        if 0 <= post_score <= 1:
-            print("    ✅ Score in [0,1] range")
-        else:
-            print("    ❌ Score not in [0,1] range")
+        # Early termination if score not in target range
+        if not (0 <= post_score <= 1):
             return False, None, None
 
-        # Check winrate
-        if post_winrate >= 0.5:
-            print("    ✅ Winrate >= 0.5")
-        else:
-            print("    ❌ Winrate < 0.5")
+        # After score adjustment, check winrate
+        if post_winrate < 0.5:
             return False, None, None
 
         MAX_ATTEMPTS = 5
@@ -250,7 +244,7 @@ class DifficultyAssessor:
                     # Get status after removal
                     post_score, post_winrate = self._get_position_info(adjusted_moves)
                     if post_score is not None and post_winrate is not None:
-                        print(f"    After: score={post_score:.1f}, winrate={post_winrate:.3f}")
+                        print(f"    {post_score:.1f}, {post_winrate:.3f}")
                 
                     break
 
