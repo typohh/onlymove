@@ -165,7 +165,7 @@ class DifficultyAssessor:
         print(f"    {initial_score:.1f}, {initial_winrate:.3f}")
 
         # Phase: Adjusting Score
-        print(f"  Adjusting Score")
+        print(f"    Adjusting Score")
         adjusted_moves, candidate_move, opponent_move = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         
         if candidate_move and opponent_move:
@@ -190,7 +190,7 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
-        print(f"  Attempting move adjustments...")
+        print(f"    Attempting move adjustments...")
         for attempt in range(MAX_ATTEMPTS):
             query = self._build_query(
                 adjusted_moves,
@@ -233,7 +233,7 @@ class DifficultyAssessor:
             # Find the first alternative move that is not the correct move
             for alt_move in best_moves:
                 if alt_move != correct_move:
-                    print(f"  Removing choices")
+                    print(f"    Removing choices")
                     adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
                 
                     if alt_played and response_played:
