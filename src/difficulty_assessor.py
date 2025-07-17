@@ -166,13 +166,13 @@ class DifficultyAssessor:
         print(f"    Player to move: {player_to_move}, Correct move: {correct_move}")
 
         # Phase: Adjusting Score
-        print(f"  Phase 1: Score Adjustment")
+        print(f"  Adjusting Score")
         adjusted_moves = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         score_after_adjust, winrate_after_adjust = self._get_position_info(adjusted_moves)
         if score_after_adjust is None or winrate_after_adjust is None:
             print("    Failed to get position info after adjustment")
             return False, None, None
-        print(f"    After exchange: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
+        print(f"    After candidate exchange: score: {score_after_adjust:.1f}, winrate: {winrate_after_adjust:.3f}")
 
         # Early termination if score not in target range
         if score_after_adjust < 0 or score_after_adjust > 1:
@@ -186,7 +186,7 @@ class DifficultyAssessor:
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
-        print(f"  Phase 2: Move Adjustment")
+        print(f"  Adjusting Moves")
         for attempt in range(MAX_ATTEMPTS):
             print(f"    Adjustment attempt {attempt+1}/{MAX_ATTEMPTS}")
             query = self._build_query(
@@ -376,7 +376,15 @@ class DifficultyAssessor:
         print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-        print(f"  Phase 1: Applied exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
+        # Get actual position info after player's candidate move
+        temp_score, temp_winrate = self._get_position_info(adjusted_moves)
+        if temp_score is not None and temp_winrate is not None:
+            print(f"    After {player} {best_candidate}: score: {temp_score:.1f}, winrate: {temp_winrate:.3f}")
+
+        print(f"    Selected {opponent} move: {best_opponent} (expected score: {best_opponent_score:.1f})", flush=True)
+        # Apply opponent's move
+        adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
+        print(f"  Candidate Exchange: {player} {best_candidate} -> {opponent} {best_opponent}")
 
         return adjusted_moves
 
