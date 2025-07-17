@@ -33,8 +33,8 @@ class ProblemFinder:
         difficulties = [None] * len(game_moves)
         adjusted_moves_list = [None] * len(game_moves)
 
-        # For each Black move starting at move 25, validate and assess difficulty
-        for i in range(25, len(game_moves)):
+        # for debugging purposes only go trough moves 25,33. In practice we should go trough all of them.
+        for i in range(25, 33):
             if game_moves[i][0] != "B":
                 continue
             moves_so_far = game_moves[:i]
@@ -53,37 +53,6 @@ class ProblemFinder:
             difficulties[i] = difficulty
             adjusted_moves_list[i] = adjusted_moves
             print(f"  Difficulty: {difficulty}")
-
-        # Now, identify problems by looking for difficulty spikes in Black moves
-        if len(game_moves) < 26:  # Need at least 25 moves to start analyzing
-            return problems
-
-        for i in range(25, len(game_moves)):
-            if game_moves[i][0] != "B" or difficulties[i] is None:
-                continue
-            # Entry Condition: significant increase from previous Black move
-            if i > 25 and difficulties[i-1] is not None and self._is_significant_increase(difficulties[i-1], difficulties[i]):
-                # Crux Condition: no significant increase in next Black moves
-                is_crux = True
-                j = i + 1
-                while j < len(game_moves):
-                    if game_moves[j][0] == "B" and difficulties[j] is not None:
-                        if self._is_significant_increase(difficulties[i], difficulties[j]):
-                            is_crux = False
-                            break
-                    j += 1
-
-                if is_crux:
-                    problem_data = {
-                        "moves": adjusted_moves_list[i],
-                        "solution": game_moves[i],
-                        "difficulty": difficulties[i],
-                        "move_number": i+1
-                    }
-                    problems.append(problem_data)
-                    print(f"  ✅ Found tsumego at move {i+1}/{len(game_moves)}!")
-                    print(f"  Solution: {game_moves[i][1]}")
-                    print(f"  Difficulty: {difficulties[i]}")
 
         return problems
 
