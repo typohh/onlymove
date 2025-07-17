@@ -364,8 +364,7 @@ class DifficultyAssessor:
                 best_candidate_score = candidate_score
 
         if not best_candidate:
-            print("    No suitable candidate move found")
-            return moves, None, None
+            raise Exception("No suitable candidate move found")
 
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
@@ -379,8 +378,7 @@ class DifficultyAssessor:
         )
         opponent_response = self.strong_controller.send_query(opponent_query)
         if not opponent_response or "moveInfos" not in opponent_response:
-            print("    No response or no moveInfos for opponent")
-            return moves, None, None
+            raise Exception("No response or no moveInfos for opponent")
 
         best_opponent = None
         best_opponent_score = None
@@ -402,8 +400,7 @@ class DifficultyAssessor:
                 best_opponent_score = opponent_score
 
         if not best_opponent:
-            print("    No suitable opponent move found")
-            return moves, None, None
+            raise Exception("No suitable opponent move found")
 
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
