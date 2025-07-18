@@ -308,6 +308,18 @@ class DifficultyAssessor:
             print("    No response or no moveInfos in response")
             return moves, None, None
 
+        # Print all candidate moves
+        print(f"    All candidate moves for {player}:")
+        for move_info in response["moveInfos"]:
+            candidate_move = move_info["move"]
+            if "scoreLead" not in move_info or "visits" not in move_info:
+                continue
+            # Convert score to Black's perspective
+            candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
+            candidate_winrate = move_info["winrate"] if player == "B" else 1 - move_info["winrate"]
+            visits = move_info["visits"]
+            print(f"      {candidate_move}: score {candidate_score:.1f}, winrate {candidate_winrate:.3f}, visits {visits}")
+
         best_candidate = None
         best_candidate_score = None
         best_candidate_winrate = None
@@ -335,6 +347,7 @@ class DifficultyAssessor:
 
         if not best_candidate:
             raise Exception("No suitable candidate move found")
+        print(f"    Selected candidate: {best_candidate} (score: {best_candidate_score:.1f}, winrate: {best_candidate_winrate:.3f}, visits: {best_candidate_visits})")
 
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
@@ -347,6 +360,18 @@ class DifficultyAssessor:
         )
         if not opponent_response or "moveInfos" not in opponent_response:
             raise Exception("No response or no moveInfos for opponent")
+
+        # Print all opponent moves
+        print(f"    All opponent moves for {opponent}:")
+        for move_info in opponent_response["moveInfos"]:
+            opponent_move = move_info["move"]
+            if "scoreLead" not in move_info or "winrate" not in move_info or "visits" not in move_info:
+                continue
+            # Convert score to Black's perspective
+            opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
+            opponent_winrate = move_info["winrate"] if opponent == "B" else 1 - move_info["winrate"]
+            visits = move_info["visits"]
+            print(f"      {opponent_move}: score {opponent_score:.1f}, winrate {opponent_winrate:.3f}, visits {visits}")
 
         best_opponent = None
         best_opponent_score = None
@@ -373,6 +398,7 @@ class DifficultyAssessor:
 
         if not best_opponent:
             raise Exception("No suitable opponent move found")
+        print(f"    Selected opponent: {best_opponent} (score: {best_opponent_score:.1f}, winrate: {best_opponent_winrate:.3f}, visits: {best_opponent_visits})")
 
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
