@@ -89,10 +89,10 @@ class KatagoController:
 
         return self._read_response()
 
-    def build_explore_children_query(self, moves, **kwargs):
+    def create_root_query(self, moves, **kwargs):
         """
-        Builds a standardized query object that explores all children.
-        Note: You cannot use root score or winrate from this query.
+        Creates a standardized query for root position analysis (1 visit).
+        Returns rootInfo but no moveInfos.
         """
         query = {
             "moves": moves,
@@ -101,8 +101,25 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 25,  # Halved from original
-            "rootPolicyTemperature": 49
+            "maxVisits": 1
+        }
+        query.update(kwargs)
+        return query
+
+    def create_children_query(self, moves, **kwargs):
+        """
+        Creates a standardized query for children analysis (1 visit per child).
+        Returns moveInfos but not necessarily accurate rootInfo.
+        """
+        query = {
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1,
+            "includeMoveInfos": True
         }
         query.update(kwargs)
         return query
