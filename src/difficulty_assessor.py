@@ -330,6 +330,7 @@ class DifficultyAssessor:
         best_candidate = None
         best_candidate_score = None
         best_candidate_winrate = None
+        best_candidate_visits = None
         best_candidate_diff = float('inf')
 
         # Find best candidate move for player
@@ -337,7 +338,7 @@ class DifficultyAssessor:
             candidate_move = move_info["move"]
             if candidate_move == correct_move:
                 continue
-            if "scoreLead" not in move_info:
+            if "scoreLead" not in move_info or "visits" not in move_info:
                 continue
 
             # Convert score to Black's perspective
@@ -349,6 +350,7 @@ class DifficultyAssessor:
                 best_candidate = candidate_move
                 best_candidate_score = candidate_score
                 best_candidate_winrate = move_info["winrate"]
+                best_candidate_visits = move_info["visits"]
 
         if not best_candidate:
             raise Exception("No suitable candidate move found")
@@ -370,12 +372,13 @@ class DifficultyAssessor:
         best_opponent = None
         best_opponent_score = None
         best_opponent_winrate = None
+        best_opponent_visits = None
         best_opponent_diff = float('inf')
 
         # Find best opponent move
         for move_info in opponent_response["moveInfos"]:
             opponent_move = move_info["move"]
-            if "scoreLead" not in move_info or "winrate" not in move_info:
+            if "scoreLead" not in move_info or "winrate" not in move_info or "visits" not in move_info:
                 continue
 
             # Convert score to Black's perspective
@@ -387,6 +390,7 @@ class DifficultyAssessor:
                 best_opponent = opponent_move
                 best_opponent_score = opponent_score
                 best_opponent_winrate = move_info["winrate"]
+                best_opponent_visits = move_info["visits"]
 
         if not best_opponent:
             raise Exception("No suitable opponent move found")
