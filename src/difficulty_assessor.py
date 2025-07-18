@@ -350,13 +350,14 @@ class DifficultyAssessor:
                 continue
 
             candidate_score = move_info["scoreLead"]
-            score_diff = abs(candidate_score - 0.5)
+            candidate_winrate = move_info["winrate"]
+            penalty = (0.5 + abs(candidate_score - 0.5)) * (1 - candidate_winrate)
 
-            if score_diff < best_candidate_diff:
-                best_candidate_diff = score_diff
+            if penalty < best_candidate_penalty:
+                best_candidate_penalty = penalty
                 best_candidate = candidate_move
                 best_candidate_score = candidate_score
-                best_candidate_winrate = move_info["winrate"]
+                best_candidate_winrate = candidate_winrate
                 best_candidate_visits = move_info["visits"]
 
         if not best_candidate:
@@ -399,13 +400,14 @@ class DifficultyAssessor:
                 continue
 
             opponent_score = move_info["scoreLead"]
-            score_diff = abs(opponent_score - 0.5)
+            opponent_winrate = move_info["winrate"]
+            penalty = (0.5 + abs(opponent_score - 0.5)) * (1 - opponent_winrate)
 
-            if score_diff < best_opponent_diff:
-                best_opponent_diff = score_diff
+            if penalty < best_opponent_penalty:
+                best_opponent_penalty = penalty
                 best_opponent = opponent_move
                 best_opponent_score = opponent_score
-                best_opponent_winrate = move_info["winrate"]
+                best_opponent_winrate = opponent_winrate
                 best_opponent_visits = move_info["visits"]
 
         if not best_opponent:
