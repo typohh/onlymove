@@ -109,13 +109,11 @@ class KatagoController:
         query.update(kwargs)
         return self._send_query(query)
 
-    def query_children(self, moves, id, **kwargs):
+    def query_children(self, moves, id):
         """
-        Sends a standardized query for children analysis (1 visit per child).
+        Sends a standardized query for children analysis (25 visits per child).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
-        if 'maxVisits' in kwargs:
-            raise Exception("maxVisits cannot be overridden in query_children")
         query = {
             "moves": moves,
             "initialStones": [],
@@ -123,10 +121,10 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1,
+            "maxVisits": 25,
+            "rootPolicyTemperature": 49,
             "id": id
         }
-        query.update(kwargs)
         return self._send_query(query)
 
     def _send_query(self, query):

@@ -185,8 +185,7 @@ class DifficultyAssessor:
         for attempt in range(MAX_ATTEMPTS):
             response = self.strong_controller.query_children(
                 adjusted_moves,
-                id="tsumego_check",
-                analysisPVLen=10
+                id="tsumego_check"
             )
             if not response or "rootInfo" not in response or "moveInfos" not in response:
                 raise Exception("Error in tsumego check query")
@@ -303,8 +302,7 @@ class DifficultyAssessor:
         # Query for moves in current position (player's turn)
         response = self.strong_controller.query_children(
             moves,
-            id="adjust_to_0_5",
-            analysisPVLen=5
+            id="adjust_to_0_5"
         )
         if not response or "moveInfos" not in response:
             print("    No response or no moveInfos in response")
@@ -345,8 +343,7 @@ class DifficultyAssessor:
         # Query for opponent's moves
         opponent_response = self.strong_controller.query_children(
             adjusted_moves,
-            id="adjust_to_0_5_opponent",
-            analysisPVLen=5
+            id="adjust_to_0_5_opponent"
         )
         if not opponent_response or "moveInfos" not in opponent_response:
             raise Exception("No response or no moveInfos for opponent")
