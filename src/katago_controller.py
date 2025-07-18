@@ -118,8 +118,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1,
-            "includeMoveInfos": True
+            "maxVisits": 1
         }
         query.update(kwargs)
         return query
