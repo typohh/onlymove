@@ -89,9 +89,9 @@ class KatagoController:
 
         return self._read_response()
 
-    def build_query(self, moves, **kwargs):
+    def build_explore_children_query(self, moves, **kwargs):
         """
-        Builds a standardized query object.
+        Builds a standardized query object that explores all children.
         Note: You cannot use root score or winrate from this query.
         """
         query = {
@@ -101,7 +101,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 49,
+            "maxVisits": 25,  # Halved from original
             "rootPolicyTemperature": 49
         }
         query.update(kwargs)

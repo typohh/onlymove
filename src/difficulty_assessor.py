@@ -156,20 +156,20 @@ class DifficultyAssessor:
 
         # Phase: Adjusting Score
         print(f"    Adjusting Score")
-        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score, candidate_visits, opponent_visits = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
         
         if candidate_move and opponent_move:
             # Compute opponent color
             opponent = "W" if player_to_move == "B" else "B"
-            # Print candidate move with score/winrate
+            # Print candidate move with score/winrate/visits
             cand_winrate = candidate_winrate if player_to_move == "B" else 1 - candidate_winrate
             cand_score = candidate_score
-            print(f"    {player_to_move} {candidate_move} (score: {cand_score:.1f}, winrate: {cand_winrate:.3f})")
+            print(f"    {player_to_move} {candidate_move} (score: {cand_score:.1f}, winrate: {cand_winrate:.3f}, visits: {candidate_visits})")
             
-            # Print opponent response with score/winrate
+            # Print opponent response with score/winrate/visits
             opp_winrate = opponent_winrate if opponent == "B" else 1 - opponent_winrate
             opp_score = opponent_score
-            print(f"    {opponent} {opponent_move} (score: {opp_score:.1f}, winrate: {opp_winrate:.3f})")
+            print(f"    {opponent} {opponent_move} (score: {opp_score:.1f}, winrate: {opp_winrate:.3f}, visits: {opponent_visits})")
         
         # Get status after adjustment
         self._print_position_info(adjusted_moves, "After adjustment")
@@ -189,11 +189,11 @@ class DifficultyAssessor:
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
         for attempt in range(MAX_ATTEMPTS):
-            query = self.strong_controller.build_query(
+            query = self.strong_controller.build_explore_children_query(
                 adjusted_moves,
                 id="tsumego_check",
                 analysisPVLen=10,
-                maxVisits=100   # More visits for reliable winrate
+                maxVisits=50   # Halved and more reliable
             )
             response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
@@ -276,7 +276,7 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        query = self.strong_controller.build_query(
+        query = self.strong_controller.build_explore_children_query(
             moves,
             id="moves_above_50"
         )
@@ -317,7 +317,7 @@ class DifficultyAssessor:
             return moves, None, None
 
         # Query for moves in current position (player's turn)
-        query = self.strong_controller.build_query(
+        query = self.strong_controller.build_explore_children_query(
             moves,
             id="adjust_to_0_5",
             analysisPVLen=5
@@ -358,7 +358,7 @@ class DifficultyAssessor:
         opponent = "W" if player == "B" else "B"
 
         # Query for opponent's moves
-        opponent_query = self.strong_controller.build_query(
+        opponent_query = self.strong_controller.build_explore_children_query(
             adjusted_moves,
             id="adjust_to_0_5_opponent",
             analysisPVLen=5
@@ -394,7 +394,7 @@ class DifficultyAssessor:
         # Apply opponent's move
         adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
 
-        return adjusted_moves, best_candidate, best_opponent, best_candidate_winrate, best_opponent_winrate, best_candidate_score, best_opponent_score
+        return adjusted_moves, best_candidate, best_opponent, best_candidate_winrate, best_opponent_winrate, best_candidate_score, best_opponent_score, best_candidate_visits, best_opponent_visits
 
 
 
@@ -451,15 +451,17 @@ class DifficultyAssessor:
         resp_move_info = resp_response["moveInfos"][0]
         response_played = resp_move_info["move"]
 
-        # Print alternative move with score/winrate
+        # Print alternative move with score/winrate/visits
         alt_winrate = alt_move_info["winrate"] if player == "B" else 1 - alt_move_info["winrate"]
         alt_score = alt_move_info["scoreLead"] if player == "B" else -alt_move_info["scoreLead"]
-        print(f"    {player} {alternative_move} (score: {alt_score:.1f}, winrate: {alt_winrate:.3f})")
+        alt_visits = alt_move_info["visits"]
+        print(f"    {player} {alternative_move} (score: {alt_score:.1f}, winrate: {alt_winrate:.3f}, visits: {alt_visits})")
         
-        # Print opponent response with score/winrate
+        # Print opponent response with score/winrate/visits
         resp_winrate = resp_move_info["winrate"] if opponent == "B" else 1 - resp_move_info["winrate"]
         resp_score = resp_move_info["scoreLead"] if opponent == "B" else -resp_move_info["scoreLead"]
-        print(f"    {opponent} {response_played} (score: {resp_score:.1f}, winrate: {resp_winrate:.3f})")
+        resp_visits = resp_move_info["visits"]
+        print(f"    {opponent} {response_played} (score: {resp_score:.1f}, winrate: {resp_winrate:.3f}, visits: {resp_visits})")
 
         # Apply opponent's response
         adjusted_moves = adjusted_moves + [[opponent, response_played]]
