@@ -246,3 +246,11 @@ class KatagoController:
         row = board_y_size - row_num
 
         return row * board_x_size + col
+
+
+
+def other_player(player):
+    if player == "B":
+        return "W"
+    else:
+        return "B"
