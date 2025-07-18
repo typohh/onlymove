@@ -89,13 +89,11 @@ class KatagoController:
 
         return self._read_response()
 
-    def query_root(self, moves, id, **kwargs):
+    def query_root(self, moves, id, humanRank=None):
         """
         Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
         """
-        if 'maxVisits' in kwargs:
-            raise Exception("maxVisits cannot be overridden in query_root")
         query = {
             "moves": moves,
             "initialStones": [],
@@ -106,7 +104,11 @@ class KatagoController:
             "maxVisits": 1,
             "id": id
         }
-        query.update(kwargs)
+        if humanRank:
+            query["includePolicy"] = True
+            query["overrideSettings"] = {
+                "humanSLProfile": humanRank
+            }
         return self._send_query(query)
 
     def query_children(self, moves, id):

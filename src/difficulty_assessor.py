@@ -64,16 +64,11 @@ class DifficultyAssessor:
         Returns:
             bool: True if the rank solves the problem, False otherwise.
         """
-        query = self.human_controller.create_root_query(
+        sl_response = self.human_controller.query_root(
             moves,
             id="check_rank",
-            includePolicy=True,
-            overrideSettings={
-                "humanSLProfile": rank_string
-            }
+            humanRank=rank_string
         )
-
-        sl_response = self.human_controller.send_query(query)
         if not sl_response or "policy" not in sl_response:
             return False
 
