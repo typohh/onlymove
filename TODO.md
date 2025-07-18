@@ -2,7 +2,5 @@ Work on one issue at a time from TODO list, testing it as needed, then moving it
 
 ### ** TODO **
 
-- it doesnt produce any tsumegos, find out why.
-
 ### ** COMPLETED **
 

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import norm
-from src.katago_controller import KatagoController
+from src.katago_controller import KatagoController, other_player
+
 
 class DifficultyAssessor:
     """
@@ -116,6 +117,16 @@ class DifficultyAssessor:
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
+    def _debug(self,move_info):
+        for mi in move_info:
+            candidate_move = mi['move']
+            candidate_score = mi['scoreLead']
+            candidate_winrate = mi['winrate']
+            print(f" DEBUG:    {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+
+    def _penalty(self,score,winrate):
+        return abs(score - 0.5) + 0.25 * (1 - winrate)
+
     def validate_and_adjust_tsumego(self, moves, player_to_move):
         """
         Validates and adjusts position to meet tsumego criteria.
@@ -135,20 +146,20 @@ class DifficultyAssessor:
 
         # First, check if the score is already in [0,1] for Black
         while True:
-            score,winrate = self._get_position_info(moves)
+            score,winrate = self._get_position_info(adjusted_moves)
             if 0 < score < 1 and winrate > 0.5:
                 break
-            print(f"    Adjusting Score")
-            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
+            print(f"    Adjusting score because (score: {score:.1f}, winrate: {winrate:.3f})")
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, player_to_move)
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
             if candidate_move == "pass":
-                break
-            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
-            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+                return False,None,None,None
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, other_player(player_to_move))
+            print(f"    {other_player(player_to_move)} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
             if candidate_move == "pass":
-                break
-            self._print_position_info(adjusted_moves, "After adjustment")
+                return False,None,None,None
 
+        self._print_position_info(adjusted_moves, "After adjustment")
 
         while True:
             response = self.strong_controller.query_children_100_visits(adjusted_moves, id=f"adjust_winning_moves")
@@ -156,14 +167,19 @@ class DifficultyAssessor:
             winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > 0.5]
             num_winning_moves = len(winning_moves)
             if num_winning_moves == 1:
+                print( "only 1 winning move, ready for check" )
                 break
             if num_winning_moves == 0:
+                print( "no winning moves" )
                 return False, None, None, None
+            print(f"    Eliminating moves because {num_winning_moves} excess winning moves." )
 
             candidate_move = winning_moves[1]['move']
+            candidate_score = winning_moves[1]['scoreLead']
+            candidate_winrate = winning_moves[1]['winrate']
             if candidate_move == "pass":
-                break
-            print(f"    B: {candidate_move}")
+                return False,None,None,None
+            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
 
             # Add candidate move to adjusted_moves
             adjusted_moves.append([player_to_move, candidate_move])
@@ -175,9 +191,10 @@ class DifficultyAssessor:
             policy = response_after_candidate["policy"]
             best_idx = max(range(len(policy)), key=lambda i: policy[i] if policy[i] != -1 else -999)
             opponent_move = self.strong_controller.get_move_from_idx(best_idx)
+            print(f"    {other_player(player_to_move)} {candidate_move} (score: ?, winrate: ?)")
 
             # Add opponent's response to adjusted_moves
-            adjusted_moves.append(["W" if player_to_move == "B" else "B", opponent_move])
+            adjusted_moves.append([other_player(player_to_move), opponent_move])
 
         # Now verify the solution move
         solution_response = self.strong_controller.query_children_100_visits(adjusted_moves, id="confirm_solution")
@@ -199,7 +216,7 @@ class DifficultyAssessor:
         )
         for move_info in exclude_response["moveInfos"]:
             if move_info["winrate"] > 0.5 or move_info["scoreLead"] > 0 :
-                print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f}")
+                print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f} and score {move_info["scoreLead"]}")
                 return False, None, None, None
 
         # All checks passed
@@ -287,7 +304,8 @@ class DifficultyAssessor:
 
             candidate_score = move_info["scoreLead"]
             candidate_winrate = move_info["winrate"]
-            penalty = (0.5 + abs(candidate_score - 0.5)) * (1 - candidate_winrate)
+            penalty = self._penalty(candidate_score,candidate_winrate)
+            # penalty = abs(candidate_score - 0.5)
 
             if penalty < best_candidate_penalty:
                 best_candidate_penalty = penalty
