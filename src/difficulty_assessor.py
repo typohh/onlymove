@@ -183,12 +183,11 @@ class DifficultyAssessor:
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
         for attempt in range(MAX_ATTEMPTS):
-            query = self.strong_controller.create_children_query(
+            response = self.strong_controller.query_children(
                 adjusted_moves,
                 id="tsumego_check",
                 analysisPVLen=10
             )
-            response = self.strong_controller.send_query(query)
             if not response or "rootInfo" not in response or "moveInfos" not in response:
                 raise Exception("Error in tsumego check query")
 
@@ -234,11 +233,10 @@ class DifficultyAssessor:
         Returns (score, winrate) or (None, None) if failed.
         Uses maxVisits=10 for a quick but reliable read.
         """
-        query = self.strong_controller.create_root_query(
+        response = self.strong_controller.query_root(
             moves,
             id="position_info"
         )
-        response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
             raise Exception("Failed to get position info from KataGo")
 
@@ -263,11 +261,10 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        query = self.strong_controller.create_children_query(
+        response = self.strong_controller.query_children(
             moves,
             id="moves_above_50"
         )
-        response = self.strong_controller.send_query(query)
         if not response:
             raise Exception("No response from KataGo for moves above 50%")
         if "moveInfos" not in response:
@@ -304,12 +301,11 @@ class DifficultyAssessor:
             return moves, None, None
 
         # Query for moves in current position (player's turn)
-        query = self.strong_controller.create_children_query(
+        response = self.strong_controller.query_children(
             moves,
             id="adjust_to_0_5",
             analysisPVLen=5
         )
-        response = self.strong_controller.send_query(query)
         if not response or "moveInfos" not in response:
             print("    No response or no moveInfos in response")
             return moves, None, None
@@ -347,12 +343,11 @@ class DifficultyAssessor:
         opponent = "W" if player == "B" else "B"
 
         # Query for opponent's moves
-        opponent_query = self.strong_controller.create_children_query(
+        opponent_response = self.strong_controller.query_children(
             adjusted_moves,
             id="adjust_to_0_5_opponent",
             analysisPVLen=5
         )
-        opponent_response = self.strong_controller.send_query(opponent_query)
         if not opponent_response or "moveInfos" not in opponent_response:
             raise Exception("No response or no moveInfos for opponent")
 
@@ -407,11 +402,10 @@ class DifficultyAssessor:
         # We'll let the caller decide if removal is needed
 
         # Get move info for alternative move
-        alt_query = self.strong_controller.create_children_query(
+        alt_response = self.strong_controller.query_children(
             moves,
             id="alt_move_info"
         )
-        alt_response = self.strong_controller.send_query(alt_query)
         if not alt_response or "moveInfos" not in alt_response:
             raise Exception("Failed to get move info for alternative move")
     
@@ -429,11 +423,10 @@ class DifficultyAssessor:
         opponent = "W" if player == "B" else "B"
 
         # Get best response and its info
-        resp_query = self.strong_controller.create_children_query(
+        resp_response = self.strong_controller.query_children(
             adjusted_moves,
             id="resp_move_info"
         )
-        resp_response = self.strong_controller.send_query(resp_query)
         if not resp_response or "moveInfos" not in resp_response or not resp_response["moveInfos"]:
             raise Exception("Failed to get response move info")
     

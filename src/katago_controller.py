@@ -89,13 +89,13 @@ class KatagoController:
 
         return self._read_response()
 
-    def create_root_query(self, moves, **kwargs):
+    def query_root(self, moves, id, **kwargs):
         """
-        Creates a standardized query for root position analysis (1 visit).
+        Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
         """
         if 'maxVisits' in kwargs:
-            raise Exception("maxVisits cannot be overridden in create_root_query")
+            raise Exception("maxVisits cannot be overridden in query_root")
         query = {
             "moves": moves,
             "initialStones": [],
@@ -103,18 +103,19 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1
+            "maxVisits": 1,
+            "id": id
         }
         query.update(kwargs)
-        return query
+        return self._send_query(query)
 
-    def create_children_query(self, moves, **kwargs):
+    def query_children(self, moves, id, **kwargs):
         """
-        Creates a standardized query for children analysis (1 visit per child).
+        Sends a standardized query for children analysis (1 visit per child).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
         if 'maxVisits' in kwargs:
-            raise Exception("maxVisits cannot be overridden in create_children_query")
+            raise Exception("maxVisits cannot be overridden in query_children")
         query = {
             "moves": moves,
             "initialStones": [],
@@ -122,10 +123,30 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1
+            "maxVisits": 1,
+            "id": id
         }
         query.update(kwargs)
-        return query
+        return self._send_query(query)
+
+    def _send_query(self, query):
+        """
+        Sends a JSON query to the KataGo analysis engine.
+
+        Args:
+            query (dict): The query to send to the engine.
+
+        Returns:
+            dict: The response from the engine.
+        """
+        if not self.process:
+            raise Exception("KataGo engine is not running.")
+
+        query_str = json.dumps(query)
+        self.process.stdin.write(query_str + "\n")
+        self.process.stdin.flush()
+
+        return self._read_response()
 
     def _read_response(self):
         """
