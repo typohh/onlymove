@@ -109,7 +109,7 @@ class ProblemFinder:
             "boardYSize": 9,
             "maxVisits": 100
         }
-        response = self.difficulty_assessor.strong_controller.send_query(query)
+        response = self.difficulty_assessor.strong_controller.__send_query(query)
         if response and "rootInfo" in response:
             return response["rootInfo"]["scoreLead"]
         return None

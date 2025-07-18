@@ -42,7 +42,7 @@ class GroundTruthGenerator:
                 "includePolicy": True
             }
 
-            response = self.controller.send_query(query)
+            response = self.controller.__send_query(query)
             if response and "policy" in response and response["policy"]:
                 best_move_idx = response['policy'].index(max(response['policy']))
                 best_move = self.controller.get_move_from_idx(best_move_idx)

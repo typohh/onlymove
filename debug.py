@@ -52,7 +52,7 @@ def main():
 
         # Send query and print response
         print("Sending analysis query for position after 26 moves...")
-        response = controller.send_query(query)
+        response = controller.__send_query(query)
         print("\nAnalysis Output:")
         print(json.dumps(response, indent=2))
 

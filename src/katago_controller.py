@@ -70,25 +70,6 @@ class KatagoController:
             self.process.terminate()
             self.process.wait()
 
-    def send_query(self, query):
-        """
-        Sends a JSON query to the KataGo analysis engine.
-
-        Args:
-            query (dict): The query to send to the engine.
-
-        Returns:
-            dict: The response from the engine.
-        """
-        if not self.process:
-            raise Exception("KataGo engine is not running.")
-
-        query_str = json.dumps(query)
-        self.process.stdin.write(query_str + "\n")
-        self.process.stdin.flush()
-
-        return self._read_response()
-
     def query_root(self, moves, id, humanRank=None):
         """
         Sends a standardized query for root position analysis (1 visit).
@@ -109,7 +90,7 @@ class KatagoController:
             query["overrideSettings"] = {
                 "humanSLProfile": humanRank
             }
-        return self._send_query(query)
+        return self.__send_query(query)
 
     def query_children(self, moves, id):
         """
@@ -127,7 +108,7 @@ class KatagoController:
             "rootPolicyTemperature": 49,
             "id": id
         }
-        return self._send_query(query)
+        return self.__send_query(query)
 
     def query_children_100_visits(self, moves, id):
         """
@@ -144,7 +125,10 @@ class KatagoController:
             "maxVisits": 100,
             "id": id
         }
-        return self._send_query(query)
+        result = self.__send_query(query)
+        if not result or "moveInfos" not in result:
+            raise Exception("Failed to get 100-visit response for solution move")
+        return result
 
     def query_children_exclude_move(self, moves, exclude_move, player, id):
         """
@@ -168,9 +152,9 @@ class KatagoController:
             ],
             "id": id
         }
-        return self._send_query(query)
+        return self.__send_query(query)
 
-    def _send_query(self, query):
+    def __send_query(self, query):
         """
         Sends a JSON query to the KataGo analysis engine.
 
