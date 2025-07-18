@@ -33,8 +33,8 @@ class ProblemFinder:
         difficulties = [None] * len(game_moves)
         adjusted_moves_list = [None] * len(game_moves)
 
-        # for debugging purposes only go trough moves 25,33. In practice we should go trough all of them.
-        for i in range(25, 33):
+        # Analyze all moves except first 10 and last 10
+        for i in range(10, len(game_moves) - 10):
             if game_moves[i][0] != "B":
                 continue
             moves_so_far = game_moves[:i]
