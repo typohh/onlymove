@@ -132,9 +132,9 @@ class DifficultyAssessor:
             print("    Current score already in [0,1] - no adjustment needed")
         else:
             print(f"    Adjusting Score")
-            adjusted_moves, candidate_move,candidate,candidate_winrate,candidate_score= self._adjust_to_0_5(adjusted_moves, "B")
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
-            adjusted_moves, candidate_move,candidate,candidate_winrate,candidate_score= self._adjust_to_0_5(adjusted_moves, "B")
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
             self._print_position_info(adjusted_moves, "After adjustment")
 
