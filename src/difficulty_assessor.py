@@ -267,11 +267,20 @@ class DifficultyAssessor:
             print(f"Debug: Response: {response}")
             raise Exception("Response missing 'moveInfos' for moves above 50%")
 
+        # Print all moves for debugging
+        print("    All moves for current position:")
+        for move_info in response["moveInfos"]:
+            move = move_info["move"]
+            winrate = move_info["winrate"]
+            score = move_info.get("scoreLead", "N/A")
+            print(f"      {move}: winrate={winrate:.3f}, score={score}")
+
         num_moves_above_50 = 0
         for move_info in response["moveInfos"]:
             if move_info["winrate"] > 0.5:
                 num_moves_above_50 += 1
 
+        print(f"    Found {num_moves_above_50} moves above 50% winrate")
         return num_moves_above_50
 
     def _adjust_to_0_5(self, moves, player):
