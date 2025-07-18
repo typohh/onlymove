@@ -116,7 +116,7 @@ class DifficultyAssessor:
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
-    def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
+    def validate_and_adjust_tsumego(self, moves, player_to_move):
         """
         Validates and adjusts position to meet tsumego criteria.
         Returns (is_valid, final_score, adjusted_moves, solution_move)
@@ -124,7 +124,6 @@ class DifficultyAssessor:
         Args:
             moves (list): The list of moves in the game.
             player_to_move (str): The player to move ("B" or "W").
-            correct_move (str): The correct move.
 
         Returns:
             tuple: (is_valid, final_score, adjusted_moves, solution_move)
@@ -147,57 +146,35 @@ class DifficultyAssessor:
             self._print_position_info(adjusted_moves, "After adjustment")
 
 
-        MAX_ADJUSTMENT_ITERATIONS = 10
-        iteration = 0
-        while iteration < MAX_ADJUSTMENT_ITERATIONS:
-            iteration += 1
-            response = self.strong_controller.query_children_100_visits(adjusted_moves, id=f"adjust_winning_moves_{iteration}")
-            moveInfos = response["moveInfos"]
-            
+        while True:
+            response = self.strong_controller.query_children_100_visits(adjusted_moves, id=f"adjust_winning_moves")
             # Count moves above 50% winrate
-            winning_moves = [mi for mi in moveInfos if mi['winrate'] > 0.5]
+            winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > 0.5]
             num_winning_moves = len(winning_moves)
-            
-            # Check if we have exactly one winning move and it's the correct one
-            if num_winning_moves == 1 and winning_moves[0]['move'] == correct_move:
-                print(f"    ✅ Exactly one winning move after {iteration} adjustments")
+            if num_winning_moves == 1:
                 break
-            elif num_winning_moves == 0:
-                print("    ❌ No winning moves found! This should not happen.")
+            if num_winning_moves == 0:
                 return False, None, None, None
-            else:
-                # If there are multiple winning moves, play the second best move
-                if len(moveInfos) < 2:
-                    print("    ❌ Only one move available, cannot adjust")
-                    return False, None, None, None
-                    
-                candidate_move = moveInfos[1]['move']
-                print(f"    Adjustment {iteration}: Playing alternative move {candidate_move}")
-                
-                # Add candidate move to adjusted_moves
-                adjusted_moves.append([player_to_move, candidate_move])
-                
-                # Query for opponent's best response
-                response_after_candidate = self.strong_controller.query_children_100_visits(adjusted_moves, id=f"opponent_response_{iteration}")
-                if not response_after_candidate["moveInfos"]:
-                    opponent_move = "pass"
-                else:
-                    opponent_move = response_after_candidate["moveInfos"][0]["move"]
-                print(f"    Opponent plays {opponent_move}")
-                
-                # Add opponent's response to adjusted_moves
-                adjusted_moves.append(["W" if player_to_move == "B" else "B", opponent_move])
-        else:
-            print(f"    ❌ Failed to adjust to one winning move after {MAX_ADJUSTMENT_ITERATIONS} iterations")
-            return False, None, None, None
+
+            candidate_move = winning_moves[1]['move']
+            print(f"    B: {candidate_move}")
+
+            # Add candidate move to adjusted_moves
+            adjusted_moves.append([player_to_move, candidate_move])
+
+            # Query for opponent's best response
+            response_after_candidate = self.strong_controller.query_root(adjusted_moves, id="whatever")
+
+            # TODO: find opponents best move from policy and assign it to opponent_move
+
+            # Add opponent's response to adjusted_moves
+            adjusted_moves.append(["W" if player_to_move == "B" else "B", opponent_move])
 
         # Now verify the solution move
         solution_response = self.strong_controller.query_children_100_visits(adjusted_moves, id="confirm_solution")
-        solution_move_info = next((mi for mi in solution_response["moveInfos"] if mi["move"] == correct_move), None)
-        if solution_move_info is None:
-            print(f"    ❌ Solution move {correct_move} not found in the position")
-            return False, None, None, None
+        solution_move_info = solution_response["moveInfos"][0]
 
+        solution_move = solution_move_info["move"]
         solution_winrate = solution_move_info["winrate"]
         solution_score = solution_move_info["scoreLead"]
         if solution_winrate < 0.5:
@@ -207,12 +184,12 @@ class DifficultyAssessor:
         # Check alternative moves
         exclude_response = self.strong_controller.query_children_exclude_move(
             adjusted_moves,
-            correct_move,
+            solution_move,
             player_to_move,
             id="exclude_solution"
         )
         for move_info in exclude_response["moveInfos"]:
-            if move_info["winrate"] > 0.5:
+            if move_info["winrate"] > 0.5 or move_info["scoreLead"] > 0 :
                 print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f}")
                 return False, None, None, None
 
