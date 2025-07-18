@@ -141,8 +141,12 @@ class DifficultyAssessor:
             print(f"    Adjusting Score")
             adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+            if candidate_move == "pass":
+                break
             adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, "B")
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+            if candidate_move == "pass":
+                break
             self._print_position_info(adjusted_moves, "After adjustment")
 
 
@@ -157,6 +161,8 @@ class DifficultyAssessor:
                 return False, None, None, None
 
             candidate_move = winning_moves[1]['move']
+            if candidate_move == "pass":
+                break
             print(f"    B: {candidate_move}")
 
             # Add candidate move to adjusted_moves
