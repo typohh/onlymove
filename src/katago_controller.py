@@ -102,10 +102,10 @@ class KatagoController:
             "boardXSize": 9,
             "boardYSize": 9,
             "maxVisits": 1,
+            "includePolicy": True,  # Always include policy
             "id": id
         }
         if humanRank:
-            query["includePolicy"] = True
             query["overrideSettings"] = {
                 "humanSLProfile": humanRank
             }

@@ -426,14 +426,27 @@ class DifficultyAssessor:
         return -score_lead
 
     def _get_best_move(self, moves, player):
-        """Helper to get best move for player in current position"""
-        response = self.strong_controller.query_children(
+        """Helper to get best move for player in current position using root policy"""
+        response = self.strong_controller.query_root(
             moves,
-            id="get_best_move"
+            id="get_best_move_policy"
         )
-        if not response or "moveInfos" not in response or not response["moveInfos"]:
+        if not response or "policy" not in response:
             return None
-        return response["moveInfos"][0]["move"]
+        
+        policy = response["policy"]
+        # Find index of move with highest policy probability
+        max_policy = -1
+        best_idx = None
+        for idx, prob in enumerate(policy):
+            if prob > max_policy:
+                max_policy = prob
+                best_idx = idx
+        
+        if best_idx is None:
+            return None
+        
+        return self.strong_controller.get_move_from_idx(best_idx)
 
     def _get_best_response(self, moves):
         """Helper to get best response to a move"""
