@@ -53,7 +53,22 @@ class DifficultyAssessor:
         A = np.vstack([np.ones(len(z_scores)), z_scores]).T
         mu, sigma = np.linalg.lstsq(A, numerical_ranks, rcond=None)[0]
         
-        return f"mean={mu:.2f}, sd={sigma:.2f}"
+        # Ensure positive standard deviation
+        sigma = abs(sigma)
+        
+        # Convert numerical mean to rank string
+        rank_idx = int(round(mu))
+        if rank_idx < 0: rank_idx = 0
+        if rank_idx >= len(self._SUPPORTED_RANKS): rank_idx = len(self._SUPPORTED_RANKS)-1
+        rank_str = self._SUPPORTED_RANKS[rank_idx].replace("rank_", "").replace("_", " ").upper()
+        
+        # Debug: show probabilities
+        print("    Probabilities by rank:")
+        for i, rank in enumerate(self._SUPPORTED_RANKS):
+            r = rank.replace("rank_", "").replace("_", " ").upper()
+            print(f"      {r}: {probabilities[i]:.3f}")
+        
+        return f"mean={mu:.2f} ({rank_str}), sd={sigma:.2f}"
 
     def _get_probability_for_rank(self, rank_string, moves, correct_move):
         """
