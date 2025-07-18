@@ -186,3 +186,28 @@ class KatagoController:
         row_char = str(board_y_size - row)
 
         return f"{col_char}{row_char}"
+
+    def get_idx_from_move(self, move):
+        """
+        Converts a Go move string (e.g., "A1", "pass") to a KataGo policy index.
+        Assumes a 9x9 board.
+        """
+        board_x_size = 9
+        board_y_size = 9
+
+        if move == "pass":
+            return board_x_size * board_y_size
+
+        col_char = move[0].upper()
+        row_str = move[1:]
+
+        # Convert column character to index
+        col = ord(col_char) - ord('A')
+        if col_char > 'H':  # Skip 'I'
+            col -= 1
+
+        # Convert row string to index
+        row_num = int(row_str)
+        row = board_y_size - row_num
+
+        return row * board_x_size + col

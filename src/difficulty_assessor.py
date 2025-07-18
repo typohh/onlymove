@@ -1,3 +1,5 @@
+import numpy as np
+from scipy.stats import norm
 from src.katago_controller import KatagoController
 
 class DifficultyAssessor:
@@ -25,7 +27,7 @@ class DifficultyAssessor:
 
     def assess_move_difficulty(self, moves, player_to_move, correct_move):
         """
-        Finds the precise rank that is the threshold for solving the problem.
+        Assesses difficulty by sampling all ranks and fitting a normal distribution.
 
         Args:
             moves (list): The list of moves in the game.
@@ -33,96 +35,61 @@ class DifficultyAssessor:
             correct_move (str): The correct move.
 
         Returns:
-            str: The best found rank.
+            str: String representation of mean and standard deviation.
         """
-        low = 0
-        high = len(self._SUPPORTED_RANKS) - 1
-        best_found_rank = None
+        probabilities = []
+        for rank in self._SUPPORTED_RANKS:
+            prob = self._get_probability_for_rank(rank, moves, correct_move)
+            probabilities.append(prob)
+        
+        # Convert probabilities to z-scores
+        clamped_probs = np.clip(probabilities, 0.01, 0.99)
+        z_scores = norm.ppf(clamped_probs)
+        
+        # Create numerical rank values (0 to 28)
+        numerical_ranks = np.arange(len(self._SUPPORTED_RANKS))
+        
+        # Solve linear regression: rank = mu + sigma * z_score
+        A = np.vstack([np.ones(len(z_scores)), z_scores]).T
+        mu, sigma = np.linalg.lstsq(A, numerical_ranks, rcond=None)[0]
+        
+        return f"mean={mu:.2f}, sd={sigma:.2f}"
 
-        while low <= high:
-            mid = (low + high) // 2
-            rank_string = self._SUPPORTED_RANKS[mid]
-
-            if self._check_rank_solves(rank_string, moves, player_to_move, correct_move):
-                best_found_rank = rank_string
-                high = mid - 1  # Try to find an even weaker rank
-            else:
-                low = mid + 1  # Need a stronger rank
-
-        return best_found_rank
-
-    def _check_rank_solves(self, rank_string, moves, player, correct_move):
+    def _get_probability_for_rank(self, rank_string, moves, correct_move):
         """
-        Checks if a single, specific rank can solve the problem.
+        Gets the probability of correct move for a given rank.
 
         Args:
             rank_string (str): The rank to check.
             moves (list): The list of moves in the game.
-            player (str): The player to move.
             correct_move (str): The correct move.
 
         Returns:
-            bool: True if the rank solves the problem, False otherwise.
+            float: Probability of the correct move.
         """
-        sl_response = self.human_controller.query_root(
-            moves,
-            id="check_rank",
-            humanRank=rank_string
-        )
-        if not sl_response or "policy" not in sl_response:
-            return False
-
-        # Get the policy from the response
-        policy = sl_response["humanPolicy"] if "humanPolicy" in sl_response else sl_response["policy"]
-
-        # Get the top N moves based on policy probabilities
-        top_n = 3 # Check top 3 moves
-        # Create a list of (probability, index) tuples
-        indexed_policy = []
-        for i, prob in enumerate(policy):
-            indexed_policy.append((prob, i))
-
-        # Sort by probability in descending order
-        indexed_policy.sort(key=lambda x: x[0], reverse=True)
-
-        # Get the top N move indices
-        top_move_indices = [idx for prob, idx in indexed_policy[:top_n]]
-
-        # Convert indices to Go coordinates
-        proposed_moves = [self.human_controller.get_move_from_idx(idx) for idx in top_move_indices]
-
-        if correct_move not in proposed_moves:
-            return False
-
-        # Verify with the strong network that the move is not a blunder
-        strong_query = {
-            "id": "verify_move",
-            "moves": moves + [[player, correct_move]],
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 100 # Decent search to verify
-        }
-        rl_response = self.strong_controller.send_query(strong_query)
-        if not rl_response or "rootInfo" not in rl_response:
-            return False
-
-        # A simple check: if the winrate doesn't drop too much, it's a good move.
-        # This can be made more sophisticated.
-        initial_winrate_query = strong_query.copy()
-        initial_winrate_query["id"] = "initial_winrate"
-        initial_winrate_query["moves"] = moves
-        initial_winrate_response = self.strong_controller.send_query(initial_winrate_query)
-        if not initial_winrate_response or "rootInfo" not in initial_winrate_response:
-            return False
-
-        initial_winrate = initial_winrate_response["rootInfo"]["winrate"]
-        new_winrate = rl_response["rootInfo"]["winrate"]
-
-        # Allow a small drop in winrate
-        return new_winrate >= (initial_winrate - 0.1)
+        try:
+            response = self.human_controller.query_root(
+                moves,
+                id="get_prob",
+                humanRank=rank_string
+            )
+            if not response:
+                return 0.0
+                
+            # Use humanPolicy if available, else policy
+            policy = response.get("humanPolicy", response.get("policy", []))
+            if not policy:
+                return 0.0
+                
+            # Convert move to index
+            idx = self.human_controller.get_idx_from_move(correct_move)
+            if idx is None or idx >= len(policy):
+                return 0.0
+                
+            return policy[idx]
+        except Exception as e:
+            print(f"Error getting probability: {e}")
+            return 0.0
 
 
     def _print_position_info(self, moves, label):
