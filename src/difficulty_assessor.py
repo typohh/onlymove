@@ -203,7 +203,7 @@ class DifficultyAssessor:
                 return False, None, None, None
 
         # All checks passed
-        return True, solution_score, adjusted_moves, correct_move
+        return True, solution_score, adjusted_moves, solution_move
 
     def _get_position_info(self, moves):
         """
