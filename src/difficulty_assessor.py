@@ -126,21 +126,17 @@ class DifficultyAssessor:
         adjusted_moves = moves.copy()
         self._print_position_info(adjusted_moves, "Initial")
 
-        # Phase: Adjusting Score
-        print(f"    Adjusting Score")
-        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score, candidate_visits, opponent_visits = self._adjust_to_0_5(adjusted_moves, player_to_move)
-        
-        if candidate_move and opponent_move:
-            # Compute opponent color
-            opponent = "W" if player_to_move == "B" else "B"
-            # Print candidate move with score/winrate/visits
-            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f}, visits: {candidate_visits})")
-            
-            # Print opponent response with score/winrate/visits
-            print(f"    {opponent} {opponent_move} (score: {opponent_score:.1f}, winrate: {opponent_winrate:.3f}, visits: {opponent_visits})")
-        
-        # Get status after adjustment
-        self._print_position_info(adjusted_moves, "After adjustment")
+        # First, check if the score is already in [0,1] for Black
+        score, _ = self._get_position_info(moves)
+        if  0 <= score <= 1:
+            print("    Current score already in [0,1] - no adjustment needed")
+        else:
+            print(f"    Adjusting Score")
+            adjusted_moves, candidate_move,candidate,candidate_winrate,candidate_score= self._adjust_to_0_5(adjusted_moves, "B")
+            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+            adjusted_moves, candidate_move,candidate,candidate_winrate,candidate_score= self._adjust_to_0_5(adjusted_moves, "B")
+            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
+            self._print_position_info(adjusted_moves, "After adjustment")
 
         # Print "Removing choices" unconditionally as per user request
         print(f"    Removing choices")
@@ -148,10 +144,6 @@ class DifficultyAssessor:
         # Early termination if score not in target range
         post_score, post_winrate = self._get_position_info(adjusted_moves)
         if not (0 <= post_score <= 1):
-            return False, None, None, None
-
-        # After score adjustment, check winrate
-        if post_winrate < 0.5:
             return False, None, None, None
 
         # Now that the position is adjusted, determine the solution move
@@ -321,27 +313,16 @@ class DifficultyAssessor:
         Returns:
             list: Adjusted move sequence
         """
-        # First, check if the score is already in [0,1] for Black
-        score, _ = self._get_position_info(moves)
-        if score is not None and 0 <= score <= 1:
-            print("    Current score already in [0,1] - no adjustment needed")
-            return moves, None, None
-
         # Query for moves in current position (player's turn)
         response = self.strong_controller.query_children(
             moves,
             id="adjust_to_0_5"
         )
-        if not response or "moveInfos" not in response:
-            print("    No response or no moveInfos in response")
-            return moves, None, None
-
 
         best_candidate = None
-        best_candidate_score = None
-        best_candidate_winrate = None
-        best_candidate_visits = None
         best_candidate_penalty = float('inf')
+        best_candidate_winrate = None
+        best_candidate_score = None
 
         # Find best candidate move for player
         for move_info in response["moveInfos"]:
@@ -356,67 +337,13 @@ class DifficultyAssessor:
             if penalty < best_candidate_penalty:
                 best_candidate_penalty = penalty
                 best_candidate = candidate_move
-                best_candidate_score = candidate_score
                 best_candidate_winrate = candidate_winrate
-                best_candidate_visits = move_info["visits"]
-
-        if not best_candidate:
-            # If no candidate found, use the first non-best move we can find
-            for move_info in response["moveInfos"]:
-                candidate_move = move_info["move"]
-                if "scoreLead" not in move_info or "visits" not in move_info:
-                    continue
-                best_candidate = candidate_move
-                best_candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
-                best_candidate_winrate = move_info["winrate"]
-                best_candidate_visits = move_info["visits"]
-                break
-            if not best_candidate:
-                raise Exception("No suitable candidate move found")
+                best_candidate_score = candidate_score
 
         # Apply player's candidate move
         adjusted_moves = moves + [[player, best_candidate]]
-        opponent = "W" if player == "B" else "B"
 
-        # Query for opponent's moves
-        opponent_response = self.strong_controller.query_children(
-            adjusted_moves,
-            id="adjust_to_0_5_opponent"
-        )
-        if not opponent_response or "moveInfos" not in opponent_response:
-            raise Exception("No response or no moveInfos for opponent")
-
-
-        best_opponent = None
-        best_opponent_score = None
-        best_opponent_winrate = None
-        best_opponent_visits = None
-        best_opponent_penalty = float('inf')
-
-        # Find best opponent move
-        for move_info in opponent_response["moveInfos"]:
-            opponent_move = move_info["move"]
-            if "scoreLead" not in move_info or "winrate" not in move_info or "visits" not in move_info:
-                continue
-
-            opponent_score = move_info["scoreLead"]
-            opponent_winrate = move_info["winrate"]
-            penalty = (0.5 + abs(opponent_score - 0.5)) * (1 - opponent_winrate)
-
-            if penalty < best_opponent_penalty:
-                best_opponent_penalty = penalty
-                best_opponent = opponent_move
-                best_opponent_score = opponent_score
-                best_opponent_winrate = opponent_winrate
-                best_opponent_visits = move_info["visits"]
-
-        if not best_opponent:
-            raise Exception("No suitable opponent move found")
-
-        # Apply opponent's move
-        adjusted_moves = adjusted_moves + [[opponent, best_opponent]]
-
-        return adjusted_moves, best_candidate, best_opponent, best_candidate_winrate, best_opponent_winrate, best_candidate_score, best_opponent_score, best_candidate_visits, best_opponent_visits
+        return adjusted_moves,best_candidate,best_candidate_winrate,best_candidate_score
 
 
 
