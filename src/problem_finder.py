@@ -42,12 +42,12 @@ class ProblemFinder:
             correct_move = game_moves[i][1]
 
             print(f"\nValidating tsumego at move {i+1}/{len(game_moves)}...")
-            is_valid, adjusted_score, adjusted_moves = self.difficulty_assessor.validate_and_adjust_tsumego(moves_so_far, player_to_move, correct_move)
-            if not is_valid:
+            is_valid, adjusted_score, adjusted_moves, solution_move = self.difficulty_assessor.validate_and_adjust_tsumego(moves_so_far, player_to_move)
+            if not is_valid or not solution_move:
                 print(f"  ❌ Not a valid tsumego.")
                 continue
 
-            print(f"  ✅ Valid tsumego. Adjusted score: {adjusted_score:.1f}")
+            print(f"  ✅ Valid tsumego. Adjusted score: {adjusted_score:.1f}, Solution: {solution_move}")
             print(f"  Assessing difficulty on adjusted position...")
             difficulty = self.difficulty_assessor.assess_move_difficulty(adjusted_moves, player_to_move, correct_move)
             difficulties[i] = difficulty

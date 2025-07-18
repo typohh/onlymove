@@ -138,7 +138,7 @@ class DifficultyAssessor:
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
-    def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
+    def validate_and_adjust_tsumego(self, moves, player_to_move):
         """
         Validates and adjusts position to meet tsumego criteria.
         Returns (is_valid, final_score, adjusted_moves)
@@ -150,7 +150,7 @@ class DifficultyAssessor:
 
         # Phase: Adjusting Score
         print(f"    Adjusting Score")
-        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score, candidate_visits, opponent_visits = self._adjust_to_0_5(adjusted_moves, player_to_move, correct_move)
+        adjusted_moves, candidate_move, opponent_move, candidate_winrate, opponent_winrate, candidate_score, opponent_score, candidate_visits, opponent_visits = self._adjust_to_0_5(adjusted_moves, player_to_move)
         
         if candidate_move and opponent_move:
             # Compute opponent color
@@ -174,11 +174,19 @@ class DifficultyAssessor:
         # Early termination if score not in target range
         post_score, post_winrate = self._get_position_info(adjusted_moves)
         if not (0 <= post_score <= 1):
-            return False, None, None
+            return False, None, None, None
 
         # After score adjustment, check winrate
         if post_winrate < 0.5:
-            return False, None, None
+            return False, None, None, None
+
+        # Now that the position is adjusted, determine the solution move
+        solution_move = self._get_best_move(adjusted_moves, player_to_move)
+        if not solution_move:
+            print("    ❌ Failed to determine solution move")
+            return False, None, None, None
+
+        print(f"    Solution move determined: {solution_move}")
 
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
@@ -205,26 +213,26 @@ class DifficultyAssessor:
                     best_moves.append(move_info["move"])
 
             # If only solution move is best, we're done
-            if best_moves == [correct_move]:
+            if best_moves == [solution_move]:
                 final_score, final_winrate = self._get_position_info(adjusted_moves)
                 if final_score is None or final_winrate is None:
                     raise Exception("Failed to get final position info")
-                return True, final_score, adjusted_moves
+                return True, final_score, adjusted_moves, solution_move
 
             # If multiple best moves, remove one alternative at a time
-            # Find the first alternative move that is not the correct move
+            # Find the first alternative move that is not the solution move
             alt_played = None
             response_played = None
             for alt_move in best_moves:
-                if alt_move != correct_move:
-                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, correct_move, alt_move)
+                if alt_move != solution_move:
+                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, solution_move, alt_move)
                     break
             
             # Get status after removal
             self._print_position_info(adjusted_moves, "After removal")
 
         print("    Failed to achieve single best move after max attempts")
-        return False, None, None
+        return False, None, None, None
 
     def _get_position_info(self, moves):
         """
@@ -279,7 +287,7 @@ class DifficultyAssessor:
 
         return num_moves_above_50
 
-    def _adjust_to_0_5(self, moves, player, correct_move):
+    def _adjust_to_0_5(self, moves, player):
         """
         Adjusts position to ensure solution leads to ~0.5 win.
         Performs a single exchange (player move + opponent response) if needed.
@@ -329,7 +337,8 @@ class DifficultyAssessor:
         # Find best candidate move for player
         for move_info in response["moveInfos"]:
             candidate_move = move_info["move"]
-            if candidate_move == correct_move:
+            # Skip the best move - we want to play a suboptimal move for adjustment
+            if candidate_move == best_move:
                 continue
             if "scoreLead" not in move_info or "visits" not in move_info:
                 continue
@@ -346,7 +355,20 @@ class DifficultyAssessor:
                 best_candidate_visits = move_info["visits"]
 
         if not best_candidate:
-            raise Exception("No suitable candidate move found")
+            # If no candidate found, use the first non-best move we can find
+            for move_info in response["moveInfos"]:
+                candidate_move = move_info["move"]
+                if candidate_move == best_move:
+                    continue
+                if "scoreLead" not in move_info or "visits" not in move_info:
+                    continue
+                best_candidate = candidate_move
+                best_candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
+                best_candidate_winrate = move_info["winrate"]
+                best_candidate_visits = move_info["visits"]
+                break
+            if not best_candidate:
+                raise Exception("No suitable candidate move found")
         print(f"    Selected candidate: {best_candidate} (score: {best_candidate_score:.1f}, winrate: {best_candidate_winrate:.3f}, visits: {best_candidate_visits})")
 
         # Apply player's candidate move
@@ -484,6 +506,16 @@ class DifficultyAssessor:
         score_lead = response["rootInfo"]["scoreLead"]
         # Always return score from Black's perspective
         return -score_lead
+
+    def _get_best_move(self, moves, player):
+        """Helper to get best move for player in current position"""
+        response = self.strong_controller.query_children(
+            moves,
+            id="get_best_move"
+        )
+        if not response or "moveInfos" not in response or not response["moveInfos"]:
+            return None
+        return response["moveInfos"][0]["move"]
 
     def _get_best_response(self, moves):
         """Helper to get best response to a move"""
