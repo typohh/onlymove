@@ -116,10 +116,18 @@ class DifficultyAssessor:
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
-    def validate_and_adjust_tsumego(self, moves, player_to_move):
+    def validate_and_adjust_tsumego(self, moves, player_to_move, correct_move):
         """
         Validates and adjusts position to meet tsumego criteria.
-        Returns (is_valid, final_score, adjusted_moves)
+        Returns (is_valid, final_score, adjusted_moves, solution_move)
+
+        Args:
+            moves (list): The list of moves in the game.
+            player_to_move (str): The player to move ("B" or "W").
+            correct_move (str): The correct move.
+
+        Returns:
+            tuple: (is_valid, final_score, adjusted_moves, solution_move)
         """
         move_num = len(moves)+1
         print(f"\n  Validating tsumego at move {move_num}...")
