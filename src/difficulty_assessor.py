@@ -165,7 +165,10 @@ class DifficultyAssessor:
             # Query for opponent's best response
             response_after_candidate = self.strong_controller.query_root(adjusted_moves, id="whatever")
 
-            # TODO: find opponents best move from policy and assign it to opponent_move
+            # Extract policy and find best move index (excluding -1 for illegal moves)
+            policy = response_after_candidate["policy"]
+            best_idx = max(range(len(policy)), key=lambda i: policy[i] if policy[i] != -1 else -999)
+            opponent_move = self.strong_controller.get_move_from_idx(best_idx)
 
             # Add opponent's response to adjusted_moves
             adjusted_moves.append(["W" if player_to_move == "B" else "B", opponent_move])
