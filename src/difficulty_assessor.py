@@ -66,30 +66,31 @@ class DifficultyAssessor:
 
         Returns:
             float: Probability of the correct move.
+
+        Raises:
+            Exception: If any step fails unexpectedly.
         """
-        try:
-            response = self.human_controller.query_root(
-                moves,
-                id="get_prob",
-                humanRank=rank_string
-            )
-            if not response:
-                return 0.0
-                
-            # Use humanPolicy if available, else policy
-            policy = response.get("humanPolicy", response.get("policy", []))
-            if not policy:
-                return 0.0
-                
-            # Convert move to index
-            idx = self.human_controller.get_idx_from_move(correct_move)
-            if idx is None or idx >= len(policy):
-                return 0.0
-                
-            return policy[idx]
-        except Exception as e:
-            print(f"Error getting probability: {e}")
-            return 0.0
+        response = self.human_controller.query_root(
+            moves,
+            id="get_prob",
+            humanRank=rank_string
+        )
+        if not response:
+            raise Exception(f"No response for rank: {rank_string}")
+            
+        # Use humanPolicy if available, else policy
+        policy = response.get("humanPolicy", response.get("policy", []))
+        if not policy:
+            raise Exception(f"Empty policy in response for rank: {rank_string}")
+            
+        # Convert move to index
+        idx = self.human_controller.get_idx_from_move(correct_move)
+        if idx is None:
+            raise Exception(f"Invalid move: {correct_move}")
+        if idx >= len(policy):
+            raise Exception(f"Move index {idx} out of bounds for policy length {len(policy)}")
+            
+        return policy[idx]
 
 
     def _print_position_info(self, moves, label):
