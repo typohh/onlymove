@@ -204,51 +204,14 @@ class DifficultyAssessor:
             print("    ❌ Found alternative move that meets win criteria")
             return False, None, None, None
 
-        MAX_ATTEMPTS = 5
-        # Phase: Adjusting Moves
-        for attempt in range(MAX_ATTEMPTS):
-            response = self.strong_controller.query_children(
-                adjusted_moves,
-                id="tsumego_check"
-            )
-            if not response or "rootInfo" not in response or "moveInfos" not in response:
-                raise Exception("Error in tsumego check query")
-
-            # Find best winrate
-            best_winrate = -1
-            for move_info in response["moveInfos"]:
-                if move_info["winrate"] > best_winrate:
-                    best_winrate = move_info["winrate"]
-
-            # Use a fixed relative threshold of 0.01 (1%) for all positions
-            threshold = 0.01
-
-            best_moves = []
-            for move_info in response["moveInfos"]:
-                if best_winrate - move_info["winrate"] <= threshold:
-                    best_moves.append(move_info["move"])
-
-            # If only solution move is best, we're done
-            if best_moves == [solution_move]:
-                final_score, final_winrate = self._get_position_info(adjusted_moves)
-                if final_score is None or final_winrate is None:
-                    raise Exception("Failed to get final position info")
-                return True, final_score, adjusted_moves, solution_move
-
-            # If multiple best moves, remove one alternative at a time
-            # Find the first alternative move that is not the solution move
-            alt_played = None
-            response_played = None
-            for alt_move in best_moves:
-                if alt_move != solution_move:
-                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, solution_move, alt_move)
-                    break
-            
-            # Get status after removal
-            self._print_position_info(adjusted_moves, "After removal")
-
-        print("    Failed to achieve single best move after max attempts")
-        return False, None, None, None
+        # Now adjust until only solution move is best
+        print("    Adjusting until only solution move is best...")
+        adjusted_moves = self._adjust_until_single_best_move(adjusted_moves, player_to_move, solution_move)
+        
+        final_score, final_winrate = self._get_position_info(adjusted_moves)
+        if final_score is None or final_winrate is None:
+            raise Exception("Failed to get final position info")
+        return True, final_score, adjusted_moves, solution_move
 
     def _get_position_info(self, moves):
         """
@@ -450,13 +413,43 @@ class DifficultyAssessor:
         
         return self.strong_controller.get_move_from_idx(best_idx)
 
-    def _get_best_response(self, moves):
-        """Helper to get best response to a move"""
-        query = self.strong_controller.create_children_query(
-            moves,
-            id="best_response"
-        )
-        response = self.strong_controller.send_query(query)
-        if not response or "moveInfos" not in response:
-            raise Exception("Failed to get best response")
-        return response["moveInfos"][0]["move"]
+    def _adjust_until_single_best_move(self, adjusted_moves, player_to_move, solution_move):
+        """
+        Adjusts the position by removing alternative moves until only the solution move is best.
+        Returns the updated move sequence.
+        """
+        while True:
+            response = self.strong_controller.query_children(
+                adjusted_moves,
+                id="tsumego_check"
+            )
+            if not response or "rootInfo" not in response or "moveInfos" not in response:
+                raise Exception("Error in tsumego check query")
+
+            # Find best winrate
+            best_winrate = -1
+            for move_info in response["moveInfos"]:
+                if move_info["winrate"] > best_winrate:
+                    best_winrate = move_info["winrate"]
+
+            # Use a fixed relative threshold of 0.01 (1%) for all positions
+            threshold = 0.01
+
+            best_moves = []
+            for move_info in response["moveInfos"]:
+                if best_winrate - move_info["winrate"] <= threshold:
+                    best_moves.append(move_info["move"])
+
+            # If only solution move is best, we're done
+            if best_moves == [solution_move]:
+                return adjusted_moves
+
+            # If multiple best moves, remove one alternative at a time
+            # Find the first alternative move that is not the solution move
+            alt_played = None
+            for alt_move in best_moves:
+                if alt_move != solution_move:
+                    adjusted_moves, alt_played, response_played = self._remove_alternative(adjusted_moves, player_to_move, solution_move, alt_move)
+                    # Get status after removal
+                    self._print_position_info(adjusted_moves, "After removal")
+                    break
