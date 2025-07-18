@@ -249,7 +249,7 @@ class DifficultyAssessor:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 10   # Quick but reliable
+            "maxVisits": 1   # MUST REMAIN AT 1 TO MATCH MOVEINFO VISITS IN _ADJUST_TO_0_5
         }
         response = self.strong_controller.send_query(query)
         if not response or "rootInfo" not in response:
