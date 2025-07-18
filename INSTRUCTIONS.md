@@ -9,3 +9,6 @@
 - when making changes to code, remember to update those to README.md if relevant.
 - use debug.py to construct isolated test cases as needed to avoid long runs of the whole code.
 - avoid excessive edge case testing, we want the code to crash when something is wrong, so we cant test it. it doenst have to gracefully handle wrong inputs.
+- avoid coding defensively, you are to throw excpetions rather than assume defualt values or gracefully skip part of the code because something failed.
+- code compactly, avoid creating unnescesary intermediate variables.
+- do not overthink small changes.
