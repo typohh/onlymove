@@ -162,6 +162,56 @@ class DifficultyAssessor:
 
         print(f"    Solution move determined: {solution_move}")
 
+        # Run 100-visit analysis to confirm solution move meets criteria
+        print("    Running 100-visit analysis for solution move...")
+        response = self.strong_controller.query_children_100_visits(
+            adjusted_moves,
+            id="confirm_solution"
+        )
+        if not response or "moveInfos" not in response:
+            print("    ❌ Failed to get 100-visit response for solution move")
+            return False, None, None, None
+
+        solution_found = False
+        for move_info in response["moveInfos"]:
+            if move_info["move"] == solution_move:
+                winrate = move_info["winrate"]
+                score_lead = move_info["scoreLead"]
+                print(f"      Solution move: winrate={winrate:.3f}, score_lead={score_lead:.1f}")
+                if winrate > 0.5 and 0 <= score_lead <= 1:
+                    solution_found = True
+                break
+
+        if not solution_found:
+            print("    ❌ Solution move doesn't meet win criteria")
+            return False, None, None, None
+
+        # Run 100-visit analysis with solution move excluded
+        print("    Running 100-visit analysis excluding solution move...")
+        exclude_response = self.strong_controller.query_children_exclude_move(
+            adjusted_moves,
+            solution_move,
+            player_to_move,
+            id="exclude_solution"
+        )
+        if not exclude_response or "moveInfos" not in exclude_response:
+            print("    ❌ Failed to get response when excluding solution move")
+            return False, None, None, None
+
+        # Check if any alternative move meets win criteria
+        invalid_alternative = False
+        for move_info in exclude_response["moveInfos"]:
+            winrate = move_info["winrate"]
+            score_lead = move_info["scoreLead"]
+            if winrate > 0.5 and score_lead > 0:
+                print(f"      Alternative move {move_info['move']} meets win criteria: winrate={winrate:.3f}, score_lead={score_lead:.1f}")
+                invalid_alternative = True
+                break
+
+        if invalid_alternative:
+            print("    ❌ Found alternative move that meets win criteria")
+            return False, None, None, None
+
         MAX_ATTEMPTS = 5
         # Phase: Adjusting Moves
         for attempt in range(MAX_ATTEMPTS):

@@ -129,6 +129,47 @@ class KatagoController:
         }
         return self._send_query(query)
 
+    def query_children_100_visits(self, moves, id):
+        """
+        Sends a standardized query for children analysis with 100 visits per child.
+        Returns moveInfos but not necessarily accurate rootInfo.
+        """
+        query = {
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 100,
+            "id": id
+        }
+        return self._send_query(query)
+
+    def query_children_exclude_move(self, moves, exclude_move, player, id):
+        """
+        Sends a query for children analysis while excluding a specific move.
+        Returns moveInfos but not necessarily accurate rootInfo.
+        """
+        query = {
+            "moves": moves,
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 100,
+            "avoidMoves": [
+                {
+                    "player": player,
+                    "moves": [exclude_move],
+                    "untilDepth": 1
+                }
+            ],
+            "id": id
+        }
+        return self._send_query(query)
+
     def _send_query(self, query):
         """
         Sends a JSON query to the KataGo analysis engine.
