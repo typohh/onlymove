@@ -64,20 +64,14 @@ class DifficultyAssessor:
         Returns:
             bool: True if the rank solves the problem, False otherwise.
         """
-        query = {
-            "id": "check_rank",
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5, # Assuming standard komi
-            "boardXSize": 9, # Assuming 9x9 board
-            "boardYSize": 9,
-            "maxVisits": 1, # Pure intuition
-            "includePolicy": True,
-            "overrideSettings": {
+        query = self.human_controller.create_root_query(
+            moves,
+            id="check_rank",
+            includePolicy=True,
+            overrideSettings={
                 "humanSLProfile": rank_string
             }
-        }
+        )
 
         sl_response = self.human_controller.send_query(query)
         if not sl_response or "policy" not in sl_response:
@@ -464,7 +458,7 @@ class DifficultyAssessor:
 
     def _get_score_after_move(self, moves, player, move):
         """Helper to get score after playing a move"""
-        query = self._build_query(
+        query = self.strong_controller.create_root_query(
             moves + [[player, move]],
             id="get_score"
         )
@@ -477,7 +471,7 @@ class DifficultyAssessor:
 
     def _get_best_response(self, moves):
         """Helper to get best response to a move"""
-        query = self._build_query(
+        query = self.strong_controller.create_children_query(
             moves,
             id="best_response"
         )

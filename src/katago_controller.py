@@ -94,6 +94,8 @@ class KatagoController:
         Creates a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
         """
+        if 'maxVisits' in kwargs:
+            raise Exception("maxVisits cannot be overridden in create_root_query")
         query = {
             "moves": moves,
             "initialStones": [],
@@ -111,6 +113,8 @@ class KatagoController:
         Creates a standardized query for children analysis (1 visit per child).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
+        if 'maxVisits' in kwargs:
+            raise Exception("maxVisits cannot be overridden in create_children_query")
         query = {
             "moves": moves,
             "initialStones": [],
