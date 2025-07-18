@@ -86,11 +86,7 @@ class DifficultyAssessor:
         Raises:
             Exception: If any step fails unexpectedly.
         """
-        response = self.human_controller.query_root(
-            moves,
-            id="get_prob",
-            humanRank=rank_string
-        )
+        response = self.human_controller.query_root(moves, humanRank=rank_string)
         if not response:
             raise Exception(f"No response for rank: {rank_string}")
             
@@ -162,7 +158,7 @@ class DifficultyAssessor:
         self._print_position_info(adjusted_moves, "After adjustment")
 
         while True:
-            response = self.strong_controller.query_children_100_visits(adjusted_moves, id=f"adjust_winning_moves")
+            response = self.strong_controller.query_children_100_visits(adjusted_moves)
             # Count moves above 50% winrate
             winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > 0.5]
             num_winning_moves = len(winning_moves)
@@ -185,7 +181,7 @@ class DifficultyAssessor:
             adjusted_moves.append([player_to_move, candidate_move])
 
             # Query for opponent's best response
-            response_after_candidate = self.strong_controller.query_root(adjusted_moves, id="whatever")
+            response_after_candidate = self.strong_controller.query_root(adjusted_moves)
 
             # Extract policy and find best move index (excluding -1 for illegal moves)
             policy = response_after_candidate["policy"]
@@ -197,7 +193,7 @@ class DifficultyAssessor:
             adjusted_moves.append([other_player(player_to_move), opponent_move])
 
         # Now verify the solution move
-        solution_response = self.strong_controller.query_children_100_visits(adjusted_moves, id="confirm_solution")
+        solution_response = self.strong_controller.query_children_100_visits(adjusted_moves)
         solution_move_info = solution_response["moveInfos"][0]
 
         solution_move = solution_move_info["move"]
@@ -208,12 +204,7 @@ class DifficultyAssessor:
             return False, None, None, None
 
         # Check alternative moves
-        exclude_response = self.strong_controller.query_children_exclude_move(
-            adjusted_moves,
-            solution_move,
-            player_to_move,
-            id="exclude_solution"
-        )
+        exclude_response = self.strong_controller.query_children_exclude_move(adjusted_moves, solution_move, player_to_move)
         for move_info in exclude_response["moveInfos"]:
             if move_info["winrate"] > 0.5 or move_info["scoreLead"] > 0 :
                 print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f} and score {move_info["scoreLead"]}")
@@ -228,10 +219,7 @@ class DifficultyAssessor:
         Returns (score, winrate) or (None, None) if failed.
         Uses maxVisits=10 for a quick but reliable read.
         """
-        response = self.strong_controller.query_root(
-            moves,
-            id="position_info"
-        )
+        response = self.strong_controller.query_root(moves)
         if not response or "rootInfo" not in response:
             raise Exception("Failed to get position info from KataGo")
 
@@ -252,10 +240,7 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        response = self.strong_controller.query_children(
-            moves,
-            id="moves_above_50"
-        )
+        response = self.strong_controller.query_children(moves)
         if not response:
             raise Exception("No response from KataGo for moves above 50%")
         if "moveInfos" not in response:
@@ -286,10 +271,7 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         # Query for moves in current position (player's turn)
-        response = self.strong_controller.query_children(
-            moves,
-            id="adjust_to_0_5"
-        )
+        response = self.strong_controller.query_children(moves)
 
         best_candidate = None
         best_candidate_penalty = float('inf')

@@ -70,7 +70,7 @@ class KatagoController:
             self.process.terminate()
             self.process.wait()
 
-    def query_root(self, moves, id, humanRank=None):
+    def query_root(self, moves, humanRank=None):
         """
         Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
@@ -92,11 +92,13 @@ class KatagoController:
             }
         return self.__send_query(query)
 
-    def query_children(self, moves, id):
+    def query_children(self, moves):
         """
         Sends a standardized query for children analysis (25 visits per child).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
+        # TODO: do a query root, count number of legal moves from policy, and then set maxVisits to that number.
+
         query = {
             "moves": moves,
             "initialStones": [],
@@ -110,7 +112,7 @@ class KatagoController:
         }
         return self.__send_query(query)
 
-    def query_children_100_visits(self, moves, id):
+    def query_children_100_visits(self, moves):
         """
         Sends a standardized query for children analysis with 100 visits per child.
         Returns moveInfos but not necessarily accurate rootInfo.
@@ -130,7 +132,7 @@ class KatagoController:
             raise Exception("Failed to get 100-visit response for solution move")
         return result
 
-    def query_children_exclude_move(self, moves, exclude_move, player, id):
+    def query_children_exclude_move(self, moves, exclude_move, player):
         """
         Sends a query for children analysis while excluding a specific move.
         Returns moveInfos but not necessarily accurate rootInfo.
