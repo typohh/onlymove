@@ -337,9 +337,6 @@ class DifficultyAssessor:
         # Find best candidate move for player
         for move_info in response["moveInfos"]:
             candidate_move = move_info["move"]
-            # Skip the best move - we want to play a suboptimal move for adjustment
-            if candidate_move == best_move:
-                continue
             if "scoreLead" not in move_info or "visits" not in move_info:
                 continue
 
@@ -358,8 +355,6 @@ class DifficultyAssessor:
             # If no candidate found, use the first non-best move we can find
             for move_info in response["moveInfos"]:
                 candidate_move = move_info["move"]
-                if candidate_move == best_move:
-                    continue
                 if "scoreLead" not in move_info or "visits" not in move_info:
                     continue
                 best_candidate = candidate_move
