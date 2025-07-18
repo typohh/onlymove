@@ -341,7 +341,7 @@ class DifficultyAssessor:
         best_candidate_score = None
         best_candidate_winrate = None
         best_candidate_visits = None
-        best_candidate_diff = float('inf')
+        best_candidate_penalty = float('inf')
 
         # Find best candidate move for player
         for move_info in response["moveInfos"]:
@@ -391,7 +391,7 @@ class DifficultyAssessor:
         best_opponent_score = None
         best_opponent_winrate = None
         best_opponent_visits = None
-        best_opponent_diff = float('inf')
+        best_opponent_penalty = float('inf')
 
         # Find best opponent move
         for move_info in opponent_response["moveInfos"]:
