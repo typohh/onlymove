@@ -94,10 +94,16 @@ class KatagoController:
 
     def query_children(self, moves):
         """
-        Sends a standardized query for children analysis (25 visits per child).
+        Sends a standardized query for children analysis (visits adjusted by the number of legal moves).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
-        # TODO: do a query root, count number of legal moves from policy, and then set maxVisits to that number.
+        # Get root policy to count legal moves
+        root_response = self.query_root(moves)
+        if not root_response or "policy" not in root_response:
+            num_legal_moves = 25  # fallback if query fails
+        else:
+            policy = root_response["policy"]
+            num_legal_moves = sum(1 for p in policy if p >= 0)
 
         query = {
             "moves": moves,
@@ -106,7 +112,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 25,
+            "maxVisits": num_legal_moves,
             "rootPolicyTemperature": 49,
             "id": id
         }
