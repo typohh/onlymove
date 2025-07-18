@@ -156,14 +156,10 @@ class DifficultyAssessor:
             # Compute opponent color
             opponent = "W" if player_to_move == "B" else "B"
             # Print candidate move with score/winrate/visits
-            cand_winrate = candidate_winrate if player_to_move == "B" else 1 - candidate_winrate
-            cand_score = candidate_score
-            print(f"    {player_to_move} {candidate_move} (score: {cand_score:.1f}, winrate: {cand_winrate:.3f}, visits: {candidate_visits})")
+            print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f}, visits: {candidate_visits})")
             
             # Print opponent response with score/winrate/visits
-            opp_winrate = opponent_winrate if opponent == "B" else 1 - opponent_winrate
-            opp_score = opponent_score
-            print(f"    {opponent} {opponent_move} (score: {opp_score:.1f}, winrate: {opp_winrate:.3f}, visits: {opponent_visits})")
+            print(f"    {opponent} {opponent_move} (score: {opponent_score:.1f}, winrate: {opponent_winrate:.3f}, visits: {opponent_visits})")
         
         # Get status after adjustment
         self._print_position_info(adjusted_moves, "After adjustment")
@@ -257,11 +253,7 @@ class DifficultyAssessor:
             last_player = moves[-1][0]
             current_player = "W" if last_player == "B" else "B"
 
-        # Convert to Black's perspective
-        if current_player == "B":
-            return score_lead, winrate
-        else:
-            return -score_lead, 1 - winrate
+        return score_lead, winrate
 
     def _get_num_moves_above_50(self, moves):
         """
@@ -322,9 +314,8 @@ class DifficultyAssessor:
             candidate_move = move_info["move"]
             if "scoreLead" not in move_info or "visits" not in move_info:
                 continue
-            # Convert score to Black's perspective
-            candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
-            candidate_winrate = move_info["winrate"] if player == "B" else 1 - move_info["winrate"]
+            candidate_score = move_info["scoreLead"]
+            candidate_winrate = move_info["winrate"]
             visits = move_info["visits"]
             print(f"      {candidate_move}: score {candidate_score:.1f}, winrate {candidate_winrate:.3f}, visits {visits}")
 
@@ -340,8 +331,7 @@ class DifficultyAssessor:
             if "scoreLead" not in move_info or "visits" not in move_info:
                 continue
 
-            # Convert score to Black's perspective
-            candidate_score = move_info["scoreLead"] if player == "B" else -move_info["scoreLead"]
+            candidate_score = move_info["scoreLead"]
             score_diff = abs(candidate_score - 0.5)
 
             if score_diff < best_candidate_diff:
@@ -384,9 +374,8 @@ class DifficultyAssessor:
             opponent_move = move_info["move"]
             if "scoreLead" not in move_info or "winrate" not in move_info or "visits" not in move_info:
                 continue
-            # Convert score to Black's perspective
-            opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
-            opponent_winrate = move_info["winrate"] if opponent == "B" else 1 - move_info["winrate"]
+            opponent_score = move_info["scoreLead"]
+            opponent_winrate = move_info["winrate"]
             visits = move_info["visits"]
             print(f"      {opponent_move}: score {opponent_score:.1f}, winrate {opponent_winrate:.3f}, visits {visits}")
 
@@ -402,8 +391,7 @@ class DifficultyAssessor:
             if "scoreLead" not in move_info or "winrate" not in move_info or "visits" not in move_info:
                 continue
 
-            # Convert score to Black's perspective
-            opponent_score = move_info["scoreLead"] if opponent == "B" else -move_info["scoreLead"]
+            opponent_score = move_info["scoreLead"]
             score_diff = abs(opponent_score - 0.5)
 
             if score_diff < best_opponent_diff:
