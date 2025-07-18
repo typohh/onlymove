@@ -431,8 +431,10 @@ class DifficultyAssessor:
             moves,
             id="get_best_move_policy"
         )
-        if not response or "policy" not in response:
-            return None
+        if not response:
+            raise Exception("No response from KataGo for best move")
+        if "policy" not in response:
+            raise Exception("Response missing policy for best move")
         
         policy = response["policy"]
         # Find index of move with highest policy probability
@@ -444,7 +446,7 @@ class DifficultyAssessor:
                 best_idx = idx
         
         if best_idx is None:
-            return None
+            raise Exception("No move found in policy")
         
         return self.strong_controller.get_move_from_idx(best_idx)
 

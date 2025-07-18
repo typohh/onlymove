@@ -195,11 +195,21 @@ class KatagoController:
 
         Returns:
             dict: The parsed JSON response.
+
+        Raises:
+            Exception: If response is empty or contains error/warning.
         """
         response_str = self.process.stdout.readline()
         if not response_str:
-            return None
-        return json.loads(response_str)
+            raise Exception("KataGo engine returned empty response")
+        
+        response = json.loads(response_str)
+        if "error" in response:
+            raise Exception(f"KataGo error: {response['error']}")
+        if "warning" in response:
+            raise Exception(f"KataGo warning: {response['warning']}")
+            
+        return response
 
     def get_move_from_idx(self, idx):
         """
