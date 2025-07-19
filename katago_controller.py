@@ -1,6 +1,9 @@
 import subprocess
 import json
 
+LOW_PLAYOUTS = 10
+HIGH_PLAYOUTS = 100
+
 class KatagoController:
     """
     A class to manage the KataGo analysis engine process.
@@ -82,7 +85,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 1,
+            "maxVisits": LOW_PLAYOUTS,
             "includePolicy": True,  # Always include policy
             "id": id
         }
@@ -99,11 +102,7 @@ class KatagoController:
         """
         # Get root policy to count legal moves
         root_response = self.query_root(moves)
-        if not root_response or "policy" not in root_response:
-            num_legal_moves = 25  # fallback if query fails
-        else:
-            policy = root_response["policy"]
-            num_legal_moves = sum(1 for p in policy if p >= 0)
+        num_legal_moves = sum(1 for p in root_response["policy"] if p >= 0)
 
         query = {
             "moves": moves,
@@ -112,8 +111,8 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": num_legal_moves,
-            "rootPolicyTemperature": 49,
+            "maxVisits": num_legal_moves * LOW_PLAYOUTS,
+            "rootPolicyTemperature": 100,
             "id": id
         }
         return self.__send_query(query)
@@ -130,7 +129,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 100,
+            "maxVisits": HIGH_PLAYOUTS,
             "id": id
         }
         result = self.__send_query(query)
@@ -150,7 +149,7 @@ class KatagoController:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": 100,
+            "maxVisits": HIGH_PLAYOUTS,
             "avoidMoves": [
                 {
                     "player": player,
@@ -174,6 +173,8 @@ class KatagoController:
         """
         if not self.process:
             raise Exception("KataGo engine is not running.")
+
+        query["id"]="random"
 
         query_str = json.dumps(query)
         self.process.stdin.write(query_str + "\n")
@@ -254,6 +255,28 @@ class KatagoController:
         row = board_y_size - row_num
 
         return row * board_x_size + col
+
+    def get_position_info(self, moves):
+        """
+        Helper to get the current position score and winrate from Black's perspective.
+        Returns (score, winrate) or (None, None) if failed.
+        Uses maxVisits=10 for a quick but reliable read.
+        """
+        response = self.query_root(moves)
+        if not response or "rootInfo" not in response:
+            raise Exception("Failed to get position info from KataGo")
+
+        score_lead = response["rootInfo"]["scoreLead"]
+        winrate = response["rootInfo"]["winrate"]
+
+        # Determine current player to move
+        if not moves:
+            current_player = "B"
+        else:
+            last_player = moves[-1][0]
+            current_player = "W" if last_player == "B" else "B"
+
+        return score_lead, winrate
 
 
 

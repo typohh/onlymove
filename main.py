@@ -3,11 +3,7 @@ import sys
 import argparse
 import traceback
 
-# Add the src directory to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
-
 from katago_controller import KatagoController
-from game_generator import GroundTruthGenerator
 from difficulty_assessor import DifficultyAssessor
 from problem_finder import ProblemFinder
 
@@ -18,58 +14,39 @@ SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
 
 def main():
-    # Check if running in virtual environment
-    in_venv = (hasattr(sys, 'real_prefix') or
-               (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix))
-    if not in_venv:
-        print("ERROR: Please run this script inside a virtual environment as per README.md instructions")
-        print("You can either:")
-        print("1. Activate the virtual environment: source .venv/bin/activate")
-        print("   then run: python3 main.py")
-        print("2. Or run directly using: .venv/bin/python3 main.py")
-        sys.exit(1)
-
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
     parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
+    # TODO: add --game argument to parser, which can take an sfd filename, help should be ""Use existing game to create the tsumegos"
     args = parser.parse_args()
-    args.board_size = 9  # Fixed board size
-    args.komi = 7.5      # Fixed komi
 
     # Always use existing game.sgf if present
-    game_filename = "./generated_games/game.sgf"
     human_controller = None
     strong_controller = None
     try:
-        print("Initializing KataGo controllers...")
+        print("Starting KataGo engines...")
         human_controller = KatagoController(KATAGO_PATH, SL_MODEL_PATH, human_model_path=SL_MODEL_PATH)
         strong_controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH)
 
-        print("Starting KataGo engines...")
         human_controller.start_engine(verbose=args.verbose)
         strong_controller.start_engine(verbose=args.verbose)
         print("KataGo engines started.")
 
-        print("Initializing game generator...")
-        game_generator = GroundTruthGenerator(strong_controller)
-
-        print("Initializing difficulty assessor...")
         difficulty_assessor = DifficultyAssessor(human_controller, strong_controller)
 
-        print("Initializing problem finder...")
-        problem_finder = ProblemFinder(difficulty_assessor, game_generator)
+        moves = []
 
-        if os.path.exists(game_filename):
-            print(f"Using existing game file: {game_filename}")
-        else:
+        if _ :# TODO: if args doesnt have a game specificed, create one..
             print("Generating new game...")
             game_output_dir = "./generated_games"
             os.makedirs(game_output_dir, exist_ok=True)
-            game_generator.generate_game(board_size=args.board_size, komi=args.komi, filename=game_filename)
+            game_moves = game_generator.generate_game()
+            game_filename = # TODO: create random filename .sgf, in the game output dir
+            game_generator.save_sgf(game_moves,game_filename,9,7.5)
             print(f"Generated game and saved to {game_filename}")
-
-        print("Loading game for analysis...")
-        game_moves = problem_finder.load_sgf(game_filename)
-        print(f"Loaded game with {len(game_moves)} moves.")
+        else :
+            print("Loading game for analysis...")
+            game_moves = game_generator.load_sgf(_) # TODO use the filename provided by argparser for this purpose
+            print(f"Loaded game with {len(game_moves)} moves.")
 
         print("Finding problems...")
         problems = problem_finder.find_problems(game_moves)

@@ -1,7 +1,15 @@
 import numpy as np
 from scipy.stats import norm
-from src.katago_controller import KatagoController, other_player
+from katago_controller import KatagoController, other_player
 
+SUPPORTED_RANKS = [
+    "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
+    "rank_15k", "rank_14k", "rank_13k", "rank_12k", "rank_11k",
+    "rank_10k", "rank_9k", "rank_8k", "rank_7k", "rank_6k",
+    "rank_5k", "rank_4k", "rank_3k", "rank_2k", "rank_1k",
+    "rank_1d", "rank_2d", "rank_3d", "rank_4d", "rank_5d",
+    "rank_6d", "rank_7d", "rank_8d", "rank_9d"
+]
 
 class DifficultyAssessor:
     """
@@ -17,14 +25,6 @@ class DifficultyAssessor:
         """
         self.human_controller = human_controller
         self.strong_controller = strong_controller
-        self._SUPPORTED_RANKS = [
-            "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
-            "rank_15k", "rank_14k", "rank_13k", "rank_12k", "rank_11k",
-            "rank_10k", "rank_9k", "rank_8k", "rank_7k", "rank_6k",
-            "rank_5k", "rank_4k", "rank_3k", "rank_2k", "rank_1k",
-            "rank_1d", "rank_2d", "rank_3d", "rank_4d", "rank_5d",
-            "rank_6d", "rank_7d", "rank_8d", "rank_9d"
-        ]
 
     def assess_move_difficulty(self, moves, player_to_move, correct_move):
         """
@@ -35,11 +35,9 @@ class DifficultyAssessor:
             player_to_move (str): The player to move ("B" or "W").
             correct_move (str): The correct move.
 
-        Returns:
-            str: String representation of mean and standard deviation.
         """
         probabilities = []
-        for rank in self._SUPPORTED_RANKS:
+        for rank in SUPPORTED_RANKS:
             prob = self._get_probability_for_rank(rank, moves, correct_move)
             probabilities.append(prob)
         
@@ -48,7 +46,7 @@ class DifficultyAssessor:
         z_scores = norm.ppf(clamped_probs)
         
         # Create numerical rank values (0 to 28)
-        numerical_ranks = np.arange(len(self._SUPPORTED_RANKS))
+        numerical_ranks = np.arange(len(SUPPORTED_RANKS))
         
         # Solve linear regression: rank = mu + sigma * z_score
         A = np.vstack([np.ones(len(z_scores)), z_scores]).T
@@ -60,16 +58,16 @@ class DifficultyAssessor:
         # Convert numerical mean to rank string
         rank_idx = int(round(mu))
         if rank_idx < 0: rank_idx = 0
-        if rank_idx >= len(self._SUPPORTED_RANKS): rank_idx = len(self._SUPPORTED_RANKS)-1
-        rank_str = self._SUPPORTED_RANKS[rank_idx].replace("rank_", "").replace("_", " ").upper()
+        if rank_idx >= len(SUPPORTED_RANKS): rank_idx = len(SUPPORTED_RANKS)-1
+        rank_str = SUPPORTED_RANKS[rank_idx].replace("rank_", "").replace("_", " ").upper()
         
         # Debug: show probabilities
-        print("    Probabilities by rank:")
-        for i, rank in enumerate(self._SUPPORTED_RANKS):
-            r = rank.replace("rank_", "").replace("_", " ").upper()
-            print(f"      {r}: {probabilities[i]:.3f}")
+        # print("    Probabilities by rank:")
+        # for i, rank in enumerate(SUPPORTED_RANKS):
+        #     r = rank.replace("rank_", "").replace("_", " ").upper()
+        #     print(f"      {r}: {probabilities[i]:.3f}")
         
-        return f"mean={mu:.2f} ({rank_str}), sd={sigma:.2f}"
+        return rank_str,mu,sigma
 
     def _get_probability_for_rank(self, rank_string, moves, correct_move):
         """
@@ -187,7 +185,7 @@ class DifficultyAssessor:
             policy = response_after_candidate["policy"]
             best_idx = max(range(len(policy)), key=lambda i: policy[i] if policy[i] != -1 else -999)
             opponent_move = self.strong_controller.get_move_from_idx(best_idx)
-            print(f"    {other_player(player_to_move)} {candidate_move} (score: ?, winrate: ?)")
+            print(f"    {other_player(player_to_move)} {opponent_move} (score: ?, winrate: ?)")
 
             # Add opponent's response to adjusted_moves
             adjusted_moves.append([other_player(player_to_move), opponent_move])
@@ -212,28 +210,6 @@ class DifficultyAssessor:
 
         # All checks passed
         return True, solution_score, adjusted_moves, solution_move
-
-    def _get_position_info(self, moves):
-        """
-        Helper to get the current position score and winrate from Black's perspective.
-        Returns (score, winrate) or (None, None) if failed.
-        Uses maxVisits=10 for a quick but reliable read.
-        """
-        response = self.strong_controller.query_root(moves)
-        if not response or "rootInfo" not in response:
-            raise Exception("Failed to get position info from KataGo")
-
-        score_lead = response["rootInfo"]["scoreLead"]
-        winrate = response["rootInfo"]["winrate"]
-
-        # Determine current player to move
-        if not moves:
-            current_player = "B"
-        else:
-            last_player = moves[-1][0]
-            current_player = "W" if last_player == "B" else "B"
-
-        return score_lead, winrate
 
     def _get_num_moves_above_50(self, moves):
         """
@@ -299,3 +275,71 @@ class DifficultyAssessor:
         adjusted_moves = moves + [[player, best_candidate]]
 
         return adjusted_moves,best_candidate,best_candidate_winrate,best_candidate_score
+
+
+    def find_problems(self, game_moves):
+        """
+        Finds problems in a game sequence.
+
+        Args:
+            game_moves (list): The list of moves in the game.
+
+        Returns:
+            list: A list of identified problems.
+        """
+        problems = []
+        # Pre-allocate difficulties array
+        difficulties = [None] * len(game_moves)
+        adjusted_moves_list = [None] * len(game_moves)
+
+        # Analyze all moves except first 10 and last 10
+        for i in range(10, len(game_moves) - 10):
+            if game_moves[i][0] != "B":
+                continue
+            moves_so_far = game_moves[:i]
+            player_to_move = game_moves[i][0]
+            correct_move = game_moves[i][1]
+
+            print(f"\nValidating tsumego at move {i+1}/{len(game_moves)}...")
+            is_valid, adjusted_score, adjusted_moves, solution_move = self.validate_and_adjust_tsumego(moves_so_far, player_to_move)
+            if not is_valid or not solution_move:
+                print(f"  ❌ Not a valid tsumego.")
+                continue
+
+            rank_str,mu,sigma = self.assess_move_difficulty(adjusted_moves, player_to_move, solution_move)
+            print(f"  Difficulty: {mu:.2f}({rank_str}) ± {sigma:.3f} ")
+            if 0 < mu < len(SUPPORTED_RANKS) - 1 and sigma < 5:
+                print( "Valid tsumego" )
+                difficulties[i] = rank_str
+                adjusted_moves_list[i] = adjusted_moves
+        return problems
+
+    def save_problem_as_sgf(self, problem, filename, board_size=9, komi=7.5):
+        """
+        Saves a single problem as an SGF file with annotations.
+
+        Args:
+            problem (dict): The problem dictionary.
+            filename (str): The name of the SGF file.
+            board_size (int): The size of the board.
+            komi (float): The komi for the game.
+        """
+        game = sgf.Sgf_game(size=board_size)
+        game.root.set("KM", str(komi))
+        game.root.set("RU", "tromp-taylor")
+        game.root.set("GN", f"Problem Difficulty: {problem["difficulty"]}")
+
+        # Add initial moves
+        for player, move in problem["moves"]:
+            node = game.extend_main_sequence()
+            node.set_move(player.lower(), self.strong_controller._katago_to_sgf_coords(move, board_size))
+
+        # Add the solution move and annotations
+        solution_player, solution_move = problem["solution"]
+        solution_node = game.extend_main_sequence()
+        solution_node.set_move(solution_player.lower(), self.game_generator._katago_to_sgf_coords(solution_move, board_size))
+        solution_node.set("C", f"Solution move for {problem["difficulty"]} problem.")
+        solution_node.set("MA", [self.game_generator._katago_to_sgf_coords(solution_move, board_size)])
+
+        with open(filename, "wb") as f:
+            f.write(game.serialise())
