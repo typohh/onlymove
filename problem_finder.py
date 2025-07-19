@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import norm
 from katago_controller import KatagoController, other_player
+from game_generator import katago_to_sgf_coords
 
 SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
@@ -11,7 +12,7 @@ SUPPORTED_RANKS = [
     "rank_6d", "rank_7d", "rank_8d", "rank_9d"
 ]
 
-class DifficultyAssessor:
+class ProblemFinder:
     """
     Assesses the difficulty of a move.
     """
@@ -21,10 +22,8 @@ class DifficultyAssessor:
 
         Args:
             human_controller (KatagoController): The KataGo controller for the SL network.
-            strong_controller (KatagoController): The KataGo controller for the RL network.
         """
-        self.human_controller = human_controller
-        self.strong_controller = strong_controller
+        self.controller = human_controller
 
     def assess_move_difficulty(self, moves, player_to_move, correct_move):
         """
@@ -84,7 +83,7 @@ class DifficultyAssessor:
         Raises:
             Exception: If any step fails unexpectedly.
         """
-        response = self.human_controller.query_root(moves, humanRank=rank_string)
+        response = self.controller.query_root(moves, humanRank=rank_string)
         if not response:
             raise Exception(f"No response for rank: {rank_string}")
             
@@ -94,7 +93,7 @@ class DifficultyAssessor:
             raise Exception(f"Empty policy in response for rank: {rank_string}")
             
         # Convert move to index
-        idx = self.human_controller.get_idx_from_move(correct_move)
+        idx = self.controller.get_idx_from_move(correct_move)
         if idx is None:
             raise Exception(f"Invalid move: {correct_move}")
         if idx >= len(policy):
@@ -107,7 +106,7 @@ class DifficultyAssessor:
         """
         Helper to get and print position info (score, winrate, num_moves_above_50).
         """
-        score, winrate = self._get_position_info(moves)
+        score, winrate = self.controller.get_position_info(moves)
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
@@ -140,7 +139,7 @@ class DifficultyAssessor:
 
         # First, check if the score is already in [0,1] for Black
         while True:
-            score,winrate = self._get_position_info(adjusted_moves)
+            score,winrate = self.controller.get_position_info(adjusted_moves)
             if 0 < score < 1 and winrate > 0.5:
                 break
             print(f"    Adjusting score because (score: {score:.1f}, winrate: {winrate:.3f})")
@@ -156,7 +155,7 @@ class DifficultyAssessor:
         self._print_position_info(adjusted_moves, "After adjustment")
 
         while True:
-            response = self.strong_controller.query_children_100_visits(adjusted_moves)
+            response = self.controller.query_children_100_visits(adjusted_moves)
             # Count moves above 50% winrate
             winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > 0.5]
             num_winning_moves = len(winning_moves)
@@ -179,19 +178,19 @@ class DifficultyAssessor:
             adjusted_moves.append([player_to_move, candidate_move])
 
             # Query for opponent's best response
-            response_after_candidate = self.strong_controller.query_root(adjusted_moves)
+            response_after_candidate = self.controller.query_root(adjusted_moves)
 
             # Extract policy and find best move index (excluding -1 for illegal moves)
             policy = response_after_candidate["policy"]
             best_idx = max(range(len(policy)), key=lambda i: policy[i] if policy[i] != -1 else -999)
-            opponent_move = self.strong_controller.get_move_from_idx(best_idx)
+            opponent_move = self.controller.get_move_from_idx(best_idx)
             print(f"    {other_player(player_to_move)} {opponent_move} (score: ?, winrate: ?)")
 
             # Add opponent's response to adjusted_moves
             adjusted_moves.append([other_player(player_to_move), opponent_move])
 
         # Now verify the solution move
-        solution_response = self.strong_controller.query_children_100_visits(adjusted_moves)
+        solution_response = self.controller.query_children_100_visits(adjusted_moves)
         solution_move_info = solution_response["moveInfos"][0]
 
         solution_move = solution_move_info["move"]
@@ -202,7 +201,7 @@ class DifficultyAssessor:
             return False, None, None, None
 
         # Check alternative moves
-        exclude_response = self.strong_controller.query_children_exclude_move(adjusted_moves, solution_move, player_to_move)
+        exclude_response = self.controller.query_children_exclude_move(adjusted_moves, solution_move, player_to_move)
         for move_info in exclude_response["moveInfos"]:
             if move_info["winrate"] > 0.5 or move_info["scoreLead"] > 0 :
                 print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f} and score {move_info["scoreLead"]}")
@@ -216,7 +215,7 @@ class DifficultyAssessor:
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        response = self.strong_controller.query_children(moves)
+        response = self.controller.query_children(moves)
         if not response:
             raise Exception("No response from KataGo for moves above 50%")
         if "moveInfos" not in response:
@@ -247,7 +246,7 @@ class DifficultyAssessor:
             list: Adjusted move sequence
         """
         # Query for moves in current position (player's turn)
-        response = self.strong_controller.query_children(moves)
+        response = self.controller.query_children(moves)
 
         best_candidate = None
         best_candidate_penalty = float('inf')
@@ -332,7 +331,7 @@ class DifficultyAssessor:
         # Add initial moves
         for player, move in problem["moves"]:
             node = game.extend_main_sequence()
-            node.set_move(player.lower(), self.strong_controller._katago_to_sgf_coords(move, board_size))
+            node.set_move(player.lower(), self.controller._katago_to_sgf_coords(move, board_size))
 
         # Add the solution move and annotations
         solution_player, solution_move = problem["solution"]

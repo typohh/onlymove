@@ -12,3 +12,4 @@
 - avoid coding defensively, you are to throw excpetions rather than assume defualt values or gracefully skip part of the code because something failed.
 - code compactly, avoid creating unnescesary intermediate variables.
 - do not overthink small changes.
+- avoid replicating code. Even something as short as 3-5 lines mostly replicating, should be created into a function instead, or possibly a loop.

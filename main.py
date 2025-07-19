@@ -1,11 +1,11 @@
 import os
-import sys
 import argparse
 import traceback
+import uuid
 
 from katago_controller import KatagoController
-from difficulty_assessor import DifficultyAssessor
 from problem_finder import ProblemFinder
+import game_generator
 
 # Define paths - adjust these if your KataGo executable or models are elsewhere
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,36 +16,32 @@ RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-
 def main():
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
     parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
-    # TODO: add --game argument to parser, which can take an sfd filename, help should be ""Use existing game to create the tsumegos"
+    parser.add_argument("--game", type=str, help="Use existing game to create the tsumegos")
     args = parser.parse_args()
 
     # Always use existing game.sgf if present
-    human_controller = None
-    strong_controller = None
+    controller = None
     try:
         print("Starting KataGo engines...")
-        human_controller = KatagoController(KATAGO_PATH, SL_MODEL_PATH, human_model_path=SL_MODEL_PATH)
-        strong_controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH)
-
-        human_controller.start_engine(verbose=args.verbose)
-        strong_controller.start_engine(verbose=args.verbose)
+        controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH, human_model_path=SL_MODEL_PATH)
+        controller.start_engine(verbose=args.verbose)
         print("KataGo engines started.")
 
-        difficulty_assessor = DifficultyAssessor(human_controller, strong_controller)
+        problem_finder = ProblemFinder(controller, controller)
 
         moves = []
 
-        if _ :# TODO: if args doesnt have a game specificed, create one..
+        if not args.game:
             print("Generating new game...")
             game_output_dir = "./generated_games"
             os.makedirs(game_output_dir, exist_ok=True)
-            game_moves = game_generator.generate_game()
-            game_filename = # TODO: create random filename .sgf, in the game output dir
-            game_generator.save_sgf(game_moves,game_filename,9,7.5)
+            game_moves = game_generator.generate_game(controller)
+            game_filename = os.path.join(game_output_dir, f"{uuid.uuid4()}.sgf")
+            game_generator.save_sgf(game_moves, game_filename, 9, 7.5)
             print(f"Generated game and saved to {game_filename}")
-        else :
-            print("Loading game for analysis...")
-            game_moves = game_generator.load_sgf(_) # TODO use the filename provided by argparser for this purpose
+        else:
+            print(f"Loading game for analysis from {args.game}...")
+            game_moves = game_generator.load_sgf(args.game)
             print(f"Loaded game with {len(game_moves)} moves.")
 
         print("Finding problems...")
@@ -74,10 +70,8 @@ def main():
         traceback.print_exc()
     finally:
         print("Stopping KataGo engines...")
-        if human_controller:
-            human_controller.stop_engine()
-        if strong_controller:
-            strong_controller.stop_engine()
+        if controller:
+            controller.stop_engine()
         print("KataGo engines stopped.")
 
 if __name__ == "__main__":

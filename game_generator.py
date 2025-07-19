@@ -15,7 +15,7 @@ def generate_game(controller:KatagoController):
     consecutive_passes = 0
 
     while consecutive_passes < 2:
-        response = controller.query_root()
+        response = controller.query_root(moves)
         if response and "policy" in response and response["policy"]:
             best_move_idx = response['policy'].index(max(response['policy']))
             best_move = controller.get_move_from_idx(best_move_idx)
@@ -50,7 +50,7 @@ def save_sgf(moves, filename, board_size=9, komi=7.5):
 
     for player, move in moves:
         node = game.extend_main_sequence()
-        node.set_move(player.lower(), self._katago_to_sgf_coords(move, board_size))
+        node.set_move(player.lower(), katago_to_sgf_coords(move, board_size))
 
     with open(filename, "wb") as f:
         f.write(game.serialise())
@@ -70,10 +70,11 @@ def load_sgf(filename):
         sgf_game = sgf.Sgf_game.from_bytes(f.read())
 
     moves = []
+    board_size = sgf_game.get_size()
     for node in sgf_game.get_main_sequence():
         player, move = node.get_move()
         if player is not None:
-            moves.append([player.upper(), self._sgf_to_katago_coords(move, sgf_game.get_size())])
+            moves.append([player.upper(), sgf_to_katago_coords(move, board_size)])
     return moves
 
 
