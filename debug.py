@@ -22,7 +22,7 @@ def main():
     if not os.path.exists(GAME_FILE):
         print(f"Error: Game file not found at {GAME_FILE}")
         return
-    game_moves = problem_finder.load_sgf(GAME_FILE)
+    game_moves = problem_finder.load_game_sgf(GAME_FILE)
 
     # Get moves up to move 26 (index 26) for analysis at move 27
     if len(game_moves) < 27:

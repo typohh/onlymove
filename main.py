@@ -3,8 +3,9 @@ import argparse
 import traceback
 import uuid
 
-from katago_controller import KatagoController
+from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder
+from katago_controller import KatagoController
 import game_generator
 
 # Define paths - adjust these if your KataGo executable or models are elsewhere
@@ -12,6 +13,33 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+
+def loop(katago_queries:KatagoQueries):
+    problem_finder = ProblemFinder(katago_queries)
+    while True:
+        print("Generating new game...")
+        game_output_dir = "./generated_games"
+        os.makedirs(game_output_dir, exist_ok=True)
+        game_moves = game_generator.generate_game(katago_queries)
+        game_filename = os.path.join(game_output_dir, f"{uuid.uuid4()}.sgf")
+        game_generator.save_game_sgf(game_moves, game_filename)
+        print(f"Generated game and saved to {game_filename}")
+
+        print("Finding problems...")
+        problems = problem_finder.find_problems(game_moves)
+        print(f"Found {len(problems)} problems.")
+
+        if problems:
+            output_dir = "./generated_problems"
+            os.makedirs(output_dir, exist_ok=True)
+
+            for i, problem in enumerate(problems):
+                sgf_filename = os.path.join(output_dir, f"{uuid.uuid4()}.sgf")
+                problem_finder.save_problem_as_sgf(problem, sgf_filename)
+                print(f"Problem {i + 1} saved to {sgf_filename}")
+        else:
+            print("No problems found.")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
@@ -27,43 +55,9 @@ def main():
         controller.start_engine(verbose=args.verbose)
         print("KataGo engines started.")
 
-        problem_finder = ProblemFinder(controller, controller)
+        queries = KatagoQueries(controller)
 
-        moves = []
-
-        if not args.game:
-            print("Generating new game...")
-            game_output_dir = "./generated_games"
-            os.makedirs(game_output_dir, exist_ok=True)
-            game_moves = game_generator.generate_game(controller)
-            game_filename = os.path.join(game_output_dir, f"{uuid.uuid4()}.sgf")
-            game_generator.save_sgf(game_moves, game_filename, 9, 7.5)
-            print(f"Generated game and saved to {game_filename}")
-        else:
-            print(f"Loading game for analysis from {args.game}...")
-            game_moves = game_generator.load_sgf(args.game)
-            print(f"Loaded game with {len(game_moves)} moves.")
-
-        print("Finding problems...")
-        problems = problem_finder.find_problems(game_moves)
-        print(f"Found {len(problems)} problems.")
-
-        if problems:
-            output_dir = "./generated_problems"
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Save problems to JSON
-            json_filename = os.path.join(output_dir, "problems.json")
-            problem_finder.save_problems(problems, json_filename)
-            print(f"Problems saved to {json_filename}")
-
-            # Save each problem as an SGF
-            for i, problem in enumerate(problems):
-                sgf_filename = os.path.join(output_dir, f"problem_{i+1}.sgf")
-                problem_finder.save_problem_as_sgf(problem, sgf_filename)
-                print(f"Problem {i+1} saved to {sgf_filename}")
-        else:
-            print("No problems found.")
+        loop(queries)
 
     except Exception as e:
         print(f"An error occurred: {e}")

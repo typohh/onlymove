@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.stats import norm
-from katago_controller import KatagoController, other_player
+from sgfmill import sgf
+
+from katago_queries import KatagoQueries, other_player
 from game_generator import katago_to_sgf_coords
 
 SUPPORTED_RANKS = [
@@ -12,65 +14,70 @@ SUPPORTED_RANKS = [
     "rank_6d", "rank_7d", "rank_8d", "rank_9d"
 ]
 
+MIN_SCORE = 0
+MAX_SCORE = 2
+MIN_WINRATE_CORRECT = 0.6
+MAX_WINRATE_ALTERNATIVE = 0.4
+
 class ProblemFinder:
     """
     Assesses the difficulty of a move.
     """
-    def __init__(self, human_controller: KatagoController, strong_controller: KatagoController):
+    def __init__(self, queries: KatagoQueries):
         """
         Initializes the DifficultyAssessor.
 
         Args:
-            human_controller (KatagoController): The KataGo controller for the SL network.
+            human_controller (KatagoQueries): The KataGo controller for the SL network.
         """
-        self.controller = human_controller
+        self.queries = queries
 
     def assess_move_difficulty(self, moves, player_to_move, correct_move):
         """
-        Assesses difficulty by sampling all ranks and fitting a normal distribution.
+        Assesses difficulty by sampling all ranks determinig CDF for probability of move being first choice.
 
         Args:
             moves (list): The list of moves in the game.
             player_to_move (str): The player to move ("B" or "W").
             correct_move (str): The correct move.
 
+        Returns:
+            String: closest mean rank as a string
+            Float: mean rank of the distribution
+            Float: stdev rank of the distribution.
+
         """
         probabilities = []
         for rank in SUPPORTED_RANKS:
-            prob = self._get_probability_for_rank(rank, moves, correct_move)
-            probabilities.append(prob)
-        
+            rank_order = self._get_order_for_rank(rank, moves, correct_move)
+            probabilities.append(1.0 if rank_order == 0 else 0.0)
+
         # Convert probabilities to z-scores
         clamped_probs = np.clip(probabilities, 0.01, 0.99)
         z_scores = norm.ppf(clamped_probs)
-        
+
         # Create numerical rank values (0 to 28)
         numerical_ranks = np.arange(len(SUPPORTED_RANKS))
-        
+
         # Solve linear regression: rank = mu + sigma * z_score
         A = np.vstack([np.ones(len(z_scores)), z_scores]).T
         mu, sigma = np.linalg.lstsq(A, numerical_ranks, rcond=None)[0]
-        
-        # Ensure positive standard deviation
+
+        # Ensure positive standard deviation 
         sigma = abs(sigma)
-        
+
         # Convert numerical mean to rank string
         rank_idx = int(round(mu))
         if rank_idx < 0: rank_idx = 0
-        if rank_idx >= len(SUPPORTED_RANKS): rank_idx = len(SUPPORTED_RANKS)-1
+        if rank_idx >= len(SUPPORTED_RANKS): rank_idx = len(SUPPORTED_RANKS) - 1
         rank_str = SUPPORTED_RANKS[rank_idx].replace("rank_", "").replace("_", " ").upper()
-        
-        # Debug: show probabilities
-        # print("    Probabilities by rank:")
-        # for i, rank in enumerate(SUPPORTED_RANKS):
-        #     r = rank.replace("rank_", "").replace("_", " ").upper()
-        #     print(f"      {r}: {probabilities[i]:.3f}")
-        
-        return rank_str,mu,sigma
 
-    def _get_probability_for_rank(self, rank_string, moves, correct_move):
+        return rank_str, mu, sigma
+
+
+    def _get_order_for_rank(self, rank_string, moves, correct_move):
         """
-        Gets the probability of correct move for a given rank.
+        Gets the move rank of moves by plicy of the correct move for a given strength rank.
 
         Args:
             rank_string (str): The rank to check.
@@ -78,144 +85,154 @@ class ProblemFinder:
             correct_move (str): The correct move.
 
         Returns:
-            float: Probability of the correct move.
+            float: index of the correct move when sorted by policy, 0 indicating first choice, and ascending from there.
 
         Raises:
             Exception: If any step fails unexpectedly.
         """
-        response = self.controller.query_root(moves, humanRank=rank_string)
+        response = self.queries.query_root(moves, human_rank=rank_string)
         if not response:
             raise Exception(f"No response for rank: {rank_string}")
-            
+
         # Use humanPolicy if available, else policy
         policy = response.get("humanPolicy", response.get("policy", []))
         if not policy:
             raise Exception(f"Empty policy in response for rank: {rank_string}")
-            
-        # Convert move to index
-        idx = self.controller.get_idx_from_move(correct_move)
+
+        # Get index of correct move and its policy probability
+        idx = self.queries.get_idx_from_move(correct_move)
         if idx is None:
             raise Exception(f"Invalid move: {correct_move}")
         if idx >= len(policy):
             raise Exception(f"Move index {idx} out of bounds for policy length {len(policy)}")
-            
-        return policy[idx]
 
+        # Return rank by sorting policy probabilities
+        prob_with_idx = [(p, i) for i, p in enumerate(policy) if p > 0]
+        prob_with_idx.sort(reverse=True)
+        rank = next(i for i, (p, move_idx) in enumerate(prob_with_idx) if move_idx == idx)
+        return rank
 
     def _print_position_info(self, moves, label):
         """
         Helper to get and print position info (score, winrate, num_moves_above_50).
         """
-        score, winrate = self.controller.get_position_info(moves)
+        score, winrate = self.queries.get_position_info(moves)
         num_above = self._get_num_moves_above_50(moves)
         print(f"    {label}: {score:.1f}, {winrate:.3f}, {num_above}")
 
-    def _debug(self,move_info):
-        for mi in move_info:
-            candidate_move = mi['move']
-            candidate_score = mi['scoreLead']
-            candidate_winrate = mi['winrate']
-            print(f" DEBUG:    {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
-
-    def _penalty(self,score,winrate):
-        return abs(score - 0.5) + 0.25 * (1 - winrate)
-
-    def validate_and_adjust_tsumego(self, moves, player_to_move):
+    def adjust_tsumego(self,moves,player_to_move):
         """
-        Validates and adjusts position to meet tsumego criteria.
-        Returns (is_valid, final_score, adjusted_moves, solution_move)
-
-        Args:
-            moves (list): The list of moves in the game.
-            player_to_move (str): The player to move ("B" or "W").
-
-        Returns:
-            tuple: (is_valid, final_score, adjusted_moves, solution_move)
         """
-        move_num = len(moves)+1
-        print(f"\n  Validating tsumego at move {move_num}...")
         adjusted_moves = moves.copy()
+        move_num = len(moves)+1
+
+        print(f"\n  Adjusting tsumego at move {move_num}...")
         self._print_position_info(adjusted_moves, "Initial")
 
-        # First, check if the score is already in [0,1] for Black
+        # First, check if the score is already in [MIN_SCORE-MAX_SCORE] for Black
         while True:
-            score,winrate = self.controller.get_position_info(adjusted_moves)
-            if 0 < score < 1 and winrate > 0.5:
+            score,winrate = self.queries.get_position_info(adjusted_moves)
+            if MIN_SCORE < score < MAX_SCORE and winrate > MIN_WINRATE_CORRECT:
                 break
             print(f"    Adjusting score because (score: {score:.1f}, winrate: {winrate:.3f})")
-            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, player_to_move)
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_score(adjusted_moves, player_to_move)
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
             if candidate_move == "pass":
-                return False,None,None,None
-            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_to_0_5(adjusted_moves, other_player(player_to_move))
+                return None
+            adjusted_moves, candidate_move, candidate_winrate, candidate_score = self._adjust_score(adjusted_moves, other_player(player_to_move))
             print(f"    {other_player(player_to_move)} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
             if candidate_move == "pass":
-                return False,None,None,None
+                return None
 
         self._print_position_info(adjusted_moves, "After adjustment")
 
         while True:
-            response = self.controller.query_children_100_visits(adjusted_moves)
+            response = self.queries.query_children_100_visits(adjusted_moves)
             # Count moves above 50% winrate
-            winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > 0.5]
+            winning_moves = [mi for mi in response["moveInfos"] if mi['winrate'] > MAX_WINRATE_ALTERNATIVE]
             num_winning_moves = len(winning_moves)
             if num_winning_moves == 1:
                 print( "only 1 winning move, ready for check" )
                 break
             if num_winning_moves == 0:
                 print( "no winning moves" )
-                return False, None, None, None
+                return None
             print(f"    Eliminating moves because {num_winning_moves} excess winning moves." )
 
             candidate_move = winning_moves[1]['move']
             candidate_score = winning_moves[1]['scoreLead']
             candidate_winrate = winning_moves[1]['winrate']
             if candidate_move == "pass":
-                return False,None,None,None
+                return None
             print(f"    {player_to_move} {candidate_move} (score: {candidate_score:.1f}, winrate: {candidate_winrate:.3f})")
 
             # Add candidate move to adjusted_moves
             adjusted_moves.append([player_to_move, candidate_move])
 
             # Query for opponent's best response
-            response_after_candidate = self.controller.query_root(adjusted_moves)
+            response_after_candidate = self.queries.query_root(adjusted_moves)
 
             # Extract policy and find best move index (excluding -1 for illegal moves)
             policy = response_after_candidate["policy"]
             best_idx = max(range(len(policy)), key=lambda i: policy[i] if policy[i] != -1 else -999)
-            opponent_move = self.controller.get_move_from_idx(best_idx)
+            opponent_move = self.queries.get_move_from_idx(best_idx)
             print(f"    {other_player(player_to_move)} {opponent_move} (score: ?, winrate: ?)")
 
             # Add opponent's response to adjusted_moves
             adjusted_moves.append([other_player(player_to_move), opponent_move])
 
+        return adjusted_moves
+
+
+    def validate_tsumego(self, moves, player_to_move):
+        """
+        Validates position to to ensure its score 0-1 for black, only one move with positive score and winrate above 50%, and correct move is in range 19kyu-8dan.
+
+        Args:
+            moves (list): The list of moves in the game.
+            player_to_move (str): The player to move ("B" or "W").
+
+        Returns:
+            tuple: (is_valid, solution_move, rank_str, mean rank, std rank)
+        """
+        move_num = len(moves)+1
+        print(f"\n  Validating tsumego...")
+
         # Now verify the solution move
-        solution_response = self.controller.query_children_100_visits(adjusted_moves)
+        solution_response = self.queries.query_children_100_visits(moves)
         solution_move_info = solution_response["moveInfos"][0]
 
         solution_move = solution_move_info["move"]
         solution_winrate = solution_move_info["winrate"]
         solution_score = solution_move_info["scoreLead"]
-        if solution_winrate < 0.5:
-            print(f"    ❌ Solution move winrate too low: {solution_winrate:.3f}")
-            return False, None, None, None
+        if solution_winrate < MIN_WINRATE_CORRECT:
+            print(f"    ❌ Solution move winrate of {solution_winrate:.3f} is below {MIN_WINRATE_CORRECT}:.3f")
+            return False, None, None, None, None
+        if not MIN_SCORE < solution_score < MAX_SCORE:
+            print(f"    ❌ Solution move score: {solution_score:.3f} is not in range [{MIN_SCORE}-{MAX_SCORE}]")
+            return False, None, None, None, None
 
         # Check alternative moves
-        exclude_response = self.controller.query_children_exclude_move(adjusted_moves, solution_move, player_to_move)
+        exclude_response = self.queries.query_children_exclude_move(moves, solution_move, player_to_move)
         for move_info in exclude_response["moveInfos"]:
-            if move_info["winrate"] > 0.5 or move_info["scoreLead"] > 0 :
-                print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f} and score {move_info["scoreLead"]}")
-                return False, None, None, None
+            if move_info["winrate"] > MAX_WINRATE_ALTERNATIVE:
+                print(f"    ❌ Alternative move {move_info['move']} has winrate {move_info['winrate']:.3f}")
+                return False, None, None, None, None
 
-        # All checks passed
-        return True, solution_score, adjusted_moves, solution_move
+        rank_str,mu,sigma = self.assess_move_difficulty(moves, player_to_move, solution_move)
+        print(f"  Difficulty: {mu:.2f}({rank_str}) ± {sigma:.3f} ")
+        if not 0 < mu < len(SUPPORTED_RANKS) - 1 :
+            print(f"    ❌ Tsumego too easy or hard [19k-8d]")
+            return False, None, None, None, None
+
+        return True, solution_move, rank_str, mu, sigma
 
     def _get_num_moves_above_50(self, moves):
         """
         Helper to get the number of moves with winrate above 50% for the current player.
         Returns None if failed.
         """
-        response = self.controller.query_children(moves)
+        response = self.queries.query_children(moves)
         if not response:
             raise Exception("No response from KataGo for moves above 50%")
         if "moveInfos" not in response:
@@ -231,9 +248,9 @@ class ProblemFinder:
 
         return num_moves_above_50
 
-    def _adjust_to_0_5(self, moves, player):
+    def _adjust_score(self, moves, player):
         """
-        Adjusts position to ensure solution leads to ~0.5 win.
+        Adjusts position to ensure solution leads to ~(MIN_SCORE+MAX_SCORE)/2 win.
         Performs a single exchange (player move + opponent response) if needed.
         Returns original sequence if no adjustments were needed or possible.
 
@@ -246,7 +263,7 @@ class ProblemFinder:
             list: Adjusted move sequence
         """
         # Query for moves in current position (player's turn)
-        response = self.controller.query_children(moves)
+        response = self.queries.query_children(moves)
 
         best_candidate = None
         best_candidate_penalty = float('inf')
@@ -261,7 +278,7 @@ class ProblemFinder:
 
             candidate_score = move_info["scoreLead"]
             candidate_winrate = move_info["winrate"]
-            penalty = self._penalty(candidate_score,candidate_winrate)
+            penalty = abs(candidate_score - (MAX_SCORE + MIN_SCORE) / 2) + 0.25 * (1 - candidate_winrate)
             # penalty = abs(candidate_score - 0.5)
 
             if penalty < best_candidate_penalty:
@@ -286,10 +303,8 @@ class ProblemFinder:
         Returns:
             list: A list of identified problems.
         """
-        problems = []
         # Pre-allocate difficulties array
-        difficulties = [None] * len(game_moves)
-        adjusted_moves_list = [None] * len(game_moves)
+        tsumegos = []
 
         # Analyze all moves except first 10 and last 10
         for i in range(10, len(game_moves) - 10):
@@ -297,21 +312,23 @@ class ProblemFinder:
                 continue
             moves_so_far = game_moves[:i]
             player_to_move = game_moves[i][0]
-            correct_move = game_moves[i][1]
 
             print(f"\nValidating tsumego at move {i+1}/{len(game_moves)}...")
-            is_valid, adjusted_score, adjusted_moves, solution_move = self.validate_and_adjust_tsumego(moves_so_far, player_to_move)
-            if not is_valid or not solution_move:
-                print(f"  ❌ Not a valid tsumego.")
+            adjusted_moves = self.adjust_tsumego(moves_so_far,player_to_move)
+            if adjusted_moves is None:
                 continue
-
-            rank_str,mu,sigma = self.assess_move_difficulty(adjusted_moves, player_to_move, solution_move)
-            print(f"  Difficulty: {mu:.2f}({rank_str}) ± {sigma:.3f} ")
-            if 0 < mu < len(SUPPORTED_RANKS) - 1 and sigma < 5:
-                print( "Valid tsumego" )
-                difficulties[i] = rank_str
-                adjusted_moves_list[i] = adjusted_moves
-        return problems
+            is_valid, solution_move, rank_str, mu, sigma = self.validate_tsumego(adjusted_moves, player_to_move)
+            if not is_valid:
+                continue
+            print( "Valid tsumego" )
+            tsumegos.append({
+                "moves":adjusted_moves,
+                "solution":solution_move,
+                "rank":rank_str,
+                "mean":mu,
+                "stddev":sigma
+            })
+        return tsumegos
 
     def save_problem_as_sgf(self, problem, filename, board_size=9, komi=7.5):
         """
@@ -326,19 +343,19 @@ class ProblemFinder:
         game = sgf.Sgf_game(size=board_size)
         game.root.set("KM", str(komi))
         game.root.set("RU", "tromp-taylor")
-        game.root.set("GN", f"Problem Difficulty: {problem["difficulty"]}")
+        game.root.set("GN", f"Problem Difficulty: {problem["rank"]}±{int(round(problem["stddev"]))}")
 
         # Add initial moves
         for player, move in problem["moves"]:
             node = game.extend_main_sequence()
-            node.set_move(player.lower(), self.controller._katago_to_sgf_coords(move, board_size))
+            node.set_move(player.lower(), katago_to_sgf_coords(move, board_size))
 
         # Add the solution move and annotations
         solution_player, solution_move = problem["solution"]
         solution_node = game.extend_main_sequence()
-        solution_node.set_move(solution_player.lower(), self.game_generator._katago_to_sgf_coords(solution_move, board_size))
-        solution_node.set("C", f"Solution move for {problem["difficulty"]} problem.")
-        solution_node.set("MA", [self.game_generator._katago_to_sgf_coords(solution_move, board_size)])
+        solution_node.set_move(solution_player.lower(), katago_to_sgf_coords(solution_move, board_size))
+        solution_node.set("C", f"Solution move for {problem["rank"]}±{int(round(problem["stddev"]))} problem.")
+        solution_node.set("MA", [katago_to_sgf_coords(solution_move, board_size)])
 
         with open(filename, "wb") as f:
             f.write(game.serialise())
