@@ -210,7 +210,7 @@ class KatagoQueries:
     def get_best_move(self, response):
         """
         Helper to get the the best policy move
-        Returns move
+        Returns move,winrate,score
         """
 
         if response["moveInfos"]:
@@ -222,7 +222,7 @@ class KatagoQueries:
             policy = response["policy"]
             score = response["rootInfo"]["scoreLead"]
             winrate = response["rootInfo"]["winrate"]
-            return self.get_move_from_idx(policy.index(max(policy))),score,winrate
+            return self.get_move_from_idx(policy.index(max(policy))),winrate,score
 
 
 def get_player_to_move_next(moves):

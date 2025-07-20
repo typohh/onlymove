@@ -6,11 +6,10 @@ import concurrent.futures
 import time
 import threading
 
-from Stats import STATS
+from Stats import STATS, DEBUG
 from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder
 from katago_controller import KatagoController
-import game_generator
 
 # Define paths - adjust these if your KataGo executable or models are elsewhere
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,16 +26,7 @@ def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: P
     Generates one game and finds all problems within it.
     """
     try:
-        game_output_dir = "./generated_games"
-        os.makedirs(game_output_dir, exist_ok=True)
-
-        # 1. Generate a game
-        game_moves = game_generator.generate_game(katago_queries)
-        game_filename = os.path.join(game_output_dir, f"{uuid.uuid4()}.sgf")
-        game_generator.save_game_sgf(game_moves, game_filename)
-
-        # 2. Find problems in the generated game
-        problem_finder.find_problems(game_moves, OUTPUT_DIR)
+        problem_finder.create_problem(OUTPUT_DIR)
 
     except Exception as e:
         print(f"An error occurred in worker {worker_id}: {e}")
@@ -44,7 +34,7 @@ def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: P
 
 
 def print_stats():
-    while True:
+    while not DEBUG:
         time.sleep(10)
         print("\n--- Statistics ---")
         current_stats = STATS.get_stats()
@@ -63,6 +53,9 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
     parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel worker threads to run")
     args = parser.parse_args()
+
+    if DEBUG:
+        args.num_workers = 1
 
     controller = None
     try:

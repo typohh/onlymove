@@ -1,15 +1,15 @@
 import os
 import uuid
+import random
 
 from sgfmill import sgf
 
-from Stats import STATS
+from Stats import STATS, DEBUG
 from difficulty_evaluator import DifficultyEvaluator
-from game_generator import katago_to_sgf_coords
-from katago_queries import KatagoQueries
+from katago_queries import KatagoQueries, katago_to_sgf_coords
 
-MIN_SCORE = 0
-MAX_SCORE = 2
+MIN_SCORE = -2
+MAX_SCORE = 0
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4
 
@@ -28,6 +28,59 @@ class ProblemFinder:
         self.queries = queries
         self.difficulty = DifficultyEvaluator(queries)
 
+    def generate_initial_position(self):
+        """
+        Generates a single game by starting with random moves and then balancing the game.
+
+        Returns:
+            list: A list of moves representing the game sequence.
+        """
+        moves = []
+
+        # 1. Play 4 random moves
+        for _ in range(4):
+            response = self.queries.query_policy(moves)
+            # Filter out pass moves and moves with very low policy values
+            legal_moves = [
+                (i, p)
+                for i, p in enumerate(response["policy"])
+                if p > 1e-5 and self.queries.get_move_from_idx(i) != "pass"
+            ]
+
+            # Weighted random sampling based on policy
+            move_indices, probabilities = zip(*legal_moves)
+            total_prob = sum(probabilities)
+            normalized_probs = [p / total_prob for p in probabilities]
+            chosen_idx = random.choices(move_indices, weights=normalized_probs)[0]
+            move = self.queries.get_move_from_idx(chosen_idx)
+
+            moves.append(move)
+
+        if DEBUG:
+            move,winrate,score=self.queries.get_best_move(self.queries.query_policy(moves))
+            print(f"status after 4 random moves: {(100*winrate):.1f}% {score:.1f}")
+
+        # 2. Play 2 moves to balance the game
+        for _ in range(2):
+            response = self.queries.query_children_low(moves)
+            if not response.get("moveInfos"):
+                break  # No further moves possible
+
+            # Find the move that brings the score closest to 0
+            best_move = min(
+                response["moveInfos"],
+                key=lambda x: abs(x["scoreLead"]) * abs(x["winrate"] - 0.5),
+            )["move"]
+
+            moves.append(best_move)
+
+        if DEBUG:
+            move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
+            print(f"status after rebalance: {(100*winrate):.1f}% {score:.1f}")
+
+        return moves
+
+
     def adjust_tsumego(self, moves):
         """
         play additional exchanges in an attempt to get score for BLACK within MIN_SCORE and MAX_SCORE. and so there is only one move with winrate abeove MAX_WINRATE_ALTERNATIVE and it has winrate above MIN_WINRATE_CORRECT.
@@ -35,166 +88,72 @@ class ProblemFinder:
 
         # We want the tsumego to have large gap in winrate between best and second best move. We want the score of the second best move to be close to -0.5 as possible.
 
+        if DEBUG: print("adjusting tsumego")
+
         # if multiple moves above MAX_WINRATE_ALTERNATIVE, remove all but one.
         while True:
             best_move, best_winrate, best_score = self.queries.get_best_move(self.queries.query(moves))
             second_move, second_winrate, second_score = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move))
 
+            print( f"{(100*best_winrate):.1f}%, {(100*second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}" )
+
             # do we meet all criteria?
             if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and MIN_SCORE < second_score < MAX_SCORE :
+                if DEBUG: print( "valid tsumego!" )
                 return moves,best_move
 
-            if best_move == "pass":
-                STATS.add_problems_found( "black best move was pass")
+            if best_move == "pass" or second_move == "pass":
+                if DEBUG: print( "terminating due to pass" )
                 return None, None
 
-
             # black plays second best move
+            print( f"B {second_move} {(second_winrate*100):.1f}% {second_score:.1f}")
             moves.append(second_move)
 
             response = self.queries.query_children_low(moves)
 
-            if best_winrate < MIN_WINRATE_CORRECT or second_winrate > MAX_WINRATE_ALTERNATIVE:
-                STATS.add_winrate_correction()
-                # Find a move that gets black's winrate just above MIN_WINRATE_CORRECT
-                best_response = None
-                best_response_penalty = float('inf')
+            STATS.add_score_correction()
+            # Find move that makes score difference closest to target
+            best_response = None
+            best_response_penalty = float('inf')
+            best_score = 0
+            best_winrate = 0.5
+            target_score = best_score - second_score + (MIN_SCORE + MAX_SCORE) / 2
 
-                for move_info in response["moveInfos"]:
-                    test_winrate = move_info["winrate"]
+            for move_info in response["moveInfos"]:
+                penalty = abs(move_info["scoreLead"] - target_score)
+                if penalty < best_response_penalty:
+                    best_response_penalty = penalty
+                    best_response = move_info["move"]
+                    best_score = move_info["scoreLead"]
+                    best_winrate = move_info["winrate"]
 
-                    penalty = abs(test_winrate - MIN_WINRATE_CORRECT)
-                    if test_winrate > MIN_WINRATE_CORRECT:
-                        penalty *= 10
-                    if penalty < best_response_penalty:
-                        best_response_penalty = penalty
-                        best_response = move_info["move"]
+            print( f"W {best_response} {(best_winrate*100):.1f}% {best_score:.1f}")
+            moves.append(best_response)
 
-                moves.append(best_response)
-            else:
-                STATS.add_score_correction()
-                # Find move that makes score difference closest to target
-                best_response = None
-                best_response_penalty = float('inf')
-                target_score = best_score - second_score - 1
+    def create_problem(self,output_dir):
+        STATS.add_tsumego_creation_attempt()
 
-                for move_info in response["moveInfos"]:
-                    penalty = abs(move_info["scoreLead"] - target_score)
-                    if penalty < best_response_penalty:
-                        best_response_penalty = penalty
-                        best_response = move_info["move"]
+        moves_so_far = self.generate_initial_position()
 
-                moves.append(best_response)
+        adjusted_moves, solution_move = self.adjust_tsumego(moves_so_far.copy())
+        if not solution_move:
+            STATS.add_failed_tsumego_creation()
+            return False
 
-    def validate_tsumego(self, moves):
-        """
-        Validates position to to ensure its score 0-1 for black, only one move with positive score and winrate above 50%, and correct move is in range 19kyu-8dan.
+        move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
+        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves)
 
-        Args:
-            moves (list): The list of moves in the game.
-
-        Returns:
-            solution_move or None if not valid tsumego
-        """
-        # Now verify the solution move
-        solution_response = self.queries.query(moves, True)
-        solution_move_info = solution_response["moveInfos"][0]
-
-        solution_move = solution_move_info["move"]
-        solution_winrate = solution_move_info["winrate"]
-        solution_score = solution_move_info["scoreLead"]
-        if solution_winrate < MIN_WINRATE_CORRECT:
-            STATS.add_rejection_reason("Winrate too low")
-            return None
-        if solution_score < MIN_SCORE:
-            STATS.add_rejection_reason("Score too low")
-            return None
-        if not solution_score > MAX_SCORE:
-            STATS.add_rejection_reason("Score too high")
-            return None
-
-        # Check alternative moves
-        exclude_response = self.queries.query(moves, True, solution_move)
-        for move_info in exclude_response["moveInfos"]:
-            if move_info["winrate"] > MAX_WINRATE_ALTERNATIVE:
-                STATS.add_rejection_reason("Alternative too good")
-                return None
-
-        return solution_move
-
-    def _adjust_score(self, moves):
-        """
-        Adjusts position to ensure solution leads to ~(MIN_SCORE+MAX_SCORE)/2 win.
-        Performs a single exchange (player move + opponent response) if needed.
-        Returns original sequence if no adjustments were needed or possible.
-
-        Args:
-            moves (list): Current move sequence
-
-        Returns:
-            list: Adjusted move sequence
-        """
-        # Query for moves in current position (player's turn)
-        response = self.queries.query_children_low(moves)
-
-        best_candidate = None
-        best_candidate_penalty = float('inf')
-        best_candidate_winrate = None
-        best_candidate_score = None
-
-        # Find best candidate move for player
-        for move_info in response["moveInfos"]:
-            candidate_move = move_info["move"]
-            if "scoreLead" not in move_info or "visits" not in move_info:
-                continue
-
-            candidate_score = move_info["scoreLead"]
-            candidate_winrate = move_info["winrate"]
-            penalty = abs(candidate_score - (MAX_SCORE + MIN_SCORE) / 2) + 0.25 * (1 - candidate_winrate)
-            # penalty = abs(candidate_score - 0.5)
-
-            if penalty < best_candidate_penalty:
-                best_candidate_penalty = penalty
-                best_candidate = candidate_move
-                best_candidate_winrate = candidate_winrate
-                best_candidate_score = candidate_score
-
-        # Apply player's candidate move
-        adjusted_moves = moves + [best_candidate]
-
-        return adjusted_moves, best_candidate, best_candidate_winrate, best_candidate_score
-
-    def find_problems(self, game_moves, output_dir):
-        """
-        Finds problems in a game sequence.
-
-        Args:
-            game_moves (list): The list of moves in the game.
-            output_dir (str): The directory to save problems to.
-
-        """
-        # Analyze all moves except first 10 and last 10
-        for i in list(reversed(range(10, len(game_moves) - 10))):
-            if game_moves[i][0] != "B":
-                continue
-            STATS.add_tsumego_creation_attempt()
-            moves_so_far = game_moves[:i]
-
-            adjusted_moves,solution_move = self.adjust_tsumego(moves_so_far.copy())
-            if not solution_move:
-                continue
-
-            move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
-            game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves)
-
-            STATS.add_problems_found(1)
-            self.save_problem_as_sgf({
-                "moves": adjusted_moves,
-                "solution": solution_move,
-                "move_rank": self.difficulty.get_rank_str(move_mean, move_stddev),
-                "game_rank": self.difficulty.get_rank_str(game_mean, game_stddev)
-            }, output_dir)
+        STATS.add_problem_found()
+        self.save_problem_as_sgf({
+            "moves": adjusted_moves,
+            "solution": solution_move,
+            "move_rank": self.difficulty.get_rank_str(move_mean, move_stddev),
+            "game_rank": self.difficulty.get_rank_str(game_mean, game_stddev)
+        }, output_dir)
         STATS.add_game_processed()
+        return True
+
 
     @staticmethod
     def save_problem_as_sgf(problem, output_dir):
@@ -214,7 +173,7 @@ class ProblemFinder:
         game = sgf.Sgf_game(size=9)
         game.root.set("KM", str(7.5))
         game.root.set("RU", "tromp-taylor")
-        game.root.set("GN", f"Next move difficulty: {problem["move_rank"]}, Remaining game difficulty: {problem['game_rank']}")
+        game.root.set("GN", f"Last move difficulty: {problem["move_rank"]}, Last move + remaining game difficulty: {problem['game_rank']}")
 
         player = "b"
 
@@ -228,7 +187,7 @@ class ProblemFinder:
         solution_move = problem["solution"]
         solution_node = game.extend_main_sequence()
         solution_node.set_move(player, katago_to_sgf_coords(solution_move, 9))
-        solution_node.set("C", f"Next move difficulty: {problem["move_rank"]}, Remaining game difficulty: {problem['game_rank']}")
+        solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
         solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
 
         with open(filename, "wb") as f:

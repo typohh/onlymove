@@ -59,6 +59,24 @@ class DifficultyEvaluator:
 
         return average_mu, average_sigma
 
+    def rank_probabilities_into_distribution(self,probabilities):
+
+        # Convert probabilities to z-scores
+        clamped_probs = np.clip(probabilities, 0.01, 0.99)
+        z_scores = norm.ppf(clamped_probs)
+
+        # Create numerical rank values
+        numerical_ranks = np.arange(len(probabilities))
+
+        # Solve linear regression: rank = mu + sigma * z_score
+        a = np.vstack([np.ones(len(z_scores)), z_scores]).T
+        mu, sigma = np.linalg.lstsq(a, numerical_ranks)[0]
+
+        # Ensure positive standard deviation
+        sigma = abs(sigma)
+
+        return mu, sigma
+
     def _assess_move_difficulty(self, moves, correct_move, ranks):
         """
         Assesses difficulty by sampling all ranks determinig CDF for probability of move being played.
@@ -78,21 +96,8 @@ class DifficultyEvaluator:
             probability = self._get_probability_for_rank(rank, moves, correct_move)
             probabilities.append(probability)
 
-        # Convert probabilities to z-scores
-        clamped_probs = np.clip(probabilities, 0.01, 0.99)
-        z_scores = norm.ppf(clamped_probs)
+        return self.rank_probabilities_into_distribution(probabilities)
 
-        # Create numerical rank values
-        numerical_ranks = np.arange(len(ranks))
-
-        # Solve linear regression: rank = mu + sigma * z_score
-        a = np.vstack([np.ones(len(z_scores)), z_scores]).T
-        mu, sigma = np.linalg.lstsq(a, numerical_ranks)[0]
-
-        # Ensure positive standard deviation
-        sigma = abs(sigma)
-
-        return mu, sigma
 
     def _get_probability_for_rank(self, rank_string, moves, correct_move):
         """
@@ -119,11 +124,14 @@ class DifficultyEvaluator:
 
         return policy[idx]
 
-    def _playout_game(self, moves, rank):
+    def _playout_game(self, moves, rank, random=False):
         simulation_moves = moves.copy()
         while True:
             # Human player's turn
-            human_move = self.queries.query_weighted_random_move(simulation_moves, rank)
+            if random:
+                human_move = self.queries.query_weighted_random_move(simulation_moves, rank)
+            else:
+                human_move,_,_ = self.queries.get_best_move(self.queries.query_policy(simulation_moves,rank))
             simulation_moves.append(human_move)
 
             # Check if game is over
@@ -131,9 +139,11 @@ class DifficultyEvaluator:
                 break
 
             # KataGo's turn
-            # response = self.queries.query_low(simulation_moves)
-            # katago_move = response["moveInfos"][0]["move"]
-            katago_move = self.queries.get_best_move(self.queries.query_policy(simulation_moves))
+            katago_move,winrate,_ = self.queries.get_best_move(self.queries.query_policy(simulation_moves))
+
+            if winrate < 0.01: # katago thinks 99% chance of it winning
+                return False
+
             simulation_moves.append(katago_move)
 
             # Check if game is over
@@ -154,31 +164,32 @@ class DifficultyEvaluator:
             moves (list): The list of moves in the game.
 
         Returns:
-            str: The rank at which the human player has a 50% chance of winning.
+            float: mean rank where 50% chance of winning is exceeded
+            float: std for the uncertainty in the rank
         """
-        best_rank = None
-        closest_winrate_diff = float('inf')
+
+        MC = False
 
         for rank in SUPPORTED_RANKS:
-            wins = 0
-            for _ in range(SIMULATION_ROUNDS):
-                if self._playout_game(moves, rank):
-                    wins += 1
-            winrate = wins / SIMULATION_ROUNDS
-            winrate_diff = abs(winrate - 0.5)
+            if MC:
+                wins = 0
+                for _ in range(SIMULATION_ROUNDS):
+                    if self._playout_game(moves, rank, True):
+                        wins += 1
+                winrate = wins / SIMULATION_ROUNDS
+            else:
+                winrate = 1 if self._playout_game(moves,rank) else 0
+            if winrate > 0.5 :
+                return SUPPORTED_RANKS.index(rank),0
 
-            if winrate_diff < closest_winrate_diff:
-                closest_winrate_diff = winrate_diff
-                best_rank = rank
-
-        return best_rank[5:]
+        return len(SUPPORTED_RANKS),0
 
     @staticmethod
     def get_rank_str(mean, stddev=None):
         """
         returns rank as string
         """
-        mean_str = SUPPORTED_RANKS[int(round(mean))][5:]
+        mean_str = SUPPORTED_RANKS[max(0,min(int(round(mean)),len(SUPPORTED_RANKS)-1))][5:]
         if stddev:
             return f"{mean_str}±{stddev:.1f}"
         else:
