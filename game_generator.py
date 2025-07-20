@@ -1,36 +1,59 @@
+import random
 from katago_queries import KatagoQueries, sgf_to_katago_coords, katago_to_sgf_coords
 from sgfmill import sgf
 
-def generate_game(queries:KatagoQueries):
+def generate_game(queries: KatagoQueries):
     """
-    Generates a single game.
-
-    Args:
+    Generates a single game by starting with random moves and then balancing the game.
 
     Returns:
         list: A list of moves representing the game sequence.
     """
     moves = []
-    player = "B"
-    consecutive_passes = 0
 
+    # 1. Play 4 random moves
+    for _ in range(4):
+        response = queries.query_policy(moves)
+        # Filter out pass moves and moves with very low policy values
+        legal_moves = [
+            (i, p)
+            for i, p in enumerate(response["policy"])
+            if p > 1e-5 and queries.get_move_from_idx(i) != "pass"
+        ]
+
+        # Weighted random sampling based on policy
+        move_indices, probabilities = zip(*legal_moves)
+        total_prob = sum(probabilities)
+        normalized_probs = [p / total_prob for p in probabilities]
+        chosen_idx = random.choices(move_indices, weights=normalized_probs, k=1)[0]
+        move = queries.get_move_from_idx(chosen_idx)
+
+        moves.append(move)
+
+    # 2. Play 2 moves to balance the game
+    for _ in range(2):
+        response = queries.query_children_low(moves)
+        if not response.get("moveInfos"):
+            break  # No further moves possible
+
+        # Find the move that brings the score closest to 0
+        best_move = min(
+            response["moveInfos"],
+            key=lambda x: abs(x["scoreLead"]) * abs(x["winrate"]-0.5),
+        )["move"]
+
+    # 3. Continue with normal game generation
+    consecutive_passes = 0
     while consecutive_passes < 2:
-        response = queries.query_root(moves)
-        if response and "policy" in response and response["policy"]:
-            best_move_idx = response['policy'].index(max(response['policy']))
-            best_move = queries.get_move_from_idx(best_move_idx)
-        elif response and "moveInfos" in response and response["moveInfos"]:
-            best_move = response["moveInfos"][0]["move"]
-        else:
-            best_move = "pass"
+        response = queries.query_policy(moves)
+        best_move,_,_ = queries.get_best_move(response)
 
         if best_move == "pass":
             consecutive_passes += 1
         else:
             consecutive_passes = 0
 
-        moves.append([player, best_move])
-        player = "W" if player == "B" else "B"
+        moves.append(best_move)
 
     return moves
 
@@ -48,9 +71,12 @@ def save_game_sgf(moves, filename, board_size=9, komi=7.5):
     game.root.set("KM", str(komi))
     game.root.set("RU", "tromp-taylor")
 
-    for player, move in moves:
+    player = "b"
+
+    for move in moves:
         node = game.extend_main_sequence()
-        node.set_move(player.lower(), katago_to_sgf_coords(move, board_size))
+        node.set_move(player, katago_to_sgf_coords(move, board_size))
+        player = "w" if player == "b" else "b"
 
     with open(filename, "wb") as f:
         f.write(game.serialise())
@@ -74,5 +100,5 @@ def load_game_sgf(filename):
     for node in sgf_game.get_main_sequence():
         player, move = node.get_move()
         if player is not None:
-            moves.append([player.upper(), sgf_to_katago_coords(move, board_size)])
+            moves.append(sgf_to_katago_coords(move, board_size))
     return moves

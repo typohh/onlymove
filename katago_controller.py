@@ -1,9 +1,6 @@
 import subprocess
 import json
-
-LOW_PLAYOUTS = 10
-HIGH_PLAYOUTS = 100
-
+import threading
 
 class KatagoController:
     """
@@ -25,6 +22,8 @@ class KatagoController:
         self.counter = 0
         self.process = None
         self.stderr_thread = None
+        # Add a lock for thread safety
+        self.lock = threading.Lock()
 
     def start_engine(self, verbose=False):
         """
@@ -55,7 +54,6 @@ class KatagoController:
             )
             # Only start a thread to read stderr if verbose
             if verbose:
-                import threading
                 def read_stderr(process):
                     for line in process.stderr:
                         print(f"KataGo STDERR: {line.strip()}")
@@ -73,13 +71,23 @@ class KatagoController:
         Stops the KataGo analysis engine.
         """
         if self.process:
-            self.process.stdin.close()
-            self.process.terminate()
-            self.process.wait()
+            try:
+                self.process.stdin.close()
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except (IOError, BrokenPipeError):
+                # Ignore errors that can happen during shutdown
+                pass
+            except subprocess.TimeoutExpired:
+                print("KataGo process did not terminate gracefully, killing.")
+                self.process.kill()
+                self.process.wait()
+            finally:
+                self.process = None
 
     def send_query(self, query):
         """
-        Sends a JSON query to the KataGo analysis engine.
+        Sends a JSON query to the KataGo analysis engine in a thread-safe manner.
 
         Args:
             query (dict): The query to send to the engine.
@@ -90,18 +98,26 @@ class KatagoController:
         if not self.process:
             raise Exception("KataGo engine is not running.")
 
-        query["id"] = str(self.counter)
-        self.counter += 1
+        # Acquire the lock to ensure this whole operation is atomic
+        with self.lock:
+            query["id"] = str(self.counter)
+            self.counter += 1
 
-        query_str = json.dumps(query)
-        self.process.stdin.write(query_str + "\n")
-        self.process.stdin.flush()
+            query_str = json.dumps(query)
 
-        return self._read_response()
+            try:
+                self.process.stdin.write(query_str + "\n")
+                self.process.stdin.flush()
+                response = self._read_response()
+            except (BrokenPipeError, IOError) as e:
+                raise Exception(f"Error communicating with KataGo, it may have crashed: {e}")
+
+            return response
 
     def _read_response(self):
         """
         Reads and parses a JSON response from the KataGo engine.
+        This method should only be called by send_query, which holds the lock.
 
         Returns:
             dict: The parsed JSON response.
@@ -111,15 +127,17 @@ class KatagoController:
         """
         response_str = self.process.stdout.readline()
         if not response_str:
+            # Check if the process exited unexpectedly
+            if self.process.poll() is not None:
+                raise Exception("KataGo engine exited unexpectedly while waiting for a response.")
             raise Exception("KataGo engine returned empty response")
 
         response = json.loads(response_str)
         if "error" in response:
             raise Exception(f"KataGo error: {response['error']}")
         if "warning" in response:
-            raise Exception(f"KataGo warning: {response['warning']}")
+            # Warnings are often not fatal, but good to be aware of.
+            # Depending on the need, you might just print it instead of raising.
+            print(f"KataGo warning: {response['warning']}")
 
         return response
-
-
-

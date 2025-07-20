@@ -3,34 +3,14 @@
 This project generates Go problems using KataGo.
 
 Generation strategy is to play out a single game, then evaluate each black position during the game as posible tsumego candidate.
-- We can start this evaluation at the last position, and proceed backwards in the game. When we reach 1 dan difficulty, we can stop as we do not want harder than 1 dan tsumegos.
 
-We may try to alter the position to ensure following goals are met:
-- The correct move leads to black winning by 0.5 points. This can be managed by having black and white play exchanges, which allowes one to play subpar move to adjust the score towards the goal of black leading by 0.5 (0-1).
-- There is only one correct first move. This can be managed by having black play a move that is above 50% winrate, other than the best move, and having white respond. Repeating this until there is only one remaining 50% winrate move for black.
+We may try to alter each position to ensure following goals are met:
+- The correct move leads to black winning by 0-2 points and winrate exceeding 60%. This can be managed by having both play moves that have this score, and as high win rate as possible for black.
+- There is only one correct first move, all other moves are at most 40%. This can be managed by having black play a move that is above 40% winrate, other than the best move, and having white play respond that aims at score of 0-2 and winrate for black as high as possible.
+- 
+- We want the tsumego to have large gap in winrate between best and second best move. We want the score of the second best move to be close to -0.5 as possible.
 
 Also we evaluate the tsumego quality and difficulty, by using katago human network to see which rank humans have a reasonable chance of winning against the full strength katago network.
-- This should be done with multiple plays to the end with each rank human network.
-- The tsumego rank is according to the the rank human network that exceeds 50% wins in plays to the ends.
-- Next move as a single move should be at most 90% policy candidate for the tsumego rank human network. I.e we want it to be difficult enough.
-
-## Implementation
-
-...
-
-## Setup
-
-1.  **Install Python dependencies:**
-    It is recommended to use a virtual environment (`venv`).
-
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    ```
-
-2.  **KataGo Executable and Models:**
-    Ensure you have the KataGo executable compiled and the necessary `.bin.gz` model files downloaded. Update the `KATAGO_PATH`, `SL_MODEL_PATH`, and `RL_MODEL_PATH` variables in `main.py` to point to your KataGo executable and models.
 
 ## Usage
 
@@ -40,8 +20,3 @@ To generate Go problems, run the `main.py` script using the virtual environment'
 .venv/bin/python3 main.py
 ```
 
-To see KataGo engine output during generation, add the `--verbose` flag:
-
-```bash
-.venv/bin/python3 main.py --verbose
-```

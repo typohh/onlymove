@@ -2,7 +2,11 @@ import os
 import argparse
 import traceback
 import uuid
+import concurrent.futures
+import time
+import threading
 
+from Stats import STATS
 from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder
 from katago_controller import KatagoController
@@ -13,41 +17,53 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+OUTPUT_DIR = "./tsumegos"
 
-def loop(katago_queries:KatagoQueries):
-    problem_finder = ProblemFinder(katago_queries)
-    while True:
-        print("Generating new game...")
+
+
+def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: ProblemFinder):
+    """
+    The task for a single worker thread.
+    Generates one game and finds all problems within it.
+    """
+    try:
         game_output_dir = "./generated_games"
         os.makedirs(game_output_dir, exist_ok=True)
+
+        # 1. Generate a game
         game_moves = game_generator.generate_game(katago_queries)
         game_filename = os.path.join(game_output_dir, f"{uuid.uuid4()}.sgf")
         game_generator.save_game_sgf(game_moves, game_filename)
-        print(f"Generated game and saved to {game_filename}")
 
-        print("Finding problems...")
-        problems = problem_finder.find_problems(game_moves)
-        print(f"Found {len(problems)} problems.")
+        # 2. Find problems in the generated game
+        problem_finder.find_problems(game_moves, OUTPUT_DIR)
 
-        if problems:
-            output_dir = "./generated_problems"
-            os.makedirs(output_dir, exist_ok=True)
+    except Exception as e:
+        print(f"An error occurred in worker {worker_id}: {e}")
+        traceback.print_exc()
 
-            for i, problem in enumerate(problems):
-                sgf_filename = os.path.join(output_dir, f"{uuid.uuid4()}.sgf")
-                problem_finder.save_problem_as_sgf(problem, sgf_filename)
-                print(f"Problem {i + 1} saved to {sgf_filename}")
-        else:
-            print("No problems found.")
 
+def print_stats():
+    while True:
+        time.sleep(10)
+        print("\n--- Statistics ---")
+        current_stats = STATS.get_stats()
+        for key, value in current_stats.items():
+            if key == "Rejection Reasons":
+                if value:
+                    print("Rejection Reasons:")
+                    for reason, count in value.items():
+                        print(f"  - {reason}: {count}")
+            else:
+                print(f"{key}: {value}")
+        print("------------------\n")
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate Go problems using KataGo.")
+    parser = argparse.ArgumentParser(description="Generate Go problems using KataGo in parallel.")
     parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
-    parser.add_argument("--game", type=str, help="Use existing game to create the tsumegos")
+    parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel worker threads to run")
     args = parser.parse_args()
 
-    # Always use existing game.sgf if present
     controller = None
     try:
         print("Starting KataGo engines...")
@@ -56,17 +72,41 @@ def main():
         print("KataGo engines started.")
 
         queries = KatagoQueries(controller)
+        problem_finder = ProblemFinder(queries)
 
-        loop(queries)
+        # Start a thread to print stats periodically
+        stats_thread = threading.Thread(target=print_stats, args=(), daemon=True)
+        stats_thread.start()
 
+        # Use a ThreadPoolExecutor to manage a pool of worker threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_workers) as executor:
+            print(f"Starting {args.num_workers} worker threads for continuous problem generation.")
+
+            futures = {
+                executor.submit(worker_task, i, queries, problem_finder): i for i in range(args.num_workers)
+            }
+
+            while futures:
+                done, _ = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
+
+                for future in done:
+                    worker_id = futures[future]
+                    del futures[future]
+                    new_worker_id = worker_id
+                    new_future = executor.submit(worker_task, new_worker_id, queries, problem_finder)
+                    futures[new_future] = new_worker_id
+
+    except KeyboardInterrupt:
+        print("\nCaught KeyboardInterrupt, shutting down.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"A critical error occurred in the main thread: {e}")
         traceback.print_exc()
     finally:
         print("Stopping KataGo engines...")
         if controller:
             controller.stop_engine()
         print("KataGo engines stopped.")
+
 
 if __name__ == "__main__":
     main()

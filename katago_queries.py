@@ -1,5 +1,4 @@
-import subprocess
-import json
+import numpy as np
 
 LOW_PLAYOUTS = 10
 HIGH_PLAYOUTS = 100
@@ -19,38 +18,96 @@ class KatagoQueries:
         """
         self._katago_controller = katago_controller
 
-    def query_root(self, moves, human_rank=None):
+    def query_low(self, moves):
         """
         Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
         """
         query = {
-            "moves": moves,
+            "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
             "maxVisits": LOW_PLAYOUTS,
+        }
+        if exclude_move:
+            query["avoidMoves"] = [
+                {
+                    "player": get_player_to_move_next(moves),
+                    "moves": [exclude_move],
+                    "untilDepth": 1
+                }
+            ]
+
+        return self._katago_controller.send_query(query)
+
+    @staticmethod
+    def _include_player_in_move_sequence(moves):
+        player_and_move = []
+        for move in moves:
+            player_and_move.append([get_player_to_move_next(player_and_move),move])
+        return player_and_move
+
+    def query_policy(self, moves, human_rank=None):
+        """
+        Sends a standardized query for root position analysis (1 visit).
+        Returns rootInfo but no moveInfos.
+        """
+        query = {
+            "moves": self._include_player_in_move_sequence(moves),
+            "initialStones": [],
+            "rules": "tromp-taylor",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": 1,
             "includePolicy": True,
         }
         if human_rank:
             query["overrideSettings"] = {
-                "humanSLProfile": human_rank
+                "humanSLProfile": human_rank,
+                "ignorePreRootHistory": False,
+                "rootNumSymmetriesToSample": 8
             }
         return self._katago_controller.send_query(query)
 
-    def query_children(self, moves):
+    def query_weighted_random_move(self, moves, human_rank):
+        """
+        Queries the policy for a given rank and returns a move based on a weighted random sample.
+        """
+        response = self.query_policy(moves, human_rank=human_rank)
+        policy = response["humanPolicy"]
+
+        # Filter out illegal moves and create a list of (move_index, probability)
+        legal_moves = [(i, p) for i, p in enumerate(policy) if p > 0]
+        if not legal_moves:
+            return "pass" # or handle as an error
+
+        # Separate indices and probabilities for random sampling
+        move_indices, probabilities = zip(*legal_moves)
+        
+        # Normalize probabilities
+        probabilities = np.array(probabilities)
+        probabilities /= probabilities.sum()
+
+        # Choose a move index based on the probabilities
+        chosen_index = np.random.choice(move_indices, p=probabilities)
+
+        return self.get_move_from_idx(chosen_index)
+
+    def query_children_low(self, moves):
         """
         Sends a standardized query for children analysis (visits adjusted by the number of legal moves).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
         # Get root policy to count legal moves
-        root_response = self.query_root(moves)
+        root_response = self.query_policy(moves)
         num_legal_moves = sum(1 for p in root_response["policy"] if p >= 0)
 
         query = {
-            "moves": moves,
+            "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
@@ -61,13 +118,12 @@ class KatagoQueries:
         }
         return self._katago_controller.send_query(query)
 
-    def query_children_100_visits(self, moves):
+    def query(self, moves, strong = False, exclude_move=None):
         """
-        Sends a standardized query for children analysis with 100 visits per child.
-        Returns moveInfos but not necessarily accurate rootInfo.
+        Provides a high playout query, where specific first move may be excluded.
         """
         query = {
-            "moves": moves,
+            "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
             "rules": "tromp-taylor",
             "komi": 7.5,
@@ -75,32 +131,15 @@ class KatagoQueries:
             "boardYSize": 9,
             "maxVisits": HIGH_PLAYOUTS,
         }
-        result = self._katago_controller.send_query(query)
-        if not result or "moveInfos" not in result:
-            raise Exception("Failed to get 100-visit response for solution move")
-        return result
-
-    def query_children_exclude_move(self, moves, exclude_move, player):
-        """
-        Sends a query for children analysis while excluding a specific move.
-        Returns moveInfos but not necessarily accurate rootInfo.
-        """
-        query = {
-            "moves": moves,
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": HIGH_PLAYOUTS,
-            "avoidMoves": [
+        if exclude_move:
+            query["avoidMoves"] = [
                 {
-                    "player": player,
+                    "player": get_player_to_move_next(moves),
                     "moves": [exclude_move],
                     "untilDepth": 1
                 }
             ]
-        }
+
         return self._katago_controller.send_query(query)
 
     def get_move_from_idx(self, idx):
@@ -159,31 +198,41 @@ class KatagoQueries:
         """
         Helper to get the current position score and winrate from Black's perspective.
         Returns (score, winrate) or (None, None) if failed.
-        Uses maxVisits=10 for a quick but reliable read.
         """
-        response = self.query_root(moves)
-        if not response or "rootInfo" not in response:
-            raise Exception("Failed to get position info from KataGo")
+        response = self.query_policy(moves)
 
         score_lead = response["rootInfo"]["scoreLead"]
         winrate = response["rootInfo"]["winrate"]
 
-        # Determine current player to move
-        if not moves:
-            current_player = "B"
-        else:
-            last_player = moves[-1][0]
-            current_player = "W" if last_player == "B" else "B"
-
         return score_lead, winrate
 
 
+    def get_best_move(self, response):
+        """
+        Helper to get the the best policy move
+        Returns move
+        """
 
-def other_player(player):
-    if player == "B":
-        return "W"
-    else:
+        if response["moveInfos"]:
+            moveInfo = response["moveInfos"][0]
+            score = moveInfo["scoreLead"]
+            winrate = moveInfo["winrate"]
+            return moveInfo["move"],winrate,score
+        else:
+            policy = response["policy"]
+            score = response["rootInfo"]["scoreLead"]
+            winrate = response["rootInfo"]["winrate"]
+            return self.get_move_from_idx(policy.index(max(policy))),score,winrate
+
+
+def get_player_to_move_next(moves):
+    """
+    returns "B" or "W" corresponding to whos turn it is to move, assuming black started game and alternating turns.
+    """
+    if len(moves) % 2 == 0 :
         return "B"
+    else:
+        return "W"
 
 
 def katago_to_sgf_coords(katago_move, board_size):
@@ -209,6 +258,7 @@ def katago_to_sgf_coords(katago_move, board_size):
     row = board_size - int(row_str)
 
     return row, col
+
 
 
 def sgf_to_katago_coords(sgf_move, board_size):
