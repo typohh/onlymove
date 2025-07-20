@@ -1,15 +1,14 @@
-import os
 import argparse
-import traceback
-import uuid
 import concurrent.futures
-import time
+import os
 import threading
+import time
+import traceback
 
 from Stats import STATS, DEBUG
+from katago_controller import KatagoController
 from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder
-from katago_controller import KatagoController
 
 # Define paths - adjust these if your KataGo executable or models are elsewhere
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

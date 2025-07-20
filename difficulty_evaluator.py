@@ -1,6 +1,10 @@
-import numpy as np
-from scipy.stats import norm
+from collections import Counter
+from enum import unique
 
+import numpy as np
+from scipy.stats import norm, stats
+
+from Stats import DEBUG
 from katago_queries import KatagoQueries
 
 SUPPORTED_RANKS = [
@@ -38,6 +42,26 @@ class DifficultyEvaluator:
         """
         self.queries = queries
 
+    def assess_game_difficulty(self, moves, move_rank):
+        current_rank = int(round(move_rank))
+        games = []
+        # games playes, continue until the number of games is more than SIMULATIONS ROUNDS, ignoring the first game of each rank
+        while len(games) - len(set(games)) < SIMULATION_ROUNDS:
+            current_rank = max(0, min(current_rank, len(SUPPORTED_RANKS) - 1))
+            games.append(current_rank)
+
+            if self._playout_game(moves, SUPPORTED_RANKS[current_rank]):
+                current_rank -= 1
+            else:
+                current_rank += 1
+
+        if DEBUG: print("ranks played:", games)
+
+        # ignore first game of each rank
+        counter = Counter(games)
+        relevant_games = list(Counter({k: v - 1 for k, v in counter.items() if v > 1}).elements())
+        return stats.tmean(relevant_games), stats.tstd(relevant_games)
+
     def assess_move_difficulty(self, moves, correct_move):
         """
         Assesses difficulty by sampling all ranks determinig CDF for probability of move being played.
@@ -52,14 +76,16 @@ class DifficultyEvaluator:
             Float: stdev rank of the distribution.
 
         """
-        rank_mu, rank_sigma = self._assess_move_difficulty(moves, correct_move, SUPPORTED_RANKS)
-        preaz_mu, preaz_sigma = self._assess_move_difficulty(moves, correct_move, PREAZ_RANKS)
-        average_mu = (rank_mu + preaz_mu) / 2
-        average_sigma = (rank_sigma + preaz_sigma) / 2
+        # rank_mu, rank_sigma = self._assess_move_difficulty(moves, correct_move, SUPPORTED_RANKS)
+        # preaz_mu, preaz_sigma = self._assess_move_difficulty(moves, correct_move, PREAZ_RANKS)
+        # average_mu = (rank_mu + preaz_mu) / 2
+        # average_sigma = (rank_sigma + preaz_sigma) / 2
+        #
+        # return average_mu, average_sigma
+        return self._assess_move_difficulty(moves, correct_move, SUPPORTED_RANKS)
 
-        return average_mu, average_sigma
-
-    def rank_probabilities_into_distribution(self,probabilities):
+    @staticmethod
+    def rank_probabilities_into_distribution(probabilities):
 
         # Convert probabilities to z-scores
         clamped_probs = np.clip(probabilities, 0.01, 0.99)
@@ -96,8 +122,11 @@ class DifficultyEvaluator:
             probability = self._get_probability_for_rank(rank, moves, correct_move)
             probabilities.append(probability)
 
-        return self.rank_probabilities_into_distribution(probabilities)
+        mu, sigma = self.rank_probabilities_into_distribution(probabilities)
 
+        if DEBUG: print("move difficulty:", mu, sigma, probabilities)
+
+        return mu, sigma
 
     def _get_probability_for_rank(self, rank_string, moves, correct_move):
         """
@@ -124,14 +153,11 @@ class DifficultyEvaluator:
 
         return policy[idx]
 
-    def _playout_game(self, moves, rank, random=False):
+    def _playout_game(self, moves, rank_str):
         simulation_moves = moves.copy()
         while True:
             # Human player's turn
-            if random:
-                human_move = self.queries.query_weighted_random_move(simulation_moves, rank)
-            else:
-                human_move,_,_ = self.queries.get_best_move(self.queries.query_policy(simulation_moves,rank))
+            human_move = self.queries.query_weighted_random_move(simulation_moves, rank_str)
             simulation_moves.append(human_move)
 
             # Check if game is over
@@ -139,9 +165,10 @@ class DifficultyEvaluator:
                 break
 
             # KataGo's turn
-            katago_move,winrate,_ = self.queries.get_best_move(self.queries.query_policy(simulation_moves))
+            katago_move, winrate, _ = self.queries.get_best_move(self.queries.query_policy(simulation_moves))
 
-            if winrate < 0.01: # katago thinks 99% chance of it winning
+            if winrate < 0.01:  # katago thinks 99% chance of it winning
+                if DEBUG: print(rank_str, "resigns after", len(simulation_moves) - len(moves), "moves");
                 return False
 
             simulation_moves.append(katago_move)
@@ -153,7 +180,7 @@ class DifficultyEvaluator:
         score, _ = self.queries.get_position_info(simulation_moves)
         return score > 0  # Black wins
 
-    def assess_game_difficulty(self, moves):
+    def assess_game_difficulty_brute_force(self, moves):
         """
         Assesses the difficulty of winning the game from the current position.
         This is done by simulating games against the full-strength KataGo engine,
@@ -168,28 +195,24 @@ class DifficultyEvaluator:
             float: std for the uncertainty in the rank
         """
 
-        MC = False
-
         for rank in SUPPORTED_RANKS:
-            if MC:
-                wins = 0
-                for _ in range(SIMULATION_ROUNDS):
-                    if self._playout_game(moves, rank, True):
-                        wins += 1
-                winrate = wins / SIMULATION_ROUNDS
-            else:
-                winrate = 1 if self._playout_game(moves,rank) else 0
-            if winrate > 0.5 :
-                return SUPPORTED_RANKS.index(rank),0
+            wins = 0
+            for _ in range(SIMULATION_ROUNDS):
+                if self._playout_game(moves, rank, True):
+                    wins += 1
+            winrate = wins / SIMULATION_ROUNDS
+            if winrate > 0.5:
+                if DEBUG: print("game difficulty:", SUPPORTED_RANKS.index(rank))
+                return SUPPORTED_RANKS.index(rank), 0
 
-        return len(SUPPORTED_RANKS),0
+        return len(SUPPORTED_RANKS), 0
 
     @staticmethod
     def get_rank_str(mean, stddev=None):
         """
         returns rank as string
         """
-        mean_str = SUPPORTED_RANKS[max(0,min(int(round(mean)),len(SUPPORTED_RANKS)-1))][5:]
+        mean_str = SUPPORTED_RANKS[max(0, min(int(round(mean)), len(SUPPORTED_RANKS) - 1))][5:]
         if stddev:
             return f"{mean_str}±{stddev:.1f}"
         else:

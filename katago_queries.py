@@ -213,7 +213,12 @@ class KatagoQueries:
         Returns move,winrate,score
         """
 
-        if response["moveInfos"]:
+        if response.get("humanPolicy"):
+            policy = response["humanPolicy"]
+            score = response["rootInfo"]["scoreLead"]
+            winrate = response["rootInfo"]["winrate"]
+            return self.get_move_from_idx(policy.index(max(policy))), winrate, score
+        elif response.get("moveInfos"):
             moveInfo = response["moveInfos"][0]
             score = moveInfo["scoreLead"]
             winrate = moveInfo["winrate"]

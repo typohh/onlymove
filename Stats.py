@@ -1,49 +1,37 @@
 import time
 
-DEBUG = True
+DEBUG = False
 
 class Stats:
     def __init__(self):
-        self.games_processed = 0
-        self.tsumego_creation_attempts = 0
         self.problems_found = 0
-        self.total_winrate_corrections = 0
-        self.total_score_corrections = 0
-        self.failed_tsumego_creation = 0
+        self.failures_to_create = 0
+        self.total_number_of_moves = 0
+        self.total_move_rank = 0
+        self.total_game_rank = 0
         self.start_time = time.time()
 
-    def add_game_processed(self):
-        self.games_processed += 1
-
-    def add_tsumego_creation_attempt(self):
-        self.tsumego_creation_attempts += 1
-
-    def add_problem_found(self):
+    def add_problem_found(self,number_of_moves,move_rank,game_rank):
         self.problems_found += 1
+        self.total_number_of_moves += number_of_moves
+        self.total_move_rank += move_rank
+        self.total_game_rank += game_rank
 
-    def add_winrate_correction(self):
-        self.total_winrate_corrections += 1
-
-    def add_score_correction(self):
-        self.total_score_corrections += 1
-
-    def add_failed_tsumego_creation(self):
-        self.failed_tsumego_creation += 1
+    def add_failure_to_create_problem(self):
+        self.failures_to_create += 1
 
     def get_stats(self):
         elapsed_time = time.time() - self.start_time
         tsumegos_per_minute = (self.problems_found / elapsed_time) * 60 if elapsed_time > 0 else 0
+        average_move_length = self.total_number_of_moves / max(1,self.problems_found)
+        average_move_rank = self.total_move_rank / max(1,self.problems_found)
+        average_game_rank = self.total_game_rank / max(1,self.problems_found)
         stats = {
             "Running Time": f"{elapsed_time:.2f}s",
-            "Tsumego Creation Attempts": self.tsumego_creation_attempts,
-            "Tsumegos Creations Failed": self.failed_tsumego_creation,
             "Problems Found": self.problems_found,
-            "Avg Winrate adjustments per Attempt": f"{((
-                                                             self.total_winrate_corrections / self.tsumego_creation_attempts
-            ) if self.tsumego_creation_attempts > 0 else 0):.2f}",
-            "Avg Score adjustments per Attempt": f"{((
-                                                             self.total_score_corrections / self.tsumego_creation_attempts
-            ) if self.tsumego_creation_attempts > 0 else 0):.2f}",
+            "Avg moves": f"{average_move_length:.1f}",
+            "Avg move rank": f"{average_move_rank:.1f}",
+            "Avg game rank": f"{average_game_rank:.1f}",
             "Tsumegos per Minute": f"{tsumegos_per_minute:.2f}",
         }
         return stats

@@ -13,6 +13,7 @@ MAX_SCORE = 0
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4
 
+
 class ProblemFinder:
     """
     Assesses the difficulty of a move.
@@ -44,7 +45,7 @@ class ProblemFinder:
             legal_moves = [
                 (i, p)
                 for i, p in enumerate(response["policy"])
-                if p > 1e-5 and self.queries.get_move_from_idx(i) != "pass"
+                if p > 0 and self.queries.get_move_from_idx(i) != "pass"
             ]
 
             # Weighted random sampling based on policy
@@ -57,8 +58,8 @@ class ProblemFinder:
             moves.append(move)
 
         if DEBUG:
-            move,winrate,score=self.queries.get_best_move(self.queries.query_policy(moves))
-            print(f"status after 4 random moves: {(100*winrate):.1f}% {score:.1f}")
+            move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
+            print(f"status after 4 random moves: {(100 * winrate):.1f}% {score:.1f}")
 
         # 2. Play 2 moves to balance the game
         for _ in range(2):
@@ -76,10 +77,9 @@ class ProblemFinder:
 
         if DEBUG:
             move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
-            print(f"status after rebalance: {(100*winrate):.1f}% {score:.1f}")
+            print(f"status after rebalance: {(100 * winrate):.1f}% {score:.1f}")
 
         return moves
-
 
     def adjust_tsumego(self, moves):
         """
@@ -95,24 +95,23 @@ class ProblemFinder:
             best_move, best_winrate, best_score = self.queries.get_best_move(self.queries.query(moves))
             second_move, second_winrate, second_score = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move))
 
-            print( f"{(100*best_winrate):.1f}%, {(100*second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}" )
+            if DEBUG: print(f"{(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
 
             # do we meet all criteria?
-            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and MIN_SCORE < second_score < MAX_SCORE :
-                if DEBUG: print( "valid tsumego!" )
-                return moves,best_move
+            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and MIN_SCORE < second_score < MAX_SCORE:
+                if DEBUG: print("valid tsumego!")
+                return moves, best_move
 
             if best_move == "pass" or second_move == "pass":
-                if DEBUG: print( "terminating due to pass" )
+                if DEBUG: print("terminating due to pass")
                 return None, None
 
             # black plays second best move
-            print( f"B {second_move} {(second_winrate*100):.1f}% {second_score:.1f}")
+            if DEBUG: print(f"B {second_move} {(second_winrate * 100):.1f}% {second_score:.1f}")
             moves.append(second_move)
 
             response = self.queries.query_children_low(moves)
 
-            STATS.add_score_correction()
             # Find move that makes score difference closest to target
             best_response = None
             best_response_penalty = float('inf')
@@ -128,32 +127,29 @@ class ProblemFinder:
                     best_score = move_info["scoreLead"]
                     best_winrate = move_info["winrate"]
 
-            print( f"W {best_response} {(best_winrate*100):.1f}% {best_score:.1f}")
+            if DEBUG: print(f"W {best_response} {(best_winrate * 100):.1f}% {best_score:.1f}")
             moves.append(best_response)
 
-    def create_problem(self,output_dir):
-        STATS.add_tsumego_creation_attempt()
+    def create_problem(self, output_dir):
 
         moves_so_far = self.generate_initial_position()
 
         adjusted_moves, solution_move = self.adjust_tsumego(moves_so_far.copy())
         if not solution_move:
-            STATS.add_failed_tsumego_creation()
+            STATS.add_failure_to_create_problem()
             return False
 
         move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
-        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves)
+        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean)
 
-        STATS.add_problem_found()
+        STATS.add_problem_found(len(adjusted_moves), move_mean, game_mean)
         self.save_problem_as_sgf({
             "moves": adjusted_moves,
             "solution": solution_move,
             "move_rank": self.difficulty.get_rank_str(move_mean, move_stddev),
             "game_rank": self.difficulty.get_rank_str(game_mean, game_stddev)
         }, output_dir)
-        STATS.add_game_processed()
         return True
-
 
     @staticmethod
     def save_problem_as_sgf(problem, output_dir):
