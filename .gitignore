@@ -2,4 +2,6 @@ KataGo/
 .venv/
 weights/
 .aider*
-
+__pycache__/
+.idea/
+tsumegos/

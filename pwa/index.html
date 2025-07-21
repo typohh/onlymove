@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-signin-client_id" content="YOUR_CLIENT_ID.apps.googleusercontent.com">
+    <link rel="manifest" href="/manifest.json">
+    <title>Yose Tsumego</title>
+    <link rel="stylesheet" type="text/css" href="wgo.js/wgo/wgo.player.css" />
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #player {
+            width: 400px;
+            height: 400px;
+        }
+
+        #controls {
+            margin-top: 20px;
+        }
+
+        @media (orientation: landscape) {
+            body {
+                flex-direction: row;
+                align-items: flex-start;
+            }
+
+            #controls {
+                margin-top: 0;
+                margin-left: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="player" data-wgo=""></div>
+    <div id="controls">
+        <div class="g-signin2" data-onsuccess="onSignIn"></div>
+        <div id="user-profile" style="display: none;">
+            <img id="user-image" src="" alt="User image">
+            <p>Welcome, <span id="user-name"></span>!</p>
+            <button id="sign-out">Sign Out</button>
+        </div>
+        <div id="stats">
+            <p>Rank: <span id="rank">N/A</span></p>
+            <p>Attempted: <span id="attempted">0</span></p>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="wgo.js/wgo/wgo.js"></script>
+    <script type="text/javascript" src="wgo.js/wgo/wgo.player.js"></script>
+    <script type="text/javascript" src="wgo.js/wgo/sgfparser.js"></script>
+    <script type="text/javascript" src="wgo.js/wgo/kifu.js"></script>
+    <script type="text/javascript" src="wgo.js/extensions/tsumego/tsumego.js"></script>
+    <script src="https://apis.google.com/js/platform.js" async defer></script>
+    <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js');
+            });
+        }
+    </script>
+</body>
+</html>
