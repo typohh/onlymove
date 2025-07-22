@@ -76,6 +76,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             target_prob = np.random.uniform(0.01, 0.99)
             logit_p = np.log(target_prob / (1 - target_prob))
             komi_for_this_game = (logit_p - intercept) / coef
+            komi_for_this_game = round(komi_for_this_game-0.5) + 0.5
 
         # --- Phase 2: Play the Game (unlocked) ---
         black_won, num_moves = play_game("rank_1d", "rank_2d", komi_for_this_game, queries)
@@ -103,8 +104,8 @@ if __name__ == "__main__":
     # Initialize with two wins and two losses to provide a stable starting point
     # for the logistic regression model, centered around a komi of 7.5.
     shared_data = {
-        "wins": [7.4, 7.4],
-        "losses": [7.6, 7.6],
+        "wins": [-2.5],
+        "losses": [17.5],
         "total_games": 4,
         "total_moves": 0,
         "last_print_time": start_time,
