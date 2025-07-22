@@ -26,7 +26,7 @@ class KatagoController:
     def start_engine(self, verbose=False):
         command = [
             self.katago_path, "analysis",
-            "-config", "/home/ootakamoku/Repositories/YoseTsumego/analysis.cfg",
+            "-config", "analysis.cfg",
             "-model", self.model_path
         ]
         if self.human_model_path:
