@@ -56,8 +56,11 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             komis_data = shared_data["komis"]
 
             warmup_cutoff = round(stats.tmean(komis_data))
-            start_index = komis_data.index(warmup_cutoff)
-            relevant_games = komis_data[start_index:]
+            if warmup_cutoff not in komis_data:
+                relevant_games = komis_data[len(komis_data) // 2:]
+            else:
+                start_index = komis_data.index(warmup_cutoff)
+                relevant_games = komis_data[start_index:]
 
             mean_val = stats.tmean(relevant_games)
             std_dev = stats.tstd(relevant_games)
