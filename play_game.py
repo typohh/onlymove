@@ -84,7 +84,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             previous_komi = komi_for_this_game
 
         # --- Phase 2: Play the Game (unlocked) ---
-        black_won, num_moves = play_game("rank_1d", "rank_2d", komi_for_this_game, queries)
+        black_won, num_moves = play_game("rank_1d", "rank_5k", komi_for_this_game, queries)
 
         # --- Phase 3: Update Results (locked) ---
         with lock:
