@@ -9,7 +9,7 @@ sys.path.insert(0, '/home/ootakamoku/Repositories/YoseTsumego')
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
 
-NUM_WORKERS = 4
+NUM_WORKERS = 1
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
