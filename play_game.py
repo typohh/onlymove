@@ -39,6 +39,8 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
     """
     model = LogisticRegression()
 
+    previous_komi = 7.5
+
     while not shutdown_event.is_set():
         # --- Phase 1: Analyze, Print, and Plan (locked) ---
         with lock:
@@ -68,7 +70,8 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
                 print(f"Games: {len(all_komis):>5} | Fair Komi (LR): {fair_komi:>6.3f} | "
                       f"Mean Komi: {mean_val:>6.3f} | Std Dev: {std_dev:>5.3f} | "
-                      f"Games/min: {games_per_minute:>6.1f} | Moves/min: {moves_per_minute:>7.1f}")
+                      f"Games/min: {games_per_minute:>6.1f} | Moves/min: {moves_per_minute:>7.1f}"
+                      f" | Last Game Komi: {previous_komi:>6.1f}")
 
                 shared_data["last_print_time"] = current_time
 
@@ -77,6 +80,8 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             logit_p = np.log(target_prob / (1 - target_prob))
             komi_for_this_game = (logit_p - intercept) / coef
             komi_for_this_game = round(komi_for_this_game-0.5) + 0.5
+            komi_for_this_game = max(-149.5, min( komi_for_this_game, 149.5))
+            previous_komi = komi_for_this_game
 
         # --- Phase 2: Play the Game (unlocked) ---
         black_won, num_moves = play_game("rank_1d", "rank_2d", komi_for_this_game, queries)
