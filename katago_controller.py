@@ -11,7 +11,7 @@ class KatagoController:
     The external interface is a simple, blocking send_query call.
     """
 
-    def __init__(self, katago_path, model_path, human_model_path=None):
+    def __init__(self, katago_path, model_path, human_model_path=None, batch_size=32, search_shreads=1):
         self.katago_path = katago_path
         self.model_path = model_path
         self.human_model_path = human_model_path
@@ -19,6 +19,8 @@ class KatagoController:
         self._master_reader_thread = None
         self.running = False
         self.lock = threading.Lock()
+        self.batch_size = batch_size
+        self.search_threads = search_shreads
         self.query_counter = 0
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
@@ -27,12 +29,13 @@ class KatagoController:
         command = [
             self.katago_path, "analysis",
             "-config", "analysis.cfg",
-            "-model", self.model_path
+            "-model", self.model_path,
+            "-override-config", f"numAnalysisThreads={int(self.batch_size/self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
         if self.human_model_path:
             command.extend(["-human-model", self.human_model_path])
 
-        print( command )
+        print(command)
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,

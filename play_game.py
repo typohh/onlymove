@@ -79,8 +79,8 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             target_prob = np.random.uniform(0.2, 0.8)
             logit_p = np.log(target_prob / (1 - target_prob))
             komi_for_this_game = (logit_p - intercept) / coef
-            komi_for_this_game = round(komi_for_this_game-0.5) + 0.5
-            komi_for_this_game = max(-149.5, min( komi_for_this_game, 149.5))
+            komi_for_this_game = round(komi_for_this_game - 0.5) + 0.5
+            komi_for_this_game = max(-149.5, min(komi_for_this_game, 149.5))
             previous_komi = komi_for_this_game
 
         # --- Phase 2: Play the Game (unlocked) ---
@@ -98,7 +98,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
 
 if __name__ == "__main__":
-    controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH, human_model_path=SL_MODEL_PATH)
+    controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH, human_model_path=SL_MODEL_PATH, batch_size=128, search_shreads=1)
     controller.start_engine()
     queries = KatagoQueries(controller)
     lock = threading.Lock()
