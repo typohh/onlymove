@@ -76,7 +76,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
                 shared_data["last_print_time"] = current_time
 
             # Sample a new komi from the calculated distribution for the next game
-            target_prob = np.random.uniform(0.01, 0.99)
+            target_prob = np.random.uniform(0.2, 0.8)
             logit_p = np.log(target_prob / (1 - target_prob))
             komi_for_this_game = (logit_p - intercept) / coef
             komi_for_this_game = round(komi_for_this_game-0.5) + 0.5
