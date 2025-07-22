@@ -63,7 +63,10 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
                 relevant_games = komis_data[start_index:]
 
             mean_val = stats.tmean(relevant_games)
-            std_dev = stats.tstd(relevant_games)
+            if len(set(relevant_games)) == 1:
+                std_dev = stats.tstd(relevant_games)
+            else:
+                std_dev = 0
 
             # --- Calculate Performance Metrics ---
             elapsed_seconds = time.time() - start_time
