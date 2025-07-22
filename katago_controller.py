@@ -32,6 +32,7 @@ class KatagoController:
         if self.human_model_path:
             command.extend(["-human-model", self.human_model_path])
 
+        print( command )
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,

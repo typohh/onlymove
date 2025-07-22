@@ -1,10 +1,7 @@
 import os
-import sys
 import threading
 import time
 from scipy import stats
-
-sys.path.insert(0, '/home/ootakamoku/Repositories/YoseTsumego')
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
