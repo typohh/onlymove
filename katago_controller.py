@@ -1,14 +1,16 @@
 import json
 import os
+import re
 import subprocess
 import threading
 
-# CONFIG_FILE = "analysis.cfg"
-CONFIG_FILE = "KataGo/cpp/configs/analysis_example.cfg"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, "analysis.cfg")
+# CONFIG_FILE = os.path.join(BASE_DIR, "KataGo", "cpp", "configs", "analysis_example.cfg")
 KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
-RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+# RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata9x9-b18c384nbt-20231025.bin.gz")
 
 
 class KatagoController:
@@ -17,13 +19,12 @@ class KatagoController:
     The external interface is a simple, blocking send_query call.
     """
 
-    def __init__(self, batch_size=32, search_threads=1):
+    def __init__(self):
         self.process = None
         self._master_reader_thread = None
         self.running = False
+        self.batch_size = None
         self.lock = threading.Lock()
-        self.batch_size = batch_size
-        self.search_threads = search_threads
         self.query_counter = 0
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
@@ -32,12 +33,12 @@ class KatagoController:
         command = [
             KATAGO_PATH, "analysis",
             "-config", CONFIG_FILE,
-            "-override-config", f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
+            # "-override-config",
+            # f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
         command.extend(["-model", RL_MODEL_PATH])
         command.extend(["-human-model", SL_MODEL_PATH])
 
-        print(command)
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -75,6 +76,19 @@ class KatagoController:
         if self._master_reader_thread and self._master_reader_thread.is_alive():
             self._master_reader_thread.join(timeout=2)
 
+    def get_batch_size(self) -> int:
+        if self.batch_size is None:
+            """Reads nnMaxBatchSize from a KataGo config file."""
+            with open(CONFIG_FILE, 'r') as f:
+                for line in f:
+                    # Find the line defining nnMaxBatchSize and return its value
+                    match = re.match(r"^\s*nnMaxBatchSize\s*=\s*(\d+)", line)
+                    if match:
+                        self.batch_size = int(match.group(1))
+                        break
+        return self.batch_size
+
+
     def _master_reader(self):
         """Master thread to read all stdout responses and signal events."""
         while self.running and self.process and not self.process.stdout.closed:
@@ -109,7 +123,6 @@ class KatagoController:
                 self.response_events[query_id] = event
 
                 query_str = json.dumps(query)
-                print("sending query:", query_str)
                 self.process.stdin.write(query_str + "\n")
                 self.process.stdin.flush()
 

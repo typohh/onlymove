@@ -1,22 +1,16 @@
-import os
 import threading
 import time
-
-import numpy as np
-from sklearn.isotonic import IsotonicRegression
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
 
-NUM_WORKERS = 2
 
-
-def play_game(rank1, rank2, komi, queries):
+def play_game(black_rank, white_rank, komi, queries):
     """
     Plays a 9x9 game and returns whether black won and the number of moves.
     """
     moves = []
-    ranks = [rank1, rank2]
+    ranks = [black_rank, white_rank]
     current_player = 0
     while True:
         rank = ranks[current_player]
@@ -30,30 +24,55 @@ def play_game(rank1, rank2, komi, queries):
     return score > 0, len(moves)
 
 
-def get_komis(shared_data):
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+import random
+from typing import Dict, List, Tuple
+
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+import random
+from typing import Dict, List, Tuple
+
+
+def get_komis(shared_data: Dict[str, List[float]]) -> Tuple[float, float, float, int]:
+    """
+    Calculates fair komi, distribution std dev, and a random sample from the 20%-80% win probability range.
+    """
     wins = shared_data["wins"]
     losses = shared_data["losses"]
-    all_komis = wins + losses
 
-    X = np.array(all_komis).reshape(-1, 1)
+    all_komis_list = wins + losses
+
+    # Fit a logistic regression model to the game data.
+    X = np.array(all_komis_list).reshape(-1, 1)
     y = np.array([1] * len(wins) + [0] * len(losses))
+    model = LogisticRegression(C=1e10)
+    model.fit(X, y)
 
-    # Fit an Isotonic Regression model
-    iso_reg = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
-    iso_reg.fit(X.flatten(), y)
+    intercept = model.intercept_[0]
+    coefficient = model.coef_[0][0]
 
-    unique_komis = sorted(list(set(all_komis)))
-    x_points = np.array(unique_komis)
-    y_points = iso_reg.predict(x_points)
+    # Calculate fair komi, where win probability is 50%.
+    fair_komi = -intercept / coefficient
 
-    target_prob = np.random.uniform(0.2, 0.8)
-    komi_for_this_game, komi_minus_1_std, fair_komi, komi_plus_1_std = np.interp([target_prob, 0.5 - 0.341, 0.5, 0.5 + 0.341], y_points, x_points)
-    komi_std = (komi_plus_1_std - komi_minus_1_std) / 2
+    # Calculate the standard deviation of the fitted probability distribution.
+    # For a logistic distribution, the standard deviation is scale * pi / sqrt(3),
+    # where the scale parameter is 1 / coefficient.
+    scale_param = 1 / abs(coefficient)
+    komi_std_of_distribution = scale_param * np.pi / np.sqrt(3)
 
-    komi_for_this_game = round(komi_for_this_game - 0.5) + 0.5
+    komi_std_of_distribution_corrected = max(6, min(komi_std_of_distribution, 30))
+
+    # Sample a komi corresponding to a random win probability between 0.2 and 0.8.
+    random_probability = random.uniform(0.2, 0.8)
+    logit_p = np.log(random_probability / (1 - random_probability))
+    komi_for_this_game = fair_komi + logit_p * (komi_std_of_distribution_corrected * np.sqrt(3) / np.pi)
+
+    komi_for_this_game = round(komi_for_this_game + 0.5) - 0.5
     komi_for_this_game = max(-149.5, min(komi_for_this_game, 149.5))
 
-    return fair_komi, komi_std, komi_for_this_game, len(all_komis)
+    return fair_komi, komi_std_of_distribution, komi_for_this_game, len(all_komis_list)
 
 
 def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
@@ -67,6 +86,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             # Fit model on all available historical data
 
             fair_komi, komi_std, komi_for_this_game, game_count = get_komis(shared_data)
+            game_count -= 2
 
             current_time = time.time()
 
@@ -75,12 +95,12 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             games_per_minute = shared_data["total_games"] / elapsed_minutes
             moves_per_minute = shared_data["total_moves"] / elapsed_minutes
 
-            print(f"Games: {game_count:>5} | Komi : {fair_komi:>6.1f}±{komi_std} | "
-                  f"Games/min: {games_per_minute:>6.1f} | Moves/min: {moves_per_minute:>7.1f}"
-                  f" | Next Komi: {komi_for_this_game:>6.1f}")
+            print(f"Games: {game_count} | Komi : {fair_komi:.1f}±{komi_std:.1f} | "
+                  f"Games/min: {games_per_minute:.1f} | Moves/min: {moves_per_minute:.1f}"
+                  f" | Next Komi: {komi_for_this_game:.1f}")
 
         # --- Phase 2: Play the Game (unlocked) ---
-        black_won, num_moves = play_game("rank_2d", "rank_2d", komi_for_this_game, queries)
+        black_won, num_moves = play_game("rank_12k", "rank_2d", komi_for_this_game, queries)
 
         # --- Phase 3: Update Results (locked) ---
         with lock:
@@ -94,8 +114,8 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
 
 if __name__ == "__main__":
-    controller = KatagoController(KATAGO_PATH, model_path= SL_MODEL_PATH, human_model_path=SL_MODEL_PATH, batch_size=NUM_WORKERS, search_threads=1)
-    controller.start_engine(verbose=True)
+    controller = KatagoController()
+    controller.start_engine()
     queries = KatagoQueries(controller)
     lock = threading.Lock()
     shutdown_event = threading.Event()
@@ -107,18 +127,20 @@ if __name__ == "__main__":
     # Initialize with two wins and two losses to provide a stable starting point
     # for the logistic regression model, centered around a komi of 7.5.
     shared_data = {
-        "wins": [-2.5],
-        "losses": [17.5],
+        "wins": [-149.5, 7.5],
+        "losses": [149.5, 7.5],
         "total_games": 4,
         "total_moves": 0,
         "last_print_time": start_time,
     }
 
     threads = []
-    for i in range(NUM_WORKERS):
+    for i in range(controller.get_batch_size()):
         thread = threading.Thread(target=worker_loop, args=(queries, shared_data, lock, shutdown_event, start_time))
         thread.start()
         threads.append(thread)
+
+    print("started", len(threads), "worker threads")
 
     try:
         while True:

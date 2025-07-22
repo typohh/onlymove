@@ -66,10 +66,11 @@ class KatagoQueries:
             "includePolicy": True,
         }
         if human_rank:
+            # noinspection PyTypeChecker
             query["overrideSettings"] = {
                 "humanSLProfile": human_rank,
                 "ignorePreRootHistory": False,
-                "rootNumSymmetriesToSample": 8
+                # "rootNumSymmetriesToSample": 8
             }
         return self._katago_controller.send_query(query)
 
