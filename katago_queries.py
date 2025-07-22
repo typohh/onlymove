@@ -50,7 +50,7 @@ class KatagoQueries:
             player_and_move.append([get_player_to_move_next(player_and_move),move])
         return player_and_move
 
-    def query_policy(self, moves, human_rank=None):
+    def query_policy(self, moves, human_rank=None, komi = 7.5):
         """
         Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
@@ -59,7 +59,7 @@ class KatagoQueries:
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
             "rules": "tromp-taylor",
-            "komi": 7.5,
+            "komi": komi,
             "boardXSize": 9,
             "boardYSize": 9,
             "maxVisits": 1,
@@ -73,11 +73,11 @@ class KatagoQueries:
             }
         return self._katago_controller.send_query(query)
 
-    def query_weighted_random_move(self, moves, human_rank):
+    def query_weighted_random_move(self, moves, human_rank, komi = 7.5):
         """
         Queries the policy for a given rank and returns a move based on a weighted random sample.
         """
-        response = self.query_policy(moves, human_rank=human_rank)
+        response = self.query_policy(moves, human_rank=human_rank, komi=komi)
         policy = response["humanPolicy"]
 
         # Filter out illegal moves and create a list of (move_index, probability)

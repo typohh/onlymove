@@ -1,143 +1,116 @@
+# FILE: katago_controller.py
 import subprocess
 import json
 import threading
+import time
+
 
 class KatagoController:
     """
-    A class to manage the KataGo analysis engine process.
+    Manages the KataGo analysis engine with a robust, encapsulated, and thread-safe query system.
+    The external interface is a simple, blocking send_query call.
     """
 
     def __init__(self, katago_path, model_path, human_model_path=None):
-        """
-        Initializes the KatagoController.
-
-        Args:
-            katago_path (str): The path to the KataGo executable.
-            model_path (str): The path to the KataGo model file (for the RL network).
-            human_model_path (str, optional): The path to the KataGo human SL model file. Defaults to None.
-        """
         self.katago_path = katago_path
         self.model_path = model_path
         self.human_model_path = human_model_path
-        self.counter = 0
         self.process = None
-        self.stderr_thread = None
-        # Add a lock for thread safety
+        self._master_reader_thread = None
+        self.running = False
         self.lock = threading.Lock()
+        self.query_counter = 0
+        self.response_events = {}  # Maps query_id -> threading.Event
+        self.responses = {}  # Maps query_id -> response_dict
 
     def start_engine(self, verbose=False):
-        """
-        Starts the KataGo analysis engine as a subprocess.
+        command = [
+            self.katago_path, "analysis",
+            "-config", "/home/ootakamoku/Repositories/YoseTsumego/analysis.cfg",
+            "-model", self.model_path
+        ]
+        if self.human_model_path:
+            command.extend(["-human-model", self.human_model_path])
 
-        Args:
-            verbose (bool): If True, shows KataGo stderr output
-        """
-        try:
-            command = [
-                self.katago_path,
-                "analysis",
-                "-config",
-                "/home/ootakamoku/Repositories/YoseTsumego/analysis.cfg",
-                "-model",
-                self.model_path
-            ]
-            stderr_setting = subprocess.PIPE if verbose else subprocess.DEVNULL
-            if self.human_model_path:
-                command.extend(["-human-model", self.human_model_path])
-            self.process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=stderr_setting,
-                text=True,
-                bufsize=1  # Line-buffered
-            )
-            # Only start a thread to read stderr if verbose
-            if verbose:
-                def read_stderr(process):
-                    for line in process.stderr:
-                        print(f"KataGo STDERR: {line.strip()}")
-
-                self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process,))
-                self.stderr_thread.daemon = True  # Allow main program to exit even if thread is still running
-                self.stderr_thread.start()
-        except FileNotFoundError:
-            raise Exception(f"KataGo executable not found at: {self.katago_path}")
-        except Exception as e:
-            raise Exception(f"Error starting KataGo engine: {e}")
+        self.process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1
+        )
+        self.running = True
+        self._master_reader_thread = threading.Thread(target=self._master_reader)
+        self._master_reader_thread.daemon = True
+        self._master_reader_thread.start()
 
     def stop_engine(self):
-        """
-        Stops the KataGo analysis engine.
-        """
+        self.running = False
         if self.process:
             try:
                 self.process.stdin.close()
+            except (IOError, BrokenPipeError):
+                pass
+            try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
-            except (IOError, BrokenPipeError):
-                # Ignore errors that can happen during shutdown
-                pass
             except subprocess.TimeoutExpired:
-                print("KataGo process did not terminate gracefully, killing.")
                 self.process.kill()
                 self.process.wait()
             finally:
                 self.process = None
+        if self._master_reader_thread and self._master_reader_thread.is_alive():
+            self._master_reader_thread.join(timeout=2)
 
-    def send_query(self, query):
-        """
-        Sends a JSON query to the KataGo analysis engine in a thread-safe manner.
+    def _master_reader(self):
+        """Master thread to read all stdout responses and signal events."""
+        while self.running and self.process and not self.process.stdout.closed:
+            response_str = self.process.stdout.readline()
+            if not response_str: break
 
-        Args:
-            query (dict): The query to send to the engine.
+            response = json.loads(response_str)
+            query_id = response.get("id")
 
-        Returns:
-            dict: The response from the engine.
-        """
-        if not self.process:
-            raise Exception("KataGo engine is not running.")
+            if query_id in self.response_events:
+                self.responses[query_id] = response
+                self.response_events[query_id].set()
 
-        # Acquire the lock to ensure this whole operation is atomic
+        # On exit, signal all remaining waiters to prevent deadlocks
         with self.lock:
-            query["id"] = str(self.counter)
-            self.counter += 1
+            for event in self.response_events.values():
+                event.set()
 
-            query_str = json.dumps(query)
+    def send_query(self, query, timeout=300):
+        """
+        Sends a query, waits for the response, and returns it.
+        This is a blocking, thread-safe call that hides the internal async logic.
+        """
+        event = threading.Event()
+        query_id = None
 
-            try:
+        try:
+            with self.lock:
+                self.query_counter += 1
+                query_id = str(self.query_counter)
+                query["id"] = query_id
+                self.response_events[query_id] = event
+
+                query_str = json.dumps(query)
                 self.process.stdin.write(query_str + "\n")
                 self.process.stdin.flush()
-                response = self._read_response()
-            except (BrokenPipeError, IOError) as e:
-                raise Exception(f"Error communicating with KataGo, it may have crashed: {e}")
+
+            # Release lock and wait for the response event from the master reader
+            if not event.wait(timeout=timeout):
+                raise TimeoutError(f"KataGo query {query_id} timed out after {timeout} seconds. KataGo may be stuck or crashed.")
+
+            response = self.responses.get(query_id)
+            if not response:
+                raise Exception(f"Engine may have exited while awaiting response for query {query_id}.")
+            if "error" in response:
+                raise Exception(f"KataGo error: {response['error']}")
 
             return response
-
-    def _read_response(self):
-        """
-        Reads and parses a JSON response from the KataGo engine.
-        This method should only be called by send_query, which holds the lock.
-
-        Returns:
-            dict: The parsed JSON response.
-
-        Raises:
-            Exception: If response is empty or contains error/warning.
-        """
-        response_str = self.process.stdout.readline()
-        if not response_str:
-            # Check if the process exited unexpectedly
-            if self.process.poll() is not None:
-                raise Exception("KataGo engine exited unexpectedly while waiting for a response.")
-            raise Exception("KataGo engine returned empty response")
-
-        response = json.loads(response_str)
-        if "error" in response:
-            raise Exception(f"KataGo error: {response['error']}")
-        if "warning" in response:
-            # Warnings are often not fatal, but good to be aware of.
-            # Depending on the need, you might just print it instead of raising.
-            print(f"KataGo warning: {response['warning']}")
-
-        return response
+        finally:
+            # Clean up the dictionaries for this query_id to prevent memory leaks
+            if query_id:
+                with self.lock:
+                    self.response_events.pop(query_id, None)
+                    self.responses.pop(query_id, None)

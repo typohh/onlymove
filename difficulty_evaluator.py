@@ -16,15 +16,6 @@ SUPPORTED_RANKS = [
     "rank_6d", "rank_7d", "rank_8d", "rank_9d"
 ]
 
-PREAZ_RANKS = [
-    "preaz_20k", "preaz_19k", "preaz_18k", "preaz_17k", "preaz_16k",
-    "preaz_15k", "preaz_14k", "preaz_13k", "preaz_12k", "preaz_11k",
-    "preaz_10k", "preaz_9k", "preaz_8k", "preaz_7k", "preaz_6k",
-    "preaz_5k", "preaz_4k", "preaz_3k", "preaz_2k", "preaz_1k",
-    "preaz_1d", "preaz_2d", "preaz_3d", "preaz_4d", "preaz_5d",
-    "preaz_6d", "preaz_7d", "preaz_8d", "preaz_9d"
-]
-
 SIMULATION_ROUNDS = 10
 
 
