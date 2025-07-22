@@ -1,17 +1,14 @@
 import os
 import threading
 import time
+
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
 
-NUM_WORKERS = 64
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
-SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
-RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+NUM_WORKERS = 2
 
 
 def play_game(rank1, rank2, komi, queries):
@@ -33,58 +30,57 @@ def play_game(rank1, rank2, komi, queries):
     return score > 0, len(moves)
 
 
+def get_komis(shared_data):
+    wins = shared_data["wins"]
+    losses = shared_data["losses"]
+    all_komis = wins + losses
+
+    X = np.array(all_komis).reshape(-1, 1)
+    y = np.array([1] * len(wins) + [0] * len(losses))
+
+    # Fit an Isotonic Regression model
+    iso_reg = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
+    iso_reg.fit(X.flatten(), y)
+
+    unique_komis = sorted(list(set(all_komis)))
+    x_points = np.array(unique_komis)
+    y_points = iso_reg.predict(x_points)
+
+    target_prob = np.random.uniform(0.2, 0.8)
+    komi_for_this_game, komi_minus_1_std, fair_komi, komi_plus_1_std = np.interp([target_prob, 0.5 - 0.341, 0.5, 0.5 + 0.341], y_points, x_points)
+    komi_std = (komi_plus_1_std - komi_minus_1_std) / 2
+
+    komi_for_this_game = round(komi_for_this_game - 0.5) + 0.5
+    komi_for_this_game = max(-149.5, min(komi_for_this_game, 149.5))
+
+    return fair_komi, komi_std, komi_for_this_game, len(all_komis)
+
+
 def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
     """
     Main loop for each worker thread. Plays games and reports stats.
     """
-    model = LogisticRegression()
-
-    previous_komi = 7.5
 
     while not shutdown_event.is_set():
         # --- Phase 1: Analyze, Print, and Plan (locked) ---
         with lock:
             # Fit model on all available historical data
-            wins = shared_data["wins"]
-            losses = shared_data["losses"]
-            all_komis = wins + losses
 
-            X = np.array(all_komis).reshape(-1, 1)
-            y = np.array([1] * len(wins) + [0] * len(losses))
-            model.fit(X, y)
+            fair_komi, komi_std, komi_for_this_game, game_count = get_komis(shared_data)
 
-            intercept = model.intercept_[0]
-            coef = model.coef_[0][0]
-
-            # Periodically print the current stats from a single thread
             current_time = time.time()
-            if current_time - shared_data["last_print_time"] > 2.0:
-                fair_komi = -intercept / coef
-                mean_val = np.mean(all_komis)
-                std_dev = np.std(all_komis)
 
-                elapsed_seconds = current_time - start_time
-                elapsed_minutes = elapsed_seconds / 60.0
-                games_per_minute = shared_data["total_games"] / elapsed_minutes
-                moves_per_minute = shared_data["total_moves"] / elapsed_minutes
+            elapsed_seconds = current_time - start_time
+            elapsed_minutes = elapsed_seconds / 60.0
+            games_per_minute = shared_data["total_games"] / elapsed_minutes
+            moves_per_minute = shared_data["total_moves"] / elapsed_minutes
 
-                print(f"Games: {len(all_komis):>5} | Fair Komi (LR): {fair_komi:>6.3f} | "
-                      f"Mean Komi: {mean_val:>6.3f} | Std Dev: {std_dev:>5.3f} | "
-                      f"Games/min: {games_per_minute:>6.1f} | Moves/min: {moves_per_minute:>7.1f}"
-                      f" | Last Game Komi: {previous_komi:>6.1f}")
-
-                shared_data["last_print_time"] = current_time
-
-            # Sample a new komi from the calculated distribution for the next game
-            target_prob = np.random.uniform(0.2, 0.8)
-            logit_p = np.log(target_prob / (1 - target_prob))
-            komi_for_this_game = (logit_p - intercept) / coef
-            komi_for_this_game = round(komi_for_this_game - 0.5) + 0.5
-            komi_for_this_game = max(-149.5, min(komi_for_this_game, 149.5))
-            previous_komi = komi_for_this_game
+            print(f"Games: {game_count:>5} | Komi : {fair_komi:>6.1f}±{komi_std} | "
+                  f"Games/min: {games_per_minute:>6.1f} | Moves/min: {moves_per_minute:>7.1f}"
+                  f" | Next Komi: {komi_for_this_game:>6.1f}")
 
         # --- Phase 2: Play the Game (unlocked) ---
-        black_won, num_moves = play_game("rank_1d", "rank_5k", komi_for_this_game, queries)
+        black_won, num_moves = play_game("rank_2d", "rank_2d", komi_for_this_game, queries)
 
         # --- Phase 3: Update Results (locked) ---
         with lock:
@@ -98,11 +94,13 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
 
 if __name__ == "__main__":
-    controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH, human_model_path=SL_MODEL_PATH, batch_size=128, search_shreads=1)
-    controller.start_engine()
+    controller = KatagoController(KATAGO_PATH, model_path= SL_MODEL_PATH, human_model_path=SL_MODEL_PATH, batch_size=NUM_WORKERS, search_threads=1)
+    controller.start_engine(verbose=True)
     queries = KatagoQueries(controller)
     lock = threading.Lock()
     shutdown_event = threading.Event()
+
+    time.sleep(10)
 
     start_time = time.time()
 

@@ -1,8 +1,14 @@
-# FILE: katago_controller.py
-import subprocess
 import json
+import os
+import subprocess
 import threading
-import time
+
+# CONFIG_FILE = "analysis.cfg"
+CONFIG_FILE = "KataGo/cpp/configs/analysis_example.cfg"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
+SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
+RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
 
 
 class KatagoController:
@@ -11,40 +17,45 @@ class KatagoController:
     The external interface is a simple, blocking send_query call.
     """
 
-    def __init__(self, katago_path, model_path, human_model_path=None, batch_size=32, search_shreads=1):
-        self.katago_path = katago_path
-        self.model_path = model_path
-        self.human_model_path = human_model_path
+    def __init__(self, batch_size=32, search_threads=1):
         self.process = None
         self._master_reader_thread = None
         self.running = False
         self.lock = threading.Lock()
         self.batch_size = batch_size
-        self.search_threads = search_shreads
+        self.search_threads = search_threads
         self.query_counter = 0
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
 
     def start_engine(self, verbose=False):
         command = [
-            self.katago_path, "analysis",
-            "-config", "analysis.cfg",
-            "-model", self.model_path,
-            "-override-config", f"numAnalysisThreads={int(self.batch_size/self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
+            KATAGO_PATH, "analysis",
+            "-config", CONFIG_FILE,
+            "-override-config", f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
-        if self.human_model_path:
-            command.extend(["-human-model", self.human_model_path])
+        command.extend(["-model", RL_MODEL_PATH])
+        command.extend(["-human-model", SL_MODEL_PATH])
 
         print(command)
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1
+            stderr=subprocess.PIPE if verbose else subprocess.DEVNULL, text=True, bufsize=1
         )
         self.running = True
         self._master_reader_thread = threading.Thread(target=self._master_reader)
         self._master_reader_thread.daemon = True
         self._master_reader_thread.start()
+
+        if verbose:
+            def read_stderr(process):
+                for line in process.stderr:
+                    print(f"KataGo STDERR: {line.strip()}")
+
+            self.stderr_thread = threading.Thread(target=read_stderr, args=(self.process,))
+            self.stderr_thread.daemon = True  # Allow main program to exit even if thread is still running
+            self.stderr_thread.start()
 
     def stop_engine(self):
         self.running = False
@@ -98,6 +109,7 @@ class KatagoController:
                 self.response_events[query_id] = event
 
                 query_str = json.dumps(query)
+                print("sending query:", query_str)
                 self.process.stdin.write(query_str + "\n")
                 self.process.stdin.flush()
 

@@ -219,10 +219,10 @@ class KatagoQueries:
             winrate = response["rootInfo"]["winrate"]
             return self.get_move_from_idx(policy.index(max(policy))), winrate, score
         elif response.get("moveInfos"):
-            moveInfo = response["moveInfos"][0]
-            score = moveInfo["scoreLead"]
-            winrate = moveInfo["winrate"]
-            return moveInfo["move"],winrate,score
+            move_info = response["moveInfos"][0]
+            score = move_info["scoreLead"]
+            winrate = move_info["winrate"]
+            return move_info["move"],winrate,score
         else:
             policy = response["policy"]
             score = response["rootInfo"]["scoreLead"]
