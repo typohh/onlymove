@@ -123,11 +123,11 @@ def main():
             num_queries_per_round = 2 * batch_size
 
             # Round 1: Warm-up
-            warmup_queries = [generate_random_query(f"w_{i}") for i in range(num_queries_per_round)]
+            warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1,int(num_queries_per_round/4)))]
             for query in warmup_queries:
                 process.stdin.write(json.dumps(query) + "\n")
             process.stdin.flush()
-            for i in range(num_queries_per_round):
+            for i in range(max(1,int(num_queries_per_round/4))):
                 if not process.stdout.readline():
                     raise RuntimeError("exited during warm-up")
 
