@@ -99,8 +99,8 @@ def main():
             sys.exit(1)
 
     batch_size = 1
-    best_batch_size = 0
     best_queries_per_second = 0
+    all_results = []
 
     print("--- Starting KataGo Throughput Test ---")
     while True:
@@ -123,11 +123,11 @@ def main():
             num_queries_per_round = 2 * batch_size
 
             # Round 1: Warm-up
-            warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1,int(num_queries_per_round/4)))]
+            warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1, int(num_queries_per_round / 4)))]
             for query in warmup_queries:
                 process.stdin.write(json.dumps(query) + "\n")
             process.stdin.flush()
-            for i in range(max(1,int(num_queries_per_round/4))):
+            for _ in range(len(warmup_queries)):
                 if not process.stdout.readline():
                     raise RuntimeError("exited during warm-up")
 
@@ -137,22 +137,36 @@ def main():
             for query in timed_queries:
                 process.stdin.write(json.dumps(query) + "\n")
             process.stdin.flush()
+
+            predicted_time_limit = 0
+            if best_queries_per_second > 0:
+                predicted_total_time = num_queries_per_round / best_queries_per_second
+                predicted_time_limit = predicted_total_time * 1.5
+
+            has_stalled = False
             for i in range(num_queries_per_round):
+                if predicted_time_limit > 0:
+                    elapsed_time = time.perf_counter() - start_time
+                    if elapsed_time > predicted_time_limit:
+                        print(f"STALLED | Time ({elapsed_time:.2f}s) exceeded 150% of predicted time ({predicted_total_time:.2f}s). Halting.")
+                        has_stalled = True
+                        break
                 if not process.stdout.readline():
                     raise RuntimeError("exited during timed test")
-            end_time = time.perf_counter()
 
+            if has_stalled:
+                break
+
+            end_time = time.perf_counter()
             queries_per_second = num_queries_per_round / (end_time - start_time)
             print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
-            if queries_per_second < 0.9 * best_queries_per_second:
-                print("Signficant throughput drop.")
-                break
+
+            all_results.append((batch_size, queries_per_second))
+
             if queries_per_second > best_queries_per_second:
-                best_batch_size = batch_size
                 best_queries_per_second = queries_per_second
 
             batch_size *= 2
-
 
         except (RuntimeError, BrokenPipeError) as e:
             print(f"FAILURE | KataGo process {e}.")
@@ -170,9 +184,24 @@ def main():
                 process.communicate()
 
     print("\n--- Test Complete ---")
-    if best_queries_per_second > 0:
-        print(f"The optimal throughput was achieved with batch size: {best_batch_size}")
-        update_config_file(CONFIG_FILE, best_batch_size)
+    if all_results:
+        # Find the absolute maximum throughput from all successful runs
+        max_batch_size, max_throughput = max(all_results, key=lambda item: item[1])
+        print(f"Peak throughput found: {max_throughput:.2f} q/s at batch size {max_batch_size}.")
+
+        # Calculate the 85% target
+        target_throughput = max_throughput * 0.85
+
+        # Find the smallest batch size that meets the target
+        # all_results is already sorted by batch size, so we can iterate
+        balanced_batch_size = 1
+        for bs, throughput in all_results:
+            if throughput >= target_throughput:
+                balanced_batch_size = bs
+                break
+
+        print(f"Selecting balanced batch size of: {balanced_batch_size}")
+        update_config_file(CONFIG_FILE, balanced_batch_size)
     else:
         print("Could not complete a single run. Please check your KataGo setup and file paths.")
 
