@@ -3,10 +3,21 @@ import numpy as np
 LOW_PLAYOUTS = 10
 HIGH_PLAYOUTS = 100
 
+SUPPORTED_RANKS = [
+    "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
+    "rank_15k", "rank_14k", "rank_13k", "rank_12k", "rank_11k",
+    "rank_10k", "rank_9k", "rank_8k", "rank_7k", "rank_6k",
+    "rank_5k", "rank_4k", "rank_3k", "rank_2k", "rank_1k",
+    "rank_1d", "rank_2d", "rank_3d", "rank_4d", "rank_5d",
+    "rank_6d", "rank_7d", "rank_8d", "rank_9d"
+]
+
+
 class KatagoQueries:
     """
     A class to manage the KataGo analysis engine process.
     """
+
     def __init__(self, katago_controller):
         """
         Initializes the KatagoController.
@@ -47,10 +58,10 @@ class KatagoQueries:
     def _include_player_in_move_sequence(moves):
         player_and_move = []
         for move in moves:
-            player_and_move.append([get_player_to_move_next(player_and_move),move])
+            player_and_move.append([get_player_to_move_next(player_and_move), move])
         return player_and_move
 
-    def query_policy(self, moves, human_rank=None, komi = 7.5):
+    def query_policy(self, moves, human_rank=None, komi=7.5):
         """
         Sends a standardized query for root position analysis (1 visit).
         Returns rootInfo but no moveInfos.
@@ -70,33 +81,48 @@ class KatagoQueries:
             query["overrideSettings"] = {
                 "humanSLProfile": human_rank,
                 "ignorePreRootHistory": False,
-                # "rootNumSymmetriesToSample": 8
+                "rootNumSymmetriesToSample": 1
             }
         return self._katago_controller.send_query(query)
 
-    def query_weighted_random_move(self, moves, human_rank, komi = 7.5):
+    def query_weighted_random_move(self, moves, human_rank, komi=7.5):
         """
         Queries the policy for a given rank and returns a move based on a weighted random sample.
         """
-        response = self.query_policy(moves, human_rank=human_rank, komi=komi)
-        policy = response["humanPolicy"]
+        rank_str = _get_rank_str(human_rank)
 
-        # Filter out illegal moves and create a list of (move_index, probability)
-        legal_moves = [(i, p) for i, p in enumerate(policy) if p > 0]
+        response = self.query_policy(moves, human_rank=rank_str, komi=komi)
+        human_policy = response["humanPolicy"]
+        strong_policy = response["policy"]
+
+        human_legal_indices = {i for i, p in enumerate(human_policy) if p > 0}
+        strong_legal_indices = {i for i, p in enumerate(strong_policy) if p > 0}
+
+        if human_legal_indices != strong_legal_indices:
+            raise Exception("Human and strong policies disagree on legal moves.")
+
+        legal_moves_map = {
+            i: p for i, p in enumerate(human_policy) if i in strong_legal_indices
+        }
+
+        pass_idx = len(strong_policy) - 1
+        if pass_idx in legal_moves_map:
+            legal_moves_map[pass_idx] = strong_policy[pass_idx]
+
+        legal_moves = list(legal_moves_map.items())
+
         if not legal_moves:
-            return "pass" # or handle as an error
+            return "pass"
 
-        # Separate indices and probabilities for random sampling
         move_indices, probabilities = zip(*legal_moves)
-        
-        # Normalize probabilities
+
         probabilities = np.array(probabilities)
         probabilities /= probabilities.sum()
 
-        # Choose a move index based on the probabilities
         chosen_index = np.random.choice(move_indices, p=probabilities)
 
         return self.get_move_from_idx(chosen_index)
+
 
     def query_children_low(self, moves):
         """
@@ -119,7 +145,7 @@ class KatagoQueries:
         }
         return self._katago_controller.send_query(query)
 
-    def query(self, moves, strong = False, exclude_move=None):
+    def query(self, moves, strong=False, exclude_move=None):
         """
         Provides a high playout query, where specific first move may be excluded.
         """
@@ -146,7 +172,7 @@ class KatagoQueries:
     def get_move_from_idx(self, idx):
         """
         Converts a KataGo policy index to a Go move string (e.g., "A1", "pass").
-        Assumes a 9x9 board for now.
+        Assumes a 9x9 board
         """
         board_x_size = 9
         board_y_size = 9
@@ -207,7 +233,6 @@ class KatagoQueries:
 
         return score_lead, winrate
 
-
     def get_best_move(self, response):
         """
         Helper to get the the best policy move
@@ -223,19 +248,19 @@ class KatagoQueries:
             move_info = response["moveInfos"][0]
             score = move_info["scoreLead"]
             winrate = move_info["winrate"]
-            return move_info["move"],winrate,score
+            return move_info["move"], winrate, score
         else:
             policy = response["policy"]
             score = response["rootInfo"]["scoreLead"]
             winrate = response["rootInfo"]["winrate"]
-            return self.get_move_from_idx(policy.index(max(policy))),winrate,score
+            return self.get_move_from_idx(policy.index(max(policy))), winrate, score
 
 
 def get_player_to_move_next(moves):
     """
     returns "B" or "W" corresponding to whos turn it is to move, assuming black started game and alternating turns.
     """
-    if len(moves) % 2 == 0 :
+    if len(moves) % 2 == 0:
         return "B"
     else:
         return "W"
@@ -266,7 +291,6 @@ def katago_to_sgf_coords(katago_move, board_size):
     return row, col
 
 
-
 def sgf_to_katago_coords(sgf_move, board_size):
     """
     Converts SGF coordinates to KataGo coordinates.
@@ -287,3 +311,11 @@ def sgf_to_katago_coords(sgf_move, board_size):
         col_str = chr(ord('A') + col + 1)
     row_str = str(board_size - row)
     return col_str + row_str
+
+
+def _get_rank_str(rank):
+    return SUPPORTED_RANKS[min(int(rank * len(SUPPORTED_RANKS)), len(SUPPORTED_RANKS) - 1)]
+
+
+def get_rank_str(rank):
+    return _get_rank_str(rank)[5:]

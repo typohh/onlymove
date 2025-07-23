@@ -6,17 +6,7 @@ from scipy.stats import norm, stats
 from Stats import DEBUG
 from katago_queries import KatagoQueries
 
-SUPPORTED_RANKS = [
-    "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
-    "rank_15k", "rank_14k", "rank_13k", "rank_12k", "rank_11k",
-    "rank_10k", "rank_9k", "rank_8k", "rank_7k", "rank_6k",
-    "rank_5k", "rank_4k", "rank_3k", "rank_2k", "rank_1k",
-    "rank_1d", "rank_2d", "rank_3d", "rank_4d", "rank_5d",
-    "rank_6d", "rank_7d", "rank_8d", "rank_9d"
-]
-
 SIMULATION_ROUNDS = 10
-
 
 class DifficultyEvaluator:
     """

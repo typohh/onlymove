@@ -143,48 +143,52 @@ class ProblemFinder:
         game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean)
 
         STATS.add_problem_found(len(adjusted_moves), move_mean, game_mean)
-        self.save_problem_as_sgf({
+        sgf_str = save_problem_as_sgf({
             "moves": adjusted_moves,
             "solution": solution_move,
             "move_rank": self.difficulty.get_rank_str(move_mean, move_stddev),
             "game_rank": self.difficulty.get_rank_str(game_mean, game_stddev)
-        }, output_dir)
-        return True
-
-    @staticmethod
-    def save_problem_as_sgf(problem, output_dir):
-        """
-        Saves a single problem as an SGF file with annotations.
-
-        Args:
-            problem (dict): The problem dictionary.
-            output_dir (str): The name of the directory for SGF files.
-        """
-
-        # print(problem)
+        })
 
         os.makedirs(output_dir, exist_ok=True)
         filename = os.path.join(output_dir, f"{uuid.uuid4()}.sgf")
+        with open(filename, "wb") as f:
+            f.write(sgf_str)
 
-        game = sgf.Sgf_game(size=9)
-        game.root.set("KM", str(7.5))
-        game.root.set("RU", "tromp-taylor")
+        return True
+
+
+def save_problem_as_sgf(problem, komi=7.5):
+    """
+    Saves a single problem as an SGF file with annotations.
+
+    Args:
+        problem (dict): The problem dictionary.
+        output_dir (str): The name of the directory for SGF files.
+    """
+
+    # print(problem)
+
+    game = sgf.Sgf_game(size=9)
+    game.root.set("KM", str(komi))
+    game.root.set("RU", "tromp-taylor")
+    if problem.get("move_rank") and problem.get("game_rank"):
         game.root.set("GN", f"Last move difficulty: {problem["move_rank"]}, Last move + remaining game difficulty: {problem['game_rank']}")
 
-        player = "b"
+    player = "b"
 
-        # Add initial moves
-        for move in problem["moves"]:
-            node = game.extend_main_sequence()
-            node.set_move(player, katago_to_sgf_coords(move, 9))
-            player = "w" if player == "b" else "b"
+    # Add initial moves
+    for move in problem["moves"]:
+        node = game.extend_main_sequence()
+        node.set_move(player, katago_to_sgf_coords(move, 9))
+        player = "w" if player == "b" else "b"
 
-        # Add the solution move and annotations
+    # Add the solution move and annotations
+    if problem.get("solution"):
         solution_move = problem["solution"]
         solution_node = game.extend_main_sequence()
         solution_node.set_move(player, katago_to_sgf_coords(solution_move, 9))
         solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
         solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
 
-        with open(filename, "wb") as f:
-            f.write(game.serialise())
+    return game.serialise()

@@ -6,14 +6,14 @@ import sys
 import time
 import re
 
-# --- Configuration ---
-# This script assumes it's located in a directory that also contains the 'KataGo' and 'weights' folders.
-# If your layout is different, you will need to adjust these paths.
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
-CONFIG_FILE = os.path.join(BASE_DIR, "KataGo", "cpp", "configs", "analysis_example.cfg")
-RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
-SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
+from katago_controller import KATAGO_PATH, CONFIG_FILE, RL_MODEL_PATH, SL_MODEL_PATH
+
+
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
+# CONFIG_FILE = os.path.join(BASE_DIR, "analysis.cfg")
+# RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
+# SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 
 
 # --- Helper Function for Query Generation ---
@@ -40,8 +40,8 @@ def generate_random_query(query_id: str) -> dict:
         "id": query_id, "moves": [], "initialStones": initial_stones,
         "rules": "tromp-taylor", "komi": 7.5, "boardXSize": board_size,
         "boardYSize": board_size, "maxVisits": 1, "includePolicy": True,
-        "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False,"rootNumSymmetriesToSample": 1
-}
+        "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False, "rootNumSymmetriesToSample": 1
+                             }
     }
 
 
@@ -67,7 +67,7 @@ def update_config_file(config_path: str, optimal_size: int):
                     if key in keys_to_update:
                         updated_lines.append(f"{key} = {optimal_size}\n")
                         keys_found.add(key)
-                        continue # Skip appending the old line
+                        continue  # Skip appending the old line
             # If the line doesn't match, add it as-is
             updated_lines.append(line)
 
@@ -99,7 +99,8 @@ def main():
             sys.exit(1)
 
     batch_size = 1
-    last_successful_batch_size = 0
+    best_batch_size = 0
+    best_queries_per_second = 0
 
     print("--- Starting KataGo Throughput Test ---")
     while True:
@@ -143,15 +144,22 @@ def main():
 
             queries_per_second = num_queries_per_round / (end_time - start_time)
             print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
-            last_successful_batch_size = batch_size
+            if queries_per_second < 0.9 * best_queries_per_second:
+                print("Signficant throughput drop.")
+                break
+            if queries_per_second > best_queries_per_second:
+                best_batch_size = batch_size
+                best_queries_per_second = queries_per_second
+
             batch_size *= 2
+
 
         except (RuntimeError, BrokenPipeError) as e:
             print(f"FAILURE | KataGo process {e}.")
             if process and process.stderr:
                 stderr = process.stderr.read()
                 if "out of memory" in stderr.lower():
-                     print("          (Likely cause: Out of VRAM)")
+                    print("          (Likely cause: Out of VRAM)")
             break
         except Exception as e:
             print(f"FAILURE | An unexpected Python error occurred: {e}")
@@ -162,11 +170,12 @@ def main():
                 process.communicate()
 
     print("\n--- Test Complete ---")
-    if last_successful_batch_size > 0:
-        print(f"The optimal throughput was achieved with batch size: {last_successful_batch_size}")
-        update_config_file(CONFIG_FILE, last_successful_batch_size)
+    if best_queries_per_second > 0:
+        print(f"The optimal throughput was achieved with batch size: {best_batch_size}")
+        update_config_file(CONFIG_FILE, best_batch_size)
     else:
         print("Could not complete a single run. Please check your KataGo setup and file paths.")
+
 
 if __name__ == "__main__":
     main()
