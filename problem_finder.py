@@ -1,17 +1,15 @@
-import os
-import uuid
 import random
 
 from sgfmill import sgf
 
 from Stats import STATS, DEBUG
 from difficulty_evaluator import DifficultyEvaluator
-from katago_queries import KatagoQueries, katago_to_sgf_coords
+from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
 
 MIN_SCORE = -2
 MAX_SCORE = 0
-MIN_WINRATE_CORRECT = 0.6
-MAX_WINRATE_ALTERNATIVE = 0.4
+MIN_WINRATE_CORRECT = 0.7
+MAX_WINRATE_ALTERNATIVE = 0.3
 
 
 class ProblemFinder:
@@ -38,6 +36,15 @@ class ProblemFinder:
         """
         moves = []
 
+        def is_valid(move):
+            if move == "pass":
+                return False
+            if move[0] == "A" or move[0] == "J":
+                return False
+            if move[1] == "1" or move[1] == "9":
+                return False
+            return True
+
         # 1. Play 4 random moves
         for _ in range(4):
             response = self.queries.query_policy(moves)
@@ -45,14 +52,14 @@ class ProblemFinder:
             legal_moves = [
                 (i, p)
                 for i, p in enumerate(response["policy"])
-                if p > 0 and self.queries.get_move_from_idx(i) != "pass"
+                if p > 0 and is_valid(self.queries.get_move_from_idx(i))
             ]
 
             # Weighted random sampling based on policy
             move_indices, probabilities = zip(*legal_moves)
             total_prob = sum(probabilities)
             normalized_probs = [p / total_prob for p in probabilities]
-            chosen_idx = random.choices(move_indices, weights=normalized_probs)[0]
+            chosen_idx = random.choices(move_indices)[0]
             move = self.queries.get_move_from_idx(chosen_idx)
 
             moves.append(move)
@@ -63,7 +70,7 @@ class ProblemFinder:
 
         # 2. Play 2 moves to balance the game
         for _ in range(2):
-            response = self.queries.query_children_low(moves)
+            response = self.queries.query_children(moves)
             if not response.get("moveInfos"):
                 break  # No further moves possible
 
@@ -110,7 +117,7 @@ class ProblemFinder:
             if DEBUG: print(f"B {second_move} {(second_winrate * 100):.1f}% {second_score:.1f}")
             moves.append(second_move)
 
-            response = self.queries.query_children_low(moves)
+            response = self.queries.query_children(moves)
 
             # Find move that makes score difference closest to target
             best_response = None
@@ -130,35 +137,28 @@ class ProblemFinder:
             if DEBUG: print(f"W {best_response} {(best_winrate * 100):.1f}% {best_score:.1f}")
             moves.append(best_response)
 
-    def create_problem(self, output_dir):
+    def create_problem(self):
 
         moves_so_far = self.generate_initial_position()
 
         adjusted_moves, solution_move = self.adjust_tsumego(moves_so_far.copy())
         if not solution_move:
             STATS.add_failure_to_create_problem()
-            return False
+            return None
 
         move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
         game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean)
 
         STATS.add_problem_found(len(adjusted_moves), move_mean, game_mean)
-        sgf_str = save_problem_as_sgf({
+        return {
             "moves": adjusted_moves,
             "solution": solution_move,
-            "move_rank": self.difficulty.get_rank_str(move_mean, move_stddev),
-            "game_rank": self.difficulty.get_rank_str(game_mean, game_stddev)
-        })
-
-        os.makedirs(output_dir, exist_ok=True)
-        filename = os.path.join(output_dir, f"{uuid.uuid4()}.sgf")
-        with open(filename, "wb") as f:
-            f.write(sgf_str)
-
-        return True
+            "move_rank": get_rank_str(move_mean, move_stddev),
+            "game_rank": get_rank_str(game_mean, game_stddev)
+        }
 
 
-def save_problem_as_sgf(problem, komi=7.5):
+def problem_to_sgf(problem, komi=7.5):
     """
     Saves a single problem as an SGF file with annotations.
 
@@ -191,4 +191,4 @@ def save_problem_as_sgf(problem, komi=7.5):
         solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
         solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
 
-    return game.serialise()
+    return game.serialise().decode()

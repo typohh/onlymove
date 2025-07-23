@@ -4,19 +4,15 @@ import os
 import threading
 import time
 import traceback
+import uuid
 
 from Stats import STATS, DEBUG
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
-from problem_finder import ProblemFinder
+from problem_finder import ProblemFinder, problem_to_sgf
 
-# Define paths - adjust these if your KataGo executable or models are elsewhere
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
-SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
-RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
-OUTPUT_DIR = "./tsumegos"
-
+OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
 
 
 def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: ProblemFinder):
@@ -25,7 +21,17 @@ def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: P
     Generates one game and finds all problems within it.
     """
     try:
-        problem_finder.create_problem(OUTPUT_DIR)
+        problem = problem_finder.create_problem()
+        if problem:
+            sgf_str = problem_to_sgf(problem)
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            filename = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}.sgf")
+            with open(filename, "wb") as f:
+                f.write(sgf_str.encode("utf-8"))
+            print_stats()
+            print(problem["move_rank"], problem["game_rank"], filename)
+
+
 
     except Exception as e:
         print(f"An error occurred in worker {worker_id}: {e}")
@@ -47,35 +53,26 @@ def print_stats():
                 print(f"{key}: {value}")
         print("------------------\n")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate Go problems using KataGo in parallel.")
-    parser.add_argument("--verbose", action="store_true", help="Show KataGo engine output")
-    parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel worker threads to run")
-    args = parser.parse_args()
-
-    if DEBUG:
-        args.num_workers = 1
-
     controller = None
     try:
         print("Starting KataGo engines...")
-        controller = KatagoController(KATAGO_PATH, RL_MODEL_PATH, human_model_path=SL_MODEL_PATH)
-        controller.start_engine(verbose=args.verbose)
+        controller = KatagoController()
+        controller.start_engine()
         print("KataGo engines started.")
 
         queries = KatagoQueries(controller)
         problem_finder = ProblemFinder(queries)
 
-        # Start a thread to print stats periodically
-        stats_thread = threading.Thread(target=print_stats, args=(), daemon=True)
-        stats_thread.start()
+        worker_count = 1 if DEBUG else controller.get_batch_size()
 
         # Use a ThreadPoolExecutor to manage a pool of worker threads
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_workers) as executor:
-            print(f"Starting {args.num_workers} worker threads for continuous problem generation.")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+            print(f"Starting {worker_count} worker threads for continuous problem generation.")
 
             futures = {
-                executor.submit(worker_task, i, queries, problem_finder): i for i in range(args.num_workers)
+                executor.submit(worker_task, i, queries, problem_finder): i for i in range(worker_count)
             }
 
             while futures:

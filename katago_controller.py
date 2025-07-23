@@ -107,7 +107,7 @@ class KatagoController:
             for event in self.response_events.values():
                 event.set()
 
-    def send_query(self, query, timeout=300):
+    def send_query(self, query):
         """
         Sends a query, waits for the response, and returns it.
         This is a blocking, thread-safe call that hides the internal async logic.
@@ -127,7 +127,7 @@ class KatagoController:
                 self.process.stdin.flush()
 
             # Release lock and wait for the response event from the master reader
-            if not event.wait(timeout=timeout):
+            if not event.wait(timeout=60*60):
                 raise TimeoutError(f"KataGo query {query_id} timed out after {timeout} seconds. KataGo may be stuck or crashed.")
 
             response = self.responses.get(query_id)

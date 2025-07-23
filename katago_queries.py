@@ -1,9 +1,8 @@
 import numpy as np
 
-LOW_PLAYOUTS = 10
-HIGH_PLAYOUTS = 100
+PLAYOUTS = 30
 
-SUPPORTED_RANKS = [
+_SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
     "rank_15k", "rank_14k", "rank_13k", "rank_12k", "rank_11k",
     "rank_10k", "rank_9k", "rank_8k", "rank_7k", "rank_6k",
@@ -11,6 +10,10 @@ SUPPORTED_RANKS = [
     "rank_1d", "rank_2d", "rank_3d", "rank_4d", "rank_5d",
     "rank_6d", "rank_7d", "rank_8d", "rank_9d"
 ]
+
+
+def get_all_ranks():
+    return [(i + 0.5) / len(_SUPPORTED_RANKS) for i in range(len(_SUPPORTED_RANKS))]
 
 
 class KatagoQueries:
@@ -29,36 +32,11 @@ class KatagoQueries:
         """
         self._katago_controller = katago_controller
 
-    def query_low(self, moves):
-        """
-        Sends a standardized query for root position analysis (1 visit).
-        Returns rootInfo but no moveInfos.
-        """
-        query = {
-            "moves": self._include_player_in_move_sequence(moves),
-            "initialStones": [],
-            "rules": "tromp-taylor",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": LOW_PLAYOUTS,
-        }
-        if exclude_move:
-            query["avoidMoves"] = [
-                {
-                    "player": get_player_to_move_next(moves),
-                    "moves": [exclude_move],
-                    "untilDepth": 1
-                }
-            ]
-
-        return self._katago_controller.send_query(query)
-
     @staticmethod
     def _include_player_in_move_sequence(moves):
         player_and_move = []
         for move in moves:
-            player_and_move.append([get_player_to_move_next(player_and_move), move])
+            player_and_move.append([_get_player_to_move_next(player_and_move), move])
         return player_and_move
 
     def query_policy(self, moves, human_rank=None, komi=7.5):
@@ -79,7 +57,7 @@ class KatagoQueries:
         if human_rank:
             # noinspection PyTypeChecker
             query["overrideSettings"] = {
-                "humanSLProfile": human_rank,
+                "humanSLProfile": _get_rank_str(human_rank),
                 "ignorePreRootHistory": False,
                 "rootNumSymmetriesToSample": 1
             }
@@ -89,9 +67,20 @@ class KatagoQueries:
         """
         Queries the policy for a given rank and returns a move based on a weighted random sample.
         """
-        rank_str = _get_rank_str(human_rank)
 
-        response = self.query_policy(moves, human_rank=rank_str, komi=komi)
+        response = self.query_policy(moves, human_rank=human_rank, komi=komi)
+
+        if not response.get("humanPolicy"):
+            print("moves:", moves)
+            print("human_rank:", human_rank)
+            print("response:", response)
+            response = self.query_policy(moves, human_rank=human_rank, komi=komi)
+            if not response.get("humanPolicy"):
+                raise Exception("Human policy not found in response.")
+            else:
+                raise Exception("Human policy found in repeat query.")
+            # return "pass"
+
         human_policy = response["humanPolicy"]
         strong_policy = response["policy"]
 
@@ -123,8 +112,7 @@ class KatagoQueries:
 
         return self.get_move_from_idx(chosen_index)
 
-
-    def query_children_low(self, moves):
+    def query_children(self, moves):
         """
         Sends a standardized query for children analysis (visits adjusted by the number of legal moves).
         Returns moveInfos but not necessarily accurate rootInfo.
@@ -140,12 +128,12 @@ class KatagoQueries:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": num_legal_moves * LOW_PLAYOUTS,
+            "maxVisits": num_legal_moves * int(PLAYOUTS ** 0.5),
             "rootPolicyTemperature": 100,
         }
         return self._katago_controller.send_query(query)
 
-    def query(self, moves, strong=False, exclude_move=None):
+    def query(self, moves, exclude_move=None):
         """
         Provides a high playout query, where specific first move may be excluded.
         """
@@ -156,12 +144,12 @@ class KatagoQueries:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": HIGH_PLAYOUTS,
+            "maxVisits": PLAYOUTS,
         }
         if exclude_move:
             query["avoidMoves"] = [
                 {
-                    "player": get_player_to_move_next(moves),
+                    "player": _get_player_to_move_next(moves),
                     "moves": [exclude_move],
                     "untilDepth": 1
                 }
@@ -256,7 +244,7 @@ class KatagoQueries:
             return self.get_move_from_idx(policy.index(max(policy))), winrate, score
 
 
-def get_player_to_move_next(moves):
+def _get_player_to_move_next(moves):
     """
     returns "B" or "W" corresponding to whos turn it is to move, assuming black started game and alternating turns.
     """
@@ -314,8 +302,11 @@ def sgf_to_katago_coords(sgf_move, board_size):
 
 
 def _get_rank_str(rank):
-    return SUPPORTED_RANKS[min(int(rank * len(SUPPORTED_RANKS)), len(SUPPORTED_RANKS) - 1)]
+    return _SUPPORTED_RANKS[min(int(rank * len(_SUPPORTED_RANKS)), len(_SUPPORTED_RANKS) - 1)]
 
 
-def get_rank_str(rank):
-    return _get_rank_str(rank)[5:]
+def get_rank_str(rank, stddev=None):
+    if stddev is None:
+        return _get_rank_str(rank)[5:]
+    else:
+        return f"{_get_rank_str(rank)[5:]}±{stddev:.1f}"
