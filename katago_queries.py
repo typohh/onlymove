@@ -309,4 +309,4 @@ def get_rank_str(rank, stddev=None):
     if stddev is None:
         return _get_rank_str(rank)[5:]
     else:
-        return f"{_get_rank_str(rank)[5:]}±{stddev:.1f}"
+        return f"{_get_rank_str(rank)[5:]}±{stddev/len(_SUPPORTED_RANKS):.1f}"

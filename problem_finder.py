@@ -124,7 +124,7 @@ class ProblemFinder:
             best_response_penalty = float('inf')
             best_score = 0
             best_winrate = 0.5
-            target_score = best_score - second_score + (MIN_SCORE + MAX_SCORE) / 2
+            target_score = best_score - second_score - (MIN_SCORE + MAX_SCORE) / 2
 
             for move_info in response["moveInfos"]:
                 penalty = abs(move_info["scoreLead"] - target_score)
