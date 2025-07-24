@@ -14,6 +14,7 @@ from problem_finder import ProblemFinder, problem_to_sgf
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
 
+print_lock = threading.Lock()
 
 def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: ProblemFinder):
     """
@@ -28,10 +29,9 @@ def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: P
             filename = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}.sgf")
             with open(filename, "wb") as f:
                 f.write(sgf_str.encode("utf-8"))
-            print_stats()
-            print(problem["move_rank"], problem["game_rank"], filename)
-
-
+            with print_lock:
+                print_stats()
+                print(problem["move_rank"], problem["game_rank"], filename)
 
     except Exception as e:
         print(f"An error occurred in worker {worker_id}: {e}")
