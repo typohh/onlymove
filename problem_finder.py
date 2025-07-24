@@ -2,7 +2,7 @@ import random
 
 from sgfmill import sgf
 
-from Stats import STATS, DEBUG
+from stats import STATS, DEBUG
 from difficulty_evaluator import DifficultyEvaluator
 from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
 
@@ -45,10 +45,9 @@ class ProblemFinder:
                 return False
             return True
 
-        # 1. Play 4 random moves
-        for _ in range(4):
+        # Play 6 random moves, anywhere except 1st line
+        for _ in range(6):
             response = self.queries.query_policy(moves)
-            # Filter out pass moves and moves with very low policy values
             legal_moves = [
                 (i, p)
                 for i, p in enumerate(response["policy"])
@@ -57,8 +56,8 @@ class ProblemFinder:
 
             # Weighted random sampling based on policy
             move_indices, probabilities = zip(*legal_moves)
-            total_prob = sum(probabilities)
-            normalized_probs = [p / total_prob for p in probabilities]
+            # total_prob = sum(probabilities)
+            # normalized_probs = [p / total_prob for p in probabilities]
             chosen_idx = random.choices(move_indices)[0]
             move = self.queries.get_move_from_idx(chosen_idx)
 
@@ -66,7 +65,7 @@ class ProblemFinder:
 
         if DEBUG:
             move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
-            print(f"status after 4 random moves: {(100 * winrate):.1f}% {score:.1f}")
+            print(f"status after 6 random moves: {(100 * winrate):.1f}% {score:.1f}")
 
         # 2. Play 2 moves to balance the game
         for _ in range(2):
@@ -90,14 +89,13 @@ class ProblemFinder:
 
     def adjust_tsumego(self, moves):
         """
-        play additional exchanges in an attempt to get score for BLACK within MIN_SCORE and MAX_SCORE. and so there is only one move with winrate abeove MAX_WINRATE_ALTERNATIVE and it has winrate above MIN_WINRATE_CORRECT.
+        play additional exchanges in an attempt to get winrate above WINRATE_CORRECT and second best move below WINRATE_ALTERNATIVE and score within MIN_SCORE, MAX_SCORE for second best move.
         """
 
         # We want the tsumego to have large gap in winrate between best and second best move. We want the score of the second best move to be close to -0.5 as possible.
 
         if DEBUG: print("adjusting tsumego")
 
-        # if multiple moves above MAX_WINRATE_ALTERNATIVE, remove all but one.
         while True:
             best_move, best_winrate, best_score = self.queries.get_best_move(self.queries.query(moves))
             second_move, second_winrate, second_score = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move))
@@ -105,7 +103,7 @@ class ProblemFinder:
             if DEBUG: print(f"{(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
 
             # do we meet all criteria?
-            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and MIN_SCORE < second_score < MAX_SCORE:
+            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and second_score < 0:
                 if DEBUG: print("valid tsumego!")
                 return moves, best_move
 
@@ -149,13 +147,50 @@ class ProblemFinder:
         move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
         game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean)
 
+        # Generate variations data - all legal moves and their optimal responses
+        variations = self._generate_variations(adjusted_moves)
+
         STATS.add_problem_found(len(adjusted_moves), move_mean, game_mean)
         return {
             "moves": adjusted_moves,
             "solution": solution_move,
             "move_rank": get_rank_str(move_mean, move_stddev),
-            "game_rank": get_rank_str(game_mean, game_stddev)
+            "game_rank": get_rank_str(game_mean, game_stddev),
+            "variations": variations
         }
+
+    def _generate_variations(self, moves):
+        """
+        Generate variations for all legal moves from the current position and their optimal responses.
+        
+        Args:
+            moves (list): The sequence of moves leading to the current position.
+            
+        Returns:
+            list: A list of variations, each containing move, winrate, score, and optional response.
+        """
+        variations = []
+
+        # Get all legal moves from the current position
+        response = self.queries.query_children(moves)
+
+        # For each legal move, get its evaluation and optimal response
+        if DEBUG: print("creating", len(response["moveInfos"]), "variations")
+        for move_info in response["moveInfos"]:
+            move = move_info["move"]
+            # Get the optimal response to this move
+            response_moves = moves + [move]
+            response_result = self.queries.query(response_moves)
+            response_move, winrate, score = self.queries.get_best_move(response_result)
+            variation = {
+                "move": move,
+                "response": response_move,
+                "winrate": winrate * 100,  # Convert to percentage
+                "score": score
+            }
+            variations.append(variation)
+
+        return variations
 
 
 def problem_to_sgf(problem, komi=7.5):
@@ -183,12 +218,32 @@ def problem_to_sgf(problem, komi=7.5):
         node.set_move(player, katago_to_sgf_coords(move, 9))
         player = "w" if player == "b" else "b"
 
-    # Add the solution move and annotations
-    if problem.get("solution"):
-        solution_move = problem["solution"]
-        solution_node = game.extend_main_sequence()
-        solution_node.set_move(player, katago_to_sgf_coords(solution_move, 9))
-        solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
-        solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
+    # Get the node where variations should be attached (the position where player needs to move)
+    parent_node = game.get_last_node()
+
+    # Add the solution move and annotations as main line
+    # if problem.get("solution"):
+    #     solution_move = problem["solution"]
+    #     solution_node = parent_node.new_child()
+    #     solution_node.set_move(player, katago_to_sgf_coords(solution_move, 9))
+    #     solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
+    #     solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
+
+    # Add variations for all legal moves and their responses
+    if problem.get("variations"):
+        for variation in problem["variations"]:
+            # First move in variation (by the same player as the solution)
+            var_player = player
+            var_node = parent_node.new_child()
+            var_node.set_move(var_player, katago_to_sgf_coords(variation["move"], 9))
+
+            # Add comment with winrate and score
+            text = "Correct move!" if variation["move"] == problem.get("solution") else "Losing move!"
+            var_node.set("C", f"{text} Winrate: {variation['winrate']:.1f}%, Score: {variation['score']:.1f}")
+
+            response_player = "b" if var_player == "w" else "w"
+            response_node = var_node.new_child()
+            response_node.set_move(response_player, katago_to_sgf_coords(variation["response"], 9))
+            response_node.set("C", f"Winrate: {variation['winrate']:.1f}%, Score: {variation['score']:.1f}")
 
     return game.serialise().decode()

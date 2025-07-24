@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import numpy as np
 
 PLAYOUTS = 30
@@ -54,7 +56,7 @@ class KatagoQueries:
             "maxVisits": 1,
             "includePolicy": True,
         }
-        if human_rank:
+        if human_rank is not None:
             # noinspection PyTypeChecker
             query["overrideSettings"] = {
                 "humanSLProfile": _get_rank_str(human_rank),
@@ -72,8 +74,9 @@ class KatagoQueries:
 
         if not response.get("humanPolicy"):
             print("moves:", moves)
-            print("human_rank:", human_rank)
-            print("response:", response)
+            print("human_rank:", human_rank, _get_rank_str(human_rank))
+            print("response:")
+            pprint(response)
             response = self.query_policy(moves, human_rank=human_rank, komi=komi)
             if not response.get("humanPolicy"):
                 raise Exception("Human policy not found in response.")
@@ -130,8 +133,18 @@ class KatagoQueries:
             "boardYSize": 9,
             "maxVisits": num_legal_moves * int(PLAYOUTS ** 0.5),
             "rootPolicyTemperature": 100,
+            "overrideSettings": {
+                "wideRootNoise": 5.0
+            }
         }
-        return self._katago_controller.send_query(query)
+        r = self._katago_controller.send_query(query)
+        if len(r["moveInfos"]) < num_legal_moves:
+            print("moves:", moves)
+            print("num_legal_moves:", num_legal_moves)
+            print("response:")
+            pprint(r)
+            raise Exception(f"Not enough moveInfos found in response: {len(r["moveInfos"])} vs {num_legal_moves}")
+        return r
 
     def query(self, moves, exclude_move=None):
         """
@@ -302,11 +315,11 @@ def sgf_to_katago_coords(sgf_move, board_size):
 
 
 def _get_rank_str(rank):
-    return _SUPPORTED_RANKS[min(int(rank * len(_SUPPORTED_RANKS)), len(_SUPPORTED_RANKS) - 1)]
+    return _SUPPORTED_RANKS[max(0, min(int(rank * len(_SUPPORTED_RANKS)), len(_SUPPORTED_RANKS) - 1))]
 
 
 def get_rank_str(rank, stddev=None):
     if stddev is None:
         return _get_rank_str(rank)[5:]
     else:
-        return f"{_get_rank_str(rank)[5:]}±{stddev/len(_SUPPORTED_RANKS):.1f}"
+        return f"{_get_rank_str(rank)[5:]}±{stddev / len(_SUPPORTED_RANKS):.1f}"

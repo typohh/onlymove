@@ -6,7 +6,7 @@ import time
 import traceback
 import uuid
 
-from Stats import STATS, DEBUG
+from stats import STATS, DEBUG
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder, problem_to_sgf
@@ -16,7 +16,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
 
 print_lock = threading.Lock()
 
-def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: ProblemFinder):
+def worker_task(problem_finder: ProblemFinder):
     """
     The task for a single worker thread.
     Generates one game and finds all problems within it.
@@ -31,10 +31,11 @@ def worker_task(worker_id: int, katago_queries: KatagoQueries, problem_finder: P
                 f.write(sgf_str.encode("utf-8"))
             with print_lock:
                 print_stats()
-                print(problem["move_rank"], problem["game_rank"], filename)
+                print(problem["move_rank"], problem["game_rank"])
+                print(sgf_str)
 
     except Exception as e:
-        print(f"An error occurred in worker {worker_id}: {e}")
+        print(e)
         traceback.print_exc()
 
 
@@ -72,7 +73,7 @@ def main():
             print(f"Starting {worker_count} worker threads for continuous problem generation.")
 
             futures = {
-                executor.submit(worker_task, i, queries, problem_finder): i for i in range(worker_count)
+                executor.submit(worker_task, problem_finder): i for i in range(worker_count)
             }
 
             while futures:
@@ -82,7 +83,7 @@ def main():
                     worker_id = futures[future]
                     del futures[future]
                     new_worker_id = worker_id
-                    new_future = executor.submit(worker_task, new_worker_id, queries, problem_finder)
+                    new_future = executor.submit(worker_task, problem_finder)
                     futures[new_future] = new_worker_id
 
     except KeyboardInterrupt:

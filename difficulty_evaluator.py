@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 from scipy.stats import norm, stats
 
-from Stats import DEBUG
+from stats import DEBUG
 from katago_queries import KatagoQueries, get_all_ranks
 
 SIMULATION_ROUNDS = 10
