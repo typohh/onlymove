@@ -3,6 +3,8 @@ import re
 import shutil
 import json
 
+from katago_queries import get_rank_number
+
 
 def extract_difficulty(content):
     """Extract difficulty rank from SGF content."""
@@ -14,7 +16,11 @@ def extract_difficulty(content):
     for pattern in patterns:
         match = re.search(pattern, content)
         if match:
-            return match.group(1)
+            rank_txt = match.group(1)
+            rank_number = get_rank_number(rank_txt)
+            print(rank_txt, rank_number)
+            return rank_number
+
     return None
 
 
@@ -35,7 +41,7 @@ if __name__ == "__main__":
 
             difficulty = extract_difficulty(content)
 
-            if not difficulty:
+            if difficulty is None:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
 
             metadata.append({
@@ -47,3 +53,4 @@ if __name__ == "__main__":
     metadata_path = os.path.join("pwa", "metadata.json")
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
+

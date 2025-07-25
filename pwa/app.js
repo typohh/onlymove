@@ -5,7 +5,8 @@ const attemptedElement = document.getElementById('attempted');
 let board;
 let game;
 let kifuReader;
-let solutionMove;
+let userRank = '20k'; // Default starting rank
+let problems = []; // Array to store problems from metadata.json
 
 function showResult(message) {
     const overlay = document.createElement('div');
@@ -33,7 +34,28 @@ function showResult(message) {
     setTimeout(() => {
         document.body.removeChild(overlay);
         loadTsumego();
-    }, 3000);
+    }, 2000);
+}
+
+function updateBoard() {
+    const position = kifuReader.game.position;
+    board.removeAllObjects();
+    let stonesAdded = 0;
+    for (let x = 0; x < position.size; x++) {
+        for (let y = 0; y < position.size; y++) {
+            const color = position.get(x, y);
+            if (color !== 0) {
+                board.addObject({ x: x, y: y, c: color });
+                stonesAdded++;
+            }
+        }
+    }
+    console.log(`Updated board with ${stonesAdded} stones.`);
+
+    const lastNode = kifuReader.node;
+    if (lastNode.move) {
+        board.addObject({x: lastNode.move.x, y: lastNode.move.y, type: 'CR'});
+    }
 }
 
 function handleBoardClick(x, y) {
@@ -44,11 +66,30 @@ function handleBoardClick(x, y) {
 
     if (isLegal) {
         console.log(`Legal move played at (${x}, ${y}) by ${currentPlayer === WGo.B ? 'Black' : 'White'}`);
-        // Here you can add your logic for what happens after a legal move is played
-        // For example, check if it's the solution move
-        if (solutionMove && x === solutionMove.x && y === solutionMove.y) {
-            showResult('Correct move!');
+
+        const branchingNode = kifuReader.node;
+        const correctMoveNode = branchingNode.children.find(child => child.move && child.move.x === x && child.move.y === y);
+
+        if (correctMoveNode) {
+            // Correct move
+            let comment = correctMoveNode.comment || 'Correct!';
+
+            const moveIndex = branchingNode.children.indexOf(correctMoveNode);
+            kifuReader.next(moveIndex);
+            updateBoard();
+
+            setTimeout(() => {
+                // Advance to the next node to get white's response
+                kifuReader.next();
+                updateBoard();
+
+                setTimeout(() => {
+                    showResult(comment);
+                }, 1000);
+            }, 1000);
+
         } else {
+            // Incorrect move
             showResult('Incorrect move, try again.');
         }
     } else {
@@ -58,7 +99,20 @@ function handleBoardClick(x, y) {
 
 async function loadTsumego() {
     try {
-        const response = await fetch('tsumego.sgf');
+        // First load the metadata to get the list of problems
+        if (problems.length === 0) {
+            const metadataResponse = await fetch('metadata.json');
+            problems = await metadataResponse.json();
+        }
+
+        // Filter problems by user's rank
+        const rankedProblems = problems.filter(problem => problem.rank === userRank);
+        
+        // Select a random problem from the filtered list
+        const randomProblem = rankedProblems[Math.floor(Math.random() * rankedProblems.length)];
+        
+        // Load the selected problem
+        const response = await fetch(`tsumegos/${randomProblem.filename}`);
         console.log('SGF fetch response:', response);
         const sgfContent = await response.text();
         console.log('SGF content:', sgfContent);
@@ -68,19 +122,14 @@ async function loadTsumego() {
         kifuReader = new WGo.KifuReader(kifu);
         console.log('KifuReader initialized:', kifuReader);
 
-        // Go to the second to last move
-        kifuReader.last();
-        console.log('KifuReader after last():', kifuReader);
-        kifuReader.previous();
-        console.log('KifuReader after previous():', kifuReader);
-
-        // Get the board state at the second to last move
-        const position = kifuReader.game.position;
-        console.log('Board position at second-to-last move:', position);
+        // Find the branching node
+        while (kifuReader.node.children.length === 1) {
+            kifuReader.next();
+        }
+        console.log('Branching node found:', kifuReader.node);
 
         // Clear previous board if exists
         if (board) {
-            board.removeAllObjects();
             board.removeEventListener('click', handleBoardClick);
             boardContainer.innerHTML = ''; // Clear the container
             console.log('Cleared existing board.');
@@ -96,44 +145,29 @@ async function loadTsumego() {
         });
         console.log('WGo.Board initialized:', board);
 
-        // Add stones to the board based on the position
-        let stonesAdded = 0;
-        for (let x = 0; x < position.size; x++) {
-            for (let y = 0; y < position.size; y++) {
-                const color = position.get(x, y);
-                if (color !== 0) {
-                    board.addObject({ x: x, y: y, c: color });
-                    stonesAdded++;
-                }
-            }
-        }
-        console.log(`Added ${stonesAdded} stones to the board.`);
+        updateBoard();
 
         // Store the game object for move validation
         game = kifuReader.game;
         console.log('Game object for validation:', game);
 
-        // Get the solution move (the first child of the current node)
-        const currentNode = kifuReader.node;
-        if (currentNode.children.length > 0 && currentNode.children[0].move) {
-            solutionMove = currentNode.children[0].move;
-            console.log('Solution move:', solutionMove);
-        } else {
-            solutionMove = null;
-            console.log('No solution move found or current node has no children.');
-        }
-
         // Add click listener to the board
         board.addEventListener('click', handleBoardClick);
         console.log('Click listener added to board.');
 
-        // Update UI elements (rank, attempted) - placeholder for now
-        rankElement.textContent = 'N/A';
-        attemptedElement.textContent = '0';
+        // Update UI elements
+        rankElement.textContent = userRank;
+        attemptedElement.textContent = '0'; // This would be updated with actual stats in a full implementation
 
     } catch (error) {
         console.error('Error loading or parsing SGF:', error);
     }
+}
+
+// Add a function to change user rank and load a new problem
+function changeRank(newRank) {
+    userRank = newRank;
+    loadTsumego();
 }
 
 loadTsumego();

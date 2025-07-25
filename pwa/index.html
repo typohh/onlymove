@@ -22,6 +22,15 @@
             margin-top: 20px;
         }
 
+        #rank-controls {
+            margin-top: 10px;
+        }
+
+        #rank-controls button {
+            margin: 2px;
+            padding: 5px 10px;
+        }
+
         @media (orientation: landscape) {
             body {
                 flex-direction: row;
@@ -41,6 +50,17 @@
         <div id="stats">
             <p>Rank: <span id="rank">N/A</span></p>
             <p>Attempted: <span id="attempted">0</span></p>
+        </div>
+        <div id="rank-controls">
+            <p>Change Rank:</p>
+            <button onclick="changeRank('20k')">20k</button>
+            <button onclick="changeRank('15k')">15k</button>
+            <button onclick="changeRank('10k')">10k</button>
+            <button onclick="changeRank('5k')">5k</button>
+            <button onclick="changeRank('1k')">1k</button>
+            <button onclick="changeRank('1d')">1d</button>
+            <button onclick="changeRank('5d')">5d</button>
+            <button onclick="changeRank('9d')">9d</button>
         </div>
     </div>
 
