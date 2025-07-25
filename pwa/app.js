@@ -1,14 +1,40 @@
 const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
-const attemptedElement = document.getElementById('attempted');
 
 let board;
 let game;
 let kifuReader;
-let userRank = '20k'; // Default starting rank
+// Initialize user rank from localStorage or start at 0.5
+let userRank = localStorage.getItem('userRank') ? parseFloat(localStorage.getItem('userRank')) : 0.5;
 let problems = []; // Array to store problems from metadata.json
 
-function showResult(message) {
+// Convert numeric rank to descriptive rank
+function getDescriptiveRank(numericRank) {
+    // There are 29 ranks from 20 kyu to 9 dan
+    // 0.0 = 20 kyu, 1.0 = 9 dan
+    const totalRanks = 29;
+    const rankIndex = Math.floor(numericRank * totalRanks);
+    
+    if (rankIndex < 20) {
+        // Kyu ranks (20 kyu to 1 kyu)
+        const kyuRank = 20 - rankIndex;
+        return `${kyuRank} kyu`;
+    } else {
+        // Dan ranks (1 dan to 9 dan)
+        const danRank = rankIndex - 19;
+        return `${danRank} dan`;
+    }
+}
+
+function showResult(message, correct) {
+    if (correct) {
+        userRank = Math.min(1, userRank + 0.001);
+    } else {
+        userRank = Math.max(0, userRank - 0.004);
+    }
+    localStorage.setItem('userRank', userRank.toString());
+    rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
     overlay.style.top = '0';
@@ -84,13 +110,13 @@ function handleBoardClick(x, y) {
                 updateBoard();
 
                 setTimeout(() => {
-                    showResult(comment);
+                    showResult(comment, comment.includes('Correct'));
                 }, 1000);
             }, 1000);
 
         } else {
             // Incorrect move
-            showResult('Incorrect move, try again.');
+            showResult('Incorrect move, try again.', false);
         }
     } else {
         console.log(`Illegal move at (${x}, ${y})`);
@@ -105,12 +131,19 @@ async function loadTsumego() {
             problems = await metadataResponse.json();
         }
 
-        // Filter problems by user's rank
-        const rankedProblems = problems.filter(problem => problem.rank === userRank);
-        
-        // Select a random problem from the filtered list
-        const randomProblem = rankedProblems[Math.floor(Math.random() * rankedProblems.length)];
-        
+        // Find the problem with the rank closest to the user's rank
+        let minRankDiff = Infinity;
+
+        for (const problem of problems) {
+            const rankDiff = Math.abs(problem.rank - userRank);
+            if (rankDiff < minRankDiff) {
+                minRankDiff = rankDiff;
+            }
+        }
+
+        const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
+        const randomProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
+
         // Load the selected problem
         const response = await fetch(`tsumegos/${randomProblem.filename}`);
         console.log('SGF fetch response:', response);
@@ -156,18 +189,11 @@ async function loadTsumego() {
         console.log('Click listener added to board.');
 
         // Update UI elements
-        rankElement.textContent = userRank;
-        attemptedElement.textContent = '0'; // This would be updated with actual stats in a full implementation
+        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
 
     } catch (error) {
         console.error('Error loading or parsing SGF:', error);
     }
-}
-
-// Add a function to change user rank and load a new problem
-function changeRank(newRank) {
-    userRank = newRank;
-    loadTsumego();
 }
 
 loadTsumego();
