@@ -11,11 +11,15 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            margin: 0;
+            padding: 0;
         }
 
         #board-container {
-            width: 400px;
-            height: 400px;
+            width: 100vw;
+            height: 100vw;
+            max-width: none;
+            max-height: none;
         }
 
         #controls {
@@ -37,9 +41,21 @@
                 align-items: flex-start;
             }
 
+            #board-container {
+                width: 400px;
+                height: 400px;
+            }
+
             #controls {
                 margin-top: 0;
                 margin-left: 20px;
+            }
+        }
+
+        @media (max-width: 400px) {
+            #board-container {
+                width: 100vw;
+                height: 100vw;
             }
         }
     </style>

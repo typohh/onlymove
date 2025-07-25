@@ -6,10 +6,8 @@ from stats import STATS, DEBUG
 from difficulty_evaluator import DifficultyEvaluator
 from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
 
-MIN_SCORE = -2
-MAX_SCORE = 0
-MIN_WINRATE_CORRECT = 0.7
-MAX_WINRATE_ALTERNATIVE = 0.3
+MIN_WINRATE_CORRECT = 0.65
+MAX_WINRATE_ALTERNATIVE = 0.35
 
 
 class ProblemFinder:
@@ -122,7 +120,7 @@ class ProblemFinder:
             best_response_penalty = float('inf')
             best_score = 0
             best_winrate = 0.5
-            target_score = best_score - second_score - (MIN_SCORE + MAX_SCORE) / 2
+            target_score = best_score - second_score - 1
 
             for move_info in response["moveInfos"]:
                 penalty = abs(move_info["scoreLead"] - target_score)

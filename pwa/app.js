@@ -8,6 +8,19 @@ let kifuReader;
 let userRank = localStorage.getItem('userRank') ? parseFloat(localStorage.getItem('userRank')) : 0.5;
 let problems = []; // Array to store problems from metadata.json
 
+// Function to update board size based on screen orientation
+function updateBoardSize() {
+    if (!board) return;
+    
+    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+    board.setWidth(boardSize);
+    board.setHeight(boardSize);
+    
+    // Ensure container takes full space
+    boardContainer.style.display = 'block';
+}
+
 // Convert numeric rank to descriptive rank
 function getDescriptiveRank(numericRank) {
     // There are 29 ranks from 20 kyu to 9 dan
@@ -29,11 +42,16 @@ function getDescriptiveRank(numericRank) {
 function showResult(message, correct) {
     if (correct) {
         userRank = Math.min(1, userRank + 0.001);
+        // Skip overlay for correct moves, just load next tsumego
+        localStorage.setItem('userRank', userRank.toString());
+        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+        loadTsumego();
+        return;
     } else {
         userRank = Math.max(0, userRank - 0.004);
+        localStorage.setItem('userRank', userRank.toString());
+        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
     }
-    localStorage.setItem('userRank', userRank.toString());
-    rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
 
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
@@ -110,7 +128,7 @@ function handleBoardClick(x, y) {
                 updateBoard();
 
                 setTimeout(() => {
-                    showResult(comment, comment.includes('Correct'));
+                    showResult(comment, true);
                 }, 1000);
             }, 1000);
 
@@ -169,12 +187,19 @@ async function loadTsumego() {
         }
 
         // Initialize WGo.Board
+        const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+        const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+        
+        // Clear any existing content and ensure container takes full space
+        boardContainer.innerHTML = '';
+        boardContainer.style.display = 'block';
+        
         board = new WGo.Board(boardContainer, {
             size: kifu.size,
             background: WGo.DIR + "wood_1024.jpg",
             stoneHandler: WGo.Board.drawHandlers.REALISTIC,
-            width: boardContainer.clientWidth,
-            height: boardContainer.clientHeight,
+            width: boardSize,
+            height: boardSize,
         });
         console.log('WGo.Board initialized:', board);
 
@@ -197,3 +222,6 @@ async function loadTsumego() {
 }
 
 loadTsumego();
+
+// Add resize handler
+window.addEventListener('resize', updateBoardSize);

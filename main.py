@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 import time
 import traceback
@@ -11,8 +12,10 @@ from problem_finder import ProblemFinder, problem_to_sgf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
+DRIVE_DIR = '/content/drive/My Drive/Tsumegos'
 
 print_lock = threading.Lock()
+
 
 def worker_task(problem_finder: ProblemFinder):
     """
@@ -26,16 +29,23 @@ def worker_task(problem_finder: ProblemFinder):
             if problem:
                 sgf_str = problem_to_sgf(problem)
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
-                filename = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}.sgf")
-                with open(filename, "wb") as f:
+                filename = f"{uuid.uuid4()}.sgf"
+                with open(os.path.join(OUTPUT_DIR, filename), "wb") as f:
                     f.write(sgf_str.encode("utf-8"))
-            with print_lock:
-                print_stats()
-                print(problem["move_rank"], problem["game_rank"])
-                if sgf_str:
-                    print(sgf_str)
 
-    except Exception as e:
+                # Copy to Google Drive if path exists
+                if os.path.exists(DRIVE_DIR):
+                    shutil.copy2(os.path.join(OUTPUT_DIR, filename), os.path.join(DRIVE_DIR, filename))
+
+                with print_lock:
+                    print_stats()
+                    print(problem["move_rank"], problem["game_rank"])
+                    if sgf_str:
+                        print(sgf_str)
+
+
+
+        except Exception as e:
         print(e)
         traceback.print_exc()
 
@@ -69,16 +79,16 @@ def main():
         problem_finder = ProblemFinder(queries)
 
         worker_count = 1 if DEBUG else controller.get_batch_size()
-        
+
         print(f"Starting {worker_count} worker threads for continuous problem generation.")
-        
+
         # Create and start worker threads
         for i in range(worker_count):
             thread = threading.Thread(target=worker_task, args=(problem_finder,))
             thread.daemon = True  # Dies when main thread dies
             thread.start()
             threads.append(thread)
-        
+
         # Keep main thread alive
         while True:
             time.sleep(1)
