@@ -11,7 +11,7 @@ def main():
     controller = KatagoController()
     controller.start_engine(verbose=False)
     queries = KatagoQueries(controller)
-    moves = ['D7', 'B3', 'C7', 'F2', 'H2', 'F5', 'F4']
+    moves = ['D7', 'E4', 'E7', 'B6', 'C8', 'C6', 'C3', 'H6', 'D4', 'D3', 'D5', 'E5', 'E3', 'D2', 'F3', 'D6', 'B4', 'B3', 'C4', 'E6', 'G8']
     sgf = problem_to_sgf({
         "moves": moves
     })

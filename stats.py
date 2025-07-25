@@ -29,7 +29,8 @@ class Stats:
         average_game_rank = self.total_game_rank / max(1, self.problems_found)
         stats = {
             "Running Time": f"{elapsed_time:.2f}s",
-            "Problems Found": self.problems_found,
+            "Games processed": self.problems_found + self.failures_to_create,
+            "Success rate": f"{(100*self.problems_found/max(1,self.problems_found + self.failures_to_create)):.1f}%",
             "Avg moves": f"{average_move_length:.1f}",
             "Avg move rank": f"{average_move_rank:.1f}",
             "Avg game rank": f"{average_game_rank:.1f}",

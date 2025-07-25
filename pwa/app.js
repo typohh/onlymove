@@ -1,33 +1,11 @@
 const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 const attemptedElement = document.getElementById('attempted');
-const userProfileElement = document.getElementById('user-profile');
-const userImageElement = document.getElementById('user-image');
-const userNameElement = document.getElementById('user-name');
-const signOutButton = document.getElementById('sign-out');
-const signInButton = document.querySelector('.g-signin2');
 
 let board;
 let game;
 let kifuReader;
 let solutionMove;
-
-function onSignIn(googleUser) {
-    const profile = googleUser.getBasicProfile();
-    userNameElement.textContent = profile.getName();
-    userImageElement.src = profile.getImageUrl();
-
-    signInButton.style.display = 'none';
-    userProfileElement.style.display = 'block';
-}
-
-function signOut() {
-    const auth2 = gapi.auth2.getAuthInstance();
-    auth2.signOut().then(() => {
-        signInButton.style.display = 'block';
-        userProfileElement.style.display = 'none';
-    });
-}
 
 function showResult(message) {
     const overlay = document.createElement('div');
@@ -157,7 +135,5 @@ async function loadTsumego() {
         console.error('Error loading or parsing SGF:', error);
     }
 }
-
-signOutButton.addEventListener('click', signOut);
 
 loadTsumego();

@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="google-signin-client_id" content="YOUR_CLIENT_ID.apps.googleusercontent.com">
     <link rel="manifest" href="/manifest.json">
     <title>Yose Tsumego</title>
     <link rel="stylesheet" type="text/css" href="wgo.js/wgo/wgo.player.css" />
@@ -39,12 +38,6 @@
 <body>
     <div id="board-container"></div>
     <div id="controls">
-        <div class="g-signin2" data-onsuccess="onSignIn"></div>
-        <div id="user-profile" style="display: none;">
-            <img id="user-image" src="" alt="User image">
-            <p>Welcome, <span id="user-name"></span>!</p>
-            <button id="sign-out">Sign Out</button>
-        </div>
         <div id="stats">
             <p>Rank: <span id="rank">N/A</span></p>
             <p>Attempted: <span id="attempted">0</span></p>
@@ -56,7 +49,6 @@
     <script type="text/javascript" src="wgo.js/wgo/sgfparser.js"></script>
     <script type="text/javascript" src="wgo.js/wgo/kifu.js"></script>
     <script type="text/javascript" src="wgo.js/extensions/tsumego/tsumego.js"></script>
-    <script src="https://apis.google.com/js/platform.js" async defer></script>
     <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

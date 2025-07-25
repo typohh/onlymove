@@ -1,5 +1,3 @@
-import argparse
-import concurrent.futures
 import os
 import threading
 import time
@@ -19,20 +17,23 @@ print_lock = threading.Lock()
 def worker_task(problem_finder: ProblemFinder):
     """
     The task for a single worker thread.
-    Generates one game and finds all problems within it.
+    Generates problems continuously.
     """
     try:
-        problem = problem_finder.create_problem()
-        if problem:
-            sgf_str = problem_to_sgf(problem)
-            os.makedirs(OUTPUT_DIR, exist_ok=True)
-            filename = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}.sgf")
-            with open(filename, "wb") as f:
-                f.write(sgf_str.encode("utf-8"))
+        while True:  # Keep working continuously
+            problem = problem_finder.create_problem()
+            sgf_str = None
+            if problem:
+                sgf_str = problem_to_sgf(problem)
+                os.makedirs(OUTPUT_DIR, exist_ok=True)
+                filename = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}.sgf")
+                with open(filename, "wb") as f:
+                    f.write(sgf_str.encode("utf-8"))
             with print_lock:
                 print_stats()
                 print(problem["move_rank"], problem["game_rank"])
-                print(sgf_str)
+                if sgf_str:
+                    print(sgf_str)
 
     except Exception as e:
         print(e)
@@ -57,6 +58,7 @@ def print_stats():
 
 def main():
     controller = None
+    threads = []
     try:
         print("Starting KataGo engines...")
         controller = KatagoController()
@@ -67,24 +69,19 @@ def main():
         problem_finder = ProblemFinder(queries)
 
         worker_count = 1 if DEBUG else controller.get_batch_size()
-
-        # Use a ThreadPoolExecutor to manage a pool of worker threads
-        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-            print(f"Starting {worker_count} worker threads for continuous problem generation.")
-
-            futures = {
-                executor.submit(worker_task, problem_finder): i for i in range(worker_count)
-            }
-
-            while futures:
-                done, _ = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
-
-                for future in done:
-                    worker_id = futures[future]
-                    del futures[future]
-                    new_worker_id = worker_id
-                    new_future = executor.submit(worker_task, problem_finder)
-                    futures[new_future] = new_worker_id
+        
+        print(f"Starting {worker_count} worker threads for continuous problem generation.")
+        
+        # Create and start worker threads
+        for i in range(worker_count):
+            thread = threading.Thread(target=worker_task, args=(problem_finder,))
+            thread.daemon = True  # Dies when main thread dies
+            thread.start()
+            threads.append(thread)
+        
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
 
     except KeyboardInterrupt:
         print("\nCaught KeyboardInterrupt, shutting down.")
