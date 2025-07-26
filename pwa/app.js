@@ -3,7 +3,6 @@ const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
 const APP_VERSION = "2025-07-26 22:24";
-
 console.log(`Yose Tsumego App v${APP_VERSION} loaded`);
 
 // Force service worker update
@@ -13,227 +12,55 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// State variables
 let board;
 let game;
 let kifuReader;
-// Initialize user rank from localStorage or start at 0.5
-let userRank = localStorage.getItem('userRank') ? parseFloat(localStorage.getItem('userRank')) : 0.5;
-let problems = []; // Array to store problems from metadata.json
-// Initialize problem frequencies from localStorage or default to 1
-let problemFrequencies = localStorage.getItem('problemFrequencies') ? 
-    JSON.parse(localStorage.getItem('problemFrequencies')) : {};
-let currentProblemFilename = null; // Track current problem filename
-let showCorrectMove = false; // Flag to indicate if we should show the correct move
+let problems = [];
+let currentProblemFilename = null;
+let showCorrectMove = false;
 
-// Function to update board size based on screen orientation
-function updateBoardSize() {
-    if (!board) return;
-    
-    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
-    board.setWidth(boardSize);
-    board.setHeight(boardSize);
-    
-    // Ensure container takes full space
-    boardContainer.style.display = 'block';
-}
+// Load state from localStorage or set defaults
+let userRank = parseFloat(localStorage.getItem('userRank')) || 0.5;
+let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
 
-// Convert numeric rank to descriptive rank
+// --- Helper Functions ---
+
+/**
+ * Converts a numeric rank (0.0 to 1.0) to a descriptive Go rank (20k to 9d).
+ * @param {number} numericRank - The rank value between 0.0 and 1.0.
+ * @returns {string} The descriptive rank.
+ */
 function getDescriptiveRank(numericRank) {
-    // There are 29 ranks from 20 kyu to 9 dan
-    // 0.0 = 20 kyu, 1.0 = 9 dan
-    const totalRanks = 29;
+    const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
     const rankIndex = Math.floor(numericRank * totalRanks);
-    
     if (rankIndex < 20) {
-        // Kyu ranks (20 kyu to 1 kyu)
-        const kyuRank = 20 - rankIndex;
-        return `${kyuRank} kyu`;
-    } else {
-        // Dan ranks (1 dan to 9 dan)
-        const danRank = rankIndex - 19;
-        return `${danRank} dan`;
+        return `${20 - rankIndex} kyu`;
     }
+    return `${rankIndex - 19} dan`;
 }
 
-function showResult(message, correct, problemFilename) {
-    // Update problem frequency based on correctness
-    if (correct) {
-        // Decrease frequency to 1/5 of current value
-        const currentFreq = problemFrequencies[problemFilename] || 1;
-        problemFrequencies[problemFilename] = currentFreq / 5;
-        userRank = Math.min(1, userRank + 0.001);
-        // Skip overlay for correct moves, just load next tsumego
-        localStorage.setItem('userRank', userRank.toString());
-        localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
-        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
-        console.log(`Correct answer for ${problemFilename}. New frequency: ${problemFrequencies[problemFilename]}`);
-        loadTsumego();
-        return;
-    } else {
-        // Set frequency to 25 for incorrect answers
-        problemFrequencies[problemFilename] = 25;
-        userRank = Math.max(0, userRank - 0.004);
-        localStorage.setItem('userRank', userRank.toString());
-        localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
-        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
-        console.log(`Incorrect answer for ${problemFilename}. New frequency: ${problemFrequencies[problemFilename]}`);
-        
-        // For incorrect answers, reload the same tsumego with correct move highlighted
-        console.log("Setting showCorrectMove flag to true in showResult");
-        showCorrectMove = true;
-        
-        // Show the overlay message
-        const overlay = document.createElement('div');
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        overlay.style.display = 'flex';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '1000';
-
-        const messageBox = document.createElement('div');
-        messageBox.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        messageBox.style.color = 'white';
-        messageBox.style.padding = '20px';
-        messageBox.style.borderRadius = '10px';
-        messageBox.textContent = message;
-
-        overlay.appendChild(messageBox);
-        document.body.appendChild(overlay);
-
-        // After showing the message, reload the same tsumego
-        setTimeout(() => {
-            document.body.removeChild(overlay);
-            loadTsumego(); // This will now reload the same tsumego because showCorrectMove is true
-        }, 2000);
-        
-        // Return early to prevent the normal flow
-        return;
-    }
-}
-
-function updateBoard() {
-    const position = kifuReader.game.position;
-    board.removeAllObjects();
-    for (let x = 0; x < position.size; x++) {
-        for (let y = 0; y < position.size; y++) {
-            const color = position.get(x, y);
-            if (color !== 0) {
-                board.addObject({ x: x, y: y, c: color });
-            }
-        }
-    }
-
-    const lastNode = kifuReader.node;
-    if (lastNode.move) {
-        board.addObject({x: lastNode.move.x, y: lastNode.move.y, type: 'CR'});
-    }
-    
-    // If we're showing the correct move, add a GLOW marker
-    if (showCorrectMove) {
-        // Find the correct move in the branching node's children
-        const branchingNode = kifuReader.node;
-        const correctNode = branchingNode.children.find(child => 
-            child.comment && child.comment.includes('Correct'));
-        if (correctNode && correctNode.move) {
-            console.log(`Showing correct move at (${correctNode.move.x}, ${correctNode.move.y})`);
-            board.addObject({x: correctNode.move.x, y: correctNode.move.y, type: 'outline', stoneStyle:'NORMAL'});
-        }
-    }
-}
-
-function handleBoardClick(x, y) {
-    // If we're showing the correct move, only allow clicks on the correct move
-    if (showCorrectMove) {
-        const branchingNode = kifuReader.node;
-        const correctNode = branchingNode.children.find(child => 
-            child.comment && child.comment.includes('Correct'));
-        
-        if (correctNode && correctNode.move && 
-            correctNode.move.x === x && correctNode.move.y === y) {
-            // User clicked on the correct move, proceed normally
-            console.log("User clicked on the correct move");
-            // Reset the flag since the user clicked the correct move
-            showCorrectMove = false;
-        } else {
-            // User clicked on an incorrect move, show overlay
-            console.log("User clicked on an incorrect move while showing correct move");
-            showOverlay("Click on the correct move");
-            return;
-        }
-    }
-    
-    if (!game || !kifuReader) return;
-
-    const currentPlayer = game.turn;
-    const isLegal = game.isValid(x, y, currentPlayer);
-
-    if (isLegal) {
-        const branchingNode = kifuReader.node;
-        const correctMoveNode = branchingNode.children.find(child => child.move && child.move.x === x && child.move.y === y);
-
-        if (correctMoveNode) {
-            // Check if the comment contains the word "Correct"
-            let comment = correctMoveNode.comment || '';
-            const isCorrect = comment.includes('Correct');
-
-            if (isCorrect) {
-                // Correct move
-                const moveIndex = branchingNode.children.indexOf(correctMoveNode);
-                kifuReader.next(moveIndex);
-                updateBoard();
-
-                setTimeout(() => {
-                    // Advance to the next node to get white's response
-                    kifuReader.next();
-                    updateBoard();
-
-                    setTimeout(() => {
-                        // Pass the current problem filename to showResult
-                        showResult(comment, true, currentProblemFilename);
-                    }, 1000);
-                }, 1000);
-            } else {
-                // Incorrect move despite being a valid variation
-                // Set flag to show correct move on reload
-                console.log("Setting showCorrectMove flag to true");
-                showCorrectMove = true;
-                showResult('Incorrect move, try again.', false, currentProblemFilename);
-            }
-        } else {
-            // Incorrect move
-            // Set flag to show correct move on reload
-            console.log("Setting showCorrectMove flag to true");
-            showCorrectMove = true;
-            showResult('Incorrect move, try again.', false, currentProblemFilename);
-        }
-    }
-}
-
-// Helper function to show an overlay message
-function showOverlay(message) {
+/**
+ * Displays a message in a temporary overlay.
+ * @param {string} message - The text to display.
+ * @param {number} duration - How long to display the overlay in milliseconds.
+ * @param {function} [callback] - An optional function to run after the overlay is removed.
+ */
+function displayOverlay(message, duration, callback) {
     const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    overlay.style.display = 'flex';
-    overlay.style.justifyContent = 'center';
-    overlay.style.alignItems = 'center';
-    overlay.style.zIndex = '1000';
+    overlay.className = 'overlay';
+    Object.assign(overlay.style, {
+        position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
+        justifyContent: 'center', alignItems: 'center', zIndex: '1000'
+    });
 
     const messageBox = document.createElement('div');
-    messageBox.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    messageBox.style.color = 'white';
-    messageBox.style.padding = '20px';
-    messageBox.style.borderRadius = '10px';
+    messageBox.className = 'overlay-message-box';
+    Object.assign(messageBox.style, {
+        backgroundColor: 'rgba(0, 0, 0, 0.7)', color: 'white',
+        padding: '20px', borderRadius: '10px'
+    });
     messageBox.textContent = message;
 
     overlay.appendChild(messageBox);
@@ -241,128 +68,271 @@ function showOverlay(message) {
 
     setTimeout(() => {
         document.body.removeChild(overlay);
-    }, 2000);
+        if (callback) callback();
+    }, duration);
 }
 
+/**
+ * Updates the rank display on the UI.
+ */
+function updateRankDisplay() {
+    rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+}
+
+/**
+ * Updates user rank and problem frequency, then saves to localStorage.
+ * @param {boolean} isCorrect - Whether the user's answer was correct.
+ */
+function updateUserStats(isCorrect) {
+    if (isCorrect) {
+        const currentFreq = problemFrequencies[currentProblemFilename] || 1;
+        problemFrequencies[currentProblemFilename] = Math.max(0.001, currentFreq / 5);
+        userRank = Math.min(1, userRank + 0.001);
+    } else {
+        problemFrequencies[currentProblemFilename] = 25;
+        userRank = Math.max(0, userRank - 0.004);
+    }
+
+    localStorage.setItem('userRank', userRank.toString());
+    localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
+    updateRankDisplay();
+
+    const outcome = isCorrect ? "Correct" : "Incorrect";
+    console.log(`${outcome} answer for ${currentProblemFilename}. New frequency: ${problemFrequencies[currentProblemFilename]}`);
+}
+
+// --- Core Application Logic ---
+
+/**
+ * Handles the logic for a correct user move.
+ */
+function handleCorrectAnswer() {
+    updateUserStats(true);
+    // Directly load the next tsumego without an overlay.
+    loadTsumego();
+}
+
+/**
+ * Handles the logic for an incorrect user move.
+ */
+function handleIncorrectAnswer() {
+    updateUserStats(false);
+    showCorrectMove = true;
+    // Show an overlay, and after it disappears, reload the tsumego.
+    displayOverlay('Incorrect move, try again.', 2000, () => {
+        loadTsumego();
+    });
+}
+
+/**
+ * Handles user clicks on the Go board.
+ * @param {number} x - The x-coordinate of the click.
+ * @param {number} y - The y-coordinate of the click.
+ */
+function handleBoardClick(x, y) {
+    if (!game || !kifuReader) return;
+
+    if (showCorrectMove) {
+        const correctNode = kifuReader.node.children.find(child => child.comment?.includes('Correct'));
+        if (correctNode?.move && correctNode.move.x === x && correctNode.move.y === y) {
+            showCorrectMove = false; // Allow play to proceed
+        } else {
+            displayOverlay("Click on the highlighted correct move.", 1500);
+            return;
+        }
+    }
+
+    if (game.isValid(x, y, game.turn)) {
+        const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
+        if (moveNode?.comment?.includes('Correct')) {
+            const moveIndex = kifuReader.node.children.indexOf(moveNode);
+            kifuReader.next(moveIndex);
+            updateBoard();
+
+            setTimeout(() => {
+                kifuReader.next(); // Opponent's response
+                updateBoard();
+                setTimeout(() => handleCorrectAnswer(), 1000);
+            }, 1000);
+        } else {
+            handleIncorrectAnswer();
+        }
+    }
+}
+
+// --- Tsumego Loading and Board Rendering ---
+
+/**
+ * Selects the next tsumego problem based on user rank and past performance.
+ * @returns {object} The selected problem's metadata.
+ */
+function selectProblem() {
+    // If we need to show the correct move, stick to the current problem.
+    if (showCorrectMove && currentProblemFilename) {
+        return problems.find(p => p.filename === currentProblemFilename);
+    }
+
+    // Find problems with the rank closest to the user's rank.
+    let minRankDiff = Infinity;
+    problems.forEach(p => minRankDiff = Math.min(minRankDiff, Math.abs(p.rank - userRank)));
+    const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
+
+    // Use weighted random selection based on problem frequencies.
+    const weightedProblems = closestProblems.map(problem => ({
+        problem,
+        weight: problemFrequencies[problem.filename] || 1
+    }));
+    const totalWeight = weightedProblems.reduce((sum, p) => sum + p.weight, 0);
+
+    let random = Math.random() * totalWeight;
+    for (const { problem, weight } of weightedProblems) {
+        random -= weight;
+        if (random <= 0) return problem;
+    }
+
+    // Fallback to simple random selection if weighting fails.
+    return closestProblems[Math.floor(Math.random() * closestProblems.length)];
+}
+
+/**
+ * Initializes or re-initializes the WGo board.
+ * @param {number} size - The size of the board (e.g., 19 for a 19x19 board).
+ */
+function initializeBoard(size) {
+    if (board) {
+        board.removeEventListener('click', handleBoardClick);
+    }
+    boardContainer.innerHTML = ''; // Clear the container
+    boardContainer.style.display = 'block';
+
+    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+
+    board = new WGo.Board(boardContainer, {
+        size: size,
+        background: WGo.DIR + "wood_1024.jpg",
+        stoneHandler: WGo.Board.drawHandlers.REALISTIC,
+        width: boardSize,
+        height: boardSize,
+    });
+
+    board.addEventListener('click', handleBoardClick);
+}
+
+/**
+ * Draws a marker on the board to indicate the correct move.
+ */
+function drawCorrectMoveMarker() {
+    const correctNode = kifuReader.node.children.find(child => child.comment?.includes('Correct'));
+    if (correctNode?.move) {
+        console.log(`Highlighting correct move at (${correctNode.move.x}, ${correctNode.move.y})`);
+        board.addObject({
+            x: correctNode.move.x,
+            y: correctNode.move.y,
+            type: 'outline',
+            stoneStyle: 'NORMAL'
+        });
+    }
+}
+
+/**
+ * Redraws the board with the current position, moves, and markers.
+ */
+function updateBoard() {
+    if (!board || !kifuReader) return;
+
+    const position = kifuReader.game.position;
+    board.removeAllObjects();
+
+    // Draw stones
+    for (let x = 0; x < position.size; x++) {
+        for (let y = 0; y < position.size; y++) {
+            if (position.get(x, y) !== 0) {
+                board.addObject({ x, y, c: position.get(x, y) });
+            }
+        }
+    }
+
+    // Mark the last move
+    if (kifuReader.node.move) {
+        board.addObject({ x: kifuReader.node.move.x, y: kifuReader.node.move.y, type: 'CR' });
+    }
+
+    // Highlight the correct move if needed
+    if (showCorrectMove) {
+        drawCorrectMoveMarker();
+    }
+}
+
+/**
+ * Adjusts the board's dimensions on window resize or orientation change.
+ */
+function updateBoardSize() {
+    if (!board) return;
+    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+    board.setWidth(boardSize);
+    board.setHeight(boardSize);
+}
+
+/**
+ * Fetches an SGF file, parses it, and prepares the kifu reader.
+ * @param {string} filename - The SGF file to load from the 'tsumegos' directory.
+ */
+async function fetchAndLoadSgf(filename) {
+    const response = await fetch(`tsumegos/${filename}`);
+    const sgfContent = await response.text();
+    const kifu = WGo.Kifu.fromSgf(sgfContent);
+
+    kifuReader = new WGo.KifuReader(kifu);
+
+    // Advance to the first branching node (where the user needs to move).
+    while (kifuReader.node.children.length === 1) {
+        kifuReader.next();
+    }
+
+    game = kifuReader.game;
+    return kifu;
+}
+
+/**
+ * Main function to load and display a tsumego problem.
+ */
 async function loadTsumego() {
     try {
-        // First load the metadata to get the list of problems
+        // Ensure problem metadata is loaded.
         if (problems.length === 0) {
             const metadataResponse = await fetch('metadata.json');
             problems = await metadataResponse.json();
         }
 
-        let selectedProblem;
-        let wasShowingCorrectMove = false; // Track if we were showing the correct move
-        
-        // If we're showing the correct move, use the current problem
-        if (showCorrectMove) {
-            selectedProblem = problems.find(p => p.filename === currentProblemFilename);
-            console.log(`Reloading same problem: ${currentProblemFilename}`);
-            wasShowingCorrectMove = true; // Mark that we're showing the correct move
-        } else {
-            // Find the problem with the rank closest to the user's rank
-            let minRankDiff = Infinity;
+        const wasShowingCorrectMove = showCorrectMove;
 
-            for (const problem of problems) {
-                const rankDiff = Math.abs(problem.rank - userRank);
-                if (rankDiff < minRankDiff) {
-                    minRankDiff = rankDiff;
-                }
-            }
-
-            const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
-            
-            // Use weighted random selection based on frequencies
-            let totalWeight = 0;
-            const weightedProblems = closestProblems.map(problem => {
-                const frequency = problemFrequencies[problem.filename] || 1;
-                totalWeight += frequency; // Higher frequency = higher weight
-                return { problem, weight: frequency };
-            });
-
-            // Select a problem based on weights
-            let random = Math.random() * totalWeight;
-            selectedProblem = null;
-            
-            for (const { problem, weight } of weightedProblems) {
-                random -= weight;
-                if (random <= 0) {
-                    selectedProblem = problem;
-                    break;
-                }
-            }
-            
-            // Fallback to random selection if weighting fails
-            if (!selectedProblem) {
-                selectedProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
-            }
-        }
-
-        // Store the current problem filename
+        const selectedProblem = selectProblem();
         currentProblemFilename = selectedProblem.filename;
 
-        // Load the selected problem
-        const response = await fetch(`tsumegos/${selectedProblem.filename}`);
-        const sgfContent = await response.text();
+        const kifu = await fetchAndLoadSgf(currentProblemFilename);
 
-        const kifu = WGo.Kifu.fromSgf(sgfContent);
-        kifuReader = new WGo.KifuReader(kifu);
-
-        // Find the branching node
-        while (kifuReader.node.children.length === 1) {
-            kifuReader.next();
-        }
-
-        // Clear previous board if exists
-        if (board) {
-            board.removeEventListener('click', handleBoardClick);
-            boardContainer.innerHTML = ''; // Clear the container
-        }
-
-        // Initialize WGo.Board
-        const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-        const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
-        
-        // Clear any existing content and ensure container takes full space
-        boardContainer.innerHTML = '';
-        boardContainer.style.display = 'block';
-        
-        board = new WGo.Board(boardContainer, {
-            size: kifu.size,
-            background: WGo.DIR + "wood_1024.jpg",
-            stoneHandler: WGo.Board.drawHandlers.REALISTIC,
-            width: boardSize,
-            height: boardSize,
-        });
-
+        initializeBoard(kifu.size);
         updateBoard();
+        updateRankDisplay();
 
-        // Store the game object for move validation
-        game = kifuReader.game;
-
-        // Add click listener to the board
-        board.addEventListener('click', handleBoardClick);
-
-        // Log current problem frequency
         const currentFrequency = problemFrequencies[currentProblemFilename] || 1;
-        console.log(`Loaded problem: ${currentProblemFilename}, frequency: ${currentFrequency}`);
+        console.log(`Loaded problem: ${currentProblemFilename}, rank: ${selectedProblem.rank.toFixed(3)}, frequency: ${currentFrequency}`);
 
-        // Update UI elements
-        rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
-
-        // Reset the flag after the tsumego is loaded
+        // Reset the flag only after the problem has been reloaded with the hint.
         if (wasShowingCorrectMove) {
-            showCorrectMove = false; // Reset the flag
-            console.log("Reset showCorrectMove flag to false");
+            showCorrectMove = false;
         }
 
     } catch (error) {
         console.error('Error loading or parsing SGF:', error);
+        displayOverlay('Error loading problem. Please refresh.', 5000);
     }
 }
 
-loadTsumego();
+// --- Initial Load ---
 
-// Add resize handler
+loadTsumego();
 window.addEventListener('resize', updateBoardSize);
+window.addEventListener('orientationchange', updateBoardSize);
