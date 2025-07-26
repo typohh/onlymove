@@ -3,18 +3,35 @@ const urlsToCache = [
     '/',
     '/index.html',
     '/app.js',
-    'http://wgo.waltheri.net/css/wgo.player.css',
-    'http://wgo.waltheri.net/js/wgo.min.js',
-    'http://wgo.waltheri.net/js/wgo.player.min.js'
+    '/wgo.js/wgo/wgo.player.css',
+    '/wgo.js/wgo/wgo.js',
+    '/wgo.js/wgo/sgfparser.js',
+    '/wgo.js/wgo/kifu.js'
 ];
 
 self.addEventListener('install', event => {
-    event.waitUntil(
+  self.skipWaiting();
+  event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
                 return cache.addAll(urlsToCache);
             })
     );
+});
+
+self.addEventListener('activate', event => {
+  clients.claim();
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          if (cacheName !== CACHE_NAME) {
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
+  );
 });
 
 self.addEventListener('fetch', event => {

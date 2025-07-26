@@ -1,6 +1,18 @@
 const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
+// App version - last modified date and time
+const APP_VERSION = "2025-07-26 22:24";
+
+console.log(`Yose Tsumego App v${APP_VERSION} loaded`);
+
+// Force service worker update
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    registrations.forEach(reg => reg.update());
+  });
+}
+
 let board;
 let game;
 let kifuReader;
@@ -10,6 +22,8 @@ let problems = []; // Array to store problems from metadata.json
 // Initialize problem frequencies from localStorage or default to 1
 let problemFrequencies = localStorage.getItem('problemFrequencies') ? 
     JSON.parse(localStorage.getItem('problemFrequencies')) : {};
+let currentProblemFilename = null; // Track current problem filename
+let showCorrectMove = false; // Flag to indicate if we should show the correct move
 
 // Function to update board size based on screen orientation
 function updateBoardSize() {
@@ -45,14 +59,15 @@ function getDescriptiveRank(numericRank) {
 function showResult(message, correct, problemFilename) {
     // Update problem frequency based on correctness
     if (correct) {
-        // Decrease frequency to 1/5 of current value, with minimum of 0.1
+        // Decrease frequency to 1/5 of current value
         const currentFreq = problemFrequencies[problemFilename] || 1;
-        problemFrequencies[problemFilename] = Math.max(0.1, currentFreq / 5);
+        problemFrequencies[problemFilename] = currentFreq / 5;
         userRank = Math.min(1, userRank + 0.001);
         // Skip overlay for correct moves, just load next tsumego
         localStorage.setItem('userRank', userRank.toString());
         localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
         rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+        console.log(`Correct answer for ${problemFilename}. New frequency: ${problemFrequencies[problemFilename]}`);
         loadTsumego();
         return;
     } else {
@@ -62,8 +77,146 @@ function showResult(message, correct, problemFilename) {
         localStorage.setItem('userRank', userRank.toString());
         localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
         rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+        console.log(`Incorrect answer for ${problemFilename}. New frequency: ${problemFrequencies[problemFilename]}`);
+        
+        // For incorrect answers, reload the same tsumego with correct move highlighted
+        console.log("Setting showCorrectMove flag to true in showResult");
+        showCorrectMove = true;
+        
+        // Show the overlay message
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        overlay.style.display = 'flex';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.zIndex = '1000';
+
+        const messageBox = document.createElement('div');
+        messageBox.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        messageBox.style.color = 'white';
+        messageBox.style.padding = '20px';
+        messageBox.style.borderRadius = '10px';
+        messageBox.textContent = message;
+
+        overlay.appendChild(messageBox);
+        document.body.appendChild(overlay);
+
+        // After showing the message, reload the same tsumego
+        setTimeout(() => {
+            document.body.removeChild(overlay);
+            loadTsumego(); // This will now reload the same tsumego because showCorrectMove is true
+        }, 2000);
+        
+        // Return early to prevent the normal flow
+        return;
+    }
+}
+
+function updateBoard() {
+    const position = kifuReader.game.position;
+    board.removeAllObjects();
+    for (let x = 0; x < position.size; x++) {
+        for (let y = 0; y < position.size; y++) {
+            const color = position.get(x, y);
+            if (color !== 0) {
+                board.addObject({ x: x, y: y, c: color });
+            }
+        }
     }
 
+    const lastNode = kifuReader.node;
+    if (lastNode.move) {
+        board.addObject({x: lastNode.move.x, y: lastNode.move.y, type: 'CR'});
+    }
+    
+    // If we're showing the correct move, add a GLOW marker
+    if (showCorrectMove) {
+        // Find the correct move in the branching node's children
+        const branchingNode = kifuReader.node;
+        const correctNode = branchingNode.children.find(child => 
+            child.comment && child.comment.includes('Correct'));
+        if (correctNode && correctNode.move) {
+            console.log(`Showing correct move at (${correctNode.move.x}, ${correctNode.move.y})`);
+            board.addObject({x: correctNode.move.x, y: correctNode.move.y, type: 'outline', stoneStyle:'NORMAL'});
+        }
+    }
+}
+
+function handleBoardClick(x, y) {
+    // If we're showing the correct move, only allow clicks on the correct move
+    if (showCorrectMove) {
+        const branchingNode = kifuReader.node;
+        const correctNode = branchingNode.children.find(child => 
+            child.comment && child.comment.includes('Correct'));
+        
+        if (correctNode && correctNode.move && 
+            correctNode.move.x === x && correctNode.move.y === y) {
+            // User clicked on the correct move, proceed normally
+            console.log("User clicked on the correct move");
+            // Reset the flag since the user clicked the correct move
+            showCorrectMove = false;
+        } else {
+            // User clicked on an incorrect move, show overlay
+            console.log("User clicked on an incorrect move while showing correct move");
+            showOverlay("Click on the correct move");
+            return;
+        }
+    }
+    
+    if (!game || !kifuReader) return;
+
+    const currentPlayer = game.turn;
+    const isLegal = game.isValid(x, y, currentPlayer);
+
+    if (isLegal) {
+        const branchingNode = kifuReader.node;
+        const correctMoveNode = branchingNode.children.find(child => child.move && child.move.x === x && child.move.y === y);
+
+        if (correctMoveNode) {
+            // Check if the comment contains the word "Correct"
+            let comment = correctMoveNode.comment || '';
+            const isCorrect = comment.includes('Correct');
+
+            if (isCorrect) {
+                // Correct move
+                const moveIndex = branchingNode.children.indexOf(correctMoveNode);
+                kifuReader.next(moveIndex);
+                updateBoard();
+
+                setTimeout(() => {
+                    // Advance to the next node to get white's response
+                    kifuReader.next();
+                    updateBoard();
+
+                    setTimeout(() => {
+                        // Pass the current problem filename to showResult
+                        showResult(comment, true, currentProblemFilename);
+                    }, 1000);
+                }, 1000);
+            } else {
+                // Incorrect move despite being a valid variation
+                // Set flag to show correct move on reload
+                console.log("Setting showCorrectMove flag to true");
+                showCorrectMove = true;
+                showResult('Incorrect move, try again.', false, currentProblemFilename);
+            }
+        } else {
+            // Incorrect move
+            // Set flag to show correct move on reload
+            console.log("Setting showCorrectMove flag to true");
+            showCorrectMove = true;
+            showResult('Incorrect move, try again.', false, currentProblemFilename);
+        }
+    }
+}
+
+// Helper function to show an overlay message
+function showOverlay(message) {
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
     overlay.style.top = '0';
@@ -88,72 +241,8 @@ function showResult(message, correct, problemFilename) {
 
     setTimeout(() => {
         document.body.removeChild(overlay);
-        loadTsumego();
     }, 2000);
 }
-
-function updateBoard() {
-    const position = kifuReader.game.position;
-    board.removeAllObjects();
-    let stonesAdded = 0;
-    for (let x = 0; x < position.size; x++) {
-        for (let y = 0; y < position.size; y++) {
-            const color = position.get(x, y);
-            if (color !== 0) {
-                board.addObject({ x: x, y: y, c: color });
-                stonesAdded++;
-            }
-        }
-    }
-    console.log(`Updated board with ${stonesAdded} stones.`);
-
-    const lastNode = kifuReader.node;
-    if (lastNode.move) {
-        board.addObject({x: lastNode.move.x, y: lastNode.move.y, type: 'CR'});
-    }
-}
-
-function handleBoardClick(x, y) {
-    if (!game || !kifuReader) return;
-
-    const currentPlayer = game.turn;
-    const isLegal = game.isValid(x, y, currentPlayer);
-
-    if (isLegal) {
-        console.log(`Legal move played at (${x}, ${y}) by ${currentPlayer === WGo.B ? 'Black' : 'White'}`);
-
-        const branchingNode = kifuReader.node;
-        const correctMoveNode = branchingNode.children.find(child => child.move && child.move.x === x && child.move.y === y);
-
-        if (correctMoveNode) {
-            // Correct move
-            let comment = correctMoveNode.comment || 'Correct!';
-
-            const moveIndex = branchingNode.children.indexOf(correctMoveNode);
-            kifuReader.next(moveIndex);
-            updateBoard();
-
-            setTimeout(() => {
-                // Advance to the next node to get white's response
-                kifuReader.next();
-                updateBoard();
-
-                setTimeout(() => {
-                    // Pass the current problem filename to showResult
-                    showResult(comment, true, currentProblemFilename);
-                }, 1000);
-            }, 1000);
-
-        } else {
-            // Incorrect move
-            showResult('Incorrect move, try again.', false, currentProblemFilename);
-        }
-    } else {
-        console.log(`Illegal move at (${x}, ${y})`);
-    }
-}
-
-let currentProblemFilename = null; // Track current problem filename
 
 async function loadTsumego() {
     try {
@@ -163,41 +252,51 @@ async function loadTsumego() {
             problems = await metadataResponse.json();
         }
 
-        // Find the problem with the rank closest to the user's rank
-        let minRankDiff = Infinity;
+        let selectedProblem;
+        let wasShowingCorrectMove = false; // Track if we were showing the correct move
+        
+        // If we're showing the correct move, use the current problem
+        if (showCorrectMove) {
+            selectedProblem = problems.find(p => p.filename === currentProblemFilename);
+            console.log(`Reloading same problem: ${currentProblemFilename}`);
+            wasShowingCorrectMove = true; // Mark that we're showing the correct move
+        } else {
+            // Find the problem with the rank closest to the user's rank
+            let minRankDiff = Infinity;
 
-        for (const problem of problems) {
-            const rankDiff = Math.abs(problem.rank - userRank);
-            if (rankDiff < minRankDiff) {
-                minRankDiff = rankDiff;
+            for (const problem of problems) {
+                const rankDiff = Math.abs(problem.rank - userRank);
+                if (rankDiff < minRankDiff) {
+                    minRankDiff = rankDiff;
+                }
             }
-        }
 
-        const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
-        
-        // Use weighted random selection based on frequencies
-        let totalWeight = 0;
-        const weightedProblems = closestProblems.map(problem => {
-            const frequency = problemFrequencies[problem.filename] || 1;
-            totalWeight += 1 / frequency; // Lower frequency = higher weight
-            return { problem, weight: 1 / frequency };
-        });
+            const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
+            
+            // Use weighted random selection based on frequencies
+            let totalWeight = 0;
+            const weightedProblems = closestProblems.map(problem => {
+                const frequency = problemFrequencies[problem.filename] || 1;
+                totalWeight += frequency; // Higher frequency = higher weight
+                return { problem, weight: frequency };
+            });
 
-        // Select a problem based on weights
-        let random = Math.random() * totalWeight;
-        let selectedProblem = null;
-        
-        for (const { problem, weight } of weightedProblems) {
-            random -= weight;
-            if (random <= 0) {
-                selectedProblem = problem;
-                break;
+            // Select a problem based on weights
+            let random = Math.random() * totalWeight;
+            selectedProblem = null;
+            
+            for (const { problem, weight } of weightedProblems) {
+                random -= weight;
+                if (random <= 0) {
+                    selectedProblem = problem;
+                    break;
+                }
             }
-        }
-        
-        // Fallback to random selection if weighting fails
-        if (!selectedProblem) {
-            selectedProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
+            
+            // Fallback to random selection if weighting fails
+            if (!selectedProblem) {
+                selectedProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
+            }
         }
 
         // Store the current problem filename
@@ -205,26 +304,20 @@ async function loadTsumego() {
 
         // Load the selected problem
         const response = await fetch(`tsumegos/${selectedProblem.filename}`);
-        console.log('SGF fetch response:', response);
         const sgfContent = await response.text();
-        console.log('SGF content:', sgfContent);
 
         const kifu = WGo.Kifu.fromSgf(sgfContent);
-        console.log('Parsed Kifu object:', kifu);
         kifuReader = new WGo.KifuReader(kifu);
-        console.log('KifuReader initialized:', kifuReader);
 
         // Find the branching node
         while (kifuReader.node.children.length === 1) {
             kifuReader.next();
         }
-        console.log('Branching node found:', kifuReader.node);
 
         // Clear previous board if exists
         if (board) {
             board.removeEventListener('click', handleBoardClick);
             boardContainer.innerHTML = ''; // Clear the container
-            console.log('Cleared existing board.');
         }
 
         // Initialize WGo.Board
@@ -242,20 +335,27 @@ async function loadTsumego() {
             width: boardSize,
             height: boardSize,
         });
-        console.log('WGo.Board initialized:', board);
 
         updateBoard();
 
         // Store the game object for move validation
         game = kifuReader.game;
-        console.log('Game object for validation:', game);
 
         // Add click listener to the board
         board.addEventListener('click', handleBoardClick);
-        console.log('Click listener added to board.');
+
+        // Log current problem frequency
+        const currentFrequency = problemFrequencies[currentProblemFilename] || 1;
+        console.log(`Loaded problem: ${currentProblemFilename}, frequency: ${currentFrequency}`);
 
         // Update UI elements
         rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+
+        // Reset the flag after the tsumego is loaded
+        if (wasShowingCorrectMove) {
+            showCorrectMove = false; // Reset the flag
+            console.log("Reset showCorrectMove flag to false");
+        }
 
     } catch (error) {
         console.error('Error loading or parsing SGF:', error);
