@@ -139,12 +139,9 @@ class KatagoQueries:
         }
         r = self._katago_controller.send_query(query)
         if len(r["moveInfos"]) < num_legal_moves:
-            print("moves:", moves)
-            print("num_legal_moves:", num_legal_moves)
-            print("response:")
-            pprint(r)
             move_info_count = len(r["moveInfos"])
-            raise Exception(f"Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
+            print("moves:", moves)
+            print(f"WARNING: Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
         return r
 
     def query(self, moves, exclude_move=None):
