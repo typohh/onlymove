@@ -11,7 +11,7 @@ from katago_queries import KatagoQueries
 from problem_finder import ProblemFinder, problem_to_sgf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
+OUTPUT_DIR = os.path.join(BASE_DIR, "pwa", "tsumegos")
 DRIVE_DIR = '/content/drive/My Drive/Tsumegos'
 
 print_lock = threading.Lock()

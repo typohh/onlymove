@@ -5,6 +5,7 @@ import random
 import sys
 import time
 import re
+import argparse
 
 from katago_controller import KATAGO_PATH, CONFIG_FILE, RL_MODEL_PATH, SL_MODEL_PATH
 
@@ -93,10 +94,19 @@ def main():
     """
     Main function to run the batch size test.
     """
+    parser = argparse.ArgumentParser(description='KataGo batch size optimization')
+    parser.add_argument('--batchsize', type=int, help='Set specific batch size and skip testing')
+    args = parser.parse_args()
+
     for path in [KATAGO_PATH, CONFIG_FILE, RL_MODEL_PATH, SL_MODEL_PATH]:
         if not os.path.exists(path):
             print(f"Error: Required file not found at '{path}'", file=sys.stderr)
             sys.exit(1)
+
+    if args.batchsize is not None:
+        print(f"Setting batch size to {args.batchsize} from command line argument")
+        update_config_file(CONFIG_FILE, args.batchsize)
+        return
 
     batch_size = 1
     best_queries_per_second = 0
