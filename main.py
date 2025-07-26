@@ -25,7 +25,6 @@ def worker_task(problem_finder: ProblemFinder):
     try:
         while True:  # Keep working continuously
             problem = problem_finder.create_problem()
-            print( problem )
             if problem:
                 sgf_str = problem_to_sgf(problem)
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -40,27 +39,18 @@ def worker_task(problem_finder: ProblemFinder):
                 with print_lock:
                     print_stats()
                     print(problem["move_rank"], problem["game_rank"])
-                    if sgf_str:
-                        print(sgf_str)
+
     except Exception as e:
         print(e)
         traceback.print_exc()
 
 
 def print_stats():
-    while not DEBUG:
-        time.sleep(10)
-        print("\n--- Statistics ---")
-        current_stats = STATS.get_stats()
-        for key, value in current_stats.items():
-            if key == "Rejection Reasons":
-                if value:
-                    print("Rejection Reasons:")
-                    for reason, count in value.items():
-                        print(f"  - {reason}: {count}")
-            else:
-                print(f"{key}: {value}")
-        print("------------------\n")
+    print("\n--- Statistics ---")
+    current_stats = STATS.get_stats()
+    for key, value in current_stats.items():
+        print(f"{key}: {value}")
+    print("------------------\n")
 
 
 def main():
