@@ -7,6 +7,9 @@ let kifuReader;
 // Initialize user rank from localStorage or start at 0.5
 let userRank = localStorage.getItem('userRank') ? parseFloat(localStorage.getItem('userRank')) : 0.5;
 let problems = []; // Array to store problems from metadata.json
+// Initialize problem frequencies from localStorage or default to 1
+let problemFrequencies = localStorage.getItem('problemFrequencies') ? 
+    JSON.parse(localStorage.getItem('problemFrequencies')) : {};
 
 // Function to update board size based on screen orientation
 function updateBoardSize() {
@@ -39,17 +42,25 @@ function getDescriptiveRank(numericRank) {
     }
 }
 
-function showResult(message, correct) {
+function showResult(message, correct, problemFilename) {
+    // Update problem frequency based on correctness
     if (correct) {
+        // Decrease frequency to 1/5 of current value, with minimum of 0.1
+        const currentFreq = problemFrequencies[problemFilename] || 1;
+        problemFrequencies[problemFilename] = Math.max(0.1, currentFreq / 5);
         userRank = Math.min(1, userRank + 0.001);
         // Skip overlay for correct moves, just load next tsumego
         localStorage.setItem('userRank', userRank.toString());
+        localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
         rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
         loadTsumego();
         return;
     } else {
+        // Set frequency to 25 for incorrect answers
+        problemFrequencies[problemFilename] = 25;
         userRank = Math.max(0, userRank - 0.004);
         localStorage.setItem('userRank', userRank.toString());
+        localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
         rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
     }
 
@@ -128,18 +139,21 @@ function handleBoardClick(x, y) {
                 updateBoard();
 
                 setTimeout(() => {
-                    showResult(comment, true);
+                    // Pass the current problem filename to showResult
+                    showResult(comment, true, currentProblemFilename);
                 }, 1000);
             }, 1000);
 
         } else {
             // Incorrect move
-            showResult('Incorrect move, try again.', false);
+            showResult('Incorrect move, try again.', false, currentProblemFilename);
         }
     } else {
         console.log(`Illegal move at (${x}, ${y})`);
     }
 }
+
+let currentProblemFilename = null; // Track current problem filename
 
 async function loadTsumego() {
     try {
@@ -160,10 +174,37 @@ async function loadTsumego() {
         }
 
         const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
-        const randomProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
+        
+        // Use weighted random selection based on frequencies
+        let totalWeight = 0;
+        const weightedProblems = closestProblems.map(problem => {
+            const frequency = problemFrequencies[problem.filename] || 1;
+            totalWeight += 1 / frequency; // Lower frequency = higher weight
+            return { problem, weight: 1 / frequency };
+        });
+
+        // Select a problem based on weights
+        let random = Math.random() * totalWeight;
+        let selectedProblem = null;
+        
+        for (const { problem, weight } of weightedProblems) {
+            random -= weight;
+            if (random <= 0) {
+                selectedProblem = problem;
+                break;
+            }
+        }
+        
+        // Fallback to random selection if weighting fails
+        if (!selectedProblem) {
+            selectedProblem = closestProblems[Math.floor(Math.random() * closestProblems.length)];
+        }
+
+        // Store the current problem filename
+        currentProblemFilename = selectedProblem.filename;
 
         // Load the selected problem
-        const response = await fetch(`tsumegos/${randomProblem.filename}`);
+        const response = await fetch(`tsumegos/${selectedProblem.filename}`);
         console.log('SGF fetch response:', response);
         const sgfContent = await response.text();
         console.log('SGF content:', sgfContent);
