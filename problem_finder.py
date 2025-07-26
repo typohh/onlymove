@@ -206,7 +206,9 @@ def problem_to_sgf(problem, komi=7.5):
     game.root.set("KM", str(komi))
     game.root.set("RU", "tromp-taylor")
     if problem.get("move_rank") and problem.get("game_rank"):
-        game.root.set("GN", f"Move difficulty: {problem["move_rank"]}, Game difficulty: {problem['game_rank']}")
+        move_rank = problem["move_rank"]
+        game_rank = problem['game_rank']
+        game.root.set("GN", f"Move difficulty: {move_rank}, Game difficulty: {game_rank}")
 
     player = "b"
 
