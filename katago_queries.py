@@ -143,7 +143,8 @@ class KatagoQueries:
             print("num_legal_moves:", num_legal_moves)
             print("response:")
             pprint(r)
-            raise Exception(f"Not enough moveInfos found in response: {len(r["moveInfos"])} vs {num_legal_moves}")
+            move_info_count = len(r["moveInfos"])
+            raise Exception(f"Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
         return r
 
     def query(self, moves, exclude_move=None):
