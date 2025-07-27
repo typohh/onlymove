@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "include": ["/*"],
-  "exclude": [
-    "/INSTRUCTIONS.md",
-    "/app.js",
-  ]
-}
