@@ -108,7 +108,7 @@ function displayOverlay(message, duration, callback) {
 function updateRankDisplay() {
     // Calculate standard deviation
     const recentLosses = attemptHistory.filter(success => !success).length;
-    const adjustmentFactor = (1 + Math.pow(recentLosses - 6, 2)) * 0.5;
+    const adjustmentFactor = (1 + Math.pow(recentLosses - 6, 1.5)) * 0.5;
     
     // Update the rank element inside the board container
     const rankElement = document.getElementById('rank');
@@ -136,7 +136,7 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     const recentLosses = attemptHistory.filter(success => !success).length;
     
     // Apply rank adjustment formula
-    const adjustmentFactor = 1 + Math.pow(recentLosses - 6, 2);
+    const adjustmentFactor = 1 + Math.pow(recentLosses - 6, 1.5);
     const oldRank = userRank;
     
     if (isCorrect) {
