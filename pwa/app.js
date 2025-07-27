@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 16:27";
+const APP_VERSION = "2025-07-27 19:39";
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -44,8 +44,8 @@ function getDescriptiveRank(numericRank) {
 }
 
 /**
- * Displays a message in a temporary overlay.
- * @param {string} message - The text to display.
+ * Displays a temporary blood red overlay that fades out.
+ * @param {string} message - The text to display (not used in new implementation).
  * @param {number} duration - How long to display the overlay in milliseconds.
  * @param {function} [callback] - An optional function to run after the overlay is removed.
  */
@@ -54,25 +54,27 @@ function displayOverlay(message, duration, callback) {
     overlay.className = 'overlay';
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
-        justifyContent: 'center', alignItems: 'center', zIndex: '1000'
+        backgroundColor: 'rgba(139, 0, 0, 1)', // Blood red completely opaque
+        display: 'flex',
+        justifyContent: 'center', alignItems: 'center', zIndex: '1000',
+        opacity: '1',
+        transition: 'opacity 5s ease-out'
     });
 
-    const messageBox = document.createElement('div');
-    messageBox.className = 'overlay-message-box';
-    Object.assign(messageBox.style, {
-        backgroundColor: 'rgba(0, 0, 0, 0.7)', color: 'white',
-        padding: '20px', borderRadius: '10px'
-    });
-    messageBox.textContent = message;
-
-    overlay.appendChild(messageBox);
     document.body.appendChild(overlay);
 
+    // Start fade-out after a short delay
     setTimeout(() => {
-        document.body.removeChild(overlay);
+        overlay.style.opacity = '0';
+    }, 50);
+
+    // Remove overlay after fade-out completes and call callback
+    setTimeout(() => {
+        if (overlay.parentNode) {
+            document.body.removeChild(overlay);
+        }
         if (callback) callback();
-    }, duration);
+    }, 5000);
 }
 
 /**
@@ -82,7 +84,12 @@ function updateRankDisplay() {
     // Calculate standard deviation
     const recentLosses = attemptHistory.filter(success => !success).length;
     const adjustmentFactor = (1 + Math.pow(recentLosses - 6, 2)) * 0.5;
-    rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
+    
+    // Update the rank element inside the board container
+    const rankElement = document.getElementById('rank');
+    if (rankElement) {
+        rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
+    }
 }
 
 /**
@@ -131,18 +138,6 @@ function handleCorrectAnswer() {
 }
 
 /**
- * Handles the logic for an incorrect user move.
- */
-function handleIncorrectAnswer() {
-    updateUserStats(false);
-    showCorrectMove = true;
-    // Show an overlay, and after it disappears, reload the tsumego.
-    displayOverlay('Incorrect move, try again.', 2000, () => {
-        loadTsumego();
-    });
-}
-
-/**
  * Handles user clicks on the Go board.
  * @param {number} x - The x-coordinate of the click.
  * @param {number} y - The y-coordinate of the click.
@@ -158,7 +153,7 @@ function handleBoardClick(x, y) {
         if (correctNode?.move && correctNode.move.x === x && correctNode.move.y === y) {
             showCorrectMove = false; // Allow play to proceed
         } else {
-            displayOverlay("Click on the highlighted correct move.", 1500);
+            displayOverlay("", 1500);
             return;
         }
     }
@@ -167,19 +162,51 @@ function handleBoardClick(x, y) {
         // Disable clicks immediately after a valid move is played
         acceptClicks = false;
         
-        const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
-        if (moveNode?.comment?.includes('Correct')) {
+        // Find the move node that matches the user's click
+        const moveNode = kifuReader.node.children.find(child => 
+            child.move && child.move.x === x && child.move.y === y);
+        
+        if (moveNode) {
+            // Check if this is the correct move
+            const isCorrect = moveNode.comment?.includes('Correct') || false;
+            
+            // Play the user's move
             const moveIndex = kifuReader.node.children.indexOf(moveNode);
             kifuReader.next(moveIndex);
             updateBoard();
 
+            // After 1 second, show the follow-up move
             setTimeout(() => {
-                kifuReader.next(); // Opponent's response
-                updateBoard();
-                setTimeout(() => handleCorrectAnswer(), 1000);
+                // Check if there's a follow-up move in this variation
+                if (kifuReader.node.children.length > 0) {
+                    kifuReader.next(); // Play the follow-up move
+                    updateBoard();
+                    
+                    // After another 1 second, either show overlay or proceed to next tsumego
+                    setTimeout(() => {
+                        if (isCorrect) {
+                            handleCorrectAnswer();
+                        } else {
+                            // Show overlay and then show the same tsumego with correct move marked
+                            displayOverlay('', 5000, () => {
+                                showCorrectMove = true;
+                                loadTsumego();
+                            });
+                        }
+                    }, 1000);
+                } else {
+                    // No follow-up move, proceed immediately
+                    if (isCorrect) {
+                        handleCorrectAnswer();
+                    } else {
+                // Show overlay and then show the same tsumego with correct move marked
+                displayOverlay('', 5000, () => {
+                    showCorrectMove = true;
+                    loadTsumego();
+                });
+            }
+                }
             }, 1000);
-        } else {
-            handleIncorrectAnswer();
         }
     }
 }
@@ -244,6 +271,24 @@ function initializeBoard(size) {
     }
 
     board.addEventListener('click', handleBoardClick);
+    
+    // Create and position the rank display
+    const rankDisplay = document.createElement('div');
+    rankDisplay.id = 'rank-display';
+    Object.assign(rankDisplay.style, {
+        position: 'absolute',
+        bottom: '0',
+        left: '50%',
+        transform: 'translate(-50%, 0)',
+        color: 'black',
+        padding: '5px 15px',
+        fontSize: '18px',
+        zIndex: '1000',
+        textShadow: '0 0 3px white, 0 0 5px white',
+        pointerEvents: 'none'
+    });
+    rankDisplay.innerHTML = '<span id="rank">N/A</span>';
+    boardContainer.appendChild(rankDisplay);
     
     // Update board size based on current orientation
     updateBoardSize();
@@ -361,17 +406,16 @@ async function loadTsumego() {
         updateRankDisplay();
 
         const currentFrequency = problemFrequencies[currentProblemFilename] || 1;
-
-        // Reset the flag only after the problem has been reloaded with the hint.
-        if (wasShowingCorrectMove) {
+        // Only reset showCorrectMove if we're not showing the correct move
+        if (!wasShowingCorrectMove) {
             showCorrectMove = false;
         }
-        
+
         // Enable clicks once the board is ready
         acceptClicks = true;
 
     } catch (error) {
-        displayOverlay('Error loading problem. Please refresh.', 5000);
+        displayOverlay('', 5000);
     }
 }
 

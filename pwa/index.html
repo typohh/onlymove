@@ -15,6 +15,7 @@
             touch-action: manipulation; /* Prevents double-tap zoom */
         }
 
+        /* Light mode default */
         body {
             display: flex;
             flex-direction: column;
@@ -28,6 +29,16 @@
             user-select: none;
             /* Prevent zoom on focus */
             font-size: 16px;
+            background-color: #ffffff; /* Light background */
+            color: #000000; /* Dark text */
+        }
+
+        /* Dark mode */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #121212; /* Dark background */
+                color: #ffffff; /* Light text */
+            }
         }
 
         #board-container {
@@ -40,6 +51,7 @@
             padding: 0;
             /* Prevent zoom on double tap */
             touch-action: manipulation;
+            position: relative;
         }
 
         /* Remove borders from wgo board to eliminate 1px gap at top */
@@ -110,17 +122,13 @@
 <body>
     <div id="board-container"></div>
     <div id="controls">
-        <div id="stats">
-            <p>Rank: <span id="rank">N/A</span></p>
-        </div>
-        
     </div>
 
     <script type="text/javascript" src="wgo.js/wgo/wgo.js"></script>
     
     <script type="text/javascript" src="wgo.js/wgo/sgfparser.js"></script>
     <script type="text/javascript" src="wgo.js/wgo/kifu.js"></script>
-    <script src="appf7ad958e.js"></script>
+    <script src="app78912c85.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
