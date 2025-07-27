@@ -1,0 +1,2 @@
+We are working on a PWA. Its about showing users pre designed tsumegos (context baduk/weiqi/go). The relevant entry points are @index.html and @app.js. We use wGo.js library to handle game state, board graphics and parse SGF.
+After any changes you should deploy it by running deploy.sh so user can test the changes. There is already a webserver running, so you do not need to do that.

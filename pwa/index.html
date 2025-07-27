@@ -7,6 +7,11 @@
     <title>Yose Tsumego</title>
     <link rel="stylesheet" type="text/css" href="wgo.js/wgo/wgo.player.css" />
     <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             display: flex;
             flex-direction: column;
@@ -20,6 +25,18 @@
             height: 100vw;
             max-width: none;
             max-height: none;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Remove borders from wgo board to eliminate 1px gap at top */
+        .wgo-board {
+            margin: 0 !important;
+            border-top: none !important;
+            border-right: none !important;
+            border-left: none !important;
+            border-bottom: none !important;
         }
 
         #controls {
@@ -58,6 +75,16 @@
                 height: 100vw;
             }
         }
+
+        /* Ensure board takes full width on vertical screens */
+        @media (orientation: portrait) {
+            #board-container {
+                width: 100vw;
+                height: 100vw;
+                max-width: 100vw;
+                max-height: 100vw;
+            }
+        }
     </style>
 </head>
 <body>
@@ -73,7 +100,7 @@
     
     <script type="text/javascript" src="wgo.js/wgo/sgfparser.js"></script>
     <script type="text/javascript" src="wgo.js/wgo/kifu.js"></script>
-    <script src="app4bd4fa85.js"></script>
+    <script src="appd9726fc5.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

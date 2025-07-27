@@ -21,8 +21,11 @@ let currentProblemFilename = null;
 let showCorrectMove = false;
 
 // Load state from localStorage or set defaults
-let userRank = parseFloat(localStorage.getItem('userRank')) || 0.5;
+let userRank = parseFloat(localStorage.getItem('userRank')) || 0; // Set initial rank to 0
 let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
+// Initialize attempt history with all wins for new players
+let attemptHistory = JSON.parse(localStorage.getItem('attemptHistory')) || 
+    Array.from({length: 30}, () => true);
 
 // --- Helper Functions ---
 
@@ -76,7 +79,10 @@ function displayOverlay(message, duration, callback) {
  * Updates the rank display on the UI.
  */
 function updateRankDisplay() {
-    rankElement.textContent = `${getDescriptiveRank(userRank)} (${userRank.toFixed(3)})`;
+    // Calculate standard deviation
+    const recentLosses = attemptHistory.filter(success => !success).length;
+    const adjustmentFactor = (1 + Math.pow(recentLosses - 6, 2)) * 0.5;
+    rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
 }
 
 /**
@@ -84,17 +90,30 @@ function updateRankDisplay() {
  * @param {boolean} isCorrect - Whether the user's answer was correct.
  */
 function updateUserStats(isCorrect) {
+    // Update attempt history (shift array and add new result)
+    attemptHistory.shift();
+    attemptHistory.push(isCorrect);
+    
+    // Calculate recent losses (failures) in the last 30 attempts
+    const recentLosses = attemptHistory.filter(success => !success).length;
+    
+    // Apply rank adjustment formula
+    const adjustmentFactor = 1 + Math.pow(recentLosses - 6, 2);
+    
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
         problemFrequencies[currentProblemFilename] = Math.max(0.001, currentFreq / 5);
-        userRank = Math.min(1, userRank + 0.001);
+        userRank = Math.min(1, userRank + ((1/(5*3*29)) * adjustmentFactor));
     } else {
         problemFrequencies[currentProblemFilename] = 25;
-        userRank = Math.max(0, userRank - 0.004);
+        userRank = Math.max(0, userRank - ((1/(3*29)) * adjustmentFactor));
     }
 
+    // Save to localStorage
     localStorage.setItem('userRank', userRank.toString());
     localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
+    localStorage.setItem('attemptHistory', JSON.stringify(attemptHistory));
+    
     updateRankDisplay();
 
     const outcome = isCorrect ? "Correct" : "Incorrect";
@@ -206,7 +225,7 @@ function initializeBoard(size) {
     boardContainer.style.display = 'block';
 
     const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight);
 
     board = new WGo.Board(boardContainer, {
         size: size,
@@ -270,7 +289,7 @@ function updateBoard() {
 function updateBoardSize() {
     if (!board) return;
     const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight) * 0.95;
+    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight);
     board.setWidth(boardSize);
     board.setHeight(boardSize);
 }
@@ -334,5 +353,6 @@ async function loadTsumego() {
 // --- Initial Load ---
 
 loadTsumego();
+updateRankDisplay(); // Initialize performance display
 window.addEventListener('resize', updateBoardSize);
 window.addEventListener('orientationchange', updateBoardSize);
