@@ -1,0 +1,51 @@
+<svg width="240" height="240" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <circle id="black" r="20" fill="black" stroke="black" stroke-width="2"/>
+    <circle id="white" r="20" fill="white" stroke="black" stroke-width="2"/>
+  </defs>
+
+  <!-- Grid lines -->
+  <!-- Vertical lines -->
+  <line x1="40" y1="40" x2="40" y2="200" stroke="black" stroke-width="2"/>
+  <line x1="80" y1="40" x2="80" y2="200" stroke="black" stroke-width="2"/>
+  <line x1="120" y1="40" x2="120" y2="200" stroke="black" stroke-width="2"/>
+  <line x1="160" y1="40" x2="160" y2="200" stroke="black" stroke-width="2"/>
+  <line x1="200" y1="40" x2="200" y2="200" stroke="black" stroke-width="2"/>
+
+  <!-- Horizontal lines -->
+  <line x1="40" y1="40" x2="200" y2="40" stroke="black" stroke-width="2"/>
+  <line x1="40" y1="80" x2="200" y2="80" stroke="black" stroke-width="2"/>
+  <line x1="40" y1="120" x2="200" y2="120" stroke="black" stroke-width="2"/>
+  <line x1="40" y1="160" x2="200" y2="160" stroke="black" stroke-width="2"/>
+  <line x1="40" y1="200" x2="200" y2="200" stroke="black" stroke-width="2"/>
+
+  <!-- Stones -->
+  <!-- Row 1 -->
+  <use href="#black" x="80" y="40"/>
+  <use href="#white" x="160" y="40"/>
+
+  <!-- Row 2 -->
+  <use href="#black" x="40" y="80"/>
+  <use href="#black" x="80" y="80"/>
+  <use href="#black" x="120" y="80"/>
+  <use href="#white" x="160" y="80"/>
+  <use href="#white" x="200" y="80"/>
+
+  <!-- Row 3 -->
+  <use href="#white" x="40" y="120"/>
+  <use href="#white" x="80" y="120"/>
+  <use href="#white" x="120" y="120"/>
+  <use href="#black" x="160" y="120"/>
+  <use href="#black" x="200" y="120"/>
+
+  <!-- Row 4 -->
+  <use href="#white" x="80" y="160"/>
+  <use href="#black" x="120" y="160"/>
+  <use href="#black" x="160" y="160"/>
+  <use href="#white" x="200" y="160"/>
+
+  <!-- Row 5 -->
+  <use href="#black" x="40" y="200"/>
+  <use href="#white" x="80" y="200"/>
+  <use href="#black" x="160" y="200"/>
+</svg>

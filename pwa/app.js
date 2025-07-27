@@ -2,8 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 13:11";
-console.log(`Yose Tsumego App v${APP_VERSION} loaded`);
+const APP_VERSION = "2025-07-27 16:27";
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -19,6 +18,7 @@ let kifuReader;
 let problems = [];
 let currentProblemFilename = null;
 let showCorrectMove = false;
+let acceptClicks = false; // Track when we should accept clicks
 
 // Load state from localStorage or set defaults
 let userRank = parseFloat(localStorage.getItem('userRank')) || 0; // Set initial rank to 0
@@ -117,7 +117,6 @@ function updateUserStats(isCorrect) {
     updateRankDisplay();
 
     const outcome = isCorrect ? "Correct" : "Incorrect";
-    console.log(`${outcome} answer for ${currentProblemFilename}. New frequency: ${problemFrequencies[currentProblemFilename]}`);
 }
 
 // --- Core Application Logic ---
@@ -149,6 +148,9 @@ function handleIncorrectAnswer() {
  * @param {number} y - The y-coordinate of the click.
  */
 function handleBoardClick(x, y) {
+    // Only process clicks when we're expecting them
+    if (!acceptClicks) return;
+    
     if (!game || !kifuReader) return;
 
     if (showCorrectMove) {
@@ -162,6 +164,9 @@ function handleBoardClick(x, y) {
     }
 
     if (game.isValid(x, y, game.turn)) {
+        // Disable clicks immediately after a valid move is played
+        acceptClicks = false;
+        
         const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
         if (moveNode?.comment?.includes('Correct')) {
             const moveIndex = kifuReader.node.children.indexOf(moveNode);
@@ -218,7 +223,6 @@ function selectProblem() {
  * @param {number} size - The size of the board (e.g., 19 for a 19x19 board).
  */
 function initializeBoard(size) {
-    console.log(`Initializing board with size: ${size}`);
     if (board) {
         board.removeEventListener('click', handleBoardClick);
         board = null; // Explicitly nullify the board reference
@@ -236,11 +240,9 @@ function initializeBoard(size) {
 
     // Explicitly verify and set the board size
     if (board.size !== size) {
-        console.warn(`Board size mismatch! Expected: ${size}, Actual: ${board.size}`);
         board.size = size;
     }
 
-    console.log(`Board created with size: ${board.size}`);
     board.addEventListener('click', handleBoardClick);
     
     // Update board size based on current orientation
@@ -253,7 +255,6 @@ function initializeBoard(size) {
 function drawCorrectMoveMarker() {
     const correctNode = kifuReader.node.children.find(child => child.comment?.includes('Correct'));
     if (correctNode?.move) {
-        console.log(`Highlighting correct move at (${correctNode.move.x}, ${correctNode.move.y})`);
         board.addObject({
             x: correctNode.move.x,
             y: correctNode.move.y,
@@ -268,16 +269,13 @@ function drawCorrectMoveMarker() {
  */
 function updateBoard() {
     if (!board || !kifuReader) {
-        console.log('updateBoard called but board or kifuReader not ready');
         return;
     }
 
     const position = kifuReader.game.position;
-    console.log(`Updating board. Position size: ${position.size}`);
     
     // Verify board size matches position size
     if (board.size !== position.size) {
-        console.warn(`Board size mismatch in updateBoard! Board: ${board.size}, Position: ${position.size}`);
         // Reinitialize the board with correct size
         initializeBoard(position.size);
     }
@@ -302,8 +300,6 @@ function updateBoard() {
     if (showCorrectMove) {
         drawCorrectMoveMarker();
     }
-    
-    console.log('Board updated');
 }
 
 /**
@@ -323,18 +319,13 @@ function updateBoardSize() {
  * @param {string} filename - The SGF file to load from the 'tsumegos' directory.
  */
 async function fetchAndLoadSgf(filename) {
-    console.log(`Fetching SGF file: ${filename}`);
     const response = await fetch(`tsumegos/${filename}`);
     const sgfContent = await response.text();
     
     // Log the first two lines of the SGF to help debug board size issues
     const lines = sgfContent.split('\n');
-    console.log(`SGF first line: ${lines[0]}`);
-    console.log(`SGF second line: ${lines[1]}`);
     
     const kifu = WGo.Kifu.fromSgf(sgfContent);
-    
-    console.log(`SGF parsed. Board size: ${kifu.size}`);
 
     kifuReader = new WGo.KifuReader(kifu);
 
@@ -351,47 +342,41 @@ async function fetchAndLoadSgf(filename) {
  * Main function to load and display a tsumego problem.
  */
 async function loadTsumego() {
-    console.log('Loading tsumego...');
     try {
         // Ensure problem metadata is loaded.
         if (problems.length === 0) {
-            console.log('Loading metadata.json');
             const metadataResponse = await fetch('metadata.json');
             problems = await metadataResponse.json();
-            console.log(`Loaded ${problems.length} problems from metadata`);
         }
 
         const wasShowingCorrectMove = showCorrectMove;
 
         const selectedProblem = selectProblem();
-        console.log(`Selected problem: ${selectedProblem.filename}`);
         currentProblemFilename = selectedProblem.filename;
 
         const kifu = await fetchAndLoadSgf(currentProblemFilename);
 
-        console.log(`Initializing board with kifu.size: ${kifu.size}`);
         initializeBoard(kifu.size);
         updateBoard();
         updateRankDisplay();
 
         const currentFrequency = problemFrequencies[currentProblemFilename] || 1;
-        console.log(`Loaded problem: ${currentProblemFilename}, rank: ${selectedProblem.rank.toFixed(3)}, frequency: ${currentFrequency}`);
 
         // Reset the flag only after the problem has been reloaded with the hint.
         if (wasShowingCorrectMove) {
             showCorrectMove = false;
         }
+        
+        // Enable clicks once the board is ready
+        acceptClicks = true;
 
     } catch (error) {
-        console.error('Error loading or parsing SGF:', error);
         displayOverlay('Error loading problem. Please refresh.', 5000);
     }
 }
 
 // --- Initial Load ---
 
-console.log('Starting app initialization');
-console.log('Board container element:', boardContainer);
 loadTsumego();
 updateRankDisplay(); // Initialize performance display
 window.addEventListener('resize', updateBoardSize);
