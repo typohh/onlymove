@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 19:39";
+const APP_VERSION = "2025-07-27 21:21";
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -58,7 +58,7 @@ function displayOverlay(message, duration, callback) {
         display: 'flex',
         justifyContent: 'center', alignItems: 'center', zIndex: '1000',
         opacity: '1',
-        transition: 'opacity 5s ease-out'
+        transition: 'opacity 3s ease-out'
     });
 
     document.body.appendChild(overlay);
@@ -74,7 +74,7 @@ function displayOverlay(message, duration, callback) {
             document.body.removeChild(overlay);
         }
         if (callback) callback();
-    }, 5000);
+    }, 3000);
 }
 
 /**
@@ -188,7 +188,7 @@ function handleBoardClick(x, y) {
                             handleCorrectAnswer();
                         } else {
                             // Show overlay and then show the same tsumego with correct move marked
-                            displayOverlay('', 5000, () => {
+                            displayOverlay('', 3000, () => {
                                 showCorrectMove = true;
                                 loadTsumego();
                             });
@@ -200,10 +200,10 @@ function handleBoardClick(x, y) {
                         handleCorrectAnswer();
                     } else {
                 // Show overlay and then show the same tsumego with correct move marked
-                displayOverlay('', 5000, () => {
-                    showCorrectMove = true;
-                    loadTsumego();
-                });
+                            displayOverlay('', 3000, () => {
+                                showCorrectMove = true;
+                                loadTsumego();
+                            });
             }
                 }
             }, 1000);
@@ -415,7 +415,7 @@ async function loadTsumego() {
         acceptClicks = true;
 
     } catch (error) {
-        displayOverlay('', 5000);
+        displayOverlay('', 3000);
     }
 }
 
