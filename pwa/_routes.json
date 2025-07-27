@@ -1,13 +1,8 @@
 {
-  "version": 2,
+  "version": 3,
   "include": ["/*"],
   "exclude": [
-    "/wgo.js/*",
-    "/app*.js",
-    "/**/*.js",
-    "/**/*.css",
-    "/favicon.ico",
-    "/robots.txt",
-    "/tsumegos/*.sgf"
+    "/INSTRUCTIONS.md",
+    "/app.js",
   ]
 }
