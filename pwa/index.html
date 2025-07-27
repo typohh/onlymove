@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Yose Tsumego">
     <link rel="manifest" href="/manifest.json">
     <title>Yose Tsumego</title>
     <link rel="stylesheet" type="text/css" href="wgo.js/wgo/wgo.player.css" />
@@ -10,6 +12,7 @@
         html, body {
             margin: 0;
             padding: 0;
+            touch-action: manipulation; /* Prevents double-tap zoom */
         }
 
         body {
@@ -18,6 +21,13 @@
             align-items: center;
             margin: 0;
             padding: 0;
+            /* Prevent text selection which can interfere with touch actions */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            /* Prevent zoom on focus */
+            font-size: 16px;
         }
 
         #board-container {
@@ -28,6 +38,8 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
+            /* Prevent zoom on double tap */
+            touch-action: manipulation;
         }
 
         /* Remove borders from wgo board to eliminate 1px gap at top */
@@ -86,6 +98,12 @@
                 max-width: 100vw;
                 max-height: 100vw;
             }
+        }
+        
+        /* Disable all forms of zooming */
+        * {
+            touch-action: manipulation;
+            -ms-touch-action: manipulation;
         }
     </style>
 </head>

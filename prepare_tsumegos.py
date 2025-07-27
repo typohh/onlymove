@@ -1,8 +1,19 @@
+import hashlib
 import json
 import os
 import re
 
 from katago_queries import get_rank_number
+
+
+def rename_tsumegos(tsumegos_dir):
+    sgf_files = [f for f in os.listdir(tsumegos_dir) if f.endswith('.sgf')]
+    for filename in sgf_files:
+        filepath = os.path.join(tsumegos_dir, filename)
+        with open(filepath, 'rb') as f:
+            file_bytes = f.read()
+            new_filename = hashlib.sha256(file_bytes).hexdigest()[:8] + ".sgf"
+            os.rename(filepath, os.path.join(tsumegos_dir, new_filename))
 
 
 def extract_difficulty(content):
@@ -28,6 +39,8 @@ if __name__ == "__main__":
         print(f"Error: {tsumegos_dir} directory not found")
         exit(1)
 
+    rename_tsumegos(tsumegos_dir)
+
     metadata = []
     rank_distribution = {}
 
@@ -38,7 +51,7 @@ if __name__ == "__main__":
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            rank_num,rank_txt = extract_difficulty(content)
+            rank_num, rank_txt = extract_difficulty(content)
 
             if rank_num is None:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
@@ -60,4 +73,3 @@ if __name__ == "__main__":
     metadata_path = os.path.join("pwa", "metadata.json")
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
-

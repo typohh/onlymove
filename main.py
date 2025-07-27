@@ -3,7 +3,7 @@ import shutil
 import threading
 import time
 import traceback
-import uuid
+import hashlib
 
 from stats import STATS, DEBUG
 from katago_controller import KatagoController
@@ -28,7 +28,7 @@ def worker_task(problem_finder: ProblemFinder):
             if problem:
                 sgf_str = problem_to_sgf(problem)
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
-                filename = f"{uuid.uuid4()}.sgf"
+                filename = hashlib.sha256(sgf_str.encode('utf-8')).hexdigest()[:8] + ".sgf"
                 with open(os.path.join(OUTPUT_DIR, filename), "wb") as f:
                     f.write(sgf_str.encode("utf-8"))
 
