@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-26 22:24";
+const APP_VERSION = "2025-07-27 10:00 (debug)";
 console.log(`Yose Tsumego App v${APP_VERSION} loaded`);
 
 // Force service worker update
@@ -218,6 +218,7 @@ function selectProblem() {
  * @param {number} size - The size of the board (e.g., 19 for a 19x19 board).
  */
 function initializeBoard(size) {
+    console.log(`Initializing board with size: ${size}`);
     if (board) {
         board.removeEventListener('click', handleBoardClick);
     }
@@ -232,6 +233,7 @@ function initializeBoard(size) {
         height: 400,
     });
 
+    console.log(`Board created with size: ${board.size}`);
     board.addEventListener('click', handleBoardClick);
     
     // Update board size based on current orientation
@@ -258,9 +260,13 @@ function drawCorrectMoveMarker() {
  * Redraws the board with the current position, moves, and markers.
  */
 function updateBoard() {
-    if (!board || !kifuReader) return;
+    if (!board || !kifuReader) {
+        console.log('updateBoard called but board or kifuReader not ready');
+        return;
+    }
 
     const position = kifuReader.game.position;
+    console.log(`Updating board. Position size: ${position.size}`);
     board.removeAllObjects();
 
     // Draw stones
@@ -281,6 +287,8 @@ function updateBoard() {
     if (showCorrectMove) {
         drawCorrectMoveMarker();
     }
+    
+    console.log('Board updated');
 }
 
 /**
@@ -300,9 +308,12 @@ function updateBoardSize() {
  * @param {string} filename - The SGF file to load from the 'tsumegos' directory.
  */
 async function fetchAndLoadSgf(filename) {
+    console.log(`Fetching SGF file: ${filename}`);
     const response = await fetch(`tsumegos/${filename}`);
     const sgfContent = await response.text();
     const kifu = WGo.Kifu.fromSgf(sgfContent);
+    
+    console.log(`SGF parsed. Board size: ${kifu.size}`);
 
     kifuReader = new WGo.KifuReader(kifu);
 
@@ -319,20 +330,25 @@ async function fetchAndLoadSgf(filename) {
  * Main function to load and display a tsumego problem.
  */
 async function loadTsumego() {
+    console.log('Loading tsumego...');
     try {
         // Ensure problem metadata is loaded.
         if (problems.length === 0) {
+            console.log('Loading metadata.json');
             const metadataResponse = await fetch('metadata.json');
             problems = await metadataResponse.json();
+            console.log(`Loaded ${problems.length} problems from metadata`);
         }
 
         const wasShowingCorrectMove = showCorrectMove;
 
         const selectedProblem = selectProblem();
+        console.log(`Selected problem: ${selectedProblem.filename}`);
         currentProblemFilename = selectedProblem.filename;
 
         const kifu = await fetchAndLoadSgf(currentProblemFilename);
 
+        console.log(`Initializing board with kifu.size: ${kifu.size}`);
         initializeBoard(kifu.size);
         updateBoard();
         updateRankDisplay();
@@ -353,6 +369,8 @@ async function loadTsumego() {
 
 // --- Initial Load ---
 
+console.log('Starting app initialization');
+console.log('Board container element:', boardContainer);
 loadTsumego();
 updateRankDisplay(); // Initialize performance display
 window.addEventListener('resize', updateBoardSize);
