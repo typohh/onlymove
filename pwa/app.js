@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 10:00 (debug)";
+const APP_VERSION = "2025-07-27 13:11";
 console.log(`Yose Tsumego App v${APP_VERSION} loaded`);
 
 // Force service worker update
@@ -221,6 +221,7 @@ function initializeBoard(size) {
     console.log(`Initializing board with size: ${size}`);
     if (board) {
         board.removeEventListener('click', handleBoardClick);
+        board = null; // Explicitly nullify the board reference
     }
     boardContainer.innerHTML = ''; // Clear the container
     boardContainer.style.display = 'block';
@@ -232,6 +233,12 @@ function initializeBoard(size) {
         width: 400, // Default size, will be updated immediately
         height: 400,
     });
+
+    // Explicitly verify and set the board size
+    if (board.size !== size) {
+        console.warn(`Board size mismatch! Expected: ${size}, Actual: ${board.size}`);
+        board.size = size;
+    }
 
     console.log(`Board created with size: ${board.size}`);
     board.addEventListener('click', handleBoardClick);
@@ -267,6 +274,14 @@ function updateBoard() {
 
     const position = kifuReader.game.position;
     console.log(`Updating board. Position size: ${position.size}`);
+    
+    // Verify board size matches position size
+    if (board.size !== position.size) {
+        console.warn(`Board size mismatch in updateBoard! Board: ${board.size}, Position: ${position.size}`);
+        // Reinitialize the board with correct size
+        initializeBoard(position.size);
+    }
+    
     board.removeAllObjects();
 
     // Draw stones
@@ -311,6 +326,12 @@ async function fetchAndLoadSgf(filename) {
     console.log(`Fetching SGF file: ${filename}`);
     const response = await fetch(`tsumegos/${filename}`);
     const sgfContent = await response.text();
+    
+    // Log the first two lines of the SGF to help debug board size issues
+    const lines = sgfContent.split('\n');
+    console.log(`SGF first line: ${lines[0]}`);
+    console.log(`SGF second line: ${lines[1]}`);
+    
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     
     console.log(`SGF parsed. Board size: ${kifu.size}`);

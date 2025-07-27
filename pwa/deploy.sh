@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# Update APP_VERSION in app.js with current date and time
+CURRENT_DATETIME=$(date +"%Y-%m-%d %H:%M")
+sed -i "s/const APP_VERSION = \".*\";/const APP_VERSION = \"$CURRENT_DATETIME\";/" app.js
+
 # Step 1: Search for references to app.js or appXXXX.js inside .html and .js files
 REF=$(grep -hoE 'app([0-9a-zA-Z]{4,})?\.js' *.html *.js 2>/dev/null | sort | uniq | head -n 1)
 

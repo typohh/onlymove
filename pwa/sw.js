@@ -2,7 +2,7 @@ const CACHE_NAME = 'yose-tsumego-cache-v1';
 const urlsToCache = [
     '/',
     '/index.html',
-    '/appeef0bee2.js',
+    '/app56154069.js',
     '/wgo.js/wgo/wgo.player.css',
     '/wgo.js/wgo/wgo.js',
     '/wgo.js/wgo/sgfparser.js',
