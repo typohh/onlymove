@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": [
+    "/wgo.js/*",
+    "/app*.js",
+    "/**/*.js",
+    "/**/*.css",
+    "/favicon.ico",
+    "/robots.txt",
+    "/tsumegos/*.sgf"
+  ]
+}

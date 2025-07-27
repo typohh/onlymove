@@ -1,0 +1,11 @@
+/wgo.js/wgo/*.js
+  Content-Type: application/javascript
+
+/wgo.js/wgo/*.css
+  Content-Type: text/css
+
+/*.js
+  Content-Type: application/javascript
+
+/*.css
+  Content-Type: text/css

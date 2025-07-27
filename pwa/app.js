@@ -224,18 +224,18 @@ function initializeBoard(size) {
     boardContainer.innerHTML = ''; // Clear the container
     boardContainer.style.display = 'block';
 
-    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight);
-
     board = new WGo.Board(boardContainer, {
         size: size,
         background: WGo.DIR + "wood_1024.jpg",
         stoneHandler: WGo.Board.drawHandlers.REALISTIC,
-        width: boardSize,
-        height: boardSize,
+        width: 400, // Default size, will be updated immediately
+        height: 400,
     });
 
     board.addEventListener('click', handleBoardClick);
+    
+    // Update board size based on current orientation
+    updateBoardSize();
 }
 
 /**
@@ -289,7 +289,8 @@ function updateBoard() {
 function updateBoardSize() {
     if (!board) return;
     const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    const boardSize = isLandscape ? 400 : Math.min(window.innerWidth, window.innerHeight);
+    // For landscape, use 90% of screen height, for portrait use full width
+    const boardSize = isLandscape ? window.innerHeight * 0.9 : Math.min(window.innerWidth, window.innerHeight);
     board.setWidth(boardSize);
     board.setHeight(boardSize);
 }
