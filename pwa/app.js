@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 21:21";
+const APP_VERSION = "2025-07-27 21:51";
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -32,15 +32,40 @@ let attemptHistory = JSON.parse(localStorage.getItem('attemptHistory')) ||
 /**
  * Converts a numeric rank (0.0 to 1.0) to a descriptive Go rank (20k to 9d).
  * @param {number} numericRank - The rank value between 0.0 and 1.0.
- * @returns {string} The descriptive rank.
+ * @returns {string} The descriptive rank in the appropriate language.
  */
 function getDescriptiveRank(numericRank) {
     const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
     const rankIndex = Math.floor(numericRank * totalRanks);
-    if (rankIndex < 20) {
-        return `${20 - rankIndex} kyu`;
+    
+    // Get browser language, default to 'en'
+    const lang = navigator.language || 'en';
+    
+    // Define translations for kyu and dan
+    let kyuTerm, danTerm;
+    
+    if (lang.startsWith('zh')) {
+        // Chinese
+        kyuTerm = '级';
+        danTerm = '段';
+    } else if (lang.startsWith('ja')) {
+        // Japanese
+        kyuTerm = '級';
+        danTerm = '段';
+    } else if (lang.startsWith('ko')) {
+        // Korean
+        kyuTerm = '급';
+        danTerm = '단';
+    } else {
+        // Default (English and others)
+        kyuTerm = 'kyu';
+        danTerm = 'dan';
     }
-    return `${rankIndex - 19} dan`;
+    
+    if (rankIndex < 20) {
+        return `${20 - rankIndex} ${kyuTerm}`;
+    }
+    return `${rankIndex - 19} ${danTerm}`;
 }
 
 /**
@@ -95,8 +120,14 @@ function updateRankDisplay() {
 /**
  * Updates user rank and problem frequency, then saves to localStorage.
  * @param {boolean} isCorrect - Whether the user's answer was correct.
+ * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
  */
-function updateUserStats(isCorrect) {
+function updateUserStats(isCorrect, hintWasShown = false) {
+    // If a hint was shown, do not update stats.
+    if (hintWasShown) {
+        return;
+    }
+
     // Update attempt history (shift array and add new result)
     attemptHistory.shift();
     attemptHistory.push(isCorrect);
@@ -106,6 +137,7 @@ function updateUserStats(isCorrect) {
     
     // Apply rank adjustment formula
     const adjustmentFactor = 1 + Math.pow(recentLosses - 6, 2);
+    const oldRank = userRank;
     
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
@@ -115,6 +147,8 @@ function updateUserStats(isCorrect) {
         problemFrequencies[currentProblemFilename] = 25;
         userRank = Math.max(0, userRank - ((1/(3*29)) * adjustmentFactor));
     }
+
+    console.log(`Rank changed from ${oldRank.toFixed(4)} to ${userRank.toFixed(4)} (adjustment factor: ${adjustmentFactor.toFixed(2)})`);
 
     // Save to localStorage
     localStorage.setItem('userRank', userRank.toString());
@@ -130,11 +164,24 @@ function updateUserStats(isCorrect) {
 
 /**
  * Handles the logic for a correct user move.
+ * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
  */
-function handleCorrectAnswer() {
-    updateUserStats(true);
+function handleCorrectAnswer(hintWasShown = false) {
+    updateUserStats(true, hintWasShown);
     // Directly load the next tsumego without an overlay.
     loadTsumego();
+}
+
+/**
+ * Handles the logic for an incorrect user move.
+ * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
+ */
+function handleIncorrectAnswer(hintWasShown = false) {
+    updateUserStats(false, hintWasShown);
+    displayOverlay('', 3000, () => {
+        showCorrectMove = true;
+        loadTsumego();
+    });
 }
 
 /**
@@ -147,6 +194,8 @@ function handleBoardClick(x, y) {
     if (!acceptClicks) return;
     
     if (!game || !kifuReader) return;
+
+    const hintWasShown = showCorrectMove;
 
     if (showCorrectMove) {
         const correctNode = kifuReader.node.children.find(child => child.comment?.includes('Correct'));
@@ -185,26 +234,18 @@ function handleBoardClick(x, y) {
                     // After another 1 second, either show overlay or proceed to next tsumego
                     setTimeout(() => {
                         if (isCorrect) {
-                            handleCorrectAnswer();
+                            handleCorrectAnswer(hintWasShown);
                         } else {
-                            // Show overlay and then show the same tsumego with correct move marked
-                            displayOverlay('', 3000, () => {
-                                showCorrectMove = true;
-                                loadTsumego();
-                            });
+                            handleIncorrectAnswer(hintWasShown);
                         }
                     }, 1000);
                 } else {
                     // No follow-up move, proceed immediately
                     if (isCorrect) {
-                        handleCorrectAnswer();
+                        handleCorrectAnswer(hintWasShown);
                     } else {
-                // Show overlay and then show the same tsumego with correct move marked
-                            displayOverlay('', 3000, () => {
-                                showCorrectMove = true;
-                                loadTsumego();
-                            });
-            }
+                        handleIncorrectAnswer(hintWasShown);
+                    }
                 }
             }, 1000);
         }
@@ -366,12 +407,7 @@ function updateBoardSize() {
 async function fetchAndLoadSgf(filename) {
     const response = await fetch(`tsumegos/${filename}`);
     const sgfContent = await response.text();
-    
-    // Log the first two lines of the SGF to help debug board size issues
-    const lines = sgfContent.split('\n');
-    
     const kifu = WGo.Kifu.fromSgf(sgfContent);
-
     kifuReader = new WGo.KifuReader(kifu);
 
     // Advance to the first branching node (where the user needs to move).
