@@ -75,6 +75,8 @@ if __name__ == "__main__":
     for group in range(10):
         group_files = [item["filename"] for item in metadata if item["group"] == group]
         zip_path = os.path.join("pwa", f"tsumegos{group}.zip")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for filename in group_files:
                 file_path = os.path.join(tsumegos_dir, filename)

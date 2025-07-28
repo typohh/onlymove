@@ -49,7 +49,7 @@ class KatagoQueries:
         query = {
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
-            "rules": "tromp-taylor",
+            "rules": "chinese",
             "komi": komi,
             "boardXSize": 9,
             "boardYSize": 9,
@@ -127,7 +127,7 @@ class KatagoQueries:
         query = {
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
-            "rules": "tromp-taylor",
+            "rules": "chinese",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
@@ -151,7 +151,7 @@ class KatagoQueries:
         query = {
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
-            "rules": "tromp-taylor",
+            "rules": "chinese",
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,

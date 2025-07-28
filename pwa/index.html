@@ -12,120 +12,54 @@
         html, body {
             margin: 0;
             padding: 0;
-            touch-action: manipulation; /* Prevents double-tap zoom */
+            overflow: hidden; /* Prevent scrollbars */
+            height: 100vh;
+            background-color: #f0f0f0; /* Light gray background */
         }
-
-        /* Light mode default */
         body {
             display: flex;
             flex-direction: column;
             align-items: center;
-            margin: 0;
-            padding: 0;
-            /* Prevent text selection which can interfere with touch actions */
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-            /* Prevent zoom on focus */
-            font-size: 16px;
-            background-color: #ffffff; /* Light background */
-            color: #000000; /* Dark text */
+            justify-content: center;
         }
 
         /* Dark mode */
         @media (prefers-color-scheme: dark) {
-            body {
+            html, body {
                 background-color: #121212; /* Dark background */
                 color: #ffffff; /* Light text */
             }
         }
 
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
         #board-container {
-            width: 100vw;
-            height: 100vw;
-            max-width: none;
-            max-height: none;
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            /* Prevent zoom on double tap */
-            touch-action: manipulation;
             position: relative;
         }
-
-        /* Remove borders from wgo board to eliminate 1px gap at top */
+        #info-container {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            font-weight: bold;
+        }
         .wgo-board {
-            margin: 0 !important;
-            border-top: none !important;
-            border-right: none !important;
-            border-left: none !important;
-            border-bottom: none !important;
-        }
-
-        #controls {
-            margin-top: 20px;
-        }
-
-        #rank-controls {
-            margin-top: 10px;
-        }
-
-        #rank-controls button {
-            margin: 2px;
-            padding: 5px 10px;
-        }
-
-        @media (orientation: landscape) {
-            body {
-                flex-direction: row;
-                align-items: flex-start;
-                height: 100vh;
-                overflow: hidden;
-            }
-
-            #board-container {
-                width: 100vh;
-                height: 100vh;
-                max-width: 100vh;
-                max-height: 100vh;
-            }
-
-            #controls {
-                margin-top: 0;
-                margin-left: 20px;
-                max-height: 100vh;
-                overflow-y: auto;
-            }
-        }
-
-        @media (max-width: 400px) {
-            #board-container {
-                width: 100vw;
-                height: 100vw;
-            }
-        }
-
-        /* Ensure board takes full width on vertical screens */
-        @media (orientation: portrait) {
-            #board-container {
-                width: 100vw;
-                height: 100vw;
-                max-width: 100vw;
-                max-height: 100vw;
-            }
-        }
-        
-        /* Disable all forms of zooming */
-        * {
-            touch-action: manipulation;
-            -ms-touch-action: manipulation;
+            border: none !important;
         }
     </style>
 </head>
 <body>
-    <div id="board-container"></div>
-    <div id="controls">
+    <div id="app-container">
+        <div id="board-container"></div>
+        <div id="info-container">
+            <div id="komi">7.5 komi</div>
+            <div id="rank-display">Loading...</div>
+        </div>
     </div>
 
     <script type="text/javascript" src="wgo.js/wgo/wgo.js"></script>
@@ -133,7 +67,7 @@
     <script type="text/javascript" src="wgo.js/wgo/sgfparser.js"></script>
     <script type="text/javascript" src="wgo.js/wgo/kifu.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="app240a92a1.js"></script>
+    <script src="app5d0dc5c2.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

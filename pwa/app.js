@@ -1,8 +1,7 @@
 const boardContainer = document.getElementById('board-container');
-const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-28 12:12";
+const APP_VERSION = "2025-07-28 20:36";
 
 // Log version to console
 console.log(`App Version: ${APP_VERSION}`);
@@ -47,24 +46,34 @@ function getDescriptiveRank(numericRank) {
     const lang = navigator.language || 'en';
     
     // Define translations for kyu and dan
-    let kyuTerm, danTerm;
+    let kyuTerm, danTerm, komiTerm;
     
     if (lang.startsWith('zh')) {
         // Chinese
         kyuTerm = '级';
         danTerm = '段';
+        komiTerm = '贴目';
     } else if (lang.startsWith('ja')) {
         // Japanese
         kyuTerm = '級';
         danTerm = '段';
+        komiTerm = 'コミ';
     } else if (lang.startsWith('ko')) {
         // Korean
         kyuTerm = '급';
         danTerm = '단';
+        komiTerm = '덤';
     } else {
         // Default (English and others)
         kyuTerm = 'kyu';
         danTerm = 'dan';
+        komiTerm = 'komi';
+    }
+    
+    // Update the komi display with the translated term
+    const komiElement = document.getElementById('komi');
+    if (komiElement) {
+        komiElement.textContent = `7.5 ${komiTerm}`;
     }
     
     if (rankIndex < 20) {
@@ -116,7 +125,7 @@ function updateRankDisplay() {
     const adjustmentFactor = (1 + Math.pow(Math.abs(recentLosses - 6), 1.5)) * 0.5;
     
     // Update the rank element inside the board container
-    const rankElement = document.getElementById('rank');
+    const rankElement = document.getElementById('rank-display');
     if (rankElement) {
         rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
     }
@@ -142,7 +151,6 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     
     // Apply rank adjustment formula
     const adjustmentFactor = 1 + Math.pow(Math.abs(recentLosses - 6), 1.5);
-    const oldRank = userRank;
     
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
@@ -159,8 +167,6 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     localStorage.setItem('attemptHistory', JSON.stringify(attemptHistory));
     
     updateRankDisplay();
-
-    const outcome = isCorrect ? "Correct" : "Incorrect";
 }
 
 // --- Core Application Logic ---
@@ -309,10 +315,12 @@ function initializeBoard(size) {
         board.removeEventListener('click', handleBoardClick);
         board = null; // Explicitly nullify the board reference
     }
-    boardContainer.innerHTML = ''; // Clear the container
-    boardContainer.style.display = 'block';
+    
+    const boardWrapper = document.createElement('div');
+    boardContainer.innerHTML = '';
+    boardContainer.appendChild(boardWrapper);
 
-    board = new WGo.Board(boardContainer, {
+    board = new WGo.Board(boardWrapper, {
         size: size,
         background: WGo.DIR + "wood_1024.jpg",
         stoneHandler: WGo.Board.drawHandlers.REALISTIC,
@@ -326,24 +334,6 @@ function initializeBoard(size) {
     }
 
     board.addEventListener('click', handleBoardClick);
-    
-    // Create and position the rank display
-    const rankDisplay = document.createElement('div');
-    rankDisplay.id = 'rank-display';
-    Object.assign(rankDisplay.style, {
-        position: 'absolute',
-        bottom: '0',
-        left: '50%',
-        transform: 'translate(-50%, 0)',
-        color: 'black',
-        padding: '5px 15px',
-        fontSize: '20px', // Default size, will be updated immediately
-        zIndex: '1000',
-        textShadow: '0 0 3px white, 0 0 5px white',
-        pointerEvents: 'none'
-    });
-    rankDisplay.innerHTML = '<span id="rank">N/A</span>';
-    boardContainer.appendChild(rankDisplay);
     
     // Update board size based on current orientation
     updateBoardSize();
@@ -407,16 +397,44 @@ function updateBoard() {
  */
 function updateBoardSize() {
     if (!board) return;
-    const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    // For landscape, use full screen height, for portrait use full width
-    const boardSize = isLandscape ? window.innerHeight : Math.min(window.innerWidth, window.innerHeight);
+
+    const appContainer = document.getElementById('app-container');
+    const boardContainer = document.getElementById('board-container');
+    const infoContainer = document.getElementById('info-container');
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    // Set a fixed height for the info container
+    const infoHeight = 60; // Adjust this value as needed
+
+    // Calculate the available space for the board
+    const availableWidth = w;
+    const availableHeight = h - infoHeight;
+
+    // Determine the size of the board based on the available space
+    const boardSize = Math.min(availableWidth, availableHeight);
+
+    // Set the size of the board container
+    boardContainer.style.width = boardSize + 'px';
+    boardContainer.style.height = boardSize + 'px';
+
+    // Set the size of the board
     board.setWidth(boardSize);
     board.setHeight(boardSize);
-    
-    // Update rank display font size to be 1/20 of board size
+
+    // Style the info container
+    if (infoContainer) {
+        infoContainer.style.width = boardSize + 'px';
+        infoContainer.style.height = infoHeight + 'px';
+    }
+
+    // Update font size for rank and komi
     const rankDisplay = document.getElementById('rank-display');
-    if (rankDisplay) {
-        rankDisplay.style.fontSize = `${boardSize / 20}px`;
+    const komiDisplay = document.getElementById('komi');
+    if (rankDisplay && komiDisplay) {
+        const fontSize = boardSize / 25;
+        rankDisplay.style.fontSize = fontSize + 'px';
+        komiDisplay.style.fontSize = fontSize + 'px';
     }
 }
 
@@ -482,7 +500,6 @@ async function loadTsumego() {
         updateBoard();
         updateRankDisplay();
 
-        const currentFrequency = problemFrequencies[currentProblemFilename] || 1;
         // Only reset showCorrectMove if we're not showing the correct move
         if (!wasShowingCorrectMove) {
             showCorrectMove = false;
@@ -492,7 +509,13 @@ async function loadTsumego() {
         acceptClicks = true;
 
     } catch (error) {
-        displayOverlay('', 3000);
+        if (error.name === 'InvalidMoveError') {
+            console.error(`Skipping tsumego ${currentProblemFilename} due to invalid move.`);
+            loadTsumego(); // Load the next problem
+        } else {
+            console.error("Error loading tsumego:", error);
+            displayOverlay('Error loading problem.', 3000);
+        }
     }
 }
 
