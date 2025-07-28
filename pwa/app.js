@@ -404,12 +404,11 @@ function updateBoardSize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
-    // Set a fixed height for the info container
-    const infoHeight = 60; // Adjust this value as needed
+    infoSize = 1/13
 
     // Calculate the available space for the board
     const availableWidth = w;
-    const availableHeight = h - infoHeight;
+    const availableHeight = h / (1+infoSize)
 
     // Determine the size of the board based on the available space
     const boardSize = Math.min(availableWidth, availableHeight);
@@ -425,7 +424,7 @@ function updateBoardSize() {
     // Style the info container
     if (infoContainer) {
         infoContainer.style.width = boardSize + 'px';
-        infoContainer.style.height = infoHeight + 'px';
+        infoContainer.style.height = (boardSize * infoSize) + 'px';
     }
 
     // Update font size for rank and komi
