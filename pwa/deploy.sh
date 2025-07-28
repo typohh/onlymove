@@ -1,8 +1,9 @@
 #!/bin/sh
 
 rm -rf dist
-rsync -a --exclude='./dist' ./ ./dist/
+mkdir dist
 cd dist
+cp -r ../* .
 
 # Update APP_VERSION in app.js with current date and time
 CURRENT_DATETIME=$(date +"%Y-%m-%d %H:%M")
