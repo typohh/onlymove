@@ -1,5 +1,9 @@
 #!/bin/sh
 
+rm -rf dist
+rsync -a --exclude='./dist' ./ ./dist/
+cd dist
+
 # Update APP_VERSION in app.js with current date and time
 CURRENT_DATETIME=$(date +"%Y-%m-%d %H:%M")
 sed -i "s/const APP_VERSION = \".*\";/const APP_VERSION = \"$CURRENT_DATETIME\";/" app.js
@@ -30,10 +34,7 @@ for f in *.html *.js; do
   sed -i -E "s/app([0-9a-zA-Z]{4,})?\.js/app$YYYY.js/g" "$f"
 done
 
-# Step 4: Delete old versioned file if exists
-[ -n "$XXXX" ] && [ -f "app$XXXX.js" ] && rm -f "app$XXXX.js"
-
 # Step 5: Copy app.js to appYYYY.js
-cp app.js "app$YYYY.js"
+mv app.js "app$YYYY.js"
 
 echo "Replaced all app.js/appXXXX.js references with app$YYYY.js"
