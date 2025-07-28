@@ -2,7 +2,7 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-27 21:51";
+const APP_VERSION = "2025-07-28 11:18";
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -108,7 +108,7 @@ function displayOverlay(message, duration, callback) {
 function updateRankDisplay() {
     // Calculate standard deviation
     const recentLosses = attemptHistory.filter(success => !success).length;
-    const adjustmentFactor = (1 + Math.pow(recentLosses - 6, 1.5)) * 0.5;
+    const adjustmentFactor = (1 + Math.pow(Math.abs(recentLosses - 6), 1.5)) * 0.5;
     
     // Update the rank element inside the board container
     const rankElement = document.getElementById('rank');
@@ -136,12 +136,12 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     const recentLosses = attemptHistory.filter(success => !success).length;
     
     // Apply rank adjustment formula
-    const adjustmentFactor = 1 + Math.pow(recentLosses - 6, 1.5);
+    const adjustmentFactor = 1 + Math.pow(Math.abs(recentLosses - 6), 1.5);
     const oldRank = userRank;
     
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
-        problemFrequencies[currentProblemFilename] = Math.max(0.001, currentFreq / 5);
+        problemFrequencies[currentProblemFilename] = currentFreq / 5;
         userRank = Math.min(1, userRank + ((1/(5*3*29)) * adjustmentFactor));
     } else {
         problemFrequencies[currentProblemFilename] = 25;
@@ -394,19 +394,37 @@ function updateBoard() {
 function updateBoardSize() {
     if (!board) return;
     const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-    // For landscape, use 90% of screen height, for portrait use full width
-    const boardSize = isLandscape ? window.innerHeight * 0.9 : Math.min(window.innerWidth, window.innerHeight);
+    // For landscape, use full screen height, for portrait use full width
+    const boardSize = isLandscape ? window.innerHeight : Math.min(window.innerWidth, window.innerHeight);
     board.setWidth(boardSize);
     board.setHeight(boardSize);
 }
 
+// Cache for loaded zip files to avoid reloading
+const zipCache = {};
+
 /**
- * Fetches an SGF file, parses it, and prepares the kifu reader.
- * @param {string} filename - The SGF file to load from the 'tsumegos' directory.
+ * Fetches an SGF file from a zip archive, parses it, and prepares the kifu reader.
+ * @param {string} filename - The SGF file to load.
+ * @param {number} group - The group number indicating which zip file to load from.
  */
-async function fetchAndLoadSgf(filename) {
-    const response = await fetch(`tsumegos/${filename}`);
-    const sgfContent = await response.text();
+async function fetchAndLoadSgf(filename, group) {
+    // Load the zip file if not already cached
+    if (!zipCache[group]) {
+        const zipResponse = await fetch(`tsumegos${group}.zip`);
+        const zipData = await zipResponse.arrayBuffer();
+        const zip = new JSZip();
+        zipCache[group] = await zip.loadAsync(zipData);
+    }
+    
+    const zip = zipCache[group];
+    const file = zip.file(filename);
+    
+    if (!file) {
+        throw new Error(`File ${filename} not found in tsumegos${group}.zip`);
+    }
+    
+    const sgfContent = await file.async('text');
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     kifuReader = new WGo.KifuReader(kifu);
 
@@ -435,7 +453,7 @@ async function loadTsumego() {
         const selectedProblem = selectProblem();
         currentProblemFilename = selectedProblem.filename;
 
-        const kifu = await fetchAndLoadSgf(currentProblemFilename);
+        const kifu = await fetchAndLoadSgf(currentProblemFilename, selectedProblem.group);
 
         initializeBoard(kifu.size);
         updateBoard();

@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import zipfile
 
 from katago_queries import get_rank_number
 
@@ -34,7 +35,7 @@ def extract_difficulty(content):
 
 
 if __name__ == "__main__":
-    tsumegos_dir = "pwa/tsumegos"
+    tsumegos_dir = "tsumegos"
     if not os.path.exists(tsumegos_dir):
         print(f"Error: {tsumegos_dir} directory not found")
         exit(1)
@@ -63,13 +64,29 @@ if __name__ == "__main__":
 
             rank_distribution[rank_txt] = rank_distribution.get(rank_txt, 0) + 1
 
-    # Print rank distribution sorted by rank_num
-    print("\nRank Distribution:")
-    sorted_ranks = sorted(rank_distribution.items(), key=lambda x: get_rank_number(x[0]))
-    for rank, count in sorted_ranks:
-        print(f"{rank}: {count}")
+    # Sort metadata by rank and assign groups
+    metadata.sort(key=lambda x: x["rank"])
+    for i, item in enumerate(metadata):
+        item["group"] = int(10 * i / len(metadata))
+
+    # Create zip files for each group
+    import zipfile
+
+    for group in range(10):
+        group_files = [item["filename"] for item in metadata if item["group"] == group]
+        zip_path = os.path.join("pwa", f"tsumegos{group}.zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in group_files:
+                file_path = os.path.join(tsumegos_dir, filename)
+                zipf.write(file_path, filename)
 
     # Write metadata to JSON file
     metadata_path = os.path.join("pwa", "metadata.json")
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
+
+    # Print rank distribution sorted by rank_num
+    print("\nRank Distribution:")
+    sorted_ranks = sorted(rank_distribution.items(), key=lambda x: get_rank_number(x[0]))
+    for rank, count in sorted_ranks:
+        print(f"{rank}: {count}")
