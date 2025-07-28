@@ -2,7 +2,10 @@ const boardContainer = document.getElementById('board-container');
 const rankElement = document.getElementById('rank');
 
 // App version - last modified date and time
-const APP_VERSION = "2025-07-28 11:18";
+const APP_VERSION = "2025-07-28 12:12";
+
+// Log version to console
+console.log(`App Version: ${APP_VERSION}`);
 
 // Force service worker update
 if ('serviceWorker' in navigator) {
@@ -26,6 +29,8 @@ let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) 
 // Initialize attempt history with all wins for new players
 let attemptHistory = JSON.parse(localStorage.getItem('attemptHistory')) || 
     Array.from({length: 30}, () => true);
+// Get saved tsumego filename if exists
+let savedTsumego = localStorage.getItem('currentTsumego');
 
 // --- Helper Functions ---
 
@@ -148,8 +153,6 @@ function updateUserStats(isCorrect, hintWasShown = false) {
         userRank = Math.max(0, userRank - ((1/(3*29)) * adjustmentFactor));
     }
 
-    console.log(`Rank changed from ${oldRank.toFixed(4)} to ${userRank.toFixed(4)} (adjustment factor: ${adjustmentFactor.toFixed(2)})`);
-
     // Save to localStorage
     localStorage.setItem('userRank', userRank.toString());
     localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
@@ -259,6 +262,17 @@ function handleBoardClick(x, y) {
  * @returns {object} The selected problem's metadata.
  */
 function selectProblem() {
+    // If we have a saved tsumego, use it
+    if (savedTsumego) {
+        const problem = problems.find(p => p.filename === savedTsumego);
+        if (problem) {
+            // Clear the saved tsumego so next load uses normal selection
+            savedTsumego = null;
+            localStorage.removeItem('currentTsumego');
+            return problem;
+        }
+    }
+    
     // If we need to show the correct move, stick to the current problem.
     if (showCorrectMove && currentProblemFilename) {
         return problems.find(p => p.filename === currentProblemFilename);
@@ -323,7 +337,7 @@ function initializeBoard(size) {
         transform: 'translate(-50%, 0)',
         color: 'black',
         padding: '5px 15px',
-        fontSize: '18px',
+        fontSize: '20px', // Default size, will be updated immediately
         zIndex: '1000',
         textShadow: '0 0 3px white, 0 0 5px white',
         pointerEvents: 'none'
@@ -398,6 +412,12 @@ function updateBoardSize() {
     const boardSize = isLandscape ? window.innerHeight : Math.min(window.innerWidth, window.innerHeight);
     board.setWidth(boardSize);
     board.setHeight(boardSize);
+    
+    // Update rank display font size to be 1/20 of board size
+    const rankDisplay = document.getElementById('rank-display');
+    if (rankDisplay) {
+        rankDisplay.style.fontSize = `${boardSize / 20}px`;
+    }
 }
 
 // Cache for loaded zip files to avoid reloading
@@ -452,6 +472,9 @@ async function loadTsumego() {
 
         const selectedProblem = selectProblem();
         currentProblemFilename = selectedProblem.filename;
+        
+        // Save current tsumego to localStorage
+        localStorage.setItem('currentTsumego', currentProblemFilename);
 
         const kifu = await fetchAndLoadSgf(currentProblemFilename, selectedProblem.group);
 
