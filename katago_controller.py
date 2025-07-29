@@ -36,11 +36,8 @@ class KatagoController:
             # "-override-config",
             # f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
-        if human_only:
-            command.extend(["-model", SL_MODEL_PATH])
-        else:
-            command.extend(["-model", RL_MODEL_PATH])
-            command.extend(["-human-model", SL_MODEL_PATH])
+        command.extend(["-model", RL_MODEL_PATH])
+        command.extend(["-human-model", SL_MODEL_PATH])
 
         self.process = subprocess.Popen(
             command,

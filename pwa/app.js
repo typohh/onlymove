@@ -41,7 +41,7 @@ let savedTsumego = localStorage.getItem('currentTsumego');
  * @returns {string} The descriptive rank in the appropriate language.
  */
 function getDescriptiveRank(numericRank) {
-    numericRank = Math.pow(numericRank,0.4)
+//    numericRank = Math.pow(numericRank,0.4)
     const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
     const rankIndex = Math.floor(numericRank * totalRanks);
     
@@ -125,7 +125,7 @@ function displayOverlay(message, duration, callback) {
 function updateRankDisplay() {
     // Calculate standard deviation
     const recentLosses = attemptHistory.filter(success => !success).length;
-    const adjustmentFactor = (1 + Math.pow(Math.abs(recentLosses - 6), 1.5)) * 0.5;
+    const adjustmentFactor = (1 + Math.pow(Math.abs(recentLosses - 6), 2)) * 0.5;
     
     // Update the rank element inside the board container
     const rankElement = document.getElementById('rank-display');
@@ -156,6 +156,25 @@ function updateRankDisplay() {
     }
 }
 
+function binomialProbability(n, x, p) {
+    function factorial(k) {
+        if (k === 0 || k === 1) return 1;
+        let result = 1;
+        for (let i = 2; i <= k; i++) result *= i;
+        return result;
+    }
+
+    function binomialCoefficient(n, k) {
+        return factorial(n) / (factorial(k) * factorial(n - k));
+    }
+
+    return binomialCoefficient(n, x) * Math.pow(p, x) * Math.pow(1 - p, n - x);
+}
+
+// Example: Probability of 5 occurrences in 30 samples with 20% chance
+// let prob = binomialProbability(30, 5, 0.2);
+
+
 /**
  * Updates user rank and problem frequency, then saves to localStorage.
  * @param {boolean} isCorrect - Whether the user's answer was correct.
@@ -175,7 +194,7 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     const recentLosses = attemptHistory.filter(success => !success).length;
     
     // Apply rank adjustment formula
-    const adjustmentFactor = 1 + Math.pow(Math.abs(recentLosses - 6), 1.5);
+    const adjustmentFactor = 1 + Math.pow(Math.abs(recentLosses - 6), 2);
     
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;

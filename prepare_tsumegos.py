@@ -3,7 +3,7 @@ import json
 import os
 import re
 
-from katago_queries import get_rank_number
+from katago_queries import get_rank_number, get_rank_str
 
 
 def rename_tsumegos(tsumegos_dir):
@@ -14,6 +14,23 @@ def rename_tsumegos(tsumegos_dir):
             file_bytes = f.read()
             new_filename = hashlib.sha256(file_bytes).hexdigest()[:8] + ".sgf"
             os.rename(filepath, os.path.join(tsumegos_dir, new_filename))
+
+
+def count_black_moves(content):
+    """Count number of black moves before first parenthesis."""
+    content = content[1:]  # Skip first character
+    first_paren = content.find('(')
+    if first_paren == -1:
+        return content.count(';B[')
+    return content[:first_paren].count(';B[')
+
+
+def find_difference_in_score(content):
+    """Find difference between two highest scores in content."""
+    pattern = r'Score: (-?\d+\.?\d*)'
+    matches = re.findall(pattern, content)
+    scores = sorted([float(score) for score in matches], reverse=True)
+    return scores[0] - scores[1]
 
 
 def extract_difficulty(content):
@@ -28,6 +45,11 @@ def extract_difficulty(content):
     total = 0
     count = 0
 
+    black_moves = count_black_moves(content)
+    difference_in_score = find_difference_in_score(content)
+    total += max(0.0, 1 - (black_moves - 3) / 25) * max(0.0, 1 - difference_in_score / 10)
+    count += 1
+
     for pattern in patterns:
         match = re.search(pattern, content)
         if match:
@@ -36,7 +58,7 @@ def extract_difficulty(content):
             total += rank_number
             count += 1
 
-    return total / count
+    return (total / count) ** 0.5
 
 
 if __name__ == "__main__":
@@ -96,8 +118,8 @@ if __name__ == "__main__":
     rank_distribution = sorted(rank_distribution)
     print("\nRank Distribution:")
     for i in range(29):
-        min_rank = i/29
-        max_rank = (i+1)/29
+        min_rank = i / 29
+        max_rank = (i + 1) / 29
         # print aproximately how many of rank_distrubitn is between min_rank and max_rank
         count = sum(1 for x in rank_distribution if min_rank <= x <= max_rank)
-        print(f"Rank {i}: {count} problems")
+        print(f"{get_rank_str((min_rank + max_rank) / 2)}: {count} problems")
