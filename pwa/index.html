@@ -43,10 +43,25 @@
         #info-container {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             width: 100%;
             padding: 10px;
             box-sizing: border-box;
             font-weight: bold;
+        }
+        #komi {
+            flex-grow: 1;
+            text-align: center;
+        }
+        #prev-tsumego {
+            text-decoration: underline;
+            color: #0066cc;
+            cursor: pointer;
+        }
+        #prev-tsumego.disabled {
+            color: #999999;
+            cursor: not-allowed;
+            text-decoration: none;
         }
         .wgo-board {
             border: none !important;
@@ -57,6 +72,7 @@
     <div id="app-container">
         <div id="board-container"></div>
         <div id="info-container">
+            <a id="prev-tsumego" href="#" style="text-decoration: none; color: inherit;">Previous Tsumego</a>
             <div id="komi">7.5 komi</div>
             <div id="rank-display">Loading...</div>
         </div>

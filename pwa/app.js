@@ -19,6 +19,8 @@ let game;
 let kifuReader;
 let problems = [];
 let currentProblemFilename = null;
+let currentSGF = null; // Store current tsumego SGF content
+let previousSGF = null; // Store previous tsumego SGF content for download
 let showCorrectMove = false;
 let acceptClicks = false; // Track when we should accept clicks
 
@@ -129,6 +131,28 @@ function updateRankDisplay() {
     const rankElement = document.getElementById('rank-display');
     if (rankElement) {
         rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
+    }
+    
+    // Update the previous tsumego link text based on language
+    const prevTsumegoLink = document.getElementById('prev-tsumego');
+    if (prevTsumegoLink) {
+        // Get browser language, default to 'en'
+        const lang = navigator.language || 'en';
+        
+        // Define translations
+        let prevTsumegoText;
+        if (lang.startsWith('zh')) {
+            prevTsumegoText = '上一题';
+        } else if (lang.startsWith('ja')) {
+            prevTsumegoText = '前の詰碁';
+        } else if (lang.startsWith('ko')) {
+            prevTsumegoText = '이전 문제';
+        } else {
+            // Default (English and others)
+            prevTsumegoText = 'Previous Tsumego';
+        }
+        
+        prevTsumegoLink.textContent = prevTsumegoText;
     }
 }
 
@@ -428,13 +452,15 @@ function updateBoardSize() {
         infoContainer.style.height = (boardSize * infoSize) + 'px';
     }
 
-    // Update font size for rank and komi
+    // Update font size for rank, komi, and previous tsumego link
     const rankDisplay = document.getElementById('rank-display');
     const komiDisplay = document.getElementById('komi');
-    if (rankDisplay && komiDisplay) {
+    const prevTsumegoLink = document.getElementById('prev-tsumego');
+    if (rankDisplay && komiDisplay && prevTsumegoLink) {
         const fontSize = boardSize / 25;
         rankDisplay.style.fontSize = fontSize + 'px';
         komiDisplay.style.fontSize = fontSize + 'px';
+        prevTsumegoLink.style.fontSize = fontSize + 'px';
     }
 }
 
@@ -472,7 +498,7 @@ async function fetchAndLoadSgf(filename, group) {
     }
 
     game = kifuReader.game;
-    return kifu;
+    return { kifu, sgfContent }; // Return both kifu and sgfContent
 }
 
 /**
@@ -489,16 +515,31 @@ async function loadTsumego() {
         const wasShowingCorrectMove = showCorrectMove;
 
         const selectedProblem = selectProblem();
+        
+        // Update previousSGF with currentSGF before loading new tsumego
+        previousSGF = currentSGF;
+        
         currentProblemFilename = selectedProblem.filename;
         
         // Save current tsumego to localStorage
         localStorage.setItem('currentTsumego', currentProblemFilename);
 
-        const kifu = await fetchAndLoadSgf(currentProblemFilename, selectedProblem.group);
+        const { kifu, sgfContent } = await fetchAndLoadSgf(currentProblemFilename, selectedProblem.group);
+        currentSGF = sgfContent; // Store the current SGF content
 
         initializeBoard(kifu.size);
         updateBoard();
         updateRankDisplay();
+        
+        // Update the previous tsumego link state
+        const prevTsumegoLink = document.getElementById('prev-tsumego');
+        if (prevTsumegoLink) {
+            if (previousSGF) {
+                prevTsumegoLink.classList.remove('disabled');
+            } else {
+                prevTsumegoLink.classList.add('disabled');
+            }
+        }
 
         // Only reset showCorrectMove if we're not showing the correct move
         if (!wasShowingCorrectMove) {
@@ -525,3 +566,27 @@ loadTsumego();
 updateRankDisplay(); // Initialize performance display
 window.addEventListener('resize', updateBoardSize);
 window.addEventListener('orientationchange', updateBoardSize);
+
+// Add event listener for previous tsumego download
+document.addEventListener('DOMContentLoaded', () => {
+    const prevTsumegoLink = document.getElementById('prev-tsumego');
+    if (prevTsumegoLink) {
+        prevTsumegoLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (previousSGF) {
+                // Create a blob and download link
+                const blob = new Blob([previousSGF], { type: 'application/x-go-sgf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'previous_tsumego.sgf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else {
+                console.log("No previous tsumego available for download");
+            }
+        });
+    }
+});
