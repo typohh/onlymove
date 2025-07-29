@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import re
-import zipfile
 
 from katago_queries import get_rank_number
 
@@ -21,17 +20,23 @@ def extract_difficulty(content):
     """Extract difficulty rank from SGF content."""
     patterns = [
         r"GN\[Move difficulty: (\d+[kd])±",
-        r"GN\[Last move difficulty: (\d+[kd])±"
+        r"GN\[Last move difficulty: (\d+[kd])±",
+        r"Game difficulty: (\d+[kd])±",
+        r"remaining game difficulty: (\d+[kd])±"
     ]
+
+    total = 0
+    count = 0
 
     for pattern in patterns:
         match = re.search(pattern, content)
         if match:
             rank_txt = match.group(1)
             rank_number = get_rank_number(rank_txt)
-            return rank_number, rank_txt
+            total += rank_number
+            count += 1
 
-    return None, None
+    return total / count
 
 
 if __name__ == "__main__":
@@ -43,7 +48,7 @@ if __name__ == "__main__":
     rename_tsumegos(tsumegos_dir)
 
     metadata = []
-    rank_distribution = {}
+    rank_distribution = []
 
     for filename in os.listdir(tsumegos_dir):
         if filename.endswith(".sgf"):
@@ -52,7 +57,7 @@ if __name__ == "__main__":
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            rank_num, rank_txt = extract_difficulty(content)
+            rank_num = extract_difficulty(content)
 
             if rank_num is None:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
@@ -62,7 +67,7 @@ if __name__ == "__main__":
                 "rank": rank_num
             })
 
-            rank_distribution[rank_txt] = rank_distribution.get(rank_txt, 0) + 1
+            rank_distribution.append(rank_num)
 
     # Sort metadata by rank and assign groups
     metadata.sort(key=lambda x: x["rank"])
@@ -88,7 +93,11 @@ if __name__ == "__main__":
         json.dump(metadata, f, indent=2)
 
     # Print rank distribution sorted by rank_num
+    rank_distribution = sorted(rank_distribution)
     print("\nRank Distribution:")
-    sorted_ranks = sorted(rank_distribution.items(), key=lambda x: get_rank_number(x[0]))
-    for rank, count in sorted_ranks:
-        print(f"{rank}: {count}")
+    for i in range(29):
+        min_rank = i/29
+        max_rank = (i+1)/29
+        # print aproximately how many of rank_distrubitn is between min_rank and max_rank
+        count = sum(1 for x in rank_distribution if min_rank <= x <= max_rank)
+        print(f"Rank {i}: {count} problems")

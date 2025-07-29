@@ -29,15 +29,18 @@ class KatagoController:
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
 
-    def start_engine(self, verbose=False):
+    def start_engine(self, verbose=False,human_only=False):
         command = [
             KATAGO_PATH, "analysis",
             "-config", CONFIG_FILE,
             # "-override-config",
             # f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
-        command.extend(["-model", RL_MODEL_PATH])
-        command.extend(["-human-model", SL_MODEL_PATH])
+        if human_only:
+            command.extend(["-model", SL_MODEL_PATH])
+        else:
+            command.extend(["-model", RL_MODEL_PATH])
+            command.extend(["-human-model", SL_MODEL_PATH])
 
         self.process = subprocess.Popen(
             command,

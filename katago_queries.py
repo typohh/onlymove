@@ -1,3 +1,5 @@
+import math
+import random
 from pprint import pprint
 
 import numpy as np
@@ -65,19 +67,19 @@ class KatagoQueries:
             }
         return self._katago_controller.send_query(query)
 
-    def query_weighted_random_move(self, moves, human_rank, komi=7.5):
+    def query_weighted_random_move(self, moves, human_rank):
         """
         Queries the policy for a given rank and returns a move based on a weighted random sample.
         """
 
-        response = self.query_policy(moves, human_rank=human_rank, komi=komi)
+        response = self.query_policy(moves, human_rank=human_rank)
 
         if not response.get("humanPolicy"):
             print("moves:", moves)
             print("human_rank:", human_rank, _get_rank_str(human_rank))
             print("response:")
             pprint(response)
-            response = self.query_policy(moves, human_rank=human_rank, komi=komi)
+            response = self.query_policy(moves, human_rank=human_rank)
             if not response.get("humanPolicy"):
                 raise Exception("Human policy not found in response.")
             else:
@@ -143,6 +145,51 @@ class KatagoQueries:
             print("moves:", moves)
             print(f"WARNING: Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
         return r
+
+    def query_human(self, moves, human_rank, playouts):
+        """
+        Provides a high playout query, where specific first move may be excluded.
+        """
+
+        utility_limit = 0.5
+
+        query = {
+            "moves": self._include_player_in_move_sequence(moves),
+            "initialStones": [],
+            "rules": "chinese",
+            "komi": 7.5,
+            "boardXSize": 9,
+            "boardYSize": 9,
+            "maxVisits": playouts,
+            "includePolicy": True,
+            "overrideSettings": {
+                "humanSLProfile": _get_rank_str(human_rank),
+                "ignorePreRootHistory": False,
+                "humanSLPlaExploreProbWeightful": 1.0,
+                "humanSLOppExploreProbWeightful": 1.0,
+                "humanSLCpuctPermanent": utility_limit,
+                "useNoisePruning": False,
+                "useUncertainty": False,
+                "subtreeValueBiasFactor": 0,
+            }
+        }
+        response = self._katago_controller.send_query(query)
+
+        human_policy = response["humanPolicy"]
+
+        # pprint(response)
+        # exit(-1)
+
+        moves = {
+            self.get_move_from_idx(i) : p * math.exp(response["rootInfo"]["utility"] / utility_limit) for i, p in enumerate(human_policy) if p > 0
+        }
+
+        for move_info in response["moveInfos"]:
+            weight = move_info["humanPrior"] * math.exp(move_info["utility"] / utility_limit)
+            moves[move_info["move"]] = weight
+
+        return random.choices(list(moves.keys()), weights=list(moves.values()))[0]
+
 
     def query(self, moves, exclude_move=None):
         """
