@@ -39,6 +39,7 @@ let savedTsumego = localStorage.getItem('currentTsumego');
  * @returns {string} The descriptive rank in the appropriate language.
  */
 function getDescriptiveRank(numericRank) {
+    numericRank = Math.pow(numericRank,0.4)
     const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
     const rankIndex = Math.floor(numericRank * totalRanks);
     
