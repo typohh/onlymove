@@ -7,8 +7,8 @@ from katago_queries import KatagoQueries, get_rank_str
 BLACK_HANDICAP = True
 BLACK_RANK = 0.5
 BLACK_PLAYOUTS = 1
-WHITE_RANK = 0.7
-WHITE_PLAYOUTS = 50
+WHITE_RANK = 0.5
+WHITE_PLAYOUTS = 30
 DEBUG = False
 MAX_GAMES = 300
 
