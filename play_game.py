@@ -5,12 +5,12 @@ from katago_controller import KatagoController
 from katago_queries import KatagoQueries, get_rank_str
 
 BLACK_HANDICAP = True
-BLACK_RANK = 0.0
+BLACK_RANK = 0.5
 BLACK_PLAYOUTS = 1
-WHITE_RANK = 0.22
-WHITE_PLAYOUTS = 1
+WHITE_RANK = 0.7
+WHITE_PLAYOUTS = 30
 DEBUG = False
-MAX_GAMES = 1
+MAX_GAMES = 300
 
 
 def play_game(black_rank: float, black_playouts: int, white_rank: float, white_playouts: int, queries: KatagoQueries):

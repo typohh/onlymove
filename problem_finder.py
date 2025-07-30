@@ -152,8 +152,8 @@ class ProblemFinder:
         return {
             "moves": adjusted_moves,
             "solution": solution_move,
-            "move_rank": get_rank_str(move_mean, move_stddev),
-            "game_rank": get_rank_str(game_mean, game_stddev),
+            "move_rank": get_rank_str(move_mean),
+            "game_rank": get_rank_str(game_mean),
             "variations": variations
         }
 
@@ -208,7 +208,7 @@ def problem_to_sgf(problem, komi=7.5):
     if problem.get("move_rank") and problem.get("game_rank"):
         move_rank = problem["move_rank"]
         game_rank = problem['game_rank']
-        game.root.set("GN", f"Move difficulty: {move_rank}, Game difficulty: {game_rank}")
+        game.root.set("GN", f"Move: {move_rank}, Game: {game_rank}")
 
     player = "b"
 
