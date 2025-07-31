@@ -6,9 +6,9 @@ from stats import STATS, DEBUG
 from difficulty_evaluator import DifficultyEvaluator
 from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
 
-MIN_WINRATE_CORRECT = 0.65
-MAX_WINRATE_ALTERNATIVE = 0.35
-GOAL_SCORE = -2
+MIN_WINRATE_CORRECT = 0.7
+MAX_WINRATE_ALTERNATIVE = 0.3
+GOAL_SCORE = -3
 
 class ProblemFinder:
     """
