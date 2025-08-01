@@ -143,7 +143,7 @@ class ProblemFinder:
             return None
 
         move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
-        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean)
+        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean, solution_move)
 
         # Generate variations data - all legal moves and their optimal responses
         variations = self._generate_variations(adjusted_moves)
@@ -191,7 +191,7 @@ class ProblemFinder:
         return variations
 
 
-def problem_to_sgf(problem, komi=7.5):
+def problem_to_sgf(problem):
     """
     Saves a single problem as an SGF file with annotations.
 
@@ -203,8 +203,8 @@ def problem_to_sgf(problem, komi=7.5):
     # print(problem)
 
     game = sgf.Sgf_game(size=9)
-    game.root.set("KM", str(komi))
-    game.root.set("RU", "tromp-taylor")
+    game.root.set("KM", "7.5")
+    game.root.set("RU", "chinese")
     if problem.get("move_rank") and problem.get("game_rank"):
         move_rank = problem["move_rank"]
         game_rank = problem['game_rank']

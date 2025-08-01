@@ -3,34 +3,48 @@ import time
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries, get_rank_str
+from problem_finder import problem_to_sgf
 
 BLACK_HANDICAP = True
-BLACK_RANK = 0.5
-BLACK_PLAYOUTS = 1
-WHITE_RANK = 0.5
-WHITE_PLAYOUTS = 30
+BLACK_RANK = 3 * 6 / 29
+BLACK_ASSISTANCE = 0
+BLACK_TEMPERATURE = 1
+
+WHITE_RANK = 4 * 6 / 29
+WHITE_ASSISTANCE = 0
+WHITE_TEMPERATURE = 1
+
 DEBUG = False
 MAX_GAMES = 300
 
 
-def play_game(black_rank: float, black_playouts: int, white_rank: float, white_playouts: int, queries: KatagoQueries):
+def play_game(black_rank: float, black_assistance: int, white_rank: float, white_assistance: int, queries: KatagoQueries):
     """
     Plays a 9x9 game and returns whether black won and the number of moves.
     """
     moves = []
     ranks = [black_rank, white_rank]
-    playouts = [black_playouts, white_playouts]
+    assistances = [black_assistance, white_assistance]
+    temperatures = [BLACK_TEMPERATURE, WHITE_TEMPERATURE]
     current_player = 0
     while True:
         if BLACK_HANDICAP and len(moves) == 1:
             move = "pass"
         else:
-            move = queries.query_human(moves, ranks[current_player], playouts[current_player])
+            move = queries.query_weighted_random_move_next(moves, ranks[current_player], assistances[current_player], temperatures[current_player])
         moves.append(move)
         if len(moves) > 1 and moves[-1] == "pass" and moves[-2] == "pass":
             break
         current_player = 1 - current_player
+
     score, winrate = queries.get_position_info(moves)
+
+    sgf = problem_to_sgf({
+        "moves": moves
+    })
+    print(winrate > 0.5)
+    print(sgf)
+
     return winrate > 0.5, len(moves)
 
 
@@ -60,7 +74,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             if total_games > MAX_GAMES:
                 return
 
-        black_won, num_moves = play_game(BLACK_RANK, BLACK_PLAYOUTS, WHITE_RANK, WHITE_PLAYOUTS, queries)
+        black_won, num_moves = play_game(BLACK_RANK, BLACK_ASSISTANCE, WHITE_RANK, WHITE_ASSISTANCE, queries)
 
         with lock:
 
@@ -73,7 +87,7 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
 
 if __name__ == "__main__":
-    print("black:", get_rank_str(BLACK_RANK), BLACK_PLAYOUTS, "white:", get_rank_str(WHITE_RANK), WHITE_PLAYOUTS)
+    print("black:", get_rank_str(BLACK_RANK), BLACK_ASSISTANCE, "white:", get_rank_str(WHITE_RANK), WHITE_ASSISTANCE)
 
     controller = KatagoController()
     controller.start_engine()
@@ -113,3 +127,8 @@ if __name__ == "__main__":
 # 20 kyu + 1 stone handicap vs 16 kyu = 55%
 # 5 dan + 1 stone handicap vs 9 dan = 88%
 # 5 dan 50 playouts = 9 dan
+
+
+# 20k 14k = 45%
+# 14k 8k = 33%
+# 2k 5d = 53%

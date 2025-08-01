@@ -117,6 +117,57 @@ class KatagoQueries:
 
         return self.get_move_from_idx(chosen_index)
 
+    def query_weighted_random_move_next(self, moves, human_rank, bot_weight=0, temperature=1):
+        """
+        Queries the policy for a given rank and returns a move based on a weighted random sample.
+        """
+
+        response = self.query_policy(moves, human_rank=human_rank)
+
+        if not response.get("humanPolicy"):
+            print("moves:", moves)
+            print("human_rank:", human_rank, _get_rank_str(human_rank))
+            print("response:")
+            pprint(response)
+            response = self.query_policy(moves, human_rank=human_rank)
+            if not response.get("humanPolicy"):
+                raise Exception("Human policy not found in response.")
+            else:
+                raise Exception("Human policy found in repeat query.")
+            # return "pass"
+
+        human_policy = response["humanPolicy"]
+        strong_policy = response["policy"]
+
+        human_legal_indices = {i for i, p in enumerate(human_policy) if p > 0}
+        strong_legal_indices = {i for i, p in enumerate(strong_policy) if p > 0}
+
+        if human_legal_indices != strong_legal_indices:
+            raise Exception("Human and strong policies disagree on legal moves.")
+
+        legal_moves_map = {
+            i: (ph * (1-bot_weight) + pb * bot_weight) ** (1/temperature) for i, (ph, pb) in enumerate(zip(human_policy,strong_policy)) if i in strong_legal_indices
+        }
+
+        pass_idx = len(strong_policy) - 1
+        if pass_idx in legal_moves_map:
+            legal_moves_map[pass_idx] = strong_policy[pass_idx] ** (1/temperature)
+
+        legal_moves = list(legal_moves_map.items())
+
+        if not legal_moves:
+            return "pass"
+
+        move_indices, probabilities = zip(*legal_moves)
+
+        probabilities = np.array(probabilities)
+        probabilities /= probabilities.sum()
+
+        chosen_index = np.random.choice(move_indices, p=probabilities)
+
+        return self.get_move_from_idx(chosen_index)
+
+
     def query_children(self, moves):
         """
         Sends a standardized query for children analysis (visits adjusted by the number of legal moves).

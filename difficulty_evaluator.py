@@ -4,7 +4,7 @@ import numpy as np
 from scipy.stats import norm, stats
 
 from stats import DEBUG
-from katago_queries import KatagoQueries, get_all_ranks
+from katago_queries import KatagoQueries, get_all_ranks, get_rank_str, get_rank_number
 
 SIMULATION_ROUNDS = 10
 
@@ -23,7 +23,7 @@ class DifficultyEvaluator:
         """
         self.queries = queries
 
-    def assess_game_difficulty(self, moves, move_rank):
+    def assess_game_difficulty(self, moves, move_rank, correct_move):
         current_rank = move_rank
         number_of_ranks = len(get_all_ranks())
         games = []
@@ -32,7 +32,7 @@ class DifficultyEvaluator:
             current_rank = max(0, min(current_rank, 1))
             games.append(current_rank)
 
-            if self._playout_game(moves, current_rank):
+            if self._playout_game(moves + [correct_move], current_rank):
                 current_rank -= 1 / number_of_ranks
             else:
                 current_rank += 1 / number_of_ranks
@@ -69,6 +69,44 @@ class DifficultyEvaluator:
 
         return mu, sigma
 
+    def assess_move_difficulty_alternative(self, moves, correct_move):
+        """
+        Assesses difficulty by sampling all ranks determinig CDF for probability of move being played.
+
+        Args:
+            moves (list): The list of moves in the game.
+            correct_move (str): The correct move.
+
+        Returns:
+            String: closest mean rank as a string
+            Float: mean rank of the distribution
+            Float: stdev rank of the distribution.
+
+        """
+        most_likely = None
+        most_likely_twice_over = None
+        for rank in get_all_ranks():
+            response = self.queries.query_policy(moves, human_rank=rank)
+            policy = response["humanPolicy"]
+            best_move_idx = self.queries.get_idx_from_move(correct_move)
+            second_best_move_idx = 0
+            for i in range(len(policy)):
+                if i != best_move_idx:
+                    second_best_move_idx = i
+            correct_policy = policy[best_move_idx]
+            altenative_policy = policy[second_best_move_idx]
+
+            if most_likely is None and correct_policy > altenative_policy:
+                most_likely = rank
+
+            if most_likely_twice_over is None and correct_policy > 2 * altenative_policy:
+                most_likely_twice_over = rank
+
+            if most_likely is not None and most_likely_twice_over is not None:
+                break
+
+        return get_rank_number(most_likely), get_rank_number(most_likely_twice_over)
+
     def get_probability_for_rank(self, rank, moves, correct_move):
         """
         Gets the move probability of the correct move for a given strength rank.
@@ -97,14 +135,6 @@ class DifficultyEvaluator:
     def _playout_game(self, moves, rank_str):
         simulation_moves = moves.copy()
         while True:
-            # Human player's turn
-            human_move = self.queries.query_weighted_random_move(simulation_moves, rank_str)
-            simulation_moves.append(human_move)
-
-            # Check if game is over
-            if len(simulation_moves) > 1 and simulation_moves[-1] == "pass" and simulation_moves[-2] == "pass":
-                break
-
             # KataGo's turn
             katago_move, winrate, _ = self.queries.get_best_move(self.queries.query_policy(simulation_moves))
 
@@ -113,6 +143,14 @@ class DifficultyEvaluator:
                 return False
 
             simulation_moves.append(katago_move)
+
+            # Check if game is over
+            if len(simulation_moves) > 1 and simulation_moves[-1] == "pass" and simulation_moves[-2] == "pass":
+                break
+
+            # Human player's turn
+            human_move = self.queries.query_weighted_random_move(simulation_moves, rank_str)
+            simulation_moves.append(human_move)
 
             # Check if game is over
             if len(simulation_moves) > 1 and simulation_moves[-1] == "pass" and simulation_moves[-2] == "pass":
