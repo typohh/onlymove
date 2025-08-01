@@ -516,20 +516,17 @@ const zipCache = {};
 async function fetchAndLoadSgf(filename, group) {
     const zipFilename = `tsumegos${group}.zip`;
     
-    // Load the zip file if not already cached
-    if (!zipCache[group]) {
-        // Ensure the zip is loaded in our tracking system
-        if (!loadedZips[zipFilename]) {
-            await loadZipProblems(zipFilename);
-        }
-        
-        const zipResponse = await fetch(`tsumegos/${zipFilename}`);
-        const zipData = await zipResponse.arrayBuffer();
-        const zip = new JSZip();
-        zipCache[group] = await zip.loadAsync(zipData);
+    // Ensure the zip is loaded in our tracking system
+    if (!loadedZips[zipFilename]) {
+        await loadZipProblems(zipFilename);
     }
     
+    // Get the zip from cache (should be there after loadZipProblems)
     const zip = zipCache[group];
+    if (!zip) {
+        throw new Error(`Zip file ${zipFilename} not found in cache`);
+    }
+    
     const file = zip.file(filename);
     
     if (!file) {
@@ -596,6 +593,10 @@ async function loadZipProblems(zipFilename) {
     
     loadedZips[zipFilename] = problems;
     allProblems = allProblems.concat(problems);
+    
+    // Also cache the loaded zip for future use to avoid redundant fetches
+    zipCache[group] = zip;
+    
     return problems;
 }
 
