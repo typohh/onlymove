@@ -3,8 +3,8 @@ from collections import Counter
 import numpy as np
 from scipy.stats import norm, stats
 
+from katago_queries import KatagoQueries, get_all_ranks, get_rank_number
 from stats import DEBUG
-from katago_queries import KatagoQueries, get_all_ranks, get_rank_str, get_rank_number
 
 SIMULATION_ROUNDS = 10
 
@@ -175,4 +175,4 @@ def rank_probabilities_into_distribution(probabilities):
     # Ensure positive standard deviation
     sigma = abs(sigma)
 
-    return mu/len(probabilities), sigma/len(probabilities)
+    return mu / len(probabilities), sigma / len(probabilities)
