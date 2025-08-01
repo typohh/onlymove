@@ -3,7 +3,6 @@ const boardContainer = document.getElementById('board-container');
 // App version - last modified date and time
 const APP_VERSION = "2025-07-28 21:22";
 
-// Log version to console
 console.log(`App Version: ${APP_VERSION}`);
 
 // Force service worker update
@@ -17,21 +16,21 @@ if ('serviceWorker' in navigator) {
 let board;
 let game;
 let kifuReader;
-let problems = [];
+let zipMetadata = []; // Metadata about zip files (filename, min_rank, max_rank)
+let loadedZips = {}; // Track which zip files have been loaded {zipFilename: problemsArray}
+let allProblems = []; // Flattened list of all problems from loaded zips
 let currentProblemFilename = null;
+let previousProblemFilename = localStorage.getItem('previousTsumego'); // Store previous tsumego filename
 let currentSGF = null; // Store current tsumego SGF content
-let previousSGF = null; // Store previous tsumego SGF content for download
+let previousSGF = localStorage.getItem('previousTsumegoContent'); // Store previous tsumego SGF content for download
 let showCorrectMove = false;
 let acceptClicks = false; // Track when we should accept clicks
 
 // Load state from localStorage or set defaults
 let userRank = parseFloat(localStorage.getItem('userRank')) || 0; // Set initial rank to 0
 let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
-// Initialize attempt history with all wins for new players
-let attemptHistory = JSON.parse(localStorage.getItem('attemptHistory')) || 
-    Array.from({length: 30}, () => true);
-// Get saved tsumego filename if exists
-let savedTsumego = localStorage.getItem('currentTsumego');
+// Initialize momentum
+let momentum = parseFloat(localStorage.getItem('momentum')) || 30;
 
 // --- Helper Functions ---
 
@@ -123,14 +122,13 @@ function displayOverlay(message, duration, callback) {
  * Updates the rank display on the UI.
  */
 function updateRankDisplay() {
-    // Calculate standard deviation
-    const recentLosses = attemptHistory.filter(success => !success).length;
-    const adjustmentFactor = (1 + Math.pow(Math.abs(recentLosses - 6), 2)) * 0.5;
+    // Calculate stddev from momentum
+    const stddev = momentum / 2;
     
     // Update the rank element inside the board container
     const rankElement = document.getElementById('rank-display');
     if (rankElement) {
-        rankElement.textContent = `${getDescriptiveRank(userRank)} (±${adjustmentFactor.toFixed(1)})`;
+        rankElement.textContent = `${getDescriptiveRank(userRank)} (±${stddev.toFixed(1)})`;
     }
     
     // Update the previous tsumego link text based on language
@@ -156,23 +154,7 @@ function updateRankDisplay() {
     }
 }
 
-function binomialProbability(n, x, p) {
-    function factorial(k) {
-        if (k === 0 || k === 1) return 1;
-        let result = 1;
-        for (let i = 2; i <= k; i++) result *= i;
-        return result;
-    }
 
-    function binomialCoefficient(n, k) {
-        return factorial(n) / (factorial(k) * factorial(n - k));
-    }
-
-    return binomialCoefficient(n, x) * Math.pow(p, x) * Math.pow(1 - p, n - x);
-}
-
-// Example: Probability of 5 occurrences in 30 samples with 20% chance
-// let prob = binomialProbability(30, 5, 0.2);
 
 
 /**
@@ -186,29 +168,25 @@ function updateUserStats(isCorrect, hintWasShown = false) {
         return;
     }
 
-    // Update attempt history (shift array and add new result)
-    attemptHistory.shift();
-    attemptHistory.push(isCorrect);
-    
-    // Calculate recent losses (failures) in the last 30 attempts
-    const recentLosses = attemptHistory.filter(success => !success).length;
-    
-    // Apply rank adjustment formula
-    const adjustmentFactor = 1 + Math.pow(Math.abs(recentLosses - 6), 2);
+    const oldRank = userRank;
     
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
         problemFrequencies[currentProblemFilename] = currentFreq / 5;
-        userRank = Math.min(1, userRank + ((1/(5*3*29)) * adjustmentFactor));
+        userRank = Math.min(1, userRank + (momentum / 300));
     } else {
         problemFrequencies[currentProblemFilename] = 25;
-        userRank = Math.max(0, userRank - ((1/(3*29)) * adjustmentFactor));
+        momentum = (momentum + 1) / 2;
+        userRank = Math.max(0, userRank - 4 * (momentum / 300));
     }
+
+    // Log rank update
+    console.log(`Rank updated from ${oldRank.toFixed(4)} to ${userRank.toFixed(4)}`);
 
     // Save to localStorage
     localStorage.setItem('userRank', userRank.toString());
     localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
-    localStorage.setItem('attemptHistory', JSON.stringify(attemptHistory));
+    localStorage.setItem('momentum', momentum.toString());
     
     updateRankDisplay();
 }
@@ -222,7 +200,9 @@ function updateUserStats(isCorrect, hintWasShown = false) {
 function handleCorrectAnswer(hintWasShown = false) {
     updateUserStats(true, hintWasShown);
     // Directly load the next tsumego without an overlay.
-    loadTsumego();
+    loadTsumego().catch(error => {
+        console.error("Error loading next tsumego:", error);
+    });
 }
 
 /**
@@ -233,7 +213,9 @@ function handleIncorrectAnswer(hintWasShown = false) {
     updateUserStats(false, hintWasShown);
     displayOverlay('', 3000, () => {
         showCorrectMove = true;
-        loadTsumego();
+        loadTsumego().catch(error => {
+            console.error("Error loading next tsumego:", error);
+        });
     });
 }
 
@@ -307,47 +289,87 @@ function handleBoardClick(x, y) {
 
 // --- Tsumego Loading and Board Rendering ---
 
+// The binarySearchClosest function is no longer used with the new lazy loading system
+// but kept for reference in case it's needed in the future.
+
 /**
  * Selects the next tsumego problem based on user rank and past performance.
- * @returns {object} The selected problem's metadata.
+ * @returns {object|null} The selected problem's metadata, or null if no problems are available.
  */
 function selectProblem() {
-    // If we have a saved tsumego, use it
-    if (savedTsumego) {
-        const problem = problems.find(p => p.filename === savedTsumego);
-        if (problem) {
-            // Clear the saved tsumego so next load uses normal selection
-            savedTsumego = null;
-            localStorage.removeItem('currentTsumego');
-            return problem;
-        }
-    }
-    
     // If we need to show the correct move, stick to the current problem.
     if (showCorrectMove && currentProblemFilename) {
-        return problems.find(p => p.filename === currentProblemFilename);
+        const problem = allProblems.find(p => p.filename === currentProblemFilename);
+        return problem;
+    }
+    
+    // If no problems are loaded, return null to trigger loading
+    if (allProblems.length === 0) {
+        return null;
     }
 
-    // Find problems with the rank closest to the user's rank.
-    let minRankDiff = Infinity;
-    problems.forEach(p => minRankDiff = Math.min(minRankDiff, Math.abs(p.rank - userRank)));
-    const closestProblems = problems.filter(p => Math.abs(p.rank - userRank) === minRankDiff);
+    // Create a list of available problems, excluding current and previous
+    let availableProblems = allProblems.filter(problem =>
+        problem.filename !== currentProblemFilename && 
+        problem.filename !== previousProblemFilename
+    );
 
-    // Use weighted random selection based on problem frequencies.
-    const weightedProblems = closestProblems.map(problem => ({
+    // If we've excluded all problems, use the full list (but still exclude current/previous)
+    if (availableProblems.length === 0) {
+        availableProblems = allProblems.filter(problem => 
+            problem.filename !== currentProblemFilename && 
+            problem.filename !== previousProblemFilename
+        );
+    }
+
+    // If we still have no problems, fallback to all problems
+    if (availableProblems.length === 0) {
+        availableProblems = allProblems;
+    }
+
+    // Sort available problems by rank distance to user's rank
+    availableProblems.sort((a, b) => {
+        const diffA = Math.abs(a.rank - userRank);
+        const diffB = Math.abs(b.rank - userRank);
+        return diffA - diffB;
+    });
+
+    // Select from the closest 200 problems (or all if less than 200)
+    const candidateProblems = availableProblems.slice(0, 200);
+
+    // Use weighted random selection based on problem frequencies
+    const weightedProblems = candidateProblems.map(problem => ({
         problem,
         weight: problemFrequencies[problem.filename] || 1
     }));
+    
     const totalWeight = weightedProblems.reduce((sum, p) => sum + p.weight, 0);
 
-    let random = Math.random() * totalWeight;
-    for (const { problem, weight } of weightedProblems) {
-        random -= weight;
-        if (random <= 0) return problem;
+    // Log the selection probability for the current problem (if it exists in candidates)
+    if (currentProblemFilename) {
+        const currentProblemEntry = weightedProblems.find(wp => wp.problem.filename === currentProblemFilename);
+        if (currentProblemEntry) {
+            const probability = totalWeight > 0 ? (currentProblemEntry.weight / totalWeight) * 100 : 0;
+            console.log(`Current problem selection probability: ${probability.toFixed(2)}% (weight: ${currentProblemEntry.weight}, total: ${totalWeight})`);
+        }
     }
 
-    // Fallback to simple random selection if weighting fails.
-    return closestProblems[Math.floor(Math.random() * closestProblems.length)];
+    // If total weight is zero, fallback to uniform random selection
+    if (totalWeight <= 0) {
+        return candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
+    }
+
+    let random = Math.random() * totalWeight;
+    
+    for (const { problem, weight } of weightedProblems) {
+        random -= weight;
+        if (random <= 0) {
+            return problem;
+        }
+    }
+
+    // Fallback to simple random selection if weighting fails
+    return candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
 }
 
 /**
@@ -492,9 +514,16 @@ const zipCache = {};
  * @param {number} group - The group number indicating which zip file to load from.
  */
 async function fetchAndLoadSgf(filename, group) {
+    const zipFilename = `tsumegos${group}.zip`;
+    
     // Load the zip file if not already cached
     if (!zipCache[group]) {
-        const zipResponse = await fetch(`tsumegos${group}.zip`);
+        // Ensure the zip is loaded in our tracking system
+        if (!loadedZips[zipFilename]) {
+            await loadZipProblems(zipFilename);
+        }
+        
+        const zipResponse = await fetch(`tsumegos/${zipFilename}`);
         const zipData = await zipResponse.arrayBuffer();
         const zip = new JSZip();
         zipCache[group] = await zip.loadAsync(zipData);
@@ -504,7 +533,7 @@ async function fetchAndLoadSgf(filename, group) {
     const file = zip.file(filename);
     
     if (!file) {
-        throw new Error(`File ${filename} not found in tsumegos${group}.zip`);
+        throw new Error(`File ${filename} not found in tsumegos/${zipFilename}`);
     }
     
     const sgfContent = await file.async('text');
@@ -521,30 +550,204 @@ async function fetchAndLoadSgf(filename, group) {
 }
 
 /**
- * Main function to load and display a tsumego problem.
+ * Loads metadata about zip files.
  */
-async function loadTsumego() {
-    try {
-        // Ensure problem metadata is loaded.
-        if (problems.length === 0) {
-            const metadataResponse = await fetch('metadata.json');
-            problems = await metadataResponse.json();
+async function loadZipMetadata() {
+    if (zipMetadata.length === 0) {
+        const metadataResponse = await fetch('metadata.json');
+        zipMetadata = await metadataResponse.json();
+    }
+}
+
+/**
+ * Loads problems from a specific zip file.
+ * @param {string} zipFilename - The name of the zip file to load.
+ */
+async function loadZipProblems(zipFilename) {
+    if (loadedZips[zipFilename]) {
+        return loadedZips[zipFilename];
+    }
+
+    // Extract group number from filename (e.g., "tsumegos0.zip" -> 0)
+    const groupMatch = zipFilename.match(/tsumegos(\d+)\.zip/);
+    if (!groupMatch) {
+        throw new Error(`Invalid zip filename format: ${zipFilename}`);
+    }
+    const group = parseInt(groupMatch[1]);
+
+    // Fetch and parse the metadata.json inside the zip
+    const zipResponse = await fetch(`tsumegos/${zipFilename}`);
+    const zipData = await zipResponse.arrayBuffer();
+    const zip = new JSZip();
+    await zip.loadAsync(zipData);
+    
+    const metadataFile = zip.file('metadata.json');
+    if (!metadataFile) {
+        throw new Error(`metadata.json not found in ${zipFilename}`);
+    }
+    
+    const metadataContent = await metadataFile.async('text');
+    const problems = JSON.parse(metadataContent);
+    
+    // Add group information to each problem
+    problems.forEach(problem => {
+        problem.group = group;
+    });
+    
+    loadedZips[zipFilename] = problems;
+    allProblems = allProblems.concat(problems);
+    return problems;
+}
+
+/**
+ * Background loads a single zip file.
+ * @param {string} zipFilename - The name of the zip file to load.
+ */
+async function backgroundLoadZip(zipFilename) {
+    if (!loadedZips[zipFilename]) {
+        try {
+            await loadZipProblems(zipFilename);
+        } catch (error) {
+            console.error(`Failed to background load ${zipFilename}:`, error);
         }
+    }
+}
+
+/**
+ * Background loads zip files that might be needed soon.
+ * @param {Array} zipFilenames - Array of zip filenames to load in background.
+ * @deprecated Use backgroundLoadZip instead for single file loading
+ */
+function backgroundLoadZips(zipFilenames) {
+    if (zipFilenames.length > 0) {
+        backgroundLoadZip(zipFilenames[0]);
+    }
+}
+
+/**
+ * Main function to load and display a tsumego problem.
+ * @param {object} [selectedProblem] - Optional specific problem to load.
+ */
+async function loadTsumego(selectedProblem = null) {
+    try {
+        // Ensure zip metadata is loaded
+        await loadZipMetadata();
 
         const wasShowingCorrectMove = showCorrectMove;
 
-        const selectedProblem = selectProblem();
+        // On startup, check if we have a saved tsumego
+        if (!currentProblemFilename && !selectedProblem) {
+            const savedTsumego = localStorage.getItem('currentTsumego');
+            const savedTsumegoContent = localStorage.getItem('currentTsumegoContent');
+            
+            if (savedTsumego && savedTsumegoContent) {
+                // Load the saved tsumego content directly
+                const kifu = WGo.Kifu.fromSgf(savedTsumegoContent);
+                kifuReader = new WGo.KifuReader(kifu);
+                
+                // Advance to the first branching node (where the user needs to move).
+                while (kifuReader.node.children.length === 1) {
+                    kifuReader.next();
+                }
+                
+                game = kifuReader.game;
+                
+                // Set current values
+                currentProblemFilename = savedTsumego;
+                currentSGF = savedTsumegoContent;
+                
+                // Process the loaded tsumego
+                initializeBoard(kifu.size);
+                updateBoard();
+                updateRankDisplay();
+                
+                // Update the previous tsumego link state
+                const prevTsumegoLink = document.getElementById('prev-tsumego');
+                if (prevTsumegoLink) {
+                    // Enable the link if we have previous tsumego data
+                    if (previousSGF) {
+                        prevTsumegoLink.classList.remove('disabled');
+                    }
+                    // If no previous tsumego, it's already disabled by default
+                }
+                
+                // Reset showCorrectMove
+                showCorrectMove = false;
+                
+                // Enable clicks once the board is ready
+                acceptClicks = true;
+                
+                // Log tsumego metadata
+                const problem = allProblems.find(p => p.filename === currentProblemFilename);
+                if (problem) {
+                    console.log("Tsumego metadata:");
+                    for (const [key, value] of Object.entries(problem)) {
+                        console.log(`  ${key}: ${value}`);
+                    }
+                }
+                
+                // Background load zip files that might contain problems closer to user's rank
+                backgroundLoadCloserZips();
+                
+                return;
+            }
+        }
+
+        // If no specific problem was provided, select one
+        if (!selectedProblem) {
+            selectedProblem = selectProblem();
+        }
         
-        // Update previousSGF with currentSGF before loading new tsumego
+        // If no problems are available, we need to load at least one zip
+        if (!selectedProblem) {
+            // Find the zip file closest to user's rank
+            let closestZip = null;
+            let minRankDiff = Infinity;
+            
+            zipMetadata.forEach(zip => {
+                const rankDiff = Math.abs((zip.min_rank + zip.max_rank) / 2 - userRank);
+                if (rankDiff < minRankDiff) {
+                    minRankDiff = rankDiff;
+                    closestZip = zip;
+                }
+            });
+            
+            if (closestZip) {
+                await loadZipProblems(closestZip.filename);
+                // Try selecting a problem again
+                const retrySelectedProblem = selectProblem();
+                if (!retrySelectedProblem) {
+                    throw new Error("Failed to load any tsumego problems");
+                }
+                selectedProblem = retrySelectedProblem;
+            } else {
+                throw new Error("No zip files found");
+            }
+        }
+        
+        // Update previousSGF and previousProblemFilename with current values before loading new tsumego
         previousSGF = currentSGF;
+        previousProblemFilename = currentProblemFilename;
         
         currentProblemFilename = selectedProblem.filename;
         
-        // Save current tsumego to localStorage
-        localStorage.setItem('currentTsumego', currentProblemFilename);
-
         const { kifu, sgfContent } = await fetchAndLoadSgf(currentProblemFilename, selectedProblem.group);
         currentSGF = sgfContent; // Store the current SGF content
+        
+        // Save current tsumego filename and content to localStorage
+        // Also save previous tsumego info
+        localStorage.setItem('currentTsumego', currentProblemFilename);
+        localStorage.setItem('currentTsumegoContent', currentSGF);
+        if (previousProblemFilename) {
+            localStorage.setItem('previousTsumego', previousProblemFilename);
+            localStorage.setItem('previousTsumegoContent', previousSGF);
+        }
+        
+        // Log all available metadata fields for the tsumego in a readable format
+        console.log("Tsumego metadata:");
+        for (const [key, value] of Object.entries(selectedProblem)) {
+            console.log(`  ${key}: ${value}`);
+        }
 
         initializeBoard(kifu.size);
         updateBoard();
@@ -567,22 +770,68 @@ async function loadTsumego() {
 
         // Enable clicks once the board is ready
         acceptClicks = true;
+        
+        // Background load zip files that might contain problems closer to user's rank
+        backgroundLoadCloserZips();
 
     } catch (error) {
-        if (error.name === 'InvalidMoveError') {
-            console.error(`Skipping tsumego ${currentProblemFilename} due to invalid move.`);
-            loadTsumego(); // Load the next problem
-        } else {
-            console.error("Error loading tsumego:", error);
-            displayOverlay('Error loading problem.', 3000);
-        }
+        console.error("Error loading tsumego:", error);
+        displayOverlay('Error loading problem.', 3000);
     }
 }
 
+/**
+ * Background loads the zip file with rank range closest to the user's current rank.
+ */
+function backgroundLoadCloserZips() {
+
+    // Find the zip file with rank range closest to user's current rank
+    let closestZip = null;
+    let minRankDiff = Infinity;
+    
+    zipMetadata.forEach(zip => {
+        // Calculate the distance from user's rank to the zip's min and max ranks
+        const diffToMin = Math.abs(userRank - zip.min_rank);
+        const diffToMax = Math.abs(userRank - zip.max_rank);
+        const minDiff = Math.min(diffToMin, diffToMax);
+        
+        if (minDiff < minRankDiff) {
+            minRankDiff = minDiff;
+            closestZip = zip;
+        }
+    });
+    
+    if (closestZip) {
+
+        // If the closest zip is not already loaded, background load it
+        if (!loadedZips[closestZip.filename]) {
+            backgroundLoadZip(closestZip.filename);
+        }
+    } else {
+        console.log("No zip files found in metadata");
+    }
+}
+
+
+
 // --- Initial Load ---
 
-loadTsumego();
-updateRankDisplay(); // Initialize performance display
+// Initialize performance display
+updateRankDisplay();
+
+// Initialize previous tsumego link to disabled state
+document.addEventListener('DOMContentLoaded', () => {
+    const prevTsumegoLink = document.getElementById('prev-tsumego');
+    if (prevTsumegoLink) {
+        prevTsumegoLink.classList.add('disabled');
+    }
+});
+
+// Load initial tsumego
+loadTsumego().catch(error => {
+    console.error("Failed to load initial tsumego:", error);
+});
+
 window.addEventListener('resize', updateBoardSize);
 window.addEventListener('orientationchange', updateBoardSize);
 
@@ -592,13 +841,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (prevTsumegoLink) {
         prevTsumegoLink.addEventListener('click', (e) => {
             e.preventDefault();
-            if (previousSGF) {
+            if (previousSGF && previousProblemFilename) {
                 // Create a blob and download link
                 const blob = new Blob([previousSGF], { type: 'application/x-go-sgf' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'previous_tsumego.sgf';
+                a.download = previousProblemFilename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
