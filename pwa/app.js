@@ -819,26 +819,18 @@ function backgroundLoadCloserZips() {
 // Initialize performance display
 updateRankDisplay();
 
-// Initialize previous tsumego link to disabled state
+// Initialize previous tsumego link and attach event listener
 document.addEventListener('DOMContentLoaded', () => {
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
-        prevTsumegoLink.classList.add('disabled');
-    }
-});
-
-// Load initial tsumego
-loadTsumego().catch(error => {
-    console.error("Failed to load initial tsumego:", error);
-});
-
-window.addEventListener('resize', updateBoardSize);
-window.addEventListener('orientationchange', updateBoardSize);
-
-// Add event listener for previous tsumego download
-document.addEventListener('DOMContentLoaded', () => {
-    const prevTsumegoLink = document.getElementById('prev-tsumego');
-    if (prevTsumegoLink) {
+        // Set initial state based on whether we have previous tsumego data
+        if (previousSGF && previousProblemFilename) {
+            prevTsumegoLink.classList.remove('disabled');
+        } else {
+            prevTsumegoLink.classList.add('disabled');
+        }
+        
+        // Attach event listener for previous tsumego download
         prevTsumegoLink.addEventListener('click', (e) => {
             e.preventDefault();
             if (previousSGF && previousProblemFilename) {
@@ -858,3 +850,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// Load initial tsumego
+loadTsumego().catch(error => {
+    console.error("Failed to load initial tsumego:", error);
+});
+
+window.addEventListener('resize', updateBoardSize);
+window.addEventListener('orientationchange', updateBoardSize);
