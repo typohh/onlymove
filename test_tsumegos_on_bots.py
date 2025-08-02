@@ -180,7 +180,7 @@ def worker(file_queue, bot, lock, probabilities):
         file_queue.task_done()
 
 
-def test_bot(bot, name):
+def test_bot(bot, attempts_file):
     file_queue = queue.Queue()
     lock = threading.Lock()
     probabilities = {}
@@ -195,7 +195,7 @@ def test_bot(bot, name):
                     break
 
     threads = []
-    for _ in range(1 if DEBUG else bot.get_batch_size()):
+    for _ in range(1 if DEBUG else bot.get_batch_size() * 2 ):
         thread = threading.Thread(target=worker, args=(file_queue, bot, lock, probabilities))
         thread.start()
         threads.append(thread)
@@ -211,26 +211,39 @@ def test_bot(bot, name):
         print(f"Time: {time.time() - start_time:.2f} seconds")
         print()
 
-    print(f"writing to file attempts/{name}.txt")
+    print(f"Processed: {total_count}")
+    print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
+    print(f"Time: {time.time() - start_time:.2f} seconds")
+    print()
+
+    print(f"writing to file {attempts_file}")
     # Write results to file
-    with open(f"attempts/{name}.txt", 'w') as f:
+    with open(attempts_file, 'w') as f:
         for key, value in probabilities.items():
             f.write(f"{key} {value}\n")
 
     print("done")
 
 
+ATTEMPTS_DIRECTORY = "attempts"
+
 if __name__ == "__main__":
+    os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
     for w in reversed(WEIGHTS.keys()):
         for p in [1, 10, 100]:
-            name = f"katago_{WEIGHTS[w]}_{p}"
-            print("testing", name)
-            bot = KataGo(WEIGHT_DIRECTORY + "/" + w, p)
-            test_bot(bot, name)
-            bot.stop()
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{WEIGHTS[w]}_{p}.txt")
+            if not os.path.exists(filename):
+                bot = KataGo(os.path.join(WEIGHT_DIRECTORY, w), p)
+                test_bot(bot, filename)
+                bot.stop()
+            else:
+                print(f"skipping {filename} because it already exists")
 
     for rank in get_all_ranks():
-        name = f"katago_{get_rank_str(rank)}"
-        bot = KataGo(WEIGHT_DIRECTORY + "/" + WEIGHT_9X9, 1, rank)
-        test_bot(bot, name)
-        bot.stop()
+        filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{get_rank_str(rank)}")
+        if not os.path.exists(filename):
+            bot = KataGo(os.path.join(WEIGHT_DIRECTORY, WEIGHT_9X9), 1, rank)
+            test_bot(bot, filename)
+            bot.stop()
+        else:
+            print(f"skipping {filename} because it already exists")
