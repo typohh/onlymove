@@ -69,3 +69,38 @@ WEIGHT_9X9 = "kata9x9-b18c384nbt-20231025.bin.gz"
 WEIGHT_HUMAN = "b18c384nbt-humanv0.bin.gz"
 
 WEIGHT_DIRECTORY = "weights"
+
+def download_weights():
+    import os
+    import urllib.request
+
+    os.makedirs(WEIGHT_DIRECTORY, exist_ok=True)
+
+    def download_file(url, filename):
+        try:
+            print(f"Downloading {filename}...")
+            urllib.request.urlretrieve(url, os.path.join(WEIGHT_DIRECTORY, filename))
+            print(f"Downloaded {filename}")
+        except Exception as e:
+            print(f"Failed to download {filename}: {e}")
+
+    # Download base weights if missing
+    base_weights = {
+        WEIGHT_9X9: "https://github.com/lightvector/KataGo/releases/download/v1.13.2-kata9x9/kata9x9-b18c384nbt-20231025.bin.gz",
+        WEIGHT_HUMAN: "https://github.com/lightvector/KataGo/releases/download/v1.15.0/b18c384nbt-humanv0.bin.gz",
+        WEIGHT_FULL: "https://media.katagotraining.org/uploaded/networks/models/kata1/kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
+    }
+
+    for filename, url in base_weights.items():
+        if not os.path.exists(os.path.join(WEIGHT_DIRECTORY, filename)):
+            download_file(url, filename)
+
+    # Download training weights if missing
+    base_url = "https://media.katagotraining.org/uploaded/networks/models/kata1/"
+    for weight_file in WEIGHTS.keys():
+        if not os.path.exists(os.path.join(WEIGHT_DIRECTORY, weight_file)):
+            download_file(base_url + weight_file, weight_file)
+
+
+if __name__ == "__main__":
+    download_weights()
