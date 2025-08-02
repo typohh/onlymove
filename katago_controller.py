@@ -29,15 +29,14 @@ class KatagoController:
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
 
-    def start_engine(self, verbose=False,human_only=False):
+    def start_engine(self, verbose=False, weight=RL_MODEL_PATH, human=True):
         command = [
             KATAGO_PATH, "analysis",
             "-config", CONFIG_FILE,
-            # "-override-config",
-            # f"numAnalysisThreads={int(self.batch_size / self.search_threads)},numSearchThreadsPerAnalysisThread={self.search_threads},nnMaxBatchSize={self.batch_size}",
         ]
-        command.extend(["-model", RL_MODEL_PATH])
-        command.extend(["-human-model", SL_MODEL_PATH])
+        command.extend(["-model", weight])
+        if human:
+            command.extend(["-human-model", SL_MODEL_PATH])
 
         self.process = subprocess.Popen(
             command,
@@ -88,7 +87,6 @@ class KatagoController:
                         break
         return self.batch_size
 
-
     def _master_reader(self):
         """Master thread to read all stdout responses and signal events."""
         while self.running and self.process and not self.process.stdout.closed:
@@ -127,7 +125,7 @@ class KatagoController:
                 self.process.stdin.flush()
 
             # Release lock and wait for the response event from the master reader
-            if not event.wait(timeout=60*60):
+            if not event.wait(timeout=60 * 60):
                 raise TimeoutError(f"KataGo query {query_id} timed out after {timeout} seconds. KataGo may be stuck or crashed.")
 
             response = self.responses.get(query_id)

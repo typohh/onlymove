@@ -228,9 +228,6 @@ class KatagoQueries:
 
         human_policy = response["humanPolicy"]
 
-        # pprint(response)
-        # exit(-1)
-
         moves = {
             self.get_move_from_idx(i) : p * math.exp(response["rootInfo"]["utility"] / utility_limit) for i, p in enumerate(human_policy) if p > 0
         }
@@ -242,7 +239,7 @@ class KatagoQueries:
         return random.choices(list(moves.keys()), weights=list(moves.values()))[0]
 
 
-    def query(self, moves, exclude_move=None):
+    def query(self, moves, exclude_move=None, playouts=PLAYOUTS):
         """
         Provides a high playout query, where specific first move may be excluded.
         """
@@ -253,7 +250,8 @@ class KatagoQueries:
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
-            "maxVisits": PLAYOUTS,
+            "includePolicy": playouts == 1,
+            "maxVisits": playouts,
         }
         if exclude_move:
             query["avoidMoves"] = [

@@ -44,6 +44,27 @@ class DifficultyEvaluator:
         relevant_games = list(Counter({k: v - 1 for k, v in counter.items() if v > 1}).elements())
         return float(stats.tmean(relevant_games)), 0.0 if len(set(relevant_games)) == 1 else float(stats.tstd(relevant_games))
 
+    def assess_move_difficulty_smooth(self, moves, correct_move):
+        for rank in reversed(get_all_ranks()):
+            response = self.queries.query_policy(moves, rank)
+            human = response["humanPolicy"]
+            bot = response["policy"]
+            idx = self.queries.get_idx_from_move(correct_move)
+            weight = rank / 2
+            total_p = 0
+            for h, b in zip(human, bot):
+                total_p += max(0, b) ** weight * max(0, h) ** (1 - weight)
+                # total_p += max(0,b) * weight + max(0,h) * (1-weight)
+
+            p = bot[idx] ** weight * human[idx] ** (1 - weight)
+            # p = bot[idx] * weight + human[idx] * (1-weight)
+            print(rank, p, total_p)
+            if p < 0.8 * total_p:
+                print()
+                return rank
+        print()
+        return 0
+
     def assess_move_difficulty(self, moves, correct_move):
         """
         Assesses difficulty by sampling all ranks determinig CDF for probability of move being played.
@@ -69,6 +90,13 @@ class DifficultyEvaluator:
 
         return mu, sigma
 
+    def assess_move_difficulty_80(self, moves, correct_move):
+        for rank in reversed(get_all_ranks()):
+            probability = self.get_probability_for_rank(rank, moves, correct_move)
+            if probability < 0.8:
+                return rank
+        return 0
+
     def assess_move_difficulty_alternative(self, moves, correct_move):
         """
         Assesses difficulty by sampling all ranks determinig CDF for probability of move being played.
@@ -91,7 +119,7 @@ class DifficultyEvaluator:
             best_move_idx = self.queries.get_idx_from_move(correct_move)
             second_best_move_idx = 0
             for i in range(len(policy)):
-                if i != best_move_idx:
+                if i != best_move_idx and policy[i] > policy[second_best_move_idx]:
                     second_best_move_idx = i
             correct_policy = policy[best_move_idx]
             altenative_policy = policy[second_best_move_idx]
@@ -105,7 +133,13 @@ class DifficultyEvaluator:
             if most_likely is not None and most_likely_twice_over is not None:
                 break
 
-        return get_rank_number(most_likely), get_rank_number(most_likely_twice_over)
+        if most_likely is None:
+            most_likely = 1.0
+
+        if most_likely_twice_over is None:
+            most_likely_twice_over = 1.0
+
+        return most_likely, most_likely_twice_over
 
     def get_probability_for_rank(self, rank, moves, correct_move):
         """
