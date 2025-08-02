@@ -103,7 +103,7 @@ class KataGo:
 
     def __init__(self, weights, playouts, human_rank=None):
         self._controller = KatagoController()
-        self._controller.start_engine(weight=weights, verbose=True, human=human_rank is not None)
+        self._controller.start_engine(weight=weights, verbose=False, human=human_rank is not None)
         self._query = KatagoQueries(self._controller)
         self._moves = []
         self._playouts = playouts
@@ -195,24 +195,23 @@ def test_bot(bot, attempts_file):
                     break
 
     threads = []
-    for _ in range(1 if DEBUG else bot.get_batch_size() * 2 ):
+    for _ in range(1 if DEBUG else bot.get_batch_size() * 2):
         thread = threading.Thread(target=worker, args=(file_queue, bot, lock, probabilities))
         thread.start()
         threads.append(thread)
 
     # Wait for all threads to finish
-    while any(thread.is_alive() for thread in threads):
-        time.sleep(10)
-        total_count = len(probabilities)
-        solved_count = sum(probabilities.values())
 
-        print(f"Processed: {total_count}")
-        print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
-        print(f"Time: {time.time() - start_time:.2f} seconds")
-        print()
+    for thread in threads:
+        thread.join()
+
+    total_count = len(probabilities)
+    solved_count = sum(probabilities.values())
+    elapsed_time = time.time() - start_time
 
     print(f"Processed: {total_count}")
     print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
+    print(f"Tsumegos per second: {total_count / elapsed_time:.2f}")
     print(f"Time: {time.time() - start_time:.2f} seconds")
     print()
 
