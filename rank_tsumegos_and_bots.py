@@ -9,34 +9,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 
-# --- 1. Data Generation (for demonstration purposes) ---
-def generate_dummy_data(num_bots=250, num_tsumegos=160000, data_dir="bot_data"):
-    """
-    Generates a dummy dataset of bot result files.
-    This function is for creating a runnable example.
-    The directory will contain one file per bot.
-    """
-    print("Generating dummy data...")
-    os.makedirs(data_dir, exist_ok=True)
-
-    tsumego_ids = [f"tsumego_{i}" for i in range(num_tsumegos)]
-
-    # Create dummy bot result files
-    for i in range(num_bots):
-        bot_id = f"bot_{i}"
-        bot_file = os.path.join(data_dir, f"{bot_id}.txt")
-        with open(bot_file, "w") as f:
-            # Each bot attempts a random subset of tsumegos, simulating missing data
-            num_attempts = np.random.randint(num_tsumegos * 0.95, num_tsumegos)
-            attempted_tsumegos = np.random.choice(tsumego_ids, int(num_attempts), replace=False)
-            for tsumego_id in attempted_tsumegos:
-                # Simulate a success rate
-                success_rate = np.random.rand()
-                f.write(f"{tsumego_id} {success_rate:.4f}\n")
-    print(f"Dummy data for {num_bots} bots generated in '{data_dir}/'")
-
 # --- 2. Data Loading and Preprocessing ---
-def load_data(data_dir="bot_data"):
+def load_data(data_dir):
     """
     Loads all bot data from the specified directory.
     It dynamically discovers all bots (from filenames) and all tsumegos
@@ -156,12 +130,6 @@ if __name__ == '__main__':
     BATCH_SIZE = 4096  # Increased for potentially faster training on large datasets
     EPOCHS = 5
     LEARNING_RATE = 0.01
-
-    # --- Step 1: Generate dummy data if the directory doesn't exist ---
-    if not os.path.exists(DATA_DIRECTORY):
-        # Using smaller numbers for the dummy data so it runs quickly.
-        # The code works with any number of bots/tsumegos.
-        generate_dummy_data(num_bots=50, num_tsumegos=10000, data_dir=DATA_DIRECTORY)
 
     # --- Step 2: Load and prepare the data dynamically ---
     df, bot_map, tsumego_map = load_data(DATA_DIRECTORY)

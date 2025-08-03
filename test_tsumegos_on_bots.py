@@ -247,7 +247,7 @@ if __name__ == "__main__":
                 print(f"skipping {filename} because it already exists")
 
     for rank in get_all_ranks():
-        filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{get_rank_str(rank)}")
+        filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{get_rank_str(rank)}.txt")
         if not os.path.exists(filename):
             bot = KataGo(os.path.join(WEIGHT_DIRECTORY, WEIGHT_9X9), 1, rank)
             test_bot(bot, filename)
