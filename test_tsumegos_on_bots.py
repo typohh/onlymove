@@ -151,10 +151,9 @@ def process_file(filename, bot):
                 return bot.get_probability(next_move_color, next_move_coords)
 
         except Exception as e:
-            print("WARNING:", e)
-            traceback.print_exc()
+            pass
 
-    raise Exception(f"Failed to process {filename}")
+    return None
 
 
 def worker(file_queue, bot, lock, probabilities):
@@ -174,8 +173,11 @@ def worker(file_queue, bot, lock, probabilities):
         file_path = os.path.join(TSUMEGO_DIR, filename)
         probability = process_file(file_path, bot)
 
-        with lock:
-            probabilities[filename[:-4]] = probability
+        if probability is None:
+            print( f"Error processing {filename}" )
+        else:
+            with lock:
+                probabilities[filename[:-4]] = probability
 
         file_queue.task_done()
 
@@ -209,19 +211,17 @@ def test_bot(bot, attempts_file):
     solved_count = sum(probabilities.values())
     elapsed_time = time.time() - start_time
 
+    print(f"Generating: {attempts_file}")
     print(f"Processed: {total_count}")
     print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
     print(f"Tsumegos per second: {total_count / elapsed_time:.2f}")
     print(f"Time: {time.time() - start_time:.2f} seconds")
     print()
 
-    print(f"writing to file {attempts_file}")
     # Write results to file
     with open(attempts_file, 'w') as f:
         for key, value in probabilities.items():
             f.write(f"{key} {value}\n")
-
-    print("done")
 
 
 ATTEMPTS_DIRECTORY = "attempts"
