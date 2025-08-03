@@ -12,7 +12,7 @@ from katago_queries import KatagoQueries, get_all_ranks, get_rank_str
 from weights import WEIGHTS, WEIGHT_DIRECTORY, WEIGHT_9X9
 
 TSUMEGO_DIR = "tsumegos"
-DEBUG = False
+DEBUG = True
 
 
 def sgf_to_gtp(sgf_coord: str, size: int) -> str:
@@ -130,25 +130,33 @@ class KataGo:
     def stop(self):
         self._controller.stop_engine()
 
+cache = {}
+
+def get_file_content(filename):
+    if cache.get(filename):
+        return cache[filename]
+    with open(filename, 'r', encoding='utf-8') as f:
+        content = f.read()
+        moves = get_main_variation(content)
+        cache[filename] = moves
+        return moves
+
 
 def process_file(filename, bot):
     for _ in range(3):
         try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                content = f.read()
-                all_moves = get_main_variation(content)
+            all_moves = get_file_content(filename)
+            moves = all_moves[:-2]
+            next_move_color, next_move_coords = all_moves[-2]
 
-                moves = all_moves[:-2]
-                next_move_color, next_move_coords = all_moves[-2]
+            bot.reset()
 
-                bot.reset()
+            # Set up the board position by playing the moves
+            for color, move in moves:
+                bot.play(color, move)
 
-                # Set up the board position by playing the moves
-                for color, move in moves:
-                    bot.play(color, move)
-
-                # Ask bot to predict the next move
-                return bot.get_probability(next_move_color, next_move_coords)
+            # Ask bot to predict the next move
+            return bot.get_probability(next_move_color, next_move_coords)
 
         except Exception as e:
             pass
