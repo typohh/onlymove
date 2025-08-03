@@ -12,7 +12,7 @@ from katago_queries import KatagoQueries, get_all_ranks, get_rank_str
 from weights import WEIGHTS, WEIGHT_DIRECTORY, WEIGHT_9X9
 
 TSUMEGO_DIR = "tsumegos"
-DEBUG = True
+DEBUG = False
 
 
 def sgf_to_gtp(sgf_coord: str, size: int) -> str:
