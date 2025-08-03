@@ -4,3 +4,6 @@ weights/
 .aider*
 __pycache__/
 .idea/
+/Pachi-12.86/
+/pwa/dist/
+/pwa/wgo.js/

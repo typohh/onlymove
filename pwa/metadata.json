@@ -1,147 +1,147 @@
 [
   {
     "filename": "tsumegos0.zip",
-    "min_rank": 3.379909810760868e-05,
-    "max_rank": 0.11223560814761138
+    "min_rank": 0,
+    "max_rank": 0.16284222641190685
   },
   {
     "filename": "tsumegos1.zip",
-    "min_rank": 0.11235738683722223,
-    "max_rank": 0.25587036504750893
+    "min_rank": 0.16284478064771998,
+    "max_rank": 0.24736657649107407
   },
   {
     "filename": "tsumegos2.zip",
-    "min_rank": 0.25587533585230593,
-    "max_rank": 0.34244749425711285
+    "min_rank": 0.24738231058368296,
+    "max_rank": 0.29919355368095646
   },
   {
     "filename": "tsumegos3.zip",
-    "min_rank": 0.34245276031734084,
-    "max_rank": 0.4075606716525911
+    "min_rank": 0.29919527779013033,
+    "max_rank": 0.33809934153588705
   },
   {
     "filename": "tsumegos4.zip",
-    "min_rank": 0.4075689677275374,
-    "max_rank": 0.4662051537563539
+    "min_rank": 0.3381077449717122,
+    "max_rank": 0.3677498303795852
   },
   {
     "filename": "tsumegos5.zip",
-    "min_rank": 0.46621946809470916,
-    "max_rank": 0.5122076882405134
+    "min_rank": 0.3677531764285004,
+    "max_rank": 0.3927691321010661
   },
   {
     "filename": "tsumegos6.zip",
-    "min_rank": 0.5122077801811058,
-    "max_rank": 0.5509797862877344
+    "min_rank": 0.3927720950146093,
+    "max_rank": 0.4141371792700367
   },
   {
     "filename": "tsumegos7.zip",
-    "min_rank": 0.5509866040596406,
-    "max_rank": 0.5821363263713979
+    "min_rank": 0.41413807325257124,
+    "max_rank": 0.4352742979791423
   },
   {
     "filename": "tsumegos8.zip",
-    "min_rank": 0.5821465094097207,
-    "max_rank": 0.6101662549401816
+    "min_rank": 0.4352746044874398,
+    "max_rank": 0.45520019806566187
   },
   {
     "filename": "tsumegos9.zip",
-    "min_rank": 0.6101692084715878,
-    "max_rank": 0.6326573696654951
+    "min_rank": 0.4552004918027804,
+    "max_rank": 0.47547429157822735
   },
   {
     "filename": "tsumegos10.zip",
-    "min_rank": 0.6326629975084671,
-    "max_rank": 0.6478629670783655
+    "min_rank": 0.4754762072550871,
+    "max_rank": 0.4966388810935031
   },
   {
     "filename": "tsumegos11.zip",
-    "min_rank": 0.6478642912351072,
-    "max_rank": 0.6597584510670329
+    "min_rank": 0.4966403497790956,
+    "max_rank": 0.5171078244850731
   },
   {
     "filename": "tsumegos12.zip",
-    "min_rank": 0.6597618308169979,
-    "max_rank": 0.6727946391399726
+    "min_rank": 0.5171108129409744,
+    "max_rank": 0.538729634982078
   },
   {
     "filename": "tsumegos13.zip",
-    "min_rank": 0.6727971844406561,
-    "max_rank": 0.6942906668921893
+    "min_rank": 0.5387318954807727,
+    "max_rank": 0.5613488107082147
   },
   {
     "filename": "tsumegos14.zip",
-    "min_rank": 0.6943022400043982,
-    "max_rank": 0.7201424476569883
+    "min_rank": 0.5613503943344188,
+    "max_rank": 0.584593104998785
   },
   {
     "filename": "tsumegos15.zip",
-    "min_rank": 0.7201437623962228,
-    "max_rank": 0.7438725444423333
+    "min_rank": 0.5846178734234649,
+    "max_rank": 0.6089338407714425
   },
   {
     "filename": "tsumegos16.zip",
-    "min_rank": 0.7438785575045981,
-    "max_rank": 0.7667696990593442
+    "min_rank": 0.608934831814938,
+    "max_rank": 0.6349527937631079
   },
   {
     "filename": "tsumegos17.zip",
-    "min_rank": 0.7667832308012164,
-    "max_rank": 0.7912309578603116
+    "min_rank": 0.6349560427510621,
+    "max_rank": 0.6620971392226842
   },
   {
     "filename": "tsumegos18.zip",
-    "min_rank": 0.7912310207171476,
-    "max_rank": 0.8137120079029125
+    "min_rank": 0.6621139371545093,
+    "max_rank": 0.6910233068143206
   },
   {
     "filename": "tsumegos19.zip",
-    "min_rank": 0.8137122987394418,
-    "max_rank": 0.8359841632123646
+    "min_rank": 0.6910239683613961,
+    "max_rank": 0.7216637114584015
   },
   {
     "filename": "tsumegos20.zip",
-    "min_rank": 0.835988800349678,
-    "max_rank": 0.8629392232000735
+    "min_rank": 0.7216687522427786,
+    "max_rank": 0.7547036405752925
   },
   {
     "filename": "tsumegos21.zip",
-    "min_rank": 0.8629399084540085,
-    "max_rank": 0.8886003478428175
+    "min_rank": 0.7547051130922388,
+    "max_rank": 0.791316379831519
   },
   {
     "filename": "tsumegos22.zip",
-    "min_rank": 0.8886007631897234,
-    "max_rank": 0.9153176257251154
+    "min_rank": 0.7913257334430667,
+    "max_rank": 0.8322207294984325
   },
   {
     "filename": "tsumegos23.zip",
-    "min_rank": 0.9153344011235465,
-    "max_rank": 0.9427807649428078
+    "min_rank": 0.8322209849220139,
+    "max_rank": 0.8790008815434062
   },
   {
     "filename": "tsumegos24.zip",
-    "min_rank": 0.9427815964722138,
-    "max_rank": 0.9637849475552044
+    "min_rank": 0.8790107536648238,
+    "max_rank": 0.935868566483425
   },
   {
     "filename": "tsumegos25.zip",
-    "min_rank": 0.9637872920956735,
-    "max_rank": 0.971940968604755
+    "min_rank": 0.9358837003306177,
+    "max_rank": 1
   },
   {
     "filename": "tsumegos26.zip",
-    "min_rank": 0.97194393396472,
-    "max_rank": 0.9796001398206737
+    "min_rank": 1,
+    "max_rank": 1
   },
   {
     "filename": "tsumegos27.zip",
-    "min_rank": 0.979601534055,
-    "max_rank": 0.9882804786454963
+    "min_rank": 1,
+    "max_rank": 1
   },
   {
     "filename": "tsumegos28.zip",
-    "min_rank": 0.9882843143708686,
-    "max_rank": 0.9999090077747798
+    "min_rank": 1,
+    "max_rank": 1
   }
 ]

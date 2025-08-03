@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import random
 import re
 
 import numpy as np
@@ -24,9 +23,10 @@ def get_heuristic_rank(content):
     pattern = r'Score: (-?\d+\.?\d*)'
     matches = re.findall(pattern, content)
     scores = sorted([float(score) for score in matches], reverse=True)
-    moves = len(set([ round(score) for score in scores ])) - 2
+    moves = len(set([round(score) for score in scores])) - 2
     avg_moves = 7
     return moves ** avg_moves / (moves ** avg_moves + avg_moves ** avg_moves)
+
 
 # 7 : heuristic_    0.165    0.479    1.000
 
@@ -54,6 +54,7 @@ def extract_difficulty(content):
 
 
 if __name__ == "__main__":
+
     tsumegos_dir = "tsumegos"
     if not os.path.exists(tsumegos_dir):
         print(f"Error: {tsumegos_dir} directory not found")
@@ -63,6 +64,27 @@ if __name__ == "__main__":
     rank_distribution = []
     rank_components_data = {}  # To store data for correlation analysis
 
+    # Load tsumego ratings
+    import pandas as pd
+
+    ratings_df = pd.read_csv('tsumego_ratings_logistic.csv', header=1, names=['id', 'rating'])
+    ratings_dict = dict(zip(ratings_df['id'], ratings_df['rating']))
+
+    # Load and normalize bot ratings
+    bot_ratings_df = pd.read_csv('bot_ratings_logistic.csv', header=1, names=['id', 'rating'])
+    bot_ratings_dict = dict(zip(bot_ratings_df['id'], bot_ratings_df['rating']))
+    min_rating = min(bot_ratings_dict.values())
+    max_rating = max(bot_ratings_dict.values())
+
+    ratings_dict = {k: max(0,min((v - min_rating) / (max_rating - min_rating),1)) for k, v in ratings_dict.items()}
+
+    normalized_bot_ratings = {k: (v - min_rating) / (max_rating - min_rating)
+                              for k, v in bot_ratings_dict.items() if (( k[-1] == 'k' ) or (k[-1] == 'd' )) }
+
+    print("\nNormalized bot ratings:")
+    for bot, rating in normalized_bot_ratings.items():
+        print(f"{bot}: {rating:.3f} {get_rank_str(rating)}")
+
     for filename in os.listdir(tsumegos_dir):
         if filename.endswith(".sgf"):
             file_path = os.path.join(tsumegos_dir, filename)
@@ -71,12 +93,15 @@ if __name__ == "__main__":
                 content = f.read()
 
             rank_data = extract_difficulty(content)
+            # Add true rank from ratings file
+            tsumego_id = filename.split('.')[0]
+            rank_data["rank"] = ratings_dict.get(tsumego_id, 0.0)
 
             if rank_data is None or "rank" not in rank_data:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
 
             # Add randomness to the main rank
-            rank_data["rank"] = rank_data["rank"] * (29 / 30) + (1 / 30) * random.random()
+            # rank_data["rank"] = rank_data["rank"] * (29 / 30) + (1 / 30) * random.random()
 
             # Add filename to the rank data
             rank_data["filename"] = filename
@@ -86,7 +111,7 @@ if __name__ == "__main__":
 
             # Collect data for correlation analysis (excluding "rank" and "filename")
             for key, value in rank_data.items():
-                if key not in ["rank", "filename"]:
+                if key not in ["filename"]:
                     if key not in rank_components_data:
                         rank_components_data[key] = []
                     rank_components_data[key].append(value)
@@ -114,33 +139,33 @@ if __name__ == "__main__":
     for group in range(group_count):
         group_items = [item for item in metadata if item["group"] == group]
         group_files = [item["filename"] for item in group_items]
-        
+
         # Calculate min and max rank for this group
         if group_items:
             min_rank = min(item["rank"] for item in group_items)
             max_rank = max(item["rank"] for item in group_items)
         else:
             min_rank = max_rank = 0
-            
+
         zip_filename = f"tsumegos{group}.zip"
         zip_path = os.path.join("pwa", "tsumegos", zip_filename)
-        
+
         # Add to main metadata
         zip_metadata.append({
             "filename": zip_filename,
             "min_rank": min_rank,
             "max_rank": max_rank
         })
-        
+
         if os.path.exists(zip_path):
             os.remove(zip_path)
-            
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Add tsumego files
             for filename in group_files:
                 file_path = os.path.join(tsumegos_dir, filename)
                 zipf.write(file_path, filename)
-            
+
             # Create and add metadata.json for this zip (excluding group field)
             group_metadata = []
             for item in group_items:
