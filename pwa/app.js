@@ -390,7 +390,10 @@ function initializeKifuFromSGF(sgfContent) {
 async function fetchSgfFromZip(filename, group) {
     const zipFilename = `tsumegos${group}.zip`;
 
-    if (!loadedZips[zipFilename]) await loadZipProblems(zipFilename);
+    if (!loadedZips[zipFilename]) {
+        console.log("Blocking on zip download for SGF fetch");
+        await loadZipProblems(zipFilename);
+    }
 
     const zip = zipCache[group];
     if (!zip) throw new Error(`Zip file ${zipFilename} not found in cache`);
@@ -422,6 +425,7 @@ async function loadZipProblems(zipFilename) {
     if (!groupMatch) throw new Error(`Invalid zip filename format: ${zipFilename}`);
     const group = parseInt(groupMatch[1]);
 
+    console.log(`Starting download of ${zipFilename}`);
     const zipResponse = await fetch(`tsumegos/${zipFilename}`);
     const zipData = await zipResponse.arrayBuffer();
     const zip = new JSZip();
@@ -466,6 +470,7 @@ function findClosestZip() {
 async function backgroundLoadCloserZip() {
     const closestZip = findClosestZip();
     if (closestZip && !loadedZips[closestZip.filename]) {
+        console.log("Starting background zip download");
         try {
             await loadZipProblems(closestZip.filename);
         } catch (error) {
@@ -501,6 +506,7 @@ async function loadTsumego(problemToLoad = null) {
             if (!selectedProblem) {
                 const closestZip = findClosestZip();
                 if (closestZip) {
+                    console.log("Blocking on zip download for problem selection");
                     await loadZipProblems(closestZip.filename);
                     selectedProblem = selectProblem();
                     if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
@@ -535,7 +541,8 @@ async function loadTsumego(problemToLoad = null) {
         }
 
         acceptClicks = true;
-        backgroundLoadCloserZip();
+    console.log("Starting background zip load (non-blocking)");
+    backgroundLoadCloserZip();
 
     } catch (error) {
         // MODIFICATION START: Improved error logging
