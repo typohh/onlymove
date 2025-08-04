@@ -1,6 +1,8 @@
 import hashlib
+import io
 import json
 import os
+import random
 import re
 
 import numpy as np
@@ -97,6 +99,12 @@ if __name__ == "__main__":
             tsumego_id = filename.split('.')[0]
             rank_data["rank"] = ratings_dict.get(tsumego_id, 0.0)
 
+            # spread out extremes for about half a rank, so we can order them into zips properly
+            if rank_data["rank"] == 1.0:
+                rank_data["rank"] -= random.uniform(0, 1/60)
+            if rank_data["rank"] == 0.0:
+                rank_data["rank"] += random.uniform(0, 1/60)
+
             if rank_data is None or "rank" not in rank_data:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
 
@@ -134,6 +142,13 @@ if __name__ == "__main__":
     # Create zip files for each group with embedded metadata
     import zipfile
 
+    # Delete any pre-existing zip files in the directory
+    zip_dir = os.path.join("pwa", "tsumegos")
+    if os.path.exists(zip_dir):
+        for filename in os.listdir(zip_dir):
+            if filename.endswith(".zip"):
+                os.remove(os.path.join(zip_dir, filename))
+
     zip_metadata = []  # For the main metadata file
 
     for group in range(group_count):
@@ -147,24 +162,14 @@ if __name__ == "__main__":
         else:
             min_rank = max_rank = 0
 
-        zip_filename = f"tsumegos{group}.zip"
-        zip_path = os.path.join("pwa", "tsumegos", zip_filename)
-
-        # Add to main metadata
-        zip_metadata.append({
-            "filename": zip_filename,
-            "min_rank": min_rank,
-            "max_rank": max_rank
-        })
-
-        if os.path.exists(zip_path):
-            os.remove(zip_path)
-
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Create zip content and calculate hash
+        zip_content = io.BytesIO()
+        with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
             # Add tsumego files
             for filename in group_files:
                 file_path = os.path.join(tsumegos_dir, filename)
-                zipf.write(file_path, filename)
+                with open(file_path, 'rb') as f:
+                    temp_zip.writestr(filename, f.read())
 
             # Create and add metadata.json for this zip (excluding group field)
             group_metadata = []
@@ -172,7 +177,24 @@ if __name__ == "__main__":
                 # Copy item but exclude the "group" field
                 item_copy = {k: v for k, v in item.items() if k != "group"}
                 group_metadata.append(item_copy)
-            zipf.writestr("metadata.json", json.dumps(group_metadata, indent=2))
+            temp_zip.writestr("metadata.json", json.dumps(group_metadata, indent=2))
+        
+        # Calculate hash of zip content
+        zip_content.seek(0)
+        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:16]
+        zip_filename = f"{zip_hash}.zip"
+        zip_path = os.path.join("pwa", "tsumegos", zip_filename)
+
+        # Write the actual zip file
+        with open(zip_path, 'wb') as f:
+            f.write(zip_content.getvalue())
+
+        # Add to main metadata
+        zip_metadata.append({
+            "filename": zip_filename,
+            "min_rank": min_rank,
+            "max_rank": max_rank
+        })
 
     # Write main metadata file with zip information
     metadata_path = os.path.join("pwa", "metadata.json")
@@ -210,3 +232,5 @@ if __name__ == "__main__":
             print(f"{name}: {avg_rank:.3f}")
     else:
         print("\nNo rank components found for correlation analysis.")
+
+# in @prepare_tsumegos.py, lets name the zip files according to their hash, also delete any pre existing zip files in the directory where we store the tsumego zip files we produce.

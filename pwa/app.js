@@ -35,6 +35,9 @@ let momentum = parseFloat(localStorage.getItem('momentum')) || 30;
 // Cache for loaded zip files to avoid redundant fetches
 const zipCache = {};
 
+// Cache name for tsumego files
+const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
+
 
 // --- Helper Functions ---
 
@@ -83,15 +86,15 @@ function updateAllUI() {
         komiElement.textContent = `7.5 ${komiTerm}`;
     }
 
-    // Update "Previous Tsumego" link text and state
+    // Update "Previous" link text and state
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
         const lang = navigator.language || 'en';
         let prevTsumegoText;
         if (lang.startsWith('zh')) { prevTsumegoText = '上一题'; }
-        else if (lang.startsWith('ja')) { prevTsumegoText = '前の詰碁'; }
+        else if (lang.startsWith('ja')) { prevTsumegoText = '前の問題'; }
         else if (lang.startsWith('ko')) { prevTsumegoText = '이전 문제'; }
-        else { prevTsumegoText = 'Previous Tsumego'; }
+        else { prevTsumegoText = 'Previous'; }
 
         prevTsumegoLink.textContent = prevTsumegoText;
 
@@ -145,14 +148,15 @@ function updateUserStats(isCorrect, hintWasShown = false) {
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
         problemFrequencies[currentProblemFilename] = currentFreq / 5;
-        userRank = Math.min(1, userRank + (momentum / 300));
+        // Limit rank increase to half the distance to 1.0
+        const maxIncrease = (1.0 - userRank) / 2;
+        const intendedIncrease = momentum / 300;
+        userRank = userRank + Math.min(intendedIncrease, maxIncrease);
     } else {
         problemFrequencies[currentProblemFilename] = 25;
         momentum = (momentum + 1) / 2;
         userRank = Math.max(0, userRank - 4 * (momentum / 300));
     }
-
-    console.log(`Rank updated from ${oldRank.toFixed(4)} to ${userRank.toFixed(4)}`);
 
     localStorage.setItem('userRank', userRank.toString());
     localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
@@ -169,7 +173,8 @@ function updateUserStats(isCorrect, hintWasShown = false) {
  */
 function handleCorrectAnswer(hintWasShown = false) {
     updateUserStats(true, hintWasShown);
-    loadTsumego().catch(error => console.error("Error loading next tsumego:", error));
+    showCorrectMove = false
+    loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
 }
 
 /**
@@ -180,7 +185,7 @@ function handleIncorrectAnswer(hintWasShown = false) {
     updateUserStats(false, hintWasShown);
     displayOverlay('', 3000, () => {
         showCorrectMove = true;
-        loadTsumego().catch(error => console.error("Error loading next tsumego:", error));
+        loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
     });
 }
 
@@ -385,17 +390,14 @@ function initializeKifuFromSGF(sgfContent) {
 /**
  * Fetches an SGF file from a zip archive.
  * @param {string} filename - The SGF file to load.
- * @param {number} group - The group number indicating which zip file to load from.
+ * @param {string} zipFilename - The name of the zip file to load from.
  */
-async function fetchSgfFromZip(filename, group) {
-    const zipFilename = `tsumegos${group}.zip`;
-
+async function fetchSgfFromZip(filename, zipFilename) {
     if (!loadedZips[zipFilename]) {
-        console.log("Blocking on zip download for SGF fetch");
         await loadZipProblems(zipFilename);
     }
 
-    const zip = zipCache[group];
+    const zip = zipCache[zipFilename];
     if (!zip) throw new Error(`Zip file ${zipFilename} not found in cache`);
 
     const file = zip.file(filename);
@@ -415,19 +417,63 @@ async function loadZipMetadata() {
 }
 
 /**
+ * Evicts zip files from cache that are not listed in the main metadata.json
+ */
+async function evictUnusedZipFiles() {
+    try {
+        // Load metadata first
+        await loadZipMetadata();
+        
+        // Get all cache keys
+        const cache = await caches.open(TSUMEGO_CACHE_NAME);
+        const cacheKeys = await cache.keys();
+        
+        // Extract expected zip filenames from metadata
+        const expectedZipFiles = new Set(zipMetadata.map(zip => `tsumegos/${zip.filename}`));
+        
+        // Check each cached file
+        for (const request of cacheKeys) {
+            const url = new URL(request.url);
+            const path = url.pathname.substring(1); // Remove leading slash
+            
+            // If it's a tsumego zip file and not in our expected list, delete it
+            if (path.startsWith('tsumegos/tsumegos') && path.endsWith('.zip') && !expectedZipFiles.has(path)) {
+                console.log("Evicting unused zip from cache:", path);
+                await cache.delete(request);
+            }
+        }
+    } catch (error) {
+        console.error("Error evicting unused zip files:", error);
+    }
+}
+
+/**
  * Loads and caches problems from a specific zip file.
  * @param {string} zipFilename - The name of the zip file to load.
  */
 async function loadZipProblems(zipFilename) {
     if (loadedZips[zipFilename]) return;
 
-    const groupMatch = zipFilename.match(/tsumegos(\d+)\.zip/);
-    if (!groupMatch) throw new Error(`Invalid zip filename format: ${zipFilename}`);
-    const group = parseInt(groupMatch[1]);
+    console.log("downloading more tsumegos: " + zipFilename)
 
-    console.log(`Starting download of ${zipFilename}`);
-    const zipResponse = await fetch(`tsumegos/${zipFilename}`);
-    const zipData = await zipResponse.arrayBuffer();
+    // Try to get from cache first
+    const cache = await caches.open(TSUMEGO_CACHE_NAME);
+    const cachedResponse = await cache.match(`tsumegos/${zipFilename}`);
+    
+    let zipData;
+    if (cachedResponse) {
+        console.log("Loading from cache: " + zipFilename);
+        zipData = await cachedResponse.arrayBuffer();
+    } else {
+        console.log("Fetching from network: " + zipFilename);
+        const zipResponse = await fetch(`tsumegos/${zipFilename}`);
+        zipData = await zipResponse.arrayBuffer();
+        
+        // Cache the response
+        const responseToCache = new Response(zipData);
+        await cache.put(`tsumegos/${zipFilename}`, responseToCache);
+    }
+
     const zip = new JSZip();
     await zip.loadAsync(zipData);
 
@@ -435,11 +481,11 @@ async function loadZipProblems(zipFilename) {
     if (!metadataFile) throw new Error(`metadata.json not found in ${zipFilename}`);
 
     const metadataContent = await metadataFile.async('text');
-    const problems = JSON.parse(metadataContent).map(p => ({ ...p, group }));
+    const problems = JSON.parse(metadataContent).map(p => ({ ...p, zipFilename }));
 
     loadedZips[zipFilename] = problems;
     allProblems.push(...problems);
-    zipCache[group] = zip;
+    zipCache[zipFilename] = zip;
 }
 
 /**
@@ -470,7 +516,6 @@ function findClosestZip() {
 async function backgroundLoadCloserZip() {
     const closestZip = findClosestZip();
     if (closestZip && !loadedZips[closestZip.filename]) {
-        console.log("Starting background zip download");
         try {
             await loadZipProblems(closestZip.filename);
         } catch (error) {
@@ -481,21 +526,19 @@ async function backgroundLoadCloserZip() {
 
 /**
  * Main function to load and display a tsumego problem.
- * @param {object} [problemToLoad] - Optional specific problem to load.
  */
-async function loadTsumego(problemToLoad = null) {
+async function loadTsumego(update) {
     try {
         acceptClicks = false;
         await loadZipMetadata();
 
         let kifu;
-        let selectedProblem = problemToLoad;
-        const wasShowingCorrectMove = showCorrectMove;
+        let selectedProblem = null;
 
         const savedTsumegoFile = localStorage.getItem('currentTsumego');
         const savedTsumegoContent = localStorage.getItem('currentTsumegoContent');
 
-        if (!currentProblemFilename && savedTsumegoFile && savedTsumegoContent && !selectedProblem) {
+        if (savedTsumegoFile && savedTsumegoContent && !update) {
             currentProblemFilename = savedTsumegoFile;
             currentSGF = savedTsumegoContent;
         } else {
@@ -519,7 +562,7 @@ async function loadTsumego(problemToLoad = null) {
             previousProblemFilename = currentProblemFilename;
 
             currentProblemFilename = selectedProblem.filename;
-            currentSGF = await fetchSgfFromZip(currentProblemFilename, selectedProblem.group);
+            currentSGF = await fetchSgfFromZip(currentProblemFilename, selectedProblem.zipFilename);
 
             localStorage.setItem('currentTsumego', currentProblemFilename);
             localStorage.setItem('currentTsumegoContent', currentSGF);
@@ -528,7 +571,6 @@ async function loadTsumego(problemToLoad = null) {
                 localStorage.setItem('previousTsumegoContent', previousSGF);
             }
 
-            console.log("Tsumego metadata:", selectedProblem);
         }
 
         kifu = initializeKifuFromSGF(currentSGF);
@@ -536,13 +578,8 @@ async function loadTsumego(problemToLoad = null) {
         updateBoard();
         updateAllUI();
 
-        if (!wasShowingCorrectMove) {
-            showCorrectMove = false;
-        }
-
         acceptClicks = true;
-    console.log("Starting background zip load (non-blocking)");
-    backgroundLoadCloserZip();
+        backgroundLoadCloserZip();
 
     } catch (error) {
         // MODIFICATION START: Improved error logging
@@ -582,7 +619,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    loadTsumego().catch(error => console.error("Failed to load initial tsumego:", error));
+    // Load tsumego without waiting for eviction
+    loadTsumego(false).catch(error => console.error("Failed to load initial tsumego:", error));
+    
+    // Evict unused zip files from cache in background
+    evictUnusedZipFiles().catch(error => console.error("Error during cache eviction:", error));
 });
 
 window.addEventListener('resize', updateBoardSize);
