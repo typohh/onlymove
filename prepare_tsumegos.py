@@ -94,16 +94,20 @@ if __name__ == "__main__":
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            rank_data = extract_difficulty(content)
+            rank_data = {}
+
             # Add true rank from ratings file
             tsumego_id = filename.split('.')[0]
-            rank_data["rank"] = ratings_dict.get(tsumego_id, 0.0)
+            if ratings_dict.get(tsumego_id) is None:
+                print(f"Warning: No rating found for {tsumego_id}")
+
+            rank_data["rank"] = ratings_dict.get(tsumego_id,0)
 
             # spread out extremes for about half a rank, so we can order them into zips properly
             if rank_data["rank"] == 1.0:
-                rank_data["rank"] -= random.uniform(0, 1/60)
+                rank_data["rank"] -= random.Random(tsumego_id).uniform(0, 1 / 60)
             if rank_data["rank"] == 0.0:
-                rank_data["rank"] += random.uniform(0, 1/60)
+                rank_data["rank"] += random.Random(tsumego_id).uniform(0, 1 / 60)
 
             if rank_data is None or "rank" not in rank_data:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
@@ -134,7 +138,7 @@ if __name__ == "__main__":
     # for i, item in enumerate(metadata):
     #     item["rank"] = i / (len(metadata) - 1)
 
-    group_count = 29
+    group_count = 150
 
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
@@ -211,26 +215,3 @@ if __name__ == "__main__":
         count = sum(1 for x in rank_distribution if min_rank <= x <= max_rank)
         print(f"{get_rank_str((min_rank + max_rank) / 2)}: {count} problems")
 
-    # Calculate and print correlation matrix
-    # Convert rank_components_data to array for correlation analysis
-    component_names = list(rank_components_data.keys())
-    if component_names:
-        # Create array with each component as a column
-        ranks_array = np.array([rank_components_data[name] for name in component_names]).T
-        correlation_matrix = np.corrcoef(ranks_array.T)
-        print("\nCorrelation Matrix:")
-        header = " " * 14 + "  ".join(f"{name[:10]:>10}" for name in component_names)  # Truncate names to 10 chars
-        print(header)
-        for i, name in enumerate(component_names):
-            row = f"{name[:10]:<10}  " + "  ".join(f"{correlation_matrix[i][j]:7.3f}" for j in range(len(component_names)))
-            print(row)
-
-        # Calculate and print average ranks for each component
-        print(f"\nAverage Ranks:")
-        for name in component_names:
-            avg_rank = np.mean(rank_components_data[name])
-            print(f"{name}: {avg_rank:.3f}")
-    else:
-        print("\nNo rank components found for correlation analysis.")
-
-# in @prepare_tsumegos.py, lets name the zip files according to their hash, also delete any pre existing zip files in the directory where we store the tsumego zip files we produce.
