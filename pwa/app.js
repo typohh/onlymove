@@ -48,7 +48,7 @@ const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
  */
 function getDescriptiveRank(numericRank) {
     const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
-    const rankIndex = Math.floor(numericRank * totalRanks);
+    const rankIndex = Math.floor(Math.pow(numericRank ,0.5) * totalRanks);
     const lang = navigator.language || 'en';
 
     let kyuTerm, danTerm, komiTerm;
