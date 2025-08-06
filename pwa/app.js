@@ -120,19 +120,20 @@ function displayOverlay(message, duration, callback) {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
         backgroundColor: 'rgba(139, 0, 0, 1)',
         display: 'flex', justifyContent: 'center', alignItems: 'center',
-        zIndex: '1000', opacity: '1', transition: 'opacity 3s ease-out'
+        zIndex: '1000', opacity: '1', transition: `opacity ${duration/1000}s ease-out`
     });
 
     document.body.appendChild(overlay);
 
-    setTimeout(() => { overlay.style.opacity = '0'; }, 50);
+    // Ensure at least one paint before starting the fade
+    requestAnimationFrame(() => requestAnimationFrame(() => { overlay.style.opacity = '0'; }));
 
     setTimeout(() => {
         if (overlay.parentNode) {
             document.body.removeChild(overlay);
         }
         if (callback) callback();
-    }, 3000);
+    }, duration);
 }
 
 /**
@@ -191,11 +192,39 @@ function handleIncorrectAnswer(hintWasShown = false) {
 
 /**
  * Handles user clicks on the Go board.
+ * Sequence: user move -> wait 1s -> opponent response (if any) -> wait 1s -> resolve.
+ * Uses async/await with a delay helper and frame awaits to ensure paint before delays.
  * @param {number} x - The x-coordinate of the click.
  * @param {number} y - The y-coordinate of the click.
  */
-function handleBoardClick(x, y) {
+async function handleBoardClick(x, y) {
+    // Prevent early clicks only when not in hint mode
+    if (!showCorrectMove && window.__yt_initialBlockUntil && Date.now() < window.__yt_initialBlockUntil) {
+        const overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+            backgroundColor: 'rgba(255, 255, 255, 1)',
+            zIndex: '1000', opacity: '1', transition: 'opacity 1s ease-out'
+        });
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => requestAnimationFrame(() => { overlay.style.opacity = '0'; }));
+        setTimeout(() => { if (overlay.parentNode) document.body.removeChild(overlay); }, 1000);
+        return;
+    }
+
     if (!acceptClicks || !game || !kifuReader) return;
+
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+    const renderAndHold = async (ms) => {
+        if (boardContainer) {
+            // Force style/layout to flush any pending drawing
+            window.getComputedStyle(boardContainer).getPropertyValue('width');
+            void boardContainer.offsetHeight;
+        }
+        await Promise.resolve();
+        await delay(ms);
+    };
 
     const hintWasShown = showCorrectMove;
 
@@ -214,28 +243,35 @@ function handleBoardClick(x, y) {
 
         const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
 
-        if (moveNode) {
-            const isCorrect = moveNode.comment?.includes('Correct') || false;
-            const moveIndex = kifuReader.node.children.indexOf(moveNode);
-            kifuReader.next(moveIndex);
-            updateBoard();
+        if (!moveNode) {
+            acceptClicks = true;
+            return;
+        }
 
-            setTimeout(() => {
-                if (kifuReader.node.children.length > 0) {
-                    kifuReader.next();
-                    updateBoard();
-                    setTimeout(() => {
-                        if (isCorrect) handleCorrectAnswer(hintWasShown);
-                        else handleIncorrectAnswer(hintWasShown);
-                    }, 1000);
-                } else {
-                    if (isCorrect) handleCorrectAnswer(hintWasShown);
-                    else handleIncorrectAnswer(hintWasShown);
-                }
-            }, 1000);
+        const isCorrect = moveNode.comment?.includes('Correct') || false;
+        const moveIndex = kifuReader.node.children.indexOf(moveNode);
+
+        // User move
+        kifuReader.next(moveIndex);
+        updateBoard();
+        await renderAndHold(1000); // Show user move for 1s (after forcing render)
+
+        // Opponent response (always present per problem format)
+        kifuReader.next();
+        updateBoard();
+        await renderAndHold(1000); // Show opponent move for 1s (after forcing render)
+
+        // Resolve outcome sequentially
+        if (isCorrect) {
+            handleCorrectAnswer(hintWasShown);
         } else {
-            // Re-enable clicks if the move was invalid but on the board
-             acceptClicks = true;
+            // For incorrect, ensure overlay blocks for 3s before next load to avoid overlap
+            updateUserStats(false, hintWasShown);
+            await new Promise((resolve) => {
+                displayOverlay('', 3000, resolve);
+            });
+            showCorrectMove = true;
+            loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
         }
     }
 }
@@ -531,6 +567,8 @@ async function loadTsumego(update) {
     try {
         acceptClicks = false;
         await loadZipMetadata();
+        
+        // Set early-click block only when not in hint mode
 
         let kifu;
         let selectedProblem = null;
@@ -577,6 +615,13 @@ async function loadTsumego(update) {
         initializeBoard(kifu.size);
         updateBoard();
         updateAllUI();
+
+        // Configure 1s early-click block depending on hint mode
+        if (!showCorrectMove) {
+            window.__yt_initialBlockUntil = Date.now() + 1000;
+        } else {
+            window.__yt_initialBlockUntil = 0;
+        }
 
         acceptClicks = true;
         backgroundLoadCloserZip();

@@ -1,4 +1,5 @@
 import os
+import re
 
 import pandas as pd
 import torch
@@ -6,17 +7,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-APPROVED = [
-    "gnugo_1.txt",
-    "gnugo_6.txt",
-    "katago_1710_100.txt",
-    "katago_12k.txt",
-    "katago_3d.txt",
-    "katago_9d.txt",
-    "katago_9958_10.txt",
-    "katago_9958_100.txt"
-]
-
+from katago_queries import get_rank_number
 
 # --- 2. Data Loading and Preprocessing ---
 def load_data(data_dir):
@@ -27,9 +18,27 @@ def load_data(data_dir):
     """
     print("Loading and preprocessing data...")
     # bot_files = glob.glob(os.path.join(data_dir, "*.txt"))
-    # bot_files = [os.path.join(data_dir, filename) for filename in APPROVED if os.path.exists(os.path.join(data_dir, filename))]
-    bot_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if "corrupt" in f and f.endswith('.txt')]
-    bot_files.extend([os.path.join(data_dir, filename) for filename in APPROVED if os.path.exists(os.path.join(data_dir, filename))])
+    patterns = [
+        r"katago_corrupt.*\.txt$",
+        r"katago_\d+d\.txt$",
+        r"katago_\d+k\.txt$",
+    ]
+    bot_files = []
+    for f in os.listdir(data_dir):
+        if any(re.match(pattern, f) for pattern in patterns):
+            filepath = os.path.join(data_dir, f)
+            if os.path.exists(filepath):
+                bot_files.append(filepath)
+
+    # bot_files.append(os.path.join(data_dir, "gnugo_1.txt"))
+    # bot_files.append(os.path.join(data_dir, "gnugo_6.txt"))
+    bot_files.append(os.path.join(data_dir, "katago_9958_1.txt"))
+    bot_files.append(os.path.join(data_dir, "katago_9958_10.txt"))
+    bot_files.append(os.path.join(data_dir, "katago_9958_100.txt"))
+
+    for file in bot_files:
+        print(file)
+    print()
 
     if not bot_files:
         raise FileNotFoundError(f"No bot data files (.txt) found in '{data_dir}'")

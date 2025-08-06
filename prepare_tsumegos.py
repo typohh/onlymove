@@ -52,8 +52,32 @@ def extract_difficulty(content):
         "heuristic_rank": heuristic_rank
     }
 
-RANK_EXPONENT = 3.0/2.0
-# RANK_EXPONENT = 1.0
+
+def intepolate(points, rating):
+    # Find points above and below the rating
+    above = None
+    below = None
+    for new_val, old_val in points:
+        if old_val >= rating:
+            above = (new_val, old_val)
+        if old_val <= rating and below is None:
+            below = (new_val, old_val)
+        if above is not None and below is not None:
+            break
+
+    if above is None:
+        return 1
+    if below is None:
+        return 0
+
+    # If points are the same, return either value
+    if above[1] == below[1]:
+        return above[0]
+
+    # Linear interpolation
+    t = (rating - below[1]) / (above[1] - below[1])
+    return below[0] + t * (above[0] - below[0])
+
 
 if __name__ == "__main__":
 
@@ -69,23 +93,40 @@ if __name__ == "__main__":
     # Load tsumego ratings
     import pandas as pd
 
-    ratings_df = pd.read_csv('ratings/tsumego_ratings_final.csv', header=1, names=['id', 'rating'])
-    ratings_dict = dict(zip(ratings_df['id'], ratings_df['rating']))
-
     # Load and normalize bot ratings
-    bot_ratings_df = pd.read_csv('ratings/bot_ratings_final.csv', header=1, names=['id', 'rating'])
+    bot_ratings_df = pd.read_csv('ratings/bot_ratings_final.csv', header=0, names=['id', 'rating'])
     bot_ratings_dict = dict(zip(bot_ratings_df['id'], bot_ratings_df['rating']))
-    min_rating = min(bot_ratings_dict.values())
-    max_rating = max(bot_ratings_dict.values())
 
-    ratings_dict = {k: max(0, min((v - min_rating) / (max_rating - min_rating), 1)) for k, v in ratings_dict.items()}
+    max_rating = max(bot_ratings_dict.items(), key=lambda x: x[1])[0]
+    min_rating = min(bot_ratings_dict.items(), key=lambda x: x[1])[0]
 
-    normalized_bot_ratings = {k: (v - min_rating) / (max_rating - min_rating)
-                              for k, v in bot_ratings_dict.items()}
+    anchors = {
+        max_rating: 1.0,
+        "katago_9958_10": get_rank_number("8d"),
+        # "katago_9958_1": get_rank_number("8d"),
+        "katago_4k": get_rank_number("4d"),
+        "katago_corrupt_50_1": get_rank_number("19k"),
+        min_rating: 0.0
+    }
+
+    print(bot_ratings_dict)
+
+    print(anchors)
+
+    anchors_old = {key: bot_ratings_dict[key] for key in anchors.keys()}
+
+    rating_map = list(zip(anchors.values(), anchors_old.values()))
+
+    normalized_bot_ratings = {}
+    for bot, rating in bot_ratings_dict.items():
+        normalized_bot_ratings[bot] = intepolate(rating_map, rating)
 
     print("\nNormalized bot ratings:")
     for bot, rating in normalized_bot_ratings.items():
-        print(f"{bot}: {rating:.3f} {get_rank_str(rating**RANK_EXPONENT)}")
+        print(f"{bot}: {bot_ratings_dict[bot]:.3f} -> {rating:.3f} {get_rank_str(rating)}")
+
+    ratings_df = pd.read_csv('ratings/tsumego_ratings_final.csv', header=0, names=['id', 'rating'])
+    ratings_dict = dict(zip(ratings_df['id'], ratings_df['rating']))
 
     for filename in os.listdir(tsumegos_dir):
         if filename.endswith(".sgf"):
@@ -102,7 +143,7 @@ if __name__ == "__main__":
                 print(f"Warning: No rating found for {tsumego_id}")
                 continue
 
-            rank_data["rank"] = ratings_dict.get(tsumego_id, 0)
+            rank_data["rank"] = intepolate(rating_map, ratings_dict.get(tsumego_id))
 
             if rank_data is None or "rank" not in rank_data:
                 raise Exception(f"Warning: Could not determine difficulty for {filename}")
@@ -112,8 +153,6 @@ if __name__ == "__main__":
                 rank_data["rank"] -= random.Random(tsumego_id).uniform(0, 1 / 60)
             if rank_data["rank"] == 0.0:
                 rank_data["rank"] += random.Random(tsumego_id).uniform(0, 1 / 60)
-
-            rank_data["rank"] **= 1/RANK_EXPONENT
 
             # Add randomness to the main rank
             # rank_data["rank"] = rank_data["rank"] * (29 / 30) + (1 / 30) * random.random()

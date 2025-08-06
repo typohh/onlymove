@@ -159,8 +159,13 @@ def create_corrupted(scale, filename):
 
 
 WEIGHTS_CORRUPTED = {
+    'corrupt2.txt.gz': 2,
+    'corrupt5.txt.gz': 5,
+    'corrupt7.txt.gz': 7,
     'corrupt10.txt.gz': 10,
+    'corrupt12.txt.gz': 12,
     'corrupt15.txt.gz': 15,
+    'corrupt17.txt.gz': 17,
     'corrupt20.txt.gz': 20,
     'corrupt22.txt.gz': 22,
     'corrupt25.txt.gz': 25,
