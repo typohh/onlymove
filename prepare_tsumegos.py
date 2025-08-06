@@ -5,9 +5,7 @@ import os
 import random
 import re
 
-import numpy as np
-
-from katago_queries import get_rank_number, get_rank_str
+from katago_queries import get_rank_number, get_rank_str, get_all_ranks
 
 
 def fix_tsumegos(tsumegos_dir):
@@ -54,6 +52,8 @@ def extract_difficulty(content):
         "heuristic_rank": heuristic_rank
     }
 
+RANK_EXPONENT = 3.0/2.0
+# RANK_EXPONENT = 1.0
 
 if __name__ == "__main__":
 
@@ -69,23 +69,23 @@ if __name__ == "__main__":
     # Load tsumego ratings
     import pandas as pd
 
-    ratings_df = pd.read_csv('tsumego_ratings_logistic.csv', header=1, names=['id', 'rating'])
+    ratings_df = pd.read_csv('ratings/tsumego_ratings_final.csv', header=1, names=['id', 'rating'])
     ratings_dict = dict(zip(ratings_df['id'], ratings_df['rating']))
 
     # Load and normalize bot ratings
-    bot_ratings_df = pd.read_csv('bot_ratings_logistic.csv', header=1, names=['id', 'rating'])
+    bot_ratings_df = pd.read_csv('ratings/bot_ratings_final.csv', header=1, names=['id', 'rating'])
     bot_ratings_dict = dict(zip(bot_ratings_df['id'], bot_ratings_df['rating']))
     min_rating = min(bot_ratings_dict.values())
     max_rating = max(bot_ratings_dict.values())
 
-    ratings_dict = {k: max(0,min((v - min_rating) / (max_rating - min_rating),1)) for k, v in ratings_dict.items()}
+    ratings_dict = {k: max(0, min((v - min_rating) / (max_rating - min_rating), 1)) for k, v in ratings_dict.items()}
 
     normalized_bot_ratings = {k: (v - min_rating) / (max_rating - min_rating)
-                              for k, v in bot_ratings_dict.items() if (( k[-1] == 'k' ) or (k[-1] == 'd' )) }
+                              for k, v in bot_ratings_dict.items()}
 
     print("\nNormalized bot ratings:")
     for bot, rating in normalized_bot_ratings.items():
-        print(f"{bot}: {rating:.3f} {get_rank_str(rating)}")
+        print(f"{bot}: {rating:.3f} {get_rank_str(rating**RANK_EXPONENT)}")
 
     for filename in os.listdir(tsumegos_dir):
         if filename.endswith(".sgf"):
@@ -100,8 +100,12 @@ if __name__ == "__main__":
             tsumego_id = filename.split('.')[0]
             if ratings_dict.get(tsumego_id) is None:
                 print(f"Warning: No rating found for {tsumego_id}")
+                continue
 
-            rank_data["rank"] = ratings_dict.get(tsumego_id,0)
+            rank_data["rank"] = ratings_dict.get(tsumego_id, 0)
+
+            if rank_data is None or "rank" not in rank_data:
+                raise Exception(f"Warning: Could not determine difficulty for {filename}")
 
             # spread out extremes for about half a rank, so we can order them into zips properly
             if rank_data["rank"] == 1.0:
@@ -109,8 +113,7 @@ if __name__ == "__main__":
             if rank_data["rank"] == 0.0:
                 rank_data["rank"] += random.Random(tsumego_id).uniform(0, 1 / 60)
 
-            if rank_data is None or "rank" not in rank_data:
-                raise Exception(f"Warning: Could not determine difficulty for {filename}")
+            rank_data["rank"] **= 1/RANK_EXPONENT
 
             # Add randomness to the main rank
             # rank_data["rank"] = rank_data["rank"] * (29 / 30) + (1 / 30) * random.random()
@@ -182,7 +185,7 @@ if __name__ == "__main__":
                 item_copy = {k: v for k, v in item.items() if k != "group"}
                 group_metadata.append(item_copy)
             temp_zip.writestr("metadata.json", json.dumps(group_metadata, indent=2))
-        
+
         # Calculate hash of zip content
         zip_content.seek(0)
         zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:16]
@@ -208,10 +211,11 @@ if __name__ == "__main__":
     # Print rank distribution sorted by rank_num
     rank_distribution = sorted(rank_distribution)
     print("\nRank Distribution:")
-    for i in range(29):
-        min_rank = i / 29
-        max_rank = (i + 1) / 29
+    previous_rank = 0
+    for rank in get_all_ranks():
+        min_rank = (rank + previous_rank) / 2
+        max_rank = rank + rank - previous_rank
         # print aproximately how many of rank_distrubitn is between min_rank and max_rank
         count = sum(1 for x in rank_distribution if min_rank <= x <= max_rank)
-        print(f"{get_rank_str((min_rank + max_rank) / 2)}: {count} problems")
-
+        print(f"{get_rank_str(rank)}: {count} problems")
+        previous_rank = rank

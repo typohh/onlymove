@@ -1,6 +1,6 @@
 WEIGHTS = {
-    'kata1-b15c192-s1672170752-d466197061': 12212,
-    'kata1-b10c128-s1141046784-d204142634': 11514,
+    'kata1-b15c192-s1672170752-d466197061.txt.gz': 12212,
+    'kata1-b10c128-s1141046784-d204142634.txt.gz': 11514,
     'kata1-b6c96-s175395328-d26788732.txt.gz': 9958,
     # 'kata1-b6c96-s165180416-d25130434.txt.gz': 9900,
     # 'kata1-b6c96-s152505856-d23152636.txt.gz': 9833,
@@ -66,11 +66,13 @@ WEIGHTS = {
     'kata1-b6c96-s1248000-d550347.txt.gz': 482
 }
 
+WEIGHT_BEST_SMALL = 'kata1-b6c96-s175395328-d26788732.txt.gz'
 WEIGHT_FULL = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
 WEIGHT_9X9 = "kata9x9-b18c384nbt-20231025.bin.gz"
 WEIGHT_HUMAN = "b18c384nbt-humanv0.bin.gz"
 
 WEIGHT_DIRECTORY = "weights"
+
 
 def download_weights():
     import os
@@ -104,5 +106,98 @@ def download_weights():
             download_file(base_url + weight_file, weight_file)
 
 
+def create_corrupted(scale, filename):
+    """Creates a corrupted version of WEIGHT_BEST_SMALL model by multiplying values
+    with random samples from log normal distribution.
+
+    Args:
+        scale: Float value controlling the amount of corruption
+    """
+    import os
+    import numpy as np
+    import gzip
+
+    # seed it based on scale, so minor changes in scale alter the "personality"
+    np.random.seed(round(1000 * scale))
+
+    input_path = os.path.join(WEIGHT_DIRECTORY, WEIGHT_BEST_SMALL)
+    output_path = os.path.join(WEIGHT_DIRECTORY, filename)
+
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Weight file not found: {input_path}")
+
+    if os.path.exists(output_path):
+        return
+
+    print("creating ", filename)
+
+    # Parameters for log normal distribution
+    sigma = np.sqrt(np.log(1 + scale ** 2))
+    mu = -np.log(1 + scale ** 2) / 2
+
+    with gzip.open(input_path, 'rt') as f_in, gzip.open(output_path, 'wt') as f_out:
+        for line in f_in:
+
+            # Split line into parts
+            parts = line.strip().split()
+
+            def is_float(string):
+                try:
+                    float(string)
+                    return '.' in string
+                except ValueError:
+                    return False
+
+            # Process only lines containing float numbers
+            if len(parts) > 1 and is_float(parts[0]):
+                # Multiply each number by random sample
+                corrupted = [str(float(x) * np.random.lognormal(mu, sigma))
+                             for x in parts]
+                f_out.write(' '.join(corrupted) + '\n')
+            else:
+                f_out.write(line)
+
+
+WEIGHTS_CORRUPTED = {
+    'corrupt10.txt.gz': 10,
+    'corrupt15.txt.gz': 15,
+    'corrupt20.txt.gz': 20,
+    'corrupt22.txt.gz': 22,
+    'corrupt25.txt.gz': 25,
+    'corrupt27.txt.gz': 27,
+    'corrupt28.txt.gz': 28,
+    'corrupt29.txt.gz': 29,
+    'corrupt30.txt.gz': 30,
+    'corrupt305.txt.gz': 30.5,
+    'corrupt31.txt.gz': 31,
+    'corrupt315.txt.gz': 31.5,
+    'corrupt32.txt.gz': 32,
+    'corrupt325.txt.gz': 32.5,
+    'corrupt33.txt.gz': 33,
+    'corrupt335.txt.gz': 33.5,
+    'corrupt34.txt.gz': 34,
+    'corrupt345.txt.gz': 34.5,
+    'corrupt35.txt.gz': 35,
+    'corrupt355.txt.gz': 35.5,
+    'corrupt36.txt.gz': 36,
+    'corrupt365.txt.gz': 36.5,
+    'corrupt37.txt.gz': 37,
+    'corrupt375.txt.gz': 37.5,
+    'corrupt38.txt.gz': 38,
+    'corrupt39.txt.gz': 39,
+    'corrupt40.txt.gz': 40,
+    'corrupt42.txt.gz': 42,
+    'corrupt45.txt.gz': 45,
+    'corrupt47.txt.gz': 47,
+    'corrupt50.txt.gz': 50,
+    'corrupt52.txt.gz': 52,
+    'corrupt55.txt.gz': 55,
+    'corrupt57.txt.gz': 57,
+    'corrupt60.txt.gz': 60,
+    'corrupt65.txt.gz': 65,
+}
+
 if __name__ == "__main__":
     download_weights()
+    for filename, percent in WEIGHTS_CORRUPTED.items():
+        create_corrupted(percent / 100, filename)

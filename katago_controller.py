@@ -7,7 +7,7 @@ import threading
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "analysis.cfg")
 # CONFIG_FILE = os.path.join(BASE_DIR, "KataGo", "cpp", "configs", "analysis_example.cfg")
-KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
+KATAGO_PATH = os.path.join(BASE_DIR, "bots", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
 # RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
 RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata9x9-b18c384nbt-20231025.bin.gz")
