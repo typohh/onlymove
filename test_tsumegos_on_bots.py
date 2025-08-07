@@ -184,8 +184,6 @@ def test_bot(bot, attempts_file):
     probabilities = {}
     start_time = time.time()
 
-    print("Generating attempts for " + attempts_file)
-
     # Load existing solutions if file exists
     if os.path.exists(attempts_file):
         with open(attempts_file, 'r') as f:
@@ -205,6 +203,8 @@ def test_bot(bot, attempts_file):
 
     if file_queue.empty():
         return
+
+    print(f"generating {file_queue.qsize()} attempts for {attempts_file}")
 
     threads = []
     for _ in range(1 if DEBUG else bot.get_batch_size() * 2):
@@ -240,20 +240,22 @@ ATTEMPTS_DIRECTORY = "attempts"
 
 if __name__ == "__main__":
 
+    # tsumego_count = len([for filename in os.listdir(TSUMEGO_DIR) if filename.endswith(".sgf") ])
+
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
 
-    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
-        for playouts in [1, 3, 10, 30]:
-            model_filename = get_model(model)
+    for c in range(1, 120):
+        corruption = c / 200
+        for playouts in [1]:
+            model_filename = get_corrupted_model(corruption)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
             bot.stop()
 
-    for c in range(1, 120):
-        corruption = c/200
-        for playouts in [1]:
-            model_filename = get_corrupted_model(corruption)
+    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
+        for playouts in [1, 3, 10, 30]:
+            model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
