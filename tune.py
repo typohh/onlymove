@@ -13,6 +13,7 @@ from katago_controller import KATAGO_PATH, CONFIG_FILE
 from models import get_model, MODEL_9X9, MODEL_HUMAN, MODEL_BEST_SMALL
 
 
+verbose = False
 # --- Helper Function for Query Generation ---
 
 def generate_random_query(query_id: str) -> dict:
@@ -36,9 +37,8 @@ def generate_random_query(query_id: str) -> dict:
     return {
         "id": query_id, "moves": [], "initialStones": initial_stones,
         "rules": "tromp-taylor", "komi": 7.5, "boardXSize": board_size,
-        "boardYSize": board_size, "maxVisits": 1, "includePolicy": True,
-        "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False, "rootNumSymmetriesToSample": 1
-                             }
+        "boardYSize": board_size, "maxVisits": 1,
+        # "includePolicy": True, "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False, "rootNumSymmetriesToSample": 1 }
     }
 
 
@@ -103,6 +103,16 @@ def run_test(batch_size, best_queries_per_second):
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1
         )
+
+        if verbose:
+            def read_stderr(process):
+                for line in process.stderr:
+                    print(f"KataGo STDERR: {line.strip()}")
+
+            stderr_thread = threading.Thread(target=read_stderr, args=(process,))
+            stderr_thread.daemon = True  # Allow main program to exit even if thread is still running
+            stderr_thread.start()
+
         num_queries_per_round = 2 * batch_size
 
         # Round 1: Warm-up
@@ -183,7 +193,12 @@ def main():
     """
     parser = argparse.ArgumentParser(description='KataGo batch size optimization')
     parser.add_argument('--batchsize', type=int, help='Set specific batch size and skip testing')
+    parser.add_argument('--verbose', help='set verbose mode')
     args = parser.parse_args()
+
+    if args.verbose:
+        global verbose
+        verbose = True
 
     for path in [KATAGO_PATH, CONFIG_FILE, get_model(MODEL_9X9), get_model(MODEL_HUMAN)]:
         if not os.path.exists(path):
