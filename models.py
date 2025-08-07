@@ -49,6 +49,7 @@ def get_corrupted_model(scale):
 
     # seed it based on scale, so minor changes in scale alter the "personality"
     np.random.seed(round(1000 * scale))
+    os.makedirs(MODEL_DIRECTORY, exist_ok=True)
 
     input_path = os.path.join(MODEL_DIRECTORY, MODEL_BEST_SMALL)
     output_filename = get_filename_without_extension(input_path) + f'_corrupt{str(scale)[2:]}.txt.gz'
