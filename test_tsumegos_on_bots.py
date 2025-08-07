@@ -8,8 +8,7 @@ import sgfmill.sgf
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries, get_all_ranks, get_rank_str
-from weights import MODEL_DIRECTORY, MODEL_9X9, WEIGHTS, WEIGHTS_CORRUPTED, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, \
-    get_filename_without_extension
+from models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension
 
 TSUMEGO_DIR = "tsumegos"
 DEBUG = False
@@ -51,112 +50,6 @@ def get_main_variation(sgf_content):
             color, move_coords = move[0], sgf_to_gtp(move[1].decode(), 9)
             main_sequence.append((color, move_coords))
     return main_sequence
-
-
-class Pachi:
-
-    def __init__(self, playouts):
-
-        args = ["Pachi-12.86/pachi", "-t", "=" + str(playouts), "--nodcnn", "--nojoseki", "--nopatterns"]
-
-        self._process = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=False
-        )
-        self._send_gtp_command(f"boardsize 9")
-        self._send_gtp_command(f"komi 7.5")
-        self._playouts = playouts
-
-    def _send_gtp_command(self, command):
-        """Sends a GTP command to the Pachi process and returns the response."""
-        self._process.stdin.write((command + '\n').encode('utf-8'))
-        self._process.stdin.flush()
-
-        # Read response until an empty line is encountered
-        response = ""
-        while True:
-            line = self._process.stdout.readline().decode('utf-8').strip()
-            if not line:
-                break
-            response += line + "\n"
-
-        response = response.strip()
-
-        if response.startswith("?"):
-            raise Exception(f"Error from Pachi: {command} -> {response[1:].strip()}")
-        return response[1:].strip()
-
-    def reset(self):
-        self._send_gtp_command("clear_board")
-
-    def play(self, color, move):
-        self._send_gtp_command(f"play {color} {move}")
-
-    def get_probability(self, color, move):
-        played_move = self._send_gtp_command(f"genmove {color}")
-        return float(played_move == move)
-
-    def get_batch_size(self):
-        return 8
-
-    def copy(self):
-        return Pachi(self._playouts)
-
-
-class GnuGo:
-
-    def __init__(self, level):
-
-        args = ["bots/gnugo", "--mode", "gtp", "--silent", "--level", str(level), "--boardsize", "9", "--komi", "7.5", "--color", "white", "--chinese-rules",
-                "--nofusekidb", "--nojosekidb"]
-
-        self._process = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=False
-        )
-        self._send_gtp_command(f"boardsize 9")
-        self._send_gtp_command(f"komi 7.5")
-        self._level = level
-
-    def _send_gtp_command(self, command):
-        self._process.stdin.write((command + '\n').encode('utf-8'))
-        self._process.stdin.flush()
-
-        # Read response until an empty line is encountered
-        response = ""
-        while True:
-            line = self._process.stdout.readline().decode('utf-8').strip()
-            if not line:
-                break
-            response += line + "\n"
-
-        response = response.strip()
-
-        if response.startswith("?"):
-            raise Exception(f"Error from Pachi: {command} -> {response[1:].strip()}")
-        return response[1:].strip()
-
-    def reset(self):
-        self._send_gtp_command("clear_board")
-
-    def play(self, color, move):
-        self._send_gtp_command(f"play {color} {move}")
-
-    def get_probability(self, color, move):
-        played_move = self._send_gtp_command(f"genmove {color}")
-        return float(played_move == move)
-
-    def get_batch_size(self):
-        return 8
-
-    def copy(self):
-        return GnuGo(self._level)
 
 
 class KataGo:
@@ -346,8 +239,6 @@ if __name__ == "__main__":
                 bot = KataGo(model_filename, playouts)
                 test_bot(bot, filename)
                 bot.stop()
-            else:
-                print(f"skipping {filename} because it already exists")
 
     for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
         for playouts in [1, 3, 10, 30]:

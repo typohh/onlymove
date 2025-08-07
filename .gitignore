@@ -1,9 +1,6 @@
-KataGo/
 .venv/
-weights/
-.aider*
 __pycache__/
+models/
 .idea/
-/Pachi-12.86/
 /pwa/dist/
 /pwa/wgo.js/
