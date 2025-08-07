@@ -242,18 +242,18 @@ if __name__ == "__main__":
 
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
 
-    for c in range(1, 120):
-        corruption = c/200
-        for playouts in [1]:
-            model_filename = get_corrupted_model(corruption)
+    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
+        for playouts in [1, 3, 10, 30]:
+            model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
             bot.stop()
 
-    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
-        for playouts in [1, 3, 10, 30]:
-            model_filename = get_model(model)
+    for c in range(1, 120):
+        corruption = c/200
+        for playouts in [1]:
+            model_filename = get_corrupted_model(corruption)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
