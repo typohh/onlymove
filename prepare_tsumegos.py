@@ -103,8 +103,7 @@ if __name__ == "__main__":
     anchors = {
         max_rating: 1.0,
         "katago_9958_10": get_rank_number("8d"),
-        # "katago_9958_1": get_rank_number("8d"),
-        "katago_4k": get_rank_number("4d"),
+        "katago_corrupt_28_1": get_rank_number("4d"),
         "katago_corrupt_50_1": get_rank_number("19k"),
         min_rating: 0.0
     }

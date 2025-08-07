@@ -12,7 +12,6 @@ from problem_finder import ProblemFinder, problem_to_sgf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
-DRIVE_DIR = '/content/drive/My Drive/Tsumegos'
 
 print_lock = threading.Lock()
 
@@ -32,13 +31,8 @@ def worker_task(problem_finder: ProblemFinder):
                 with open(os.path.join(OUTPUT_DIR, filename), "wb") as f:
                     f.write(sgf_str.encode("utf-8"))
 
-                # Copy to Google Drive if path exists
-                if os.path.exists(DRIVE_DIR):
-                    shutil.copy2(os.path.join(OUTPUT_DIR, filename), os.path.join(DRIVE_DIR, filename))
-
                 with print_lock:
                     print_stats()
-                    print(problem["move_rank"], problem["game_rank"])
 
     except Exception as e:
         print(e)

@@ -8,7 +8,8 @@ import sgfmill.sgf
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries, get_all_ranks, get_rank_str
-from weights import WEIGHT_DIRECTORY, WEIGHT_9X9, WEIGHTS, WEIGHTS_CORRUPTED
+from weights import MODEL_DIRECTORY, MODEL_9X9, WEIGHTS, WEIGHTS_CORRUPTED, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, \
+    get_filename_without_extension
 
 TSUMEGO_DIR = "tsumegos"
 DEBUG = False
@@ -337,44 +338,24 @@ if __name__ == "__main__":
 
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
 
-    for weight, percentage in WEIGHTS_CORRUPTED.items():
-        for playouts in [1]:
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_corrupt_{percentage}_{playouts}.txt")
+    for corruption in range(1, 60):
+        for playouts in [1, 3, 10, 30]:
+            model_filename = get_corrupted_model(corruption)
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             if not os.path.exists(filename):
-                bot = KataGo(os.path.join(WEIGHT_DIRECTORY, weight), playouts)
+                bot = KataGo(model_filename, playouts)
                 test_bot(bot, filename)
                 bot.stop()
             else:
                 print(f"skipping {filename} because it already exists")
 
-    for w in reversed(WEIGHTS.keys()):
-        # for p in [1, 10, 100]:
-        for p in [1]:
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{WEIGHTS[w]}_{p}.txt")
+    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
+        for playouts in [1, 3, 10, 30]:
+            model_filename = get_model(model)
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             if not os.path.exists(filename):
-                bot = KataGo(os.path.join(WEIGHT_DIRECTORY, w), p)
+                bot = KataGo(model_filename, playouts)
                 test_bot(bot, filename)
                 bot.stop()
-
-    for rank in get_all_ranks():
-        filename = os.path.join(ATTEMPTS_DIRECTORY, f"katago_{get_rank_str(rank)}.txt")
-        if not os.path.exists(filename):
-            bot = KataGo(os.path.join(WEIGHT_DIRECTORY, WEIGHT_9X9), 1, rank)
-            test_bot(bot, filename)
-            bot.stop()
-
-    # for level in [1, 5, 10]:
-    #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"gnugo_{level}.txt")
-    #     if not os.path.exists(filename):
-    #         bot = GnuGo(level)
-    #         test_bot(bot, filename)
-    #         bot.reset()
-    #
-    # for playouts in [6, 60, 600]:
-    #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"pachi_{playouts}.txt")
-    #     if not os.path.exists(filename):
-    #         bot = Pachi(playouts)
-    #         test_bot(bot, filename)
-    #         bot.reset()
 
     list_outcomes()

@@ -3,7 +3,6 @@ import random
 from sgfmill import sgf
 
 from stats import STATS, DEBUG
-from difficulty_evaluator import DifficultyEvaluator
 from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
 
 MIN_WINRATE_CORRECT = 0.7
@@ -23,7 +22,6 @@ class ProblemFinder:
             queries (KatagoQueries): The KataGo controller for the SL network.
         """
         self.queries = queries
-        self.difficulty = DifficultyEvaluator(queries)
 
     def generate_initial_position(self):
         """
@@ -142,18 +140,13 @@ class ProblemFinder:
             STATS.add_failure_to_create_problem()
             return None
 
-        move_mean, move_stddev = self.difficulty.assess_move_difficulty(adjusted_moves, solution_move)
-        game_mean, game_stddev = self.difficulty.assess_game_difficulty(adjusted_moves, move_mean, solution_move)
-
         # Generate variations data - all legal moves and their optimal responses
         variations = self._generate_variations(adjusted_moves)
 
-        STATS.add_problem_found(len(adjusted_moves), move_mean, game_mean)
+        STATS.add_problem_found(len(adjusted_moves))
         return {
             "moves": adjusted_moves,
             "solution": solution_move,
-            "move_rank": get_rank_str(move_mean),
-            "game_rank": get_rank_str(game_mean),
             "variations": variations
         }
 
@@ -205,10 +198,6 @@ def problem_to_sgf(problem):
     game = sgf.Sgf_game(size=9)
     game.root.set("KM", "7.5")
     game.root.set("RU", "chinese")
-    if problem.get("move_rank") and problem.get("game_rank"):
-        move_rank = problem["move_rank"]
-        game_rank = problem['game_rank']
-        game.root.set("GN", f"Move: {move_rank}, Game: {game_rank}")
 
     player = "b"
 
@@ -220,14 +209,6 @@ def problem_to_sgf(problem):
 
     # Get the node where variations should be attached (the position where player needs to move)
     parent_node = game.get_last_node()
-
-    # Add the solution move and annotations as main line
-    # if problem.get("solution"):
-    #     solution_move = problem["solution"]
-    #     solution_node = parent_node.new_child()
-    #     solution_node.set_move(player, katago_to_sgf_coords(solution_move, 9))
-    #     solution_node.set("C", f"This move difficulty: {problem["move_rank"]}, This move + Remaining game difficulty: {problem['game_rank']}")
-    #     solution_node.set("MA", [katago_to_sgf_coords(solution_move, 9)])
 
     # Add variations for all legal moves and their responses
     if problem.get("variations"):

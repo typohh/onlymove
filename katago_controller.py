@@ -5,7 +5,7 @@ import subprocess
 import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "analysis.cfg")
+CONFIG_FILE = os.path.join(BASE_DIR, "bots","analysis.cfg")
 # CONFIG_FILE = os.path.join(BASE_DIR, "KataGo", "cpp", "configs", "analysis_example.cfg")
 KATAGO_PATH = os.path.join(BASE_DIR, "bots", "katago")
 SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")

@@ -299,7 +299,7 @@ function selectProblem() {
     }
 
     availableProblems.sort((a, b) => Math.abs(a.rank - userRank) - Math.abs(b.rank - userRank));
-    const candidateProblems = availableProblems.slice(0, 200);
+    const candidateProblems = availableProblems.slice(0, 500);
 
     const weightedProblems = candidateProblems.map(problem => ({
         problem,

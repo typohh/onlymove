@@ -20,8 +20,8 @@ def load_data(data_dir):
     # bot_files = glob.glob(os.path.join(data_dir, "*.txt"))
     patterns = [
         r"katago_corrupt.*\.txt$",
-        r"katago_\d+d\.txt$",
-        r"katago_\d+k\.txt$",
+        # r"katago_\d+d\.txt$",
+        # r"katago_\d+k\.txt$",
     ]
     bot_files = []
     for f in os.listdir(data_dir):
@@ -35,6 +35,7 @@ def load_data(data_dir):
     bot_files.append(os.path.join(data_dir, "katago_9958_1.txt"))
     bot_files.append(os.path.join(data_dir, "katago_9958_10.txt"))
     bot_files.append(os.path.join(data_dir, "katago_9958_100.txt"))
+    bot_files.append(os.path.join(data_dir, "kata9x9-b18c384nbt-20231025_1.txt"))
 
     for file in bot_files:
         print(file)
@@ -121,8 +122,8 @@ def save_ratings_snapshot(model, bot_map, tsumego_map, epoch_num_str):
     print(f"\nSaving snapshot for epoch {epoch_num_str}...")
 
     with torch.no_grad():  # Ensure no gradients are calculated during extraction
-        bot_ratings = model.bot_ratings.weight.cpu().numpy().flatten()
-        tsumego_difficulties = model.tsumego_difficulties.weight.cpu().numpy().flatten()
+        bot_ratings = model.bot_ratings.corruption.cpu().numpy().flatten()
+        tsumego_difficulties = model.tsumego_difficulties.corruption.cpu().numpy().flatten()
 
     # Create reverse mappings from index back to original ID for reporting
     rev_bot_map = {i: name for name, i in bot_map.items()}
@@ -184,7 +185,7 @@ if __name__ == '__main__':
     # --- Configuration ---
     DATA_DIRECTORY = "attempts"
     BATCH_SIZE = 2 * 4096
-    EPOCHS = 5
+    EPOCHS = 7
     LEARNING_RATE = 0.01
 
     # --- Step 1: Load and prepare the data dynamically ---
