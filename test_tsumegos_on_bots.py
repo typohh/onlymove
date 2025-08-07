@@ -187,13 +187,25 @@ def test_bot(bot, attempts_file):
 
     print("Generating attempts for " + attempts_file)
 
-    # Populate the queue with SGF files
+    # Load existing solutions if file exists
+    if os.path.exists(attempts_file):
+        with open(attempts_file, 'r') as f:
+            for line in f:
+                key, value = line.strip().split()
+                probabilities[key] = float(value)
+
+    # Populate the queue with SGF files that don't have solutions yet
     for filename in os.listdir(TSUMEGO_DIR):
         if filename.endswith(".sgf"):
-            file_queue.put(filename)
-            if DEBUG:
-                if file_queue.qsize() >= 5000:
-                    break
+            key = filename[:-4]  # Remove .sgf extension
+            if key not in probabilities:  # Only process files without solutions
+                file_queue.put(filename)
+                if DEBUG:
+                    if file_queue.qsize() >= 5000:
+                        break
+
+    if file_queue.empty():
+        return
 
     threads = []
     for _ in range(1 if DEBUG else bot.get_batch_size() * 2):
@@ -210,7 +222,7 @@ def test_bot(bot, attempts_file):
     solved_count = sum(probabilities.values())
     elapsed_time = time.time() - start_time
 
-    print(f"Generating: {attempts_file}")
+    print(f"Saving: {attempts_file}")
     print(f"Processed: {total_count}")
     print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
     print(f"Tsumegos per second: {total_count / elapsed_time:.2f}")
@@ -235,18 +247,16 @@ if __name__ == "__main__":
         for playouts in [1, 3, 10, 30]:
             model_filename = get_corrupted_model(corruption)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
-            if not os.path.exists(filename):
-                bot = KataGo(model_filename, playouts)
-                test_bot(bot, filename)
-                bot.stop()
+            bot = KataGo(model_filename, playouts)
+            test_bot(bot, filename)
+            bot.stop()
 
     for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
         for playouts in [1, 3, 10, 30]:
             model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
-            if not os.path.exists(filename):
-                bot = KataGo(model_filename, playouts)
-                test_bot(bot, filename)
-                bot.stop()
+            bot = KataGo(model_filename, playouts)
+            test_bot(bot, filename)
+            bot.stop()
 
     list_outcomes()

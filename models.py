@@ -44,11 +44,14 @@ def get_corrupted_model(scale):
     import numpy as np
     import gzip
 
+    if scale > 1 or scale < 0:
+        raise ValueError("scale must be between 0 and 1")
+
     # seed it based on scale, so minor changes in scale alter the "personality"
     np.random.seed(round(1000 * scale))
 
     input_path = os.path.join(MODEL_DIRECTORY, MODEL_BEST_SMALL)
-    output_filename = get_filename_without_extension(input_path) + f'_corrupt{int(scale * 100)}.txt.gz'
+    output_filename = get_filename_without_extension(input_path) + f'_corrupt{str(scale)[2:]}.txt.gz'
     output_path = os.path.join(MODEL_DIRECTORY, output_filename)
 
     if not os.path.exists(input_path):
