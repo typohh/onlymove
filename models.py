@@ -51,7 +51,7 @@ def get_corrupted_model(scale):
     np.random.seed(round(1000 * scale))
     os.makedirs(MODEL_DIRECTORY, exist_ok=True)
 
-    input_path = os.path.join(MODEL_DIRECTORY, MODEL_BEST_SMALL)
+    input_path = get_model(MODEL_BEST_SMALL)
     output_filename = get_filename_without_extension(input_path) + f'_corrupt{str(scale)[2:]}.txt.gz'
     output_path = os.path.join(MODEL_DIRECTORY, output_filename)
 
@@ -61,7 +61,7 @@ def get_corrupted_model(scale):
     if os.path.exists(output_path):
         return output_path
 
-    print("creating model ", output_filename)
+    print("creating model", output_filename)
 
     # Parameters for log normal distribution
     sigma = np.sqrt(np.log(1 + scale ** 2))
