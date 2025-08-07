@@ -1,13 +1,12 @@
 import os
 import queue
-import subprocess
 import threading
 import time
 
 import sgfmill.sgf
 
 from katago_controller import KatagoController
-from katago_queries import KatagoQueries, get_all_ranks, get_rank_str
+from katago_queries import KatagoQueries
 from models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension
 
 TSUMEGO_DIR = "tsumegos"
@@ -56,7 +55,7 @@ class KataGo:
 
     def __init__(self, weights, playouts, human_rank=None):
         self._controller = KatagoController()
-        self._controller.start_engine(weight=weights, verbose=DEBUG, human=human_rank is not None)
+        self._controller.start_engine(model=weights, verbose=DEBUG, human=human_rank is not None)
         self._query = KatagoQueries(self._controller)
         self._moves = []
         self._playouts = playouts

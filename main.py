@@ -5,6 +5,7 @@ import time
 import traceback
 import hashlib
 
+from models import MODEL_9X9, get_model
 from stats import STATS, DEBUG
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
@@ -53,7 +54,7 @@ def main():
     try:
         print("Starting KataGo engines...")
         controller = KatagoController()
-        controller.start_engine()
+        controller.start_engine(get_model(MODEL_9X9), verbose=DEBUG)
         print("KataGo engines started.")
 
         queries = KatagoQueries(controller)
