@@ -3,18 +3,14 @@ import os
 import subprocess
 import random
 import sys
+import threading
 import time
 import re
 import argparse
+import traceback
 
-from katago_controller import KATAGO_PATH, CONFIG_FILE, RL_MODEL_PATH, SL_MODEL_PATH
-
-
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# KATAGO_PATH = os.path.join(BASE_DIR, "KataGo", "cpp", "katago")
-# CONFIG_FILE = os.path.join(BASE_DIR, "analysis.cfg")
-# RL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz")
-# SL_MODEL_PATH = os.path.join(BASE_DIR, "weights", "b18c384nbt-humanv0.bin.gz")
+from katago_controller import KATAGO_PATH, CONFIG_FILE
+from models import get_model, MODEL_9X9, MODEL_HUMAN, MODEL_BEST_SMALL
 
 
 # --- Helper Function for Query Generation ---
@@ -88,6 +84,97 @@ def update_config_file(config_path: str, optimal_size: int):
         print(f"\nError: Failed to update config file: {e}", file=sys.stderr)
 
 
+def run_test(batch_size, best_queries_per_second):
+    # One-line status message for the current test
+    print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
+
+    command = [
+        KATAGO_PATH, "analysis",
+        "-config", CONFIG_FILE,
+        "-override-config", f"numAnalysisThreads={batch_size},nnMaxBatchSize={batch_size},numSearchThreadsPerAnalysisThread=1",
+        # "-model", get_model(MODEL_9X9), "-human-model", get_model(MODEL_HUMAN)
+        "-model", get_model(MODEL_9X9)
+        # "-model", get_model(MODEL_BEST_SMALL)
+    ]
+
+    process = None
+    try:
+        process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, bufsize=1
+        )
+        num_queries_per_round = 2 * batch_size
+
+        # Round 1: Warm-up
+        warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1, int(num_queries_per_round / 4)))]
+        for query in warmup_queries:
+            process.stdin.write(json.dumps(query) + "\n")
+        process.stdin.flush()
+        for _ in range(len(warmup_queries)):
+            if not process.stdout.readline():
+                raise RuntimeError("exited during warm-up")
+
+        # Round 2: Timed Test
+        timed_queries = [generate_random_query(f"t_{i}") for i in range(num_queries_per_round)]
+        start_time = time.perf_counter()
+        for query in timed_queries:
+            process.stdin.write(json.dumps(query) + "\n")
+        process.stdin.flush()
+
+        predicted_total_time = num_queries_per_round / best_queries_per_second
+        predicted_time_limit = predicted_total_time * 1.5
+
+        has_stalled = False
+        for i in range(num_queries_per_round):
+            if predicted_time_limit > 0:
+                elapsed_time = time.perf_counter() - start_time
+                if elapsed_time > predicted_time_limit:
+                    print(f"STALLED | Time ({elapsed_time:.2f}s) exceeded 150% of predicted time ({predicted_total_time:.2f}s). Halting.")
+                    has_stalled = True
+                    break
+            if not process.stdout.readline():
+                raise RuntimeError("exited during timed test")
+
+        if has_stalled:
+            return 0
+
+        end_time = time.perf_counter()
+        queries_per_second = num_queries_per_round / (end_time - start_time)
+        print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
+
+        return queries_per_second
+
+    except (RuntimeError, BrokenPipeError) as e:
+        print(f"FAILURE | KataGo process {e}.")
+        if process and process.stderr:
+            stderr = process.stderr.read()
+            if "out of memory" in stderr.lower():
+                print("          (Likely cause: Out of VRAM)")
+        return 0
+    except Exception as e:
+        print(f"FAILURE | An unexpected Python error occurred: {e}")
+        traceback.print_exc()
+        return 0
+    finally:
+        if process:
+            process.terminate()
+            process.communicate()
+
+
+def run_test_in_thread(batch_size, best_queries_per_second):
+    result = [0]  # Use list to store result from thread
+
+    def thread_target():
+        result[0] = run_test(batch_size, best_queries_per_second)
+
+    thread = threading.Thread(target=thread_target)
+    thread.start()
+    thread.join(timeout=5 + 2 * batch_size / best_queries_per_second if best_queries_per_second > 0 else None)
+    if thread.is_alive():
+        return 0  # Abort if thread is still running after timeout
+    return result[0]
+
+
 # --- Main Test Logic ---
 
 def main():
@@ -98,7 +185,7 @@ def main():
     parser.add_argument('--batchsize', type=int, help='Set specific batch size and skip testing')
     args = parser.parse_args()
 
-    for path in [KATAGO_PATH, CONFIG_FILE, RL_MODEL_PATH, SL_MODEL_PATH]:
+    for path in [KATAGO_PATH, CONFIG_FILE, get_model(MODEL_9X9), get_model(MODEL_HUMAN)]:
         if not os.path.exists(path):
             print(f"Error: Required file not found at '{path}'", file=sys.stderr)
             sys.exit(1)
@@ -109,89 +196,22 @@ def main():
         return
 
     batch_size = 1
-    best_queries_per_second = 0
+    best_queries_per_second = 0.01
     all_results = []
 
     print("--- Starting KataGo Throughput Test ---")
     while True:
-        # One-line status message for the current test
-        print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
-        command = [
-            KATAGO_PATH, "analysis",
-            "-config", CONFIG_FILE,
-            "-override-config", f"numAnalysisThreads={batch_size},nnMaxBatchSize={batch_size},numSearchThreadsPerAnalysisThread=1",
-            "-model", RL_MODEL_PATH, "-human-model", SL_MODEL_PATH
-        ]
+        queries_per_second = run_test_in_thread(batch_size, best_queries_per_second)
+        all_results.append((batch_size, queries_per_second))
 
-        process = None
-        try:
-            process = subprocess.Popen(
-                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, bufsize=1
-            )
-            num_queries_per_round = 2 * batch_size
-
-            # Round 1: Warm-up
-            warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1, int(num_queries_per_round / 4)))]
-            for query in warmup_queries:
-                process.stdin.write(json.dumps(query) + "\n")
-            process.stdin.flush()
-            for _ in range(len(warmup_queries)):
-                if not process.stdout.readline():
-                    raise RuntimeError("exited during warm-up")
-
-            # Round 2: Timed Test
-            timed_queries = [generate_random_query(f"t_{i}") for i in range(num_queries_per_round)]
-            start_time = time.perf_counter()
-            for query in timed_queries:
-                process.stdin.write(json.dumps(query) + "\n")
-            process.stdin.flush()
-
-            predicted_time_limit = 0
-            if best_queries_per_second > 0:
-                predicted_total_time = num_queries_per_round / best_queries_per_second
-                predicted_time_limit = predicted_total_time * 1.5
-
-            has_stalled = False
-            for i in range(num_queries_per_round):
-                if predicted_time_limit > 0:
-                    elapsed_time = time.perf_counter() - start_time
-                    if elapsed_time > predicted_time_limit:
-                        print(f"STALLED | Time ({elapsed_time:.2f}s) exceeded 150% of predicted time ({predicted_total_time:.2f}s). Halting.")
-                        has_stalled = True
-                        break
-                if not process.stdout.readline():
-                    raise RuntimeError("exited during timed test")
-
-            if has_stalled:
-                break
-
-            end_time = time.perf_counter()
-            queries_per_second = num_queries_per_round / (end_time - start_time)
-            print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
-
-            all_results.append((batch_size, queries_per_second))
-
-            if queries_per_second > best_queries_per_second:
-                best_queries_per_second = queries_per_second
-
-            batch_size *= 2
-
-        except (RuntimeError, BrokenPipeError) as e:
-            print(f"FAILURE | KataGo process {e}.")
-            if process and process.stderr:
-                stderr = process.stderr.read()
-                if "out of memory" in stderr.lower():
-                    print("          (Likely cause: Out of VRAM)")
+        if queries_per_second == 0:
             break
-        except Exception as e:
-            print(f"FAILURE | An unexpected Python error occurred: {e}")
-            break
-        finally:
-            if process:
-                process.terminate()
-                process.communicate()
+
+        if queries_per_second > best_queries_per_second:
+            best_queries_per_second = queries_per_second
+
+        batch_size *= 2
 
     print("\n--- Test Complete ---")
     if all_results:
@@ -214,6 +234,7 @@ def main():
         update_config_file(CONFIG_FILE, balanced_batch_size)
     else:
         print("Could not complete a single run. Please check your KataGo setup and file paths.")
+    os._exit(0)
 
 
 if __name__ == "__main__":
