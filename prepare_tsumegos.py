@@ -102,15 +102,14 @@ if __name__ == "__main__":
 
     anchors = {
         max_rating: 1.0,
-        "katago_9958_10": get_rank_number("8d"),
-        "katago_corrupt_28_1": get_rank_number("4d"),
-        "katago_corrupt_50_1": get_rank_number("19k"),
+        # "kata1-b6c96-s175395328-d26788732_1": get_rank_number("8d"),
+        "kata1-b6c96-s175395328-d26788732_corrupt31_1": get_rank_number("4d"),
+        "kata1-b6c96-s175395328-d26788732_corrupt5_1": get_rank_number("19k"),
         min_rating: 0.0
     }
 
-    print(bot_ratings_dict)
-
-    print(anchors)
+    # pprint(bot_ratings_dict)
+    # pprint(anchors)
 
     anchors_old = {key: bot_ratings_dict[key] for key in anchors.keys()}
 
