@@ -238,6 +238,7 @@ async function handleBoardClick(x, y) {
         }
     }
 
+    // Check if the move is valid first
     if (game.isValid(x, y, game.turn)) {
         acceptClicks = false;
 
@@ -272,6 +273,30 @@ async function handleBoardClick(x, y) {
             });
             showCorrectMove = true;
             loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
+        }
+    } else {
+        // Check if the move is illegal due to ko
+        const koResult = game.play(x, y, game.turn, true); // noplay=true to only test
+        if (koResult === 4) { // 4 indicates illegal due to ko
+            // Mark the illegal ko move with a square
+            board.addObject({ x, y, type: 'SQ' });
+            
+            // Also check adjacent squares for potential ko points
+            const size = game.size;
+            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
+            
+            for (const [dx, dy] of directions) {
+                const adjX = x + dx;
+                const adjY = y + dy;
+                
+                // Check if adjacent square is within board boundaries
+                if (adjX >= 0 && adjX < size && adjY >= 0 && adjY < size) {
+                    const adjResult = game.play(adjX, adjY, game.turn, true); // noplay=true to only test
+                    if (adjResult === 4) { // illegal due to ko
+                        board.addObject({ x: adjX, y: adjY, type: 'SQ' });
+                    }
+                }
+            }
         }
     }
 }
@@ -373,6 +398,27 @@ function updateBoard() {
 
     if (kifuReader.node.move) {
         board.addObject({ x: kifuReader.node.move.x, y: kifuReader.node.move.y, type: 'CR' });
+        
+        // Check if the last move created an illegal ko situation
+        // We check all four adjacent positions for potential ko captures
+        const x = kifuReader.node.move.x;
+        const y = kifuReader.node.move.y;
+        const size = game.size;
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
+        
+        for (const [dx, dy] of directions) {
+            const adjX = x + dx;
+            const adjY = y + dy;
+            
+            // Check if adjacent square is within board boundaries
+            if (adjX >= 0 && adjX < size && adjY >= 0 && adjY < size) {
+                // Check if playing at this position would be illegal due to ko
+                const koResult = game.play(adjX, adjY, game.turn, true); // noplay=true to only test
+                if (koResult === 4) { // 4 indicates illegal due to ko
+                    board.addObject({ x: adjX, y: adjY, type: 'SQ' });
+                }
+            }
+        }
     }
 
     if (showCorrectMove) drawCorrectMoveMarker();
