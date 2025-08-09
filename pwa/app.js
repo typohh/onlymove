@@ -174,7 +174,7 @@ function updateUserStats(isCorrect, hintWasShown = false) {
  */
 function handleCorrectAnswer(hintWasShown = false) {
     updateUserStats(true, hintWasShown);
-    showCorrectMove = false
+    showCorrectMove = false;
     loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
 }
 
@@ -257,19 +257,18 @@ async function handleBoardClick(x, y) {
         updateBoard();
         await renderAndHold(1000); // Show user move for 1s (after forcing render)
 
-        // Opponent response (always present per problem format)
-        kifuReader.next();
-        updateBoard();
-        await renderAndHold(1000); // Show opponent move for 1s (after forcing render)
-
         // Resolve outcome sequentially
         if (isCorrect) {
             handleCorrectAnswer(hintWasShown);
         } else {
-            // For incorrect, ensure overlay blocks for 3s before next load to avoid overlap
+            // For incorrect moves, show opponent response and start red overlay simultaneously
+            kifuReader.next();
+            updateBoard();
+            
+            // Start the red overlay immediately (don't wait 1 second)
             updateUserStats(false, hintWasShown);
             await new Promise((resolve) => {
-                displayOverlay('', 3000, resolve);
+                displayOverlay('', 5000, resolve);
             });
             showCorrectMove = true;
             loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
