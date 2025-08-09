@@ -108,7 +108,7 @@ function updateAllUI() {
 
 
 /**
- * Displays a temporary blood red overlay that fades out.
+ * Displays a temporary blood red overlay that fades out with ease-in effect.
  * @param {string} message - The text to display (not used in new implementation).
  * @param {number} duration - How long to display the overlay in milliseconds.
  * @param {function} [callback] - An optional function to run after the overlay is removed.
@@ -120,7 +120,7 @@ function displayOverlay(message, duration, callback) {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
         backgroundColor: 'rgba(139, 0, 0, 1)',
         display: 'flex', justifyContent: 'center', alignItems: 'center',
-        zIndex: '1000', opacity: '1', transition: `opacity ${duration/1000}s ease-out`
+        zIndex: '1000', opacity: '1', transition: `opacity ${duration/1000}s ease-in`
     });
 
     document.body.appendChild(overlay);
@@ -535,18 +535,14 @@ async function evictUnusedZipFiles() {
 async function loadZipProblems(zipFilename) {
     if (loadedZips[zipFilename]) return;
 
-    console.log("downloading more tsumegos: " + zipFilename)
-
     // Try to get from cache first
     const cache = await caches.open(TSUMEGO_CACHE_NAME);
     const cachedResponse = await cache.match(`tsumegos/${zipFilename}`);
     
     let zipData;
     if (cachedResponse) {
-        console.log("Loading from cache: " + zipFilename);
         zipData = await cachedResponse.arrayBuffer();
     } else {
-        console.log("Fetching from network: " + zipFilename);
         const zipResponse = await fetch(`tsumegos/${zipFilename}`);
         zipData = await zipResponse.arrayBuffer();
         
@@ -695,12 +691,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (prevTsumegoLink) {
         prevTsumegoLink.addEventListener('click', (e) => {
             e.preventDefault();
-            if (previousSGF && previousProblemFilename) {
-                const blob = new Blob([previousSGF], { type: 'application/x-go-sgf' });
+            // When showing correct move (hint mode), use current tsumego as "previous"
+            const sgfToDownload = showCorrectMove ? currentSGF : previousSGF;
+            const filenameToDownload = showCorrectMove ? currentProblemFilename : previousProblemFilename;
+            
+            if (sgfToDownload && filenameToDownload) {
+                const blob = new Blob([sgfToDownload], { type: 'application/x-go-sgf' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = previousProblemFilename;
+                a.download = filenameToDownload;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
