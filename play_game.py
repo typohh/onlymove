@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print(args.black_rank, args.white_rank, args.playouts, args.handicap)
+    print(args.black_rank, args.white_rank, args.playouts, not args.no_handicap)
 
     controller = KatagoController()
     controller.start_engine(get_model(MODEL_BEST_SMALL), human=True, verbose=DEBUG)
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         "white_rank": args.white_rank,
         "black_playouts": args.playouts,
         "white_playouts": args.playouts,
-        "black_handicap": not args.handicap,
+        "black_handicap": not args.no_handicap,
         "won_games": 0,
         "lost_games": 0,
         "total_moves": 0,
