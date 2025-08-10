@@ -249,7 +249,7 @@ if __name__ == "__main__":
         corruption = c / 200
         for playouts in [1, 3, 10, 30]:
             model_filename = get_corrupted_model(corruption)
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(corruption) + f"_{playouts}.txt"}")
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             if SKIP_IF_EXISTS and os.path.exists(filename):
                 continue
             bot = KataGo(model_filename, playouts)
