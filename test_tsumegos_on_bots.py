@@ -246,7 +246,7 @@ if __name__ == "__main__":
 
     for c in range(1, 120):
         corruption = c / 200
-        for playouts in [1]:
+        for playouts in [10]:
             model_filename = get_corrupted_model(corruption)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
             bot = KataGo(model_filename, playouts)
