@@ -96,7 +96,7 @@ if __name__ == "__main__":
     # parser.add_argument('--white-playouts', type=int, default=1, help='Number of playouts for white player')
     parser.add_argument('--black-rank', type=str, default="20k", help='Rank for black player')
     parser.add_argument('--white-rank', type=str, default="14k", help='Rank for white player')
-    parser.add_argument('--handicap', action='store_true', default=True, help='Enable handicap for black player')
+    parser.add_argument('--no-handicap', action='store_true', default=False, help='Enable handicap for black player')
 
     args = parser.parse_args()
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         "white_rank": args.white_rank,
         "black_playouts": args.playouts,
         "white_playouts": args.playouts,
-        "black_handicap": args.handicap,
+        "black_handicap": not args.handicap,
         "won_games": 0,
         "lost_games": 0,
         "total_moves": 0,
