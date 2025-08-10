@@ -92,15 +92,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Play game with specified parameters')
     parser.add_argument('--playouts', type=int, default=10, help='Number of playouts for both players')
-    # parser.add_argument('--black-playouts', type=int, default=1, help='Number of playouts for black player')
-    # parser.add_argument('--white-playouts', type=int, default=1, help='Number of playouts for white player')
+    parser.add_argument('--black-playouts', type=int, default=0, help='Number of playouts for black player')
+    parser.add_argument('--white-playouts', type=int, default=0, help='Number of playouts for white player')
     parser.add_argument('--black-rank', type=str, default="20k", help='Rank for black player')
     parser.add_argument('--white-rank', type=str, default="14k", help='Rank for white player')
     parser.add_argument('--no-handicap', action='store_true', default=False, help='Enable handicap for black player')
 
     args = parser.parse_args()
 
-    print(args.black_rank, args.white_rank, args.playouts, not args.no_handicap)
+    black_playouts = args.black_playouts if args.black_playouts > 0 else args.playouts
+    white_playouts = args.white_playouts if args.white_playouts > 0 else args.playouts
+
+    print(args.black_rank, black_playouts, not args.no_handicap, args.white_rank, white_playouts)
 
     controller = KatagoController()
     controller.start_engine(get_model(MODEL_BEST_SMALL), human=True, verbose=DEBUG)
@@ -113,8 +116,8 @@ if __name__ == "__main__":
     shared_data = {
         "black_rank": args.black_rank,
         "white_rank": args.white_rank,
-        "black_playouts": args.playouts,
-        "white_playouts": args.playouts,
+        "black_playouts": black_playouts,
+        "white_playouts": white_playouts,
         "black_handicap": not args.no_handicap,
         "won_games": 0,
         "lost_games": 0,
