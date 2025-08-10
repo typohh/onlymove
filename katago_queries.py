@@ -139,6 +139,12 @@ class KatagoQueries:
         human_policy = response["humanPolicy"]
         strong_policy = response["policy"]
 
+        if strong_policy[-1] == max(strong_policy):
+            return "pass"
+
+        human_policy[-1] = -1
+        strong_policy[-1] = -1
+
         human_legal_indices = {i for i, p in enumerate(human_policy) if p > 0}
         strong_legal_indices = {i for i, p in enumerate(strong_policy) if p > 0}
 
@@ -148,10 +154,6 @@ class KatagoQueries:
         legal_moves_map = {
             i: (ph * (1-bot_weight) + pb * bot_weight) ** (1/temperature) for i, (ph, pb) in enumerate(zip(human_policy,strong_policy)) if i in strong_legal_indices
         }
-
-        pass_idx = len(strong_policy) - 1
-        if pass_idx in legal_moves_map:
-            legal_moves_map[pass_idx] = strong_policy[pass_idx] ** (1/temperature)
 
         legal_moves = list(legal_moves_map.items())
 

@@ -2,36 +2,24 @@ import threading
 import time
 
 from katago_controller import KatagoController
-from katago_queries import KatagoQueries, get_rank_str
+from katago_queries import KatagoQueries, get_rank_number
+from models import MODEL_BEST_SMALL, get_model
 from problem_finder import problem_to_sgf
 
-BLACK_HANDICAP = True
-BLACK_RANK = 3 * 6 / 29
-BLACK_ASSISTANCE = 0
-BLACK_TEMPERATURE = 1
-
-WHITE_RANK = 4 * 6 / 29
-WHITE_ASSISTANCE = 0
-WHITE_TEMPERATURE = 1
-
 DEBUG = False
-MAX_GAMES = 300
+MAX_GAMES = 3000
 
 
-def play_game(black_rank: float, black_assistance: int, white_rank: float, white_assistance: int, queries: KatagoQueries):
-    """
-    Plays a 9x9 game and returns whether black won and the number of moves.
-    """
+def play_game(black_rank: float, black_playouts: int, black_handicap, white_rank: float, white_playouts: int, queries: KatagoQueries):
     moves = []
-    ranks = [black_rank, white_rank]
-    assistances = [black_assistance, white_assistance]
-    temperatures = [BLACK_TEMPERATURE, WHITE_TEMPERATURE]
+    ranks = [get_rank_number(black_rank), get_rank_number(white_rank)]
+    playouts = [black_playouts, white_playouts]
     current_player = 0
     while True:
-        if BLACK_HANDICAP and len(moves) == 1:
+        if black_handicap and len(moves) == 1:
             move = "pass"
         else:
-            move = queries.query_weighted_random_move_next(moves, ranks[current_player], assistances[current_player], temperatures[current_player])
+            move = queries.query_human(moves, ranks[current_player], playouts[current_player])
         moves.append(move)
         if len(moves) > 1 and moves[-1] == "pass" and moves[-2] == "pass":
             break
@@ -46,6 +34,17 @@ def play_game(black_rank: float, black_assistance: int, white_rank: float, white
     print(sgf)
 
     return winrate > 0.5, len(moves)
+
+
+from scipy.stats import binomtest
+
+
+def ci_95(wins, losses):
+    k = wins
+    n = wins + losses
+    p_hat = k / n
+    ci = binomtest(k, n).proportion_ci(confidence_level=0.95, method='wilson')
+    return p_hat, ci.low, ci.high
 
 
 def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
@@ -68,13 +67,14 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
             moves_per_minute = shared_data["total_moves"] / elapsed_minutes
 
             if moves_per_minute != 0:
-                print(f"Games: {total_games} | Winrate: {(winrate * 100):.1f}% | "
+                _, low, high = ci_95(shared_data["won_games"], shared_data["lost_games"])
+                print(f"Games: {total_games} | Winrate: {(winrate * 100):.1f}% | 95% CI {100 * low:.1f}%-{100 * high:.1f}% | "
                       f"Games/min: {games_per_minute:.1f} | Moves/min: {moves_per_minute:.1f}")
 
             if total_games > MAX_GAMES:
                 return
 
-        black_won, num_moves = play_game(BLACK_RANK, BLACK_ASSISTANCE, WHITE_RANK, WHITE_ASSISTANCE, queries)
+        black_won, num_moves = play_game(shared_data["black_rank"], shared_data["black_playouts"], shared_data["black_handicap"], shared_data["white_rank"], shared_data["white_playouts"], queries )
 
         with lock:
 
@@ -87,26 +87,42 @@ def worker_loop(queries, shared_data, lock, shutdown_event, start_time):
 
 
 if __name__ == "__main__":
-    print("black:", get_rank_str(BLACK_RANK), BLACK_ASSISTANCE, "white:", get_rank_str(WHITE_RANK), WHITE_ASSISTANCE)
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Play game with specified parameters')
+    parser.add_argument('--playouts', type=int, default=10, help='Number of playouts for both players')
+    # parser.add_argument('--black-playouts', type=int, default=1, help='Number of playouts for black player')
+    # parser.add_argument('--white-playouts', type=int, default=1, help='Number of playouts for white player')
+    parser.add_argument('--black-rank', type=str, default="20k", help='Rank for black player')
+    parser.add_argument('--white-rank', type=str, default="14k", help='Rank for white player')
+    parser.add_argument('--handicap', action='store_true', default=True, help='Enable handicap for black player')
+
+    args = parser.parse_args()
+
+    print(args.black_rank, args.white_rank, args.playouts, args.handicap)
 
     controller = KatagoController()
-    controller.start_engine()
+    controller.start_engine(get_model(MODEL_BEST_SMALL), human=True, verbose=DEBUG)
     queries = KatagoQueries(controller)
     lock = threading.Lock()
     shutdown_event = threading.Event()
 
-    time.sleep(10)
-
     start_time = time.time()
 
     shared_data = {
+        "black_rank": args.black_rank,
+        "white_rank": args.white_rank,
+        "black_playouts": args.playouts,
+        "white_playouts": args.playouts,
+        "black_handicap": args.handicap,
         "won_games": 0,
         "lost_games": 0,
         "total_moves": 0,
     }
 
     threads = []
-    for i in range(1 if DEBUG else controller.get_batch_size()):
+    for i in range(1 if DEBUG else controller.get_batch_size() * 2):
         thread = threading.Thread(target=worker_loop, args=(queries, shared_data, lock, shutdown_event, start_time))
         thread.start()
         threads.append(thread)
