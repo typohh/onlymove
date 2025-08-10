@@ -248,20 +248,20 @@ if __name__ == "__main__":
     for c in range(1, 120):
         corruption = c / 200
         for playouts in [1, 3, 10, 30]:
-            model_filename = get_corrupted_model(corruption)
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(corruption) + f"_{playouts}.txt"}")
             if SKIP_IF_EXISTS and os.path.exists(filename):
                 continue
+            model_filename = get_corrupted_model(corruption)
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
             bot.stop()
 
     for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
         for playouts in [1, 3, 10, 30]:
-            model_filename = get_model(model)
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f"_{playouts}.txt"}")
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model) + f"_{playouts}.txt"}")
             if SKIP_IF_EXISTS and os.path.exists(filename):
                 continue
+            model_filename = get_model(model)
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
             bot.stop()
