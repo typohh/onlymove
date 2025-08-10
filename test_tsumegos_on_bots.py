@@ -245,7 +245,7 @@ if __name__ == "__main__":
 
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
 
-    for c in range(80, 120):
+    for c in range(1, 120):
         corruption = c / 200
         for playouts in [1, 3, 10, 30]:
             model_filename = get_corrupted_model(corruption)
