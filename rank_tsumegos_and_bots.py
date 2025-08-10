@@ -1,37 +1,23 @@
 import glob
 import os
-import re
-
 import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from katago_queries import get_rank_number
 
-# --- 2. Data Loading and Preprocessing ---
+# --- Data Loading ---
 def load_data(data_dir):
-    """
-    Loads all bot data from the specified directory.
-    It dynamically discovers all bots (from filenames) and all tsumegos
-    (from the content of the files).
-    """
     print("Loading and preprocessing data...")
     bot_files = glob.glob(os.path.join(data_dir, "*.txt"))
-
-    for file in bot_files:
-        print(file)
-    print()
 
     if not bot_files:
         raise FileNotFoundError(f"No bot data files (.txt) found in '{data_dir}'")
 
-    # Dynamically discover bots from filenames
     bot_ids = sorted([os.path.splitext(os.path.basename(f))[0] for f in bot_files])
     bot_map = {name: i for i, name in enumerate(bot_ids)}
 
-    # Dynamically discover all unique tsumegos by reading the files
     all_tsumego_ids = set()
     for bot_file in tqdm(bot_files, desc="Discovering Tsumegos"):
         with open(bot_file, "r") as f:
@@ -45,7 +31,6 @@ def load_data(data_dir):
 
     print(f"Discovered {len(bot_map)} bots and {len(tsumego_map)} tsumegos.")
 
-    # Create records for observed interactions.
     records = []
     for bot_file in tqdm(bot_files, desc="Loading Records"):
         bot_name = os.path.splitext(os.path.basename(bot_file))[0]
@@ -64,75 +49,71 @@ def load_data(data_dir):
     return df, bot_map, tsumego_map
 
 
-# --- 3. The Rating Model (Using Logistic Distribution) ---
+# --- Rating Model (3PL IRT) ---
 class RatingModel(nn.Module):
-    """
-    A PyTorch module for the logistic-based rating system (Elo-style).
-    """
-
     def __init__(self, num_bots, num_tsumegos):
         super().__init__()
-        # Bot ratings (theta)
-        self.bot_ratings = nn.Embedding(num_bots, 1)
-        # Tsumego difficulties (beta)
-        self.tsumego_difficulties = nn.Embedding(num_tsumegos, 1)
+        self.bot_ratings = nn.Embedding(num_bots, 1)           # θ_b
+        self.tsumego_difficulties = nn.Embedding(num_tsumegos, 1)  # β_t
+        self.tsumego_discrimination = nn.Embedding(num_tsumegos, 1) # α_t
+        self.tsumego_guessing = nn.Embedding(num_tsumegos, 1)       # c_t
 
-        # Initialize ratings from a standard normal distribution.
         nn.init.normal_(self.bot_ratings.weight, mean=0, std=1)
         nn.init.normal_(self.tsumego_difficulties.weight, mean=0, std=1)
+        nn.init.normal_(self.tsumego_discrimination.weight, mean=1.0, std=0.1)
+        nn.init.constant_(self.tsumego_guessing.weight, -2.2)  # sigmoid ~ 0.1
 
     def forward(self, bot_indices, tsumego_indices):
-        bot_rating = self.bot_ratings(bot_indices)
-        tsumego_difficulty = self.tsumego_difficulties(tsumego_indices)
-        # The core of the logistic model (Elo system)
-        diff = bot_rating - tsumego_difficulty
-        return torch.sigmoid(diff)
+        theta = self.bot_ratings(bot_indices)                # (batch, 1)
+        beta = self.tsumego_difficulties(tsumego_indices)    # (batch, 1)
+        alpha = self.tsumego_discrimination(tsumego_indices) # (batch, 1)
+        c = torch.sigmoid(self.tsumego_guessing(tsumego_indices))  # ensure (0,1)
+        diff = alpha * (theta - beta)
+        return c + (1 - c) * torch.sigmoid(diff)
 
 
-# --- NEW: Function to save a snapshot of the ratings ---
+# --- Save ratings snapshot (only 80% rating) ---
 def save_ratings_snapshot(model, bot_map, tsumego_map, epoch_num_str):
-    """
-    Extracts ratings from the model and saves them to CSV files.
-    'epoch_num_str' can be an integer or a string like 'final'.
-    """
-    # Set model to evaluation mode for consistent results
     model.eval()
-
     output_suffix = f"epoch_{epoch_num_str}" if isinstance(epoch_num_str, int) else epoch_num_str
     bot_filename = f"ratings/bot_ratings_{output_suffix}.csv"
     tsumego_filename = f"ratings/tsumego_ratings_{output_suffix}.csv"
 
-    print(f"\nSaving snapshot for epoch {epoch_num_str}...")
-
-    with torch.no_grad():  # Ensure no gradients are calculated during extraction
+    with torch.no_grad():
         bot_ratings = model.bot_ratings.weight.cpu().numpy().flatten()
         tsumego_difficulties = model.tsumego_difficulties.weight.cpu().numpy().flatten()
+        tsumego_discrimination = model.tsumego_discrimination.weight.cpu().numpy().flatten()
+        tsumego_guessing = torch.sigmoid(model.tsumego_guessing.weight).cpu().numpy().flatten()
 
-    # Create reverse mappings from index back to original ID for reporting
     rev_bot_map = {i: name for name, i in bot_map.items()}
     rev_tsumego_map = {i: name for name, i in tsumego_map.items()}
 
-    bot_ratings_df = pd.DataFrame({
-        "bot_id": [rev_bot_map.get(i) for i in range(len(bot_ratings))],
-        "rating": bot_ratings
+    # Tsumego: rating needed for 80% success
+    tsumego_rating_80 = tsumego_difficulties + (
+        np.log((0.8 - tsumego_guessing) / (0.2 - 0.2 * tsumego_guessing))
+        / tsumego_discrimination
+    )
+
+    tsumego_df = pd.DataFrame({
+        "tsumego_id": [rev_tsumego_map[i] for i in range(len(tsumego_rating_80))],
+        "rating": tsumego_rating_80
     }).sort_values(by="rating", ascending=False)
 
-    tsumego_ratings_df = pd.DataFrame({
-        "tsumego_id": [rev_tsumego_map.get(i) for i in range(len(tsumego_difficulties))],
-        "difficulty": tsumego_difficulties
-    }).sort_values(by="difficulty", ascending=False)
+    # Bot: rating where they'd succeed 80% on a "standard" tsumego (β=0, α=1, c=0)
+    bot_rating_80 = bot_ratings - 1.386  # This is arbitrary; may not be meaningful for 3PL
 
-    # Save the full results to CSV files
-    bot_ratings_df.to_csv(bot_filename, index=False)
-    tsumego_ratings_df.to_csv(tsumego_filename, index=False)
-    print(f"Ratings saved to '{bot_filename}' and '{tsumego_filename}'")
+    bot_df = pd.DataFrame({
+        "bot_id": [rev_bot_map[i] for i in range(len(bot_rating_80))],
+        "rating": bot_rating_80
+    }).sort_values(by="rating", ascending=False)
+
+    tsumego_df.to_csv(tsumego_filename, index=False)
+    bot_df.to_csv(bot_filename, index=False)
+    print(f"80% ratings saved to '{bot_filename}' and '{tsumego_filename}'")
 
 
-# --- 4. The Training Process (MODIFIED) ---
+# --- Training ---
 def train_model(model, data_loader, bot_map, tsumego_map, device, epochs=5, learning_rate=0.01):
-    """
-    Trains the rating model and saves results after each epoch.
-    """
     loss_fn = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -142,7 +123,6 @@ def train_model(model, data_loader, bot_map, tsumego_map, device, epochs=5, lear
         count = 0
         progress_bar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{epochs}")
         for bot_batch, tsumego_batch, rate_batch in progress_bar:
-            # --- FIX: Move data batches to the correct device ---
             bot_batch = bot_batch.to(device)
             tsumego_batch = tsumego_batch.to(device)
             rate_batch = rate_batch.to(device)
@@ -163,15 +143,14 @@ def train_model(model, data_loader, bot_map, tsumego_map, device, epochs=5, lear
     print("\nTraining complete.")
 
 
-# --- Main Execution (MODIFIED) ---
+# --- Main ---
 if __name__ == '__main__':
-    # --- Configuration ---
+    import numpy as np
     DATA_DIRECTORY = "attempts"
     BATCH_SIZE = 2 * 4096
     EPOCHS = 7
     LEARNING_RATE = 0.01
 
-    # --- Step 1: Load and prepare the data dynamically ---
     df, bot_map, tsumego_map = load_data(DATA_DIRECTORY)
 
     dataset = TensorDataset(
@@ -181,10 +160,8 @@ if __name__ == '__main__':
     )
     data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
 
-    # --- Step 2: Initialize the model and define the device ---
     model = RatingModel(num_bots=len(bot_map), num_tsumegos=len(tsumego_map))
 
-    # --- FIX: Determine device and move model ---
     if torch.cuda.is_available():
         device = torch.device("cuda")
         print("\nCUDA is available. Moving model to GPU...")
@@ -193,11 +170,7 @@ if __name__ == '__main__':
         print("\nCUDA not available. Running on CPU.")
     model.to(device)
 
-    # --- Step 3: Train the model ---
-    # --- FIX: Pass the device to the training function ---
     train_model(model, data_loader, bot_map, tsumego_map, device, epochs=EPOCHS, learning_rate=LEARNING_RATE)
-
-    # --- Step 4: Save a final, clearly marked version of the ratings ---
     save_ratings_snapshot(model, bot_map, tsumego_map, "final")
 
     print("\nScript finished.")
