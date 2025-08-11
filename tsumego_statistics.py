@@ -1,56 +1,61 @@
-import os
-import shutil
-from pathlib import Path
-from collections import defaultdict
-import random
-
-# --- Configuration ---
-# The directory containing the bot performance files.
 ATTEMPTS_DIR = "attempts"
-# The Tsumego ID you want to analyze.
-# TSUMEGO_TO_ANALYZE = "5180d01a"
-# TSUMEGO_TO_ANALYZE = "78db4e47"
-TSUMEGO_TO_ANALYZE = "659d7b7f"
+TSUMEGOS_TO_ANALYZE = ["5180d01a", "78db4e47", "659d7b7f", "10d40a14", "822b297a", "ce1e7413"]
+NTH_STRONGEST_FAILER = 5
+RATINGS_DIR = "ratings"
+RATINGS_FILE = "tsumego_ratings_final.csv"
+BOT_RATINGS_FILE = "bot_ratings_final.csv"
+
+from pathlib import Path
+import csv
 
 
-def get_bot_type_from_filename(filename: str) -> str:
+def load_bot_ratings() -> dict:
     """
-    Extracts the bot type from a filename (e.g., 'botA_engine.txt' -> 'engine').
+    Loads bot ratings from the CSV file.
+    Returns a dictionary mapping bot names to their ratings.
     """
-    stem = Path(filename).stem
-    if '_' in stem:
-        return stem.rsplit('_', 1)[1]
-    return "unknown"
+    ratings_path = Path(RATINGS_DIR) / BOT_RATINGS_FILE
+    if not ratings_path.is_file():
+        print(f"Warning: Bot ratings file '{ratings_path}' not found.")
+        return {}
+
+    ratings = {}
+    try:
+        with open(ratings_path, 'r', newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            for row in reader:
+                if len(row) >= 2:
+                    bot_name = row[0].strip()
+                    try:
+                        rating = float(row[1].strip())
+                        ratings[bot_name] = rating
+                    except ValueError:
+                        # Skip rows with invalid ratings
+                        continue
+        return ratings
+    except Exception as e:
+        print(f"Warning: Error reading bot ratings file: {e}")
+        return {}
 
 
-def load_and_process_data(directory: str) -> tuple[dict, list] or tuple[None, None]:
+def load_and_process_data(directory: str, bot_ratings: dict) -> list | None:
     """
-    Loads data from all .txt files in the specified directory.
-
-    Args:
-        directory: The path to the directory containing bot files.
-
-    Returns:
-        A tuple containing:
-        - A dictionary of all bots' data.
-        - A list of bot items sorted by strength in descending order.
-        Returns (None, None) if the directory or files are not found.
+    Loads data from all .txt files, calculates bot strength, and returns a list
+    of bots sorted by strength in descending order.
     """
     base_path = Path(directory)
     if not base_path.is_dir():
-        print(f"Error: Directory '{directory}' not found.")
-        return None, None
+        print(f"Error: Directory '{directory}' not found. Please check 'ATTEMPTS_DIR'.")
+        return None
 
     files = list(base_path.glob("*.txt"))
     if not files:
         print(f"Error: No .txt files found in '{directory}'.")
-        return None, None
+        return None
 
     bots_data = {}
     for file_path in files:
         bot_name = file_path.stem
-        bot_type = get_bot_type_from_filename(file_path.name)
-
         failures = set()
         total_count = 0
         success_count = 0
@@ -65,152 +70,177 @@ def load_and_process_data(directory: str) -> tuple[dict, list] or tuple[None, No
                     else:
                         failures.add(tsumego_id)
                 except (ValueError, IndexError):
-                    print(f"Warning: Skipping malformed line in {file_path.name}")
+                    print(f"Warning: Skipping malformed line in {file_path.name}: '{line.strip()}'")
                     continue
 
         if total_count > 0:
             strength = success_count / total_count
+            # Get bot rating if available
+            bot_rating = bot_ratings.get(bot_name, None)
             bots_data[bot_name] = {
-                'type': bot_type,
                 'strength': strength,
                 'failures': failures,
-                'total_solved': success_count,
-                'total_tsumegos': total_count
+                'rating': bot_rating
             }
 
-    # Sort bots by strength (strongest first)
     sorted_bots_list = sorted(
         bots_data.items(),
         key=lambda item: item[1]['strength'],
         reverse=True
     )
 
-    return bots_data, sorted_bots_list
+    return sorted_bots_list
 
 
-def analyze_tsumego_difficulty(tsumego_id: str, sorted_bots: list):
+def load_tsumego_ratings() -> dict:
     """
-    Analyzes a specific tsumego to find failure points and estimate difficulty.
+    Loads tsumego ratings from the CSV file.
+    Returns a dictionary mapping tsumego IDs to their ratings.
     """
-    print(f"\n--- Analysis for Tsumego ID: {tsumego_id} ---")
+    ratings_path = Path(RATINGS_DIR) / RATINGS_FILE
+    if not ratings_path.is_file():
+        print(f"Warning: Ratings file '{ratings_path}' not found.")
+        return {}
 
-    strongest_failing_bot = None
-    weakest_passing_bot = None
+    ratings = {}
+    try:
+        with open(ratings_path, 'r', newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            for row in reader:
+                if len(row) >= 2:
+                    tsumego_id = row[0].strip()
+                    try:
+                        rating = float(row[1].strip())
+                        ratings[tsumego_id] = rating
+                    except ValueError:
+                        # Skip rows with invalid ratings
+                        continue
+        return ratings
+    except Exception as e:
+        print(f"Warning: Error reading ratings file: {e}")
+        return {}
 
-    # Find the strongest bot that failed
-    for bot_name, data in sorted_bots:
+
+def analyze_tsumego_globally(tsumego_id: str, sorted_bots: list, ratings: dict):
+    """
+    Analyzes tsumego performance to find the strongest failing, weakest passing,
+    and Nth strongest failing bot.
+    """
+    print(f"--- Tsumego Global Analysis for ID: {tsumego_id} ---\n")
+
+    # Display tsumego rating if available
+    if tsumego_id in ratings:
+        print(f"  -> Tsumego Rating: {ratings[tsumego_id]:.2f}")
+    else:
+        print("  -> Tsumego Rating: Not available")
+    print()  # Add a blank line for better formatting
+
+    total_bots = len(sorted_bots)
+    strongest_failing_bot_details = None
+    weakest_passing_bot_details = None
+    nth_strongest_failing_bot_details = None
+    failures_found_count = 0
+
+    # --- Find Key Bots ---
+
+    # Find the strongest failing bot (first failure in the sorted list)
+    for i, (bot_name, data) in enumerate(sorted_bots):
         if tsumego_id in data['failures']:
-            strongest_failing_bot = (bot_name, data['strength'])
-            break  # Found the strongest one, no need to look further
+            # This bot failed the tsumego
+            # Since we iterate from strongest to weakest, the first failure we find
+            # is the strongest failing bot.
+            if strongest_failing_bot_details is None:
+                strongest_failing_bot_details = {
+                    "name": bot_name,
+                    "strength": data['strength'],
+                    "rank": i + 1,
+                    "rating": data.get('rating', None)
+                }
+            break
 
-    # Find the weakest bot that passed by iterating from the bottom up
-    for bot_name, data in reversed(sorted_bots):
+    # Find the weakest bot that passed (by iterating from the weakest)
+    for i, (bot_name, data) in enumerate(reversed(sorted_bots)):
         if tsumego_id not in data['failures']:
-            weakest_passing_bot = (bot_name, data['strength'])
-            break  # Found the weakest one
+            original_index = total_bots - 1 - i
+            weakest_passing_bot_details = {
+                "name": bot_name,
+                "strength": data['strength'],
+                "rank": original_index + 1,
+                "rating": data.get('rating', None)
+            }
+            break
 
-    # --- Report Results ---
-    if strongest_failing_bot:
-        name, strength = strongest_failing_bot
-        print(f"-> Strongest bot that FAILS it: '{name}' (Strength: {strength:.2%})")
-    else:
-        print("-> This tsumego was SOLVED by all bots.")
-
-    if weakest_passing_bot:
-        name, strength = weakest_passing_bot
-        print(f"-> Weakest bot that SOLVES it: '{name}' (Strength: {strength:.2%})")
-    else:
-        print("-> This tsumego was FAILED by all bots.")
-
-    # --- Estimate 50% Crossover Strength ---
-    if strongest_failing_bot and weakest_passing_bot:
-        s_fail = strongest_failing_bot[1]
-        s_pass = weakest_passing_bot[1]
-        # The crossover point is between these two bots. A good approximation is the average.
-        midpoint_strength = (s_fail + s_pass) / 2
-        print(f"\n=> Approximate 50% failure rate occurs at strength level: {midpoint_strength:.2%}")
-    elif not strongest_failing_bot:
-        print("\n=> Cannot estimate 50% level; all bots passed.")
-    elif not weakest_passing_bot:
-        print("\n=> Cannot estimate 50% level; all bots failed.")
-
-
-def analyze_by_bot_type(tsumego_id: str, all_bots_data: dict):
-    """
-    Analyzes tsumego failure rates grouped by bot type.
-    """
-    print(f"\n--- Failure Rate by Bot Type for Tsumego ID: {tsumego_id} ---")
-
-    type_stats = defaultdict(lambda: {'fails': 0, 'total': 0})
-
-    for bot_name, data in all_bots_data.items():
-        bot_type = data['type']
-        type_stats[bot_type]['total'] += 1
+    # Find the Nth strongest failing bot
+    for i, (bot_name, data) in enumerate(sorted_bots):
         if tsumego_id in data['failures']:
-            type_stats[bot_type]['fails'] += 1
+            # This bot failed the tsumego
+            failures_found_count += 1
+            if failures_found_count == NTH_STRONGEST_FAILER:
+                nth_strongest_failing_bot_details = {
+                    "name": bot_name,
+                    "strength": data['strength'],
+                    "rank": i + 1,
+                    "rating": data.get('rating', None)
+                }
+                break
 
-    if not type_stats:
-        print("No bot types found to analyze.")
-        return
+    # --- Report Findings ---
+    if strongest_failing_bot_details:
+        s = strongest_failing_bot_details
+        rating_info = f", Rating: {s['rating']:.2f}" if s['rating'] is not None else ""
+        print(f"  -> Strongest bot that FAILS: '{s['name']}' "
+              f"(Strength: {s['strength']:.2%}, Rank: {s['rank']}/{total_bots}{rating_info})")
+    else:
+        print("  -> All bots SOLVED the tsumego.")
 
-    for bot_type, stats in sorted(type_stats.items()):
-        fail_rate = (stats['fails'] / stats['total']) if stats['total'] > 0 else 0
-        print(f"- Type '{bot_type}': {stats['fails']} of {stats['total']} bots failed ({fail_rate:.2%})")
+    if weakest_passing_bot_details:
+        w = weakest_passing_bot_details
+        rating_info = f", Rating: {w['rating']:.2f}" if w['rating'] is not None else ""
+        print(f"  -> Weakest bot that SOLVES:  '{w['name']}' "
+              f"(Strength: {w['strength']:.2%}, Rank: {w['rank']}/{total_bots}{rating_info})")
+    else:
+        print("  -> All bots FAILED the tsumego.")
 
+    # Report on the Nth strongest failing bot
+    if nth_strongest_failing_bot_details:
+        n = nth_strongest_failing_bot_details
+        rating_info = f", Rating: {n['rating']:.2f}" if n['rating'] is not None else ""
+        print(f"  -> {NTH_STRONGEST_FAILER}th strongest bot that FAILS: '{n['name']}' "
+              f"(Strength: {n['strength']:.2%}, Rank: {n['rank']}/{total_bots}{rating_info})")
+    elif failures_found_count > 0:
+        print(f"  -> Fewer than {NTH_STRONGEST_FAILER} bots FAILED the tsumego (only {failures_found_count} failed it).")
 
-def create_dummy_files(directory: str, num_bots: int, num_tsumegos: int):
-    """
-    Generates a directory with dummy bot performance files for demonstration.
-    """
-    print("--- Setting up a dummy 'attempts' directory for demonstration ---")
-    if os.path.exists(directory):
-        shutil.rmtree(directory)
-    os.makedirs(directory)
-
-    bot_types = ['mcts', 'neural', 'hybrid']
-    tsumego_ids = [f"tsumego_{i}" for i in range(1, num_tsumegos + 1)]
-
-    for i in range(1, num_bots + 1):
-        bot_type = random.choice(bot_types)
-        bot_name = f"Bot_{i:02d}_{bot_type}"
-        file_path = Path(directory) / f"{bot_name}.txt"
-
-        # Bots with higher index are stronger
-        base_success_prob = 0.2 + 0.8 * (i / num_bots)
-
-        with open(file_path, 'w') as f:
-            for t_id in tsumego_ids:
-                # Make some tsumegos harder than others
-                tsumego_difficulty = int(t_id.split('_')[1]) / num_tsumegos
-                success = 1.0 if (base_success_prob * (1 - tsumego_difficulty)) > random.random() else 0.0
-                f.write(f"{t_id} {success}\n")
-    print(f"Created {num_bots} dummy bot files in '{directory}'.\n")
+    # --- Estimate 50% crossover strength ---
+    if strongest_failing_bot_details and weakest_passing_bot_details:
+        s_fail = strongest_failing_bot_details['strength']
+        s_pass = weakest_passing_bot_details['strength']
+        midpoint_strength = (s_fail + s_pass) / 2
+        print(f"\n  => Approx. 50% failure rate is at strength: {midpoint_strength:.2%}")
+    else:
+        print(f"\n  => Cannot estimate 50% failure rate.")
 
 
 def main():
     """Main execution function."""
-    # To run with real data, comment out or delete this call to create_dummy_files()
-    create_dummy_files(ATTEMPTS_DIR, num_bots=20, num_tsumegos=100)
+    # Load bot ratings
+    bot_ratings = load_bot_ratings()
+    
+    # Load and process bot data with ratings
+    sorted_bots_list = load_and_process_data(ATTEMPTS_DIR, bot_ratings)
 
-    all_bots, sorted_bots_list = load_and_process_data(ATTEMPTS_DIR)
+    if not sorted_bots_list:
+        print("Processing aborted due to data loading errors.")
+        return
 
-    if not all_bots:
-        return  # Exit if data loading failed
+    # Load tsumego ratings
+    ratings = load_tsumego_ratings()
 
-    # 1. Print overall bot strength ranking
-    print("--- Bot Strength Ranking (Overall Success Rate) ---")
-    for bot_name, data in sorted_bots_list:
-        print(
-            f"- {bot_name:<20} (Type: {data['type']:<8}) "
-            f"| Strength: {data['strength']:>7.2%} "
-            f"({data['total_solved']}/{data['total_tsumegos']} solved)"
-        )
-
-    # 2. Analyze the specific tsumego across all bots
-    analyze_tsumego_difficulty(TSUMEGO_TO_ANALYZE, sorted_bots_list)
-
-    # 3. Analyze the specific tsumego by bot type
-    analyze_by_bot_type(TSUMEGO_TO_ANALYZE, all_bots)
+    # Perform the global analysis for each tsumego ID in the list
+    for i, tsumego_id in enumerate(TSUMEGOS_TO_ANALYZE):
+        if i > 0:
+            # Print a separator for readability between reports
+            print("\n" + "=" * 60 + "\n")
+        analyze_tsumego_globally(tsumego_id, sorted_bots_list, ratings)
 
 
 if __name__ == "__main__":

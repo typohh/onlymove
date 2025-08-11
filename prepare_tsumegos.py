@@ -1,258 +1,115 @@
+import os
+import json
 import hashlib
 import io
-import json
-import os
-import random
-import re
+import zipfile
 
-from katago_queries import get_rank_number, get_rank_str, get_all_ranks
+from katago_queries import get_all_ranks, get_rank_str
+from tsumego_ratings_simple import get_tsumego_ratings
 
 
-def fix_tsumegos(tsumegos_dir):
-    sgf_files = [f for f in os.listdir(tsumegos_dir) if f.endswith('.sgf')]
-    for filename in sgf_files:
-        filepath = os.path.join(tsumegos_dir, filename)
-        with open(filepath, 'rb') as f:
-            file_bytes = f.read()
-            new_filename = hashlib.sha256(file_bytes).hexdigest()[:8] + ".sgf"
-            os.rename(filepath, os.path.join(tsumegos_dir, new_filename))
+def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
+    """Sorts, groups, and packages tsumegos into zip files based on their rank."""
+
+    metadata.sort(key=lambda x: x["rank"])
+    group_count = 150
+    for i, item in enumerate(metadata):
+        item["group"] = int(group_count * i / len(metadata))
+
+    zip_dir = os.path.join(output_dir, "tsumegos")
+    if os.path.exists(zip_dir):
+        for f in os.listdir(zip_dir):
+            if f.endswith(".zip"):
+                os.remove(os.path.join(zip_dir, f))
+    else:
+        os.makedirs(zip_dir)
+
+    zip_metadata = []
+    for group in range(group_count):
+        group_items = [item for item in metadata if item["group"] == group]
+        if not group_items:
+            continue
+
+        min_rank = min(item["rank"] for item in group_items)
+        max_rank = max(item["rank"] for item in group_items)
+
+        zip_content = io.BytesIO()
+        with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
+            # Add SGF files to zip
+            for item in group_items:
+                file_path = os.path.join(tsumegos_dir, item["filename"])
+                with open(file_path, 'rb') as f:
+                    temp_zip.writestr(item["filename"], f.read())
+
+            # Add metadata.json to zip
+            group_metadata_content = [{k: v for k, v in item.items() if k != "group"} for item in group_items]
+            temp_zip.writestr("metadata.json", json.dumps(group_metadata_content, indent=2))
+
+        zip_content.seek(0)
+        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:16]
+        zip_filename = f"{zip_hash}.zip"
+        zip_path = os.path.join(zip_dir, zip_filename)
+
+        with open(zip_path, 'wb') as f:
+            f.write(zip_content.getvalue())
+
+        zip_metadata.append({"filename": zip_filename, "min_rank": min_rank, "max_rank": max_rank})
+
+    metadata_path = os.path.join(output_dir, "metadata.json")
+    with open(metadata_path, 'w', encoding='utf-8') as f:
+        json.dump(zip_metadata, f, indent=2)
 
 
-def get_heuristic_rank(content):
-    """Find difference between two highest scores in content."""
-    pattern = r'Score: (-?\d+\.?\d*)'
-    matches = re.findall(pattern, content)
-    scores = sorted([float(score) for score in matches], reverse=True)
-    moves = len(set([round(score) for score in scores])) - 2
-    avg_moves = 7
-    return moves ** avg_moves / (moves ** avg_moves + avg_moves ** avg_moves)
+def print_rank_distribution(metadata):
+    """Prints the final distribution of problems by rank."""
+    if not metadata:
+        print("No metadata to generate distribution from.")
+        return
 
+    rank_distribution = sorted([item['rank'] for item in metadata])
 
-# 7 : heuristic_    0.165    0.479    1.000
+    print("\n--- Final Rank Distribution ---")
+    previous_rank = 0.0
+    total_problems = len(rank_distribution)
+    for rank in get_all_ranks():
+        min_r = (rank + previous_rank) / 2
+        max_r = rank + (rank - previous_rank) / 2 if rank < 1.0 else 1.01
 
-
-def extract_difficulty(content):
-    """Extract move and game ranks from the GN tag and return a dict with components and average."""
-    pattern = r"GN\[Move: (\d+[kd]), Game: (\d+[kd])\]"
-    match = re.search(pattern, content)
-
-    if not match:
-        raise Exception(f"Error: Could not find difficulty in {content}")
-
-    move_rank = get_rank_number(match.group(1))
-    game_rank = get_rank_number(match.group(2))
-    heuristic_rank = get_heuristic_rank(content)
-
-    average_rank = (move_rank + game_rank + heuristic_rank) / 3
-
-    return {
-        "rank": average_rank,
-        "move_rank": move_rank,
-        "game_rank": game_rank,
-        "heuristic_rank": heuristic_rank
-    }
-
-
-def intepolate(points, rating):
-    # Find points above and below the rating
-    above = None
-    below = None
-    for new_val, old_val in points:
-        if old_val >= rating:
-            above = (new_val, old_val)
-        if old_val <= rating and below is None:
-            below = (new_val, old_val)
-        if above is not None and below is not None:
-            break
-
-    if above is None:
-        return 1
-    if below is None:
-        return 0
-
-    # If points are the same, return either value
-    if above[1] == below[1]:
-        return above[0]
-
-    # Linear interpolation
-    t = (rating - below[1]) / (above[1] - below[1])
-    return below[0] + t * (above[0] - below[0])
+        count = sum(1 for x in rank_distribution if min_r <= x < max_r)
+        percentage = (count / total_problems * 100) if total_problems > 0 else 0
+        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%)")
+        previous_rank = rank
 
 
 if __name__ == "__main__":
 
-    tsumegos_dir = "tsumegos"
-    if not os.path.exists(tsumegos_dir):
-        print(f"Error: {tsumegos_dir} directory not found")
-        exit(1)
+    TSUMEGOS_DIR = "tsumegos"
+    OUTPUT_DIR = "pwa"
 
-    metadata = []
-    rank_distribution = []
-    rank_components_data = {}  # To store data for correlation analysis
+    # 1. Get the ratings map (tsumego_id -> rank).
+    tsumego_ratings_map = get_tsumego_ratings()
 
-    # Load tsumego ratings
-    import pandas as pd
-
-    # Load and normalize bot ratings
-    bot_ratings_df = pd.read_csv('ratings/bot_ratings_final.csv', header=0, names=['id', 'rating'])
-    bot_ratings_dict = dict(zip(bot_ratings_df['id'], bot_ratings_df['rating']))
-
-    max_rating = max(bot_ratings_dict.items(), key=lambda x: x[1])[0]
-    min_rating = min(bot_ratings_dict.items(), key=lambda x: x[1])[0]
-
-    anchors = {
-        max_rating: 1.0,
-        # "kata1-b6c96-s175395328-d26788732_1": get_rank_number("8d"),
-        "kata1-b6c96-s175395328-d26788732_corrupt31_1": get_rank_number("4d"),
-        "kata1-b6c96-s175395328-d26788732_corrupt5_1": get_rank_number("19k"),
-        min_rating: 0.0
-    }
-
-    # pprint(bot_ratings_dict)
-    # pprint(anchors)
-
-    anchors_old = {key: bot_ratings_dict[key] for key in anchors.keys()}
-
-    rating_map = list(zip(anchors.values(), anchors_old.values()))
-
-    normalized_bot_ratings = {}
-    for bot, rating in bot_ratings_dict.items():
-        normalized_bot_ratings[bot] = intepolate(rating_map, rating)
-
-    print("\nNormalized bot ratings:")
-    for bot, rating in normalized_bot_ratings.items():
-        print(f"{bot}: {bot_ratings_dict[bot]:.3f} -> {rating:.3f} {get_rank_str(rating)}")
-
-    ratings_df = pd.read_csv('ratings/tsumego_ratings_final.csv', header=0, names=['id', 'rating'])
-    ratings_dict = dict(zip(ratings_df['id'], ratings_df['rating']))
-
-    for filename in os.listdir(tsumegos_dir):
-        if filename.endswith(".sgf"):
-            file_path = os.path.join(tsumegos_dir, filename)
-
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            rank_data = {}
-
-            # Add true rank from ratings file
-            tsumego_id = filename.split('.')[0]
-            if ratings_dict.get(tsumego_id) is None:
-                print(f"Warning: No rating found for {tsumego_id}")
-                continue
-
-            rank_data["rank"] = intepolate(rating_map, ratings_dict.get(tsumego_id))
-
-            if rank_data is None or "rank" not in rank_data:
-                raise Exception(f"Warning: Could not determine difficulty for {filename}")
-
-            # spread out extremes for about half a rank, so we can order them into zips properly
-            if rank_data["rank"] == 1.0:
-                rank_data["rank"] -= random.Random(tsumego_id).uniform(0, 1 / 60)
-            if rank_data["rank"] == 0.0:
-                rank_data["rank"] += random.Random(tsumego_id).uniform(0, 1 / 60)
-
-            # Add randomness to the main rank
-            # rank_data["rank"] = rank_data["rank"] * (29 / 30) + (1 / 30) * random.random()
-
-            # Add filename to the rank data
-            rank_data["filename"] = filename
-
-            metadata.append(rank_data)
-            rank_distribution.append(rank_data["rank"])
-
-            # Collect data for correlation analysis (excluding "rank" and "filename")
-            for key, value in rank_data.items():
-                if key not in ["filename"]:
-                    if key not in rank_components_data:
-                        rank_components_data[key] = []
-                    rank_components_data[key].append(value)
-
-            # if len(metadata)>5000:
-            #     break
-
-    # Sort metadata by rank and assign groups
-    metadata.sort(key=lambda x: x["rank"])
-
-    # spread out evenly the ranks
-    # for i, item in enumerate(metadata):
-    #     item["rank"] = i / (len(metadata) - 1)
-
-    group_count = 150
-
-    for i, item in enumerate(metadata):
-        item["group"] = int(group_count * i / len(metadata))
-
-    # Create zip files for each group with embedded metadata
-    import zipfile
-
-    # Delete any pre-existing zip files in the directory
-    zip_dir = os.path.join("pwa", "tsumegos")
-    if os.path.exists(zip_dir):
-        for filename in os.listdir(zip_dir):
-            if filename.endswith(".zip"):
-                os.remove(os.path.join(zip_dir, filename))
-
-    zip_metadata = []  # For the main metadata file
-
-    for group in range(group_count):
-        group_items = [item for item in metadata if item["group"] == group]
-        group_files = [item["filename"] for item in group_items]
-
-        # Calculate min and max rank for this group
-        if group_items:
-            min_rank = min(item["rank"] for item in group_items)
-            max_rank = max(item["rank"] for item in group_items)
+    # 2. Build the final metadata list by matching files with their ratings.
+    print(f"\nMatching {len(tsumego_ratings_map)} ratings to tsumego files...")
+    all_metadata = []
+    sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
+    for filename in sgf_files:
+        tsumego_id = filename.split('.')[0]
+        if tsumego_id in tsumego_ratings_map:
+            rank = tsumego_ratings_map[tsumego_id]
+            all_metadata.append({"filename": filename, "rank": rank})
         else:
-            min_rank = max_rank = 0
+            raise Exception(f"Warning: SGF file '{filename}' found but has no calculated rating. Skipping.")
 
-        # Create zip content and calculate hash
-        zip_content = io.BytesIO()
-        with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
-            # Add tsumego files
-            for filename in group_files:
-                file_path = os.path.join(tsumegos_dir, filename)
-                with open(file_path, 'rb') as f:
-                    temp_zip.writestr(filename, f.read())
+    print(f"\nSuccessfully created metadata for {len(all_metadata)} tsumegos.")
 
-            # Create and add metadata.json for this zip (excluding group field)
-            group_metadata = []
-            for item in group_items:
-                # Copy item but exclude the "group" field
-                item_copy = {k: v for k, v in item.items() if k != "group"}
-                group_metadata.append(item_copy)
-            temp_zip.writestr("metadata.json", json.dumps(group_metadata, indent=2))
+    # 3. Create the zip packages and main metadata file.
+    print("\n--- Creating Tsumego Packages ---")
+    create_packages(all_metadata, TSUMEGOS_DIR, OUTPUT_DIR)
+    print(f"Created packages in '{os.path.join(OUTPUT_DIR, 'tsumegos')}'")
+    print(f"Created main metadata file at '{os.path.join(OUTPUT_DIR, 'metadata.json')}'")
 
-        # Calculate hash of zip content
-        zip_content.seek(0)
-        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:16]
-        zip_filename = f"{zip_hash}.zip"
-        zip_path = os.path.join("pwa", "tsumegos", zip_filename)
+    print("\nProcessing complete.")
 
-        # Write the actual zip file
-        with open(zip_path, 'wb') as f:
-            f.write(zip_content.getvalue())
-
-        # Add to main metadata
-        zip_metadata.append({
-            "filename": zip_filename,
-            "min_rank": min_rank,
-            "max_rank": max_rank
-        })
-
-    # Write main metadata file with zip information
-    metadata_path = os.path.join("pwa", "metadata.json")
-    with open(metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(zip_metadata, f, indent=2)
-
-    # Print rank distribution sorted by rank_num
-    rank_distribution = sorted(rank_distribution)
-    print("\nRank Distribution:")
-    previous_rank = 0
-    for rank in get_all_ranks():
-        min_rank = (rank + previous_rank) / 2
-        max_rank = rank + rank - previous_rank
-        # print aproximately how many of rank_distrubitn is between min_rank and max_rank
-        count = sum(1 for x in rank_distribution if min_rank <= x <= max_rank)
-        print(f"{get_rank_str(rank)}: {count} problems")
-        previous_rank = rank
+    # 4. Print the final distribution report.
+    print_rank_distribution(all_metadata)
