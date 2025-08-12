@@ -2,8 +2,8 @@
 
 const boardContainer = document.getElementById('board-container');
 
-// App version - last modified date and time
-const APP_VERSION = "2025-08-01 11:44";
+// App version - last modified date and time (automatically updated by deployment script)
+const APP_VERSION = "2025-08-12 19:30";
 console.log(`App Version: ${APP_VERSION}`);
 
 // Force service worker update
@@ -274,21 +274,6 @@ function handleIncorrectAnswer(hintWasShown = false) {
  * @param {number} y - The y-coordinate of the click.
  */
 async function handleBoardClick(x, y) {
-    // Prevent early clicks only when not in hint mode
-    if (!showCorrectMove && window.__yt_initialBlockUntil && Date.now() < window.__yt_initialBlockUntil) {
-        const overlay = document.createElement('div');
-        overlay.className = 'overlay';
-        Object.assign(overlay.style, {
-            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-            backgroundColor: 'rgba(255, 255, 255, 1)',
-            zIndex: '1000', opacity: '1', transition: 'opacity 1s ease-out'
-        });
-        document.body.appendChild(overlay);
-        requestAnimationFrame(() => requestAnimationFrame(() => { overlay.style.opacity = '0'; }));
-        setTimeout(() => { if (overlay.parentNode) document.body.removeChild(overlay); }, 1000);
-        return;
-    }
-
     if (!acceptClicks || !game || !kifuReader) return;
 
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
@@ -438,7 +423,29 @@ function initializeBoard(size) {
         stoneHandler: WGo.Board.drawHandlers.REALISTIC
     });
 
+    // Add click event listener
     board.addEventListener('click', handleBoardClick);
+    
+    // Add WebGL context event listeners to one of the canvas elements
+    // We use the stone layer's first canvas element since it's always present
+    if (board && board.stone && board.stone.elements && board.stone.elements[0]) {
+        const canvas = board.stone.elements[0];
+        
+        // Listen for WebGL context loss
+        canvas.addEventListener('webglcontextlost', function(event) {
+            console.log('WebGL context lost');
+            event.preventDefault();
+            // Prevent the default behavior which would cause the browser to remove the canvas
+        });
+        
+        // Listen for WebGL context restoration
+        canvas.addEventListener('webglcontextrestored', function(event) {
+            console.log('WebGL context restored');
+            // Re-render the board when context is restored
+            updateBoard();
+        });
+    }
+    
     updateBoardSize();
 }
 
@@ -733,13 +740,6 @@ async function loadTsumego(update) {
         updateBoard();
         updateAllUI();
 
-        // Configure 1s early-click block depending on hint mode
-        if (!showCorrectMove) {
-            window.__yt_initialBlockUntil = Date.now() + 1000;
-        } else {
-            window.__yt_initialBlockUntil = 0;
-        }
-
         acceptClicks = true;
         backgroundLoadCloserZip();
 
@@ -790,6 +790,19 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Evict unused zip files from cache in background
     evictUnusedZipFiles().catch(error => console.error("Error during cache eviction:", error));
+});
+
+// Handle page visibility changes to detect when the app was idle
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && board) {
+        // Page became visible again, update the board in case of context loss
+        console.log('Page became visible, checking board state');
+        try {
+            updateBoard();
+        } catch (e) {
+            console.log('Board update failed, likely due to context loss:', e);
+        }
+    }
 });
 
 window.addEventListener('resize', updateBoardSize);
