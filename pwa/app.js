@@ -140,17 +140,18 @@ function updateAllUI() {
 
 
 /**
- * Displays a temporary blood red overlay that fades out with ease-in effect.
+ * Displays a temporary overlay that fades out with ease-in effect.
  * @param {string} message - The text to display (not used in new implementation).
  * @param {number} duration - How long to display the overlay in milliseconds.
  * @param {function} [callback] - An optional function to run after the overlay is removed.
+ * @param {string} [color='rgba(139, 0, 0, 1)'] - The background color of the overlay.
  */
-function displayOverlay(message, duration, callback) {
+function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: 'rgba(139, 0, 0, 1)',
+        backgroundColor: color,
         display: 'flex', justifyContent: 'center', alignItems: 'center',
         zIndex: '1000', opacity: '1', transition: `opacity ${duration/1000}s ease-in`
     });
@@ -165,6 +166,45 @@ function displayOverlay(message, duration, callback) {
             document.body.removeChild(overlay);
         }
         if (callback) callback();
+    }, duration);
+}
+
+/**
+ * Displays a white overlay with fade in and fade out effects.
+ * @param {number} duration - How long to display the overlay in milliseconds.
+ * @param {function} [callback] - An optional function to run after the overlay is removed.
+ */
+function fadeOverlay(duration, callback) {
+    const overlay = document.createElement('div');
+    Object.assign(overlay.style, {
+        position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+        backgroundColor: 'white',
+        zIndex: '1000', opacity: '0', transition: 'opacity 1s ease-in-out'
+    });
+
+    document.body.appendChild(overlay);
+
+    // Fade in
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            overlay.style.opacity = '1';
+        });
+    });
+
+    // Hold for duration, then call callback and fade out
+    setTimeout(() => {
+        // Call the callback (load next tsumego) when fully visible
+        if (callback) callback();
+        
+        // Start fade out
+        overlay.style.opacity = '0';
+        
+        // Remove overlay after fade out completes
+        setTimeout(() => {
+            if (overlay.parentNode) {
+                document.body.removeChild(overlay);
+            }
+        }, 1000); // Match the 1s transition time
     }, duration);
 }
 
@@ -207,7 +247,11 @@ function updateUserStats(isCorrect, hintWasShown = false) {
 function handleCorrectAnswer(hintWasShown = false) {
     updateUserStats(true, hintWasShown);
     showCorrectMove = false;
-    loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
+    
+    // Create white overlay with fade in/out effect
+    fadeOverlay(1000, () => {
+        loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
+    });
 }
 
 /**
