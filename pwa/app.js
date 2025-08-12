@@ -13,6 +13,38 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Add click handler for showing version
+document.addEventListener('DOMContentLoaded', () => {
+  const komiElement = document.getElementById('komi');
+  if (komiElement) {
+    komiElement.addEventListener('click', () => {
+      // Show version briefly
+      const versionDisplay = document.createElement('div');
+      versionDisplay.textContent = `Version: ${APP_VERSION}`;
+      versionDisplay.style.position = 'fixed';
+      versionDisplay.style.top = '50%';
+      versionDisplay.style.left = '50%';
+      versionDisplay.style.transform = 'translate(-50%, -50%)';
+      versionDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+      versionDisplay.style.color = 'white';
+      versionDisplay.style.padding = '10px 20px';
+      versionDisplay.style.borderRadius = '5px';
+      versionDisplay.style.zIndex = '10000';
+      versionDisplay.style.fontSize = '18px';
+      versionDisplay.style.pointerEvents = 'none';
+      
+      document.body.appendChild(versionDisplay);
+      
+      // Remove after 2 seconds
+      setTimeout(() => {
+        if (versionDisplay.parentNode) {
+          document.body.removeChild(versionDisplay);
+        }
+      }, 2000);
+    });
+  }
+});
+
 // State variables
 let board;
 let game;
