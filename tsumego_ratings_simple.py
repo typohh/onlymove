@@ -6,6 +6,7 @@ from katago_queries import get_rank_number
 
 ATTEMPTS_DIR = "attempts"
 
+
 def get_tsumego_ratings():
     """
     Generates tsumego ratings based purely on bot attempt data.
@@ -52,29 +53,27 @@ def get_tsumego_ratings():
     ranked_bots = sorted(bot_solves.keys(), key=lambda bot: bot_solves[bot], reverse=True)
     bot_strength_rank = {bot_id: i for i, bot_id in enumerate(ranked_bots)}
 
-    print(f"Ranked bots. Strongest: {ranked_bots[0]}, Weakest: {ranked_bots[-1]}")
-
     # --- 3. Determine tsumego difficulty based on failing bots ---
     tsumego_difficulty_scores = {}
     print("\n--- Calculating Tsumego Difficulty ---")
 
     for tsumego_id in all_tsumegos:
-        # Find all bots that failed this tsumego, already ordered by strength
-        failing_bots = [
-            bot for bot in ranked_bots
-            if not bot_results.get(bot, {}).get(tsumego_id, True)  # Default to True (success) if not attempted
-        ]
+        # Start with strongest bots and look for up to 5 failing ones
+        found_failing_bots = []
+        for bot in ranked_bots:
+            if not bot_results.get(bot, {}).get(tsumego_id, True):
+                found_failing_bots.append(bot)
+                if len(found_failing_bots) >= 5:
+                    break
 
-        if not failing_bots:
-            # No bot failed it -> Easiest. Assign a rank weaker than the weakest bot.
-            difficulty_score = len(ranked_bots)
+        if not found_failing_bots:
+            # No bot failed it -> Easiest. Assign a rank equal to weakest bot.
+            failure_bot = ranked_bots[-1]
         else:
-            # Use the 5th strongest failing bot, or the weakest failing bot if fewer than 5 failed.
-            pivot_bot_index = min(4, len(failing_bots) - 1)
-            pivot_bot = failing_bots[pivot_bot_index]
-            difficulty_score = bot_strength_rank[pivot_bot]
+            # 5th strongest failing bot
+            failure_bot = found_failing_bots[-1]
 
-        tsumego_difficulty_scores[tsumego_id] = difficulty_score
+        tsumego_difficulty_scores[tsumego_id] = bot_strength_rank[failure_bot]
 
     # --- 4. Sort tsumegos by their calculated difficulty ---
     # A lower score means a stronger bot failed it -> harder problem.
@@ -86,17 +85,17 @@ def get_tsumego_ratings():
     )
 
     # --- 5. Assign final uniform ranks ---
-    final_ratings = {}
+    uniform_ratings = {}
     total_tsumegos = len(sorted_tsumegos)
     for i, tsumego_id in enumerate(sorted_tsumegos):
         # Assign rank from 0.0 (weakest/easiest) to 1.0 (strongest/hardest)
-        rank = i / (total_tsumegos - 1) if total_tsumegos > 1 else 0.5
-        final_ratings[tsumego_id] = rank
+        rank = i / (total_tsumegos - 1)
+        uniform_ratings[tsumego_id] = rank
 
     anchors = {
-        1.0:1.0,
-        get_rank_number("1k"):get_rank_number("4d"),
-        0.0:0.0
+        1.0: 1.0,
+        get_rank_number("2k"): get_rank_number("4d"),
+        0.0: 0.0
     }
 
     # Convert anchor points into sorted arrays for np.interp
@@ -105,7 +104,12 @@ def get_tsumego_ratings():
 
     # Create interpolated ratings
     interpolated_ratings = {}
-    for tsumego_id, rating in final_ratings.items():
+    for tsumego_id, rating in uniform_ratings.items():
         interpolated_ratings[tsumego_id] = np.interp(rating, anchor_x, anchor_y)
+
+    # Calculate average difference between ratings
+    differences = [(interpolated_ratings[tid] - uniform_ratings[tid]) for tid in uniform_ratings.keys()]
+    avg_difference = sum(differences) / len(differences)
+    print(f"\nAverage difference between interpolated and final ratings: {avg_difference:.4f}")
 
     return interpolated_ratings
