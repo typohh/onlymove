@@ -6,6 +6,32 @@ const boardContainer = document.getElementById('board-container');
 const APP_VERSION = "2025-08-12 19:30";
 console.log(`App Version: ${APP_VERSION}`);
 
+// Stone placement sound
+let stoneSound = null;
+
+// Initialize audio
+function initAudio() {
+    try {
+        stoneSound = new Audio('stone.wav');
+        stoneSound.preload = 'auto';
+    } catch (e) {
+        console.log('Audio initialization failed:', e);
+    }
+}
+
+// Play stone placement sound
+function playStoneSound() {
+    if (stoneSound) {
+        try {
+            // Reset to beginning and play
+            stoneSound.currentTime = 0;
+            stoneSound.play().catch(e => console.log('Audio play failed:', e));
+        } catch (e) {
+            console.log('Audio play failed:', e);
+        }
+    }
+}
+
 // Force service worker update
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
@@ -315,6 +341,7 @@ async function handleBoardClick(x, y) {
 
         // User move
         kifuReader.next(moveIndex);
+        playStoneSound(); // Play stone sound when user places a stone
         updateBoard();
         await renderAndHold(1000); // Show user move for 1s (after forcing render)
 
@@ -324,6 +351,7 @@ async function handleBoardClick(x, y) {
         } else {
             // For incorrect moves, show opponent response and start red overlay simultaneously
             kifuReader.next();
+            playStoneSound(); // Play stone sound for opponent's response
             updateBoard();
             
             // Start the red overlay immediately (don't wait 1 second)
@@ -762,6 +790,9 @@ async function loadTsumego(update) {
 
 document.addEventListener('DOMContentLoaded', () => {
     updateAllUI();
+    
+    // Initialize audio
+    initAudio();
 
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
