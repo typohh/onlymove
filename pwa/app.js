@@ -3,17 +3,31 @@
 const boardContainer = document.getElementById('board-container');
 
 // App version - last modified date and time (automatically updated by deployment script)
-const APP_VERSION = "2025-08-12 19:30";
+const APP_VERSION = "2025-08-12 19:50";
 console.log(`App Version: ${APP_VERSION}`);
 
 // Stone placement sound
 let stoneSound = null;
+// Fail sounds
+let failSound1 = null;
+let failSound2 = null;
+// Success sound
+let successSound = null;
 
 // Initialize audio
 function initAudio() {
     try {
         stoneSound = new Audio('stone.wav');
         stoneSound.preload = 'auto';
+        
+        failSound1 = new Audio('fail1.wav');
+        failSound1.preload = 'auto';
+        
+        failSound2 = new Audio('fail2.wav');
+        failSound2.preload = 'auto';
+        
+        successSound = new Audio('success.wav');
+        successSound.preload = 'auto';
     } catch (e) {
         console.log('Audio initialization failed:', e);
     }
@@ -28,6 +42,35 @@ function playStoneSound() {
             stoneSound.play().catch(e => console.log('Audio play failed:', e));
         } catch (e) {
             console.log('Audio play failed:', e);
+        }
+    }
+}
+
+// Play random fail sound
+function playRandomFailSound() {
+    if (!failSound1 || !failSound2) return;
+    
+    try {
+        const sounds = [failSound1, failSound2];
+        const randomSound = sounds[Math.floor(Math.random() * sounds.length)];
+        
+        // Reset to beginning and play
+        randomSound.currentTime = 0;
+        randomSound.play().catch(e => console.log('Fail sound play failed:', e));
+    } catch (e) {
+        console.log('Fail sound play failed:', e);
+    }
+}
+
+// Play success sound
+function playSuccessSound() {
+    if (successSound) {
+        try {
+            // Reset to beginning and play
+            successSound.currentTime = 0;
+            successSound.play().catch(e => console.log('Success sound play failed:', e));
+        } catch (e) {
+            console.log('Success sound play failed:', e);
         }
     }
 }
@@ -166,9 +209,10 @@ function updateAllUI() {
 
 
 /**
- * Displays a temporary overlay that fades out with ease-in effect.
+ * Displays a temporary overlay that fades in to 90% opacity over 4 seconds.
+ * Total duration is 5 seconds (1s wait + 4s fade in), then overlay is directly removed.
  * @param {string} message - The text to display (not used in new implementation).
- * @param {number} duration - How long to display the overlay in milliseconds.
+ * @param {number} duration - How long to display the overlay in milliseconds (ignored for fixed duration).
  * @param {function} [callback] - An optional function to run after the overlay is removed.
  * @param {string} [color='rgba(139, 0, 0, 1)'] - The background color of the overlay.
  */
@@ -179,20 +223,30 @@ function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
         backgroundColor: color,
         display: 'flex', justifyContent: 'center', alignItems: 'center',
-        zIndex: '1000', opacity: '1', transition: `opacity ${duration/1000}s ease-in`
+        zIndex: '1000', opacity: '0'
     });
 
     document.body.appendChild(overlay);
 
-    // Ensure at least one paint before starting the fade
-    requestAnimationFrame(() => requestAnimationFrame(() => { overlay.style.opacity = '0'; }));
+    // Start fade in after 1 second (to account for the 1s wait)
+    setTimeout(() => {
+        overlay.style.transition = 'opacity 4s linear';
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => { 
+                overlay.style.opacity = '0.9'; 
+                // Play random fail sound when overlay starts
+                playRandomFailSound();
+            });
+        });
+    }, 1000); // Start fade in after 1 second
 
+    // Remove overlay directly after fade in completes (1s wait + 4s fade in)
     setTimeout(() => {
         if (overlay.parentNode) {
             document.body.removeChild(overlay);
         }
         if (callback) callback();
-    }, duration);
+    }, 5000); // Remove overlay after 5 seconds total
 }
 
 /**
@@ -210,10 +264,11 @@ function fadeOverlay(duration, callback) {
 
     document.body.appendChild(overlay);
 
-    // Fade in
+    // Fade in and play success sound
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             overlay.style.opacity = '1';
+            playSuccessSound(); // Play success sound when overlay starts fading in
         });
     });
 
@@ -320,7 +375,34 @@ async function handleBoardClick(x, y) {
         if (correctNode?.move && correctNode.move.x === x && correctNode.move.y === y) {
             showCorrectMove = false;
         } else {
-            displayOverlay("", 1500);
+            // For incorrect moves in hint mode, show the normal animation path but without rating update
+            const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
+
+            if (!moveNode) {
+                displayOverlay("", 1500);
+                return;
+            }
+
+            const isCorrect = moveNode.comment?.includes('Correct') || false;
+            const moveIndex = kifuReader.node.children.indexOf(moveNode);
+
+            // User move
+            kifuReader.next(moveIndex);
+            playStoneSound(); // Play stone sound for user move
+            updateBoard();
+            await renderAndHold(1000); // Show user move for 1s (after forcing render)
+
+            // For incorrect moves, show opponent response and start red overlay simultaneously
+            kifuReader.next();
+            playStoneSound(); // Play stone sound for opponent response
+            updateBoard();
+            
+            // Start the red overlay immediately (don't wait 1 second) but don't update ratings
+            await new Promise((resolve) => {
+                displayOverlay('', 5000, resolve);
+            });
+            showCorrectMove = true;
+            loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
             return;
         }
     }
