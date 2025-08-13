@@ -17,16 +17,16 @@ let successSound = null;
 // Initialize audio
 function initAudio() {
     try {
-        stoneSound = new Audio('stone.wav');
+        stoneSound = new Audio('sound/stone.wav');
         stoneSound.preload = 'auto';
         
-        failSound1 = new Audio('fail1.wav');
+        failSound1 = new Audio('sound/fail1.wav');
         failSound1.preload = 'auto';
         
-        failSound2 = new Audio('fail2.wav');
+        failSound2 = new Audio('sound/fail2.wav');
         failSound2.preload = 'auto';
         
-        successSound = new Audio('success.wav');
+        successSound = new Audio('sound/success.wav');
         successSound.preload = 'auto';
     } catch (e) {
         console.log('Audio initialization failed:', e);
