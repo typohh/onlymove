@@ -64,6 +64,8 @@ function playRandomFailSound() {
 
 // Play success sound
 function playSuccessSound() {
+    // Temporarily disabled
+    /*
     if (successSound) {
         try {
             // Reset to beginning and play
@@ -73,6 +75,7 @@ function playSuccessSound() {
             console.log('Success sound play failed:', e);
         }
     }
+    */
 }
 
 // Force service worker update
@@ -907,13 +910,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Handle page visibility changes to detect when the app was idle
 document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && board) {
-        // Page became visible again, update the board in case of context loss
-        console.log('Page became visible, checking board state');
+    if (!document.hidden) {
+        // Page became visible again, reinitialize audio and update board in case of context loss
+        console.log('Page became visible, reinitializing audio and checking board state');
+        
+        // Reinitialize audio resources
         try {
-            updateBoard();
+            initAudio();
         } catch (e) {
-            console.log('Board update failed, likely due to context loss:', e);
+            console.log('Audio reinitialization failed:', e);
+        }
+        
+        // Update the board in case of context loss
+        if (board) {
+            try {
+                updateBoard();
+            } catch (e) {
+                console.log('Board update failed, likely due to context loss:', e);
+            }
         }
     }
 });
