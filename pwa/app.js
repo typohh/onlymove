@@ -6,14 +6,122 @@ const boardContainer = document.getElementById('board-container');
 const APP_VERSION = "2025-08-12 19:50";
 console.log(`App Version: ${APP_VERSION}`);
 
-// Stone placement sound
+// --- Constants ---
+const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
+
+// Local Storage Keys
+const STORAGE_USER_RANK = 'userRank';
+const STORAGE_PROBLEM_FREQUENCIES = 'problemFrequencies';
+const STORAGE_MOMENTUM = 'momentum';
+const STORAGE_PREVIOUS_TSUMEGO = 'previousTsumego';
+const STORAGE_PREVIOUS_TSUMEGO_CONTENT = 'previousTsumegoContent';
+const STORAGE_CURRENT_TSUMEGO = 'currentTsumego';
+const STORAGE_CURRENT_TSUMEGO_CONTENT = 'currentTsumegoContent';
+
+
+// --- Audio State ---
 let stoneSound = null;
-// Fail sounds
 let failSound1 = null;
 let failSound2 = null;
-// Success sound
 let successSound = null;
 
+// --- State Variables ---
+let board;
+let game;
+let kifuReader;
+let zipMetadata = []; // Metadata about zip files (filename, min_rank, max_rank)
+let loadedZips = {}; // Track which zip files have been loaded {zipFilename: problemsArray}
+let allProblems = []; // Flattened list of all problems from loaded zips
+let currentProblemFilename = null;
+let previousProblemFilename = localStorage.getItem(STORAGE_PREVIOUS_TSUMEGO);
+let currentSGF = null;
+let previousSGF = localStorage.getItem(STORAGE_PREVIOUS_TSUMEGO_CONTENT);
+let showCorrectMove = false;
+let acceptClicks = false; // Track when we should accept clicks
+let currentPointLoss = null; // Store point loss information for display in overlay
+
+// Load state from localStorage or set defaults
+let userRank = parseFloat(localStorage.getItem(STORAGE_USER_RANK)) || 0;
+let problemFrequencies = JSON.parse(localStorage.getItem(STORAGE_PROBLEM_FREQUENCIES)) || {};
+let momentum = parseFloat(localStorage.getItem(STORAGE_MOMENTUM)) || 30;
+
+// MODIFICATION: Cache for loaded zip files using direct references to prevent garbage collection.
+const zipCache = new Map();
+
+
+// --- Localization Helper ---
+
+const localization = {
+    'zh': { kyu: '级', dan: '段', komi: '贴目', previous: '上一题', points: '点' },
+    'ja': { kyu: '級', dan: '段', komi: 'コミ', previous: '前の問題', points: '点' },
+    'ko': { kyu: '급', dan: '단', komi: '덤', previous: '이전 문제', points: '점' },
+    'en': { kyu: 'kyu', dan: 'dan', komi: 'komi', previous: 'Previous', points: 'points' }
+};
+
+/**
+ * Gets a localized term based on the browser's language.
+ * @param {string} key - The key of the term to retrieve ('kyu', 'dan', 'komi', 'previous', 'points').
+ * @returns {string} The translated term.
+ */
+function getTerm(key) {
+    const lang = navigator.language || 'en';
+    if (lang.startsWith('zh')) return localization.zh[key];
+    if (lang.startsWith('ja')) return localization.ja[key];
+    if (lang.startsWith('ko')) return localization.ko[key];
+    return localization.en[key];
+}
+
+
+// --- Audio Functions ---
+
+/**
+ * Encapsulates the logic for playing an audio element.
+ * @param {HTMLAudioElement} audioObject - The audio object to play.
+ */
+function _playSound(audioObject) {
+    if (audioObject) {
+        try {
+            audioObject.currentTime = 0;
+            audioObject.play().catch(e => console.log('Audio play failed:', e));
+        } catch (e) {
+            console.log('Audio play failed:', e);
+        }
+    }
+}
+
+function initAudio() {
+    try {
+        stoneSound = new Audio('sound/stone.wav');
+        stoneSound.preload = 'auto';
+        failSound1 = new Audio('sound/fail1.wav');
+        failSound1.preload = 'auto';
+        failSound2 = new Audio('sound/fail2.wav');
+        failSound2.preload = 'auto';
+        successSound = new Audio('sound/success.wav');
+        successSound.preload = 'auto';
+    } catch (e) {
+        console.log('Audio initialization failed:', e);
+    }
+}
+
+function playStoneSound() {
+    _playSound(stoneSound);
+}
+
+function playRandomFailSound() {
+    if (!failSound1 || !failSound2) return;
+    const sounds = [failSound1, failSound2];
+    const randomSound = sounds[Math.floor(Math.random() * sounds.length)];
+    _playSound(randomSound);
+}
+
+function playSuccessSound() {
+    // Temporarily disabled
+    // _playSound(successSound);
+}
+
+
+// --- Suspension Detector Class (Unchanged) ---
 class SuspensionDetector {
   constructor(onResume) {
     this.onResume = onResume;
@@ -49,136 +157,32 @@ class SuspensionDetector {
   }
 }
 
-// Initialize audio
-function initAudio() {
-    try {
-        stoneSound = new Audio('sound/stone.wav');
-        stoneSound.preload = 'auto';
-        
-        failSound1 = new Audio('sound/fail1.wav');
-        failSound1.preload = 'auto';
-        
-        failSound2 = new Audio('sound/fail2.wav');
-        failSound2.preload = 'auto';
-        
-        successSound = new Audio('sound/success.wav');
-        successSound.preload = 'auto';
-    } catch (e) {
-        console.log('Audio initialization failed:', e);
-    }
-}
 
-// Play stone placement sound
-function playStoneSound() {
-    if (stoneSound) {
-        try {
-            // Reset to beginning and play
-            stoneSound.currentTime = 0;
-            stoneSound.play().catch(e => console.log('Audio play failed:', e));
-        } catch (e) {
-            console.log('Audio play failed:', e);
-        }
-    }
-}
-
-// Play random fail sound
-function playRandomFailSound() {
-    if (!failSound1 || !failSound2) return;
-    
-    try {
-        const sounds = [failSound1, failSound2];
-        const randomSound = sounds[Math.floor(Math.random() * sounds.length)];
-        
-        // Reset to beginning and play
-        randomSound.currentTime = 0;
-        randomSound.play().catch(e => console.log('Fail sound play failed:', e));
-    } catch (e) {
-        console.log('Fail sound play failed:', e);
-    }
-}
-
-// Play success sound
-function playSuccessSound() {
-    // Temporarily disabled
-    /*
-    if (successSound) {
-        try {
-            // Reset to beginning and play
-            successSound.currentTime = 0;
-            successSound.play().catch(e => console.log('Success sound play failed:', e));
-        } catch (e) {
-            console.log('Success sound play failed:', e);
-        }
-    }
-    */
-}
-
-// Force service worker update
+// --- Service Worker and Version Display ---
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
     registrations.forEach(reg => reg.update());
   });
 }
 
-// Add click handler for showing version
 document.addEventListener('DOMContentLoaded', () => {
   const komiElement = document.getElementById('komi');
   if (komiElement) {
     komiElement.addEventListener('click', () => {
-      // Show version briefly
       const versionDisplay = document.createElement('div');
       versionDisplay.textContent = `Version: ${APP_VERSION}`;
-      versionDisplay.style.position = 'fixed';
-      versionDisplay.style.top = '50%';
-      versionDisplay.style.left = '50%';
-      versionDisplay.style.transform = 'translate(-50%, -50%)';
-      versionDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-      versionDisplay.style.color = 'white';
-      versionDisplay.style.padding = '10px 20px';
-      versionDisplay.style.borderRadius = '5px';
-      versionDisplay.style.zIndex = '10000';
-      versionDisplay.style.fontSize = '18px';
-      versionDisplay.style.pointerEvents = 'none';
-      
+      Object.assign(versionDisplay.style, {
+          position: 'fixed', top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)', color: 'white',
+          padding: '10px 20px', borderRadius: '5px', zIndex: '10000',
+          fontSize: '18px', pointerEvents: 'none'
+      });
       document.body.appendChild(versionDisplay);
-      
-      // Remove after 2 seconds
-      setTimeout(() => {
-        if (versionDisplay.parentNode) {
-          document.body.removeChild(versionDisplay);
-        }
-      }, 2000);
+      setTimeout(() => versionDisplay.remove(), 2000);
     });
   }
 });
-
-// State variables
-let board;
-let game;
-let kifuReader;
-let zipMetadata = []; // Metadata about zip files (filename, min_rank, max_rank)
-let loadedZips = {}; // Track which zip files have been loaded {zipFilename: problemsArray}
-let allProblems = []; // Flattened list of all problems from loaded zips
-let currentProblemFilename = null;
-let previousProblemFilename = localStorage.getItem('previousTsumego'); // Store previous tsumego filename
-let currentSGF = null; // Store current tsumego SGF content
-let previousSGF = localStorage.getItem('previousTsumegoContent'); // Store previous tsumego SGF content for download
-let showCorrectMove = false;
-let acceptClicks = false; // Track when we should accept clicks
-
-// Store point loss information for display in overlay
-let currentPointLoss = null;
-
-// Load state from localStorage or set defaults
-let userRank = parseFloat(localStorage.getItem('userRank')) || 0;
-let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
-let momentum = parseFloat(localStorage.getItem('momentum')) || 30;
-
-// MODIFICATION: Cache for loaded zip files using direct references to prevent garbage collection.
-const zipCache = new Map();
-
-// Cache name for tsumego files
-const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
 
 
 // --- Helper Functions ---
@@ -186,60 +190,32 @@ const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
 /**
  * Converts a numeric rank (0.0 to 1.0) to a descriptive Go rank (20k to 9d).
  * @param {number} numericRank - The rank value between 0.0 and 1.0.
- * @returns {{rank: string, kyu: string, dan: string, komi: string}} An object with translated terms.
+ * @returns {string} The descriptive rank string.
  */
 function getDescriptiveRank(numericRank) {
     const totalRanks = 29; // 20 kyu ranks + 9 dan ranks
     const rankIndex = Math.floor(Math.pow(numericRank ,1.0) * totalRanks);
-    const lang = navigator.language || 'en';
-
-    let kyuTerm, danTerm, komiTerm;
-
-    if (lang.startsWith('zh')) { // Chinese
-        kyuTerm = '级'; danTerm = '段'; komiTerm = '贴目';
-    } else if (lang.startsWith('ja')) { // Japanese
-        kyuTerm = '級'; danTerm = '段'; komiTerm = 'コミ';
-    } else if (lang.startsWith('ko')) { // Korean
-        kyuTerm = '급'; danTerm = '단'; komiTerm = '덤';
-    } else { // Default (English and others)
-        kyuTerm = 'kyu'; danTerm = 'dan'; komiTerm = 'komi';
-    }
-
-    const rank = (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
-    return { rank, kyuTerm, danTerm, komiTerm };
+    const kyuTerm = getTerm('kyu');
+    const danTerm = getTerm('dan');
+    return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
 }
 
 /**
  * Centralized function to update all UI elements related to rank, komi, and links.
  */
 function updateAllUI() {
-    const { rank, komiTerm } = getDescriptiveRank(userRank);
+    const rank = getDescriptiveRank(userRank);
     const stddev = momentum / 2;
 
-    // Update rank display
     const rankElement = document.getElementById('rank-display');
-    if (rankElement) {
-        rankElement.textContent = `${rank} (±${stddev.toFixed(1)})`;
-    }
+    if (rankElement) rankElement.textContent = `${rank} (±${stddev.toFixed(1)})`;
 
-    // Update komi display
     const komiElement = document.getElementById('komi');
-    if (komiElement) {
-        komiElement.textContent = `7.5 ${komiTerm}`;
-    }
+    if (komiElement) komiElement.textContent = `7.5 ${getTerm('komi')}`;
 
-    // Update "Previous" link text and state
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
-        const lang = navigator.language || 'en';
-        let prevTsumegoText;
-        if (lang.startsWith('zh')) { prevTsumegoText = '上一题'; }
-        else if (lang.startsWith('ja')) { prevTsumegoText = '前の問題'; }
-        else if (lang.startsWith('ko')) { prevTsumegoText = '이전 문제'; }
-        else { prevTsumegoText = 'Previous'; }
-
-        prevTsumegoLink.textContent = prevTsumegoText;
-
+        prevTsumegoLink.textContent = getTerm('previous');
         if (previousSGF && previousProblemFilename) {
             prevTsumegoLink.classList.remove('disabled');
         } else {
@@ -250,12 +226,7 @@ function updateAllUI() {
 
 
 /**
- * Displays a temporary overlay that fades in to 90% opacity over 4 seconds.
- * Total duration is 5 seconds (1s wait + 4s fade in), then overlay is directly removed.
- * @param {string} message - The text to display (not used in new implementation).
- * @param {number} duration - How long to display the overlay in milliseconds (ignored for fixed duration).
- * @param {function} [callback] - An optional function to run after the overlay is removed.
- * @param {string} [color='rgba(139, 0, 0, 1)'] - The background color of the overlay.
+ * Displays a temporary overlay.
  */
 function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
     const overlay = document.createElement('div');
@@ -267,60 +238,38 @@ function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)
         zIndex: '1000', opacity: '0'
     });
 
-    // Create point loss display element
-    const pointLossElement = document.createElement('div');
-    pointLossElement.style.color = 'white';
-    pointLossElement.style.fontWeight = 'bold';
-    pointLossElement.style.textAlign = 'center';
-    pointLossElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.8)';
-    
-    // Set font size similar to other text elements
-    if (boardContainer) {
-        const boardSize = boardContainer.offsetWidth || 400; // fallback to 400px if not available
-        const fontSize = boardSize / 25;
-        pointLossElement.style.fontSize = fontSize + 'px';
-    } else {
-        pointLossElement.style.fontSize = '24px'; // fallback font size
-    }
-    
-    // Use stored point loss information
-    let pointLossText = currentPointLoss;
-    
-    // Only add the point loss element if we have point loss text
-    if (pointLossText) {
-        pointLossElement.textContent = pointLossText;
+    if (currentPointLoss) {
+        const pointLossElement = document.createElement('div');
+        Object.assign(pointLossElement.style, {
+            color: 'white', fontWeight: 'bold', textAlign: 'center',
+            textShadow: '2px 2px 4px rgba(0, 0, 0, 0.8)',
+            fontSize: boardContainer ? `${boardContainer.offsetWidth / 25}px` : '24px'
+        });
+        pointLossElement.textContent = currentPointLoss;
         overlay.appendChild(pointLossElement);
     }
 
     document.body.appendChild(overlay);
 
-    // Start fade in after 1 second (to account for the 1s wait)
     setTimeout(() => {
         overlay.style.transition = 'opacity 4s linear';
         requestAnimationFrame(() => {
-            requestAnimationFrame(() => { 
-                overlay.style.opacity = '0.9'; 
-                // Play random fail sound when overlay starts
+            requestAnimationFrame(() => {
+                overlay.style.opacity = '0.9';
                 playRandomFailSound();
             });
         });
-    }, 1000); // Start fade in after 1 second
+    }, 1000);
 
-    // Remove overlay directly after fade in completes (1s wait + 4s fade in)
     setTimeout(() => {
-        if (overlay.parentNode) {
-            document.body.removeChild(overlay);
-        }
-        // Clear the stored point loss after displaying it
-        currentPointLoss = null;
+        overlay.remove();
+        currentPointLoss = null; // Clear after displaying
         if (callback) callback();
-    }, 5000); // Remove overlay after 5 seconds total
+    }, 5000);
 }
 
 /**
- * Displays a white overlay with fade in and fade out effects.
- * @param {number} duration - How long to display the overlay in milliseconds.
- * @param {function} [callback] - An optional function to run after the overlay is removed.
+ * Displays a white fade overlay for correct answers.
  */
 function fadeOverlay(duration, callback) {
     const overlay = document.createElement('div');
@@ -332,57 +281,42 @@ function fadeOverlay(duration, callback) {
 
     document.body.appendChild(overlay);
 
-    // Fade in and play success sound
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             overlay.style.opacity = '1';
-            playSuccessSound(); // Play success sound when overlay starts fading in
+            playSuccessSound();
         });
     });
 
-    // Hold for duration, then call callback and fade out
     setTimeout(() => {
-        // Call the callback (load next tsumego) when fully visible
         if (callback) callback();
-        
-        // Start fade out
         overlay.style.opacity = '0';
-        
-        // Remove overlay after fade out completes
-        setTimeout(() => {
-            if (overlay.parentNode) {
-                document.body.removeChild(overlay);
-            }
-        }, 1000); // Match the 1s transition time
+        setTimeout(() => overlay.remove(), 1000);
     }, duration);
 }
 
 /**
  * Updates user rank and problem frequency, then saves to localStorage.
  * @param {boolean} isCorrect - Whether the user's answer was correct.
- * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
  */
-function updateUserStats(isCorrect, hintWasShown = false) {
-    if (hintWasShown) return;
-
+function updateUserStats(isCorrect) {
     const oldRank = userRank;
 
     if (isCorrect) {
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
         problemFrequencies[currentProblemFilename] = currentFreq / 5;
-        // Limit rank increase to half the distance to 1.0
         const maxIncrease = (1.0 - userRank) / 2;
         const intendedIncrease = momentum / 300;
-        userRank = userRank + Math.min(intendedIncrease, maxIncrease);
+        userRank += Math.min(intendedIncrease, maxIncrease);
     } else {
         problemFrequencies[currentProblemFilename] = 25;
         momentum = (momentum + 1) / 2;
         userRank = Math.max(0, userRank - 4 * (momentum / 300));
     }
 
-    localStorage.setItem('userRank', userRank.toString());
-    localStorage.setItem('problemFrequencies', JSON.stringify(problemFrequencies));
-    localStorage.setItem('momentum', momentum.toString());
+    localStorage.setItem(STORAGE_USER_RANK, userRank.toString());
+    localStorage.setItem(STORAGE_PROBLEM_FREQUENCIES, JSON.stringify(problemFrequencies));
+    localStorage.setItem(STORAGE_MOMENTUM, momentum.toString());
 
     updateAllUI();
 }
@@ -391,233 +325,127 @@ function updateUserStats(isCorrect, hintWasShown = false) {
 
 /**
  * Handles the logic for a correct user move.
- * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
+ * @param {boolean} hintWasShown - Whether a hint was shown before the answer.
  */
-function handleCorrectAnswer(hintWasShown = false) {
-    updateUserStats(true, hintWasShown);
+function handleCorrectAnswer(hintWasShown) {
+    if (!hintWasShown) updateUserStats(true);
     showCorrectMove = false;
-    
-    // Create white overlay with fade in/out effect
     fadeOverlay(1000, () => {
         loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
     });
 }
 
 /**
- * Handles the logic for an incorrect user move.
- * @param {boolean} [hintWasShown=false] - Whether a hint was shown before the answer.
+ * Calculates the point loss text for an incorrect move.
+ * @param {object} playedNode - The kifu node for the move the user played.
+ * @param {object} currentKifuNode - The current kifu node containing all possible next moves.
+ * @returns {string} The formatted point loss text, or an empty string.
  */
-function handleIncorrectAnswer(hintWasShown = false) {
-    updateUserStats(false, hintWasShown);
-    displayOverlay('', 3000, () => {
-        showCorrectMove = true;
-        loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
-    });
+function _calculatePointLossText(playedNode, currentKifuNode) {
+    const correctNode = currentKifuNode.children.find(child => child.comment?.includes('Correct'));
+    if (!correctNode) return '';
+
+    const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+    const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+
+    if (correctScoreMatch && playedScoreMatch) {
+        const correctScore = parseFloat(correctScoreMatch[1]);
+        const playedScore = parseFloat(playedScoreMatch[1]);
+        const pointLoss = Math.abs(correctScore - playedScore);
+        return `-${pointLoss.toFixed(1)} ${getTerm('points')}`;
+    }
+    return '';
 }
 
 /**
+ * Private helper to handle the animation and resolution of an incorrect move.
+ * @param {number} moveIndex - The index of the incorrect move played.
+ * @param {boolean} hintWasShown - Whether a hint was active.
+ */
+async function _handleIncorrectMoveSequence(moveIndex, hintWasShown) {
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+    const renderAndHold = async (ms) => {
+        if (boardContainer) void boardContainer.offsetHeight; // Force reflow
+        await Promise.resolve();
+        await delay(ms);
+    };
+
+    // User move
+    kifuReader.next(moveIndex);
+    playStoneSound();
+    updateBoard();
+    await renderAndHold(1000);
+
+    // Opponent response
+    kifuReader.next();
+    playStoneSound();
+    updateBoard();
+
+    // Show overlay and load next problem
+    if (!hintWasShown) updateUserStats(false);
+    await new Promise((resolve) => displayOverlay('', 5000, resolve));
+
+    showCorrectMove = true;
+    loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
+}
+
+
+/**
  * Handles user clicks on the Go board.
- * Sequence: user move -> wait 1s -> opponent response (if any) -> wait 1s -> resolve.
- * Uses async/await with a delay helper and frame awaits to ensure paint before delays.
  * @param {number} x - The x-coordinate of the click.
  * @param {number} y - The y-coordinate of the click.
  */
 async function handleBoardClick(x, y) {
     if (!acceptClicks || !game || !kifuReader) return;
 
-    const delay = (ms) => new Promise(res => setTimeout(res, ms));
-    const renderAndHold = async (ms) => {
-        if (boardContainer) {
-            // Force style/layout to flush any pending drawing
-            window.getComputedStyle(boardContainer).getPropertyValue('width');
-            void boardContainer.offsetHeight;
-        }
-        await Promise.resolve();
-        await delay(ms);
-    };
-
     const hintWasShown = showCorrectMove;
 
-    if (showCorrectMove) {
+    if (hintWasShown) {
         const correctNode = kifuReader.node.children.find(child => child.comment?.includes('Correct'));
         if (correctNode?.move && correctNode.move.x === x && correctNode.move.y === y) {
-            showCorrectMove = false;
-        } else {
-            // For incorrect moves in hint mode, show the normal animation path but without rating update
-            const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
-
-            if (!moveNode) {
-                displayOverlay("", 1500);
-                return;
-            }
-
-            const isCorrect = moveNode.comment?.includes('Correct') || false;
-            const moveIndex = kifuReader.node.children.indexOf(moveNode);
-            
-            // For incorrect moves in hint mode, calculate point loss before advancing kifuReader
-            if (!isCorrect) {
-                let pointLossText = '';
-                // Try different ways to find the correct node
-                const correctNode = kifuReader.node.children.find(child => 
-                    child.comment?.includes('Correct') || 
-                    child.comment?.includes('Correct move')
-                );
-                const playedNode = moveNode;
-                
-                if (correctNode && playedNode) {
-                    // Extract scores from comments (handle both formats)
-                    const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
-                    const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
-                    
-                    if (correctScoreMatch && playedScoreMatch) {
-                        const correctScore = parseFloat(correctScoreMatch[1]);
-                        const playedScore = parseFloat(playedScoreMatch[1]);
-                        const pointLoss = Math.abs(correctScore - playedScore);
-                        
-                        // Get localized "points" text
-                        const lang = navigator.language || 'en';
-                        let pointsText;
-                        if (lang.startsWith('zh')) { // Chinese
-                            pointsText = '点';
-                        } else if (lang.startsWith('ja')) { // Japanese
-                            pointsText = '点';
-                        } else if (lang.startsWith('ko')) { // Korean
-                            pointsText = '점';
-                        } else { // Default (English and others)
-                            pointsText = 'points';
-                        }
-                        
-                        pointLossText = `-${pointLoss.toFixed(1)} ${pointsText}`;
-                    }
-                }
-                
-                // Store point loss for display in overlay
-                currentPointLoss = pointLossText;
-            }
-
-            // User move
-            kifuReader.next(moveIndex);
-            playStoneSound(); // Play stone sound for user move
+            // Show the stone immediately
+            kifuReader.next(kifuReader.node.children.indexOf(correctNode));
+            playStoneSound();
             updateBoard();
-            await renderAndHold(1000); // Show user move for 1s (after forcing render)
-
-            // For incorrect moves, show opponent response and start red overlay simultaneously
-            kifuReader.next();
-            playStoneSound(); // Play stone sound for opponent response
-            updateBoard();
-            
-            // Start the red overlay immediately (don't wait 1 second) but don't update ratings
-            await new Promise((resolve) => {
-                displayOverlay('', 5000, resolve);
-            });
-            showCorrectMove = true;
-            loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
+            // Then, after a delay, handle the success logic
+            setTimeout(() => handleCorrectAnswer(hintWasShown), 1000);
             return;
         }
     }
 
-    // Check if the move is valid first
-    if (game.isValid(x, y, game.turn)) {
-        acceptClicks = false;
-
-        const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
-
-        if (!moveNode) {
-            acceptClicks = true;
-            return;
-        }
-
-        const isCorrect = moveNode.comment?.includes('Correct') || false;
-        const moveIndex = kifuReader.node.children.indexOf(moveNode);
-
-        // Calculate point loss BEFORE advancing kifuReader
-        if (!isCorrect) {
-            let pointLossText = '';
-            // Try different ways to find the correct node
-            const correctNode = kifuReader.node.children.find(child => 
-                child.comment?.includes('Correct') || 
-                child.comment?.includes('Correct move')
-            );
-            const playedNode = moveNode;
-            
-            if (correctNode && playedNode) {
-                // Extract scores from comments (handle both formats)
-                const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
-                const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
-                
-                if (correctScoreMatch && playedScoreMatch) {
-                    const correctScore = parseFloat(correctScoreMatch[1]);
-                    const playedScore = parseFloat(playedScoreMatch[1]);
-                    const pointLoss = Math.abs(correctScore - playedScore);
-                    
-                    // Get localized "points" text
-                    const lang = navigator.language || 'en';
-                    let pointsText;
-                    if (lang.startsWith('zh')) { // Chinese
-                        pointsText = '点';
-                    } else if (lang.startsWith('ja')) { // Japanese
-                        pointsText = '点';
-                    } else if (lang.startsWith('ko')) { // Korean
-                        pointsText = '점';
-                    } else { // Default (English and others)
-                        pointsText = 'points';
-                    }
-                    
-                    pointLossText = `-${pointLoss.toFixed(1)} ${pointsText}`;
-                }
-            }
-            
-            // Store point loss for display in overlay
-            currentPointLoss = pointLossText;
-        }
-
-        // User move
-        kifuReader.next(moveIndex);
-        playStoneSound(); // Play stone sound when user places a stone
-        updateBoard();
-        await renderAndHold(1000); // Show user move for 1s (after forcing render)
-
-        // Resolve outcome sequentially
-        if (isCorrect) {
-            handleCorrectAnswer(hintWasShown);
-        } else {
-            // For incorrect moves, show opponent response and start red overlay simultaneously
-            kifuReader.next();
-            playStoneSound(); // Play stone sound for opponent's response
-            updateBoard();
-            
-            // Start the red overlay immediately (don't wait 1 second)
-            updateUserStats(false, hintWasShown);
-            await new Promise((resolve) => {
-                displayOverlay('', 5000, resolve);
-            });
-            showCorrectMove = true;
-            loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
-        }
-    } else {
-        // Check if the move is illegal due to ko
-        const koResult = game.play(x, y, game.turn, true); // noplay=true to only test
-        if (koResult === 4) { // 4 indicates illegal due to ko
-            // Mark the illegal ko move with a square
+    if (!game.isValid(x, y, game.turn)) {
+        if (game.play(x, y, game.turn, true) === 4) { // 4 = illegal due to ko
             board.addObject({ x, y, type: 'SQ' });
-            
-            // Also check adjacent squares for potential ko points
-            const size = game.size;
-            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
-            
-            for (const [dx, dy] of directions) {
-                const adjX = x + dx;
-                const adjY = y + dy;
-                
-                // Check if adjacent square is within board boundaries
-                if (adjX >= 0 && adjX < size && adjY >= 0 && adjY < size) {
-                    const adjResult = game.play(adjX, adjY, game.turn, true); // noplay=true to only test
-                    if (adjResult === 4) { // illegal due to ko
-                        board.addObject({ x: adjX, y: adjY, type: 'SQ' });
-                    }
-                }
-            }
         }
+        return;
+    }
+
+    const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
+
+    if (!moveNode) {
+        if (hintWasShown) displayOverlay("", 1500);
+        return;
+    }
+
+    acceptClicks = false;
+    const isCorrect = moveNode.comment?.includes('Correct') || false;
+    const moveIndex = kifuReader.node.children.indexOf(moveNode);
+
+    if (isCorrect) {
+        // Show the stone immediately
+        kifuReader.next(moveIndex);
+        playStoneSound();
+        updateBoard();
+
+        // Then, after a delay, handle the success logic
+        setTimeout(() => {
+            handleCorrectAnswer(hintWasShown);
+        }, 1000);
+    } else {
+        // For incorrect moves, calculate point loss and then run the sequence
+        currentPointLoss = _calculatePointLossText(moveNode, kifuReader.node);
+        // The sequence itself handles the necessary delays internally
+        await _handleIncorrectMoveSequence(moveIndex, hintWasShown);
     }
 }
 
@@ -634,23 +462,13 @@ function selectProblem() {
 
     if (allProblems.length === 0) return null;
 
-    let availableProblems = allProblems.filter(problem =>
-        problem.filename !== currentProblemFilename &&
-        problem.filename !== previousProblemFilename
-    );
-
-    if (availableProblems.length === 0) {
-        availableProblems = allProblems; // Fallback to all problems if filtering leaves none
-    }
+    let availableProblems = allProblems.filter(p => p.filename !== currentProblemFilename && p.filename !== previousProblemFilename);
+    if (availableProblems.length === 0) availableProblems = allProblems;
 
     availableProblems.sort((a, b) => Math.abs(a.rank - userRank) - Math.abs(b.rank - userRank));
     const candidateProblems = availableProblems.slice(0, 500);
 
-    const weightedProblems = candidateProblems.map(problem => ({
-        problem,
-        weight: problemFrequencies[problem.filename] || 1
-    }));
-
+    const weightedProblems = candidateProblems.map(problem => ({ problem, weight: problemFrequencies[problem.filename] || 1 }));
     const totalWeight = weightedProblems.reduce((sum, p) => sum + p.weight, 0);
 
     if (totalWeight <= 0) {
@@ -683,9 +501,7 @@ function initializeBoard(size) {
         stoneHandler: WGo.Board.drawHandlers.REALISTIC
     });
 
-    // Add click event listener
     board.addEventListener('click', handleBoardClick);
-    
     updateBoardSize();
 }
 
@@ -720,27 +536,6 @@ function updateBoard() {
 
     if (kifuReader.node.move) {
         board.addObject({ x: kifuReader.node.move.x, y: kifuReader.node.move.y, type: 'CR' });
-        
-        // Check if the last move created an illegal ko situation
-        // We check all four adjacent positions for potential ko captures
-        const x = kifuReader.node.move.x;
-        const y = kifuReader.node.move.y;
-        const size = game.size;
-        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
-        
-        for (const [dx, dy] of directions) {
-            const adjX = x + dx;
-            const adjY = y + dy;
-            
-            // Check if adjacent square is within board boundaries
-            if (adjX >= 0 && adjX < size && adjY >= 0 && adjY < size) {
-                // Check if playing at this position would be illegal due to ko
-                const koResult = game.play(adjX, adjY, game.turn, true); // noplay=true to only test
-                if (koResult === 4) { // 4 indicates illegal due to ko
-                    board.addObject({ x: adjX, y: adjY, type: 'SQ' });
-                }
-            }
-        }
     }
 
     if (showCorrectMove) drawCorrectMoveMarker();
@@ -791,40 +586,28 @@ function initializeKifuFromSGF(sgfContent) {
     return kifu;
 }
 
-/**
- * Fetches an SGF file from a zip archive.
- * @param {string} filename - The SGF file to load.
- * @param {string} zipFilename - The name of the zip file to load from.
- */
+
+// --- Caching and Data Fetching ---
+
 async function fetchSgfFromZip(filename, zipFilename) {
-    if (!loadedZips[zipFilename]) {
-        await loadZipProblems(zipFilename);
-    }
+    if (!loadedZips[zipFilename]) await loadZipProblems(zipFilename);
 
-    // MODIFICATION: Get zip object directly from cache. WeakRef logic is removed.
     const zip = zipCache.get(zipFilename);
-
     if (!zip) {
-        // This case should ideally not be hit if logic is sound, but as a fallback, reload.
         console.error(`Zip file ${zipFilename} was not found in cache. Forcing reload.`);
         await loadZipProblems(zipFilename);
         const reloadedZip = zipCache.get(zipFilename);
         if (!reloadedZip) throw new Error(`Failed to load and cache zip file: ${zipFilename}`);
-        
-        const file = reloadedZip.file(filename);
-        if (!file) throw new Error(`File ${filename} not found in reloaded ${zipFilename}`);
-        return await file.async('text');
+        const fileInReloaded = reloadedZip.file(filename);
+        if (!fileInReloaded) throw new Error(`File ${filename} not found in reloaded ${zipFilename}`);
+        return await fileInReloaded.async('text');
     }
 
     const file = zip.file(filename);
     if (!file) throw new Error(`File ${filename} not found in ${zipFilename}`);
-
     return await file.async('text');
 }
 
-/**
- * Loads metadata about all zip files.
- */
 async function loadZipMetadata() {
     if (zipMetadata.length === 0) {
         const response = await fetch('metadata.json');
@@ -832,27 +615,14 @@ async function loadZipMetadata() {
     }
 }
 
-/**
- * Evicts zip files from cache that are not listed in the main metadata.json
- */
 async function evictUnusedZipFiles() {
     try {
-        // Load metadata first
         await loadZipMetadata();
-        
-        // Get all cache keys
         const cache = await caches.open(TSUMEGO_CACHE_NAME);
         const cacheKeys = await cache.keys();
-        
-        // Extract expected zip filenames from metadata
         const expectedZipFiles = new Set(zipMetadata.map(zip => `tsumegos/${zip.filename}`));
-        
-        // Check each cached file
         for (const request of cacheKeys) {
-            const url = new URL(request.url);
-            const path = url.pathname.substring(1); // Remove leading slash
-            
-            // If it's a tsumego zip file and not in our expected list, delete it
+            const path = new URL(request.url).pathname.substring(1);
             if (path.startsWith('tsumegos/tsumegos') && path.endsWith('.zip') && !expectedZipFiles.has(path)) {
                 console.log("Evicting unused zip from cache:", path);
                 await cache.delete(request);
@@ -863,32 +633,23 @@ async function evictUnusedZipFiles() {
     }
 }
 
-/**
- * Loads and caches problems from a specific zip file.
- * @param {string} zipFilename - The name of the zip file to load.
- */
 async function loadZipProblems(zipFilename) {
     if (loadedZips[zipFilename]) return;
 
-    // Try to get from cache first
     const cache = await caches.open(TSUMEGO_CACHE_NAME);
-    const cachedResponse = await cache.match(`tsumegos/${zipFilename}`);
-    
+    const cacheKey = `tsumegos/${zipFilename}`;
     let zipData;
+    const cachedResponse = await cache.match(cacheKey);
+
     if (cachedResponse) {
         zipData = await cachedResponse.arrayBuffer();
     } else {
-        const zipResponse = await fetch(`tsumegos/${zipFilename}`);
+        const zipResponse = await fetch(cacheKey);
         zipData = await zipResponse.arrayBuffer();
-        
-        // Cache the response
-        const responseToCache = new Response(zipData);
-        await cache.put(`tsumegos/${zipFilename}`, responseToCache);
+        await cache.put(cacheKey, new Response(zipData));
     }
 
-    const zip = new JSZip();
-    await zip.loadAsync(zipData);
-
+    const zip = await new JSZip().loadAsync(zipData);
     const metadataFile = zip.file('metadata.json');
     if (!metadataFile) throw new Error(`metadata.json not found in ${zipFilename}`);
 
@@ -897,36 +658,16 @@ async function loadZipProblems(zipFilename) {
 
     loadedZips[zipFilename] = problems;
     allProblems.push(...problems);
-    
-    // MODIFICATION: Store a direct (strong) reference to the JSZip object in the cache.
     zipCache.set(zipFilename, zip);
 }
 
-/**
- * Finds the zip file with a rank range closest to the user's current rank.
- * @returns {object|null} The metadata for the closest zip file.
- */
 function findClosestZip() {
-    let closestZip = null;
-    let minRankDiff = Infinity;
-
-    zipMetadata.forEach(zip => {
-        const diffToMin = Math.abs(userRank - zip.min_rank);
-        const diffToMax = Math.abs(userRank - zip.max_rank);
-        const minDiff = Math.min(diffToMin, diffToMax);
-
-        if (minDiff < minRankDiff) {
-            minRankDiff = minDiff;
-            closestZip = zip;
-        }
-    });
-
-    return closestZip;
+    return zipMetadata.reduce((closest, zip) => {
+        const diff = Math.min(Math.abs(userRank - zip.min_rank), Math.abs(userRank - zip.max_rank));
+        return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
+    }, { zip: null, minDiff: Infinity }).zip;
 }
 
-/**
- * Background loads the zip file closest to the user's rank if not already loaded.
- */
 async function backgroundLoadCloserZip() {
     const closestZip = findClosestZip();
     if (closestZip && !loadedZips[closestZip.filename]) {
@@ -946,26 +687,18 @@ async function loadTsumego(update) {
         acceptClicks = false;
         await loadZipMetadata();
         
-        // Set early-click block only when not in hint mode
-
-        let kifu;
+        const savedTsumegoFile = localStorage.getItem(STORAGE_CURRENT_TSUMEGO);
+        const savedTsumegoContent = localStorage.getItem(STORAGE_CURRENT_TSUMEGO_CONTENT);
         let selectedProblem = null;
-
-        const savedTsumegoFile = localStorage.getItem('currentTsumego');
-        const savedTsumegoContent = localStorage.getItem('currentTsumegoContent');
 
         if (savedTsumegoFile && savedTsumegoContent && !update) {
             currentProblemFilename = savedTsumegoFile;
             currentSGF = savedTsumegoContent;
         } else {
-            if (!selectedProblem) {
-                selectedProblem = selectProblem();
-            }
-
+            selectedProblem = selectProblem();
             if (!selectedProblem) {
                 const closestZip = findClosestZip();
                 if (closestZip) {
-                    console.log("Blocking on zip download for problem selection");
                     await loadZipProblems(closestZip.filename);
                     selectedProblem = selectProblem();
                     if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
@@ -976,20 +709,18 @@ async function loadTsumego(update) {
 
             previousSGF = currentSGF;
             previousProblemFilename = currentProblemFilename;
-
             currentProblemFilename = selectedProblem.filename;
             currentSGF = await fetchSgfFromZip(currentProblemFilename, selectedProblem.zipFilename);
 
-            localStorage.setItem('currentTsumego', currentProblemFilename);
-            localStorage.setItem('currentTsumegoContent', currentSGF);
+            localStorage.setItem(STORAGE_CURRENT_TSUMEGO, currentProblemFilename);
+            localStorage.setItem(STORAGE_CURRENT_TSUMEGO_CONTENT, currentSGF);
             if (previousProblemFilename) {
-                localStorage.setItem('previousTsumego', previousProblemFilename);
-                localStorage.setItem('previousTsumegoContent', previousSGF);
+                localStorage.setItem(STORAGE_PREVIOUS_TSUMEGO, previousProblemFilename);
+                localStorage.setItem(STORAGE_PREVIOUS_TSUMEGO_CONTENT, previousSGF);
             }
-
         }
 
-        kifu = initializeKifuFromSGF(currentSGF);
+        const kifu = initializeKifuFromSGF(currentSGF);
         initializeBoard(kifu.size);
         updateBoard();
         updateAllUI();
@@ -998,15 +729,7 @@ async function loadTsumego(update) {
         backgroundLoadCloserZip();
 
     } catch (error) {
-        // MODIFICATION START: Improved error logging
-        let errorMessage = "Error loading tsumego";
-        if (currentProblemFilename) {
-            errorMessage += ` (file: ${currentProblemFilename})`;
-        }
-        errorMessage += ":";
-        console.error(errorMessage, error);
-        // MODIFICATION END
-
+        console.error(`Error loading tsumego (file: ${currentProblemFilename || 'unknown'}):`, error);
         displayOverlay('Error loading problem.', 3000);
     }
 }
@@ -1016,24 +739,12 @@ async function loadTsumego(update) {
 
 document.addEventListener('DOMContentLoaded', () => {
     updateAllUI();
-    
-    // Initialize audio
     initAudio();
 
-    // Initialize SuspensionDetector to handle app suspension/resume
-    const suspensionDetector = new SuspensionDetector((wasDiscarded) => {
-        console.log('App resumed from suspension, reinitializing audio and UI');
-        
-        // Reinitialize audio resources
+    new SuspensionDetector(() => {
+        console.log('App resumed from suspension, reinitializing...');
+        initAudio();
         try {
-            initAudio();
-        } catch (e) {
-            console.log('Audio reinitialization failed:', e);
-        }
-        
-        // Reinitialize WGo.js board and UI
-        try {
-            // Recreate the board to ensure WebGL context is properly restored
             if (board && currentSGF) {
                 const kifu = initializeKifuFromSGF(currentSGF);
                 initializeBoard(kifu.size);
@@ -1042,13 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.log('Board reinitialization failed:', e);
-            
-            // Fallback: try to reload current tsumego
-            try {
-                loadTsumego(false).catch(error => console.error("Failed to reload tsumego after suspension:", error));
-            } catch (reloadError) {
-                console.log('Tsumego reload failed:', reloadError);
-            }
+            loadTsumego(false).catch(reloadError => console.error("Failed to reload tsumego after suspension:", reloadError));
         }
     });
 
@@ -1056,7 +761,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (prevTsumegoLink) {
         prevTsumegoLink.addEventListener('click', (e) => {
             e.preventDefault();
-            // When showing correct move (hint mode), use current tsumego as "previous"
             const sgfToDownload = showCorrectMove ? currentSGF : previousSGF;
             const filenameToDownload = showCorrectMove ? currentProblemFilename : previousProblemFilename;
             
@@ -1066,23 +770,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = filenameToDownload;
-                document.body.appendChild(a);
                 a.click();
-                document.body.removeChild(a);
                 URL.revokeObjectURL(url);
             }
         });
     }
 
-    // Load tsumego without waiting for eviction
     loadTsumego(false).catch(error => console.error("Failed to load initial tsumego:", error));
-    
-    // Evict unused zip files from cache in background
     evictUnusedZipFiles().catch(error => console.error("Error during cache eviction:", error));
 });
-
-// SuspensionDetector now handles suspension/resume events
-// This replaces the previous visibilitychange handler
 
 window.addEventListener('resize', updateBoardSize);
 window.addEventListener('orientationchange', updateBoardSize);
