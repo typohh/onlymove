@@ -166,6 +166,9 @@ let previousSGF = localStorage.getItem('previousTsumegoContent'); // Store previ
 let showCorrectMove = false;
 let acceptClicks = false; // Track when we should accept clicks
 
+// Store point loss information for display in overlay
+let currentPointLoss = null;
+
 // Load state from localStorage or set defaults
 let userRank = parseFloat(localStorage.getItem('userRank')) || 0;
 let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
@@ -264,6 +267,31 @@ function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)
         zIndex: '1000', opacity: '0'
     });
 
+    // Create point loss display element
+    const pointLossElement = document.createElement('div');
+    pointLossElement.style.color = 'white';
+    pointLossElement.style.fontWeight = 'bold';
+    pointLossElement.style.textAlign = 'center';
+    pointLossElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.8)';
+    
+    // Set font size similar to other text elements
+    if (boardContainer) {
+        const boardSize = boardContainer.offsetWidth || 400; // fallback to 400px if not available
+        const fontSize = boardSize / 25;
+        pointLossElement.style.fontSize = fontSize + 'px';
+    } else {
+        pointLossElement.style.fontSize = '24px'; // fallback font size
+    }
+    
+    // Use stored point loss information
+    let pointLossText = currentPointLoss;
+    
+    // Only add the point loss element if we have point loss text
+    if (pointLossText) {
+        pointLossElement.textContent = pointLossText;
+        overlay.appendChild(pointLossElement);
+    }
+
     document.body.appendChild(overlay);
 
     // Start fade in after 1 second (to account for the 1s wait)
@@ -283,6 +311,8 @@ function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)
         if (overlay.parentNode) {
             document.body.removeChild(overlay);
         }
+        // Clear the stored point loss after displaying it
+        currentPointLoss = null;
         if (callback) callback();
     }, 5000); // Remove overlay after 5 seconds total
 }
@@ -423,6 +453,47 @@ async function handleBoardClick(x, y) {
 
             const isCorrect = moveNode.comment?.includes('Correct') || false;
             const moveIndex = kifuReader.node.children.indexOf(moveNode);
+            
+            // For incorrect moves in hint mode, calculate point loss before advancing kifuReader
+            if (!isCorrect) {
+                let pointLossText = '';
+                // Try different ways to find the correct node
+                const correctNode = kifuReader.node.children.find(child => 
+                    child.comment?.includes('Correct') || 
+                    child.comment?.includes('Correct move')
+                );
+                const playedNode = moveNode;
+                
+                if (correctNode && playedNode) {
+                    // Extract scores from comments (handle both formats)
+                    const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+                    const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+                    
+                    if (correctScoreMatch && playedScoreMatch) {
+                        const correctScore = parseFloat(correctScoreMatch[1]);
+                        const playedScore = parseFloat(playedScoreMatch[1]);
+                        const pointLoss = Math.abs(correctScore - playedScore);
+                        
+                        // Get localized "points" text
+                        const lang = navigator.language || 'en';
+                        let pointsText;
+                        if (lang.startsWith('zh')) { // Chinese
+                            pointsText = '点';
+                        } else if (lang.startsWith('ja')) { // Japanese
+                            pointsText = '点';
+                        } else if (lang.startsWith('ko')) { // Korean
+                            pointsText = '점';
+                        } else { // Default (English and others)
+                            pointsText = 'points';
+                        }
+                        
+                        pointLossText = `-${pointLoss.toFixed(1)} ${pointsText}`;
+                    }
+                }
+                
+                // Store point loss for display in overlay
+                currentPointLoss = pointLossText;
+            }
 
             // User move
             kifuReader.next(moveIndex);
@@ -458,6 +529,47 @@ async function handleBoardClick(x, y) {
 
         const isCorrect = moveNode.comment?.includes('Correct') || false;
         const moveIndex = kifuReader.node.children.indexOf(moveNode);
+
+        // Calculate point loss BEFORE advancing kifuReader
+        if (!isCorrect) {
+            let pointLossText = '';
+            // Try different ways to find the correct node
+            const correctNode = kifuReader.node.children.find(child => 
+                child.comment?.includes('Correct') || 
+                child.comment?.includes('Correct move')
+            );
+            const playedNode = moveNode;
+            
+            if (correctNode && playedNode) {
+                // Extract scores from comments (handle both formats)
+                const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+                const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
+                
+                if (correctScoreMatch && playedScoreMatch) {
+                    const correctScore = parseFloat(correctScoreMatch[1]);
+                    const playedScore = parseFloat(playedScoreMatch[1]);
+                    const pointLoss = Math.abs(correctScore - playedScore);
+                    
+                    // Get localized "points" text
+                    const lang = navigator.language || 'en';
+                    let pointsText;
+                    if (lang.startsWith('zh')) { // Chinese
+                        pointsText = '点';
+                    } else if (lang.startsWith('ja')) { // Japanese
+                        pointsText = '点';
+                    } else if (lang.startsWith('ko')) { // Korean
+                        pointsText = '점';
+                    } else { // Default (English and others)
+                        pointsText = 'points';
+                    }
+                    
+                    pointLossText = `-${pointLoss.toFixed(1)} ${pointsText}`;
+                }
+            }
+            
+            // Store point loss for display in overlay
+            currentPointLoss = pointLossText;
+        }
 
         // User move
         kifuReader.next(moveIndex);
