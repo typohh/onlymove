@@ -14,6 +14,41 @@ let failSound2 = null;
 // Success sound
 let successSound = null;
 
+class SuspensionDetector {
+  constructor(onResume) {
+    this.onResume = onResume;
+    this._init();
+  }
+  _init() {
+    if ("onfreeze" in document) {
+      document.addEventListener("freeze", this.onPause);
+      document.addEventListener("resume", () => {
+        this.onResume(document.wasDiscarded);
+      });
+    } else {
+      this._initTimerHack();
+    }
+    this._initWeakRefCheck();
+  }
+  _initTimerHack() {
+    let last = performance.now();
+    setInterval(() => {
+      const now = performance.now();
+      if (now - last > 2000) this.onResume();
+      last = now;
+    }, 1000);
+  }
+  _initWeakRefCheck() {
+    if (typeof WeakRef !== "undefined") {
+      this.ref = new WeakRef({});
+      const finalizer = new FinalizationRegistry(() => {
+        this.onResume();
+      });
+      finalizer.register(this.ref.deref());
+    }
+  }
+}
+
 // Initialize audio
 function initAudio() {
     try {
@@ -136,8 +171,8 @@ let userRank = parseFloat(localStorage.getItem('userRank')) || 0;
 let problemFrequencies = JSON.parse(localStorage.getItem('problemFrequencies')) || {};
 let momentum = parseFloat(localStorage.getItem('momentum')) || 30;
 
-// Cache for loaded zip files to avoid redundant fetches
-const zipCache = {};
+// MODIFICATION: Cache for loaded zip files using direct references to prevent garbage collection.
+const zipCache = new Map();
 
 // Cache name for tsumego files
 const TSUMEGO_CACHE_NAME = 'tsumego-cache-v1';
@@ -539,26 +574,6 @@ function initializeBoard(size) {
     // Add click event listener
     board.addEventListener('click', handleBoardClick);
     
-    // Add WebGL context event listeners to one of the canvas elements
-    // We use the stone layer's first canvas element since it's always present
-    if (board && board.stone && board.stone.elements && board.stone.elements[0]) {
-        const canvas = board.stone.elements[0];
-        
-        // Listen for WebGL context loss
-        canvas.addEventListener('webglcontextlost', function(event) {
-            console.log('WebGL context lost');
-            event.preventDefault();
-            // Prevent the default behavior which would cause the browser to remove the canvas
-        });
-        
-        // Listen for WebGL context restoration
-        canvas.addEventListener('webglcontextrestored', function(event) {
-            console.log('WebGL context restored');
-            // Re-render the board when context is restored
-            updateBoard();
-        });
-    }
-    
     updateBoardSize();
 }
 
@@ -674,8 +689,20 @@ async function fetchSgfFromZip(filename, zipFilename) {
         await loadZipProblems(zipFilename);
     }
 
-    const zip = zipCache[zipFilename];
-    if (!zip) throw new Error(`Zip file ${zipFilename} not found in cache`);
+    // MODIFICATION: Get zip object directly from cache. WeakRef logic is removed.
+    const zip = zipCache.get(zipFilename);
+
+    if (!zip) {
+        // This case should ideally not be hit if logic is sound, but as a fallback, reload.
+        console.error(`Zip file ${zipFilename} was not found in cache. Forcing reload.`);
+        await loadZipProblems(zipFilename);
+        const reloadedZip = zipCache.get(zipFilename);
+        if (!reloadedZip) throw new Error(`Failed to load and cache zip file: ${zipFilename}`);
+        
+        const file = reloadedZip.file(filename);
+        if (!file) throw new Error(`File ${filename} not found in reloaded ${zipFilename}`);
+        return await file.async('text');
+    }
 
     const file = zip.file(filename);
     if (!file) throw new Error(`File ${filename} not found in ${zipFilename}`);
@@ -758,7 +785,9 @@ async function loadZipProblems(zipFilename) {
 
     loadedZips[zipFilename] = problems;
     allProblems.push(...problems);
-    zipCache[zipFilename] = zip;
+    
+    // MODIFICATION: Store a direct (strong) reference to the JSZip object in the cache.
+    zipCache.set(zipFilename, zip);
 }
 
 /**
@@ -879,6 +908,38 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize audio
     initAudio();
 
+    // Initialize SuspensionDetector to handle app suspension/resume
+    const suspensionDetector = new SuspensionDetector((wasDiscarded) => {
+        console.log('App resumed from suspension, reinitializing audio and UI');
+        
+        // Reinitialize audio resources
+        try {
+            initAudio();
+        } catch (e) {
+            console.log('Audio reinitialization failed:', e);
+        }
+        
+        // Reinitialize WGo.js board and UI
+        try {
+            // Recreate the board to ensure WebGL context is properly restored
+            if (board && currentSGF) {
+                const kifu = initializeKifuFromSGF(currentSGF);
+                initializeBoard(kifu.size);
+                updateBoard();
+                console.log('Board successfully reinitialized after suspension');
+            }
+        } catch (e) {
+            console.log('Board reinitialization failed:', e);
+            
+            // Fallback: try to reload current tsumego
+            try {
+                loadTsumego(false).catch(error => console.error("Failed to reload tsumego after suspension:", error));
+            } catch (reloadError) {
+                console.log('Tsumego reload failed:', reloadError);
+            }
+        }
+    });
+
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
         prevTsumegoLink.addEventListener('click', (e) => {
@@ -908,29 +969,8 @@ document.addEventListener('DOMContentLoaded', () => {
     evictUnusedZipFiles().catch(error => console.error("Error during cache eviction:", error));
 });
 
-// Handle page visibility changes to detect when the app was idle
-document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-        // Page became visible again, reinitialize audio and update board in case of context loss
-        console.log('Page became visible, reinitializing audio and checking board state');
-        
-        // Reinitialize audio resources
-        try {
-            initAudio();
-        } catch (e) {
-            console.log('Audio reinitialization failed:', e);
-        }
-        
-        // Update the board in case of context loss
-        if (board) {
-            try {
-                updateBoard();
-            } catch (e) {
-                console.log('Board update failed, likely due to context loss:', e);
-            }
-        }
-    }
-});
+// SuspensionDetector now handles suspension/resume events
+// This replaces the previous visibilitychange handler
 
 window.addEventListener('resize', updateBoardSize);
 window.addEventListener('orientationchange', updateBoardSize);
