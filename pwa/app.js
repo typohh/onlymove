@@ -52,10 +52,10 @@ const zipCache = new Map();
 // --- Localization Helper ---
 
 const localization = {
-    'zh': { kyu: '级', dan: '段', komi: '贴目', previous: '上一题', points: '点' },
-    'ja': { kyu: '級', dan: '段', komi: 'コミ', previous: '前の問題', points: '点' },
-    'ko': { kyu: '급', dan: '단', komi: '덤', previous: '이전 문제', points: '점' },
-    'en': { kyu: 'kyu', dan: 'dan', komi: 'komi', previous: 'Previous', points: 'points' }
+    'zh': { kyu: '级', dan: '段', komi: '贴目', previous: '上一题', points: '点', rules: '规则', version: '版本', chinese: '中国规则', komiValue: '7.5贴目' },
+    'ja': { kyu: '級', dan: '段', komi: 'コミ', previous: '前の問題', points: '点', rules: 'ルール', version: 'バージョン', chinese: '中国ルール', komiValue: '7.5コミ' },
+    'ko': { kyu: '급', dan: '단', komi: '덤', previous: '이전 문제', points: '점', rules: '규칙', version: '버전', chinese: '중국 규칙', komiValue: '7.5 덤' },
+    'en': { kyu: 'kyu', dan: 'dan', komi: 'komi', previous: 'Previous', points: 'points', rules: 'Rules', version: 'Version', chinese: 'Chinese', komiValue: '7.5' }
 };
 
 /**
@@ -168,15 +168,18 @@ if ('serviceWorker' in navigator) {
 document.addEventListener('DOMContentLoaded', () => {
   const komiElement = document.getElementById('komi');
   if (komiElement) {
+    komiElement.textContent = getTerm('rules'); // Use localized term for "Rules"
     komiElement.addEventListener('click', () => {
       const versionDisplay = document.createElement('div');
-      versionDisplay.textContent = `Version: ${APP_VERSION}`;
+      // Show version, rules, and komi when clicked with localization
+      versionDisplay.innerHTML = `${getTerm('version')}: ${APP_VERSION}<br>${getTerm('rules')}: ${getTerm('chinese')}<br>${getTerm('komi')}: ${getTerm('komiValue')}`;
       Object.assign(versionDisplay.style, {
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           backgroundColor: 'rgba(0, 0, 0, 0.8)', color: 'white',
           padding: '10px 20px', borderRadius: '5px', zIndex: '10000',
-          fontSize: '18px', pointerEvents: 'none'
+          fontSize: '18px', pointerEvents: 'none',
+          textAlign: 'center' // Center-align the text
       });
       document.body.appendChild(versionDisplay);
       setTimeout(() => versionDisplay.remove(), 2000);
@@ -205,13 +208,13 @@ function getDescriptiveRank(numericRank) {
  */
 function updateAllUI() {
     const rank = getDescriptiveRank(userRank);
-    const stddev = momentum / 2;
+    const stddev = momentum / 4;
 
     const rankElement = document.getElementById('rank-display');
     if (rankElement) rankElement.textContent = `${rank} (±${stddev.toFixed(1)})`;
 
     const komiElement = document.getElementById('komi');
-    if (komiElement) komiElement.textContent = `7.5 ${getTerm('komi')}`;
+    if (komiElement) komiElement.textContent = getTerm('rules');
 
     const prevTsumegoLink = document.getElementById('prev-tsumego');
     if (prevTsumegoLink) {
@@ -303,15 +306,16 @@ function updateUserStats(isCorrect) {
     const oldRank = userRank;
 
     if (isCorrect) {
+        momentum = momentum * 1.1;
         const currentFreq = problemFrequencies[currentProblemFilename] || 1;
         problemFrequencies[currentProblemFilename] = currentFreq / 5;
         const maxIncrease = (1.0 - userRank) / 2;
-        const intendedIncrease = momentum / 300;
+        const intendedIncrease = momentum / 600;
         userRank += Math.min(intendedIncrease, maxIncrease);
     } else {
+        momentum = (momentum + 1) / 3;
         problemFrequencies[currentProblemFilename] = 25;
-        momentum = (momentum + 1) / 2;
-        userRank = Math.max(0, userRank - 4 * (momentum / 300));
+        userRank = Math.max(0, userRank - 4 * (momentum / 600));
     }
 
     localStorage.setItem(STORAGE_USER_RANK, userRank.toString());
@@ -411,13 +415,6 @@ async function handleBoardClick(x, y) {
             setTimeout(() => handleCorrectAnswer(hintWasShown), 1000);
             return;
         }
-    }
-
-    if (!game.isValid(x, y, game.turn)) {
-        if (game.play(x, y, game.turn, true) === 4) { // 4 = illegal due to ko
-            board.addObject({ x, y, type: 'SQ' });
-        }
-        return;
     }
 
     const moveNode = kifuReader.node.children.find(child => child.move && child.move.x === x && child.move.y === y);
@@ -536,6 +533,18 @@ function updateBoard() {
 
     if (kifuReader.node.move) {
         board.addObject({ x: kifuReader.node.move.x, y: kifuReader.node.move.y, type: 'CR' });
+    }
+
+    for( let xd = -1; xd < 2 ; xd += 2) {
+        for( let yd = -1; yd < 2 ; yd += 2) {
+            x = kifuReader.node.move.x + xd;
+            y = kifuReader.node.move.y + yd;
+            if (!game.isValid(x, y, game.turn)) {
+                if (game.play(x, y, game.turn, true) === 4) { // 4 = illegal due to ko
+                    board.addObject({ x, y, type: 'SQ' });
+                }
+            }
+        }
     }
 
     if (showCorrectMove) drawCorrectMoveMarker();
