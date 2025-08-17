@@ -196,3 +196,119 @@ def get_tsumego_ratings():
     print(f"\nAverage difference between interpolated and uniform ratings: {avg_difference:.4f}")
 
     return interpolated_ratings
+
+
+def reading_statistics():
+    """
+    Analyzes how additional reading (playouts) affects bot performance.
+    
+    This function examines bot IDs that contain playout information in the format
+    'name_x' where 'x' is the number of playouts, and determines:
+    1. How many bots show performance changes with additional reading
+    2. How much reading is needed to see significant performance improvements
+    """
+    attempts_path = Path(ATTEMPTS_DIR)
+    if not attempts_path.is_dir():
+        raise FileNotFoundError(f"Attempts directory not found at '{attempts_path}'")
+
+    # Parse all attempts
+    bot_results = defaultdict(dict)
+    all_tsumegos = set()
+
+    print("--- Parsing Bot Attempts for Reading Analysis ---")
+    for file_path in attempts_path.glob("*.txt"):
+        bot_id = file_path.stem
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    tsumego_id, result = line.strip().split()
+                    is_success = float(result) == 1.0
+                    bot_results[bot_id][tsumego_id] = is_success
+                    all_tsumegos.add(tsumego_id)
+                except (ValueError, IndexError):
+                    continue
+
+    if not all_tsumegos:
+        raise ValueError("No tsumego problems found in attempts directory.")
+
+    # Group bots by base name (without playout count)
+    bot_groups = defaultdict(list)
+    for bot_id in bot_results.keys():
+        # Extract playout count from bot ID (format: name_x where x is playouts)
+        if '_' in bot_id:
+            parts = bot_id.split('_')
+            if len(parts) >= 2 and parts[-1].isdigit():
+                base_name = '_'.join(parts[:-1])
+                playouts = int(parts[-1])
+                bot_groups[base_name].append((playouts, bot_id))
+            else:
+                # Bot ID doesn't follow the expected pattern, skip for this analysis
+                continue
+        # Bots without playout info are not included in this analysis
+
+    # Analyze reading effects for each bot group
+    print(f"\n--- Reading Statistics for {len(bot_groups)} Bot Groups ---")
+    
+    total_bots_with_reading_data = 0
+    bots_showing_improvement = 0
+    bots_with_insufficient_data = 0
+    
+    for base_name, bots in bot_groups.items():
+        if len(bots) < 2:
+            # Need at least 2 bots with different playouts to compare
+            bots_with_insufficient_data += 1
+            continue
+            
+        total_bots_with_reading_data += 1
+        
+        # Sort bots by playout count
+        sorted_bots = sorted(bots, key=lambda x: x[0])
+        playout_counts = [b[0] for b in sorted_bots]
+        bot_ids = [b[1] for b in sorted_bots]
+        
+        # Calculate success rates for each bot
+        success_rates = []
+        for bot_id in bot_ids:
+            results = bot_results[bot_id]
+            if results:
+                success_rate = sum(results.values()) / len(results)
+                success_rates.append(success_rate)
+            else:
+                success_rates.append(0.0)
+        
+        # Check if additional reading improves performance
+        shows_improvement = False
+        for i in range(1, len(success_rates)):
+            if success_rates[i] > success_rates[i-1]:
+                shows_improvement = True
+                break
+        
+        if shows_improvement:
+            bots_showing_improvement += 1
+            
+        # Print detailed statistics for this bot group
+        print(f"\nBot Group: {base_name}")
+        print(f"  Playouts -> Success Rate")
+        for playouts, success_rate in zip(playout_counts, success_rates):
+            print(f"  {playouts:>8} -> {success_rate:.4f}")
+        
+        if shows_improvement:
+            print("  Status: IMPROVEMENT with additional reading")
+        else:
+            print("  Status: NO IMPROVEMENT with additional reading")
+    
+    # Summary statistics
+    print(f"\n--- Summary ---")
+    print(f"Total bot groups with sufficient reading data: {total_bots_with_reading_data}")
+    print(f"Bot groups showing improvement with more reading: {bots_showing_improvement}")
+    
+    if total_bots_with_reading_data > 0:
+        improvement_percentage = (bots_showing_improvement / total_bots_with_reading_data) * 100
+        print(f"Percentage of bots improved with reading: {improvement_percentage:.1f}%")
+    else:
+        print("No bots with sufficient reading data found for comparison.")
+        
+    if bots_with_insufficient_data > 0:
+        print(f"Bots with insufficient data for reading analysis: {bots_with_insufficient_data}")
+
+

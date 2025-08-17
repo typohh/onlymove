@@ -535,15 +535,14 @@ function updateBoard() {
         board.addObject({ x: kifuReader.node.move.x, y: kifuReader.node.move.y, type: 'CR' });
     }
 
-    for( let xd = -1; xd < 2 ; xd += 2) {
-        for( let yd = -1; yd < 2 ; yd += 2) {
-            x = kifuReader.node.move.x + xd;
-            y = kifuReader.node.move.y + yd;
-            if (!game.isValid(x, y, game.turn)) {
-                if (game.play(x, y, game.turn, true) === 4) { // 4 = illegal due to ko
-                    board.addObject({ x, y, type: 'SQ' });
-                }
-            }
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
+
+    for (const [dx, dy] of directions) {
+        const adjX = kifuReader.node.move.x + dx;
+        const adjY = kifuReader.node.move.y + dy;
+        const adjResult = game.play(adjX, adjY, game.turn, true);
+        if (adjResult === 4) { // illegal due to ko
+            board.addObject({ x: adjX, y: adjY, type: 'SQ' });
         }
     }
 
@@ -700,7 +699,10 @@ async function loadTsumego(update) {
         const savedTsumegoContent = localStorage.getItem(STORAGE_CURRENT_TSUMEGO_CONTENT);
         let selectedProblem = null;
 
-        if (savedTsumegoFile && savedTsumegoContent && !update) {
+        // If we have currentSGF and currentProblemFilename already set (e.g. from URL parameter handling), use them
+        if (currentSGF && currentProblemFilename && !update) {
+            // We already have the SGF content (from URL param handling)
+        } else if (savedTsumegoFile && savedTsumegoContent && !update) {
             currentProblemFilename = savedTsumegoFile;
             currentSGF = savedTsumegoContent;
         } else {
@@ -744,9 +746,11 @@ async function loadTsumego(update) {
 }
 
 
+// --- URL Parameter Handling ---
+
 // --- Initial Load & Event Listeners ---
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     updateAllUI();
     initAudio();
 
