@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('analysis-undo').addEventListener('click', () => {
-        if (state.appMode === 'analyzing' && state.analysisKifuReader) {
+        if (state.appMode === 'analyzing' && state.kifuReader && state.kifuReader.node.parent) {
             import('./analysis.js').then(module => {
                 module.undoLastMove();
             });

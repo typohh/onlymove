@@ -23,9 +23,12 @@ export function enterAnalysisMode() {
     state.appMode = 'analyzing';
     state.acceptClicks = false; // Will be enabled after the first analysis.
 
-    state.analysisKifuReader = initializeKifuFromSGF(sgfToAnalyze);
+    // Use the same initialization as tsumego mode to ensure we start in the same position
+    state.kifuReader = initializeKifuFromSGF(sgfToAnalyze);
     
-    initializeBoard(state.analysisKifuReader.kifu.size);
+    // Initialize board with the correct size
+    initializeBoard(state.kifuReader.kifu.size);
+    
     updateBoard();
 
     // Fetch analysis for the starting position. Clicks are enabled after it's done.
@@ -38,50 +41,91 @@ export function enterAnalysisMode() {
  * Handles clicks on the board during analysis mode.
  */
 export function handleBoardClick(x, y) {
-    if (!state.acceptClicks || !state.analysisKifuReader) return;
+    if (!state.acceptClicks || !state.kifuReader) return;
 
-    const game = state.analysisKifuReader.game;
+    const game = state.kifuReader.game;
+    const position = game.getPosition();
     
-    // Check if the move is valid
-    if (!game.isValid(x, y)) return;
+    // Check if there's already a stone at this position
+    if (position.get(x, y) !== 0) return;
 
-    // Play the move on the game state
-    const result = game.play(x, y, game.turn);
+    // In analysis mode, we allow any legal move, so we create a new node and navigate to it
+    playStoneSound();
+    // Append the new move to the kifu tree
+    const newNode = new WGo.KNode({
+        move: { x: x, y: y, c: game.turn }
+    });
+    state.kifuReader.node.appendChild(newNode);
+    state.kifuReader.next(state.kifuReader.node.children.length - 1);
     
-    // If the move was successful, update the board
-    if (result !== 1 && result !== 2 && result !== 3 && result !== 4) {
-        playStoneSound();
-        // Update the board to show the new stone
-        updateBoard();
-        
-        // Request analysis in the background without blocking the UI
-        requestAndDisplayAnalysis();
-    }
+    // Update the board immediately to show the user's stone
+    updateBoard();
+    
+    // Request analysis in the background without blocking the UI
+    requestAndDisplayAnalysis();
 }
 
 /**
  * Handles the "Undo" button click.
  */
 export function undoLastMove() {
-    if (!state.acceptClicks || !state.analysisKifuReader) return;
+    if (!state.acceptClicks || !state.kifuReader || !state.kifuReader.node.parent) return;
     
-    const game = state.analysisKifuReader.game;
+    state.kifuReader.previous();
+    updateBoard();
     
-    // Check if we can undo (if there are moves to undo)
-    if (game.stack.length > 1) {
-        game.popPosition();
-        updateBoard();
-        
-        // Request analysis for the new position in the background
-        requestAndDisplayAnalysis();
-    }
+    // Request analysis for the new position in the background
+    requestAndDisplayAnalysis();
 }
 
 /**
  * Converts the current board state to an SGF string for the server.
+ * This generates a clean SGF with only the main line of moves.
  */
 function getCurrentSgf() {
-    return state.analysisKifuReader.kifu.toSgf();
+    // Create a new, clean SGF with required properties
+    let sgf = "(;FF[4]GM[1]CA[UTF-8]SZ[" + state.kifuReader.kifu.size + "]";
+    
+    // Add rules and komi if available
+    if (state.kifuReader.kifu.info && state.kifuReader.kifu.info.RU) {
+        sgf += "RU[" + state.kifuReader.kifu.info.RU + "]";
+    } else {
+        sgf += "RU[Japanese]"; // Default rules
+    }
+    
+    if (state.kifuReader.kifu.info && state.kifuReader.kifu.info.KM) {
+        sgf += "KM[" + state.kifuReader.kifu.info.KM + "]";
+    } else {
+        sgf += "KM[0.5]"; // Default komi for tsumego
+    }
+    
+    // Collect moves by traversing backwards from current node to root
+    const moves = [];
+    let currentNode = state.kifuReader.node;
+    
+    // Traverse backwards to collect moves
+    while (currentNode && currentNode.move) {
+        moves.unshift(currentNode.move); // Add to beginning of array
+        currentNode = currentNode.parent;
+    }
+    
+    // Add moves to SGF in correct order
+    for (const move of moves) {
+        // Handle pass moves
+        if (move.pass) {
+            sgf += ";" + (move.c === WGo.B ? "B" : "W") + "[]";
+        } else {
+            // Convert coordinates to SGF format (aa-ss)
+            const x = String.fromCharCode(97 + move.x);
+            const y = String.fromCharCode(97 + move.y);
+            
+            // Add move to SGF
+            sgf += ";" + (move.c === WGo.B ? "B" : "W") + "[" + x + y + "]";
+        }
+    }
+    
+    sgf += ")";
+    return sgf;
 }
 
 /**
@@ -97,12 +141,25 @@ async function requestAndDisplayAnalysis() {
     try {
         const { bestMove, score } = await fetchAnalysis(sgf);
         
-        // If the server call was successful, update the UI with new data.
-        analysisHintMove = bestMove;
-        updateAnalysisUI(score, bestMove);
-        updateBoard(analysisHintMove); // Redraw board with the new hint
+        // Check if we're still in analysis mode and the board state hasn't changed
+        if (state.appMode === 'analyzing' && bestMove) {
+            // Verify the SGF hasn't changed since we sent the request
+            const currentSgf = getCurrentSgf();
+            if (currentSgf === sgf) {
+                // If the server call was successful and the board state is still relevant, update the UI with new data.
+                analysisHintMove = bestMove;
+                updateAnalysisUI(score, bestMove);
+                updateBoard(analysisHintMove); // Redraw board with the new hint
+            }
+        } else if (state.appMode !== 'analyzing') {
+            // If we've exited analysis mode, just update the score without the hint
+            updateAnalysisUI(score, null);
+        }
     } catch (error) {
         console.error("Analysis request failed:", error);
-        updateAnalysisUI('Error', null); // Show error state in the UI
+        // Only update UI if we're still in analysis mode
+        if (state.appMode === 'analyzing') {
+            updateAnalysisUI('Error', null); // Show error state in the UI
+        }
     }
 }

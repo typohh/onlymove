@@ -38,17 +38,16 @@ export function initializeBoard(size) {
 }
 
 function drawIllegalDueToKoMarker() {
-    const reader = state.appMode === 'analyzing' ? state.analysisKifuReader : state.kifuReader;
-    if (!reader || !reader.node.move) return;
+    if (!state.kifuReader || !state.kifuReader.node.move) return;
     
-    // Get the game from the appropriate reader
-    const game = reader.game;
+    // Get the game from the kifu reader
+    const game = state.kifuReader.game;
     
     const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
 
     for (const [dx, dy] of directions) {
-        const adjX = reader.node.move.x + dx;
-        const adjY = reader.node.move.y + dy;
+        const adjX = state.kifuReader.node.move.x + dx;
+        const adjY = state.kifuReader.node.move.y + dy;
         const adjResult = game.play(adjX, adjY, game.turn, true);
         if (adjResult === 4) { // illegal due to ko
             state.board.addObject({ x: adjX, y: adjY, type: 'SQ' });
@@ -65,25 +64,29 @@ function drawCorrectMoveMarker() {
 }
 
 function drawAnalysisHintMarker(move) {
-    // Assuming move is in SGF format like 'Q16'
+    // Assuming move is in SGF format like 'qa' (lowercase letters)
     if (!move || move.length < 2) return;
     
-    // THIS IS THE FIX: Use 'let' instead of 'const'
-    let x = move.charCodeAt(0) - 'A'.charCodeAt(0);
+    // Convert SGF coordinates to board coordinates
+    // SGF uses lowercase letters 'a'-'s' for coordinates 0-18
+    const x = move.charCodeAt(0) - 97;  // 'a' = 0, 'b' = 1, etc.
+    const y = move.charCodeAt(1) - 97;  // 'a' = 0, 'b' = 1, etc.
     
-    // Correct for 'I' being skipped in SGF coordinates
-    if (x > 7) x--; 
-    const y = state.board.size - parseInt(move.substring(1));
-    state.board.addObject({ x, y, type: 'outline' });
+    // Validate coordinates for 9x9 board
+    if (x < 0 || x >= 9 || y < 0 || y >= 9) return;
+    
+    // Use the current player's color for the hint marker
+    const currentPlayer = state.kifuReader.game.turn;
+    
+    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
 }
 
 export function updateBoard(analysisHintMove = null) {
     if (!state.board) return;
     
-    const reader = state.appMode === 'analyzing' ? state.analysisKifuReader : state.kifuReader;
-    if (!reader) return;
+    if (!state.kifuReader) return;
 
-    const position = reader.game.position;
+    const position = state.kifuReader.game.position;
     if (state.board.size !== position.size) {
         initializeBoard(position.size);
     }
@@ -100,8 +103,8 @@ export function updateBoard(analysisHintMove = null) {
 
     drawIllegalDueToKoMarker();
 
-    if (reader.node.move) {
-        state.board.addObject({ x: reader.node.move.x, y: reader.node.move.y, type: 'CR' });
+    if (state.kifuReader.node.move) {
+        state.board.addObject({ x: state.kifuReader.node.move.x, y: state.kifuReader.node.move.y, type: 'CR' });
     }
     
     if (state.appMode === 'solving' && state.showCorrectMove) {

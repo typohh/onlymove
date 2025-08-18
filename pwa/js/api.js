@@ -1,8 +1,7 @@
 // js/api.js
 
-// Hardcoded IP for the analysis server as requested.
-// Replace <HARDCODED_IP> with the actual server IP address.
-const ANALYSIS_SERVER_URL = 'http://localhost/analyze';
+// Analysis server endpoint
+const ANALYSIS_SERVER_URL = 'https://api.onlymove.net/';
 
 /**
  * Sends the current board position (as SGF) to the analysis server.
@@ -21,12 +20,15 @@ export async function fetchAnalysis(sgf) {
         });
 
         if (!response.ok) {
+            // Log simple message instead of full stack trace
+            console.log(`Analysis server returned ${response.status}: ${response.statusText}`);
             throw new Error(`Server returned an error: ${response.statusText}`);
         }
 
         return await response.json();
     } catch (error) {
-        console.error('Failed to fetch analysis:', error);
+        // Log simple message instead of full stack trace
+        console.log("Analysis server unavailable or request failed");
         // Return a default error object so the calling function can handle it
         return { bestMove: null, score: 'Error' };
     }

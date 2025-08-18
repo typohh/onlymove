@@ -130,6 +130,8 @@ export function toggleAnalysisModeUI(show) {
 
 export function updateAnalysisUI(score, bestMove) {
     const scoreEl = document.getElementById('analysis-score');
-    scoreEl.textContent = `Score: ${score}`;
+    // Format score to 1 decimal place if it's a number
+    const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
+    scoreEl.textContent = `Score: ${formattedScore}`;
     // Future: could also use bestMove to highlight a button or provide a hint
 }

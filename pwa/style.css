@@ -37,25 +37,33 @@ body {
 }
 
 /* --- Interactive Elements --- */
-#prev-tsumego {
+#prev-tsumego, #komi {
     text-decoration: none;
     color: #87ceeb; /* A distinct color for the link */
     cursor: pointer;
     transition: color 0.2s;
+    padding: 5px 15px; /* Match button padding */
+    border: 1px solid transparent; /* Match button border */
+    border-radius: 5px; /* Match button border radius */
+    font-weight: bold;
 }
 
-#prev-tsumego:hover {
+#prev-tsumego:hover, #komi:hover {
     color: #b0e0e6;
+    background-color: #444; /* Match button hover background */
+    border: 1px solid #666; /* Match button border */
 }
 
 #prev-tsumego.disabled {
     color: #666; /* Greyed out when disabled */
     cursor: not-allowed;
     pointer-events: none; /* Disables click events */
+    background-color: transparent; /* No background when disabled */
+    border: 1px solid transparent; /* No border when disabled */
 }
 
 /* --- Analysis Mode UI --- */
-#analysis-container button {
+#analysis-container button, #info-container #prev-tsumego, #info-container #komi {
     background-color: #444;
     color: #ddd;
     border: 1px solid #666;
@@ -64,9 +72,10 @@ body {
     cursor: pointer;
     transition: background-color 0.2s;
     font-weight: bold;
+    min-width: 80px; /* Ensure consistent button width */
 }
 
-#analysis-container button:hover {
+#analysis-container button:hover, #info-container #prev-tsumego:hover, #info-container #komi:hover {
     background-color: #555;
 }
 

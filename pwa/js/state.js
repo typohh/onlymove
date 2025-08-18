@@ -8,7 +8,7 @@ export const state = {
     board: null,
     game: null,
     kifuReader: null,
-    analysisKifuReader: null, // Separate kifu reader for analysis mode
+    // analysisKifuReader removed - using single kifuReader for both modes
 
     // Tsumego state
     zipMetadata: [],
@@ -23,6 +23,9 @@ export const state = {
     showCorrectMove: false,
     acceptClicks: false,
     currentPointLoss: null,
+    
+    // Analysis mode state
+    lastMoveInAnalysis: null, // Track last move in analysis mode
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
