@@ -1,0 +1,91 @@
+/* --- General Body and Layout --- */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Prevents scrollbars */
+    background-color: #222; /* A dark background for the page */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #fff;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+/* --- Main Containers --- */
+#board-container {
+    /* Dimensions are set by JavaScript */
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2), 0 6px 6px rgba(0, 0, 0, 0.25);
+    border-radius: 4px; /* Slight rounding on the board container */
+}
+
+#info-container,
+#analysis-container {
+    /* Dimensions are set by JavaScript */
+    display: flex;
+    justify-content: space-between; /* Spreads items across the container */
+    align-items: center;
+    box-sizing: border-box; /* Ensures padding is included in the width */
+    padding: 0 10px; /* Some horizontal padding */
+    color: #ccc;
+    text-align: center;
+}
+
+/* --- Interactive Elements --- */
+#prev-tsumego {
+    text-decoration: none;
+    color: #87ceeb; /* A distinct color for the link */
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+#prev-tsumego:hover {
+    color: #b0e0e6;
+}
+
+#prev-tsumego.disabled {
+    color: #666; /* Greyed out when disabled */
+    cursor: not-allowed;
+    pointer-events: none; /* Disables click events */
+}
+
+/* --- Analysis Mode UI --- */
+#analysis-container button {
+    background-color: #444;
+    color: #ddd;
+    border: 1px solid #666;
+    border-radius: 5px;
+    padding: 5px 15px; /* Adjust padding as needed */
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-weight: bold;
+}
+
+#analysis-container button:hover {
+    background-color: #555;
+}
+
+#analysis-score {
+    font-weight: bold;
+    color: #fff;
+    flex-grow: 1; /* Allows it to take up available space */
+    text-align: center;
+}
+
+/* --- Overlay Styles --- */
+.overlay {
+    /* Most styles are applied via JavaScript for dynamic effects */
+    /* This class is here for potential base styling or overrides */
+    box-sizing: border-box;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+    -webkit-user-select: none; /* Safari */
+    -moz-user-select: none; /* Firefox */
+    -ms-user-select: none; /* IE10+/Edge */
+    user-select: none; /* Standard */
+}

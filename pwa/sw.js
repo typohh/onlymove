@@ -1,12 +1,13 @@
-const CACHE_NAME = 'yose-tsumego-cache-v1';
+const CACHE_NAME = 'yose-tsumego-cache-v2'; // Increment the version to force an update
 const urlsToCache = [
     '/',
     '/index.html',
-    '/app.js',
-    '/wgo.js/wgo/wgo.player.css',
-    '/wgo.js/wgo/wgo.js',
-    '/wgo.js/wgo/sgfparser.js',
-    '/wgo.js/wgo/kifu.js'
+    '/style.css',
+    '/lib/wgo/wgo.player.css',
+    '/lib/wgo/wgo.min.js',
+    '/lib/wgo/wgo.player.min.js',
+    '/lib/jszip.min.js'
+    // We intentionally leave the hashed app.js file out of this precache list
 ];
 
 self.addEventListener('install', event => {
@@ -14,6 +15,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
+                console.log('Opened cache and caching static assets');
                 return cache.addAll(urlsToCache);
             })
     );

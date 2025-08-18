@@ -1,0 +1,14 @@
+{
+  "name": "onlymove.net",
+  "version": "1.0.0",
+  "description": "9x9 tsumegos",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "npm run build && wrangler pages deploy dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.2",
+    "wrangler": "^3.5.1"
+  }
+}
