@@ -160,7 +160,7 @@ export function updateBoardSize() {
     state.board.setHeight(boardSize);
 
     const controlHeight = (boardSize * controlSize) + 'px';
-    const fontSize = boardSize / 25 + 'px';
+    const fontSize = boardSize / 20 + 'px'; // Changed from 25 to 20
 
     // Style info container
     infoContainer.style.width = boardSize + 'px';
