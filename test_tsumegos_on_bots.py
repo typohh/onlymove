@@ -8,7 +8,7 @@ import sgfmill.sgf
 
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries
-from models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension
+from models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension, MODELS
 
 TSUMEGO_DIR = "tsumegos"
 DEBUG = False
@@ -299,7 +299,7 @@ if __name__ == "__main__":
             bot = KataGo(model_filename, playouts)
             test_bot(bot, filename)
             bot.stop()
-    for model in [MODEL_BEST_SMALL, MODEL_9X9, MODEL_FULL]:
+    for model in MODELS:
         for playouts in [1, 3, 10, 30]:
             model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f'_{playouts}.txt'}")

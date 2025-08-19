@@ -2,23 +2,23 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Tsumego App</title>
+  <title id="app-title">Tsumego App</title>
   <link rel="stylesheet" type="text/css" href="lib/wgo/wgo.player.css" />
   <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
   <div id="board-container"></div>
   <div id="info-container">
-    <a href="#" id="prev-tsumego" class="disabled">Previous</a>
+    <a href="#" id="prev-tsumego" class="disabled"></a>
     <div id="rank-display"></div>
-    <a href="#" id="komi">Rules</a>
+    <a href="#" id="komi"></a>
   </div>
 
   <!-- New Analysis Mode UI (Initially Hidden) -->
   <div id="analysis-container" style="display: none;">
-    <button id="analysis-exit">Exit</button>
-    <div id="analysis-score">Score: N/A</div>
-    <button id="analysis-undo">Undo</button>
+    <button id="analysis-exit"></button>
+    <div id="analysis-score"></div>
+    <button id="analysis-undo"></button>
   </div>
 
     <script type="text/javascript">

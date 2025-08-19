@@ -5,6 +5,7 @@ import { fetchAnalysis } from './api.js';
 import { updateBoard, initializeBoard, initializeKifuFromSGF } from './board.js';
 import { updateAnalysisUI, toggleAnalysisModeUI } from './ui.js';
 import { playStoneSound } from './audio.js';
+import { getTerm } from './utils.js';
 
 let analysisHintMove = null;
 
@@ -12,7 +13,10 @@ let analysisHintMove = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
-    const sgfToAnalyze = state.previousSGF || state.currentSGF;
+    // Determine which SGF to analyze
+    // If we're showing the correct move (hint mode after failing), use current SGF
+    // Otherwise, use previous SGF
+    const sgfToAnalyze = state.showCorrectMove ? state.currentSGF : state.previousSGF;
 
     if (!sgfToAnalyze) {
         console.error("No SGF found to enter analysis mode.");
@@ -134,7 +138,7 @@ function getCurrentSgf() {
  */
 async function requestAndDisplayAnalysis() {
     const sgf = getCurrentSgf();
-    updateAnalysisUI('Analyzing...', null); // Show loading state, clear old hint
+    updateAnalysisUI(getTerm('analyzing'), null); // Show loading state, clear old hint
     analysisHintMove = null;
     updateBoard(); // Redraw to remove the old hint marker immediately
 
@@ -159,7 +163,7 @@ async function requestAndDisplayAnalysis() {
         console.error("Analysis request failed:", error);
         // Only update UI if we're still in analysis mode
         if (state.appMode === 'analyzing') {
-            updateAnalysisUI('Error', null); // Show error state in the UI
+            updateAnalysisUI(getTerm('error'), null); // Show error state in the UI
         }
     }
 }

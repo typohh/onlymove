@@ -258,6 +258,6 @@ export async function loadTsumego(update) {
 
     } catch (error) {
         console.error(`Error loading tsumego:`, error);
-        displayOverlay('Error loading problem.', 3000);
+        displayOverlay(getTerm('errorLoadingProblem'), 3000);
     }
 }

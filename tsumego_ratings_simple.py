@@ -72,7 +72,8 @@ def find_bot_50_percent_rating(bot_id: str, uniform_ratings: dict, bot_results: 
     # Clamp the result between 0.0 and 1.0. A value outside this range means the
     # 50% crossing point is predicted to be easier than the easiest problem or
     # harder than the hardest problem.
-    return float(np.clip(rating_at_50_percent, 0.0, 1.0))
+    # return float(np.clip(rating_at_50_percent, 0.0, 1.0))
+    return 1.0 / (1.0 + np.exp(-4.0 * (rating_at_50_percent - 0.5)))
 
 
 def get_tsumego_ratings():
@@ -312,3 +313,5 @@ def reading_statistics():
         print(f"Bots with insufficient data for reading analysis: {bots_with_insufficient_data}")
 
 
+if __name__ == "__main__":
+    reading_statistics()

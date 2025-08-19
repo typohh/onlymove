@@ -7,15 +7,25 @@ import { playRandomFailSound, playSuccessSound } from './audio.js';
 const boardContainer = document.getElementById('board-container');
 
 export function updateAllUI() {
+    // Update app title
+    document.getElementById('app-title').textContent = getTerm('appTitle');
+    
     // Update Rank Display
     const rank = getDescriptiveRank(state.userRank);
     const stddev = state.momentum / 4;
     document.getElementById('rank-display').textContent = `${rank} (±${stddev.toFixed(1)})`;
 
-    // Update "Previous" link
+    // Update "Review" link
     const prevTsumegoLink = document.getElementById('prev-tsumego');
-    prevTsumegoLink.textContent = getTerm('previous');
-    if (state.previousSGF && state.previousProblemFilename) {
+    prevTsumegoLink.textContent = getTerm('review');
+    
+    // Determine which SGF to use for review
+    // If we're showing the correct move (hint mode after failing), use current SGF
+    // Otherwise, use previous SGF
+    const sgfToReview = state.showCorrectMove ? state.currentSGF : state.previousSGF;
+    const problemFilenameToReview = state.showCorrectMove ? state.currentProblemFilename : state.previousProblemFilename;
+    
+    if (sgfToReview && problemFilenameToReview) {
         prevTsumegoLink.classList.remove('disabled');
     } else {
         prevTsumegoLink.classList.add('disabled');
@@ -23,6 +33,13 @@ export function updateAllUI() {
     
     // Update "Rules" link
     document.getElementById('komi').textContent = getTerm('rules');
+    
+    // Update analysis UI elements
+    document.getElementById('analysis-exit').textContent = getTerm('exit');
+    document.getElementById('analysis-undo').textContent = getTerm('undo');
+    
+    // Update initial analysis score text
+    updateAnalysisUI('N/A', null);
 }
 
 export function showRulesInfo() {
@@ -169,6 +186,7 @@ export function updateAnalysisUI(score, bestMove) {
     const scoreEl = document.getElementById('analysis-score');
     // Format score to 1 decimal place if it's a number
     const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
-    scoreEl.textContent = `Score: ${formattedScore}`;
+    const scoreText = getTerm('score');
+    scoreEl.textContent = `${scoreText}: ${formattedScore}`;
     // Future: could also use bestMove to highlight a button or provide a hint
 }
