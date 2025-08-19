@@ -25,7 +25,8 @@ export function enterAnalysisMode() {
     }
 
     state.appMode = 'analyzing';
-    state.acceptClicks = false; // Will be enabled after the first analysis.
+    // Enable clicks immediately after board initialization for better UX
+    state.acceptClicks = true;
 
     // Use the same initialization as tsumego mode to ensure we start in the same position
     state.kifuReader = initializeKifuFromSGF(sgfToAnalyze);
@@ -35,10 +36,8 @@ export function enterAnalysisMode() {
     
     updateBoard();
 
-    // Fetch analysis for the starting position. Clicks are enabled after it's done.
-    requestAndDisplayAnalysis().then(() => {
-        state.acceptClicks = true;
-    });
+    // Fetch analysis for the starting position in the background
+    requestAndDisplayAnalysis();
 }
 
 /**
