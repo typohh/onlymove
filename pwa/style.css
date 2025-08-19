@@ -80,7 +80,6 @@ body {
 }
 
 #analysis-score {
-    font-weight: bold;
     color: #fff;
     flex-grow: 1; /* Allows it to take up available space */
     text-align: center;
