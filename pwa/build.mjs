@@ -82,6 +82,71 @@ async function main() {
     
     await fs.writeFile(htmlPath, htmlContent);
     console.log(`✅ index.html updated with script: <script src="${newScriptPath}"></script>`);
+    
+    // 6. Update service worker to exclude index.html from caching
+    const swPath = path.join(DIST_DIR, 'sw.js');
+    let swContent = await fs.readFile(swPath, 'utf-8');
+    
+    // Remove index.html from precache list if it's there
+    swContent = swContent.replace(/['"]\/index\.html['"],?\s*/g, '');
+    
+    // Add network-first strategy for index.html
+    const networkFirstCode = `
+// Network-first strategy for index.html to prevent stale versions
+self.addEventListener('fetch', event => {
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request)
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
+    
+    // For other requests, use the existing cache-first strategy
+    // ... existing fetch handler code ...
+});`;
+    
+    // Replace the existing fetch handler with our enhanced version
+    const existingFetchHandler = `self.addEventListener('fetch', event => {
+    event.respondWith(
+        caches.match(event.request)
+            .then(response => {
+                if (response) {
+                    return response;
+                }
+                return fetch(event.request);
+            })
+    );
+});`;
+    
+    const newFetchHandler = `// Network-first strategy for navigation requests to prevent stale HTML
+self.addEventListener('fetch', event => {
+    // For navigation requests (page loads), try network first
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request)
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
+    
+    // For other requests (assets), use cache-first strategy
+    event.respondWith(
+        caches.match(event.request)
+            .then(response => {
+                if (response) {
+                    return response;
+                }
+                return fetch(event.request);
+            })
+    );
+});`;
+    
+    swContent = swContent.replace(existingFetchHandler, newFetchHandler);
+    
+    await fs.writeFile(swPath, swContent);
+    console.log("✅ Service worker updated with network-first strategy for index.html");
+    
     console.log("🎉 Build complete!");
 }
 

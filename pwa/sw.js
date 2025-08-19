@@ -1,13 +1,12 @@
-const CACHE_NAME = 'yose-tsumego-cache-v2'; // Increment the version to force an update
+const CACHE_NAME = 'yose-tsumego-cache-v3'; // Increment the version to force an update
 const urlsToCache = [
-    '/',
-    '/index.html',
     '/style.css',
     '/lib/wgo/wgo.player.css',
     '/lib/wgo/wgo.min.js',
     '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js'
-    // We intentionally leave the hashed app.js file out of this precache list
+    // We intentionally leave index.html out of this precache list
+    // and use a network-first strategy for it instead
 ];
 
 self.addEventListener('install', event => {
@@ -36,7 +35,18 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Network-first strategy for navigation requests to prevent stale HTML
 self.addEventListener('fetch', event => {
+    // For navigation requests (page loads), try network first
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request)
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
+    
+    // For other requests (assets), use cache-first strategy
     event.respondWith(
         caches.match(event.request)
             .then(response => {
