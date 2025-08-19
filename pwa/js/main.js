@@ -1,7 +1,7 @@
 // js/main.js
 
 import { state } from './state.js';
-import { updateAllUI, updateBoardSize, toggleAnalysisModeUI } from './ui.js';
+import { updateAllUI, updateBoardSize, toggleAnalysisModeUI, showRulesInfo } from './ui.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, handleBoardClick } from './tsumego.js';
 import { enterAnalysisMode } from './analysis.js';
@@ -43,6 +43,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             toggleAnalysisModeUI(true);
             enterAnalysisMode();
         }
+    });
+
+    document.getElementById('komi').addEventListener('click', (e) => {
+        e.preventDefault();
+        showRulesInfo();
     });
 
     document.getElementById('analysis-exit').addEventListener('click', () => {
