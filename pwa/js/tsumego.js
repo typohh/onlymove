@@ -40,6 +40,7 @@ function selectProblem() {
 // Function to send report to Cloudflare Worker
 async function sendReport(problemFilename, success) {
     console.log('sendReport called:', { problemFilename, success, hintWasShown: state.showCorrectMove });
+    console.log('Current userId:', state.userId);
     console.log('Current problemFrequencies:', state.problemFrequencies);
     console.log('Problem in frequencies:', state.problemFrequencies.hasOwnProperty(problemFilename));
     
@@ -70,7 +71,8 @@ async function sendReport(problemFilename, success) {
             body: JSON.stringify(reportData)
         });
         
-        console.log('Report response:', response.status);
+        console.log('Report response status:', response.status);
+        console.log('Report response text:', await response.text());
         
         // We don't need to do anything special on success/failure since we're using
         // problemFrequencies as our tracking mechanism

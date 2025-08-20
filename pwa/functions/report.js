@@ -25,43 +25,56 @@ function handleCors() {
 // Handle report submission
 async function handleReport(request, env) {
   try {
-    // Log environment information for debugging
-    console.log('Environment keys:', Object.keys(env));
-    
     // Parse the JSON body
     const data = await request.json();
-    console.log('Received report data:', data);
     
     // Validate required fields
     if (!data.userId || !data.problem || typeof data.success !== 'boolean') {
-      return new Response('Invalid request body', { 
+      return new Response(JSON.stringify({
+        error: 'Invalid request body',
+        receivedData: data
+      }), { 
         status: 400,
-        headers: { 'Access-Control-Allow-Origin': '*' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
     
     // Check if DB binding is available
     if (!env.DB) {
-      console.error('D1 database binding not found. Available bindings:', Object.keys(env));
-      return new Response('Database not configured', { 
+      return new Response(JSON.stringify({
+        error: 'Database not configured',
+        availableBindings: Object.keys(env)
+      }), { 
         status: 500,
-        headers: { 'Access-Control-Allow-Origin': '*' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
     
     // Check if this report already exists
     const existingReport = await env.DB.prepare(
-      'SELECT id FROM tsumego_reports WHERE user_id = ? AND problem = ?'
+      'SELECT id, user_id, problem, success, created_at FROM tsumego_reports WHERE user_id = ? AND problem = ?'
     )
       .bind(data.userId, data.problem)
       .first();
-      
-    console.log('Existing report check result:', existingReport);
     
+    // Return detailed information about existing report
     if (existingReport) {
-      return new Response('Report already exists', { 
+      return new Response(JSON.stringify({
+        message: 'Report already exists',
+        existingReport: existingReport,
+        newReportAttempt: data
+      }), { 
         status: 409,
-        headers: { 'Access-Control-Allow-Origin': '*' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
     
@@ -72,17 +85,28 @@ async function handleReport(request, env) {
       .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString())
       .run();
     
-    console.log('Insert result:', result);
-    
-    return new Response('Report saved', { 
+    return new Response(JSON.stringify({
+      message: 'Report saved',
+      insertResult: result,
+      reportData: data
+    }), { 
       status: 201,
-      headers: { 'Access-Control-Allow-Origin': '*' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   } catch (error) {
-    console.error('Error handling report:', error);
-    return new Response('Internal server error', { 
+    return new Response(JSON.stringify({
+      error: 'Internal server error',
+      errorMessage: error.message,
+      errorStack: error.stack
+    }), { 
       status: 500,
-      headers: { 'Access-Control-Allow-Origin': '*' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 }
