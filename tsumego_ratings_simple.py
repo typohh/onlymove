@@ -314,4 +314,5 @@ def reading_statistics():
 
 
 if __name__ == "__main__":
+    get_tsumego_ratings()
     reading_statistics()

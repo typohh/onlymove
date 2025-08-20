@@ -1,6 +1,6 @@
 // js/tsumego.js
 
-import { state, zipCache } from './state.js';
+import { state, zipCache, setShowCorrectMove } from './state.js';
 import { updateAllUI, displayOverlay, fadeOverlay } from './ui.js';
 import { initializeBoard, updateBoard, initializeKifuFromSGF } from './board.js';
 import { playStoneSound } from './audio.js';
@@ -37,6 +37,39 @@ function selectProblem() {
 
 // --- User Stats ---
 
+// Function to send report to Cloudflare Worker
+async function sendReport(problemFilename, success) {
+    try {
+        // Check if this problem has already been attempted (exists in problemFrequencies)
+        if (state.problemFrequencies.hasOwnProperty(problemFilename)) {
+            return; // Already attempted, don't send report
+        }
+        
+        // Extract problem ID (filename without extension)
+        const problemId = problemFilename.replace(/\.[^/.]+$/, "");
+        
+        const reportData = {
+            userId: state.userId,
+            problem: problemId,
+            success: success
+        };
+        
+        // Use the same origin as the current page
+        const response = await fetch('/report', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(reportData)
+        });
+        
+        // We don't need to do anything special on success/failure since we're using
+        // problemFrequencies as our tracking mechanism
+    } catch (error) {
+        console.error('Failed to send report:', error);
+    }
+}
+
 function updateUserStats(isCorrect) {
     if (isCorrect) {
         state.momentum = state.momentum * 1.1;
@@ -60,8 +93,12 @@ function updateUserStats(isCorrect) {
 // --- Board Click and Answer Handling ---
 
 function handleCorrectAnswer(hintWasShown) {
-    if (!hintWasShown) updateUserStats(true);
-    state.showCorrectMove = false;
+    // Send success report if this is the first attempt
+    if (!hintWasShown) {
+        sendReport(state.currentProblemFilename, true);
+        updateUserStats(true);
+    }
+    setShowCorrectMove(false);
     fadeOverlay(1000, () => {
         loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
     });
@@ -95,11 +132,15 @@ async function _handleIncorrectMoveSequence(moveIndex, hintWasShown) {
     playStoneSound();
     updateBoard();
 
-    // Show overlay and load next problem
-    if (!hintWasShown) updateUserStats(false);
+    // Send failure report if this is the first attempt
+    if (!hintWasShown) {
+        sendReport(state.currentProblemFilename, false);
+        updateUserStats(false);
+    }
+    
     await new Promise((resolve) => displayOverlay('', 5000, resolve));
 
-    state.showCorrectMove = true;
+    setShowCorrectMove(true);
     loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
 }
 
@@ -258,6 +299,6 @@ export async function loadTsumego(update) {
 
     } catch (error) {
         console.error(`Error loading tsumego:`, error);
-        displayOverlay(getTerm('errorLoadingProblem'), 3000);
+        displayOverlay('Error loading problem.', 3000);
     }
 }
