@@ -39,9 +39,12 @@ function selectProblem() {
 
 // Function to send report to Cloudflare Worker
 async function sendReport(problemFilename, success) {
+    console.log('sendReport called:', { problemFilename, success, hintWasShown: state.showCorrectMove });
+    
     try {
         // Check if this problem has already been attempted (exists in problemFrequencies)
         if (state.problemFrequencies.hasOwnProperty(problemFilename)) {
+            console.log('Report already sent for this problem, skipping');
             return; // Already attempted, don't send report
         }
         
@@ -54,6 +57,8 @@ async function sendReport(problemFilename, success) {
             success: success
         };
         
+        console.log('Sending report:', reportData);
+        
         // Use relative path to work with both local and production environments
         const response = await fetch('/report', {
             method: 'POST',
@@ -62,6 +67,8 @@ async function sendReport(problemFilename, success) {
             },
             body: JSON.stringify(reportData)
         });
+        
+        console.log('Report response:', response.status);
         
         // We don't need to do anything special on success/failure since we're using
         // problemFrequencies as our tracking mechanism
