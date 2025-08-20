@@ -36,6 +36,15 @@ async function handleReport(request, env) {
       });
     }
     
+    // Check if DB binding is available
+    if (!env.DB) {
+      console.error('D1 database binding not found');
+      return new Response('Database not configured', { 
+        status: 500,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+    
     // Insert the new report, ignoring if it already exists
     const result = await env.DB.prepare(
       'INSERT OR IGNORE INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'

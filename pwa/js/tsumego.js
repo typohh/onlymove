@@ -157,7 +157,7 @@ export async function handleBoardClick(x, y) {
             state.kifuReader.next(node.children.indexOf(correctNode));
             playStoneSound();
             updateBoard();
-            setTimeout(() => handleCorrectAnswer(hintWasShown), 1000);
+            handleCorrectAnswer(hintWasShown);
             return;
         }
     }
@@ -174,9 +174,9 @@ export async function handleBoardClick(x, y) {
 
     if (isCorrect) {
         state.kifuReader.next(moveIndex);
-        playStoneSound();
         updateBoard();
-        setTimeout(() => handleCorrectAnswer(hintWasShown), 1000);
+        playStoneSound();
+        handleCorrectAnswer(hintWasShown);
     } else {
         state.currentPointLoss = _calculatePointLossText(moveNode, node);
         await _handleIncorrectMoveSequence(moveIndex, hintWasShown);
