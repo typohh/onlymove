@@ -40,6 +40,8 @@ function selectProblem() {
 // Function to send report to Cloudflare Worker
 async function sendReport(problemFilename, success) {
     console.log('sendReport called:', { problemFilename, success, hintWasShown: state.showCorrectMove });
+    console.log('Current problemFrequencies:', state.problemFrequencies);
+    console.log('Problem in frequencies:', state.problemFrequencies.hasOwnProperty(problemFilename));
     
     try {
         // Check if this problem has already been attempted (exists in problemFrequencies)
