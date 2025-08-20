@@ -25,6 +25,9 @@ function handleCors() {
 // Handle report submission
 async function handleReport(request, env) {
   try {
+    // Log environment information for debugging
+    console.log('Environment keys:', Object.keys(env));
+    
     // Parse the JSON body
     const data = await request.json();
     
@@ -38,7 +41,7 @@ async function handleReport(request, env) {
     
     // Check if DB binding is available
     if (!env.DB) {
-      console.error('D1 database binding not found');
+      console.error('D1 database binding not found. Available bindings:', Object.keys(env));
       return new Response('Database not configured', { 
         status: 500,
         headers: { 'Access-Control-Allow-Origin': '*' }
