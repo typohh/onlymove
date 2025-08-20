@@ -36,20 +36,6 @@ async function handleReport(request, env) {
       });
     }
     
-    // Check if this report already exists
-    const existingReport = await env.DB.prepare(
-      'SELECT id FROM tsumego_reports WHERE user_id = ? AND problem = ?'
-    )
-      .bind(data.userId, data.problem)
-      .first();
-      
-    if (existingReport) {
-      return new Response('Report already exists', { 
-        status: 409,
-        headers: { 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-    
     // Insert the new report
     await env.DB.prepare(
       'INSERT INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'

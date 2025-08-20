@@ -54,7 +54,7 @@ async function sendReport(problemFilename, success) {
             success: success
         };
         
-        // Use the same origin as the current page
+        // Use relative path to work with both local and production environments
         const response = await fetch('/report', {
             method: 'POST',
             headers: {
