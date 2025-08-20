@@ -1,0 +1,8 @@
+name = "onlymove-net"
+main = "functions/report.js"
+compatibility_date = "2023-05-22"
+
+[[ d1_databases ]]
+binding = "DB" # available in your Worker on env.DB
+database_name = "tsumego-reports"
+database_id = "1ad806c8-464d-44be-9cf0-134ebca8d4ac"
