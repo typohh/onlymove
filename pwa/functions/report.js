@@ -30,83 +30,44 @@ async function handleReport(request, env) {
     
     // Validate required fields
     if (!data.userId || !data.problem || typeof data.success !== 'boolean') {
-      return new Response(JSON.stringify({
-        error: 'Invalid request body',
-        receivedData: data
-      }), { 
+      return new Response('Invalid request body', { 
         status: 400,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
+        headers: { 'Access-Control-Allow-Origin': '*' }
       });
     }
     
     // Check if DB binding is available
     if (!env.DB) {
-      return new Response(JSON.stringify({
-        error: 'Database not configured',
-        availableBindings: Object.keys(env)
-      }), { 
+      return new Response('Database not configured', { 
         status: 500,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
+        headers: { 'Access-Control-Allow-Origin': '*' }
       });
     }
     
-    // Check if this report already exists
-    const existingReport = await env.DB.prepare(
-      'SELECT id, user_id, problem, success, created_at FROM tsumego_reports WHERE user_id = ? AND problem = ?'
-    )
-      .bind(data.userId, data.problem)
-      .first();
-    
-    // Return detailed information about existing report
-    if (existingReport) {
-      return new Response(JSON.stringify({
-        message: 'Report already exists',
-        existingReport: existingReport,
-        newReportAttempt: data
-      }), { 
-        status: 409,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
-    
-    // Insert the new report
+    // Insert the new report, ignoring if it already exists
     const result = await env.DB.prepare(
-      'INSERT INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'
+      'INSERT OR IGNORE INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'
     )
       .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString())
       .run();
     
-    return new Response(JSON.stringify({
-      message: 'Report saved',
-      insertResult: result,
-      reportData: data
-    }), { 
-      status: 201,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
+    // Check if the insert was actually performed
+    if (result.changes > 0) {
+      return new Response('Report saved', { 
+        status: 201,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    } else {
+      return new Response('Report already exists', { 
+        status: 409,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    }
   } catch (error) {
-    return new Response(JSON.stringify({
-      error: 'Internal server error',
-      errorMessage: error.message,
-      errorStack: error.stack
-    }), { 
+    console.error('Error handling report:', error);
+    return new Response('Internal server error', { 
       status: 500,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Access-Control-Allow-Origin': '*' }
     });
   }
 }
