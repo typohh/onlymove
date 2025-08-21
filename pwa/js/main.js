@@ -3,7 +3,7 @@
 import { state } from './state.js';
 import { updateAllUI, updateBoardSize, toggleAnalysisModeUI, showRulesInfo } from './ui.js';
 import { initAudio } from './audio.js';
-import { loadTsumego, handleBoardClick } from './tsumego.js';
+import { loadTsumego, loadTsumegoById, handleBoardClick } from './tsumego.js';
 import { enterAnalysisMode } from './analysis.js';
 
 // --- NEW AUDIO UNLOCK LOGIC ---
@@ -67,7 +67,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.addEventListener('click', initializeAudioOnInteraction);
     document.body.addEventListener('touchend', initializeAudioOnInteraction);
 
+    // Check for URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tsumegoId = urlParams.get('id');
+    
     try {
+        if (tsumegoId) {
+            const success = await loadTsumegoById(tsumegoId);
+        }
         await loadTsumego(false);
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);

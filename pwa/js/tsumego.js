@@ -202,7 +202,7 @@ export async function loadZipMetadata() {
     }
 }
 
-async function loadZipProblems(zipFilename) {
+export async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
     const cache = await caches.open('tsumego-cache-v1');
@@ -294,6 +294,10 @@ export async function loadTsumego(update) {
         updateBoard();
         updateAllUI();
 
+        // Update URL to match current tsumego
+        const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
+        updateUrlWithTsumegoId(tsumegoId);
+
         state.acceptClicks = true;
         backgroundLoadCloserZip();
 
@@ -302,3 +306,94 @@ export async function loadTsumego(update) {
         displayOverlay('Error loading problem.', 3000);
     }
 }
+
+
+// Load a specific tsumego by ID
+export async function loadTsumegoById(tsumegoId) {
+    try {
+        // Find the zip ID for this tsumego
+        const zipId = await findZipIdForTsumegoId(tsumegoId);
+        if (!zipId) {
+            console.error(`Tsumego ID ${tsumegoId} not found in lookup`);
+            return false;
+        }
+
+        // Load metadata to find which zip file contains this tsumego
+        await loadZipMetadata();
+
+        // Find the zip file that contains this tsumego
+        let zipFilename = null;
+        for (const zip of state.zipMetadata) {
+            if (zip.filename.startsWith(zipId)) {
+                zipFilename = zip.filename;
+                break;
+            }
+        }
+
+        if (!zipFilename) {
+            console.error(`Zip file for tsumego ID ${tsumegoId} not found`);
+            return false;
+        }
+
+        // Load the zip file
+        await loadZipProblems(zipFilename);
+
+        // Load the SGF content
+        const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
+
+        // Set the state directly
+        state.previousSGF = state.currentSGF;
+        state.previousProblemFilename = state.currentProblemFilename;
+        state.currentProblemFilename = `${tsumegoId}.sgf`;
+        state.currentSGF = sgfContent;
+
+        // Save to localStorage
+        localStorage.setItem('currentTsumego', state.currentProblemFilename);
+        localStorage.setItem('currentTsumegoContent', state.currentSGF);
+        if (state.previousProblemFilename) {
+            localStorage.setItem('previousTsumego', state.previousProblemFilename);
+            localStorage.setItem('previousTsumegoContent', state.previousSGF);
+        }
+
+        // Update URL to match current tsumego
+        updateUrlWithTsumegoId(tsumegoId);
+
+        return true;
+    } catch (error) {
+        console.error(`Error loading tsumego by ID ${tsumegoId}:`, error);
+        return false;
+    }
+}
+
+// Binary search lookup.txt for a tsumego ID
+async function findZipIdForTsumegoId(tsumegoId) {
+    const response = await fetch('lookup.txt');
+    const text = await response.text();
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+
+    let low = 0;
+    let high = lines.length - 1;
+
+    while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const [id, zipId] = lines[mid].split(' ');
+
+        if (id === tsumegoId) {
+            return zipId;
+        } else if (id < tsumegoId) {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    return null; // Not found
+}
+
+// Update the URL with the current tsumego ID
+function updateUrlWithTsumegoId(tsumegoId) {
+    const url = new URL(window.location);
+    url.searchParams.set('id', tsumegoId);
+    window.history.replaceState({}, '', url);
+}
+

@@ -18,7 +18,7 @@ async function main() {
 
     // 3. Copy all static assets to dist
     const staticAssets = [
-	'index.html', 'style.css', 'sound', 'lib', 'tsumegos', 'metadata.json', 'manifest.json', 'sw.js',
+	'index.html', 'style.css', 'sound', 'lib', 'tsumegos', 'metadata.json', 'manifest.json', 'sw.js', 'lookup.txt',
 	'apple-touch-icon.png',
 	'favicon.ico',
 	'icon-192.png',
