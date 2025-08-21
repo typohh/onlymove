@@ -44,24 +44,30 @@ async function handleReport(request, env) {
       });
     }
     
-    // Insert the new report, ignoring if it already exists
-    const result = await env.DB.prepare(
-      'INSERT OR IGNORE INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'
-    )
-      .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString())
-      .run();
-    
-    // Check if the insert was actually performed
-    if (result.changes > 0) {
+    // Try to insert the new report
+    try {
+      const result = await env.DB.prepare(
+        'INSERT INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'
+      )
+        .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString())
+        .run();
+      
+      // If we get here, the insert succeeded
       return new Response('Report saved', { 
         status: 201,
         headers: { 'Access-Control-Allow-Origin': '*' }
       });
-    } else {
-      return new Response('Report already exists', { 
-        status: 409,
-        headers: { 'Access-Control-Allow-Origin': '*' }
-      });
+    } catch (insertError) {
+      // If we get a SQLITE_CONSTRAINT error, it means the report already exists
+      if (insertError.message && insertError.message.includes('UNIQUE constraint failed')) {
+        return new Response('Report already exists', { 
+          status: 409,
+          headers: { 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+      
+      // For any other error, re-throw it
+      throw insertError;
     }
   } catch (error) {
     console.error('Error handling report:', error);
