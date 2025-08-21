@@ -25,6 +25,7 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
         os.makedirs(zip_dir)
 
     zip_metadata = []
+    lookup_entries = []  # To store tsumego_id to zip_id mappings
     for group in range(group_count):
         group_items = [item for item in metadata if item["group"] == group]
         if not group_items:
@@ -46,7 +47,7 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
             temp_zip.writestr("metadata.json", json.dumps(group_metadata_content, indent=2))
 
         zip_content.seek(0)
-        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:16]
+        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:8]
         zip_filename = f"{zip_hash}.zip"
         zip_path = os.path.join(zip_dir, zip_filename)
 
@@ -55,9 +56,21 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
 
         zip_metadata.append({"filename": zip_filename, "min_rank": min_rank, "max_rank": max_rank})
 
+        # Add entries to lookup for each tsumego in this group
+        for item in group_items:
+            tsumego_id = item["filename"].split('.')[0]
+            lookup_entries.append((tsumego_id, zip_hash))
+
     metadata_path = os.path.join(output_dir, "metadata.json")
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(zip_metadata, f, indent=2)
+
+    # Create lookup.txt file sorted by tsumego_id
+    lookup_entries.sort(key=lambda x: x[0])  # Sort by tsumego_id
+    lookup_path = os.path.join(output_dir, "lookup.txt")
+    with open(lookup_path, 'w', encoding='utf-8') as f:
+        for tsumego_id, zip_id in lookup_entries:
+            f.write(f"{tsumego_id} {zip_id}\n")
 
 
 def print_rank_distribution(metadata):

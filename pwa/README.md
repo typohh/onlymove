@@ -27,6 +27,8 @@ The application is built with vanilla JavaScript (ESM), organized into a modular
 |               | **esbuild**                                                | High-speed JavaScript bundling, minification, and code transformation. |
 | **Deployment**| **Git**                                                    | Version control.                                                     |
 |               | **Cloudflare Pages**                                       | Hosting and automated, Git-connected deployments.                    |
+| **Backend**   | **Cloudflare Functions**                                   | Serverless functions for handling user reports.                      |
+|               | **Cloudflare D1**                                          | SQLite-compatible database for storing user results.                 |
 
 ## 4. Project Structure
 
@@ -35,6 +37,8 @@ The codebase is organized into a modular structure to separate concerns.
 ```
 /
 ├── dist/                     # The build output directory (auto-generated, not in git)
+├── functions/                # Cloudflare Functions
+│   └── report.js             # Function for handling tsumego reports and storing in D1
 ├── js/                       # All application source code lives here
 │   ├── main.js               # Main entry point, event listeners, mode switching
 │   ├── state.js              # Centralized application state management
@@ -53,6 +57,7 @@ The codebase is organized into a modular structure to separate concerns.
 ├── build.mjs                 # The Node.js build script using esbuild
 ├── index.html                # The single HTML page for the application
 ├── package.json              # Project dependencies and scripts
+├── schema.sql                # D1 database schema
 ├── style.css                 # Main application styles
 ├── sw.js                     # The Service Worker file for PWA functionality
 └── manifest.json             # The PWA manifest file
@@ -91,18 +96,31 @@ Problems are stored in `.zip` files to reduce the number of network requests. Th
 4.  A problem (SGF filename) is selected from the zip's metadata based on a weighted algorithm.
 5.  The content of the selected SGF file is extracted from the zip as a string and displayed on the board.
 
-### 5.4. Build Process & Cache Busting (`build.mjs`)
+### 5.4. Build Process (`build.mjs`)
 
 The project **must be built** before it can be run. The `npm run build` command executes `build.mjs`, which performs these critical tasks:
 
-1.  **Bundling:** All JavaScript modules in the `js/` directory are combined into a single file by `esbuild`.
-2.  **Minification:** The bundled JavaScript is minified to reduce its size.
-3.  **Versioning:** The current Git commit hash is injected into the code as a global `APP_VERSION` constant.
-4.  **Cache Busting:** `esbuild` generates a unique, hashed filename for the final JavaScript bundle (e.g., `main.A1B2C3D4.js`).
-5.  **HTML Injection:** The `build.mjs` script automatically updates `index.html` to point to this new, uniquely named JavaScript file.
-6.  **Asset Copying:** All static assets (`lib/`, `sound/`, `style.css`, etc.) are copied into the final `dist` directory.
+1.  **Cleaning:** Removes the existing `dist` directory.
+2.  **Asset Copying:** Copies all static assets (`index.html`, `style.css`, `sound/`, `lib/`, etc.) to the `dist` directory.
+3.  **Bundling:** All JavaScript modules in the `js/` directory are combined into a single file by `esbuild`.
+4.  **Versioning:** The current Git commit hash is injected into the code as a global `APP_VERSION` constant.
+5.  **Cache Busting:** `esbuild` generates a unique, hashed filename for the final JavaScript bundle (e.g., `assets/main.A1B2C3D4.js`).
+6.  **HTML Injection:** The `build.mjs` script automatically updates `index.html` to point to this new, uniquely named JavaScript file.
+7.  **Service Worker Update:** Modifies the service worker to use a network-first strategy for `index.html` to prevent stale versions.
 
-The output is a production-ready `dist` folder. The hashed filename guarantees that browsers will never serve a stale, cached version of the application's logic.
+The output is a production-ready `dist` folder that can be deployed to any static hosting service.
+
+## 5.5. Cloudflare Functions & D1 Database Integration
+
+The application uses Cloudflare Functions and a D1 database to store user results. When a user solves a tsumego problem, the application sends a report to a Cloudflare Function endpoint (`/report`) which stores the result in a D1 database.
+
+### Implementation Details
+
+- **Cloudflare Function**: Located in `functions/report.js`, this function handles POST requests to `/report` and stores user results in the D1 database.
+- **D1 Database**: The database schema is defined in `schema.sql` and contains a table for storing tsumego reports with user IDs, problem identifiers, success status, and timestamps.
+- **Frontend Integration**: The `js/tsumego.js` module includes a `sendReport` function that sends user results to the Cloudflare Function endpoint when a problem is solved for the first time.
+
+This integration allows the application to track user progress and problem-solving statistics across sessions without requiring a traditional backend server.
 
 ## 6. Development Workflow
 
@@ -137,5 +155,6 @@ Deployment is handled automatically by Cloudflare Pages. The process is configur
 2.  Use a specific sub-folder as the project's root directory.
 3.  Run the build command: `npm install && npm run build`.
 4.  Deploy the contents of the `dist` directory.
+5.  Automatically deploy Cloudflare Functions from the `functions` directory.
 
-Therefore, to deploy a new version, a developer only needs to **push their commits to the production Git branch**.
+Therefore, to deploy a new version, a developer only needs to **push their commits to the production Git branch**. Cloudflare Pages will automatically detect and deploy both the static assets and the serverless functions.
