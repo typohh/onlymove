@@ -21,7 +21,9 @@ body {
 #board-container {
     /* Dimensions are set by JavaScript */
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2), 0 6px 6px rgba(0, 0, 0, 0.25);
-    border-radius: 4px; /* Slight rounding on the board container */
+    border-radius: 12px 12px 0 0; /* More rounded top corners, square bottom corners */
+    position: relative;
+    z-index: 2; /* Ensure board is above the control panel */
 }
 
 #info-container,
@@ -34,6 +36,15 @@ body {
     padding: 0 10px; /* Some horizontal padding */
     color: #ccc;
     text-align: center;
+    /* Extend under the board and round all corners */
+    margin-top: -12px; /* Pull up under the board */
+    padding-top: 16px; /* Add padding to compensate for pull-up */
+    padding-bottom: 12px; /* Add padding at the bottom */
+    border-radius: 0 0 16px 16px; /* More rounded bottom corners */
+    background-color: #222; /* Same as page background */
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3); /* Shadow for the button container */
+    position: relative;
+    z-index: 1; /* Ensure it's below the board */
 }
 
 /* --- Interactive Elements --- */
@@ -41,25 +52,31 @@ body {
     text-decoration: none;
     color: #87ceeb; /* A distinct color for the link */
     cursor: pointer;
-    transition: color 0.2s;
-    padding: 5px 15px; /* Match button padding */
-    border: 1px solid transparent; /* Match button border */
-    border-radius: 5px; /* Match button border radius */
+    transition: all 0.2s;
+    padding: 8px 16px; /* Increased padding */
+    border: 1px solid #555; /* Visible border */
+    border-radius: 8px; /* More rounded corners */
     font-weight: bold;
+    background-color: #444; /* Background color */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Subtle shadow */
 }
 
 #prev-tsumego:hover, #komi:hover {
     color: #b0e0e6;
-    background-color: #444; /* Match button hover background */
-    border: 1px solid #666; /* Match button border */
+    background-color: #555; /* Slightly lighter background on hover */
+    border: 1px solid #777; /* Slightly lighter border on hover */
+    transform: translateY(-1px); /* Slight lift on hover */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Enhanced shadow on hover */
 }
 
 #prev-tsumego.disabled {
     color: #666; /* Greyed out when disabled */
     cursor: not-allowed;
     pointer-events: none; /* Disables click events */
-    background-color: transparent; /* No background when disabled */
-    border: 1px solid transparent; /* No border when disabled */
+    background-color: #333; /* Darker background when disabled */
+    border: 1px solid #444; /* Subtle border when disabled */
+    transform: none; /* No lift when disabled */
+    box-shadow: none; /* No shadow when disabled */
 }
 
 /* --- Analysis Mode UI --- */
@@ -67,22 +84,28 @@ body {
     background-color: #444;
     color: #ddd;
     border: 1px solid #666;
-    border-radius: 5px;
-    padding: 5px 15px; /* Adjust padding as needed */
+    border-radius: 8px; /* More rounded corners */
+    padding: 8px 16px; /* Increased padding */
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s; /* Transition for all properties */
     font-weight: bold;
     min-width: 80px; /* Ensure consistent button width */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Subtle shadow */
 }
 
 #analysis-container button:hover, #info-container #prev-tsumego:hover, #info-container #komi:hover {
     background-color: #555;
+    transform: translateY(-1px); /* Slight lift on hover */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Enhanced shadow on hover */
 }
 
 #analysis-score {
     color: #fff;
     flex-grow: 1; /* Allows it to take up available space */
     text-align: center;
+    font-weight: bold;
+    font-size: 1.1em;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); /* Subtle text shadow */
 }
 
 /* --- Overlay Styles --- */
