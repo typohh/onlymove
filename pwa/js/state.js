@@ -4,8 +4,12 @@
 function getOrCreateUserId() {
     let userId = localStorage.getItem('userId');
     if (!userId) {
-        // Generate a random user ID
-        userId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        // Generate a random user ID (8 characters)
+        userId = Math.random().toString(36).substring(2, 10);
+        localStorage.setItem('userId', userId);
+    } else if (userId.length > 8) {
+        // Truncate existing user ID to 8 characters
+        userId = userId.substring(0, 8);
         localStorage.setItem('userId', userId);
     }
     return userId;
