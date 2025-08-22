@@ -37,7 +37,7 @@ body {
     color: #ccc;
     text-align: center;
     /* Extend under the board and round all corners */
-    margin-top: -12px; /* Pull up under the board */
+    /* margin-top is set dynamically in JavaScript */
     padding-top: 16px; /* Add padding to compensate for pull-up */
     padding-bottom: 12px; /* Add padding at the bottom */
     border-radius: 0 0 16px 16px; /* More rounded bottom corners */
