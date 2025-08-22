@@ -3,7 +3,7 @@
 import { state } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { updateBoard, initializeBoard, initializeKifuFromSGF } from './board.js';
-import { updateAnalysisUI, toggleAnalysisModeUI } from './ui.js';
+import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
@@ -21,7 +21,8 @@ export function enterAnalysisMode() {
 
     if (!sgfToAnalyze) {
         console.error("No SGF found to enter analysis mode.");
-        toggleAnalysisModeUI(false); 
+        state.appMode = 'solving';
+        updateAllUI();
         return;
     }
 

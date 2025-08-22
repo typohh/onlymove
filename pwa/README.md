@@ -158,3 +158,9 @@ Deployment is handled automatically by Cloudflare Pages. The process is configur
 5.  Automatically deploy Cloudflare Functions from the `functions` directory.
 
 Therefore, to deploy a new version, a developer only needs to **push their commits to the production Git branch**. Cloudflare Pages will automatically detect and deploy both the static assets and the serverless functions.
+
+### 7.0. LLM instructions
+
+- Rely on duduced file content whenever reasonable, instead of reading the content. Reading files "just in case" will slow down operation without improving performance.
+- For small files, read the entire file, instead of reading parts of it.
+- After you have made the requested changes, run npm build, provide summary of changes made since last request and stop. 

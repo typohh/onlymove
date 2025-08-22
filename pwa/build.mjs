@@ -38,7 +38,7 @@ async function main() {
     const buildResult = await esbuild.build({
         entryPoints: ['js/main.js', 'style.css'],
         bundle: true,
-        minify: true,
+        minify: false,
         format: 'esm',
         outdir: `${DIST_DIR}/assets`,
         entryNames: '[name].[hash]',

@@ -8,29 +8,28 @@
   <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
-  <div id="board-container"></div>
-  <div id="info-container">
-    <a href="#" id="prev-tsumego" class="disabled"></a>
-    <div id="rank-display"></div>
-    <a href="#" id="komi"></a>
+  <!-- New main container for Flexbox layout -->
+  <div id="main-container">
+    <div id="board-container"></div>
+
+    <!-- New wrapper for control panels -->
+    <div id="controls-wrapper">
+      <div id="info-container">
+        <a href="#" id="button1" class="disabled"></a>
+        <div id="text1"></div>
+        <a href="#" id="button2"></a>
+      </div>
+    </div>
   </div>
 
-  <!-- New Analysis Mode UI (Initially Hidden) -->
-  <div id="analysis-container" style="display: none;">
-    <button id="analysis-exit"></button>
-    <div id="analysis-score"></div>
-    <button id="analysis-undo"></button>
-  </div>
-
-    <script type="text/javascript">
-      var WGo = WGo || {};
-      WGo.DIR = 'lib/wgo/';
-    </script>
+  <script type="text/javascript">
+    var WGo = WGo || {};
+    WGo.DIR = 'lib/wgo/';
+  </script>
 
   <script type="text/javascript" src="lib/wgo/wgo.min.js"></script>
   <script type="text/javascript" src="lib/wgo/wgo.player.min.js"></script>
   <script type="text/javascript" src="lib/jszip.min.js"></script>
-  <!-- Load the main script as a module -->
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

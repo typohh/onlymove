@@ -10,13 +10,25 @@ export function updateAllUI() {
     // Update app title
     document.getElementById('app-title').textContent = getTerm('appTitle');
     
-    // Update Rank Display
+    // Update UI based on current app mode
+    if (state.appMode === 'solving') {
+        updateSolvingModeUI();
+    } else if (state.appMode === 'analyzing') {
+        updateAnalysisModeUI();
+    }
+    
+    // Update initial analysis score text
+    updateAnalysisUI('N/A', null);
+}
+
+function updateSolvingModeUI() {
+    // Update Rank Display in the text area
     const rank = getDescriptiveRank(state.userRank);
     const stddev = state.momentum / 4;
-    document.getElementById('rank-display').textContent = `${rank} (±${stddev.toFixed(1)})`;
+    document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
 
-    // Update "Review" link
-    const prevTsumegoLink = document.getElementById('prev-tsumego');
+    // Update "Review" link (button1)
+    const prevTsumegoLink = document.getElementById('button1');
     prevTsumegoLink.textContent = getTerm('review');
     
     // Determine which SGF to use for review
@@ -31,15 +43,21 @@ export function updateAllUI() {
         prevTsumegoLink.classList.add('disabled');
     }
     
-    // Update "About" link
-    document.getElementById('komi').textContent = getTerm('about');
+    // Update "About" link (button2)
+    document.getElementById('button2').textContent = getTerm('about');
+}
+
+function updateAnalysisModeUI() {
+    // Update text area with analysis information
+    document.getElementById('text1').textContent = getTerm('analyzing');
+
+    // Update "Exit" link (button1)
+    const exitLink = document.getElementById('button1');
+    exitLink.textContent = getTerm('exit');
+    exitLink.classList.remove('disabled'); // Always enabled in analysis mode
     
-    // Update analysis UI elements
-    document.getElementById('analysis-exit').textContent = getTerm('exit');
-    document.getElementById('analysis-undo').textContent = getTerm('undo');
-    
-    // Update initial analysis score text
-    updateAnalysisUI('N/A', null);
+    // Update "Undo" link (button2)
+    document.getElementById('button2').textContent = getTerm('undo');
 }
 
 export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
@@ -109,55 +127,30 @@ export function fadeOverlay(duration, callback) {
 
 
 export function updateBoardSize() {
+    // Board sizing is now handled by CSS using vi units
+    // We still need to update the WGo board dimensions
     if (!state.board) return;
 
-    const infoContainer = document.getElementById('info-container');
-    const analysisContainer = document.getElementById('analysis-container');
-    const h = window.innerHeight;
-    const controlSize = 1 / 13; // For both info and analysis containers
+    // Get the computed size from CSS
+    const boardElement = document.getElementById('board-container');
+    const computedStyle = window.getComputedStyle(boardElement);
+    const boardSize = parseInt(computedStyle.width);
 
-    const availableHeight = h / (1 + controlSize);
-    const boardSize = Math.min(window.innerWidth, availableHeight);
-
-    boardContainer.style.width = boardContainer.style.height = boardSize + 'px';
+    // Update WGo board dimensions
     state.board.setWidth(boardSize);
     state.board.setHeight(boardSize);
-
-    const controlHeight = (boardSize * controlSize);
-    const controlHeightPx = controlHeight + 'px';
-    const fontSize = boardSize / 20 + 'px'; // Reverted to original calculation
-
-    // Style info container
-    infoContainer.style.width = boardSize + 'px';
-    infoContainer.style.height = controlHeightPx;
-    infoContainer.style.marginTop = '-' + (controlHeight * 0.8) + 'px'; // 0.8 overlap
-    infoContainer.style.paddingTop = (controlHeight * 1.33) + 'px'; // 4/3 ratio of control height
-    infoContainer.style.paddingBottom = (controlHeight * 1.0) + 'px'; // Equal to control height
-    document.getElementById('rank-display').style.fontSize = fontSize;
-    document.getElementById('komi').style.fontSize = fontSize;
-    document.getElementById('prev-tsumego').style.fontSize = fontSize;
-
-    // Style analysis container
-    analysisContainer.style.width = boardSize + 'px';
-    analysisContainer.style.height = controlHeightPx;
-    analysisContainer.style.marginTop = '-' + (controlHeight * 0.8) + 'px'; // 0.8 overlap
-    analysisContainer.style.paddingTop = (controlHeight * 1.33) + 'px'; // 4/3 ratio of control height
-    analysisContainer.style.paddingBottom = (controlHeight * 1.0) + 'px'; // Equal to control height
-    analysisContainer.querySelectorAll('button, div').forEach(el => {
-        el.style.fontSize = fontSize;
-    });
 }
 
-export function toggleAnalysisModeUI(show) {
-    document.getElementById('info-container').style.display = show ? 'none' : 'flex';
-    document.getElementById('analysis-container').style.display = show ? 'flex' : 'none';
-}
+// No need for toggleAnalysisModeUI anymore since we're using a single div
+// and updating button functionality based on the current mode
 
 export function updateAnalysisUI(score, bestMove) {
-    const scoreEl = document.getElementById('analysis-score');
-    // Format score to 1 decimal place if it's a number
-    const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
-    const scoreText = getTerm('score');
-    scoreEl.textContent = `${scoreText}: ${formattedScore}`;
+    // In analysis mode, display the score in the text1 element
+    if (state.appMode === 'analyzing') {
+        // Format score to 1 decimal place if it's a number
+        const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
+        const scoreText = getTerm('score');
+        document.getElementById('text1').textContent = `${scoreText}: ${formattedScore}`;
+    }
     // Future: could also use bestMove to highlight a button or provide a hint
 }

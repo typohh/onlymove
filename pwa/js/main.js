@@ -1,10 +1,10 @@
 // js/main.js
 
 import { state } from './state.js';
-import { updateAllUI, updateBoardSize, toggleAnalysisModeUI, showRulesInfo } from './ui.js';
+import { updateAllUI, updateBoardSize } from './ui.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById } from './tsumego.js';
-import { enterAnalysisMode } from './analysis.js';
+import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { updateUrlWithTsumegoId } from './utils.js';
 
 // --- NEW AUDIO UNLOCK LOGIC ---
@@ -35,40 +35,43 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     updateAllUI();
     updateBoardSize();
+    // Using CSS vi units for responsive sizing, but still need to update WGo board on resize
     window.addEventListener('resize', updateBoardSize);
-    window.addEventListener('orientationchange', updateBoardSize);
 
-    document.getElementById('prev-tsumego').addEventListener('click', (e) => {
+    // Handle button1 click - behavior depends on current mode
+    document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
-        if (!e.target.classList.contains('disabled')) {
-            toggleAnalysisModeUI(true);
-            enterAnalysisMode();
+        if (state.appMode === 'solving') {
+            // In solving mode, button1 is "Review"
+            if (!e.target.classList.contains('disabled')) {
+                state.appMode = 'analyzing';
+                enterAnalysisMode();
+                updateAllUI(); // Update UI to show analysis mode
+            }
+        } else if (state.appMode === 'analyzing') {
+            // In analysis mode, button1 is "Exit"
+            state.appMode = 'solving';
+            // Update URL to match current tsumego
+            if (state.currentProblemFilename) {
+                const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
+                updateUrlWithTsumegoId(tsumegoId);
+            }
+            loadTsumego(false);
+            updateAllUI(); // Update UI to show solving mode
         }
     });
 
-    document.getElementById('komi').addEventListener('click', (e) => {
+    // Handle button2 click - behavior depends on current mode
+    document.getElementById('button2').addEventListener('click', (e) => {
         e.preventDefault();
-        window.open('about.html', '_blank');
-    });
-
-    document.getElementById('analysis-exit').addEventListener('click', () => {
-        state.appMode = 'solving';
-        toggleAnalysisModeUI(false);
-        
-        // Update URL to match current tsumego
-        if (state.currentProblemFilename) {
-            const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
-            updateUrlWithTsumegoId(tsumegoId);
-        }
-        
-        loadTsumego(false);
-    });
-
-    document.getElementById('analysis-undo').addEventListener('click', () => {
-        if (state.appMode === 'analyzing' && state.kifuReader && state.kifuReader.node.parent) {
-            import('./analysis.js').then(module => {
-                module.undoLastMove();
-            });
+        if (state.appMode === 'solving') {
+            // In solving mode, button2 is "About"
+            window.open('about.html', '_blank');
+        } else if (state.appMode === 'analyzing') {
+            // In analysis mode, button2 is "Undo"
+            if (state.kifuReader && state.kifuReader.node.parent) {
+                undoLastMove();
+            }
         }
     });
 
