@@ -3,8 +3,9 @@
 import { state } from './state.js';
 import { updateAllUI, updateBoardSize, toggleAnalysisModeUI, showRulesInfo } from './ui.js';
 import { initAudio } from './audio.js';
-import { loadTsumego, loadTsumegoById, handleBoardClick } from './tsumego.js';
+import { loadTsumego, loadTsumegoById } from './tsumego.js';
 import { enterAnalysisMode } from './analysis.js';
+import { updateUrlWithTsumegoId } from './utils.js';
 
 // --- NEW AUDIO UNLOCK LOGIC ---
 let isAudioInitialized = false;
@@ -53,6 +54,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('analysis-exit').addEventListener('click', () => {
         state.appMode = 'solving';
         toggleAnalysisModeUI(false);
+        
+        // Update URL to match current tsumego
+        if (state.currentProblemFilename) {
+            const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
+            updateUrlWithTsumegoId(tsumegoId);
+        }
+        
         loadTsumego(false);
     });
 

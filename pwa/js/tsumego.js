@@ -4,7 +4,7 @@ import { state, zipCache, setShowCorrectMove } from './state.js';
 import { updateAllUI, displayOverlay, fadeOverlay } from './ui.js';
 import { initializeBoard, updateBoard, initializeKifuFromSGF } from './board.js';
 import { playStoneSound } from './audio.js';
-import { getTerm } from './utils.js';
+import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
 // --- Tsumego Loading and Selection ---
 
@@ -366,7 +366,7 @@ export async function loadTsumegoById(tsumegoId) {
 }
 
 // Binary search lookup.txt for a tsumego ID
-async function findZipIdForTsumegoId(tsumegoId) {
+export async function findZipIdForTsumegoId(tsumegoId) {
     const response = await fetch('lookup.txt');
     const text = await response.text();
     const lines = text.split('\n').filter(line => line.trim() !== '');
@@ -388,12 +388,5 @@ async function findZipIdForTsumegoId(tsumegoId) {
     }
 
     return null; // Not found
-}
-
-// Update the URL with the current tsumego ID
-function updateUrlWithTsumegoId(tsumegoId) {
-    const url = new URL(window.location);
-    url.searchParams.set('id', tsumegoId);
-    window.history.replaceState({}, '', url);
 }
 

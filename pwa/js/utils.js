@@ -22,3 +22,16 @@ export function getDescriptiveRank(numericRank) {
     const danTerm = getTerm('dan');
     return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
 }
+
+/**
+ * Updates the URL with the current tsumego ID
+ */
+export function updateUrlWithTsumegoId(tsumegoId) {
+    const url = new URL(window.location);
+    if (tsumegoId) {
+        url.searchParams.set('id', tsumegoId);
+    } else {
+        url.searchParams.delete('id');
+    }
+    window.history.replaceState({}, '', url);
+}

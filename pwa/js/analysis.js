@@ -5,7 +5,7 @@ import { fetchAnalysis } from './api.js';
 import { updateBoard, initializeBoard, initializeKifuFromSGF } from './board.js';
 import { updateAnalysisUI, toggleAnalysisModeUI } from './ui.js';
 import { playStoneSound } from './audio.js';
-import { getTerm } from './utils.js';
+import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
 let analysisHintMove = null;
 
@@ -17,6 +17,7 @@ export function enterAnalysisMode() {
     // If we're showing the correct move (hint mode after failing), use current SGF
     // Otherwise, use previous SGF
     const sgfToAnalyze = state.showCorrectMove ? state.currentSGF : state.previousSGF;
+    const tsumegoFilename = state.showCorrectMove ? state.currentProblemFilename : state.previousProblemFilename;
 
     if (!sgfToAnalyze) {
         console.error("No SGF found to enter analysis mode.");
@@ -35,6 +36,12 @@ export function enterAnalysisMode() {
     initializeBoard(state.kifuReader.kifu.size);
     
     updateBoard();
+
+    // Update URL to match the tsumego being analyzed
+    if (tsumegoFilename) {
+        const tsumegoId = tsumegoFilename.replace('.sgf', '');
+        updateUrlWithTsumegoId(tsumegoId);
+    }
 
     // Fetch analysis for the starting position in the background
     requestAndDisplayAnalysis();
