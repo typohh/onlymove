@@ -127,10 +127,17 @@ export function updateBoardSize() {
     const controlHeightPx = controlHeight + 'px';
     const fontSize = boardSize / 20 + 'px'; // Changed from 25 to 20
 
+    // Calculate proportional padding
+    // Original design had 16px padding with 12px overlap, net 4px visibility
+    // We maintain the same proportional relationship
+    const overlapRatio = 12 / 16; // 0.75
+    const paddingRatio = 16 / 12; // 1.333...
+
     // Style info container
     infoContainer.style.width = boardSize + 'px';
     infoContainer.style.height = controlHeightPx;
     infoContainer.style.marginTop = '-' + controlHeightPx; // Dynamic overlap
+    infoContainer.style.paddingTop = (controlHeight * paddingRatio) + 'px'; // Proportional padding
     document.getElementById('rank-display').style.fontSize = fontSize;
     document.getElementById('komi').style.fontSize = fontSize;
     document.getElementById('prev-tsumego').style.fontSize = fontSize;
@@ -139,6 +146,7 @@ export function updateBoardSize() {
     analysisContainer.style.width = boardSize + 'px';
     analysisContainer.style.height = controlHeightPx;
     analysisContainer.style.marginTop = '-' + controlHeightPx; // Dynamic overlap
+    analysisContainer.style.paddingTop = (controlHeight * paddingRatio) + 'px'; // Proportional padding
     analysisContainer.querySelectorAll('button, div').forEach(el => {
         el.style.fontSize = fontSize;
     });
