@@ -42,7 +42,6 @@ body {
     padding-bottom: 12px; /* Add padding at the bottom */
     border-radius: 0 0 16px 16px; /* More rounded bottom corners */
     background-color: #222; /* Same as page background */
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3); /* Shadow for the button container */
     position: relative;
     z-index: 1; /* Ensure it's below the board */
 }
