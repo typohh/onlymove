@@ -40,8 +40,6 @@ body {
     /* margin-top is set dynamically in JavaScript */
     padding-top: 16px; /* Add padding to compensate for pull-up */
     padding-bottom: 12px; /* Add padding at the bottom */
-    /* Add responsive bottom margin to ensure rounded corners are visible */
-    margin-bottom: 3vh;
     border-radius: 0 0 16px 16px; /* More rounded bottom corners */
     background-color: #222; /* Same as page background */
     box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3); /* Shadow for the button container */
