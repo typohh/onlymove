@@ -89,7 +89,7 @@ body {
     cursor: pointer;
     transition: all 0.2s; /* Transition for all properties */
     font-weight: bold;
-    min-width: 80px; /* Ensure consistent button width */
+    /* min-width removed to allow buttons to resize with text */
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Subtle shadow */
 }
 

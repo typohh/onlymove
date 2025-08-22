@@ -125,12 +125,12 @@ export function updateBoardSize() {
 
     const controlHeight = (boardSize * controlSize);
     const controlHeightPx = controlHeight + 'px';
-    const fontSize = boardSize / 20 + 'px'; // Changed from 25 to 20
+    const fontSize = boardSize / 20 + 'px'; // Reverted to original calculation
 
     // Style info container
     infoContainer.style.width = boardSize + 'px';
     infoContainer.style.height = controlHeightPx;
-    infoContainer.style.marginTop = '-' + controlHeightPx; // Dynamic overlap
+    infoContainer.style.marginTop = '-' + (controlHeight * 0.8) + 'px'; // 0.8 overlap
     infoContainer.style.paddingTop = (controlHeight * 1.33) + 'px'; // 4/3 ratio of control height
     infoContainer.style.paddingBottom = (controlHeight * 1.0) + 'px'; // Equal to control height
     document.getElementById('rank-display').style.fontSize = fontSize;
@@ -140,7 +140,7 @@ export function updateBoardSize() {
     // Style analysis container
     analysisContainer.style.width = boardSize + 'px';
     analysisContainer.style.height = controlHeightPx;
-    analysisContainer.style.marginTop = '-' + controlHeightPx; // Dynamic overlap
+    analysisContainer.style.marginTop = '-' + (controlHeight * 0.8) + 'px'; // 0.8 overlap
     analysisContainer.style.paddingTop = (controlHeight * 1.33) + 'px'; // 4/3 ratio of control height
     analysisContainer.style.paddingBottom = (controlHeight * 1.0) + 'px'; // Equal to control height
     analysisContainer.querySelectorAll('button, div').forEach(el => {
