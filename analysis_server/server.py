@@ -11,7 +11,8 @@ import sgfmill.sgf
 # --- Configuration ---
 KATAGO_PATH = "./katago"
 # MODEL_PATH = "kata1-b6c96-s175395328-d26788732.txt.gz"
-MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
+# MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
+MODEL_PATH = "kata1-b15c192-s1672170752-d466197061.txt.gz"
 CONFIG_PATH = "analysis.cfg"
 SERVER_PORT = 8080
 PLAYOUTS = 10

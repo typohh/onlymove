@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('komi').addEventListener('click', (e) => {
         e.preventDefault();
-        showRulesInfo();
+        window.open('about.html', '_blank');
     });
 
     document.getElementById('analysis-exit').addEventListener('click', () => {

@@ -16,7 +16,7 @@ async function main() {
 
     const staticAssets = [
         'index.html',
-        'sound', 'lib', 'tsumegos', 'metadata.json', 'manifest.json', 'sw.js', 'lookup.txt',
+        'sound', 'lib', 'tsumegos', 'metadata.json', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
         'apple-touch-icon.png',
         'favicon.ico',
         'icon-192.png',

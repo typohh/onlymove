@@ -31,8 +31,8 @@ export function updateAllUI() {
         prevTsumegoLink.classList.add('disabled');
     }
     
-    // Update "Rules" link
-    document.getElementById('komi').textContent = getTerm('rules');
+    // Update "About" link
+    document.getElementById('komi').textContent = getTerm('about');
     
     // Update analysis UI elements
     document.getElementById('analysis-exit').textContent = getTerm('exit');
@@ -40,42 +40,6 @@ export function updateAllUI() {
     
     // Update initial analysis score text
     updateAnalysisUI('N/A', null);
-}
-
-export function showRulesInfo() {
-    // Display rules information
-    const rulesText = `${getTerm('ruleset')} ${getTerm('chinese')}, ${getTerm('komi')} ${getTerm('komiValue')}`;
-    
-    // Create a temporary element to show the rules info
-    const rulesInfo = document.createElement('div');
-    rulesInfo.className = 'rules-info';
-    rulesInfo.textContent = rulesText;
-    
-    // Style the rules info
-    Object.assign(rulesInfo.style, {
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '20px',
-        borderRadius: '10px',
-        zIndex: '1000',
-        fontSize: '18px',
-        fontWeight: 'bold',
-        textAlign: 'center',
-        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.5)'
-    });
-    
-    document.body.appendChild(rulesInfo);
-    
-    // Remove the element after a delay
-    setTimeout(() => {
-        if (rulesInfo.parentNode) {
-            rulesInfo.parentNode.removeChild(rulesInfo);
-        }
-    }, 2000);
 }
 
 export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
