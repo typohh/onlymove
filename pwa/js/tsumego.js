@@ -83,9 +83,9 @@ function updateUserStats(isCorrect) {
         }
         state.userRank += Math.min(intendedIncrease, maxIncrease);
     } else {
+        state.momentum = (state.momentum + 1) / 3;
         state.problemFrequencies[state.currentProblemFilename] = 25;
         state.userRank = Math.max(0, state.userRank - 4 * (state.momentum / 600));
-        state.momentum = (state.momentum + 1) / 3;
     }
 
     localStorage.setItem('userRank', state.userRank.toString());
