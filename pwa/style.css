@@ -42,22 +42,27 @@ body {
         justify-content: space-between;
         align-items: center;
         box-sizing: border-box;
-        font-size: 2.5vmin;
+        font-size: 3.5vmin;
         background-color: transparent;
         width: 100%;
     }
 
 /* --- Interactive Elements --- */
-#button1, #button2, #button3 {
-    background-color: #444; color: #ddd;
-    text-decoration: none; cursor: pointer;
-    transition: background-color 0.2s;
-    font-weight: bold; border: none;
-    display: flex; justify-content: center;
+#button1, #button2, #button3, #text1 {
     padding: 1.5vmin 2.5vmin;
     flex: 1;
     text-align: center;
     margin: 0 0.5vmin;
+    display: flex; justify-content: center;
+    font-weight: bold;
+    justify-content: center;
+}
+
+#button1, #button2, #button3 {
+    background-color: #444; color: #ddd;
+    text-decoration: none; cursor: pointer;
+    transition: background-color 0.2s;
+    border: none;
 }
 #button1:first-child {
     margin-left: 0;
@@ -67,10 +72,12 @@ body {
 }
 #button1:hover, #button2:hover, #button3:hover { background-color: #555; }
 #button1.disabled { background-color: #333; color: #666; cursor: not-allowed; pointer-events: none; }
-#text1 { text-align: center; padding: 1.5vmin 0; color: #fff; font-weight: bold; background-color: transparent; flex: 1; display: flex; align-items: center; justify-content: center; }
+#text1 { color: #fff; background-color: transparent; display: flex; align-items: center; text-wrap: nowrap;  }
+
+/* button total height = 6.5 = 3.5 text, padding 1.5 + 2.5
 
 /* --- MODE 1: PORTRAIT LAYOUT (Tall screens, constrained by width) --- */
-@media (max-aspect-ratio: 100 / 105.5) {
+@media (max-aspect-ratio: 92/100) {
     #main-container { flex-direction: column; width: 100%; height: 100%; }
     #board-container {
         width: 100%; height: auto;
@@ -86,16 +93,17 @@ body {
 }
 
 /* --- MODE 2: "SQUARISH" LAYOUT (Slightly wide, constrained by height) --- */
-@media (min-aspect-ratio: 100 / 105.5) and (max-aspect-ratio: 120 / 100) {
+@media (min-aspect-ratio: 92 / 100) and (max-aspect-ratio: 130/100) {
     #main-container {
         flex-direction: column;
-        width: 94.5vh;
+        width: 92vh;
         height: 100%;
+        justify-content: center;
     }
     #board-container {
         width: 100%;
         height: auto;
-        flex-grow: 1; min-height: 0;
+        flex-grow: 0;
     }
     #controls-wrapper {
         width: 100%;
@@ -107,7 +115,7 @@ body {
 }
 
 /* --- MODE 3: LANDSCAPE LAYOUT (Very wide, side-by-side) --- */
-@media (min-aspect-ratio: 1.2/1) {
+@media (min-aspect-ratio: 130/100) {
     #main-container { display: flex; flex-direction: row; width: 100%; height: 100%; }
     #board-container {
         height: 100%; width: auto;
