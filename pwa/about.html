@@ -86,17 +86,9 @@
     </ul>
     
     <div class="footer">
-        <p>Version: <span id="version">1.0.0</span></p>
+        <p>Version: <span id="version-date"></span><span id="version-hash"></span></p>
         <p><a href="index.html">Back to Tsumego App</a></p>
     </div>
 
-    <script>
-        // Display the app version if available
-        document.addEventListener('DOMContentLoaded', () => {
-            if (typeof APP_VERSION !== 'undefined') {
-                document.getElementById('version').textContent = APP_VERSION;
-            }
-        });
-    </script>
 </body>
 </html>

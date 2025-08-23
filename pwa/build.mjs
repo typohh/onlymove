@@ -56,11 +56,15 @@ async function main() {
     const meta = buildResult.metafile.outputs;
     let newScriptPath = '';
     let newCssPath = '';
+    let mainJsHash = '';
 
     for (const outputPath in meta) {
         const outputDetails = meta[outputPath];
         if (outputDetails.entryPoint === 'js/main.js') {
             newScriptPath = path.relative(DIST_DIR, outputPath).replace(/\\/g, '/');
+            // Extract hash from the filename (format: main.[hash].js)
+            const filename = path.basename(outputPath);
+            mainJsHash = filename.split('.')[1];
         }
         if (outputDetails.entryPoint === 'style.css') {
             newCssPath = path.relative(DIST_DIR, outputPath).replace(/\\/g, '/');
@@ -86,6 +90,21 @@ async function main() {
     console.log(`✅ index.html updated with stylesheet: <link rel="stylesheet" href="${newCssPath}">`);
 
     await fs.writeFile(htmlPath, htmlContent);
+
+    // Update about.html with version information
+    const aboutPath = path.join(DIST_DIR, 'about.html');
+    let aboutContent = await fs.readFile(aboutPath, 'utf-8');
+    
+    // Get current UTC date and time
+    const now = new Date();
+    const utcDate = now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+    
+    // Update version information
+    aboutContent = aboutContent.replace('<span id="version-date"></span>', `<span id="version-date">${utcDate}</span>`);
+    aboutContent = aboutContent.replace('<span id="version-hash"></span>', `<span id="version-hash"> (${mainJsHash})</span>`);
+    
+    await fs.writeFile(aboutPath, aboutContent);
+    console.log(`✅ about.html updated with version: ${utcDate} (${mainJsHash})`);
 
     const swPath = path.join(DIST_DIR, 'sw.js');
     let swContent = await fs.readFile(swPath, 'utf-8');
