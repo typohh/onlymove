@@ -72,16 +72,20 @@ async function sendReport(problemFilename, success) {
 
 function updateUserStats(isCorrect) {
     if (isCorrect) {
-        state.momentum = state.momentum * 1.1;
         const currentFreq = state.problemFrequencies[state.currentProblemFilename] || 1;
         state.problemFrequencies[state.currentProblemFilename] = currentFreq / 5;
         const maxIncrease = (1.0 - state.userRank) / 2;
         const intendedIncrease = state.momentum / 600;
+        if(intendedIncrease > maxIncrease) {
+            state.momentum = max( 0.5 , state.momentum * 0.8 );
+        } else {
+            state.momentum *= 1.1;
+        }
         state.userRank += Math.min(intendedIncrease, maxIncrease);
     } else {
-        state.momentum = (state.momentum + 1) / 3;
         state.problemFrequencies[state.currentProblemFilename] = 25;
         state.userRank = Math.max(0, state.userRank - 4 * (state.momentum / 600));
+        state.momentum = (state.momentum + 1) / 3;
     }
 
     localStorage.setItem('userRank', state.userRank.toString());

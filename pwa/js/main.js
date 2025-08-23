@@ -75,6 +75,49 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // Handle button3 click - share functionality
+    document.getElementById('button3').addEventListener('click', (e) => {
+        e.preventDefault();
+        // Copy current URL to clipboard
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            // Show a temporary confirmation message in the center of the screen
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay';
+            Object.assign(overlay.style, {
+                position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+                backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex', justifyContent: 'center',
+                alignItems: 'center', zIndex: '1000', opacity: '0'
+            });
+            
+            const message = document.createElement('div');
+            Object.assign(message.style, {
+                color: 'white', fontWeight: 'bold', textAlign: 'center',
+                fontSize: '4vmin', padding: '2vmin', backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                borderRadius: '1vmin'
+            });
+            message.textContent = getTerm('linkCopied');
+            overlay.appendChild(message);
+            document.body.appendChild(overlay);
+            
+            // Fade in
+            setTimeout(() => {
+                overlay.style.transition = 'opacity 0.3s ease-in-out';
+                requestAnimationFrame(() => {
+                    overlay.style.opacity = '1';
+                });
+            }, 100);
+            
+            // Remove after 2 seconds
+            setTimeout(() => {
+                overlay.style.transition = 'opacity 0.3s ease-in-out';
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.remove(), 300);
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy URL: ', err);
+        });
+    });
+
     document.body.addEventListener('click', initializeAudioOnInteraction);
     document.body.addEventListener('touchend', initializeAudioOnInteraction);
 

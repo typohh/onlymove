@@ -45,6 +45,9 @@ function updateSolvingModeUI() {
     
     // Update "About" link (button2)
     document.getElementById('button2').textContent = getTerm('about');
+    
+    // Update "Share" link (button3)
+    document.getElementById('button3').textContent = getTerm('share');
 }
 
 function updateAnalysisModeUI() {
@@ -58,6 +61,9 @@ function updateAnalysisModeUI() {
     
     // Update "Undo" link (button2)
     document.getElementById('button2').textContent = getTerm('undo');
+    
+    // Update "Share" link (button3)
+    document.getElementById('button3').textContent = getTerm('share');
 }
 
 export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
