@@ -86,7 +86,7 @@ body {
 }
 
 /* --- MODE 2: "SQUARISH" LAYOUT (Slightly wide, constrained by height) --- */
-@media (min-aspect-ratio: 100 / 105.5) and (max-aspect-ratio: 1.2/1) {
+@media (min-aspect-ratio: 100 / 105.5) and (max-aspect-ratio: 120 / 100) {
     #main-container {
         flex-direction: column;
         width: 94.5vh;
@@ -117,9 +117,25 @@ body {
         width: auto; height: 100%;
     }
     #info-container {
-        flex-direction: column; height: 100%; align-items: stretch;
+        flex-direction: column; align-items: center; justify-content: center;
+        height: auto;
+        padding: 1vmin 0;
+        min-width: 15vmin; /* Prevent UI adjustments when text changes */
+    }
+    #text1 {
+        padding-left: 1vmin;
+        text-align: center;
     }
     #button1, #button2, #button3 {
         border-radius: 0 var(--radius) var(--radius) 0;
+        margin: 0.5vmin 0;
+        width: 80%;
+        flex: 0 0 auto;
+    }
+    #button1:first-child {
+        margin-top: 0;
+    }
+    #button3:last-child {
+        margin-bottom: 0;
     }
 }

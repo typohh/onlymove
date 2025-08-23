@@ -37,7 +37,11 @@ function updateSolvingModeUI() {
     const sgfToReview = state.showCorrectMove ? state.currentSGF : state.previousSGF;
     const problemFilenameToReview = state.showCorrectMove ? state.currentProblemFilename : state.previousProblemFilename;
     
-    if (sgfToReview && problemFilenameToReview) {
+    // Enable review button if we have a previous problem to review
+    // In hint mode, we can review the current problem
+    // Otherwise, we need a previous problem
+    if ((state.showCorrectMove && state.currentSGF && state.currentProblemFilename) || 
+        (!state.showCorrectMove && state.previousSGF && state.previousProblemFilename)) {
         prevTsumegoLink.classList.remove('disabled');
     } else {
         prevTsumegoLink.classList.add('disabled');

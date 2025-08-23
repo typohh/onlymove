@@ -266,6 +266,9 @@ export async function loadTsumego(update) {
         if (savedFile && savedContent && !update) {
             state.currentProblemFilename = savedFile;
             state.currentSGF = savedContent;
+            // Ensure previous values are set from localStorage
+            state.previousProblemFilename = localStorage.getItem('previousTsumego');
+            state.previousSGF = localStorage.getItem('previousTsumegoContent');
         } else {
             selectedProblem = selectProblem();
             if (!selectedProblem) {

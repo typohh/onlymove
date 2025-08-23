@@ -5,7 +5,7 @@ import { updateAllUI, updateBoardSize } from './ui.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById } from './tsumego.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
-import { updateUrlWithTsumegoId } from './utils.js';
+import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
 // --- NEW AUDIO UNLOCK LOGIC ---
 let isAudioInitialized = false;
@@ -33,7 +33,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log(`Main file hash: ${hash}`);
     }
 
-    updateAllUI();
     updateBoardSize();
     // Using CSS vi units for responsive sizing, but still need to update WGo board on resize
     window.addEventListener('resize', updateBoardSize);
@@ -80,41 +79,64 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         // Copy current URL to clipboard
         navigator.clipboard.writeText(window.location.href).then(() => {
-            // Show a temporary confirmation message in the center of the screen
-            const overlay = document.createElement('div');
-            overlay.className = 'overlay';
-            Object.assign(overlay.style, {
-                position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-                backgroundColor: 'rgba(0, 0, 0, 0.7)', display: 'flex', justifyContent: 'center',
-                alignItems: 'center', zIndex: '1000', opacity: '0'
-            });
-            
+            // Show a temporary confirmation message
             const message = document.createElement('div');
-            Object.assign(message.style, {
-                color: 'white', fontWeight: 'bold', textAlign: 'center',
-                fontSize: '4vmin', padding: '2vmin', backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                borderRadius: '1vmin'
-            });
             message.textContent = getTerm('linkCopied');
-            overlay.appendChild(message);
-            document.body.appendChild(overlay);
+            Object.assign(message.style, {
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                padding: '1vmin 2vmin',
+                borderRadius: '0.5vmin',
+                fontWeight: 'bold',
+                fontSize: '3vmin',
+                zIndex: '10000',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                textAlign: 'center'
+            });
             
-            // Fade in
-            setTimeout(() => {
-                overlay.style.transition = 'opacity 0.3s ease-in-out';
-                requestAnimationFrame(() => {
-                    overlay.style.opacity = '1';
-                });
-            }, 100);
+            document.body.appendChild(message);
             
             // Remove after 2 seconds
             setTimeout(() => {
-                overlay.style.transition = 'opacity 0.3s ease-in-out';
-                overlay.style.opacity = '0';
-                setTimeout(() => overlay.remove(), 300);
+                if (message.parentNode) {
+                    message.parentNode.removeChild(message);
+                }
             }, 2000);
         }).catch(err => {
             console.error('Failed to copy URL: ', err);
+            // Show error message
+            const message = document.createElement('div');
+            message.textContent = getTerm('error');
+            Object.assign(message.style, {
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                color: 'white',
+                padding: '1vmin 2vmin',
+                borderRadius: '0.5vmin',
+                fontWeight: 'bold',
+                fontSize: '3vmin',
+                zIndex: '10000',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                textAlign: 'center'
+            });
+            
+            document.body.appendChild(message);
+            
+            // Remove after 2 seconds
+            setTimeout(() => {
+                if (message.parentNode) {
+                    message.parentNode.removeChild(message);
+                }
+            }, 2000);
         });
     });
 
@@ -130,7 +152,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const success = await loadTsumegoById(tsumegoId);
         }
         await loadTsumego(false);
+        // Update UI after tsumego is loaded
+        updateAllUI();
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);
+        // Still update UI even if loading fails
+        updateAllUI();
     }
 });
