@@ -34,6 +34,9 @@ export const state = {
     currentSGF: null,
     previousSGF: localStorage.getItem('previousTsumegoContent'),
     
+    // Link state
+    openedFromLink: false,
+    
     // User identification
     userId: getOrCreateUserId(),
     

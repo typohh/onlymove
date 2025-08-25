@@ -13,11 +13,9 @@ let analysisHintMove = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
-    // Determine which SGF to analyze
-    // If we're showing the correct move (hint mode after failing), use current SGF
-    // Otherwise, use previous SGF
-    const sgfToAnalyze = state.showCorrectMove ? state.currentSGF : state.previousSGF;
-    const tsumegoFilename = state.showCorrectMove ? state.currentProblemFilename : state.previousProblemFilename;
+    // Always analyze the previous problem, regardless of showCorrectMove state
+    const sgfToAnalyze = state.previousSGF;
+    const tsumegoFilename = state.previousProblemFilename;
 
     if (!sgfToAnalyze) {
         console.error("No SGF found to enter analysis mode.");

@@ -71,13 +71,16 @@ async function sendReport(problemFilename, success) {
 }
 
 function updateUserStats(isCorrect) {
+    // If the tsumego was opened from a link, don't update stats
+    if (state.openedFromLink) return;
+    
     if (isCorrect) {
         const currentFreq = state.problemFrequencies[state.currentProblemFilename] || 1;
         state.problemFrequencies[state.currentProblemFilename] = currentFreq / 5;
         const maxIncrease = (1.0 - state.userRank) / 2;
         const intendedIncrease = state.momentum / 600;
         if(intendedIncrease > maxIncrease) {
-            state.momentum = max( 0.5 , state.momentum * 0.8 );
+            state.momentum = Math.max( 0.5 , state.momentum * 0.8 );
         } else {
             state.momentum *= 1.1;
         }
@@ -295,6 +298,9 @@ export async function loadTsumego(update) {
             }
         }
 
+        // Reset the openedFromLink flag when loading a new tsumego
+        state.openedFromLink = false;
+
         state.kifuReader = initializeKifuFromSGF(state.currentSGF);
         state.game = state.kifuReader.game;
         initializeBoard(state.kifuReader.kifu.size);
@@ -348,11 +354,19 @@ export async function loadTsumegoById(tsumegoId) {
         // Load the SGF content
         const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
 
+        // Check if this is the same as the current tsumego
+        const isSameAsCurrent = state.currentProblemFilename === `${tsumegoId}.sgf`;
+        
         // Set the state directly
         state.previousSGF = state.currentSGF;
         state.previousProblemFilename = state.currentProblemFilename;
         state.currentProblemFilename = `${tsumegoId}.sgf`;
         state.currentSGF = sgfContent;
+
+        // Set openedFromLink flag only if it's not the same as current
+        if (!isSameAsCurrent) {
+            state.openedFromLink = true;
+        }
 
         // Save to localStorage
         localStorage.setItem('currentTsumego', state.currentProblemFilename);

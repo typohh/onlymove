@@ -18,30 +18,32 @@ export function updateAllUI() {
     }
     
     // Update initial analysis score text
-    updateAnalysisUI('N/A', null);
+    updateAnalysisUI('...', null);
 }
 
 function updateSolvingModeUI() {
     // Update Rank Display in the text area
-    const rank = getDescriptiveRank(state.userRank);
-    const stddev = state.momentum / 4;
-    document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
+    if (state.openedFromLink) {
+        // When opened from a link, hide the rank information
+        document.getElementById('text1').textContent = '...';
+    } else {
+        // Normal display with rank information
+        const rank = getDescriptiveRank(state.userRank);
+        const stddev = state.momentum / 4;
+        document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
+    }
 
     // Update "Review" link (button1)
     const prevTsumegoLink = document.getElementById('button1');
     prevTsumegoLink.textContent = getTerm('review');
     
     // Determine which SGF to use for review
-    // If we're showing the correct move (hint mode after failing), use current SGF
-    // Otherwise, use previous SGF
-    const sgfToReview = state.showCorrectMove ? state.currentSGF : state.previousSGF;
-    const problemFilenameToReview = state.showCorrectMove ? state.currentProblemFilename : state.previousProblemFilename;
+    // Always use previous SGF for review, regardless of showCorrectMove state
+    const sgfToReview = state.previousSGF;
+    const problemFilenameToReview = state.previousProblemFilename;
     
     // Enable review button if we have a previous problem to review
-    // In hint mode, we can review the current problem
-    // Otherwise, we need a previous problem
-    if ((state.showCorrectMove && state.currentSGF && state.currentProblemFilename) || 
-        (!state.showCorrectMove && state.previousSGF && state.previousProblemFilename)) {
+    if (state.previousSGF && state.previousProblemFilename) {
         prevTsumegoLink.classList.remove('disabled');
     } else {
         prevTsumegoLink.classList.add('disabled');
