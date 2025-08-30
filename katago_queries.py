@@ -1,10 +1,10 @@
-import math
 import random
 from pprint import pprint
 
 import numpy as np
 
 PLAYOUTS = 30
+RULES = "japanese"
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
@@ -43,146 +43,19 @@ class KatagoQueries:
             player_and_move.append([_get_player_to_move_next(player_and_move), move])
         return player_and_move
 
-    def query_policy(self, moves, human_rank=None, komi=7.5):
-        """
-        Sends a standardized query for root position analysis (1 visit).
-        Returns rootInfo but no moveInfos.
-        """
-        query = {
-            "moves": self._include_player_in_move_sequence(moves),
-            "initialStones": [],
-            "rules": "chinese",
-            "komi": komi,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": 1,
-            "includePolicy": True,
-        }
-        if human_rank is not None:
-            # noinspection PyTypeChecker
-            query["overrideSettings"] = {
-                "humanSLProfile": _get_rank_str(human_rank),
-                "ignorePreRootHistory": False,
-                "rootNumSymmetriesToSample": 1
-            }
-        return self._katago_controller.send_query(query)
-
-    def query_weighted_random_move(self, moves, human_rank):
-        """
-        Queries the policy for a given rank and returns a move based on a weighted random sample.
-        """
-
-        response = self.query_policy(moves, human_rank=human_rank)
-
-        if not response.get("humanPolicy"):
-            print("moves:", moves)
-            print("human_rank:", human_rank, _get_rank_str(human_rank))
-            print("response:")
-            pprint(response)
-            response = self.query_policy(moves, human_rank=human_rank)
-            if not response.get("humanPolicy"):
-                raise Exception("Human policy not found in response.")
-            else:
-                raise Exception("Human policy found in repeat query.")
-            # return "pass"
-
-        human_policy = response["humanPolicy"]
-        strong_policy = response["policy"]
-
-        human_legal_indices = {i for i, p in enumerate(human_policy) if p > 0}
-        strong_legal_indices = {i for i, p in enumerate(strong_policy) if p > 0}
-
-        if human_legal_indices != strong_legal_indices:
-            raise Exception("Human and strong policies disagree on legal moves.")
-
-        legal_moves_map = {
-            i: p for i, p in enumerate(human_policy) if i in strong_legal_indices
-        }
-
-        pass_idx = len(strong_policy) - 1
-        if pass_idx in legal_moves_map:
-            legal_moves_map[pass_idx] = strong_policy[pass_idx]
-
-        legal_moves = list(legal_moves_map.items())
-
-        if not legal_moves:
-            return "pass"
-
-        move_indices, probabilities = zip(*legal_moves)
-
-        probabilities = np.array(probabilities)
-        probabilities /= probabilities.sum()
-
-        chosen_index = np.random.choice(move_indices, p=probabilities)
-
-        return self.get_move_from_idx(chosen_index)
-
-    def query_weighted_random_move_next(self, moves, human_rank, bot_weight=0, temperature=1):
-        """
-        Queries the policy for a given rank and returns a move based on a weighted random sample.
-        """
-
-        response = self.query_policy(moves, human_rank=human_rank)
-
-        if not response.get("humanPolicy"):
-            print("moves:", moves)
-            print("human_rank:", human_rank, _get_rank_str(human_rank))
-            print("response:")
-            pprint(response)
-            response = self.query_policy(moves, human_rank=human_rank)
-            if not response.get("humanPolicy"):
-                raise Exception("Human policy not found in response.")
-            else:
-                raise Exception("Human policy found in repeat query.")
-            # return "pass"
-
-        human_policy = response["humanPolicy"]
-        strong_policy = response["policy"]
-
-        if strong_policy[-1] == max(strong_policy):
-            return "pass"
-
-        human_policy[-1] = -1
-        strong_policy[-1] = -1
-
-        human_legal_indices = {i for i, p in enumerate(human_policy) if p > 0}
-        strong_legal_indices = {i for i, p in enumerate(strong_policy) if p > 0}
-
-        if human_legal_indices != strong_legal_indices:
-            raise Exception("Human and strong policies disagree on legal moves.")
-
-        legal_moves_map = {
-            i: (ph * (1-bot_weight) + pb * bot_weight) ** (1/temperature) for i, (ph, pb) in enumerate(zip(human_policy,strong_policy)) if i in strong_legal_indices
-        }
-
-        legal_moves = list(legal_moves_map.items())
-
-        if not legal_moves:
-            return "pass"
-
-        move_indices, probabilities = zip(*legal_moves)
-
-        probabilities = np.array(probabilities)
-        probabilities /= probabilities.sum()
-
-        chosen_index = np.random.choice(move_indices, p=probabilities)
-
-        return self.get_move_from_idx(chosen_index)
-
-
     def query_children(self, moves):
         """
         Sends a standardized query for children analysis (visits adjusted by the number of legal moves).
         Returns moveInfos but not necessarily accurate rootInfo.
         """
         # Get root policy to count legal moves
-        root_response = self.query_policy(moves)
+        root_response = self.query(moves)
         num_legal_moves = sum(1 for p in root_response["policy"] if p >= 0)
 
         query = {
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
-            "rules": "chinese",
+            "rules": RULES,
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
@@ -199,56 +72,52 @@ class KatagoQueries:
             print(f"WARNING: Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
         return r
 
-    def query_human(self, moves, human_rank, playouts):
-        """
-        Provides a high playout query, where specific first move may be excluded.
-        """
+    @staticmethod
+    def adjust_temperature(policy, temperature):
+        heated = [(p ** (1 / temperature) if p > 0 else p) for p in policy]
+        sum_heated = sum([max(0, p) for p in heated])
+        normalized = [p / sum_heated if p > 0 else 0 for p in heated]
+        return normalized
 
-        utility_limit = 0.5
+    def get_random_move(self, policy):
+        chosen_index = random.choices(range(len(policy)), weights=policy, k=1)[0]
+        return self.get_move_from_idx(chosen_index)
 
-        query = {
-            "moves": self._include_player_in_move_sequence(moves),
-            "initialStones": [],
-            "rules": "chinese",
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": playouts,
-            "includePolicy": True,
-            "overrideSettings": {
-                "humanSLProfile": _get_rank_str(human_rank),
-                "ignorePreRootHistory": False,
-                "humanSLPlaExploreProbWeightful": 1.0,
-                "humanSLOppExploreProbWeightful": 1.0,
-                "humanSLCpuctPermanent": utility_limit,
-                "useNoisePruning": False,
-                "useUncertainty": False,
-                "subtreeValueBiasFactor": 0,
-            }
-        }
-        response = self._katago_controller.send_query(query)
+    def get_rank_temperature(self, human_rank):
 
-        human_policy = response["humanPolicy"]
+        # ratings = [
+        #     0, # 20k
+        #     get_rank_number('12k'),
+        #     get_rank_number('1d'),
+        #     1, # 9d
+        # ]
+        # temperatures = [
+        #     0.1,
+        #     1.0,
+        #     1.6,
+        #     0.1,
+        # ]
 
-        moves = {
-            self.get_move_from_idx(i) : p * math.exp(response["rootInfo"]["utility"] / utility_limit) for i, p in enumerate(human_policy) if p > 0
-        }
+        ratings = [
+            0,  # 20k
+            get_rank_number('3d'),
+            1,  # 9d
+        ]
+        temperatures = [
+            1.0,
+            1.0,
+            0.1,
+        ]
+        return np.interp(human_rank, ratings, temperatures)
 
-        for move_info in response["moveInfos"]:
-            weight = move_info["humanPrior"] * math.exp(move_info["utility"] / utility_limit)
-            moves[move_info["move"]] = weight
-
-        return random.choices(list(moves.keys()), weights=list(moves.values()))[0]
-
-
-    def query(self, moves, exclude_move=None, playouts=PLAYOUTS):
+    def query(self, moves, human_rank=None, exclude_move=None, playouts=1):
         """
         Provides a high playout query, where specific first move may be excluded.
         """
         query = {
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
-            "rules": "chinese",
+            "rules": RULES,
             "komi": 7.5,
             "boardXSize": 9,
             "boardYSize": 9,
@@ -263,6 +132,13 @@ class KatagoQueries:
                     "untilDepth": 1
                 }
             ]
+        if human_rank is not None:
+            # noinspection PyTypeChecker
+            query["overrideSettings"] = {
+                "humanSLProfile": _get_rank_str(human_rank),
+                "ignorePreRootHistory": False,
+                "rootNumSymmetriesToSample": 1
+            }
 
         return self._katago_controller.send_query(query)
 
@@ -329,6 +205,9 @@ class KatagoQueries:
         winrate = response["rootInfo"]["winrate"]
 
         return score_lead, winrate
+
+    def get_move_probability(self, policy, move):
+        return policy[self.get_idx_from_move(move)]
 
     def get_best_move(self, response):
         """
@@ -422,4 +301,6 @@ def get_rank_str(rank, stddev=None):
 
 
 def get_rank_number(rank_str):
-    return _SUPPORTED_RANKS.index("rank_" + rank_str) / (len(_SUPPORTED_RANKS) - 1)
+    return (_SUPPORTED_RANKS.index("rank_" + rank_str) + 0.5) / len(_SUPPORTED_RANKS)
+
+

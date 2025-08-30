@@ -162,5 +162,7 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 ### 7.0. LLM instructions
 
 - Rely on duduced file content whenever reasonable, instead of reading the content. Reading files "just in case" will slow down operation without improving performance.
+- If you read data files, including utf-8 encoded data files, for which content could be deduced from code, you will be fired.
+- THIS IS VERY IMPORTANT, YOU NEED TO ASK PERMISSION TO READ DATA FILES, DOIING SO OUT OF YOUR OWN INITIATIVE IS AGAINST THE POLICY AND WILL BE CAUSE FOR TERMINATION!
 - For small files, read the entire file, instead of reading parts of it.
 - After you have made the requested changes, run npm build, provide summary of changes made since last request and stop. 

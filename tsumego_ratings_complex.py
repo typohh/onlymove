@@ -1,4 +1,5 @@
 import os
+import random
 
 import numpy as np
 import pandas as pd
@@ -66,14 +67,19 @@ def get_tsumego_ratings():
     quantile_ranks_for_map = tsumego_only_map_df['quantile_rank'].values
     tsumego_quantile_lookup = dict(zip(tsumego_only_map_df['id'], tsumego_only_map_df['quantile_rank']))
 
+    print(tsumego_quantile_lookup)
+
     # --- Define Anchors ---
     min_tsumego_id = tsumego_only_map_df.iloc[0]['id']
     max_tsumego_id = tsumego_only_map_df.iloc[-1]['id']
 
     anchors = {
         max_tsumego_id: 1.0,
-        "kata1-b6c96-s175395328-d26788732_corrupt3_1": get_rank_number("4d"),
-        "kata1-b6c96-s175395328-d26788732_corrupt5_1": get_rank_number("19k"),
+        # "b18c384nbt-humanv0_4d": get_rank_number("4d"),
+        # "b18c384nbt-humanv0_1k": get_rank_number("1k"),
+        # "b18c384nbt-humanv0_5k": get_rank_number("5k"),
+        # "b18c384nbt-humanv0_10k": get_rank_number("10k"),
+        # "b18c384nbt-humanv0_15k": get_rank_number("15k"),
         min_tsumego_id: 0.0
     }
 
@@ -96,3 +102,58 @@ def get_tsumego_ratings():
         final_tsumego_ratings[tsumego_id] = final_rank
 
     return final_tsumego_ratings
+
+
+def sample_tsumegos_with_links(sample_size=50):
+    """
+    Randomly samples tsumegos and prints their ratings with links for easier testing.
+    
+    Args:
+        sample_size: Number of tsumegos to sample (default: 50)
+    """
+    # Load the ratings data
+    bot_ratings_path = os.path.join(RATINGS_DIR, 'bot_ratings_final.csv')
+    tsumego_ratings_path = os.path.join(RATINGS_DIR, 'tsumego_ratings_final.csv')
+    
+    if not os.path.exists(bot_ratings_path) or not os.path.exists(tsumego_ratings_path):
+        print("Rating files not found. Please run the rating calculation first.")
+        return
+    
+    # --- Load Data ---
+    bot_ratings_df = pd.read_csv(bot_ratings_path, header=0, names=['id', 'rating'])
+    tsumego_ratings_df = pd.read_csv(tsumego_ratings_path, header=0, names=['id', 'rating'])
+    
+    # Get all tsumego IDs
+    all_tsumego_ids = tsumego_ratings_df['id'].tolist()
+    
+    # Sample without replacement (or use all if fewer than sample_size)
+    sample_count = min(sample_size, len(all_tsumego_ids))
+    sampled_ids = random.sample(all_tsumego_ids, sample_count)
+    
+    # Create a list of (tsumego_id, rating) pairs for sorting
+    sampled_tsumegos = []
+    for tsumego_id in sampled_ids:
+        rating_row = tsumego_ratings_df[tsumego_ratings_df['id'] == tsumego_id]
+        if not rating_row.empty:
+            rating = rating_row.iloc[0]['rating']
+            sampled_tsumegos.append((tsumego_id, rating))
+    
+    # Sort by rating (descending order - higher ratings first)
+    sampled_tsumegos.sort(key=lambda x: x[1], reverse=True)
+    
+    # Print sampled tsumegos with ratings, closest bot, and links
+    print(f"\n--- Randomly Sampled {sample_count} Tsumegos for Testing (Sorted by Rating) ---")
+    for tsumego_id, tsumego_rating_val in sampled_tsumegos:
+        # Find the bot with the closest rating
+        closest_bot = None
+        min_rating_diff = float('inf')
+        
+        for _, bot_row in bot_ratings_df.iterrows():
+            bot_id = bot_row['id']
+            bot_rating_val = bot_row['rating']
+            rating_diff = abs(tsumego_rating_val - bot_rating_val)
+            if rating_diff < min_rating_diff:
+                min_rating_diff = rating_diff
+                closest_bot = bot_id
+        
+        print(f"Rating: {tsumego_rating_val:.2f} (Closest bot: {closest_bot}) - http://localhost:8000/?id={tsumego_id}")

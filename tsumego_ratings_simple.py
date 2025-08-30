@@ -1,16 +1,10 @@
 from collections import defaultdict
 from pathlib import Path
 from pprint import pprint
-
-import numpy as np
-
 from katago_queries import get_rank_number
+import numpy as np
 
 ATTEMPTS_DIR = "attempts"
-
-import numpy as np
-
-import numpy as np
 
 
 def find_bot_50_percent_rating(bot_id: str, uniform_ratings: dict, bot_results: dict) -> float:

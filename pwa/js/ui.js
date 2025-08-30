@@ -24,8 +24,16 @@ export function updateAllUI() {
 function updateSolvingModeUI() {
     // Update Rank Display in the text area
     if (state.openedFromLink) {
-        // When opened from a link, hide the rank information
-        document.getElementById('text1').textContent = '...';
+        // When opened from a link, show the tsumego's rank (and no stddev)
+        // Find the current problem in the loaded problems
+        const currentProblem = state.allProblems.find(p => p.filename === state.currentProblemFilename);
+        if (currentProblem && currentProblem.rank !== undefined) {
+            const rank = getDescriptiveRank(currentProblem.rank);
+            document.getElementById('text1').textContent = `${rank}`;
+        } else {
+            // Fallback if rank not found
+            document.getElementById('text1').textContent = '...';
+        }
     } else {
         // Normal display with rank information
         const rank = getDescriptiveRank(state.userRank);

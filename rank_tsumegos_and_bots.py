@@ -3,9 +3,26 @@ import os
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as func  # For softplus
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import numpy as np
+import random  # Keep for potential future sampling/testing
+
+# --- Configuration ---
+DATA_DIRECTORY = "attempts"
+BATCH_SIZE = 8192
+LEARNING_RATE = 0.01
+LOSS_DROP_THRESHOLD = 0.001  # Stop training if loss improves by less than 0.1%
+MIN_BATCHES = 50  # Minimum number of batches before checking loss drop
+PROB_TARGET = 0.8  # Target probability for tsumego rating calculation
+
+# --- Global Epsilon for numerical stability ---
+EPSILON = 1e-9
+
+# Set a fixed seed for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
 
 
 # --- Data Loading ---
@@ -42,13 +59,85 @@ def load_data(data_dir):
                 parts = line.strip().split()
                 if len(parts) == 2:
                     tsumego_name, success_rate = parts
+                    # Only add records for tsumegos we've mapped
                     if tsumego_name in tsumego_map:
                         tsumego_idx = tsumego_map[tsumego_name]
                         records.append((bot_idx, tsumego_idx, float(success_rate)))
 
     df = pd.DataFrame(records, columns=["bot_id", "tsumego_id", "success_rate"])
     print(f"Loaded {len(df)} total solve attempts.")
-    return df, bot_map, tsumego_map
+    return df, bot_map, tsumego_map, tsumego_ids  # Return tsumego_ids for convenience
+
+
+# --- Preliminary Bot Ranking ---
+def get_preliminary_bot_ranking(df, bot_map):
+    """
+    Assigns a preliminary rank to each bot based on their overall average success rate.
+    Returns a DataFrame with bot_id and preliminary_rank (lower rank = better bot).
+    """
+    print("\nCalculating preliminary bot rankings...")
+    bot_avg_success = df.groupby('bot_id')['success_rate'].mean().reset_index()
+    bot_avg_success = bot_avg_success.sort_values(by='success_rate', ascending=False).reset_index(drop=True)
+    bot_avg_success['preliminary_rank'] = bot_avg_success.index + 1  # Rank 1 is best bot
+
+    # Map bot_id (int index) to its rank
+    bot_rank_map = bot_avg_success.set_index('bot_id')['preliminary_rank'].to_dict()
+    print("Preliminary bot rankings calculated.")
+    return bot_rank_map
+
+
+# --- Identify Non-Monotonic Tsumegos ---
+def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map, num_tsumegos_to_evaluate=None):
+    """
+    Identifies tsumegos that exhibit a negative slope with bot preliminary rankings.
+    Returns a set of non-monotonic tsumego IDs.
+    """
+    print("\nIdentifying non-monotonic tsumegos...")
+    non_monotonic_tsumego_ids = set()
+
+    # Create a DataFrame with bot preliminary ranks
+    df_ranked_bots = df.copy()
+    df_ranked_bots['bot_prelim_rank'] = df_ranked_bots['bot_id'].map(bot_rank_map)
+
+    # Convert tsumego_id (int) back to tsumego_name
+    rev_tsumego_map = {i: name for name, i in tsumego_map.items()}
+    df_ranked_bots['tsumego_name'] = df_ranked_bots['tsumego_id'].map(rev_tsumego_map)
+
+    tsumego_names = df_ranked_bots['tsumego_name'].unique()
+
+    # Limit number of tsumegos for evaluation if specified (useful for large datasets)
+    if num_tsumegos_to_evaluate:
+        tsumego_names = random.sample(list(tsumego_names), min(num_tsumegos_to_evaluate, len(tsumego_names)))
+
+    for tsumego_name in tqdm(tsumego_names, desc="Checking Tsumego Monotonicity"):
+        tsumego_data = df_ranked_bots[df_ranked_bots['tsumego_name'] == tsumego_name].copy()
+
+        # Sort by bot preliminary rank (1 is best, so ascending means from best to worst bot)
+        tsumego_data = tsumego_data.sort_values(by='bot_prelim_rank')
+
+        # Check for non-monotonicity:
+        # We'll use a simple approach: compare success rates of adjacent skill groups.
+        # For a truly non-monotonic item, strong bots performing worse than weaker bots
+        # is the key. Let's divide bots into e.g., 3 skill groups.
+
+        # Define skill groups (e.g., top 33%, middle 33%, bottom 33%)
+        # Note: bot_prelim_rank is 1 for best, increasing for worse bots.
+        # So "lower ranks" means "stronger bots".
+        num_bots_total = len(bot_rank_map)
+        strong_bots_threshold = num_bots_total // 3
+        weak_bots_threshold = num_bots_total * 2 // 3
+
+        strong_bot_success = tsumego_data[tsumego_data['bot_prelim_rank'] <= strong_bots_threshold]['success_rate'].mean()
+        weak_bot_success = tsumego_data[tsumego_data['bot_prelim_rank'] > weak_bots_threshold]['success_rate'].mean()
+
+        # If strong bots have a significantly lower success rate than weak bots, it's non-monotonic
+        # Adding a small buffer to prevent flagging due to tiny fluctuations
+        if not np.isnan(strong_bot_success) and not np.isnan(weak_bot_success) and \
+                strong_bot_success < (weak_bot_success - 0.1):  # Tunable threshold, e.g., 10% difference
+            non_monotonic_tsumego_ids.add(tsumego_name)
+
+    print(f"Identified {len(non_monotonic_tsumego_ids)} non-monotonic tsumegos.")
+    return non_monotonic_tsumego_ids
 
 
 # --- Rating Model (3PL IRT) ---
@@ -57,23 +146,31 @@ class RatingModel(nn.Module):
 
     def __init__(self, num_bots, num_tsumegos):
         super().__init__()
-        self.bot_ratings = nn.Embedding(num_bots, 1)  # θ_b (skill)
-        self.tsumego_difficulties = nn.Embedding(num_tsumegos, 1)  # β_t (difficulty)
-        self.tsumego_discrimination = nn.Embedding(num_tsumegos, 1)  # α_t (discrimination)
-        self.tsumego_guessing = nn.Embedding(num_tsumegos, 1)  # c_t (guessing)
+        self.num_bots = num_bots  # Store for later use in save_ratings_snapshot
+        self.num_tsumegos = num_tsumegos  # Store for later use
 
-        # Initialize parameters to reasonable starting values
+        self.bot_ratings = nn.Embedding(num_bots, 1)  # θ_b (skill)
+        self.tsumego_difficulties_raw = nn.Embedding(num_tsumegos, 1)  # β_t (difficulty)
+        self.tsumego_discrimination_raw = nn.Embedding(num_tsumegos, 1)  # α_t (discrimination)
+        self.tsumego_guessing_raw = nn.Embedding(num_tsumegos, 1)  # c_t (guessing)
+
+        # Initialize parameters
         nn.init.normal_(self.bot_ratings.weight, mean=0, std=1)
-        nn.init.normal_(self.tsumego_difficulties.weight, mean=0, std=1)
-        nn.init.normal_(self.tsumego_discrimination.weight, mean=1.0, std=0.1)
-        nn.init.constant_(self.tsumego_guessing.weight, -2.2)  # Corresponds to sigmoid(-2.2) ≈ 0.1
+        nn.init.normal_(self.tsumego_difficulties_raw.weight, mean=0, std=1)
+        nn.init.normal_(self.tsumego_discrimination_raw.weight, mean=1.0, std=0.1)
+        nn.init.constant_(self.tsumego_guessing_raw.weight, -2.2)  # Corresponds to sigmoid(-2.2) approx 0.1
 
     def forward(self, bot_indices, tsumego_indices):
         """Calculates the predicted success rate."""
         theta = self.bot_ratings(bot_indices)
-        beta = self.tsumego_difficulties(tsumego_indices)
-        alpha = self.tsumego_discrimination(tsumego_indices)
-        c = torch.sigmoid(self.tsumego_guessing(tsumego_indices))
+
+        # Apply softplus to discrimination parameter and add epsilon to ensure positivity and avoid zero
+        alpha = func.softplus(self.tsumego_discrimination_raw(tsumego_indices)) + EPSILON * 10
+
+        beta = self.tsumego_difficulties_raw(tsumego_indices)
+
+        # Apply sigmoid to guessing parameter raw output
+        c = torch.sigmoid(self.tsumego_guessing_raw(tsumego_indices))
 
         diff = alpha * (theta - beta)
         non_guess_success_prob = torch.sigmoid(diff)
@@ -82,84 +179,102 @@ class RatingModel(nn.Module):
 
 
 # --- Save ratings snapshot ---
-def save_ratings_snapshot(model, bot_map, tsumego_map, epoch_num_str):
-    """Calculates and saves the bot and tsumego ratings to CSV files."""
+def save_ratings_snapshot(model, bot_map, tsumego_map, all_tsumego_names,
+                          monotonic_tsumego_map, non_monotonic_tsumego_ids, output_suffix):
+    """
+    Calculates and saves the bot and tsumego ratings to CSV files.
+    Non-monotonic tsumegos are added back with a rating equal to the hardest monotonic tsumego.
+    """
     model.eval()
-    output_suffix = f"epoch_{epoch_num_str}" if isinstance(epoch_num_str, int) else epoch_num_str
     bot_filename = f"ratings/bot_ratings_{output_suffix}.csv"
     tsumego_filename = f"ratings/tsumego_ratings_{output_suffix}.csv"
 
     os.makedirs("ratings", exist_ok=True)
 
+    # Get parameters for monotonic tsumegos
     with torch.no_grad():
-        bot_ratings = model.bot_ratings.weight.cpu().numpy().flatten()
-        tsumego_difficulties = model.tsumego_difficulties.weight.cpu().numpy().flatten()
-        tsumego_discrimination = model.tsumego_discrimination.weight.cpu().numpy().flatten()
-        # Get the "logit of the guess" parameter and apply sigmoid to get the guess probability `c`
-        tsumego_guessing_logit = model.tsumego_guessing.weight.cpu().numpy().flatten()
-        tsumego_c = 1 / (1 + np.exp(-tsumego_guessing_logit)) # This is the sigmoid function
+        bot_ratings_np = model.bot_ratings.weight.cpu().numpy().flatten()
+        monotonic_tsumego_difficulties = model.tsumego_difficulties_raw.weight.cpu().numpy().flatten()
+        # Apply softplus and epsilon as in forward pass for alpha
+        monotonic_tsumego_discrimination = (func.softplus(model.tsumego_discrimination_raw.weight) + EPSILON * 10).cpu().numpy().flatten()
+        monotonic_tsumego_guessing_logit = model.tsumego_guessing_raw.weight.cpu().numpy().flatten()
+        monotonic_tsumego_c = 1 / (1 + np.exp(-monotonic_tsumego_guessing_logit))
 
     rev_bot_map = {i: name for name, i in bot_map.items()}
-    rev_tsumego_map = {i: name for name, i in tsumego_map.items()}
 
-    # --- Corrected 3PL Rating Calculation ---
-    # This finds the skill level (theta) needed for a 50% success rate
-    PROB_TARGET = 0.5
-    epsilon = 1e-9 # A small value to prevent division by zero or log(0)
-
+    # --- Calculate Monotonic Tsumego Ratings ---
     # Argument for the logit function: (P - c) / (1 - c)
-    # We clip the value to avoid math errors if c is very close to P
-    p_minus_c = PROB_TARGET - tsumego_c
-    one_minus_c = 1 - tsumego_c
-    logit_arg = np.clip(p_minus_c / (one_minus_c + epsilon), epsilon, 1 - epsilon)
-
-    # Logit function: log(p / (1 - p))
+    p_minus_c = PROB_TARGET - monotonic_tsumego_c
+    one_minus_c = 1 - monotonic_tsumego_c
+    logit_arg = np.clip(p_minus_c / (one_minus_c + EPSILON), EPSILON, 1 - EPSILON)
     logit_val = np.log(logit_arg / (1 - logit_arg))
 
-    # Full 3PL formula to solve for rating (theta): beta + logit_val / alpha
-    tsumego_rating = tsumego_difficulties + logit_val / (tsumego_discrimination + epsilon)
+    # Full 3PL formula to solve for rating (theta)
+    monotonic_tsumego_rating = monotonic_tsumego_difficulties + logit_val / (monotonic_tsumego_discrimination + EPSILON)
 
-    # --- DataFrame creation with original format ---
-    tsumego_df = pd.DataFrame({
-        "tsumego_id": [rev_tsumego_map[i] for i in range(len(tsumego_rating))],
-        "rating": tsumego_rating
-    }).sort_values(by="rating", ascending=False)
+    # Map monotonic tsumego indices back to their original names
+    rev_monotonic_tsumego_map = {i: name for name, i in monotonic_tsumego_map.items()}
+    monotonic_tsumego_df = pd.DataFrame({
+        "tsumego_id": [rev_monotonic_tsumego_map[i] for i in range(len(monotonic_tsumego_rating))],
+        "rating": monotonic_tsumego_rating
+    })
+
+    # Find the hardest monotonic tsumego rating
+    hardest_monotonic_rating = monotonic_tsumego_df['rating'].max()
+    print(f"\nHardest monotonic tsumego rating: {hardest_monotonic_rating:.2f}")
+
+    # --- Combine all tsumego ratings ---
+    final_tsumego_ratings = []
+    for tsumego_name in all_tsumego_names:
+        if tsumego_name in non_monotonic_tsumego_ids:
+            # Assign rating of the hardest monotonic tsumego
+            final_tsumego_ratings.append({"tsumego_id": tsumego_name, "rating": hardest_monotonic_rating})
+        else:
+            # Get rating from the trained monotonic model
+            rating_row = monotonic_tsumego_df[monotonic_tsumego_df['tsumego_id'] == tsumego_name]
+            final_tsumego_ratings.append({"tsumego_id": tsumego_name, "rating": rating_row['rating'].iloc[0]})
+
+    tsumego_df_final = pd.DataFrame(final_tsumego_ratings).sort_values(by="rating", ascending=False)
 
     bot_df = pd.DataFrame({
-        "bot_id": [rev_bot_map[i] for i in range(len(bot_ratings))], # Corrected typo here
-        "rating": bot_ratings
+        "bot_id": [rev_bot_map[i] for i in range(len(bot_ratings_np))],
+        "rating": bot_ratings_np
     }).sort_values(by="rating", ascending=False)
 
-    tsumego_df.to_csv(tsumego_filename, index=False)
+    tsumego_df_final.to_csv(tsumego_filename, index=False)
     bot_df.to_csv(bot_filename, index=False)
     print(f"\nFinal ratings saved to '{bot_filename}' and '{tsumego_filename}'")
 
 
 # --- Training ---
-def train_model(model, data_loader, device, learning_rate, loss_drop_threshold, max_epochs):
+def train_model(model, data_loader, device):
     """
     Trains the IRT model, stopping when loss improvement is less than a threshold.
     """
     loss_fn = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,  weight_decay=1e-5)
+    # Add a small L2 regularization (weight_decay) to all parameters
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
 
     epoch = 0
     previous_loss = float('inf')
+    batches_processed = 0
 
-    while epoch < max_epochs:
+    print("\nStarting model training...")
+    while True:
         model.train()
         total_loss = 0
         count = 0
-        progress_bar = tqdm(data_loader, desc=f"Epoch {epoch + 1}/{max_epochs}")
+        progress_bar = tqdm(data_loader, desc=f"Epoch {epoch + 1}")
         for bot_batch, tsumego_batch, rate_batch in progress_bar:
             bot_batch = bot_batch.to(device)
             tsumego_batch = tsumego_batch.to(device)
             rate_batch = rate_batch.to(device).float()
 
             optimizer.zero_grad()
-
             predicted_rates = model(bot_batch, tsumego_batch).squeeze()
-            predicted_rates = torch.clamp(predicted_rates, 1e-9, 1 - 1e-9)
+
+            # Clamp predictions to avoid log(0) or log(1) with BCELoss
+            predicted_rates = torch.clamp(predicted_rates, EPSILON, 1 - EPSILON)
 
             loss = loss_fn(predicted_rates, rate_batch)
             loss.backward()
@@ -168,71 +283,91 @@ def train_model(model, data_loader, device, learning_rate, loss_drop_threshold, 
             total_loss += loss.item()
             count += 1
             progress_bar.set_postfix(loss=f"{(total_loss / count):.4f}")
+            batches_processed += 1
 
         avg_loss = total_loss / count
 
-        if epoch > 0:
+        # Check for early stopping only after a minimum number of batches
+        if batches_processed > MIN_BATCHES:
             relative_loss_drop = (previous_loss - avg_loss) / previous_loss
             print(f"\nEpoch {epoch + 1} complete. Average Loss: {avg_loss:.6f}. Relative Loss Drop: {relative_loss_drop:.4%}")
-            if relative_loss_drop < loss_drop_threshold:
-                print(f"Loss improvement ({relative_loss_drop:.4%}) is below threshold ({loss_drop_threshold:.2%}). Stopping training.")
+            if relative_loss_drop < LOSS_DROP_THRESHOLD:
+                print(f"Loss improvement ({relative_loss_drop:.4%}) is below threshold ({LOSS_DROP_THRESHOLD:.2%}). Stopping training.")
                 break
-        else:
-            print(f"\nEpoch {epoch + 1} complete. Average Loss: {avg_loss:.6f}.")
-
-        previous_loss = avg_loss
+            previous_loss = avg_loss
+            batches_processed = 0
         epoch += 1
-
-    if epoch == max_epochs:
-        print(f"\nTraining stopped after reaching the maximum of {max_epochs} epochs.")
 
     print("\nTraining complete.")
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # --- Configuration ---
-    DATA_DIRECTORY = "attempts"
-    BATCH_SIZE = 8192
-    LEARNING_RATE = 0.01
-    LOSS_DROP_THRESHOLD = 0.02  # Stop training if loss improves by less than 2%
-    MAX_EPOCHS = 100  # Maximum number of epochs to run as a safeguard
-
-    # Set a fixed seed for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
-
     # --- Data Loading ---
-    df, bot_map, tsumego_map = load_data(DATA_DIRECTORY)
+    df_full, bot_map, tsumego_map, all_tsumego_names = load_data(DATA_DIRECTORY)
 
-    dataset = TensorDataset(
-        torch.LongTensor(df.bot_id.values),
-        torch.LongTensor(df.tsumego_id.values),
-        torch.Tensor(df.success_rate.values)
+    # Define rev_tsumego_map here so it's accessible globally
+    rev_tsumego_map = {i: name for name, i in tsumego_map.items()}
+
+    # --- Preliminary Bot Ranking ---
+    bot_prelim_rank_map = get_preliminary_bot_ranking(df_full, bot_map)
+
+    # --- Identify Non-Monotonic Tsumegos ---
+    # Passing all_tsumego_names is important here to check every original tsumego
+    non_monotonic_tsumego_ids = identify_non_monotonic_tsumegos(df_full, tsumego_map, bot_prelim_rank_map)
+
+    # --- Filter Data for Monotonic Training ---
+    monotonic_tsumego_names = [name for name in all_tsumego_names if name not in non_monotonic_tsumego_ids]
+
+    # Create a new map for monotonic tsumegos for training
+    monotonic_tsumego_map = {name: i for i, name in enumerate(monotonic_tsumego_names)}
+
+    # Filter the DataFrame to include only monotonic tsumegos
+    # Now rev_tsumego_map is correctly defined in this scope
+    df_monotonic = df_full[df_full['tsumego_id'].map(lambda x: rev_tsumego_map[x] in monotonic_tsumego_map)].copy()
+
+    # Re-map tsumego_ids in df_monotonic to their new monotonic_tsumego_map indices
+    # This line was also causing an issue because it was recreating rev_tsumego_map
+    # which already exists, and the mapping logic was a bit convoluted.
+    # The correct way is to map the original tsumego_id (integer) to its name,
+    # then map that name to its new monotonic_tsumego_map index.
+    df_monotonic['tsumego_id_monotonic'] = df_monotonic['tsumego_id'].map(lambda x: monotonic_tsumego_map[rev_tsumego_map[x]])
+
+    print(f"\nTraining on {len(monotonic_tsumego_map)} monotonic tsumegos.")
+    print(f"Removed {len(non_monotonic_tsumego_ids)} non-monotonic tsumegos from training set.")
+
+    # Create dataset and DataLoader for monotonic tsumegos
+    dataset_monotonic = TensorDataset(
+        torch.LongTensor(df_monotonic.bot_id.values),
+        torch.LongTensor(df_monotonic.tsumego_id_monotonic.values),  # Use new monotonic tsumego IDs
+        torch.Tensor(df_monotonic.success_rate.values)
     )
-    data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    data_loader_monotonic = DataLoader(dataset_monotonic, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
 
     # --- Model Initialization ---
-    model = RatingModel(num_bots=len(bot_map), num_tsumegos=len(tsumego_map))
+    model = RatingModel(num_bots=len(bot_map), num_tsumegos=len(monotonic_tsumego_map))
 
     # --- Device Configuration ---
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print("\nCUDA is available. Moving model to GPU...")
-        model.to(device)
-    else:
-        device = torch.device("cpu")
-        print("\nCUDA not available. Running on CPU.")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\nRunning on: {device}")
+    model.to(device)
 
-    # --- Training and Final Save ---
+    # --- Training ---
     train_model(
         model,
-        data_loader,
-        device,
-        learning_rate=LEARNING_RATE,
-        loss_drop_threshold=LOSS_DROP_THRESHOLD,
-        max_epochs=MAX_EPOCHS
+        data_loader_monotonic,
+        device
     )
-    save_ratings_snapshot(model, bot_map, tsumego_map, "final")
+
+    # --- Final Rating Save (including non-monotonic tsumegos) ---
+    save_ratings_snapshot(
+        model,
+        bot_map,
+        tsumego_map,  # Pass the original tsumego_map for full name lookup
+        all_tsumego_names,
+        monotonic_tsumego_map,  # Pass the monotonic map for indexing trained parameters
+        non_monotonic_tsumego_ids,
+        "final"
+    )
 
     print("\nScript finished.")

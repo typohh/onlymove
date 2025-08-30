@@ -2,12 +2,13 @@ import random
 
 from sgfmill import sgf
 
-from stats import STATS, DEBUG
-from katago_queries import KatagoQueries, katago_to_sgf_coords, get_rank_str
+from katago_queries import KatagoQueries, katago_to_sgf_coords
 
-MIN_WINRATE_CORRECT = 0.7
-MAX_WINRATE_ALTERNATIVE = 0.3
-GOAL_SCORE = -3
+MIN_WINRATE_CORRECT = 0.9
+MAX_WINRATE_ALTERNATIVE = 0.1
+RANDOM_MOVE_COUNT = 4
+GOAL_SCORE = 1
+PLAYOUTS = 30
 
 class ProblemFinder:
     """
@@ -22,6 +23,7 @@ class ProblemFinder:
             queries (KatagoQueries): The KataGo controller for the SL network.
         """
         self.queries = queries
+        self.debug=False
 
     def generate_initial_position(self):
         """
@@ -42,7 +44,7 @@ class ProblemFinder:
             return True
 
         # Play 6 random moves, anywhere except 1st line
-        for _ in range(6):
+        for _ in range(RANDOM_MOVE_COUNT):
             response = self.queries.query_policy(moves)
             legal_moves = [
                 (i, p)
@@ -59,9 +61,9 @@ class ProblemFinder:
 
             moves.append(move)
 
-        if DEBUG:
+        if self.debug:
             move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
-            print(f"status after 6 random moves: {(100 * winrate):.1f}% {score:.1f}")
+            print(f"status after {RANDOM_MOVE_COUNT} random moves: {(100 * winrate):.1f}% {score:.1f}")
 
         # 2. Play 2 moves to balance the game
         for _ in range(2):
@@ -77,7 +79,7 @@ class ProblemFinder:
 
             moves.append(best_move)
 
-        if DEBUG:
+        if self.debug:
             move, winrate, score = self.queries.get_best_move(self.queries.query_policy(moves))
             print(f"status after rebalance: {(100 * winrate):.1f}% {score:.1f}")
 
@@ -90,25 +92,25 @@ class ProblemFinder:
 
         # We want the tsumego to have large gap in winrate between best and second best move. We want the score of the second best move to be close to -0.5 as possible.
 
-        if DEBUG: print("adjusting tsumego")
+        if self.debug: print("adjusting tsumego")
 
         while True:
-            best_move, best_winrate, best_score = self.queries.get_best_move(self.queries.query(moves))
-            second_move, second_winrate, second_score = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move))
+            best_move, best_winrate, best_score = self.queries.get_best_move(self.queries.query(moves, playouts=PLAYOUTS))
+            second_move, second_winrate, second_score = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move, playouts=PLAYOUTS))
 
-            if DEBUG: print(f"{(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
+            if self.debug: print(f"{(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
 
             # do we meet all criteria?
             if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and second_score < 0:
-                if DEBUG: print("valid tsumego!")
+                if self.debug: print("valid tsumego!")
                 return moves, best_move
 
             if best_move == "pass" or second_move == "pass":
-                if DEBUG: print("terminating due to pass")
+                if self.debug: print("terminating due to pass")
                 return None, None
 
             # black plays second best move
-            if DEBUG: print(f"B {second_move} {(second_winrate * 100):.1f}% {second_score:.1f}")
+            if self.debug: print(f"B {second_move} {(second_winrate * 100):.1f}% {second_score:.1f}")
             moves.append(second_move)
 
             response = self.queries.query_children(moves)
@@ -128,7 +130,7 @@ class ProblemFinder:
                     best_score = move_info["scoreLead"]
                     best_winrate = move_info["winrate"]
 
-            if DEBUG: print(f"W {best_response} {(best_winrate * 100):.1f}% {best_score:.1f}")
+            if self.debug: print(f"W {best_response} {(best_winrate * 100):.1f}% {best_score:.1f}")
             moves.append(best_response)
 
     def create_problem(self):
@@ -137,13 +139,11 @@ class ProblemFinder:
 
         adjusted_moves, solution_move = self.adjust_tsumego(moves_so_far.copy())
         if not solution_move:
-            STATS.add_failure_to_create_problem()
             return None
 
         # Generate variations data - all legal moves and their optimal responses
         variations = self._generate_variations(adjusted_moves)
 
-        STATS.add_problem_found(len(adjusted_moves))
         return {
             "moves": adjusted_moves,
             "solution": solution_move,
@@ -166,12 +166,12 @@ class ProblemFinder:
         response = self.queries.query_children(moves)
 
         # For each legal move, get its evaluation and optimal response
-        if DEBUG: print("creating", len(response["moveInfos"]), "variations")
+        if self.debug: print("creating", len(response["moveInfos"]), "variations")
         for move_info in response["moveInfos"]:
             move = move_info["move"]
             # Get the optimal response to this move
             response_moves = moves + [move]
-            response_result = self.queries.query(response_moves)
+            response_result = self.queries.query(response_moves,playouts=PLAYOUTS)
             response_move, winrate, score = self.queries.get_best_move(response_result)
             variation = {
                 "move": move,
@@ -196,8 +196,8 @@ def problem_to_sgf(problem):
     # print(problem)
 
     game = sgf.Sgf_game(size=9)
-    game.root.set("KM", "7.5")
-    game.root.set("RU", "chinese")
+    game.root.set("KM", "6.5")
+    game.root.set("RU", "japanese")
 
     player = "b"
 

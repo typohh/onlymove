@@ -296,10 +296,8 @@ export async function loadTsumego(update) {
                 localStorage.setItem('previousTsumego', state.previousProblemFilename);
                 localStorage.setItem('previousTsumegoContent', state.previousSGF);
             }
+            state.openedFromLink = false;
         }
-
-        // Reset the openedFromLink flag when loading a new tsumego
-        state.openedFromLink = false;
 
         state.kifuReader = initializeKifuFromSGF(state.currentSGF);
         state.game = state.kifuReader.game;

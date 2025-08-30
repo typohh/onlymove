@@ -3,16 +3,18 @@ import json
 import hashlib
 import io
 import zipfile
+import random
+import pandas as pd
 
 from katago_queries import get_all_ranks, get_rank_str
-from tsumego_ratings_simple import get_tsumego_ratings
+from tsumego_ratings_complex import get_tsumego_ratings, sample_tsumegos_with_links
 
 
 def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
     """Sorts, groups, and packages tsumegos into zip files based on their rank."""
 
     metadata.sort(key=lambda x: x["rank"])
-    group_count = 150
+    group_count = int(len(metadata)**0.5)
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
 
@@ -101,6 +103,7 @@ if __name__ == "__main__":
 
     # 1. Get the ratings map (tsumego_id -> rank).
     tsumego_ratings_map = get_tsumego_ratings()
+    print(tsumego_ratings_map)
 
     # 2. Build the final metadata list by matching files with their ratings.
     print(f"\nMatching {len(tsumego_ratings_map)} ratings to tsumego files...")
@@ -126,3 +129,6 @@ if __name__ == "__main__":
 
     # 4. Print the final distribution report.
     print_rank_distribution(all_metadata)
+    
+    # 5. Sample tsumegos for testing
+    sample_tsumegos_with_links(sample_size=200)
