@@ -131,14 +131,11 @@ async function requestAndDisplayAnalysis() {
         if (isInitialPosition && bestMoveNode) {
             const bestMove = bestMoveNode.move;
             const bestScore = getScoreFromComment(bestMoveNode.comment);
-            const bestWinrate = getWinrateFromComment(bestMoveNode.comment);
             
-            // Use score if available, otherwise use winrate, otherwise 'N/A'
+            // Use score if available, otherwise 'N/A'
             let scoreText = 'N/A';
             if (bestScore !== null) {
                 scoreText = `${bestScore.toFixed(1)}`;
-            } else if (bestWinrate !== null) {
-                scoreText = `${bestWinrate.toFixed(1)}%`;
             }
             
             analysisHintMove = bestMove;
