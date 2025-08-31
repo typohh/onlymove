@@ -1,9 +1,10 @@
 // js/board.js
 
-import { state, setBoard } from './state.js';
-import { handleBoardClick as handleTsumegoClick } from './tsumego.js';
+import { state, setBoard, setKifuReader } from './state.js';
+import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize } from './ui.js';
+import { SGF_COMMENTS } from './constants.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -33,17 +34,29 @@ export function initializeBoard(size) {
     });
 
     board.addEventListener('click', handleBoardClick);
-    setBoard(board); // Update board in global state
+    setBoard(board);
     updateBoardSize();
+}
+
+function drawAnalysisHintMarker(move) {
+    if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
+    
+    const x = move.x;
+    const y = move.y;
+    
+    if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
+    
+    const currentPlayer = state.kifuReader.game.turn;
+    
+    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
 }
 
 function drawIllegalDueToKoMarker() {
     if (!state.kifuReader || !state.kifuReader.node.move) return;
     
-    // Get the game from the kifu reader
     const game = state.kifuReader.game;
     
-    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // up, down, left, right
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
     for (const [dx, dy] of directions) {
         const adjX = state.kifuReader.node.move.x + dx;
@@ -55,39 +68,11 @@ function drawIllegalDueToKoMarker() {
     }
 }
 
-function drawCorrectMoveMarker() {
-    if (!state.kifuReader) return;
-    const correctNode = state.kifuReader.node.children.find(child => child.comment?.includes('Correct'));
-    if (correctNode?.move) {
-        state.board.addObject({ x: correctNode.move.x, y: correctNode.move.y, type: 'outline' });
-    }
-}
-
-function drawAnalysisHintMarker(move) {
-    // Assuming move is in SGF format like 'qa' (lowercase letters)
-    if (!move || move.length < 2) return;
-    
-    // Convert SGF coordinates to board coordinates
-    // SGF uses lowercase letters 'a'-'s' for coordinates 0-18
-    const x = move.charCodeAt(0) - 97;  // 'a' = 0, 'b' = 1, etc.
-    const y = move.charCodeAt(1) - 97;  // 'a' = 0, 'b' = 1, etc.
-    
-    // Validate coordinates for 9x9 board
-    if (x < 0 || x >= 9 || y < 0 || y >= 9) return;
-    
-    // Use the current player's color for the hint marker
-    const currentPlayer = state.kifuReader.game.turn;
-    
-    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
-}
-
-export function updateBoard(analysisHintMove = null) {
-    if (!state.board) return;
-    
+export function redraw(analysisHintMove = null) {
     if (!state.kifuReader) return;
 
     const position = state.kifuReader.game.position;
-    if (state.board.size !== position.size) {
+    if (!state.board || state.board.size !== position.size) {
         initializeBoard(position.size);
     }
 
@@ -101,29 +86,74 @@ export function updateBoard(analysisHintMove = null) {
         }
     }
 
-    drawIllegalDueToKoMarker();
-
     if (state.kifuReader.node.move) {
         state.board.addObject({ x: state.kifuReader.node.move.x, y: state.kifuReader.node.move.y, type: 'CR' });
     }
     
-    if (state.appMode === 'solving' && state.showCorrectMove) {
-        drawCorrectMoveMarker();
-    }
-    
+    drawIllegalDueToKoMarker();
+
     if (state.appMode === 'analyzing' && analysisHintMove) {
         drawAnalysisHintMarker(analysisHintMove);
     }
 }
 
-export function initializeKifuFromSGF(sgfContent) {
+export function loadSgf(sgfContent) {
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     const kifuReader = new WGo.KifuReader(kifu);
 
-    // For tsumego, advance to the first move
     while (kifuReader.node.children.length === 1) {
         kifuReader.next();
     }
     
-    return kifuReader;
+    setKifuReader(kifuReader);
+    redraw();
+}
+
+export function playMoveOnBranch(x, y) {
+    if (!state.kifuReader) return false;
+    
+    const game = state.kifuReader.game;
+    const position = game.getPosition();
+    
+    if (position.get(x, y) !== 0) return false;
+
+    const newNode = new WGo.KNode({
+        move: { x: x, y: y, c: game.turn }
+    });
+    state.kifuReader.node.appendChild(newNode);
+    state.kifuReader.next(state.kifuReader.node.children.length - 1);
+    redraw();
+    return true;
+}
+
+export function undoMove() {
+    if (!state.kifuReader || !state.kifuReader.node.parent) return false;
+
+    if (state.appMode === 'analyzing') {
+        if (state.kifuReader.node.comment && state.kifuReader.node.comment.includes(SGF_COMMENTS.VITAL_POINT)) {
+            return false;
+        }
+    }
+    
+    state.kifuReader.previous();
+    redraw();
+    return true;
+}
+
+export function getCurrentNode() {
+    return state.kifuReader?.node;
+}
+
+export function playMoveByIndex(index) {
+    if (!state.kifuReader) return false;
+    state.kifuReader.next(index);
+    redraw();
+    return true;
+}
+
+export function playNextMove() {
+    if (!state.kifuReader) return false;
+    state.kifuReader.next();
+    redraw();
+    return true;
 }

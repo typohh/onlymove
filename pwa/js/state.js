@@ -23,7 +23,6 @@ export const state = {
     board: null,
     game: null,
     kifuReader: null,
-    // analysisKifuReader removed - using single kifuReader for both modes
 
     // Tsumego state
     zipMetadata: [],
@@ -63,4 +62,55 @@ export function setBoard(newBoard) {
 
 export function setAppMode(mode) {
     state.appMode = mode;
+}
+
+export function setKifuReader(kifuReader) {
+    state.kifuReader = kifuReader;
+    state.game = kifuReader ? kifuReader.game : null;
+}
+
+export function setAcceptClicks(canAccept) {
+    state.acceptClicks = canAccept;
+}
+
+export function setCurrentProblem(filename, sgf) {
+    state.currentProblemFilename = filename;
+    state.currentSGF = sgf;
+    localStorage.setItem('currentTsumego', filename);
+    localStorage.setItem('currentTsumegoContent', sgf);
+}
+
+export function setPreviousProblem(filename, sgf) {
+    state.previousProblemFilename = filename;
+    state.previousSGF = sgf;
+    if (filename) {
+        localStorage.setItem('previousTsumego', filename);
+        localStorage.setItem('previousTsumegoContent', sgf);
+    } else {
+        localStorage.removeItem('previousTsumego');
+        localStorage.removeItem('previousTsumegoContent');
+    }
+}
+
+export function updateUserRank(rank) {
+    state.userRank = rank;
+    localStorage.setItem('userRank', rank.toString());
+}
+
+export function updateMomentum(momentum) {
+    state.momentum = momentum;
+    localStorage.setItem('momentum', momentum.toString());
+}
+
+export function updateProblemFrequencies(frequencies) {
+    state.problemFrequencies = frequencies;
+    localStorage.setItem('problemFrequencies', JSON.stringify(frequencies));
+}
+
+export function setOpenedFromLink(value) {
+    state.openedFromLink = value;
+}
+
+export function setCurrentPointLoss(value) {
+    state.currentPointLoss = value;
 }

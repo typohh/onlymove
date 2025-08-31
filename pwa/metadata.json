@@ -1,152 +1,77 @@
 [
   {
-    "filename": "43862abb.zip",
+    "filename": "7b444176.zip",
     "min_rank": 0.0,
-    "max_rank": 0.03285870755750274
+    "max_rank": 0.06666666666666667
   },
   {
-    "filename": "0e2e2f9b.zip",
-    "min_rank": 0.033953997809419496,
-    "max_rank": 0.06681270536692223
+    "filename": "ef9a8999.zip",
+    "min_rank": 0.07111111111111111,
+    "max_rank": 0.13333333333333333
   },
   {
-    "filename": "c055a0f6.zip",
-    "min_rank": 0.06790799561883899,
-    "max_rank": 0.09967141292442497
+    "filename": "e7fa4a4e.zip",
+    "min_rank": 0.13777777777777778,
+    "max_rank": 0.2
   },
   {
-    "filename": "2e2c153a.zip",
-    "min_rank": 0.10076670317634172,
-    "max_rank": 0.13362541073384443
+    "filename": "b100691c.zip",
+    "min_rank": 0.20444444444444443,
+    "max_rank": 0.26666666666666666
   },
   {
-    "filename": "0fc1b63a.zip",
-    "min_rank": 0.13472070098576122,
-    "max_rank": 0.16648411829134718
+    "filename": "fadf1bc9.zip",
+    "min_rank": 0.2711111111111111,
+    "max_rank": 0.33333333333333337
   },
   {
-    "filename": "b3e63171.zip",
-    "min_rank": 0.16757940854326395,
-    "max_rank": 0.20043811610076667
+    "filename": "bfef297b.zip",
+    "min_rank": 0.33777777777777773,
+    "max_rank": 0.4
   },
   {
-    "filename": "cd1dcf27.zip",
-    "min_rank": 0.20153340635268344,
-    "max_rank": 0.2332968236582694
+    "filename": "dab33dd5.zip",
+    "min_rank": 0.40444444444444444,
+    "max_rank": 0.4666666666666667
   },
   {
-    "filename": "8f76942a.zip",
-    "min_rank": 0.2343921139101862,
-    "max_rank": 0.2672508214676889
+    "filename": "e370fc19.zip",
+    "min_rank": 0.47111111111111115,
+    "max_rank": 0.5333333333333334
   },
   {
-    "filename": "4e056253.zip",
-    "min_rank": 0.2683461117196057,
-    "max_rank": 0.30120481927710846
+    "filename": "a24036df.zip",
+    "min_rank": 0.5377777777777777,
+    "max_rank": 0.6000000000000001
   },
   {
-    "filename": "e9cd452a.zip",
-    "min_rank": 0.3023001095290252,
-    "max_rank": 0.33406352683461116
+    "filename": "0e12c559.zip",
+    "min_rank": 0.6044444444444445,
+    "max_rank": 0.6666666666666667
   },
   {
-    "filename": "83dbc33d.zip",
-    "min_rank": 0.33515881708652795,
-    "max_rank": 0.36801752464403065
+    "filename": "ca3be76c.zip",
+    "min_rank": 0.6711111111111111,
+    "max_rank": 0.7333333333333334
   },
   {
-    "filename": "cd3f2b89.zip",
-    "min_rank": 0.36911281489594744,
-    "max_rank": 0.4008762322015334
+    "filename": "bc876262.zip",
+    "min_rank": 0.7377777777777779,
+    "max_rank": 0.8
   },
   {
-    "filename": "ff5f6b7e.zip",
-    "min_rank": 0.40197152245345014,
-    "max_rank": 0.4348302300109529
+    "filename": "89bc1156.zip",
+    "min_rank": 0.8044444444444445,
+    "max_rank": 0.8666666666666667
   },
   {
-    "filename": "d8eee459.zip",
-    "min_rank": 0.4359255202628696,
-    "max_rank": 0.4676889375684556
+    "filename": "f1ff6470.zip",
+    "min_rank": 0.8711111111111112,
+    "max_rank": 0.9333333333333333
   },
   {
-    "filename": "8d499e08.zip",
-    "min_rank": 0.46878422782037243,
-    "max_rank": 0.5016429353778751
-  },
-  {
-    "filename": "e860b8ae.zip",
-    "min_rank": 0.5027382256297919,
-    "max_rank": 0.5355969331872946
-  },
-  {
-    "filename": "67d04ba8.zip",
-    "min_rank": 0.5366922234392114,
-    "max_rank": 0.5684556407447974
-  },
-  {
-    "filename": "ad72c81d.zip",
-    "min_rank": 0.5695509309967142,
-    "max_rank": 0.6024096385542169
-  },
-  {
-    "filename": "9814d964.zip",
-    "min_rank": 0.6035049288061336,
-    "max_rank": 0.6352683461117196
-  },
-  {
-    "filename": "f74a6e9b.zip",
-    "min_rank": 0.6363636363636364,
-    "max_rank": 0.669222343921139
-  },
-  {
-    "filename": "d5316da2.zip",
-    "min_rank": 0.6703176341730559,
-    "max_rank": 0.7020810514786417
-  },
-  {
-    "filename": "7de73861.zip",
-    "min_rank": 0.7031763417305585,
-    "max_rank": 0.7360350492880613
-  },
-  {
-    "filename": "1b28ca0b.zip",
-    "min_rank": 0.7371303395399781,
-    "max_rank": 0.7699890470974808
-  },
-  {
-    "filename": "e17aebe6.zip",
-    "min_rank": 0.7710843373493975,
-    "max_rank": 0.8028477546549836
-  },
-  {
-    "filename": "99b34b92.zip",
-    "min_rank": 0.8039430449069003,
-    "max_rank": 0.836801752464403
-  },
-  {
-    "filename": "316c2dc1.zip",
-    "min_rank": 0.8378970427163198,
-    "max_rank": 0.8696604600219058
-  },
-  {
-    "filename": "356ba9f1.zip",
-    "min_rank": 0.8707557502738226,
-    "max_rank": 0.9036144578313252
-  },
-  {
-    "filename": "f63b0a98.zip",
-    "min_rank": 0.9047097480832421,
-    "max_rank": 0.936473165388828
-  },
-  {
-    "filename": "15529a58.zip",
-    "min_rank": 0.9375684556407448,
-    "max_rank": 0.9704271631982475
-  },
-  {
-    "filename": "7954547b.zip",
-    "min_rank": 0.9715224534501642,
+    "filename": "c6e8c60a.zip",
+    "min_rank": 0.9377777777777778,
     "max_rank": 1.0
   }
 ]

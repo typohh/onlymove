@@ -3,7 +3,7 @@
 import { state } from './state.js';
 import { updateAllUI, updateBoardSize } from './ui.js';
 import { initAudio } from './audio.js';
-import { loadTsumego, loadTsumegoById } from './tsumego.js';
+import { loadTsumego, loadTsumegoById } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
