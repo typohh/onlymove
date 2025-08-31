@@ -103,7 +103,6 @@ if __name__ == "__main__":
 
     # 1. Get the ratings map (tsumego_id -> rank).
     tsumego_ratings_map = get_tsumego_ratings()
-    print(tsumego_ratings_map)
 
     # 2. Build the final metadata list by matching files with their ratings.
     print(f"\nMatching {len(tsumego_ratings_map)} ratings to tsumego files...")

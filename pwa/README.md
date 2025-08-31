@@ -4,7 +4,7 @@
 
 **Tsumego SPA** is a web-based, mobile-first Single Page Application (SPA) designed for practicing Go (Baduk, Weiqi) life and death problems (tsumego).
 
-The core experience revolves around presenting users with tsumego problems appropriate for their skill level. The application dynamically adjusts the user's rank based on their performance. It also features an "Analysis Mode" where users can freely explore variations of the previous problem with the help of a server-side AI engine.
+The core experience revolves around presenting users with tsumego problems appropriate for their skill level. The application dynamically adjusts the user's rank based on their performance. When a user fails a problem, they automatically enter an "Analysis Mode" where they can freely explore variations. This analysis is powered by data embedded in the SGF file itself or, as a fallback, by a server-side AI engine.
 
 The application is built with vanilla JavaScript (ESM), organized into a modular structure, and uses a modern build process for optimization and deployment.
 
@@ -12,7 +12,8 @@ The application is built with vanilla JavaScript (ESM), organized into a modular
 
 *   **Adaptive Tsumego Solving:** Selects problems from a large, pre-processed collection based on the user's estimated rank.
 *   **Dynamic Rank System:** User rank and problem selection momentum are adjusted in real-time based on correct/incorrect answers.
-*   **Analysis Mode:** Users can enter a special mode to analyze the previous problem, place stones freely, and receive real-time feedback (score, best move) from a dedicated analysis server.
+*   **Automatic Analysis Mode:** Failing a problem automatically transitions the user into a review mode for that tsumego.
+*   **Client-Side Analysis:** For many problems, analysis (best move, score) is determined instantly using win-rate information embedded in the SGF file, avoiding server latency.
 *   **Progressive Web App (PWA):** Includes a service worker and manifest for offline capabilities and a native-like app experience.
 
 ## 3. Technology Stack
@@ -27,12 +28,12 @@ The application is built with vanilla JavaScript (ESM), organized into a modular
 |               | **esbuild**                                                | High-speed JavaScript bundling, minification, and code transformation. |
 | **Deployment**| **Git**                                                    | Version control.                                                     |
 |               | **Cloudflare Pages**                                       | Hosting and automated, Git-connected deployments.                    |
-| **Backend**   | **Cloudflare Functions**                                   | Serverless functions for handling user reports.                      |
+| **Backend**   | **Cloudflare Functions**                                   | Serverless functions for handling user reports and AI analysis fallback. |
 |               | **Cloudflare D1**                                          | SQLite-compatible database for storing user results.                 |
 
 ## 4. Project Structure
 
-The codebase is organized into a modular structure to separate concerns.
+The codebase is organized into a modular structure to separate concerns. The monolithic `tsumego.js` has been decomposed into smaller, more focused modules.
 
 ```
 /
@@ -41,14 +42,18 @@ The codebase is organized into a modular structure to separate concerns.
 │   └── report.js             # Function for handling tsumego reports and storing in D1
 ├── js/                       # All application source code lives here
 │   ├── main.js               # Main entry point, event listeners, mode switching
-│   ├── state.js              # Centralized application state management
-│   ├── ui.js                 # All DOM manipulation and UI updates
-│   ├── board.js              # WGo.js board logic and interaction
-│   ├── tsumego.js            # Tsumego problem loading and solving logic
+│   ├── game-logic.js         # Core tsumego solving logic (click handling, correctness)
+│   ├── problem-loader.js     # Tsumego problem loading, selection, and caching
+│   ├── user-stats.js         # User rank and statistics management
 │   ├── analysis.js           # Analysis mode logic
+│   ├── board.js              # Abstraction layer for WGo.js board interaction
+│   ├── state.js              # Centralized application state management
+│   ├── sgf.js                # SGF data parsing and interpretation
 │   ├── api.js                # Server communication for analysis
+│   ├── ui.js                 # All DOM manipulation and UI updates
 │   ├── audio.js              # Audio playback functions
-│   └── utils.js              # General helper functions (localization, etc.)
+│   ├── utils.js              # General helper functions (localization, etc.)
+│   └── constants.js          # Shared application constants
 ├── lib/                      # Third-party libraries
 │   ├── wgo/                  # WGo.js library files and assets (stones, CSS)
 │   └── jszip.min.js          # JSZip library file
@@ -67,7 +72,7 @@ The codebase is organized into a modular structure to separate concerns.
 
 ### 5.1. State Management (`js/state.js`)
 
-The application uses a simple, centralized state object. All mutable data (current user rank, loaded problems, game state, etc.) is stored in a single exported `state` object in `js/state.js`. This makes tracking and debugging data flow straightforward.
+The application uses a centralized state object, but all modifications are handled through exported setter functions (e.g., `setAppMode`, `setUserRank`). This provides a single source of truth while making state changes more explicit and trackable, improving debuggability.
 
 ### 5.2. Application Modes
 
@@ -75,52 +80,35 @@ The app operates in two primary modes, controlled by `state.appMode`:
 
 1.  **Solving Mode (`'solving'`)**:
     *   This is the default mode for practicing tsumego.
-    *   Logic is primarily handled by **`js/tsumego.js`**.
-    *   User clicks are evaluated as correct or incorrect, and stats are updated.
-    *   The UI shows the user's rank and a link to analyze the previous problem.
+    *   Logic is primarily handled by **`js/game-logic.js`**.
+    *   User clicks are evaluated as correct or incorrect based on the SGF data.
+    *   If a user fails a problem, the app automatically enters Analysis Mode.
 
 2.  **Analysis Mode (`'analyzing'`)**:
-    *   Entered by clicking the "Previous" button.
+    *   Entered automatically after failing a problem, or manually by clicking the "Review" button.
     *   Logic is handled by **`js/analysis.js`**.
     *   Users can place stones for either color to explore variations.
-    *   After each move, **`js/api.js`** sends the current board position (SGF) to a hardcoded server endpoint to get an AI evaluation.
-    *   The UI shows controls to "Exit", "Undo", and displays the current score.
+    *   The best move and score are determined client-side by parsing the SGF via **`js/sgf.js`**. If the SGF lacks this data, **`js/api.js`** sends the position to a server for AI evaluation.
+    *   The UI shows controls to "Exit" and "Undo".
 
-### 5.3. Tsumego Loading Pipeline
+### 5.3. SGF Data Format
 
-Problems are stored in `.zip` files to reduce the number of network requests. The loading process is as follows:
+The application now primarily relies on a rich SGF format.
+*   The starting position of the problem is marked with a `"Q"` comment.
+*   Each branch after this point contains a comment with win-rate and score information (e.g., `"86.4%/3.1"`).
+*   The application's **`sgf.js`** module parses this information to determine the correct move (the one with the highest win rate) without needing a "Correct" text marker. This allows for more nuanced problems and client-side answer checking.
 
-1.  `metadata.json` (root) is fetched, containing a list of all available `.zip` files and the rank range they cover.
-2.  Based on `userRank`, an appropriate `.zip` file is selected and fetched. The contents are cached in the browser's Cache Storage.
-3.  The `.zip` file is opened in memory using **JSZip**. It contains another `metadata.json` with a list of all SGF files within.
-4.  A problem (SGF filename) is selected from the zip's metadata based on a weighted algorithm.
-5.  The content of the selected SGF file is extracted from the zip as a string and displayed on the board.
+### 5.4. Tsumego Loading Pipeline
 
-### 5.4. Build Process (`build.mjs`)
+The loading pipeline, managed by **`js/problem-loader.js`**, remains largely the same, using `.zip` archives and a weighted selection algorithm to serve problems to the user.
 
-The project **must be built** before it can be run. The `npm run build` command executes `build.mjs`, which performs these critical tasks:
+### 5.5. Build Process (`build.mjs`)
 
-1.  **Cleaning:** Removes the existing `dist` directory.
-2.  **Asset Copying:** Copies all static assets (`index.html`, `style.css`, `sound/`, `lib/`, etc.) to the `dist` directory.
-3.  **Bundling:** All JavaScript modules in the `js/` directory are combined into a single file by `esbuild`.
-4.  **Versioning:** The current Git commit hash is injected into the code as a global `APP_VERSION` constant.
-5.  **Cache Busting:** `esbuild` generates a unique, hashed filename for the final JavaScript bundle (e.g., `assets/main.A1B2C3D4.js`).
-6.  **HTML Injection:** The `build.mjs` script automatically updates `index.html` to point to this new, uniquely named JavaScript file.
-7.  **Service Worker Update:** Modifies the service worker to use a network-first strategy for `index.html` to prevent stale versions.
+The build process is unchanged. The project **must be built** before it can be run using `npm run build`.
 
-The output is a production-ready `dist` folder that can be deployed to any static hosting service.
+### 5.6. Cloudflare Functions & D1 Database Integration
 
-## 5.5. Cloudflare Functions & D1 Database Integration
-
-The application uses Cloudflare Functions and a D1 database to store user results. When a user solves a tsumego problem, the application sends a report to a Cloudflare Function endpoint (`/report`) which stores the result in a D1 database.
-
-### Implementation Details
-
-- **Cloudflare Function**: Located in `functions/report.js`, this function handles POST requests to `/report` and stores user results in the D1 database.
-- **D1 Database**: The database schema is defined in `schema.sql` and contains a table for storing tsumego reports with user IDs, problem identifiers, success status, and timestamps.
-- **Frontend Integration**: The `js/tsumego.js` module includes a `sendReport` function that sends user results to the Cloudflare Function endpoint when a problem is solved for the first time.
-
-This integration allows the application to track user progress and problem-solving statistics across sessions without requiring a traditional backend server.
+The backend integration for reporting results is also unchanged, now handled by the dedicated **`js/user-stats.js`** module on the frontend.
 
 ## 6. Development Workflow
 
@@ -165,4 +153,4 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - If you read data files, including utf-8 encoded data files, for which content could be deduced from code, you will be fired.
 - THIS IS VERY IMPORTANT, YOU NEED TO ASK PERMISSION TO READ DATA FILES, DOIING SO OUT OF YOUR OWN INITIATIVE IS AGAINST THE POLICY AND WILL BE CAUSE FOR TERMINATION!
 - For small files, read the entire file, instead of reading parts of it.
-- After you have made the requested changes, run npm build, provide summary of changes made since last request and stop. 
+- After you have made the requested changes, run npm build, provide summary of changes made since last request and stop.
