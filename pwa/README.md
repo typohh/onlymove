@@ -2,7 +2,7 @@
 
 ## 1. High-Level Summary
 
-**Tsumego SPA** is a web-based, mobile-first Single Page Application (SPA) designed for practicing Go (Baduk, Weiqi) life and death problems (tsumego).
+**Tsumego SPA** is a web-based, mobile-first Single Page Application (SPA) designed for practicing Go (Baduk, Weiqi) 9x9 life and death problems (tsumego).
 
 The core experience revolves around presenting users with tsumego problems appropriate for their skill level. The application dynamically adjusts the user's rank based on their performance. When a user fails a problem, they automatically enter an "Analysis Mode" where they can freely explore variations. This analysis is powered by data embedded in the SGF file itself or, as a fallback, by a server-side AI engine.
 
