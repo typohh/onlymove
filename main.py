@@ -8,6 +8,7 @@ from sgfmill import sgf
 
 from add_variations import add_shallow_variations, generate_variations_directly_to_sgf, get_child_move
 from configurations import DEBUG, RULES, KOMI, BOARD_SIZE, debug
+from helper import construct_initial_sgf
 from katago_controller import KatagoController
 from katago_queries import KatagoQueries, katago_to_sgf_coords
 from models import MODEL_9X9, get_model
@@ -102,21 +103,6 @@ class Stats:
 
 
 STATS = Stats()
-
-
-def construct_initial_sgf(moves, solution):
-    game = sgf.Sgf_game(size=BOARD_SIZE)
-    game.root.set("KM", KOMI)
-    game.root.set("RU", RULES)
-    player = "b"
-    for move in moves:
-        node = game.extend_main_sequence()
-        node.set_move(player, katago_to_sgf_coords(move, BOARD_SIZE))
-        player = "w" if player == "b" else "b"
-    answer = game.extend_main_sequence()
-    answer.set_move(player, katago_to_sgf_coords(solution, BOARD_SIZE))
-    return game, node, answer
-
 
 def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries):
     """
