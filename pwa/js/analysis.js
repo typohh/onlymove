@@ -9,6 +9,7 @@ import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 
 let analysisHintMove = null;
+let initialAnalysisNode = null;
 
 /**
  * Initializes and enters the analysis mode.
@@ -29,6 +30,7 @@ export function enterAnalysisMode() {
     setAcceptClicks(true);
 
     loadSgf(sgfToAnalyze);
+    initialAnalysisNode = getCurrentNode();
 
     if (tsumegoFilename) {
         const tsumegoId = tsumegoFilename.replace('.sgf', '');
@@ -55,6 +57,10 @@ export function handleBoardClick(x, y) {
  */
 export function undoLastMove() {
     if (!state.acceptClicks) return;
+
+    if (getCurrentNode() === initialAnalysisNode) {
+        return; // Don't undo past the initial position
+    }
 
     if (undoMove()) {
         requestAndDisplayAnalysis();

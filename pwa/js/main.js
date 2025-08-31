@@ -148,10 +148,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tsumegoId = urlParams.get('id');
     
     try {
+        let loadedById = false;
         if (tsumegoId) {
-            const success = await loadTsumegoById(tsumegoId);
+            loadedById = await loadTsumegoById(tsumegoId);
         }
-        await loadTsumego(false);
+        if (!loadedById) {
+            await loadTsumego(false);
+        }
         // Update UI after tsumego is loaded
         updateAllUI();
     } catch (error) {

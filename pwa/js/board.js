@@ -129,12 +129,6 @@ export function playMoveOnBranch(x, y) {
 export function undoMove() {
     if (!state.kifuReader || !state.kifuReader.node.parent) return false;
 
-    if (state.appMode === 'analyzing') {
-        if (state.kifuReader.node.comment && state.kifuReader.node.comment.includes(SGF_COMMENTS.VITAL_POINT)) {
-            return false;
-        }
-    }
-    
     state.kifuReader.previous();
     redraw();
     return true;

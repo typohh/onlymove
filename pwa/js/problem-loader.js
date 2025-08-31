@@ -140,6 +140,20 @@ export async function loadTsumego(update) {
 
 export async function loadTsumegoById(tsumegoId) {
     try {
+        // On reload, the state is not fully initialized. We need to load the current problem from localStorage first.
+        if (!state.currentSGF) {
+            const savedFile = localStorage.getItem('currentTsumego');
+            const savedContent = localStorage.getItem('currentTsumegoContent');
+            if (savedFile && savedContent) {
+                setCurrentProblem(savedFile, savedContent);
+            }
+        }
+
+        // If the requested tsumego is already the current one, do nothing.
+        if (state.currentProblemFilename === `${tsumegoId}.sgf`) {
+            return false;
+        }
+
         const zipId = await findZipIdForTsumegoId(tsumegoId);
         if (!zipId) {
             console.error(`Tsumego ID ${tsumegoId} not found in lookup`);
@@ -174,7 +188,9 @@ export async function loadTsumegoById(tsumegoId) {
             setOpenedFromLink(true);
         }
 
+        loadSgf(sgfContent);
         updateUrlWithTsumegoId(tsumegoId);
+        setAcceptClicks(true);
 
         return true;
     } catch (error) {
