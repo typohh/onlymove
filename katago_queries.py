@@ -1,10 +1,6 @@
 import random
-from pprint import pprint
-
 import numpy as np
-
-PLAYOUTS = 30
-RULES = "japanese"
+from configurations import BOARD_SIZE, RULES, KOMI
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
@@ -36,6 +32,17 @@ class KatagoQueries:
         """
         self._katago_controller = katago_controller
 
+    def get_legal_moves(self, moves):
+        """
+        Gets all legal moves for the current position.
+        """
+        response = self.query(moves)
+        legal_moves = []
+        for i, p in enumerate(response["policy"]):
+            if p > 0:
+                legal_moves.append(self.get_move_from_idx(i))
+        return legal_moves
+
     @staticmethod
     def _include_player_in_move_sequence(moves):
         player_and_move = []
@@ -43,34 +50,32 @@ class KatagoQueries:
             player_and_move.append([_get_player_to_move_next(player_and_move), move])
         return player_and_move
 
-    def query_children(self, moves):
+    def query_children(self, moves, playouts=1):
         """
-        Sends a standardized query for children analysis (visits adjusted by the number of legal moves).
-        Returns moveInfos but not necessarily accurate rootInfo.
+        Gets information about all child nodes by querying each legal move individually.
         """
-        # Get root policy to count legal moves
-        root_response = self.query(moves)
-        num_legal_moves = sum(1 for p in root_response["policy"] if p >= 0)
+        legal_moves = self.get_legal_moves(moves)
 
-        query = {
-            "moves": self._include_player_in_move_sequence(moves),
-            "initialStones": [],
-            "rules": RULES,
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
-            "maxVisits": num_legal_moves * int(PLAYOUTS ** 0.5),
-            "rootPolicyTemperature": 100,
-            "overrideSettings": {
-                "wideRootNoise": 5.0
-            }
-        }
-        r = self._katago_controller.send_query(query)
-        if len(r["moveInfos"]) < num_legal_moves:
-            move_info_count = len(r["moveInfos"])
-            print("moves:", moves)
-            print(f"WARNING: Not enough moveInfos found in response: {move_info_count} vs {num_legal_moves}")
-        return r
+        move_infos = []
+
+        for move in legal_moves:
+            # For each legal move, query the position after that move is made
+            response = self.query(moves + [move], playouts=playouts)
+
+            move_info = response.get("rootInfo")
+            move_info["move"] = move
+            move_infos.append(move_info)
+
+        # Let's get the root info for the original position
+        root_response = self.query(moves, playouts=playouts)
+
+        # The response should be sorted by something, probably visits or winrate.
+        # query_children seems to return it sorted by visits.
+        # Here, all visits are the same (playouts). Let's sort by winrate descending.
+        move_infos = sorted(move_infos, key=lambda x: x.get("winrate", 0.0), reverse=True)
+        root_response["moveInfos"] = move_infos
+        return root_response
+
 
     @staticmethod
     def adjust_temperature(policy, temperature):
@@ -118,9 +123,9 @@ class KatagoQueries:
             "moves": self._include_player_in_move_sequence(moves),
             "initialStones": [],
             "rules": RULES,
-            "komi": 7.5,
-            "boardXSize": 9,
-            "boardYSize": 9,
+            "komi": KOMI,
+            "boardXSize": BOARD_SIZE,
+            "boardYSize": BOARD_SIZE,
             "includePolicy": playouts == 1,
             "maxVisits": playouts,
         }
@@ -147,14 +152,12 @@ class KatagoQueries:
         Converts a KataGo policy index to a Go move string (e.g., "A1", "pass").
         Assumes a 9x9 board
         """
-        board_x_size = 9
-        board_y_size = 9
 
-        if idx == board_x_size * board_y_size:
+        if idx == BOARD_SIZE * BOARD_SIZE:
             return "pass"
 
-        row = idx // board_x_size
-        col = idx % board_x_size
+        row = idx // BOARD_SIZE
+        col = idx % BOARD_SIZE
 
         # Convert to Go board coordinates (A1 is bottom-left, I9 is top-right)
         # KataGo uses 0-indexed from top-left, so A1 is (0,0) in KataGo's internal representation
@@ -165,7 +168,7 @@ class KatagoQueries:
         col_char = chr(ord('A') + col)
         if col >= 8:  # Skip 'I'
             col_char = chr(ord('A') + col + 1)
-        row_char = str(board_y_size - row)
+        row_char = str(BOARD_SIZE - row)
 
         return f"{col_char}{row_char}"
 
@@ -174,11 +177,9 @@ class KatagoQueries:
         Converts a Go move string (e.g., "A1", "pass") to a KataGo policy index.
         Assumes a 9x9 board.
         """
-        board_x_size = 9
-        board_y_size = 9
 
         if move == "pass":
-            return board_x_size * board_y_size
+            return BOARD_SIZE * BOARD_SIZE
 
         col_char = move[0].upper()
         row_str = move[1:]
@@ -190,16 +191,16 @@ class KatagoQueries:
 
         # Convert row string to index
         row_num = int(row_str)
-        row = board_y_size - row_num
+        row = BOARD_SIZE - row_num
 
-        return row * board_x_size + col
+        return row * BOARD_SIZE + col
 
     def get_position_info(self, moves):
         """
         Helper to get the current position score and winrate from Black's perspective.
         Returns (score, winrate) or (None, None) if failed.
         """
-        response = self.query_policy(moves)
+        response = self.query(moves)
 
         score_lead = response["rootInfo"]["scoreLead"]
         winrate = response["rootInfo"]["winrate"]

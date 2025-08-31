@@ -35,3 +35,37 @@ export function updateUrlWithTsumegoId(tsumegoId) {
     }
     window.history.replaceState({}, '', url);
 }
+
+/**
+ * Parses the winrate from an SGF comment.
+ * @param {string} comment - The comment string.
+ * @returns {number|null} - The winrate as a float, or null if not found.
+ */
+export function getWinrateFromComment(comment) {
+  if (!comment) {
+    return null;
+  }
+  // Extracts winrate like "86.4%" from "86.4%/3.1"
+  const match = comment.match(/([\d.]+)%/);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return null;
+}
+
+/**
+ * Parses the score from an SGF comment.
+ * @param {string} comment - The comment string.
+ * @returns {number|null} - The score as a float, or null if not found.
+ */
+export function getScoreFromComment(comment) {
+  if (!comment) {
+    return null;
+  }
+  // Extracts score like "3.1" from "86.4%/3.1"
+  const match = comment.match(/%\/([\d.-]+)/);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return null;
+}

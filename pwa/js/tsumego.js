@@ -1,18 +1,15 @@
 // js/tsumego.js
 
-import { state, zipCache, setShowCorrectMove } from './state.js';
+import { state, zipCache } from './state.js';
 import { updateAllUI, displayOverlay, fadeOverlay } from './ui.js';
 import { initializeBoard, updateBoard, initializeKifuFromSGF } from './board.js';
 import { playStoneSound } from './audio.js';
-import { getTerm, updateUrlWithTsumegoId } from './utils.js';
+import { getTerm, updateUrlWithTsumegoId, getWinrateFromComment, getScoreFromComment } from './utils.js';
+import { enterAnalysisMode } from './analysis.js';
 
 // --- Tsumego Loading and Selection ---
 
 function selectProblem() {
-    if (state.showCorrectMove && state.currentProblemFilename) {
-        return state.allProblems.find(p => p.filename === state.currentProblemFilename);
-    }
-
     if (state.allProblems.length === 0) return null;
 
     let availableProblems = state.allProblems.filter(p => p.filename !== state.currentProblemFilename && p.filename !== state.previousProblemFilename);
@@ -99,22 +96,48 @@ function updateUserStats(isCorrect) {
 
 // --- Board Click and Answer Handling ---
 
-function handleCorrectAnswer(hintWasShown) {
-    // Send success report if this is the first attempt
-    if (!hintWasShown) {
-        sendReport(state.currentProblemFilename, true);
-        updateUserStats(true);
-    }
-    setShowCorrectMove(false);
+function handleCorrectAnswer() {
+    // Send success report
+    sendReport(state.currentProblemFilename, true);
+    updateUserStats(true);
+
     fadeOverlay(1000, () => {
         loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
     });
 }
 
 function _calculatePointLossText(playedNode, currentKifuNode) {
-    const correctNode = currentKifuNode.children.find(child => child.comment?.includes('Correct'));
+    const children = currentKifuNode.children;
+    if (!children || children.length === 0) return '';
+
+    const hasWinrateComments = children.some(child => child.comment && getWinrateFromComment(child.comment) !== null);
+
+    let correctNode;
+    if (hasWinrateComments) {
+        let bestWinrate = -1;
+        for (const child of children) {
+            if (!child.move) continue;
+            const winrate = getWinrateFromComment(child.comment);
+            if (winrate !== null && winrate > bestWinrate) {
+                bestWinrate = winrate;
+                correctNode = child;
+            }
+        }
+    } else {
+        correctNode = children.find(child => child.comment?.includes('Correct'));
+    }
+
     if (!correctNode) return '';
 
+    const correctScore = getScoreFromComment(correctNode.comment);
+    const playedScore = getScoreFromComment(playedNode.comment);
+
+    if (correctScore !== null && playedScore !== null) {
+        const pointLoss = Math.abs(correctScore - playedScore);
+        return `-${pointLoss.toFixed(1)} ${getTerm('points')}`;
+    }
+
+    // Fallback for old format "Score: ..."
     const correctScoreMatch = correctNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
     const playedScoreMatch = playedNode.comment?.match(/Score:\s*([+-]?\d+\.?\d*)/);
 
@@ -122,10 +145,12 @@ function _calculatePointLossText(playedNode, currentKifuNode) {
         const pointLoss = Math.abs(parseFloat(correctScoreMatch[1]) - parseFloat(playedScoreMatch[1]));
         return `-${pointLoss.toFixed(1)} ${getTerm('points')}`;
     }
+
     return '';
 }
 
-async function _handleIncorrectMoveSequence(moveIndex, hintWasShown) {
+
+async function _handleIncorrectMoveSequence(moveIndex) {
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
     // User move
@@ -139,54 +164,66 @@ async function _handleIncorrectMoveSequence(moveIndex, hintWasShown) {
     playStoneSound();
     updateBoard();
 
-    // Send failure report if this is the first attempt
-    if (!hintWasShown) {
-        sendReport(state.currentProblemFilename, false);
-        updateUserStats(false);
-    }
+    // Send failure report
+    sendReport(state.currentProblemFilename, false);
+    updateUserStats(false);
     
     await new Promise((resolve) => displayOverlay('', 5000, resolve));
 
-    setShowCorrectMove(true);
-    loadTsumego(false).catch(error => console.error("Error loading next tsumego:", error));
+    // Load the next problem and then enter analysis mode for the failed one.
+    await loadTsumego(true);
+    enterAnalysisMode();
 }
 
 
 export async function handleBoardClick(x, y) {
     if (!state.acceptClicks || !state.kifuReader) return;
 
-    const hintWasShown = state.showCorrectMove;
     const { node } = state.kifuReader;
+    const children = node.children;
 
-    if (hintWasShown) {
-        const correctNode = node.children.find(child => child.comment?.includes('Correct'));
-        if (correctNode?.move && correctNode.move.x === x && correctNode.move.y === y) {
-            state.kifuReader.next(node.children.indexOf(correctNode));
-            playStoneSound();
-            updateBoard();
-            handleCorrectAnswer(hintWasShown);
-            return;
-        }
+    if (!children || children.length === 0) {
+        return;
     }
 
-    const moveNode = node.children.find(child => child.move && child.move.x === x && child.move.y === y);
+    // Find the move played by the user
+    const moveNode = children.find(child => child.move && child.move.x === x && child.move.y === y);
     if (!moveNode) {
-        if (hintWasShown) displayOverlay("", 1500);
         return;
     }
 
     state.acceptClicks = false;
-    const isCorrect = moveNode.comment?.includes('Correct') || false;
-    const moveIndex = node.children.indexOf(moveNode);
+    const moveIndex = children.indexOf(moveNode);
+
+    // Determine correctness
+    const hasWinrateComments = children.some(child => child.comment && getWinrateFromComment(child.comment) !== null);
+    let isCorrect = false;
+
+    if (hasWinrateComments) {
+        let bestWinrate = -1;
+        let correctMove = null;
+        for (const child of children) {
+            if (!child.move) continue;
+            const winrate = getWinrateFromComment(child.comment);
+            if (winrate !== null && winrate > bestWinrate) {
+                bestWinrate = winrate;
+                correctMove = child.move;
+            }
+        }
+        isCorrect = correctMove && correctMove.x === x && correctMove.y === y;
+    } else {
+        // Fallback to old logic
+        isCorrect = moveNode.comment?.includes('Correct') || false;
+    }
 
     if (isCorrect) {
         state.kifuReader.next(moveIndex);
         updateBoard();
         playStoneSound();
-        handleCorrectAnswer(hintWasShown);
+        handleCorrectAnswer();
     } else {
         state.currentPointLoss = _calculatePointLossText(moveNode, node);
-        await _handleIncorrectMoveSequence(moveIndex, hintWasShown);
+        await _handleIncorrectMoveSequence(moveIndex);
     }
 }
 
@@ -408,4 +445,3 @@ export async function findZipIdForTsumegoId(tsumegoId) {
 
     return null; // Not found
 }
-

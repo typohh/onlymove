@@ -79,6 +79,11 @@ export function handleBoardClick(x, y) {
  */
 export function undoLastMove() {
     if (!state.acceptClicks || !state.kifuReader || !state.kifuReader.node.parent) return;
+
+    // Check if the current node is the initial position (with "Q" comment)
+    if (state.kifuReader.node.comment && state.kifuReader.node.comment.includes('Q')) {
+        return; // Don't undo past the initial position
+    }
     
     state.kifuReader.previous();
     updateBoard();
@@ -142,33 +147,59 @@ function getCurrentSgf() {
  * This is now a self-contained async function.
  */
 async function requestAndDisplayAnalysis() {
-    const sgf = getCurrentSgf();
     updateAnalysisUI(getTerm('analyzing'), null); // Show loading state, clear old hint
     analysisHintMove = null;
     updateBoard(); // Redraw to remove the old hint marker immediately
 
     try {
+        // Check for local answer first
+        const children = state.kifuReader.node.children;
+        const hasWinrateComments = children.length > 0 && children.some(child => child.comment && getWinrateFromComment(child.comment) !== null);
+
+        if (hasWinrateComments) {
+            let bestWinrate = -1;
+            let bestMove = null;
+            let bestScore = null;
+
+            for (const child of children) {
+                if (!child.move) continue;
+
+                const winrate = getWinrateFromComment(child.comment);
+                if (winrate !== null && winrate > bestWinrate) {
+                    bestWinrate = winrate;
+                    bestMove = child.move;
+                    bestScore = getScoreFromComment(child.comment);
+                }
+            }
+
+            if (bestMove) {
+                const scoreText = bestScore !== null ? `${bestScore.toFixed(1)}` : 'N/A';
+                analysisHintMove = bestMove;
+                updateAnalysisUI(scoreText, bestMove);
+                updateBoard(analysisHintMove); // Redraw board with the new hint
+                return; // Exit without calling API
+            }
+        }
+
+        // If no local answer, call API
+        const sgf = getCurrentSgf();
         const { bestMove, score } = await fetchAnalysis(sgf);
-        
-        // Check if we're still in analysis mode and the board state hasn't changed
+
         if (state.appMode === 'analyzing' && bestMove) {
-            // Verify the SGF hasn't changed since we sent the request
             const currentSgf = getCurrentSgf();
             if (currentSgf === sgf) {
-                // If the server call was successful and the board state is still relevant, update the UI with new data.
                 analysisHintMove = bestMove;
                 updateAnalysisUI(score, bestMove);
-                updateBoard(analysisHintMove); // Redraw board with the new hint
+                updateBoard(analysisHintMove);
             }
         } else if (state.appMode !== 'analyzing') {
-            // If we've exited analysis mode, just update the score without the hint
             updateAnalysisUI(score, null);
         }
+
     } catch (error) {
         console.error("Analysis request failed:", error);
-        // Only update UI if we're still in analysis mode
         if (state.appMode === 'analyzing') {
-            updateAnalysisUI(getTerm('error'), null); // Show error state in the UI
+            updateAnalysisUI(getTerm('error'), null);
         }
     }
 }

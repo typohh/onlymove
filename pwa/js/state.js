@@ -41,7 +41,6 @@ export const state = {
     userId: getOrCreateUserId(),
     
     // UI state
-    showCorrectMove: JSON.parse(localStorage.getItem('showCorrectMove')) || false,
     acceptClicks: false,
     currentPointLoss: null,
     
@@ -64,10 +63,4 @@ export function setBoard(newBoard) {
 
 export function setAppMode(mode) {
     state.appMode = mode;
-}
-
-// Function to set showCorrectMove and persist it
-export function setShowCorrectMove(show) {
-    state.showCorrectMove = show;
-    localStorage.setItem('showCorrectMove', JSON.stringify(show));
 }
