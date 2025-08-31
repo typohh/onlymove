@@ -16,9 +16,6 @@ export function updateAllUI() {
     } else if (state.appMode === 'analyzing') {
         updateAnalysisModeUI();
     }
-    
-    // Update initial analysis score text
-    updateAnalysisUI('...', null);
 }
 
 function updateSolvingModeUI() {

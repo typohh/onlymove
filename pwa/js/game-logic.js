@@ -24,7 +24,7 @@ function _calculatePointLossText(playedNode, currentKifuNode) {
     const children = currentKifuNode.children;
     if (!children || children.length === 0) return '';
 
-    const correctNode = findBestMoveFromChildren(children) || children.find(child => child.comment?.includes(SGF_COMMENTS.CORRECT));
+    const correctNode = findBestMoveFromChildren(children);
 
     if (!correctNode) return '';
 

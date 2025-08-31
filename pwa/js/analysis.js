@@ -6,7 +6,7 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
-import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
+import { findBestMoveFromChildren, getScoreFromComment, getWinrateFromComment } from './sgf.js';
 
 let analysisHintMove = null;
 let initialAnalysisNode = null;
@@ -30,14 +30,16 @@ export function enterAnalysisMode() {
     setAcceptClicks(true);
 
     loadSgf(sgfToAnalyze);
-    initialAnalysisNode = getCurrentNode();
-
+    // Set initialAnalysisNode after a small delay to ensure the SGF is fully loaded
+    setTimeout(() => {
+        initialAnalysisNode = getCurrentNode();
+        requestAndDisplayAnalysis();
+    }, 0);
+    
     if (tsumegoFilename) {
         const tsumegoId = tsumegoFilename.replace('.sgf', '');
         updateUrlWithTsumegoId(tsumegoId);
     }
-
-    requestAndDisplayAnalysis();
 }
 
 /**
@@ -111,13 +113,42 @@ function getCurrentSgf() {
  * Fetches analysis from the server and updates the UI without blocking.
  */
 async function requestAndDisplayAnalysis() {
-    updateAnalysisUI(getTerm('analyzing'), null);
     analysisHintMove = null;
     redraw();
 
     try {
-        const children = getCurrentNode().children;
+        const currentNode = getCurrentNode();
+        const children = currentNode.children;
         const bestMoveNode = findBestMoveFromChildren(children);
+
+        // Special case: if we're at the initial position and it has no score,
+        // but its children do, use the best child's score
+        // Check if we're at the initial position by checking if it's the same node object
+        // or if it has the same properties (as a fallback)
+        const isInitialPosition = currentNode === initialAnalysisNode || 
+            (!currentNode.parent && currentNode.comment && currentNode.comment.includes('Q'));
+            
+        if (isInitialPosition && bestMoveNode) {
+            const bestMove = bestMoveNode.move;
+            const bestScore = getScoreFromComment(bestMoveNode.comment);
+            const bestWinrate = getWinrateFromComment(bestMoveNode.comment);
+            
+            // Use score if available, otherwise use winrate, otherwise 'N/A'
+            let scoreText = 'N/A';
+            if (bestScore !== null) {
+                scoreText = `${bestScore.toFixed(1)}`;
+            } else if (bestWinrate !== null) {
+                scoreText = `${bestWinrate.toFixed(1)}%`;
+            }
+            
+            analysisHintMove = bestMove;
+            updateAnalysisUI(scoreText, bestMove);
+            redraw(analysisHintMove);
+            return;
+        }
+
+        // For all other cases, show analyzing state first
+        updateAnalysisUI(getTerm('analyzing'), null);
 
         if (bestMoveNode) {
             const bestMove = bestMoveNode.move;

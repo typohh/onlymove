@@ -12,10 +12,29 @@ import sgfmill.sgf
 KATAGO_PATH = "./katago"
 # MODEL_PATH = "kata1-b6c96-s175395328-d26788732.txt.gz"
 # MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
-MODEL_PATH = "kata1-b15c192-s1672170752-d466197061.txt.gz"
+# MODEL_PATH = "kata1-b15c192-s1672170752-d466197061.txt.gz"
+MODEL_PATH = "kata9x9-b18c384nbt-20231025.bin.gz"
 CONFIG_PATH = "analysis.cfg"
 SERVER_PORT = 8080
-PLAYOUTS = 10
+PLAYOUTS = 1
+
+
+def get_move_from_idx(idx, board_size=9):
+    """
+    Converts a KataGo policy index to a Go move string (e.g., "A1", "pass").
+    """
+    if idx == board_size * board_size:
+        return "pass"
+
+    row = idx // board_size
+    col = idx % board_size
+
+    col_char = chr(ord('A') + col)
+    if col >= 8:  # Skip 'I'
+        col_char = chr(ord('A') + col + 1)
+    row_char = str(board_size - row)
+
+    return f"{col_char}{row_char}"
 
 # --- Coordinate Helper Functions ---
 GTP_COLUMNS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
@@ -139,7 +158,8 @@ class KataGoHandler(BaseHTTPRequestHandler):
             moves, komi, rules = self.parse_sgf(sgf_data)
             query_data = {
                 "moves": moves, "initialStones": [], "rules": rules,
-                "komi": komi, "boardXSize": 9, "boardYSize": 9, "maxVisits": PLAYOUTS
+                "komi": komi, "boardXSize": 9, "boardYSize": 9, 
+                "maxVisits": PLAYOUTS, "includePolicy": PLAYOUTS == 1
             }
             response = katago_controller.submit_and_wait(query_data, client_ip)
             if response.get("is_cancelled"):
@@ -153,7 +173,18 @@ class KataGoHandler(BaseHTTPRequestHandler):
                 return
             if "error" in response: raise Exception(f"KataGo engine error: {response['error']}")
 
-            if not response.get("moveInfos"):
+            if PLAYOUTS == 1:
+                # When using 1 playout, use policy instead of moveInfos
+                policy = response.get("policy", [])
+                if not policy:
+                    analysis_result = {"bestMove": "pass", "score": response.get('rootInfo', {}).get('scoreLead')}
+                else:
+                    # Find the move with the highest policy probability
+                    best_move_idx = policy.index(max(policy))
+                    gtp_move = get_move_from_idx(best_move_idx, 9)
+                    sgf_move = gtp_to_sgf_coords(gtp_move, 9)
+                    analysis_result = {"bestMove": sgf_move, "score": response.get('rootInfo', {}).get('scoreLead')}
+            elif not response.get("moveInfos"):
                 analysis_result = {"bestMove": "pass", "score": response.get('rootInfo', {}).get('scoreLead')}
             else:
                 best_move_info = response["moveInfos"][0]

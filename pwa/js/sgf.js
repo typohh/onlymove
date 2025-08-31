@@ -66,13 +66,6 @@ export function findBestMoveFromChildren(children) {
  * @returns {boolean} - True if the move is correct.
  */
 export function isCorrectMove(moveNode, allChildren) {
-    const hasWinrateComments = allChildren.some(child => child.comment && getWinrateFromComment(child.comment) !== null);
-
-    if (hasWinrateComments) {
-        const bestMoveNode = findBestMoveFromChildren(allChildren);
-        return bestMoveNode === moveNode;
-    } else {
-        // Fallback to old logic
-        return moveNode.comment?.includes(SGF_COMMENTS.CORRECT) || false;
-    }
+    const bestMoveNode = findBestMoveFromChildren(allChildren);
+    return bestMoveNode === moveNode;
 }

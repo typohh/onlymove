@@ -153,4 +153,5 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - If you read data files, including utf-8 encoded data files, for which content could be deduced from code, you will be fired.
 - THIS IS VERY IMPORTANT, YOU NEED TO ASK PERMISSION TO READ DATA FILES, DOIING SO OUT OF YOUR OWN INITIATIVE IS AGAINST THE POLICY AND WILL BE CAUSE FOR TERMINATION!
 - For small files, read the entire file, instead of reading parts of it.
-- After you have made the requested changes, run npm build, provide summary of changes made since last request and stop.
+- After you have made the requested changes, run npm build, provide summary of changes made since last request and stop and wait for further instructions.
+- Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed.
