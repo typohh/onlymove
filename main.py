@@ -4,13 +4,11 @@ import threading
 import time
 import traceback
 
-from sgfmill import sgf
-
-from add_variations import add_shallow_variations, generate_variations_directly_to_sgf, get_child_move
-from configurations import DEBUG, RULES, KOMI, BOARD_SIZE, debug
+from add_variations import add_shallow_variations, generate_variations_directly_to_sgf
+from configurations import DEBUG, debug
 from helper import construct_initial_sgf
 from katago_controller import KatagoController
-from katago_queries import KatagoQueries, katago_to_sgf_coords
+from katago_queries import KatagoQueries
 from models import MODEL_9X9, get_model
 from problem_finder import ProblemFinder
 
@@ -158,7 +156,12 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
         traceback.print_exc()
 
 
-def print_stats(active_threads=0):\n    print(\"\\n--- Statistics ---\")\n    current_stats = STATS.get_stats(active_threads)\n    for key, value in current_stats.items():\n        print(f\"{key}: {value}\")\n    print(\"------------------\\n\")
+def print_stats(active_threads=0):
+    print("--- Statistics ---")
+    current_stats = STATS.get_stats(active_threads)
+    for key, value in current_stats.items():
+        print(f"{key}: {value}")
+    print("------------------")
 
 
 def main():

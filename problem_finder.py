@@ -43,7 +43,7 @@ class ProblemFinder:
                 return False
             return True
 
-        # Play 6 random moves, anywhere except 1st line
+        # Play random moves, anywhere except 1st line
         for _ in range(RANDOM_MOVE_COUNT):
             response = self.queries.query(moves)
             legal_moves = [
@@ -106,14 +106,14 @@ class ProblemFinder:
         best_response_penalty = float('inf')
         best_score = 0
         best_winrate = 0.5
-        # target_score = best_score - second_score + GOAL_SCORE
 
         for move_info in response["moveInfos"]:
-            # penalty = abs(move_info["scoreLead"] - target_score)
-            penalty = abs(move_info["winrate"] - 0.5)
+            move = move_info["move"]
+            policy = response["policy"][self.queries.get_idx_from_move( move )]
+            penalty = (0.05 + abs(move_info["winrate"] - 0.5)) / (policy ** 0.25) # try to achieve 50% winrate but favor natural moves...
             if penalty < best_response_penalty:
                 best_response_penalty = penalty
-                best_response = move_info["move"]
+                best_response = move
                 best_score = move_info["scoreLead"]
                 best_winrate = move_info["winrate"]
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-DEBUG = False
+DEBUG = True
 BOARD_SIZE = 9
 KOMI = 6.5
 RULES = "japanese"
