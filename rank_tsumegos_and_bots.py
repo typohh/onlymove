@@ -87,7 +87,7 @@ def get_preliminary_bot_ranking(df, bot_map):
 
 
 # --- Identify Non-Monotonic Tsumegos ---
-def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map, num_tsumegos_to_evaluate=None):
+def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map):
     """
     Identifies tsumegos that exhibit a negative slope with bot preliminary rankings.
     Returns a set of non-monotonic tsumego IDs.
@@ -104,10 +104,6 @@ def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map, num_tsumegos_
     df_ranked_bots['tsumego_name'] = df_ranked_bots['tsumego_id'].map(rev_tsumego_map)
 
     tsumego_names = df_ranked_bots['tsumego_name'].unique()
-
-    # Limit number of tsumegos for evaluation if specified (useful for large datasets)
-    if num_tsumegos_to_evaluate:
-        tsumego_names = random.sample(list(tsumego_names), min(num_tsumegos_to_evaluate, len(tsumego_names)))
 
     for tsumego_name in tqdm(tsumego_names, desc="Checking Tsumego Monotonicity"):
         tsumego_data = df_ranked_bots[df_ranked_bots['tsumego_name'] == tsumego_name].copy()
@@ -133,7 +129,7 @@ def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map, num_tsumegos_
         # If strong bots have a significantly lower success rate than weak bots, it's non-monotonic
         # Adding a small buffer to prevent flagging due to tiny fluctuations
         if not np.isnan(strong_bot_success) and not np.isnan(weak_bot_success) and \
-                strong_bot_success < (weak_bot_success - 0.1):  # Tunable threshold, e.g., 10% difference
+                strong_bot_success < weak_bot_success:  # Tunable threshold, e.g., 10% difference
             non_monotonic_tsumego_ids.add(tsumego_name)
 
     print(f"Identified {len(non_monotonic_tsumego_ids)} non-monotonic tsumegos.")

@@ -56,6 +56,7 @@ class Stats:
             "deep_variations": 0.0,
             "other": 0.0,
         }
+        self.last_print_time = 0  # Track when stats were last printed
 
     def set_state(self, new_state):
         now = time.time()
@@ -73,7 +74,15 @@ class Stats:
     def add_failure_to_create_problem(self):
         self.failures_to_create += 1
 
-    def get_stats(self):
+    def should_print_stats(self):
+        """Check if enough time has passed to print stats again (at most once per minute)"""
+        now = time.time()
+        if now - self.last_print_time >= 60:  # 60 seconds = 1 minute
+            self.last_print_time = now
+            return True
+        return False
+
+    def get_stats(self, active_threads=0):
         # Make a copy to avoid modifying the original during calculation
         time_spent = self.time_spent_in_states.copy()
         now = time.time()
@@ -90,6 +99,7 @@ class Stats:
             "Success rate": f"{(100 * self.problems_found / max(1, self.problems_found + self.failures_to_create)):.1f}%",
             "Avg moves": f"{self.number_of_moves.mean:.1f}±{self.number_of_moves.stddev:.1f}",
             "Tsumegos per Minute": f"{tsumegos_per_minute:.2f}",
+            "Active Worker Threads": active_threads,
         }
 
         # Add time tracking stats
@@ -104,7 +114,7 @@ class Stats:
 
 STATS = Stats()
 
-def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries):
+def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_list: list):
     """
     The task for a single worker thread.
     Generates problems continuously.
@@ -135,7 +145,11 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries):
                     f.write(game.serialise(None).decode())
                 with print_lock:
                     print(filename)
-                    print_stats()
+                    # Print stats at most once per minute
+                    if STATS.should_print_stats():
+                        # Count active and alive threads
+                        active_threads = sum(1 for t in threads_list if t.is_alive())
+                        print_stats(active_threads)
             else:
                 STATS.add_failure_to_create_problem()
 
@@ -144,12 +158,7 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries):
         traceback.print_exc()
 
 
-def print_stats():
-    print("\n--- Statistics ---")
-    current_stats = STATS.get_stats()
-    for key, value in current_stats.items():
-        print(f"{key}: {value}")
-    print("------------------\n")
+def print_stats(active_threads=0):\n    print(\"\\n--- Statistics ---\")\n    current_stats = STATS.get_stats(active_threads)\n    for key, value in current_stats.items():\n        print(f\"{key}: {value}\")\n    print(\"------------------\\n\")
 
 
 def main():
@@ -171,7 +180,7 @@ def main():
 
         # Create and start worker threads
         for i in range(worker_count):
-            thread = threading.Thread(target=worker_task, args=(problem_finder, queries,)) # Corrected: added queries argument
+            thread = threading.Thread(target=worker_task, args=(problem_finder, queries, threads)) # Pass threads list
             thread.daemon = True  # Dies when main thread dies
             thread.start()
             threads.append(thread)

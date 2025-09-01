@@ -28,13 +28,15 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   clients.claim();
-  // Clean up old caches that don't match the current PRECACHE_NAME
+  // On activation, clean up all old caches to ensure fresh content.
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          if (cacheName.startsWith('only-move-precache-') && cacheName !== PRECACHE_NAME) {
-            console.log('Deleting old precache:', cacheName);
+          // We are deleting all caches except for the new precache.
+          // This includes old precaches and the runtime cache.
+          if (cacheName !== PRECACHE_NAME) {
+            console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
@@ -51,7 +53,7 @@ self.addEventListener('fetch', event => {
     // correct hashed assets, preventing the 404 race condition.
     if (request.mode === 'navigate') {
         event.respondWith(
-            fetch(request)
+            fetch(request, { cache: 'no-cache' })
                 .then(networkResponse => {
                     // Good network response? Cache it for offline use and return it.
                     const responseToCache = networkResponse.clone();

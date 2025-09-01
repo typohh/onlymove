@@ -156,7 +156,9 @@ export async function loadTsumegoById(tsumegoId) {
 
         const zipId = await findZipIdForTsumegoId(tsumegoId);
         if (!zipId) {
-            console.error(`Tsumego ID ${tsumegoId} not found in lookup`);
+            const message = `No tsumego with id ${tsumegoId}`;
+            console.error(message);
+            displayOverlay(message, 3000);
             return false;
         }
 
@@ -209,7 +211,7 @@ export async function findZipIdForTsumegoId(tsumegoId) {
 
     while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        const [id, zipId] = lines[mid].split(' ');
+        const [id, zipId] = lines[mid].trim().split(/\s+/);
 
         if (id === tsumegoId) {
             return zipId;

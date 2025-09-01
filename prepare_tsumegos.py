@@ -1,10 +1,8 @@
-import os
-import json
 import hashlib
 import io
+import json
+import os
 import zipfile
-import random
-import pandas as pd
 
 from katago_queries import get_all_ranks, get_rank_str
 from tsumego_ratings_complex import get_tsumego_ratings, sample_tsumegos_with_links
@@ -114,7 +112,7 @@ if __name__ == "__main__":
             rank = tsumego_ratings_map[tsumego_id]
             all_metadata.append({"filename": filename, "rank": rank})
         else:
-            raise Exception(f"Warning: SGF file '{filename}' found but has no calculated rating. Skipping.")
+            print(f"Warning: SGF file '{filename}' found but has no calculated rating. Skipping.")
 
     print(f"\nSuccessfully created metadata for {len(all_metadata)} tsumegos.")
 

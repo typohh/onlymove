@@ -67,8 +67,6 @@ def get_tsumego_ratings():
     quantile_ranks_for_map = tsumego_only_map_df['quantile_rank'].values
     tsumego_quantile_lookup = dict(zip(tsumego_only_map_df['id'], tsumego_only_map_df['quantile_rank']))
 
-    print(tsumego_quantile_lookup)
-
     # --- Define Anchors ---
     min_tsumego_id = tsumego_only_map_df.iloc[0]['id']
     max_tsumego_id = tsumego_only_map_df.iloc[-1]['id']
