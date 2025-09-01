@@ -86,30 +86,58 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         alignItems: 'center', zIndex: '1000', opacity: '0'
     });
 
-    if (state.currentPointLoss) {
-        const pointLossElement = document.createElement('div');
-        Object.assign(pointLossElement.style, {
+    // If a message is passed, this is a simple error/info overlay.
+    if (message) {
+        const messageElement = document.createElement('div');
+        Object.assign(messageElement.style, {
             color: 'white', fontWeight: 'bold', textAlign: 'center',
-            fontSize: `${boardContainer.offsetWidth / 25}px`
+            fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
         });
-        pointLossElement.textContent = state.currentPointLoss;
-        overlay.appendChild(pointLossElement);
-    }
-    document.body.appendChild(overlay);
+        messageElement.textContent = message;
+        overlay.appendChild(messageElement);
+        document.body.appendChild(overlay);
 
-    setTimeout(() => {
-        overlay.style.transition = 'opacity 4s linear';
+        // Fast fade in/out for messages
+        overlay.style.transition = 'opacity 0.3s ease-in-out';
         requestAnimationFrame(() => {
             overlay.style.opacity = '0.9';
-            playRandomFailSound();
         });
-    }, 1000);
 
-    setTimeout(() => {
-        overlay.remove();
-        state.currentPointLoss = null;
-        if (callback) callback();
-    }, 5000);
+        setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.remove();
+                if (callback) callback();
+            }, 300);
+        }, duration);
+
+    } else {
+        // If no message, this is the "failed problem" overlay. Use original logic.
+        if (state.currentPointLoss) {
+            const pointLossElement = document.createElement('div');
+            Object.assign(pointLossElement.style, {
+                color: 'white', fontWeight: 'bold', textAlign: 'center',
+                fontSize: `${boardContainer.offsetWidth / 25}px`
+            });
+            pointLossElement.textContent = state.currentPointLoss;
+            overlay.appendChild(pointLossElement);
+        }
+        document.body.appendChild(overlay);
+
+        setTimeout(() => {
+            overlay.style.transition = 'opacity 4s linear';
+            requestAnimationFrame(() => {
+                overlay.style.opacity = '0.9';
+                playRandomFailSound();
+            });
+        }, 1000);
+
+        setTimeout(() => {
+            overlay.remove();
+            state.currentPointLoss = null;
+            if (callback) callback();
+        }, 5000);
+    }
 }
 
 export function fadeOverlay(duration, callback) {
