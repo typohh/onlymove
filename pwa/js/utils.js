@@ -1,10 +1,10 @@
 // js/utils.js
 
 const localization = {
-    'zh': { kyu: '级', dan: '段', review: '复习', about: '关于', version: '版本', analyzing: '分析中...', error: '错误', errorLoadingProblem: '加载问题时出错。', appTitle: 'OnlyMove.net', exit: '退出', score: '得分', undo: '撤销', share: '分享', linkCopied: '链接已复制到剪贴板', tsumegoMode: 'Tsumego模式', reviewMode: '复习模式' },
-    'ja': { kyu: '級', dan: '段', review: '復習', about: 'について', version: 'バージョン', analyzing: '分析中...', error: 'エラー', errorLoadingProblem: '問題の読み込みエラー。', appTitle: 'OnlyMove.net', exit: '終了', score: 'スコア', undo: '元に戻す', share: '共有', linkCopied: 'リンクがクリップボードにコピーされました', tsumegoMode: 'Tsumegoモード', reviewMode: '復習モード' },
-    'ko': { kyu: '급', dan: '단', review: '복습', about: '정보', version: '버전', analyzing: '분석 중...', error: '오류', errorLoadingProblem: '문제 로딩 오류.', appTitle: 'OnlyMove.net', exit: '나가기', score: '점수', undo: '실행 취소', share: '공유', linkCopied: '링크가 클립보드에 복사됨', tsumegoMode: 'Tsumego 모드', reviewMode: '복습 모드' },
-    'en': { kyu: 'kyu', dan: 'dan', review: 'Review', about: 'About', version: 'Version', analyzing: '...', error: 'Error', errorLoadingProblem: 'Error loading problem.', appTitle: 'OnlyMove.net', exit: 'Exit', score: 'Score', undo: 'Undo', share: 'Share', linkCopied: 'Link copied to clipboard', tsumegoMode: 'Tsumego mode', reviewMode: 'Review mode' }
+    'zh': { kyu: '级', dan: '段', review: '复习', points: '点', about: '关于', version: '版本', analyzing: '分析中...', error: '错误', errorLoadingProblem: '加载问题时出错。', appTitle: 'OnlyMove.net', exit: '退出', score: '得分', undo: '撤销', share: '分享', linkCopied: '链接已复制到剪贴板', tsumegoMode: 'Tsumego模式', reviewMode: '复习模式' },
+    'ja': { kyu: '級', dan: '段', review: '復習', points: '点', about: 'について', version: 'バージョン', analyzing: '分析中...', error: 'エラー', errorLoadingProblem: '問題の読み込みエラー。', appTitle: 'OnlyMove.net', exit: '終了', score: 'スコア', undo: '元に戻す', share: '共有', linkCopied: 'リンクがクリップボードにコピーされました', tsumegoMode: 'Tsumegoモード', reviewMode: '復習モード' },
+    'ko': { kyu: '급', dan: '단', review: '복습', points: '점', about: '정보', version: '버전', analyzing: '분석 중...', error: '오류', errorLoadingProblem: '문제 로딩 오류.', appTitle: 'OnlyMove.net', exit: '나가기', score: '점수', undo: '실행 취소', share: '공유', linkCopied: '링크가 클립보드에 복사됨', tsumegoMode: 'Tsumego 모드', reviewMode: '복습 모드' },
+    'en': { kyu: 'kyu', dan: 'dan', review: 'Review', points: 'points', about: 'About', version: 'Version', analyzing: '...', error: 'Error', errorLoadingProblem: 'Error loading problem.', appTitle: 'OnlyMove.net', exit: 'Exit', score: 'Score', undo: 'Undo', share: 'Share', linkCopied: 'Link copied to clipboard', tsumegoMode: 'Tsumego mode', reviewMode: 'Review mode' }
 };
 
 export function getTerm(key) {
