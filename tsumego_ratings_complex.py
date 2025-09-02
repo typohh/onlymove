@@ -104,30 +104,53 @@ def get_tsumego_ratings():
 
 def sample_tsumegos_with_links(sample_size=50):
     """
-    Randomly samples tsumegos and prints their ratings with links for easier testing.
-    
+    Randomly samples tsumegos, verifies they exist, and prints their ratings
+    with links for easier testing.
+
     Args:
-        sample_size: Number of tsumegos to sample (default: 50)
+        sample_size (int): Number of tsumegos to sample.
     """
+    # Define the tsumegos directory
+    tsumegos_dir = "tsumegos"
+
     # Load the ratings data
     bot_ratings_path = os.path.join(RATINGS_DIR, 'bot_ratings_final.csv')
     tsumego_ratings_path = os.path.join(RATINGS_DIR, 'tsumego_ratings_final.csv')
-    
+
     if not os.path.exists(bot_ratings_path) or not os.path.exists(tsumego_ratings_path):
         print("Rating files not found. Please run the rating calculation first.")
         return
-    
+
     # --- Load Data ---
     bot_ratings_df = pd.read_csv(bot_ratings_path, header=0, names=['id', 'rating'])
     tsumego_ratings_df = pd.read_csv(tsumego_ratings_path, header=0, names=['id', 'rating'])
-    
-    # Get all tsumego IDs
+
+    # Get all tsumego IDs from the ratings file
     all_tsumego_ids = tsumego_ratings_df['id'].tolist()
-    
-    # Sample without replacement (or use all if fewer than sample_size)
-    sample_count = min(sample_size, len(all_tsumego_ids))
-    sampled_ids = random.sample(all_tsumego_ids, sample_count)
-    
+
+    # --- Verification Step ---
+    # Check which of the rated tsumegos actually exist in the tsumegos folder
+    verified_tsumego_ids = []
+    missing_files_count = 0
+    for tsumego_id in all_tsumego_ids:
+        tsumego_filename = f"{tsumego_id}.sgf"
+        tsumego_path = os.path.join(tsumegos_dir, tsumego_filename)
+        if os.path.exists(tsumego_path):
+            verified_tsumego_ids.append(tsumego_id)
+        else:
+            missing_files_count += 1
+
+    if missing_files_count > 0:
+        print(f"Warning: {missing_files_count} tsumegos found in ratings, but no matching file found in '{tsumegos_dir}'.")
+
+    # Sample from the verified list
+    sample_count = min(sample_size, len(verified_tsumego_ids))
+    if sample_count == 0:
+        print("No valid tsumegos found to sample from.")
+        return
+
+    sampled_ids = random.sample(verified_tsumego_ids, sample_count)
+
     # Create a list of (tsumego_id, rating) pairs for sorting
     sampled_tsumegos = []
     for tsumego_id in sampled_ids:
@@ -135,17 +158,17 @@ def sample_tsumegos_with_links(sample_size=50):
         if not rating_row.empty:
             rating = rating_row.iloc[0]['rating']
             sampled_tsumegos.append((tsumego_id, rating))
-    
+
     # Sort by rating (descending order - higher ratings first)
     sampled_tsumegos.sort(key=lambda x: x[1], reverse=True)
-    
+
     # Print sampled tsumegos with ratings, closest bot, and links
     print(f"\n--- Randomly Sampled {sample_count} Tsumegos for Testing (Sorted by Rating) ---")
     for tsumego_id, tsumego_rating_val in sampled_tsumegos:
         # Find the bot with the closest rating
         closest_bot = None
         min_rating_diff = float('inf')
-        
+
         for _, bot_row in bot_ratings_df.iterrows():
             bot_id = bot_row['id']
             bot_rating_val = bot_row['rating']
@@ -153,5 +176,5 @@ def sample_tsumegos_with_links(sample_size=50):
             if rating_diff < min_rating_diff:
                 min_rating_diff = rating_diff
                 closest_bot = bot_id
-        
+
         print(f"Rating: {tsumego_rating_val:.2f} (Closest bot: {closest_bot}) - http://localhost:8000/?id={tsumego_id}")
