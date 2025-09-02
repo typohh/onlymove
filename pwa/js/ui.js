@@ -19,8 +19,8 @@ export function updateAllUI() {
 
 function updateSolvingModeUI() {
     // Update Title Display
-    document.getElementById('title').textContent = 'TSUMEGO:';
-    document.getElementById('title-h').textContent = 'TSUMEGO:';
+    document.getElementById('title').textContent = getTerm('tsumegoMode');
+    document.getElementById('title-h').textContent = getTerm('tsumegoMode');
     
     // Update Rank Display in the text area
     if (state.openedFromLink) {
@@ -77,8 +77,8 @@ function updateSolvingModeUI() {
 
 function updateAnalysisModeUI() {
     // Update Title Display
-    document.getElementById('title').textContent = 'REVIEW:';
-    document.getElementById('title-h').textContent = 'REVIEW:';
+    document.getElementById('title').textContent = getTerm('reviewMode');
+    document.getElementById('title-h').textContent = getTerm('reviewMode');
     
     // Update text area with analysis information
     document.getElementById('text1').textContent = getTerm('analyzing');

@@ -27,7 +27,7 @@ body {
     align-items: center;
     width: 100%;
     box-sizing: border-box;
-    font-size: 3.5vmin;
+    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
     background-color: transparent;
 }
 
@@ -52,7 +52,7 @@ body {
     justify-content: space-between;
     align-items: center;
     box-sizing: border-box;
-    font-size: 3.5vmin;
+    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
     background-color: transparent;
     width: 100%;
 }
@@ -188,6 +188,7 @@ body {
     }
 
     .info-text {
+        margin-left: 3vmin;
         text-align: center;
         width: 100%;
     }
@@ -203,4 +204,6 @@ body {
     #info-container > * + * {
         margin-top: 1vmin;
     }
+
+
 }
