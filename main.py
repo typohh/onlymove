@@ -142,7 +142,7 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                 with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
                     f.write(game.serialise(None).decode())
                 with print_lock:
-                    print(filename)
+                    debug(filename)
                     # Print stats at most once per minute
                     if STATS.should_print_stats():
                         # Count active and alive threads
@@ -177,7 +177,7 @@ def main():
         problem_finder = ProblemFinder(queries)
         problem_finder.debug = DEBUG
 
-        worker_count = 1 if DEBUG else controller.get_batch_size()
+        worker_count = 1 if DEBUG else int(controller.get_batch_size() * 1.5)
 
         print(f"Starting {worker_count} worker threads for continuous problem generation.")
 
