@@ -74,6 +74,9 @@ def generate_variations_directly_to_sgf(
     Recursively generates variations and adds them directly as child nodes to the parent_sgf_node.
     'is_first_level_branch_node' indicates if the node being added is the first move in a new variation branch.
     """
+    if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
+        return
+
     if cumulative_playout_perc < MIN_PLAYOUT_PERC:
         return
 
