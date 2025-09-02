@@ -50,7 +50,7 @@ def add_shallow_variations(queries: KatagoQueries, node: sgf.Tree_node, moves):
         # Get the optimal response to this move
         response_moves = moves + [move]
         response_result = queries.query(response_moves, playouts=PLAYOUTS_SHALLOW)
-        response_move, winrate, score = queries.get_best_move(response_result)
+        response_move, winrate, score, _ = queries.get_best_move(response_result)
 
         # Add variation to SGF
         var_node = get_child_move(node, player, move)

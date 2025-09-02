@@ -220,17 +220,20 @@ class KatagoQueries:
             policy = response["humanPolicy"]
             score = response["rootInfo"]["scoreLead"]
             winrate = response["rootInfo"]["winrate"]
-            return self.get_move_from_idx(policy.index(max(policy))), winrate, score
+            max_policy = max(policy)
+            return self.get_move_from_idx(policy.index(max_policy)), winrate, score, max_policy
         elif response.get("moveInfos"):
             move_info = response["moveInfos"][0]
             score = move_info["scoreLead"]
             winrate = move_info["winrate"]
-            return move_info["move"], winrate, score
+            policy_prior = move_info["prior"]
+            return move_info["move"], winrate, score, policy_prior
         else:
             policy = response["policy"]
             score = response["rootInfo"]["scoreLead"]
             winrate = response["rootInfo"]["winrate"]
-            return self.get_move_from_idx(policy.index(max(policy))), winrate, score
+            max_policy = max(policy)
+            return self.get_move_from_idx(policy.index(max_policy)), winrate, score, policy
 
 
 def _get_player_to_move_next(moves):

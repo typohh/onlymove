@@ -48,7 +48,7 @@ def load_data(data_dir):
     tsumego_ids = sorted(list(all_tsumego_ids))
     tsumego_map = {name: i for i, name in enumerate(tsumego_ids)}
 
-    print(f"Discovered {len(bot_map)} bots and {len(tsumego_map)} tsumegos.")
+    tqdm.write(f"Discovered {len(bot_map)} bots and {len(tsumego_map)} tsumegos.")
 
     records = []
     for bot_file in tqdm(bot_files, desc="Loading Records"):
@@ -65,7 +65,7 @@ def load_data(data_dir):
                         records.append((bot_idx, tsumego_idx, float(success_rate)))
 
     df = pd.DataFrame(records, columns=["bot_id", "tsumego_id", "success_rate"])
-    print(f"Loaded {len(df)} total solve attempts.")
+    tqdm.write(f"Loaded {len(df)} total solve attempts.")
     return df, bot_map, tsumego_map, tsumego_ids  # Return tsumego_ids for convenience
 
 
@@ -90,10 +90,10 @@ def get_preliminary_bot_ranking(df, bot_map):
 def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map):
     """
     Identifies tsumegos that exhibit a negative slope with bot preliminary rankings.
+    This function is vectorized for performance.
     Returns a set of non-monotonic tsumego IDs.
     """
     print("\nIdentifying non-monotonic tsumegos...")
-    non_monotonic_tsumego_ids = set()
 
     # Create a DataFrame with bot preliminary ranks
     df_ranked_bots = df.copy()
@@ -103,37 +103,28 @@ def identify_non_monotonic_tsumegos(df, tsumego_map, bot_rank_map):
     rev_tsumego_map = {i: name for name, i in tsumego_map.items()}
     df_ranked_bots['tsumego_name'] = df_ranked_bots['tsumego_id'].map(rev_tsumego_map)
 
-    tsumego_names = df_ranked_bots['tsumego_name'].unique()
+    # Define skill groups thresholds
+    num_bots_total = len(bot_rank_map)
+    strong_bots_threshold = num_bots_total // 3
+    weak_bots_threshold = num_bots_total * 2 // 3
 
-    for tsumego_name in tqdm(tsumego_names, desc="Checking Tsumego Monotonicity"):
-        tsumego_data = df_ranked_bots[df_ranked_bots['tsumego_name'] == tsumego_name].copy()
+    # Calculate average success rates for each tsumego for strong and weak bots
+    strong_bot_avg = df_ranked_bots[df_ranked_bots['bot_prelim_rank'] <= strong_bots_threshold].groupby('tsumego_name')['success_rate'].mean().rename('strong_bot_success')
+    weak_bot_avg = df_ranked_bots[df_ranked_bots['bot_prelim_rank'] > weak_bots_threshold].groupby('tsumego_name')['success_rate'].mean().rename('weak_bot_success')
 
-        # Sort by bot preliminary rank (1 is best, so ascending means from best to worst bot)
-        tsumego_data = tsumego_data.sort_values(by='bot_prelim_rank')
+    # Combine the average success rates into a single DataFrame
+    tsumego_stats = pd.concat([strong_bot_avg, weak_bot_avg], axis=1)
 
-        # Check for non-monotonicity:
-        # We'll use a simple approach: compare success rates of adjacent skill groups.
-        # For a truly non-monotonic item, strong bots performing worse than weaker bots
-        # is the key. Let's divide bots into e.g., 3 skill groups.
+    # Drop rows where a tsumego was not attempted by either strong or weak bots
+    tsumego_stats.dropna(inplace=True)
 
-        # Define skill groups (e.g., top 33%, middle 33%, bottom 33%)
-        # Note: bot_prelim_rank is 1 for best, increasing for worse bots.
-        # So "lower ranks" means "stronger bots".
-        num_bots_total = len(bot_rank_map)
-        strong_bots_threshold = num_bots_total // 3
-        weak_bots_threshold = num_bots_total * 2 // 3
-
-        strong_bot_success = tsumego_data[tsumego_data['bot_prelim_rank'] <= strong_bots_threshold]['success_rate'].mean()
-        weak_bot_success = tsumego_data[tsumego_data['bot_prelim_rank'] > weak_bots_threshold]['success_rate'].mean()
-
-        # If strong bots have a significantly lower success rate than weak bots, it's non-monotonic
-        # Adding a small buffer to prevent flagging due to tiny fluctuations
-        if not np.isnan(strong_bot_success) and not np.isnan(weak_bot_success) and \
-                strong_bot_success < weak_bot_success:  # Tunable threshold, e.g., 10% difference
-            non_monotonic_tsumego_ids.add(tsumego_name)
+    # Identify non-monotonic tsumegos
+    non_monotonic_mask = tsumego_stats['strong_bot_success'] < tsumego_stats['weak_bot_success']
+    non_monotonic_tsumego_ids = set(tsumego_stats[non_monotonic_mask].index)
 
     print(f"Identified {len(non_monotonic_tsumego_ids)} non-monotonic tsumegos.")
     return non_monotonic_tsumego_ids
+
 
 
 # --- Rating Model (3PL IRT) ---
@@ -260,26 +251,26 @@ def train_model(model, data_loader, device):
         model.train()
         total_loss = 0
         count = 0
-        progress_bar = tqdm(data_loader, desc=f"Epoch {epoch + 1}")
-        for bot_batch, tsumego_batch, rate_batch in progress_bar:
-            bot_batch = bot_batch.to(device)
-            tsumego_batch = tsumego_batch.to(device)
-            rate_batch = rate_batch.to(device).float()
+        with tqdm(data_loader, desc=f"Epoch {epoch + 1}") as progress_bar:
+            for bot_batch, tsumego_batch, rate_batch in progress_bar:
+                bot_batch = bot_batch.to(device)
+                tsumego_batch = tsumego_batch.to(device)
+                rate_batch = rate_batch.to(device).float()
 
-            optimizer.zero_grad()
-            predicted_rates = model(bot_batch, tsumego_batch).squeeze()
+                optimizer.zero_grad()
+                predicted_rates = model(bot_batch, tsumego_batch).squeeze()
 
-            # Clamp predictions to avoid log(0) or log(1) with BCELoss
-            predicted_rates = torch.clamp(predicted_rates, EPSILON, 1 - EPSILON)
+                # Clamp predictions to avoid log(0) or log(1) with BCELoss
+                predicted_rates = torch.clamp(predicted_rates, EPSILON, 1 - EPSILON)
 
-            loss = loss_fn(predicted_rates, rate_batch)
-            loss.backward()
-            optimizer.step()
+                loss = loss_fn(predicted_rates, rate_batch)
+                loss.backward()
+                optimizer.step()
 
-            total_loss += loss.item()
-            count += 1
-            progress_bar.set_postfix(loss=f"{(total_loss / count):.4f}")
-            batches_processed += 1
+                total_loss += loss.item()
+                count += 1
+                progress_bar.set_postfix(loss=f"{(total_loss / count):.4f}")
+                batches_processed += 1
 
         avg_loss = total_loss / count
 

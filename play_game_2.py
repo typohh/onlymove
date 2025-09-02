@@ -17,9 +17,9 @@ def play_game(black_playouts: int, white_playouts: int, queries_black: KatagoQue
     current_player = 0
     while True:
         if current_player == 0:
-            move, winrate, score = queries_black.get_best_move(queries_black.query(moves, playouts=playouts[current_player]))
+            move, winrate, score, _ = queries_black.get_best_move(queries_black.query(moves, playouts=playouts[current_player]))
         else:
-            move, winrate, score = queries_white.get_best_move(queries_white.query(moves, playouts=playouts[current_player]))
+            move, winrate, score, _ = queries_white.get_best_move(queries_white.query(moves, playouts=playouts[current_player]))
 
         moves.append(move)
         if len(moves) > 1 and moves[-1] == "pass" and moves[-2] == "pass":

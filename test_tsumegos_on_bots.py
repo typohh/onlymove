@@ -205,7 +205,7 @@ class KataGoFullGame:
                         move,_ = self._query.query_human(moves, self._human_rank)
                     else:
                         response = self._query.query(moves, playouts=1)
-                        move, winrate, score = self._query.get_best_move(response)
+                        move, winrate, score, _ = self._query.get_best_move(response)
                         if winrate < 0.01:
                             resign_ready_count += 1
                         else:
