@@ -19,6 +19,10 @@ export function updateAllUI() {
 }
 
 function updateSolvingModeUI() {
+    // Update Title Display
+    document.getElementById('title').textContent = 'TSUMEGO:';
+    document.getElementById('title-h').textContent = 'TSUMEGO:';
+    
     // Update Rank Display in the text area
     if (state.openedFromLink) {
         // When opened from a link, show the tsumego's rank (and no stddev)
@@ -27,15 +31,18 @@ function updateSolvingModeUI() {
         if (currentProblem && currentProblem.rank !== undefined) {
             const rank = getDescriptiveRank(currentProblem.rank);
             document.getElementById('text1').textContent = `${rank}`;
+            document.getElementById('text1-h').textContent = `${rank}`;
         } else {
             // Fallback if rank not found
             document.getElementById('text1').textContent = '...';
+            document.getElementById('text1-h').textContent = '...';
         }
     } else {
         // Normal display with rank information
         const rank = getDescriptiveRank(state.userRank);
         const stddev = state.momentum / 4;
         document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
+        document.getElementById('text1-h').textContent = `${rank} (±${stddev.toFixed(1)})`;
     }
 
     // Update "Review" link (button1)
@@ -62,8 +69,13 @@ function updateSolvingModeUI() {
 }
 
 function updateAnalysisModeUI() {
+    // Update Title Display
+    document.getElementById('title').textContent = 'REVIEW:';
+    document.getElementById('title-h').textContent = 'REVIEW:';
+    
     // Update text area with analysis information
     document.getElementById('text1').textContent = getTerm('analyzing');
+    document.getElementById('text1-h').textContent = getTerm('analyzing');
 
     // Update "Exit" link (button1)
     const exitLink = document.getElementById('button1');
@@ -196,6 +208,7 @@ export function updateAnalysisUI(score, bestMove) {
         const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
         const scoreText = getTerm('score');
         document.getElementById('text1').textContent = `${scoreText}: ${formattedScore}`;
+        document.getElementById('text1-h').textContent = `${scoreText}: ${formattedScore}`;
     }
     // Future: could also use bestMove to highlight a button or provide a hint
 }
