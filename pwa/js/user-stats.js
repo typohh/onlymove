@@ -40,14 +40,18 @@ export function updateUserStats(isCorrect) {
     if (isCorrect) {
         const currentFreq = frequencies[state.currentProblemFilename] || 1;
         frequencies[state.currentProblemFilename] = currentFreq / 5;
-        const maxIncrease = (1.0 - rank) / 2;
-        const intendedIncrease = momentum / 600;
-        if(intendedIncrease > maxIncrease) {
-            momentum = Math.max( 0.5 , momentum * 0.8 );
-        } else {
-            momentum *= 1.1;
+        
+        // Only increase rating if problem frequency is 1 or less
+        if (currentFreq <= 1) {
+            const maxIncrease = (1.0 - rank) / 2;
+            const intendedIncrease = momentum / 600;
+            if(intendedIncrease > maxIncrease) {
+                momentum = Math.max( 0.5 , momentum * 0.8 );
+            } else {
+                momentum *= 1.1;
+            }
+            rank += Math.min(intendedIncrease, maxIncrease);
         }
-        rank += Math.min(intendedIncrease, maxIncrease);
     } else {
         momentum = (momentum + 1) / 3;
         frequencies[state.currentProblemFilename] = 25;

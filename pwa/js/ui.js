@@ -42,6 +42,14 @@ function updateSolvingModeUI() {
         const stddev = state.momentum / 4;
         document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
         document.getElementById('text1-h').textContent = `${rank} (±${stddev.toFixed(1)})`;
+        
+        // Add click event to show detailed stats
+        const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
+        text1Elements.forEach(element => {
+            element.style.cursor = 'pointer';
+            element.title = 'Click for detailed stats';
+            element.onclick = showDetailedStats;
+        });
     }
 
     // Update "Review" link (button1)
@@ -179,6 +187,25 @@ export function fadeOverlay(duration, callback) {
     }, 1000);
 }
 
+
+// Function to show detailed stats when user clicks on rank
+function showDetailedStats() {
+    // Calculate rating (the actual numeric value)
+    const rating = state.userRank;
+    
+    // Calculate rating standard deviation (1/29 of rank's standard deviation)
+    // The rank's standard deviation is state.momentum / 4
+    const ratingStdDev = (state.momentum / 4) / 29;
+    
+    // Calculate number of unique tsumegos attempted
+    const uniqueTsumegos = Object.keys(state.problemFrequencies).length;
+    
+    // Display the information
+    const detailText = `Rating: ${rating.toFixed(3)} (±${ratingStdDev.toFixed(3)})\nTsumegos attempted: ${uniqueTsumegos}`;
+    
+    // Show in an alert for now (can be improved with a better UI later)
+    alert(detailText);
+}
 
 export function updateBoardSize() {
     // Board sizing is now handled by CSS using vi units
