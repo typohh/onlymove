@@ -2,7 +2,6 @@
 
 import { state } from './state.js';
 import { getTerm, getDescriptiveRank } from './utils.js';
-import { playRandomFailSound, playSuccessSound } from './audio.js';
 
 const boardContainer = document.getElementById('board-container');
 
@@ -140,7 +139,6 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
             overlay.style.transition = 'opacity 4s linear';
             requestAnimationFrame(() => {
                 overlay.style.opacity = '0.9';
-                playRandomFailSound();
             });
         }, 1000);
 
@@ -166,7 +164,6 @@ export function fadeOverlay(duration, callback) {
         requestAnimationFrame(() => {
             overlay.style.opacity = '1';
         });
-        playSuccessSound();
     });
 
     // Halfway through, swap content

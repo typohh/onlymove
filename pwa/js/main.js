@@ -7,21 +7,6 @@ import { loadTsumego, loadTsumegoById } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
-// --- NEW AUDIO UNLOCK LOGIC ---
-let isAudioInitialized = false;
-function initializeAudioOnInteraction() {
-    if (isAudioInitialized) return;
-    try {
-        initAudio();
-        isAudioInitialized = true;
-    } catch (e) {
-        console.error("Audio initialization failed on interaction:", e);
-    }
-    // Remove the event listener after it has run once
-    document.body.removeEventListener('click', initializeAudioOnInteraction);
-    document.body.removeEventListener('touchend', initializeAudioOnInteraction);
-}
-
 // --- INITIALIZATION ---
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -139,9 +124,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 2000);
         });
     });
-
-    document.body.addEventListener('click', initializeAudioOnInteraction);
-    document.body.addEventListener('touchend', initializeAudioOnInteraction);
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
