@@ -117,7 +117,7 @@ class ProblemFinder:
             score = move_info["scoreLead"]
             penalty_winrate = (abs(winrate - MIN_WINRATE_CORRECT) * 2) ** 2
             penalty_policy = -math.log(policy)
-            penalty = penalty_winrate + penalty_policy * 0.05 + random.gauss(0,0.05)
+            penalty = penalty_winrate + penalty_policy * 0.05 + random.gauss(0, 0.05)
             if penalty < best_response_penalty:
                 best_response_penalty = penalty
                 best_move = move
@@ -133,7 +133,7 @@ class ProblemFinder:
         """
 
         debug("adjusting tsumego")
-        policies = [ 0 for _ in range(len(moves))]
+        policies = [0 for _ in range(len(moves))]
 
         while True:
             best_move, best_winrate, best_score, best_policy = self.queries.get_best_move(self.queries.query(moves, playouts=PLAYOUTS))
@@ -141,7 +141,7 @@ class ProblemFinder:
                 self.queries.query(moves, exclude_move=best_move, playouts=PLAYOUTS))
 
             debug(
-                f"{(100 * best_winrate):.1f}% vs {(100 * second_winrate):.1f}%, {best_score:.1f} vs {second_score:.1f} , {100*best_policy:.1f}% vs {100*second_policy:.1f}%")
+                f"{(100 * best_winrate):.1f}% vs {(100 * second_winrate):.1f}%, {best_score:.1f} vs {second_score:.1f} , {100 * best_policy:.1f}% vs {100 * second_policy:.1f}%")
 
             if best_move == "pass" or second_move == "pass":
                 debug("terminating due to pass")
@@ -151,8 +151,8 @@ class ProblemFinder:
             if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and second_score < 0:
                 if self.is_valid(moves):
                     debug("found tsumego!")
-                    debug( moves )
-                    debug( policies )
+                    debug(moves)
+                    debug(policies)
                     return moves, best_move
 
             if second_winrate > MIN_WINRATE_CORRECT_VERIFY:  # we are winning too much, need to lose points..
@@ -175,10 +175,14 @@ class ProblemFinder:
 
             balanced_move, balanced_score, balanced_winrate, balanced_policy = self._rebalance_game(moves)
             if balanced_move == 'pass':
-                return None,None
+                return None, None
             debug(f"W {balanced_move} {(balanced_winrate * 100):.1f}% {balanced_score:.1f} {100 * balanced_policy:.2f}%")
             moves.append(balanced_move)
             policies.append(balanced_policy)
+
+            if DEBUG:
+                if policies[-1] < 0.01 or policies[-2] < 0.01:
+                    raise Exception("too low policy!!!")
 
     def create_problem(self):
 

@@ -92,6 +92,10 @@ body {
     text-wrap: nowrap;
 }
 
+#title, #title-h {
+    text-decoration: underline;
+}
+
 /* --- MODES 1 & 2: PORTRAIT & SQUARISH LAYOUTS (Consolidated) --- */
 @media (max-aspect-ratio: 130/100) {
     #main-container {
