@@ -44,7 +44,8 @@ export const state = {
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
-    problemHistory: JSON.parse(localStorage.getItem('problemHistory')) || [],
+    problemHistory: (JSON.parse(localStorage.getItem('problemHistory')) || []).map(item => ({ ...item, linked: item.linked || false })),
+    nextTsumego: JSON.parse(localStorage.getItem('nextTsumego')) || null,
     momentum: parseFloat(localStorage.getItem('momentum')) || 30,
 
     // More stats
@@ -99,6 +100,11 @@ export function updateTsumegoStats(stats) {
 export function updateProblemHistory(history) {
     state.problemHistory = history;
     localStorage.setItem('problemHistory', JSON.stringify(history));
+}
+
+export function updateNextTsumego(nextTsumego) {
+    state.nextTsumego = nextTsumego;
+    localStorage.setItem('nextTsumego', JSON.stringify(nextTsumego));
 }
 
 export function setOpenedFromLink(value) {

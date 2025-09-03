@@ -1,12 +1,19 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, setOpenedFromLink, updateProblemHistory } from './state.js';
+import { state, zipCache, setAcceptClicks, setOpenedFromLink, updateProblemHistory, updateNextTsumego } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
 
 function selectProblem() {
     if (state.allProblems.length === 0) return null;
+
+    // Check for nextTsumego first
+    if (state.nextTsumego) {
+        const problem = state.nextTsumego;
+        updateNextTsumego(null);
+        return problem;
+    }
 
     // Check for re-selection from history
     for (let i = 0; i < state.problemHistory.length; i++) {
@@ -159,6 +166,13 @@ export async function loadTsumego(isUpdate) {
         }
         
         updateProblemHistory(history);
+
+        // Remove history[2] if it's linked
+        if (history.length > 2 && history[2].linked) {
+            history.splice(2, 1);
+            updateProblemHistory(history);
+        }
+
         setOpenedFromLink(false);
         loadSgf(sgf);
         updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
@@ -206,10 +220,17 @@ export async function loadTsumegoById(tsumegoId) {
         const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
 
         const history = state.problemHistory;
+
+        // Move current to nextTsumego if not already set
+        if (!state.nextTsumego && history.length > 0) {
+            updateNextTsumego({ ...history[0], linked: false });
+        }
+
         history.unshift({
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
-            status: 'success'
+            status: 'success',
+            linked: true
         });
         if (history.length > 200) {
             history.length = 200;
@@ -220,7 +241,13 @@ export async function loadTsumegoById(tsumegoId) {
         }
 
         updateProblemHistory(history);
-        
+
+        // Remove history[2] if it's linked
+        if (history.length > 2 && history[2].linked) {
+            history.splice(2, 1);
+            updateProblemHistory(history);
+        }
+
         setOpenedFromLink(true);
 
         loadSgf(sgfContent);
