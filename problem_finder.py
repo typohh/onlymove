@@ -64,24 +64,6 @@ class ProblemFinder:
             _, winrate, score, _ = self.queries.get_best_move(self.queries.query(moves))
             debug(f"status after {RANDOM_MOVE_COUNT} random moves: {(100 * winrate):.1f}% {score:.1f}")
 
-        # 2. Play 2 moves to balance the game
-        for _ in range(2):
-            response = self.queries.query_children(moves)
-            if not response.get("moveInfos"):
-                break  # No further moves possible
-
-            # Find the move that brings the score closest to 0
-            best_move = min(
-                response["moveInfos"],
-                key=lambda x: abs(x["scoreLead"]) * abs(x["winrate"] - 0.5),
-            )["move"]
-
-            moves.append(best_move)
-
-        if DEBUG:
-            _, winrate, score, _ = self.queries.get_best_move(self.queries.query(moves))
-            debug(f"status after rebalance: {(100 * winrate):.1f}% {score:.1f}")
-
         return moves
 
     def is_valid(self, moves):
