@@ -57,7 +57,7 @@ async function fetchSgfFromZip(filename, zipFilename) {
 
 export async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
-        const response = await fetch('metadata.json');
+        const response = await fetch(`metadata.json?v=${APP_VERSION}`);
         state.zipMetadata = await response.json();
     }
 }
@@ -164,6 +164,7 @@ export async function loadTsumego(isUpdate) {
         updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
         setAcceptClicks(true);
         backgroundLoadCloserZip();
+        updateAllUI();
 
     } catch (error) {
         console.error(`Error loading tsumego:`, error);
@@ -225,6 +226,7 @@ export async function loadTsumegoById(tsumegoId) {
         loadSgf(sgfContent);
         updateUrlWithTsumegoId(tsumegoId);
         setAcceptClicks(true);
+        updateAllUI();
 
         return true;
     } catch (error) {
@@ -234,7 +236,7 @@ export async function loadTsumegoById(tsumegoId) {
 }
 
 export async function findZipIdForTsumegoId(tsumegoId) {
-    const response = await fetch('lookup.txt');
+    const response = await fetch(`lookup.txt?v=${APP_VERSION}`);
     const text = await response.text();
     const lines = text.split('\n').filter(line => line.trim() !== '');
 
