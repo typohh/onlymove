@@ -28,10 +28,6 @@ export const state = {
     zipMetadata: [],
     loadedZips: {},
     allProblems: [],
-    currentProblemFilename: null,
-    previousProblemFilename: localStorage.getItem('previousTsumego'),
-    currentSGF: null,
-    previousSGF: localStorage.getItem('previousTsumegoContent'),
     
     // Link state
     openedFromLink: false,
@@ -48,8 +44,18 @@ export const state = {
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
-    problemFrequencies: JSON.parse(localStorage.getItem('problemFrequencies')) || {},
+    problemHistory: JSON.parse(localStorage.getItem('problemHistory')) || [],
     momentum: parseFloat(localStorage.getItem('momentum')) || 30,
+
+    // More stats
+    tsumegoStats: JSON.parse(localStorage.getItem('tsumegoStats')) || {
+        failOnFail: 0,
+        totalOnFail: 0,
+        failOnInBetween: 0,
+        totalOnInBetween: 0,
+        failOnSuccess: 0,
+        totalOnSuccess: 0,
+    },
 };
 
 // MODIFICATION: Cache for loaded zip files
@@ -73,24 +79,7 @@ export function setAcceptClicks(canAccept) {
     state.acceptClicks = canAccept;
 }
 
-export function setCurrentProblem(filename, sgf) {
-    state.currentProblemFilename = filename;
-    state.currentSGF = sgf;
-    localStorage.setItem('currentTsumego', filename);
-    localStorage.setItem('currentTsumegoContent', sgf);
-}
 
-export function setPreviousProblem(filename, sgf) {
-    state.previousProblemFilename = filename;
-    state.previousSGF = sgf;
-    if (filename) {
-        localStorage.setItem('previousTsumego', filename);
-        localStorage.setItem('previousTsumegoContent', sgf);
-    } else {
-        localStorage.removeItem('previousTsumego');
-        localStorage.removeItem('previousTsumegoContent');
-    }
-}
 
 export function updateUserRank(rank) {
     state.userRank = rank;
@@ -102,9 +91,14 @@ export function updateMomentum(momentum) {
     localStorage.setItem('momentum', momentum.toString());
 }
 
-export function updateProblemFrequencies(frequencies) {
-    state.problemFrequencies = frequencies;
-    localStorage.setItem('problemFrequencies', JSON.stringify(frequencies));
+export function updateTsumegoStats(stats) {
+    state.tsumegoStats = stats;
+    localStorage.setItem('tsumegoStats', JSON.stringify(stats));
+}
+
+export function updateProblemHistory(history) {
+    state.problemHistory = history;
+    localStorage.setItem('problemHistory', JSON.stringify(history));
 }
 
 export function setOpenedFromLink(value) {

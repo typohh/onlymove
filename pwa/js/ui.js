@@ -26,7 +26,7 @@ function updateSolvingModeUI() {
     if (state.openedFromLink) {
         // When opened from a link, show the tsumego's rank (and no stddev)
         // Find the current problem in the loaded problems
-        const currentProblem = state.allProblems.find(p => p.filename === state.currentProblemFilename);
+        const currentProblem = state.allProblems.find(p => p.filename === state.problemHistory[0].filename);
         if (currentProblem && currentProblem.rank !== undefined) {
             const rank = getDescriptiveRank(currentProblem.rank);
             document.getElementById('text1').textContent = `${rank}`;
@@ -56,13 +56,8 @@ function updateSolvingModeUI() {
     const prevTsumegoLink = document.getElementById('button1');
     prevTsumegoLink.textContent = getTerm('review');
     
-    // Determine which SGF to use for review
-    // Always use previous SGF for review, regardless of showCorrectMove state
-    const sgfToReview = state.previousSGF;
-    const problemFilenameToReview = state.previousProblemFilename;
-    
-    // Enable review button if we have a previous problem to review
-    if (state.previousSGF && state.previousProblemFilename) {
+    // Enable review button if there is a problem to review in the history
+    if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {
         prevTsumegoLink.classList.remove('disabled');
     } else {
         prevTsumegoLink.classList.add('disabled');
@@ -194,14 +189,18 @@ function showDetailedStats() {
     const rating = state.userRank;
     
     // Calculate rating standard deviation (1/29 of rank's standard deviation)
-    // The rank's standard deviation is state.momentum / 4
     const ratingStdDev = (state.momentum / 4) / 29;
     
-    // Calculate number of unique tsumegos attempted
-    const uniqueTsumegos = Object.keys(state.problemFrequencies).length;
-    
+    const stats = state.tsumegoStats;
+    const totalTsumegos = stats.totalOnFail + stats.totalOnInBetween + stats.totalOnSuccess;
+    const shortTermMemory = stats.totalOnFail > 0 ? (100 - stats.failOnFail / stats.totalOnFail * 100).toFixed(1) : 100;
+    const longTermMemory = stats.totalOnInBetween > 0 ? (100 - stats.failOnInBetween / stats.totalOnInBetween * 100).toFixed(1) : 100;
+
     // Display the information
-    const detailText = `Rating: ${rating.toFixed(3)} (±${ratingStdDev.toFixed(3)})\nTsumegos attempted: ${uniqueTsumegos}`;
+    const detailText = `Rating: ${rating.toFixed(3)} (±${ratingStdDev.toFixed(3)})
+Total Tsumegos: ${totalTsumegos}
+Short Term Memory: ${shortTermMemory}%
+Long Term Memory: ${longTermMemory}%`;
     
     // Show in an alert for now (can be improved with a better UI later)
     alert(detailText);

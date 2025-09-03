@@ -12,7 +12,7 @@ import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 
 function handleCorrectAnswer() {
-    sendReport(state.currentProblemFilename, true);
+    sendReport(true);
     updateUserStats(true);
 
     fadeOverlay(1000, () => {
@@ -57,7 +57,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     playNextMove();
     playStoneSound();
 
-    sendReport(state.currentProblemFilename, false);
+    sendReport(false);
     updateUserStats(false);
     
     await new Promise((resolve) => displayOverlay('', 5000, resolve));

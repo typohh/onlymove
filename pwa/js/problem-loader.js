@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, setCurrentProblem, setPreviousProblem, setOpenedFromLink } from './state.js';
+import { state, zipCache, setAcceptClicks, setOpenedFromLink, updateProblemHistory } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
@@ -8,23 +8,42 @@ import { updateUrlWithTsumegoId } from './utils.js';
 function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
-    let availableProblems = state.allProblems.filter(p => p.filename !== state.currentProblemFilename && p.filename !== state.previousProblemFilename);
+    // Check for re-selection from history
+    for (let i = 0; i < state.problemHistory.length; i++) {
+        const historyItem = state.problemHistory[i];
+        let probability = 0;
+
+        if (historyItem.status === 'failure') {
+            if (i >= 20) {
+                probability = Math.min(1, (i - 19) / 30);
+            }
+        } else if (historyItem.status === 'in-between') {
+            if (i >= 150) {
+                probability = Math.min(1, (i - 149) / 50);
+            }
+        }
+
+        if (Math.random() < probability) {
+            return historyItem;
+        }
+    }
+
+    // Default selection logic
+    const historyFilenames = new Set(state.problemHistory.map(p => p.filename));
+    let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
+
+    if (availableProblems.length === 0) {
+        // If all problems are in history, just use all problems
+        availableProblems = state.allProblems;
+    }
+    
     if (availableProblems.length === 0) availableProblems = state.allProblems;
 
     availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
     const candidateProblems = availableProblems.slice(0, 500);
 
-    const weightedProblems = candidateProblems.map(problem => ({ problem, weight: state.problemFrequencies[problem.filename] || 1 }));
-    const totalWeight = weightedProblems.reduce((sum, p) => sum + p.weight, 0);
-
-    if (totalWeight <= 0) return candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
-
-    let random = Math.random() * totalWeight;
-    for (const { problem, weight } of weightedProblems) {
-        random -= weight;
-        if (random <= 0) return problem;
-    }
-    return candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
+    const problem = candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
+    return { ...problem, status: 'success' };
 }
 
 async function fetchSgfFromZip(filename, zipFilename) {
@@ -89,46 +108,60 @@ async function backgroundLoadCloserZip() {
     }
 }
 
-export async function loadTsumego(update) {
+export async function loadTsumego(isUpdate) {
     try {
         setAcceptClicks(false);
-        await loadZipMetadata();
-        
-        const savedFile = localStorage.getItem('currentTsumego');
-        const savedContent = localStorage.getItem('currentTsumegoContent');
 
-        if (savedFile && savedContent && !update) {
-            setCurrentProblem(savedFile, savedContent);
-            const prevFile = localStorage.getItem('previousTsumego');
-            const prevSgf = localStorage.getItem('previousTsumegoContent');
-            setPreviousProblem(prevFile, prevSgf);
-        } else {
-            const selectedProblem = selectProblem();
-            if (!selectedProblem) {
-                const closestZip = findClosestZip();
-                if (closestZip) {
-                    await loadZipProblems(closestZip.filename);
-                    const newProblem = selectProblem();
-                    if (!newProblem) throw new Error("Failed to select a problem after loading zip.");
-                    setPreviousProblem(state.currentProblemFilename, state.currentSGF);
-                    const sgf = await fetchSgfFromZip(newProblem.filename, newProblem.zipFilename);
-                    setCurrentProblem(newProblem.filename, sgf);
-                } else {
-                    throw new Error("No zip files found in metadata.");
-                }
-            } else {
-                setPreviousProblem(state.currentProblemFilename, state.currentSGF);
-                const sgf = await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
-                setCurrentProblem(selectedProblem.filename, sgf);
-            }
-            setOpenedFromLink(false);
+        if (!isUpdate && state.problemHistory.length > 0) {
+            // On initial load, just load the last problem from history
+            loadSgf(state.problemHistory[0].sgf);
+            updateUrlWithTsumegoId(state.problemHistory[0].filename.replace('.sgf', ''));
+            setAcceptClicks(true);
+            return;
         }
 
-        loadSgf(state.currentSGF);
+        await loadZipMetadata();
 
-        const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
-        updateUrlWithTsumegoId(tsumegoId);
+        let selectedProblem = selectProblem();
 
+        if (!selectedProblem) {
+            const closestZip = findClosestZip();
+            if (closestZip) {
+                await loadZipProblems(closestZip.filename);
+                selectedProblem = selectProblem();
+                if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
+            } else {
+                throw new Error("No zip files found in metadata.");
+            }
+        }
+
+        const sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
+
+        const history = state.problemHistory;
+        
+        const existingIndex = history.findIndex(p => p.filename === selectedProblem.filename);
+        if (existingIndex > -1) {
+            history.splice(existingIndex, 1);
+        }
+
+        history.unshift({
+            filename: selectedProblem.filename,
+            sgf: sgf,
+            status: selectedProblem.status
+        });
+
+        if (history.length > 200) {
+            history.length = 200;
+        }
+
+        if (history.length > 2 && history[2].status === 'success') {
+            history[2].sgf = null;
+        }
+        
+        updateProblemHistory(history);
+        setOpenedFromLink(false);
+        loadSgf(sgf);
+        updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
         setAcceptClicks(true);
         backgroundLoadCloserZip();
 
@@ -140,17 +173,7 @@ export async function loadTsumego(update) {
 
 export async function loadTsumegoById(tsumegoId) {
     try {
-        // On reload, the state is not fully initialized. We need to load the current problem from localStorage first.
-        if (!state.currentSGF) {
-            const savedFile = localStorage.getItem('currentTsumego');
-            const savedContent = localStorage.getItem('currentTsumegoContent');
-            if (savedFile && savedContent) {
-                setCurrentProblem(savedFile, savedContent);
-            }
-        }
-
-        // If the requested tsumego is already the current one, do nothing.
-        if (state.currentProblemFilename === `${tsumegoId}.sgf`) {
+        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf`) {
             return false;
         }
 
@@ -181,14 +204,23 @@ export async function loadTsumegoById(tsumegoId) {
 
         const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
 
-        const isSameAsCurrent = state.currentProblemFilename === `${tsumegoId}.sgf`;
-        
-        setPreviousProblem(state.currentProblemFilename, state.currentSGF);
-        setCurrentProblem(`${tsumegoId}.sgf`, sgfContent);
-
-        if (!isSameAsCurrent) {
-            setOpenedFromLink(true);
+        const history = state.problemHistory;
+        history.unshift({
+            filename: `${tsumegoId}.sgf`,
+            sgf: sgfContent,
+            status: 'success'
+        });
+        if (history.length > 200) {
+            history.length = 200;
         }
+
+        if (history.length > 2 && history[2].status === 'success') {
+            history[2].sgf = null;
+        }
+
+        updateProblemHistory(history);
+        
+        setOpenedFromLink(true);
 
         loadSgf(sgfContent);
         updateUrlWithTsumegoId(tsumegoId);

@@ -1,15 +1,12 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemFrequencies } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats } from './state.js';
 import { updateAllUI } from './ui.js';
 
 // Function to send report to Cloudflare Worker
-export async function sendReport(problemFilename, success) {
+export async function sendReport(success) {
     try {
-        if (state.problemFrequencies.hasOwnProperty(problemFilename)) {
-            return;
-        }
-        
+        const problemFilename = state.problemHistory[0].filename;
         const problemId = problemFilename.replace(/\.[^/.]+$/, "");
         
         const reportData = {
@@ -32,17 +29,42 @@ export async function sendReport(problemFilename, success) {
 
 export function updateUserStats(isCorrect) {
     if (state.openedFromLink) return;
-    
+
     let rank = state.userRank;
     let momentum = state.momentum;
-    let frequencies = { ...state.problemFrequencies };
+    const history = state.problemHistory;
+    const currentProblem = history[0];
+
+    if (!currentProblem) return;
+
+    const oldStatus = currentProblem.status;
+    const stats = { ...state.tsumegoStats };
+
+    if (oldStatus === 'failure') {
+        stats.totalOnFail++;
+        if (!isCorrect) {
+            stats.failOnFail++;
+        }
+    } else if (oldStatus === 'in-between') {
+        stats.totalOnInBetween++;
+        if (!isCorrect) {
+            stats.failOnInBetween++;
+        }
+    } else { // success or new
+        stats.totalOnSuccess++;
+        if (!isCorrect) {
+            stats.failOnSuccess++;
+        }
+    }
 
     if (isCorrect) {
-        const currentFreq = frequencies[state.currentProblemFilename] || 1;
-        frequencies[state.currentProblemFilename] = currentFreq / 5;
-        
-        // Only increase rating if problem frequency is 1 or less
-        if (currentFreq <= 1) {
+        if (oldStatus === 'failure') {
+            currentProblem.status = 'in-between';
+        } else if (oldStatus === 'in-between') {
+            currentProblem.status = 'success';
+        }
+
+        if (oldStatus === 'success') {
             const maxIncrease = (1.0 - rank) / 2;
             const intendedIncrease = momentum / 600;
             if(intendedIncrease > maxIncrease) {
@@ -52,14 +74,15 @@ export function updateUserStats(isCorrect) {
             }
             rank += Math.min(intendedIncrease, maxIncrease);
         }
-    } else {
+    } else { // Incorrect
         momentum = (momentum + 1) / 3;
-        frequencies[state.currentProblemFilename] = 25;
         rank = Math.max(0, rank - 4 * (momentum / 600));
+        currentProblem.status = 'failure';
     }
 
     updateUserRank(rank);
     updateMomentum(momentum);
-    updateProblemFrequencies(frequencies);
+    updateProblemHistory(history);
+    updateTsumegoStats(stats);
     updateAllUI();
 }

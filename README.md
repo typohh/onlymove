@@ -14,3 +14,27 @@ To generate Go problems, run the `main.py` script using the virtual environment'
 .venv/bin/python3 main.py
 ```
 
+## PWA
+
+This project includes a Progressive Web App (PWA) for solving tsumegos.
+
+### Building the PWA
+
+To build the PWA, navigate to the `pwa` directory and run the build command:
+
+```bash
+cd pwa
+npm install
+npm run build
+```
+
+### Problem Selection Logic
+
+The PWA uses a history-based problem selection logic:
+
+- It tracks the last 200 problems you've faced.
+- Each problem is marked as `success`, `failure`, or `in-between`.
+- Failed problems have a linearly increasing probability of being shown again.
+- In-between problems also have a (slower) linearly increasing probability of being shown again.
+- If no problem is selected from the history, a new problem close to your rating is chosen.
+

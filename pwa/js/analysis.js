@@ -15,8 +15,16 @@ let initialAnalysisNode = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
-    const sgfToAnalyze = state.previousSGF;
-    const tsumegoFilename = state.previousProblemFilename;
+    if (!state.problemHistory || state.problemHistory.length < 2) {
+        console.error("Not enough history to enter analysis mode.");
+        setAppMode('solving');
+        updateAllUI();
+        return;
+    }
+
+    const problemToAnalyze = state.problemHistory[1];
+    const sgfToAnalyze = problemToAnalyze.sgf;
+    const tsumegoFilename = problemToAnalyze.filename;
 
     if (!sgfToAnalyze) {
         console.error("No SGF found to enter analysis mode.");
