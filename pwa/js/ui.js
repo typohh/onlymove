@@ -185,19 +185,20 @@ export function fadeOverlay(duration, callback) {
 
 // Function to show detailed stats when user clicks on rank
 function showDetailedStats() {
-    // Calculate rating (the actual numeric value)
+    // Calculate progress to next rank
     const rating = state.userRank;
-    
-    // Calculate rating standard deviation (1/29 of rank's standard deviation)
-    const ratingStdDev = (state.momentum / 4) / 29;
+    const totalRanks = 29;
+    const rankValue = rating * totalRanks;
+    const currentRankIndex = Math.floor(rankValue);
+    const progress = (rankValue - currentRankIndex) * 100;
     
     const stats = state.tsumegoStats;
     const totalTsumegos = stats.totalOnFail + stats.totalOnInBetween + stats.totalOnSuccess;
-    const shortTermMemory = stats.totalOnFail > 0 ? (100 - stats.failOnFail / stats.totalOnFail * 100).toFixed(1) : 100;
-    const longTermMemory = stats.totalOnInBetween > 0 ? (100 - stats.failOnInBetween / stats.totalOnInBetween * 100).toFixed(1) : 100;
+    const shortTermMemory = stats.totalOnFail > 0 ? Math.round(100 - stats.failOnFail / stats.totalOnFail * 100) : 100;
+    const longTermMemory = stats.totalOnInBetween > 0 ? Math.round(100 - stats.failOnInBetween / stats.totalOnInBetween * 100) : 100;
 
     // Display the information
-    const detailText = `Rating: ${rating.toFixed(3)} (±${ratingStdDev.toFixed(3)})
+    const detailText = `On the way to next rank: ${progress.toFixed(0)}%
 Total Tsumegos: ${totalTsumegos}
 Short Term Memory: ${shortTermMemory}%
 Long Term Memory: ${longTermMemory}%`;
