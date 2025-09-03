@@ -139,7 +139,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         document.body.appendChild(overlay);
 
         setTimeout(() => {
-            overlay.style.transition = 'opacity 4s linear';
+            overlay.style.transition = 'opacity 2s linear';
             requestAnimationFrame(() => {
                 overlay.style.opacity = '0.9';
             });
@@ -149,7 +149,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
             overlay.remove();
             state.currentPointLoss = null;
             if (callback) callback();
-        }, 5000);
+        }, 3000);
     }
 }
 

@@ -143,6 +143,10 @@ class ProblemFinder:
             debug(
                 f"{(100 * best_winrate):.1f}% vs {(100 * second_winrate):.1f}%, {best_score:.1f} vs {second_score:.1f} , {100*best_policy:.1f}% vs {100*second_policy:.1f}%")
 
+            if best_move == "pass" or second_move == "pass":
+                debug("terminating due to pass")
+                return None, None
+
             # do we meet all criteria?
             if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and second_score < 0:
                 if self.is_valid(moves):
@@ -150,10 +154,6 @@ class ProblemFinder:
                     debug( moves )
                     debug( policies )
                     return moves, best_move
-
-            if best_move == "pass" or second_move == "pass":
-                debug("terminating due to pass")
-                return None, None
 
             if second_winrate > MIN_WINRATE_CORRECT_VERIFY:  # we are winning too much, need to lose points..
                 balanced_move, balanced_score, balanced_winrate, balanced_policy = self._rebalance_game(moves)
