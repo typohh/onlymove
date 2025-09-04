@@ -115,6 +115,19 @@ async function backgroundLoadCloserZip() {
     }
 }
 
+function loadNextZip() {
+    const candidates = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
+    if (candidates.length > 0) {
+        const nextZip = candidates.reduce((closest, zip) => {
+            const diff = Math.min(Math.abs(state.userRank - zip.min_rank), Math.abs(state.userRank - zip.max_rank));
+            return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
+        }, { zip: null, minDiff: Infinity }).zip;
+        if (nextZip) {
+            loadZipProblems(nextZip.filename);
+        }
+    }
+}
+
 export async function loadTsumego(isUpdate) {
     try {
         setAcceptClicks(false);
@@ -140,6 +153,13 @@ export async function loadTsumego(isUpdate) {
             } else {
                 throw new Error("No zip files found in metadata.");
             }
+        }
+
+        // Check if we need to load more zips
+        const historyFilenames = new Set(state.problemHistory.map(p => p.filename));
+        const availableCount = state.allProblems.filter(p => !historyFilenames.has(p.filename)).length;
+        if (availableCount < 5) {
+            loadNextZip();
         }
 
         const sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
