@@ -82,8 +82,8 @@ const localization = {
     linkCopied: 'Link copied to clipboard',
     tsumegoMode: 'Tsumego mode',
     reviewMode: 'Review mode',
-    carelessMistake: 'Careless mistake—spend more time reading and evaluating.',
-    shouldKnowThis: 'You should know this already—spend more time reviewing your mistakes.'
+    carelessMistake: 'Slow down! You could likely have avoided this mistake with a bit more effort.',
+    shouldKnowThis: 'A repeat mistake! During reviews try to understand difference between your move and the correct solution.'
   }
 };
 

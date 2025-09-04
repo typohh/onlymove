@@ -66,10 +66,10 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const timeSpent = Date.now() - (state.problemStartTime || Date.now());
     let duration = 10000; // 10s default
     let message = '';
-    const decrease = Math.floor(timeSpent / 2000);
-    duration = Math.max(2000, 10000 - decrease * 1000);
+    const decrease = Math.floor(timeSpent / 3000);
+    duration = Math.max(2000, 8000 - decrease * 1000);
     if (oldStatus === 'failure' || oldStatus === 'in-between') {
-        duration = 10000;
+        duration = 8000;
         message = getTerm('shouldKnowThis');
     } else if (timeSpent < 18000) { // less than 18s
         message = getTerm('carelessMistake');

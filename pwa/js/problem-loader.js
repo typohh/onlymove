@@ -154,7 +154,8 @@ export async function loadTsumego(isUpdate) {
         history.unshift({
             filename: selectedProblem.filename,
             sgf: sgf,
-            status: selectedProblem.status
+            status: selectedProblem.status,
+            linked: false
         });
 
         if (history.length > 200) {

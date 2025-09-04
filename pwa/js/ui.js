@@ -43,12 +43,14 @@ function updateSolvingModeUI() {
         document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
         document.getElementById('text1-h').textContent = `${rank} (±${stddev.toFixed(1)})`;
         
-        // Add click event to show detailed stats
+        // Set styles for click (event added in main.js)
         const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
         text1Elements.forEach(element => {
             element.style.cursor = 'pointer';
             element.title = 'Click for detailed stats';
-            element.onclick = showDetailedStats;
+            element.style.userSelect = 'none';
+            element.style.webkitUserSelect = 'none';
+            element.style.MozUserSelect = 'none';
         });
     }
 
@@ -138,7 +140,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         overlay.appendChild(container);
         document.body.appendChild(overlay);
 
-        // Fade in over duration, then remove without fade out
+        // Fade in over duration, then remove
         setTimeout(() => {
             overlay.style.transition = `opacity ${duration}ms ease-out`;
             overlay.style.opacity = '0.9';
@@ -209,7 +211,7 @@ export function fadeOverlay(duration, callback) {
 
 
 // Function to show detailed stats when user clicks on rank
-function showDetailedStats() {
+export function showDetailedStats() {
     // Calculate progress to next rank
     const rating = state.userRank;
     const totalRanks = 29;

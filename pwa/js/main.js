@@ -1,7 +1,7 @@
 // js/main.js
 
 import { state } from './state.js';
-import { updateAllUI, updateBoardSize } from './ui.js';
+import { updateAllUI, updateBoardSize, showDetailedStats } from './ui.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
@@ -21,6 +21,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateBoardSize();
     // Using CSS vi units for responsive sizing, but still need to update WGo board on resize
     window.addEventListener('resize', updateBoardSize);
+
+    // Add click event to rank display for detailed stats
+    const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
+    text1Elements.forEach(element => {
+        if (element) {
+            element.style.cursor = 'pointer';
+            element.title = 'Click for detailed stats';
+            element.style.userSelect = 'none';
+            element.style.webkitUserSelect = 'none';
+            element.style.MozUserSelect = 'none';
+            element.addEventListener('click', (event) => {
+                event.preventDefault();
+                showDetailedStats();
+            });
+        }
+    });
 
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
