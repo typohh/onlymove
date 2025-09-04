@@ -40,11 +40,8 @@ function selectProblem() {
     let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
 
     if (availableProblems.length === 0) {
-        // If all problems are in history, just use all problems
-        availableProblems = state.allProblems;
+	return null;
     }
-    
-    if (availableProblems.length === 0) availableProblems = state.allProblems;
 
     availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
     const candidateProblems = availableProblems.slice(0, 500);
