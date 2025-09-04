@@ -94,16 +94,19 @@ export async function loadZipProblems(zipFilename) {
     zipCache.set(zipFilename, zip);
 }
 
-function findClosestZip() {
-    return state.zipMetadata.reduce((closest, zip) => {
+function findClosestUnloadedZip() {
+    const unloadedZips = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
+    return unloadedZips.reduce((closest, zip) => {
         const diff = Math.min(Math.abs(state.userRank - zip.min_rank), Math.abs(state.userRank - zip.max_rank));
         return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
     }, { zip: null, minDiff: Infinity }).zip;
 }
 
+
+
 async function backgroundLoadCloserZip() {
-    const closestZip = findClosestZip();
-    if (closestZip && !state.loadedZips[closestZip.filename]) {
+    const closestZip = findClosestUnloadedZip();
+    if (closestZip) {
         try {
             await loadZipProblems(closestZip.filename);
         } catch (error) {
@@ -113,15 +116,9 @@ async function backgroundLoadCloserZip() {
 }
 
 function loadNextZip() {
-    const candidates = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
-    if (candidates.length > 0) {
-        const nextZip = candidates.reduce((closest, zip) => {
-            const diff = Math.min(Math.abs(state.userRank - zip.min_rank), Math.abs(state.userRank - zip.max_rank));
-            return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
-        }, { zip: null, minDiff: Infinity }).zip;
-        if (nextZip) {
-            loadZipProblems(nextZip.filename);
-        }
+    const nextZip = findClosestUnloadedZip();
+    if (nextZip) {
+        loadZipProblems(nextZip.filename);
     }
 }
 
@@ -142,7 +139,7 @@ export async function loadTsumego(isUpdate) {
         let selectedProblem = selectProblem();
 
         if (!selectedProblem) {
-            const closestZip = findClosestZip();
+            const closestZip = findClosestUnloadedZip();
             if (closestZip) {
                 await loadZipProblems(closestZip.filename);
                 selectedProblem = selectProblem();

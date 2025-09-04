@@ -225,7 +225,7 @@ export function showDetailedStats() {
     const longTermMemory = stats.totalOnInBetween > 0 ? Math.round(100 - stats.failOnInBetween / stats.totalOnInBetween * 100) : 100;
 
     // Display the information
-    const detailText = `On the way to next rank: ${progress.toFixed(0)}%
+    const detailText = `On the way to next rank: ${Math.floor(progress)}%
 Total Tsumegos: ${totalTsumegos}
 Short Term Memory: ${shortTermMemory}%
 Long Term Memory: ${longTermMemory}%`;

@@ -64,14 +64,13 @@ async function _handleIncorrectMoveSequence(moveIndex) {
 
     // Calculate overlay duration and message based on time spent
     const timeSpent = Date.now() - (state.problemStartTime || Date.now());
-    let duration = 10000; // 10s default
+    let duration = 2000; // 2s default
     let message = '';
-    const decrease = Math.floor(timeSpent / 3000);
-    duration = Math.max(2000, 8000 - decrease * 1000);
     if (oldStatus === 'failure' || oldStatus === 'in-between') {
-        duration = 8000;
+        duration = 6000;
         message = getTerm('shouldKnowThis');
-    } else if (timeSpent < 18000) { // less than 18s
+    } else if (timeSpent < 15000) { // less than 15s
+        duration = 6000;
         message = getTerm('carelessMistake');
     }
 
