@@ -6,7 +6,7 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
-import { findBestMoveFromChildren, getScoreFromComment, getWinrateFromComment } from './sgf.js';
+import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 
 let analysisHintMove = null;
 let initialAnalysisNode = null;
@@ -82,37 +82,37 @@ export function undoLastMove() {
  */
 function getCurrentSgf() {
     let sgf = "(;FF[4]GM[1]CA[UTF-8]SZ[" + state.board.size + "]";
-    
+
     if (state.kifuReader.kifu.info && state.kifuReader.kifu.info.RU) {
         sgf += "RU[" + state.kifuReader.kifu.info.RU + "]";
     } else {
         sgf += "RU[Japanese]";
     }
-    
+
     if (state.kifuReader.kifu.info && state.kifuReader.kifu.info.KM) {
         sgf += "KM[" + state.kifuReader.kifu.info.KM + "]";
     } else {
         sgf += "KM[0.5]";
     }
-    
+
     const moves = [];
     let currentNode = getCurrentNode();
-    
+
     while (currentNode && currentNode.move) {
         moves.unshift(currentNode.move);
         currentNode = currentNode.parent;
     }
-    
+
     for (const move of moves) {
         if (move.pass) {
-            sgf += ";" + (move.c === WGo.B ? "B" : "W") + "[]";
+            sgf += ";" + (move.c === WGo.B ? "B" : "W") + "[tt]";
         } else {
             const x = String.fromCharCode(97 + move.x);
             const y = String.fromCharCode(97 + move.y);
             sgf += ";" + (move.c === WGo.B ? "B" : "W") + "[" + x + y + "]";
         }
     }
-    
+
     sgf += ")";
     return sgf;
 }
@@ -155,19 +155,6 @@ async function requestAndDisplayAnalysis() {
         // For all other cases, show analyzing state first
         updateAnalysisUI(getTerm('analyzing'), null);
 
-        // For non-initial positions, use the first child to match tsumego mode response
-        if (children && children.length > 0) {
-            const firstChild = children[0];
-            if (firstChild.move) {
-                const firstScore = getScoreFromComment(firstChild.comment);
-                const scoreText = firstScore !== null ? `${firstScore.toFixed(1)}` : 'N/A';
-                analysisHintMove = firstChild.move;
-                updateAnalysisUI(scoreText, firstChild.move);
-                redraw(analysisHintMove);
-                return;
-            }
-        }
-
         if (bestMoveNode) {
             const bestMove = bestMoveNode.move;
             const bestScore = getScoreFromComment(bestMoveNode.comment);
@@ -179,15 +166,46 @@ async function requestAndDisplayAnalysis() {
         }
 
         const sgf = getCurrentSgf();
-        const { bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf);
+        let { bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf);
+
+        if (score === 'Retry') {
+            const currentSgfCheck = getCurrentSgf();
+            if (currentSgfCheck === sgf) {
+                ({ bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf));
+            }
+        }
 
         if (state.appMode === 'analyzing' && bestMoveSgf) {
-            const currentSgf = getCurrentSgf();
-            if (currentSgf === sgf) {
+            const currentSgfCheck = getCurrentSgf();
+            if (currentSgfCheck === sgf) {
                 const bestMove = {
                     x: bestMoveSgf.charCodeAt(0) - 97,
                     y: bestMoveSgf.charCodeAt(1) - 97,
+                    c: state.kifuReader.game.turn
                 };
+                // Check if the move already exists in children
+                const existingChild = children.find(child => child.move && child.move.x === bestMove.x && child.move.y === bestMove.y);
+                if (existingChild) {
+                    // Set comment if not set
+                    if (!existingChild.comment) {
+                        existingChild.comment = `100%/${score}`;
+                    }
+                    // Move to first if not already
+                    const index = children.indexOf(existingChild);
+                    if (index > 0) {
+                        children.splice(index, 1);
+                        children.unshift(existingChild);
+                    }
+                } else {
+                    // Create new node
+                    const newNode = new WGo.KNode({
+                        move: bestMove,
+                        comment: `100%/${score}`
+                    });
+                    // Prepend
+                    currentNode.children.unshift(newNode);
+                    newNode.parent = currentNode;
+                }
                 analysisHintMove = bestMove;
                 updateAnalysisUI(score, bestMove);
                 redraw(analysisHintMove);

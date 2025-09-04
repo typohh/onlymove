@@ -1,22 +1,4 @@
-// js/sgf.js
-import { SGF_COMMENTS } from './constants.js';
-
-/**
- * Parses the winrate from an SGF comment.
- * @param {string} comment - The comment string.
- * @returns {number|null} - The winrate as a float, or null if not found.
- */
-export function getWinrateFromComment(comment) {
-  if (!comment) {
-    return null;
-  }
-  // Extracts winrate like "86.4%" from "86.4%/3.1"
-  const match = comment.match(/([\d.]+)%/);
-  if (match && match[1]) {
-    return parseFloat(match[1]);
-  }
-  return null;
-}
+// js/sgf.js\nimport { SGF_COMMENTS } from './constants.js';
 
 /**
  * Parses the score from an SGF comment.
@@ -36,7 +18,7 @@ export function getScoreFromComment(comment) {
 }
 
 /**
- * Finds the best move from a list of child nodes based on winrate.
+ * Finds the best move from a list of child nodes (assumes first child is best if it has winrate/score comment).
  * @param {Array} children - Array of SGF nodes.
  * @returns {object|null} - The best move node, or null if not found.
  */
@@ -44,19 +26,10 @@ export function findBestMoveFromChildren(children) {
     if (!children || children.length === 0) {
         return null;
     }
-
-    let bestWinrate = -1;
-    let bestMoveNode = null;
-
-    for (const child of children) {
-        if (!child.move) continue;
-        const winrate = getWinrateFromComment(child.comment);
-        if (winrate !== null && winrate > bestWinrate) {
-            bestWinrate = winrate;
-            bestMoveNode = child;
-        }
+    if (children[0].comment && children[0].comment.match(/%\//)) {
+        return children[0];
     }
-    return bestMoveNode;
+    return null;
 }
 
 /**

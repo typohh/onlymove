@@ -177,20 +177,20 @@ class KataGoHandler(BaseHTTPRequestHandler):
                 # When using 1 playout, use policy instead of moveInfos
                 policy = response.get("policy", [])
                 if not policy:
-                    analysis_result = {"bestMove": "pass", "score": response.get('rootInfo', {}).get('scoreLead')}
+                    analysis_result = {"bestMove": "pass", "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
                 else:
                     # Find the move with the highest policy probability
                     best_move_idx = policy.index(max(policy))
                     gtp_move = get_move_from_idx(best_move_idx, 9)
                     sgf_move = gtp_to_sgf_coords(gtp_move, 9)
-                    analysis_result = {"bestMove": sgf_move, "score": response.get('rootInfo', {}).get('scoreLead')}
+                    analysis_result = {"bestMove": sgf_move, "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
             elif not response.get("moveInfos"):
-                analysis_result = {"bestMove": "pass", "score": response.get('rootInfo', {}).get('scoreLead')}
+                analysis_result = {"bestMove": "pass", "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
             else:
                 best_move_info = response["moveInfos"][0]
                 gtp_move = best_move_info.get("move")
                 sgf_move = gtp_to_sgf_coords(gtp_move, 9)
-                analysis_result = {"bestMove": sgf_move, "score": best_move_info.get("scoreLead")}
+                analysis_result = {"bestMove": sgf_move, "winrate": best_move_info.get("winrate"), "score": best_move_info.get("scoreLead")}
 
             status_message = "Success"
             self.send_response(200)

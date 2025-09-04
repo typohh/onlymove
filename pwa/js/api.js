@@ -20,6 +20,9 @@ export async function fetchAnalysis(sgf) {
         });
 
         if (!response.ok) {
+            if (response.status === 499) {
+                return { bestMove: null, score: 'Retry' };
+            }
             // Log simple message instead of full stack trace
             console.log(`Analysis server returned ${response.status}: ${response.statusText}`);
             throw new Error(`Server returned an error: ${response.statusText}`);

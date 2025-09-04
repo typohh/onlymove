@@ -89,9 +89,7 @@ def generate_variations_directly_to_sgf(
     if total_visits == 0:
         return
 
-    sorted_move_infos = sorted(current_pos_analysis["moveInfos"], key=lambda x: x.get("visits", 0), reverse=True)
-
-    for move_info in sorted_move_infos:
+    for move_info in current_pos_analysis["moveInfos"]:
         visits = move_info.get("visits", 0)
         if visits == 0:
             continue
@@ -111,5 +109,5 @@ def generate_variations_directly_to_sgf(
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
             new_cumulative_perc,
-            is_primary and move_info == sorted_move_infos[0]
+            is_primary and move_info == current_pos_analysis["moveInfos"][0]
         )
