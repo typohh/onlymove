@@ -86,8 +86,17 @@ class ProblemFinder:
         full_game_moves = moves.copy()
         while full_game_moves[-1] != 'pass' or full_game_moves[-2] != 'pass':
             best_move, best_winrate, best_score, _ = self.queries.get_best_move(self.queries.query(full_game_moves, playouts=PLAYOUTS_GAME))
+            if best_winrate < 0.5 or best_score < 0:
+                debug(f"looked promising, but black fell behind after {len(full_game_moves) - len(moves)} moves.")
+                return False
+            full_game_moves.append(best_move)
+
         score,winrate = self.queries.get_position_info(full_game_moves)
-        return winrate > 0.5 and score > 0
+        if winrate < 0.5 or score < 0:
+            debug("looked promising, but playing to the end didnt give conclusive win")
+            return False
+
+        return True
 
     def _rebalance_game(self, moves):
         response = self.queries.query_children(moves)
@@ -106,7 +115,7 @@ class ProblemFinder:
             score = move_info["scoreLead"]
             penalty_winrate = (abs(winrate - MIN_WINRATE_CORRECT) * 2) ** 2
             penalty_policy = -math.log(policy)
-            penalty = penalty_winrate + penalty_policy * 0.05 + random.gauss(0, 0.05)
+            penalty = penalty_winrate + penalty_policy * 0.1 + random.gauss(0, 0.05)
             if penalty < best_response_penalty:
                 best_response_penalty = penalty
                 best_move = move
@@ -141,7 +150,7 @@ class ProblemFinder:
                 if self.is_valid(moves):
                     debug("found tsumego!")
                     debug(moves)
-                    debug(policies)
+                    debug(str(policies))
                     return moves, best_move
 
             if second_winrate > MIN_WINRATE_CORRECT_VERIFY:  # we are winning too much, need to lose points..
@@ -169,9 +178,9 @@ class ProblemFinder:
             moves.append(balanced_move)
             policies.append(balanced_policy)
 
-            if DEBUG:
-                if policies[-1] < 0.01 or policies[-2] < 0.01:
-                    raise Exception("too low policy!!!")
+            if policies[-1] < 0.01 or policies[-2] < 0.01:
+                debug ("recent moves are too ugly, discarding game..")
+                return None, None
 
     def create_problem(self):
 

@@ -78,7 +78,7 @@ def generate_variations_directly_to_sgf(
     if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
         return
 
-    if cumulative_playout_perc < MIN_PLAYOUT_PERC:
+    if cumulative_playout_perc < MIN_PLAYOUT_PERC and not is_primary:
         return
 
     current_pos_analysis = queries.query(current_moves, playouts=PLAYOUTS, exclude_move=exclude_move)

@@ -137,7 +137,6 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
 
                 STATS.set_state("other")
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
-                debug(str(moves))
                 filename = hashlib.sha256(str(moves).encode()).hexdigest()[:8] + ".sgf"
                 with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
                     f.write(game.serialise(None).decode())
