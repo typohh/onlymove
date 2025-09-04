@@ -68,11 +68,11 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     let message = '';
     const decrease = Math.floor(timeSpent / 2000);
     duration = Math.max(2000, 10000 - decrease * 1000);
-    if (timeSpent >= 20000 && (oldStatus === 'failure' || oldStatus === 'in-between')) {
+    if (oldStatus === 'failure' || oldStatus === 'in-between') {
         duration = 10000;
-        message = 'You should know this already, spend more time reviewing your mistakes';
+        message = getTerm('shouldKnowThis');
     } else if (timeSpent < 18000) { // less than 18s
-        message = 'Careless mistake, spend more time reading and evaluating';
+        message = getTerm('carelessMistake');
     }
 
     await new Promise((resolve) => displayOverlay(message, duration, resolve));
