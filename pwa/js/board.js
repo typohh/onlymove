@@ -111,17 +111,28 @@ export function loadSgf(sgfContent) {
 
 export function playMoveOnBranch(x, y) {
     if (!state.kifuReader) return false;
-    
+
     const game = state.kifuReader.game;
     const position = game.getPosition();
-    
+
     if (position.get(x, y) !== 0) return false;
 
-    const newNode = new WGo.KNode({
-        move: { x: x, y: y, c: game.turn }
-    });
-    state.kifuReader.node.appendChild(newNode);
-    state.kifuReader.next(state.kifuReader.node.children.length - 1);
+    const currentNode = state.kifuReader.node;
+    const children = currentNode.children;
+
+    // Check if the move already exists in children
+    const existingChild = children.find(child => child.move && child.move.x === x && child.move.y === y);
+    if (existingChild) {
+        const index = children.indexOf(existingChild);
+        state.kifuReader.next(index);
+    } else {
+        // If not, create a new node
+        const newNode = new WGo.KNode({
+            move: { x: x, y: y, c: game.turn }
+        });
+        currentNode.appendChild(newNode);
+        state.kifuReader.next(currentNode.children.length - 1);
+    }
     redraw();
     return true;
 }

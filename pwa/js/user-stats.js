@@ -28,16 +28,30 @@ export async function sendReport(success) {
 }
 
 export function updateUserStats(isCorrect) {
-    if (state.openedFromLink) return;
-
-    let rank = state.userRank;
-    let momentum = state.momentum;
     const history = state.problemHistory;
     const currentProblem = history[0];
 
     if (!currentProblem) return;
 
     const oldStatus = currentProblem.status;
+
+    if (isCorrect) {
+        if (oldStatus === 'failure') {
+            currentProblem.status = 'in-between';
+        } else if (oldStatus === 'in-between') {
+            currentProblem.status = 'success';
+        }
+    } else {
+        currentProblem.status = 'failure';
+    }
+
+    if (state.openedFromLink) {
+        updateProblemHistory(history);
+        return;
+    }
+
+    let rank = state.userRank;
+    let momentum = state.momentum;
     const stats = { ...state.tsumegoStats };
 
     if (oldStatus === 'failure') {
@@ -58,26 +72,17 @@ export function updateUserStats(isCorrect) {
     }
 
     if (isCorrect) {
-        if (oldStatus === 'failure') {
-            currentProblem.status = 'in-between';
-        } else if (oldStatus === 'in-between') {
-            currentProblem.status = 'success';
+        const maxIncrease = (1.0 - rank) / 2;
+        const intendedIncrease = momentum / 600;
+        if(intendedIncrease > maxIncrease) {
+            momentum = Math.max( 0.5 , momentum * 0.8 );
+        } else {
+            momentum *= 1.1;
         }
-
-        if (oldStatus === 'success') {
-            const maxIncrease = (1.0 - rank) / 2;
-            const intendedIncrease = momentum / 600;
-            if(intendedIncrease > maxIncrease) {
-                momentum = Math.max( 0.5 , momentum * 0.8 );
-            } else {
-                momentum *= 1.1;
-            }
-            rank += Math.min(intendedIncrease, maxIncrease);
-        }
+        rank += Math.min(intendedIncrease, maxIncrease);
     } else { // Incorrect
         momentum = (momentum + 1) / 3;
         rank = Math.max(0, rank - 4 * (momentum / 600));
-        currentProblem.status = 'failure';
     }
 
     updateUserRank(rank);

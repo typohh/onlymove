@@ -155,6 +155,19 @@ async function requestAndDisplayAnalysis() {
         // For all other cases, show analyzing state first
         updateAnalysisUI(getTerm('analyzing'), null);
 
+        // For non-initial positions, use the first child to match tsumego mode response
+        if (children && children.length > 0) {
+            const firstChild = children[0];
+            if (firstChild.move) {
+                const firstScore = getScoreFromComment(firstChild.comment);
+                const scoreText = firstScore !== null ? `${firstScore.toFixed(1)}` : 'N/A';
+                analysisHintMove = firstChild.move;
+                updateAnalysisUI(scoreText, firstChild.move);
+                redraw(analysisHintMove);
+                return;
+            }
+        }
+
         if (bestMoveNode) {
             const bestMove = bestMoveNode.move;
             const bestScore = getScoreFromComment(bestMoveNode.comment);
