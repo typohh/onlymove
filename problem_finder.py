@@ -11,6 +11,7 @@ MAX_WINRATE_ALTERNATIVE_VERIFY = 0.2
 RANDOM_MOVE_COUNT = 4
 PLAYOUTS = 10
 PLAYOUTS_VERIFY = 1000
+PLAYOUTS_GAME = 30
 
 
 class ProblemFinder:
@@ -80,7 +81,13 @@ class ProblemFinder:
             if best_winrate < min_winrate_correct or second_winrate > max_winrate_alternative or second_score > 0:
                 debug("looked promising, but failed after more playouts")
                 return False
-        return True
+
+        # and lets play the game to the end, just to make sure we arrive at the same conclusion..
+        full_game_moves = moves.copy()
+        while full_game_moves[-1] != 'pass' or full_game_moves[-2] != 'pass':
+            best_move, best_winrate, best_score, _ = self.queries.get_best_move(self.queries.query(full_game_moves, playouts=PLAYOUTS_GAME))
+        score,winrate = self.queries.get_position_info(full_game_moves)
+        return winrate > 0.5 and score > 0
 
     def _rebalance_game(self, moves):
         response = self.queries.query_children(moves)

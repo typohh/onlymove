@@ -38,6 +38,7 @@ export const state = {
     // UI state
     acceptClicks: false,
     currentPointLoss: null,
+    problemStartTime: null,
     
     // Analysis mode state
     lastMoveInAnalysis: null, // Track last move in analysis mode

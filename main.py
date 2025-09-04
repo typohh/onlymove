@@ -129,8 +129,8 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                 game,node,answer = construct_initial_sgf(moves, solution)
 
                 STATS.set_state("deep_variations")
-                generate_variations_directly_to_sgf(queries, node, moves, 1.0, None)
-                generate_variations_directly_to_sgf(queries, node, moves, 1.0, solution)
+                generate_variations_directly_to_sgf(queries, node, moves, 1.0, True,None)
+                generate_variations_directly_to_sgf(queries, node, moves, 1.0, False, solution)
 
                 STATS.set_state("shallow_variations")
                 add_shallow_variations(queries, node, moves)

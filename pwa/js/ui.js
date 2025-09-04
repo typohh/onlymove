@@ -100,15 +100,66 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         alignItems: 'center', zIndex: '1000', opacity: '0'
     });
 
-    // If a message is passed, this is a simple error/info overlay.
-    if (message) {
-        const messageElement = document.createElement('div');
-        Object.assign(messageElement.style, {
-            color: 'white', fontWeight: 'bold', textAlign: 'center',
-            fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
+    // Check if this is a failed problem overlay (has currentPointLoss)
+    const isFailedOverlay = state.currentPointLoss !== null;
+
+    if (isFailedOverlay) {
+        // Failed problem overlay
+        const container = document.createElement('div');
+        Object.assign(container.style, {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center'
         });
-        messageElement.textContent = message;
-        overlay.appendChild(messageElement);
+
+        if (state.currentPointLoss) {
+            const pointLossElement = document.createElement('div');
+            Object.assign(pointLossElement.style, {
+                color: 'white', fontWeight: 'bold', textAlign: 'center',
+                fontSize: `${boardContainer.offsetWidth / 25}px`,
+                marginBottom: message ? '20px' : '0'
+            });
+            pointLossElement.textContent = state.currentPointLoss;
+            container.appendChild(pointLossElement);
+        }
+
+        if (message) {
+            const messageElement = document.createElement('div');
+            Object.assign(messageElement.style, {
+                color: 'white', fontWeight: 'bold', textAlign: 'center',
+                fontSize: `${boardContainer.offsetWidth / 30}px`,
+                maxWidth: '80%'
+            });
+            messageElement.textContent = message;
+            container.appendChild(messageElement);
+        }
+
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+
+        // Fade in over duration, then remove without fade out
+        setTimeout(() => {
+            overlay.style.transition = `opacity ${duration}ms ease-out`;
+            overlay.style.opacity = '0.9';
+        }, 0);
+
+        setTimeout(() => {
+            overlay.remove();
+            state.currentPointLoss = null;
+            if (callback) callback();
+        }, duration);
+    } else {
+        // Simple message overlay
+        if (message) {
+            const messageElement = document.createElement('div');
+            Object.assign(messageElement.style, {
+                color: 'white', fontWeight: 'bold', textAlign: 'center',
+                fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
+            });
+            messageElement.textContent = message;
+            overlay.appendChild(messageElement);
+        }
         document.body.appendChild(overlay);
 
         // Fast fade in/out for messages
@@ -124,32 +175,6 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
                 if (callback) callback();
             }, 300);
         }, duration);
-
-    } else {
-        // If no message, this is the "failed problem" overlay. Use original logic.
-        if (state.currentPointLoss) {
-            const pointLossElement = document.createElement('div');
-            Object.assign(pointLossElement.style, {
-                color: 'white', fontWeight: 'bold', textAlign: 'center',
-                fontSize: `${boardContainer.offsetWidth / 25}px`
-            });
-            pointLossElement.textContent = state.currentPointLoss;
-            overlay.appendChild(pointLossElement);
-        }
-        document.body.appendChild(overlay);
-
-        setTimeout(() => {
-            overlay.style.transition = 'opacity 2s linear';
-            requestAnimationFrame(() => {
-                overlay.style.opacity = '0.9';
-            });
-        }, 1000);
-
-        setTimeout(() => {
-            overlay.remove();
-            state.currentPointLoss = null;
-            if (callback) callback();
-        }, 3000);
     }
 }
 

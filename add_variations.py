@@ -68,7 +68,8 @@ def generate_variations_directly_to_sgf(
         parent_sgf_node: sgf.Tree_node,
         current_moves: list,
         cumulative_playout_perc: float,
-        exclude_move=None
+        is_primary: bool,
+        exclude_move=None,
 ):
     """
     Recursively generates variations and adds them directly as child nodes to the parent_sgf_node.
@@ -109,5 +110,6 @@ def generate_variations_directly_to_sgf(
             queries,
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
-            new_cumulative_perc
+            new_cumulative_perc,
+            is_primary and move_info == sorted_move_infos[0]
         )

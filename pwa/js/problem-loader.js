@@ -177,6 +177,7 @@ export async function loadTsumego(isUpdate) {
         loadSgf(sgf);
         updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
         setAcceptClicks(true);
+        state.problemStartTime = Date.now();
         backgroundLoadCloserZip();
         updateAllUI();
 
@@ -253,6 +254,7 @@ export async function loadTsumegoById(tsumegoId) {
         loadSgf(sgfContent);
         updateUrlWithTsumegoId(tsumegoId);
         setAcceptClicks(true);
+        state.problemStartTime = Date.now();
         updateAllUI();
 
         return true;
