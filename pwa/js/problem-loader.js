@@ -173,8 +173,12 @@ export async function loadTsumego(isUpdate) {
             history.splice(indicesToRemove[i], 1);
         }
 
-        // Add the selected problem to the front
-        history.unshift(selectedProblem);
+        history.unshift({
+            filename: selectedProblem.filename,
+            sgf: sgf,
+            status: selectedProblem.status || 'success',
+            linked: false
+        });
 
         if (history.length > 200) {
             history.length = 200;
