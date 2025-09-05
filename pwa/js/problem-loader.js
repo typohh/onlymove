@@ -160,17 +160,21 @@ export async function loadTsumego(isUpdate) {
 
         const history = state.problemHistory;
         
-        const existingIndex = history.findIndex(p => p.filename === selectedProblem.filename);
-        if (existingIndex > -1) {
-            history.splice(existingIndex, 1);
+        // Remove all entries with the same filename
+        const filename = selectedProblem.filename;
+        const indicesToRemove = [];
+        for (let i = 0; i < history.length; i++) {
+            if (history[i].filename === filename) {
+                indicesToRemove.push(i);
+            }
+        }
+        // Remove in reverse order to maintain indices
+        for (let i = indicesToRemove.length - 1; i >= 0; i--) {
+            history.splice(indicesToRemove[i], 1);
         }
 
-        history.unshift({
-            filename: selectedProblem.filename,
-            sgf: sgf,
-            status: selectedProblem.status,
-            linked: false
-        });
+        // Add the selected problem to the front
+        history.unshift(selectedProblem);
 
         if (history.length > 200) {
             history.length = 200;
