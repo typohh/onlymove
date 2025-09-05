@@ -48,6 +48,11 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     const { request } = event;
 
+    // Only handle HTTP/HTTPS requests to avoid issues with chrome-extension or other schemes
+    if (!request.url.startsWith('http')) {
+        return;
+    }
+
     // Strategy 1: Network-First for the main HTML page (navigation requests).
     // This ensures you get the latest HTML when online, which in turn requests the
     // correct hashed assets, preventing the 404 race condition.
