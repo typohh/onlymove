@@ -44,8 +44,8 @@ export function enterAnalysisMode() {
         requestAndDisplayAnalysis();
     }, 0);
     
-    if (tsumegoFilename) {
-        const tsumegoId = tsumegoFilename.replace('.sgf', '');
+    if (problemToAnalyze.filename) {
+        const tsumegoId = problemToAnalyze.filename.replace('.sgf', '');
         updateUrlWithTsumegoId(tsumegoId);
     }
 }

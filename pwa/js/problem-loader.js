@@ -157,6 +157,9 @@ export async function loadTsumego(isUpdate) {
         }
 
         const sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
+        if (!sgf || !sgf.trim()) {
+            throw new Error('Invalid or empty SGF');
+        }
 
         const history = state.problemHistory;
         
@@ -197,7 +200,11 @@ export async function loadTsumego(isUpdate) {
         }
 
         setOpenedFromLink(false);
-        loadSgf(sgf);
+        try {
+            loadSgf(sgf);
+        } catch (error) {
+            throw new Error('Invalid SGF: ' + error.message);
+        }
         updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
         setAcceptClicks(true);
         state.problemStartTime = Date.now();
