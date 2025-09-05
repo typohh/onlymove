@@ -334,7 +334,7 @@ def test_bot(bot, attempts_file):
 
 
 ATTEMPTS_DIRECTORY = "attempts"
-SKIP_IF_EXISTS = True
+SKIP_IF_EXISTS = False
 
 if __name__ == "__main__":
 
