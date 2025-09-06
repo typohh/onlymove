@@ -71,7 +71,7 @@ export function updateUserStats(isCorrect) {
         }
     }
 
-    if (isCorrect) {
+    if (isCorrect && oldStatus !== 'failure' && oldStatus !== 'in-between') {
         const maxIncrease = (1.0 - rank) / 2;
         const intendedIncrease = momentum / 600;
         if(intendedIncrease > maxIncrease) {
@@ -80,7 +80,7 @@ export function updateUserStats(isCorrect) {
             momentum *= 1.1;
         }
         rank += Math.min(intendedIncrease, maxIncrease);
-    } else { // Incorrect
+    } else if (!isCorrect) { // Incorrect
         momentum = (momentum + 1) / 3;
         rank = Math.max(0, rank - 4 * (momentum / 600));
     }
