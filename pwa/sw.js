@@ -86,8 +86,8 @@ self.addEventListener('fetch', event => {
             }
             // Otherwise, fetch it from the network, add it to the cache for next time, and return it.
             return fetch(request).then(networkResponse => {
-                // Ensure we have a valid response before caching
-                if (networkResponse && networkResponse.status === 200) {
+                // Ensure we have a valid response and it's a GET request before caching
+                if (networkResponse && networkResponse.status === 200 && request.method === 'GET') {
                     const responseToCache = networkResponse.clone();
                     caches.open(RUNTIME_CACHE_NAME).then(cache => {
                         cache.put(request, responseToCache);
