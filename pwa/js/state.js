@@ -45,7 +45,7 @@ export const state = {
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
-    problemHistory: (JSON.parse(localStorage.getItem('problemHistory')) || []).map(item => ({ ...item, linked: item.linked || false })),
+    problemHistory: (JSON.parse(localStorage.getItem('problemHistory')) || []).map(item => ({ ...item, linked: item.linked || false, rating: item.rating || 0 })),
     nextTsumego: JSON.parse(localStorage.getItem('nextTsumego')) || null,
     momentum: parseFloat(localStorage.getItem('momentum')) || 30,
 

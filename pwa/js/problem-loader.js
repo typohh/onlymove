@@ -18,6 +18,11 @@ function selectProblem() {
     // Check for re-selection from history
     for (let i = 0; i < state.problemHistory.length; i++) {
         const historyItem = state.problemHistory[i];
+
+        if (historyItem.rating >= state.userRank) {
+            continue; // Skip this problem if its rating is not less than the user's current rank
+        }
+
         let probability = 0;
 
         if (historyItem.status === 'failure') {
@@ -180,7 +185,8 @@ export async function loadTsumego(isUpdate) {
             filename: selectedProblem.filename,
             sgf: sgf,
             status: selectedProblem.status || 'success',
-            linked: false
+            linked: false,
+            rating: selectedProblem.rank
         });
 
         if (history.length > 200) {
@@ -248,6 +254,9 @@ export async function loadTsumegoById(tsumegoId) {
 
         await loadZipProblems(zipFilename);
 
+        const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
+        const problemRank = problem ? problem.rank : 0;
+
         const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
 
         const history = state.problemHistory;
@@ -261,7 +270,8 @@ export async function loadTsumegoById(tsumegoId) {
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
             status: 'success',
-            linked: true
+            linked: true,
+            rating: problemRank
         });
         if (history.length > 200) {
             history.length = 200;
