@@ -4,6 +4,7 @@ import { state, zipCache, setAcceptClicks, setOpenedFromLink, updateProblemHisto
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
+import { reorientSgf } from './sgf.js';
 
 function selectProblem() {
     if (state.allProblems.length === 0) return null;
@@ -161,10 +162,11 @@ export async function loadTsumego(isUpdate) {
             loadNextZip();
         }
 
-        const sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
+        let sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
         if (!sgf || !sgf.trim()) {
             throw new Error('Invalid or empty SGF');
         }
+        sgf = reorientSgf(sgf);
 
         const history = state.problemHistory;
         
@@ -257,7 +259,8 @@ export async function loadTsumegoById(tsumegoId) {
         const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
         const problemRank = problem ? problem.rank : 0;
 
-        const sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
+        let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
+        sgfContent = reorientSgf(sgfContent);
 
         const history = state.problemHistory;
 

@@ -5,12 +5,13 @@ import time
 import traceback
 
 from add_variations import add_shallow_variations, generate_variations_directly_to_sgf
-from configurations import DEBUG, debug
+from configurations import BOARD_SIZE, DEBUG, debug
 from helper import construct_initial_sgf
 from katago_controller import KatagoController
-from katago_queries import KatagoQueries
+from katago_queries import KatagoQueries, katago_to_sgf_coords
 from models import MODEL_9X9, get_model
 from problem_finder import ProblemFinder
+from sgfmill import boards
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
@@ -112,6 +113,43 @@ class Stats:
 
 STATS = Stats()
 
+def transform_point(r, c, trans, size):
+    if trans == 0:  # identity
+        return r, c
+    elif trans == 1:  # 90 clockwise
+        return c, size - 1 - r
+    elif trans == 2:  # 180
+        return size - 1 - r, size - 1 - c
+    elif trans == 3:  # 270 clockwise
+        return size - 1 - c, r
+    elif trans == 4:  # horizontal reflect
+        return size - 1 - r, c
+    elif trans == 5:  # vertical reflect
+        return r, size - 1 - c
+    elif trans == 6:  # main diagonal
+        return c, r
+    elif trans == 7:  # anti-diagonal
+        return size - 1 - c, size - 1 - r
+
+def get_transformed_board(board, trans):
+    size = board.side
+    new_board = boards.Board(size)
+    for r in range(size):
+        for c in range(size):
+            stone = board.get(r, c)
+            if stone:
+                nr, nc = transform_point(r, c, trans, size)
+                new_board.play(nr, nc, stone)
+    return new_board
+
+def get_orientation_invariant_hash(board):
+    hashes = []
+    for trans in range(8):
+        tb = get_transformed_board(board, trans)
+        h = hashlib.sha256(str(tb.board).encode()).hexdigest()
+        hashes.append(h)
+    return min(hashes)
+
 def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_list: list):
     """
     The task for a single worker thread.
@@ -125,6 +163,14 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                 STATS.add_problem_found(len(moves))
 
                 STATS.set_state("other")
+                # Compute board state for hashing
+                board = boards.Board(BOARD_SIZE)
+                player = 'b'
+                for move in moves:
+                    if move != "pass":
+                        row, col = katago_to_sgf_coords(move, BOARD_SIZE)
+                        board.play(row, col, player)
+                    player = 'w' if player == 'b' else 'b'
                 # 1. Construct initial SGF
                 game,node,answer = construct_initial_sgf(moves, solution)
 
@@ -137,7 +183,8 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
 
                 STATS.set_state("other")
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
-                filename = hashlib.sha256(str(moves).encode()).hexdigest()[:8] + ".sgf"
+                board_hash = get_orientation_invariant_hash(board)
+                filename = board_hash[:8] + ".sgf"
                 with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
                     f.write(game.serialise(None).decode())
                 with print_lock:
