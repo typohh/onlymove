@@ -75,17 +75,12 @@ export async function loadZipMetadata() {
 export async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
-    const cache = await caches.open('tsumego-cache-v1');
     const cacheKey = `tsumegos/${zipFilename}`;
-    let zipData;
-    const cachedResponse = await cache.match(cacheKey);
-
-    if (cachedResponse) {
-        zipData = await cachedResponse.arrayBuffer();
-    } else {
-        const zipResponse = await fetch(cacheKey);
-        zipData = await zipResponse.arrayBuffer();
-        await cache.put(cacheKey, new Response(zipData));
+    const zipResponse = await fetch(cacheKey);
+    const zipData = await zipResponse.arrayBuffer();
+    if (!zipResponse.ok || zipData.byteLength === 0) {
+        console.error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}, cacheKey: ${cacheKey}`);
+        throw new Error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}`);
     }
 
     const zip = await new JSZip().loadAsync(zipData);
