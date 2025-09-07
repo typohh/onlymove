@@ -35,7 +35,10 @@ export const state = {
     // UI state
     acceptClicks: false,
     currentPointLoss: null,
-    problemStartTime: null,
+    problemStartTime: (() => {
+        const saved = localStorage.getItem('problemStartTime');
+        return saved ? parseInt(saved) : null;
+    })(),
     
     // Analysis mode state
     lastMoveInAnalysis: null, // Track last move in analysis mode
@@ -105,4 +108,13 @@ export function updateNextTsumego(nextTsumego) {
 
 export function setCurrentPointLoss(value) {
     state.currentPointLoss = value;
+}
+
+export function setProblemStartTime(time) {
+    state.problemStartTime = time;
+    if (time !== null) {
+        localStorage.setItem('problemStartTime', time.toString());
+    } else {
+        localStorage.removeItem('problemStartTime');
+    }
 }
