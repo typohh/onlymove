@@ -16,8 +16,8 @@ function getOrCreateUserId() {
 }
 
 export const state = {
-    // App mode: 'solving' or 'analyzing'
-        appMode: 'solving',
+    // App mode: 'solving', 'analyzing', or 'linked'
+    appMode: 'solving',
 
     // Board and Game state
     board: null,
@@ -28,9 +28,6 @@ export const state = {
     zipMetadata: [],
     loadedZips: {},
     allProblems: [],
-    
-    // Link state
-    openedFromLink: false,
     
     // User identification
     userId: getOrCreateUserId(),
@@ -81,8 +78,6 @@ export function setAcceptClicks(canAccept) {
     state.acceptClicks = canAccept;
 }
 
-
-
 export function updateUserRank(rank) {
     state.userRank = rank;
     localStorage.setItem('userRank', rank.toString());
@@ -106,10 +101,6 @@ export function updateProblemHistory(history) {
 export function updateNextTsumego(nextTsumego) {
     state.nextTsumego = nextTsumego;
     localStorage.setItem('nextTsumego', JSON.stringify(nextTsumego));
-}
-
-export function setOpenedFromLink(value) {
-    state.openedFromLink = value;
 }
 
 export function setCurrentPointLoss(value) {

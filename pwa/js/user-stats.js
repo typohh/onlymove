@@ -45,7 +45,7 @@ export function updateUserStats(isCorrect) {
         currentProblem.status = 'failure';
     }
 
-    if (state.openedFromLink) {
+    if (state.appMode === 'linked') {
         updateProblemHistory(history);
         return;
     }

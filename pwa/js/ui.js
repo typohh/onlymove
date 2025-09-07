@@ -10,7 +10,7 @@ export function updateAllUI() {
     document.getElementById('app-title').textContent = getTerm('appTitle');
     
     // Update UI based on current app mode
-    if (state.appMode === 'solving') {
+    if (state.appMode === 'solving' || state.appMode === 'linked') {
         updateSolvingModeUI();
     } else if (state.appMode === 'analyzing') {
         updateAnalysisModeUI();
@@ -19,11 +19,16 @@ export function updateAllUI() {
 
 function updateSolvingModeUI() {
     // Update Title Display
-    document.getElementById('title').textContent = getTerm('tsumegoMode');
-    document.getElementById('title-h').textContent = getTerm('tsumegoMode');
+    if (state.appMode === 'linked') {
+        document.getElementById('title').textContent = getTerm('reviewMode');
+        document.getElementById('title-h').textContent = getTerm('reviewMode');
+    } else {
+        document.getElementById('title').textContent = getTerm('tsumegoMode');
+        document.getElementById('title-h').textContent = getTerm('tsumegoMode');
+    }
     
     // Update Rank Display in the text area
-    if (state.openedFromLink) {
+    if (state.appMode === 'linked') {
         // When opened from a link, show the tsumego's rank (and no stddev)
         // Find the current problem in the loaded problems
         const currentProblem = state.allProblems.find(p => p.filename === state.problemHistory[0].filename);

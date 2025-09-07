@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, setOpenedFromLink, updateProblemHistory, updateNextTsumego } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
@@ -108,8 +108,6 @@ function findClosestUnloadedZip() {
     }, { zip: null, minDiff: Infinity }).zip;
 }
 
-
-
 async function backgroundLoadCloserZip() {
     const closestZip = findClosestUnloadedZip();
     if (closestZip) {
@@ -130,6 +128,7 @@ function loadNextZip() {
 
 export async function loadTsumego(isUpdate) {
     try {
+        setAppMode('solving');
         setAcceptClicks(false);
 
         if (!isUpdate && state.problemHistory.length > 0) {
@@ -207,7 +206,6 @@ export async function loadTsumego(isUpdate) {
             updateProblemHistory(history);
         }
 
-        setOpenedFromLink(false);
         try {
             loadSgf(sgf);
         } catch (error) {
@@ -292,7 +290,7 @@ export async function loadTsumegoById(tsumegoId) {
             updateProblemHistory(history);
         }
 
-        setOpenedFromLink(true);
+        setAppMode('linked');
 
         loadSgf(sgfContent);
         updateUrlWithTsumegoId(tsumegoId);

@@ -11,7 +11,7 @@ WGo.DIR = 'lib/wgo/';
 const boardContainer = document.getElementById('board-container');
 
 function handleBoardClick(x, y) {
-    if (state.appMode === 'solving') {
+    if (state.appMode === 'solving' || state.appMode === 'linked') {
         handleTsumegoClick(x, y);
     } else if (state.appMode === 'analyzing') {
         handleAnalysisClick(x, y);
