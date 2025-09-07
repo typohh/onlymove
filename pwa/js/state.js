@@ -17,7 +17,7 @@ function getOrCreateUserId() {
 
 export const state = {
     // App mode: 'solving' or 'analyzing'
-    appMode: 'solving',
+        appMode: 'solving',
 
     // Board and Game state
     board: null,

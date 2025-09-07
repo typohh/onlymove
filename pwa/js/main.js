@@ -1,7 +1,8 @@
 // js/main.js
 
-import { state } from './state.js';
+import { state, setAppMode, setAcceptClicks } from './state.js';
 import { updateAllUI, updateBoardSize, showDetailedStats } from './ui.js';
+import { loadSgf } from './board.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
@@ -44,13 +45,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (state.appMode === 'solving') {
             // In solving mode, button1 is "Review"
             if (!e.target.classList.contains('disabled')) {
-                state.appMode = 'analyzing';
+                setAppMode('analyzing');
                 enterAnalysisMode();
                 updateAllUI(); // Update UI to show analysis mode
             }
         } else if (state.appMode === 'analyzing') {
             // In analysis mode, button1 is "Exit"
-            state.appMode = 'solving';
+            setAppMode('solving');
             // Update URL to match current tsumego
             if (state.currentProblemFilename) {
                 const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
@@ -144,22 +145,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const tsumegoId = urlParams.get('id');
-    
+
     try {
-        let loadedById = false;
+        let loaded = false;
         if (tsumegoId) {
-            loadedById = await loadTsumegoById(tsumegoId);
+            const history = state.problemHistory;
+            if (history.length > 1 && history[1].filename.startsWith(tsumegoId)) {
+                // This is review mode on startup.
+                setAppMode('analyzing');
+                enterAnalysisMode();
+                loaded = true;
+            } else if (history.length > 0 && !history[0].filename.startsWith(tsumegoId)) {
+                // This is a new problem.
+                loaded = await loadTsumegoById(tsumegoId);
+            }
         }
-        if (!loadedById) {
+
+        if (!loaded) {
+            // This is the default case: load the current problem from history[0].
             await loadTsumego(false);
         }
-        // Update UI after tsumego is loaded
+
         updateAllUI();
+
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);
-        // Still update UI even if loading fails
         updateAllUI();
     }
-
-    
 });

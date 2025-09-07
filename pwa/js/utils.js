@@ -19,6 +19,7 @@ const localization = {
     linkCopied: '链接已复制到剪贴板',
     tsumegoMode: '死活题模式',
     reviewMode: '复习模式',
+    viewMode: '查看模式',
     carelessMistake: '粗心失误，请花更多时间阅读与判断。',
     shouldKnowThis: '应当已经掌握，请多花时间复盘你的错误。'
   },
@@ -40,6 +41,7 @@ const localization = {
     linkCopied: 'リンクをクリップボードにコピーしました',
     tsumegoMode: '詰碁モード',
     reviewMode: '復習モード',
+    viewMode: '閲覧モード',
     carelessMistake: '不注意によるミスです。読みと検討にもっと時間をかけましょう。',
     shouldKnowThis: '既知のはずです。ミスを振り返る時間をもう少し取りましょう。'
   },
@@ -61,6 +63,7 @@ const localization = {
     linkCopied: '링크가 클립보드에 복사되었습니다',
     tsumegoMode: '사활 문제 모드',
     reviewMode: '복습 모드',
+    viewMode: '보기 모드',
     carelessMistake: '부주의한 실수입니다. 더 시간을 들여 읽고 판단하세요.',
     shouldKnowThis: '이미 알고 있어야 합니다. 실수를 더 꼼꼼히 복기하세요.'
   },
@@ -82,6 +85,7 @@ const localization = {
     linkCopied: 'Link copied to clipboard',
     tsumegoMode: 'Tsumego mode',
     reviewMode: 'Review mode',
+    viewMode: 'View mode',
     carelessMistake: 'Slow down! You could likely have avoided this mistake with a bit more effort.',
     shouldKnowThis: 'A repeat mistake! During reviews try to understand difference between your move and the correct solution.'
   }
