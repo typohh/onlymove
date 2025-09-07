@@ -128,7 +128,7 @@ function loadNextZip() {
 
 export async function loadTsumego(isUpdate) {
     try {
-        setAppMode('solving');
+        
         setAcceptClicks(false);
 
         if (!isUpdate && state.problemHistory.length > 0) {

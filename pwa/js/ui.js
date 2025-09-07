@@ -6,9 +6,6 @@ import { getTerm, getDescriptiveRank } from './utils.js';
 const boardContainer = document.getElementById('board-container');
 
 export function updateAllUI() {
-    // Update app title
-    document.getElementById('app-title').textContent = getTerm('appTitle');
-    
     // Update UI based on current app mode
     if (state.appMode === 'solving' || state.appMode === 'linked') {
         updateSolvingModeUI();
@@ -20,8 +17,8 @@ export function updateAllUI() {
 function updateSolvingModeUI() {
     // Update Title Display
     if (state.appMode === 'linked') {
-        document.getElementById('title').textContent = getTerm('reviewMode');
-        document.getElementById('title-h').textContent = getTerm('reviewMode');
+        document.getElementById('title').textContent = getTerm('viewMode');
+        document.getElementById('title-h').textContent = getTerm('viewMode');
     } else {
         document.getElementById('title').textContent = getTerm('tsumegoMode');
         document.getElementById('title-h').textContent = getTerm('tsumegoMode');
@@ -29,11 +26,10 @@ function updateSolvingModeUI() {
     
     // Update Rank Display in the text area
     if (state.appMode === 'linked') {
-        // When opened from a link, show the tsumego's rank (and no stddev)
-        // Find the current problem in the loaded problems
-        const currentProblem = state.allProblems.find(p => p.filename === state.problemHistory[0].filename);
-        if (currentProblem && currentProblem.rank !== undefined) {
-            const rank = getDescriptiveRank(currentProblem.rank);
+        // When opened from a link, show the tsumego's rank from the history object.
+        const currentProblem = state.problemHistory[0];
+        if (currentProblem && currentProblem.rating !== undefined) {
+            const rank = getDescriptiveRank(currentProblem.rating);
             document.getElementById('text1').textContent = `${rank}`;
             document.getElementById('text1-h').textContent = `${rank}`;
         } else {

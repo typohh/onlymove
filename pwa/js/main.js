@@ -147,29 +147,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tsumegoId = urlParams.get('id');
 
     try {
-        let loaded = false;
-        if (tsumegoId) {
+        if (tsumegoId && tsumegoId.length > 0) {
             const history = state.problemHistory;
+
+            // Case 1: Review mode
             if (history.length > 1 && history[1].filename.startsWith(tsumegoId)) {
-                // This is review mode on startup.
                 setAppMode('analyzing');
                 enterAnalysisMode();
-                loaded = true;
-            } else if (history.length > 0 && !history[0].filename.startsWith(tsumegoId)) {
-                // This is a new problem.
-                loaded = await loadTsumegoById(tsumegoId);
+            } 
+            // Case 2: Refresh of existing problem (solving or linked)
+            else if (history.length > 0 && history[0].filename.startsWith(tsumegoId)) {
+                if (state.nextTsumego) {
+                    setAppMode('linked');
+                } else {
+                    setAppMode('solving');
+                }
+                await loadTsumego(false); // In both refresh cases, we just load what's at history[0]
             }
-        }
-
-        if (!loaded) {
-            // This is the default case: load the current problem from history[0].
+            // Case 3: Default - new linked problem
+            else {
+                await loadTsumegoById(tsumegoId);
+            }
+        } else {
+            // No ID in URL
             await loadTsumego(false);
         }
 
-        updateAllUI();
-
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);
-        updateAllUI();
     }
+
+    document.getElementById('app-title').textContent = getTerm('appTitle');
+    updateAllUI();
+
 });

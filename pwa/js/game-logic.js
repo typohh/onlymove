@@ -1,6 +1,6 @@
 // js/game-logic.js
 
-import { state, setAcceptClicks, setCurrentPointLoss } from './state.js';
+import { state, setAcceptClicks, setCurrentPointLoss, setAppMode } from './state.js';
 import { getCurrentNode, redraw, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './ui.js';
 import { playStoneSound } from './audio.js';
@@ -12,6 +12,7 @@ import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 
 function handleCorrectAnswer() {
+    setAppMode('solving');
     sendReport(true);
     updateUserStats(true);
 
