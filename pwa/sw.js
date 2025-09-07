@@ -53,48 +53,26 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // Special case for index.html: Cache-First for 1 hour, then Network-First
+    // Strategy 1: Network-First for the main HTML page (navigation requests).
+    // This ensures you get the latest HTML when online, which in turn requests the
+    // correct hashed assets, preventing the 404 race condition.
     if (request.mode === 'navigate') {
-        const url = new URL(request.url);
-        if (url.pathname === '/' || url.pathname === '/index.html') {
-            event.respondWith(
-                (async () => {
-                    const cache = await caches.open(RUNTIME_CACHE_NAME);
-                    const cacheKey = 'index.html'; // Ignore URL params
-                    const cachedResponse = await cache.match(cacheKey);
-                    if (cachedResponse) {
-                        const cachedTime = parseInt(cachedResponse.headers.get('sw-cache-time') || '0');
-                        if (Date.now() - cachedTime < 3600000) { // 1 hour
-                            return cachedResponse;
-                        }
-                    }
-                    // Fetch network
-                    try {
-                        const networkResponse = await fetch(request, { cache: 'no-cache' });
-                        if (networkResponse.ok) {
-                            const responseClone = networkResponse.clone();
-                            const newHeaders = new Headers(responseClone.headers);
-                            newHeaders.set('sw-cache-time', Date.now().toString());
-                            const modifiedResponse = new Response(responseClone.body, {
-                                status: responseClone.status,
-                                statusText: responseClone.statusText,
-                                headers: newHeaders
-                            });
-                            cache.put(cacheKey, modifiedResponse);
-                            return networkResponse;
-                        } else {
-                            if (cachedResponse) return cachedResponse;
-                            return networkResponse;
-                        }
-                    } catch (error) {
-                        if (cachedResponse) return cachedResponse;
-                        throw error;
-                    }
-                })()
-            );
-            return;
-        }
-        // Other navigation requests are not handled specially (no caching)
+        event.respondWith(
+            fetch(request, { cache: 'no-cache' })
+                .then(networkResponse => {
+                    // Good network response? Cache it for offline use and return it.
+                    const responseToCache = networkResponse.clone();
+                    caches.open(RUNTIME_CACHE_NAME).then(cache => {
+                        cache.put(request, responseToCache);
+                    });
+                    return networkResponse;
+                })
+                .catch(() => {
+                    // Network failed? Serve the cached version (for offline access).
+                    return caches.match(request);
+                })
+        );
+        return;
     }
 
     // Strategy 2: Cache-First for all other assets (CSS, JS, images, etc.).
