@@ -57,19 +57,19 @@ self.addEventListener('fetch', event => {
     // This ensures you get the latest HTML when online, which in turn requests the
     // correct hashed assets, preventing the 404 race condition.
     if (request.mode === 'navigate') {
+        const url = new URL(request.url);
+        const strippedUrl = new URL(url.pathname, url.origin);
         event.respondWith(
             fetch(request, { cache: 'no-cache' })
                 .then(networkResponse => {
-                    // Good network response? Cache it for offline use and return it.
                     const responseToCache = networkResponse.clone();
                     caches.open(RUNTIME_CACHE_NAME).then(cache => {
-                        cache.put(request, responseToCache);
+                        cache.put(strippedUrl.href, responseToCache);
                     });
                     return networkResponse;
                 })
                 .catch(() => {
-                    // Network failed? Serve the cached version (for offline access).
-                    return caches.match(request);
+                    return caches.match(strippedUrl.href);
                 })
         );
         return;
