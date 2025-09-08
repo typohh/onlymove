@@ -83,7 +83,15 @@ export async function loadZipProblems(zipFilename) {
         throw new Error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}`);
     }
 
-    const zip = await new JSZip().loadAsync(zipData);
+    let zip;
+    try {
+        zip = await new JSZip().loadAsync(zipData);
+    } catch (error) {
+        if (error.message && error.message.includes("Can't find end of central directory")) {
+            console.log(`Zip file error: filename=${zipFilename}, filesize=${zipData.byteLength}`);
+        }
+        throw error;
+    }
     const metadataFile = zip.file('metadata.json');
     if (!metadataFile) throw new Error(`metadata.json not found in ${zipFilename}`);
 
