@@ -84,9 +84,7 @@ export async function loadZipMetadata() {
         const response = await fetch(`metadata.json?v=${APP_VERSION}`);
         state.zipMetadata = await response.json();
         const metadataStr = JSON.stringify(state.zipMetadata);
-        console.log('Fetched metadata length:', state.zipMetadata.length);
         console.log('Metadata hash:', simpleHash(metadataStr));
-        console.log('Metadata includes a47585cf.zip:', state.zipMetadata.some(z => z.filename === 'a47585cf.zip'));
     }
 }
 
@@ -94,13 +92,15 @@ export async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
     const cacheKey = `tsumegos/${zipFilename}`;
-    const zipResponse = await fetch(cacheKey);
-    const zipData = await zipResponse.arrayBuffer();
-    console.log(`Fetched ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}, first 100 bytes: ${new TextDecoder().decode(zipData.slice(0, 100))}`);
-    if (!zipResponse.ok || zipData.byteLength === 0) {
-        console.error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}, cacheKey: ${cacheKey}`);
-        throw new Error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}`);
+        const zipResponse = await fetch(cacheKey);
+
+    const contentType = zipResponse.headers.get('content-type');
+    if (!zipResponse.ok || (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream'))) {
+        console.error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
+        throw new Error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
     }
+
+    const zipData = await zipResponse.arrayBuffer();
 
     let zip;
     try {
@@ -165,7 +165,6 @@ export async function loadTsumego(isUpdate) {
 
         let selectedProblem = selectProblem();
         if (selectedProblem) {
-            console.log(`Selected problem: ${selectedProblem.filename}, zip: ${selectedProblem.zipFilename}`);
         }
 
         if (!selectedProblem) {
