@@ -155,4 +155,5 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - For small files, read the entire file, instead of reading parts of it.
 - After you have made the requested changes, run npm build, provide summary of changes made since last request and stop and wait for further instructions.
 - Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed.
-- When using the replace tool, avoid using `\n` in old_string or new_string arguments, as this may insert literal `\n` characters instead of actual newlines, causing syntax errors. Use multi-line strings or ensure proper newline handling.
+- When using the replace tool, avoid using \n new_string arguments, as this may insert literal "\n" instead of actual newlines, causing syntax errors. Use multi-line strings or ensure proper newline handling.
+- Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.

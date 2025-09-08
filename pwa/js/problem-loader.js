@@ -6,6 +6,16 @@ import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
 import { reorientSgf } from './sgf.js';
 
+function simpleHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(16);
+}
+
 function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
@@ -69,6 +79,10 @@ export async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
         const response = await fetch(`metadata.json?v=${APP_VERSION}`);
         state.zipMetadata = await response.json();
+        const metadataStr = JSON.stringify(state.zipMetadata);
+        console.log('Fetched metadata length:', state.zipMetadata.length);
+        console.log('Metadata hash:', simpleHash(metadataStr));
+        console.log('Metadata includes a47585cf.zip:', state.zipMetadata.some(z => z.filename === 'a47585cf.zip'));
     }
 }
 
@@ -78,6 +92,7 @@ export async function loadZipProblems(zipFilename) {
     const cacheKey = `tsumegos/${zipFilename}`;
     const zipResponse = await fetch(cacheKey);
     const zipData = await zipResponse.arrayBuffer();
+    console.log(`Fetched ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}, first 100 bytes: ${new TextDecoder().decode(zipData.slice(0, 100))}`);
     if (!zipResponse.ok || zipData.byteLength === 0) {
         console.error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}, cacheKey: ${cacheKey}`);
         throw new Error(`Invalid zip response for ${zipFilename}: status ${zipResponse.status}, size ${zipData.byteLength}`);
@@ -141,10 +156,15 @@ export async function loadTsumego(isUpdate) {
             setAcceptClicks(true);
             return;
         }
+    }
+}
 
         await loadZipMetadata();
 
         let selectedProblem = selectProblem();
+        if (selectedProblem) {
+            console.log(`Selected problem: ${selectedProblem.filename}, zip: ${selectedProblem.zipFilename}`);
+        }
 
         if (!selectedProblem) {
             const closestZip = findClosestUnloadedZip();
