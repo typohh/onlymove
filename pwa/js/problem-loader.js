@@ -34,6 +34,10 @@ function selectProblem() {
             continue; // Skip this problem if its rating is not less than the user's current rank
         }
 
+        if (!historyItem.sgf) {
+            continue;
+        }
+
         let probability = 0;
 
         if (historyItem.status === 'failure') {
@@ -203,7 +207,7 @@ export async function loadTsumego(isUpdate) {
             history.splice(indicesToRemove[i], 1);
         }
 
-        history.unshift({
+                        history.unshift({
             filename: selectedProblem.filename,
             sgf: sgf,
             status: selectedProblem.status || 'success',
@@ -288,7 +292,7 @@ export async function loadTsumegoById(tsumegoId) {
             updateNextTsumego({ ...history[0], linked: false });
         }
 
-        history.unshift({
+                        history.unshift({
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
             status: 'success',

@@ -8,7 +8,7 @@ const DIST_DIR = 'dist';
 async function main() {
     console.log("🚀 Starting production build...");
 
-    const gitHash = execSync('git rev-parse --short HEAD').toString().trim();
+        const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
     console.log(`✅ Version (Git Hash): ${gitHash}`);
 
     await fs.rm(DIST_DIR, { recursive: true, force: true });
