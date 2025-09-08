@@ -156,8 +156,6 @@ export async function loadTsumego(isUpdate) {
             setAcceptClicks(true);
             return;
         }
-    }
-}
 
         await loadZipMetadata();
 
