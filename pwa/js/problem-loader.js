@@ -6,14 +6,12 @@ import { updateAllUI, displayOverlay } from './ui.js';
 import { updateUrlWithTsumegoId } from './utils.js';
 import { reorientSgf } from './sgf.js';
 
-function simpleHash(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
-    }
-    return hash.toString(16);
+async function simpleHash(str) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function selectProblem() {
@@ -84,7 +82,7 @@ export async function loadZipMetadata() {
         const response = await fetch(`metadata.json?v=${APP_VERSION}`);
         state.zipMetadata = await response.json();
         const metadataStr = JSON.stringify(state.zipMetadata);
-        console.log('Metadata hash:', simpleHash(metadataStr));
+        console.log('Metadata hash:', await simpleHash(metadataStr));
     }
 }
 
