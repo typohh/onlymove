@@ -132,6 +132,7 @@ class ProblemFinder:
 
         debug("adjusting tsumego")
         policies = [0 for _ in range(len(moves))]
+        # potential = {}
 
         while True:
             best_move, best_winrate, best_score, best_policy = self.queries.get_best_move(self.queries.query(moves, playouts=PLAYOUTS))
@@ -146,14 +147,15 @@ class ProblemFinder:
                 return None, None
 
             # do we meet all criteria?
-            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and second_score < 0:
+            if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and best_score > 0 and second_score < 0:
                 if self.is_valid(moves):
                     debug("found tsumego!")
                     debug(moves)
                     debug(str(policies))
+                    # potential[(len(moves))] = best_move
                     return moves, best_move
 
-            if second_winrate > MIN_WINRATE_CORRECT_VERIFY:  # we are winning too much, need to lose points..
+            if second_winrate > MIN_WINRATE_CORRECT_VERIFY and second_score > 0.5:  # we are winning too much, need to lose points..
                 balanced_move, balanced_score, balanced_winrate, balanced_policy = self._rebalance_game(moves)
                 debug(f"B {balanced_move} {(balanced_winrate * 100):.1f}% {balanced_score:.1f} {100 * balanced_policy:.1f}% (rebalancing game)")
                 moves.append(balanced_move)

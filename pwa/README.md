@@ -10,7 +10,7 @@ The application is built with vanilla JavaScript (ESM), organized into a modular
 
 ## 2. Core Features
 
-*   **Adaptive Tsumego Solving:** Selects problems from a large, pre-processed collection based on the user's estimated rank.
+*   **Adaptive Tsumego Solving:** Selects problems from a large, pre-processed collection based on the user's estimated rank and problem quality, using weighted random sampling.
 *   **Dynamic Rank System:** User rank and problem selection momentum are adjusted in real-time based on correct/incorrect answers.
 *   **Automatic Analysis Mode:** Failing a problem automatically transitions the user into a review mode for that tsumego.
 *   **Client-Side Analysis:** For many problems, analysis (best move, score) is determined instantly using win-rate information embedded in the SGF file, avoiding server latency.
@@ -98,9 +98,13 @@ The application now primarily relies on a rich SGF format.
 *   Each branch after this point contains a comment with win-rate and score information (e.g., `"86.4%/3.1"`).
 *   The application's **`sgf.js`** module parses this information to determine the correct move (the one with the highest win rate) without needing a "Correct" text marker. This allows for more nuanced problems and client-side answer checking.
 
+### 5.3.1. Tsumego Quality Attribute
+
+Each tsumego in the collection has a quality attribute (a numerical value) that represents its overall quality or desirability. During problem selection, the system uses weighted random sampling where the quality value serves as the weight, allowing higher-quality problems to have a greater chance of being chosen without always selecting the absolute best ones.
+
 ### 5.4. Tsumego Loading Pipeline
 
-The loading pipeline, managed by **`js/problem-loader.js`**, remains largely the same, using `.zip` archives and a weighted selection algorithm to serve problems to the user.
+The loading pipeline, managed by **`js/problem-loader.js`**, uses `.zip` archives and a weighted random selection algorithm based on each tsumego's quality attribute to serve problems to the user. This ensures that higher-quality problems are more likely to be selected while maintaining randomness and adapting to the user's rank.
 
 ### 5.5. Build Process (`build.mjs`)
 
@@ -157,3 +161,6 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed.
 - When using the replace tool, avoid using \n new_string arguments, as this may insert literal "\n" instead of actual newlines, causing syntax errors. Use multi-line strings or ensure proper newline handling.
 - Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.
+- Upon reading these instructions, quote back any you understand and think you are able to follow.
+- Try to rule out any "explanation" you have for a bug, by properly investigating the code before making any changes. Instead of hiding behind vague claims and jumping to conclusions.
+

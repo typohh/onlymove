@@ -3,9 +3,9 @@ import io
 import json
 import os
 import zipfile
+import pandas as pd
 
 from katago_queries import get_all_ranks, get_rank_str
-from tsumego_ratings_complex import get_tsumego_ratings, sample_tsumegos_with_links
 
 
 def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
@@ -90,7 +90,9 @@ def print_rank_distribution(metadata):
 
         count = sum(1 for x in rank_distribution if min_r <= x < max_r)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
-        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%)")
+        qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rank'] < max_r]
+        avg_quality = sum(qualities_in_range) / len(qualities_in_range) if qualities_in_range else 0.0
+        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f})")
         previous_rank = rank
 
 
@@ -100,21 +102,70 @@ if __name__ == "__main__":
     OUTPUT_DIR = "pwa"
 
     # 1. Get the ratings map (tsumego_id -> rank).
-    tsumego_ratings_map = get_tsumego_ratings()
+    tsumego_ratings_df = pd.read_csv("ratings/tsumego_ratings_final.csv")
 
-    # 2. Build the final metadata list by matching files with their ratings.
-    print(f"\nMatching {len(tsumego_ratings_map)} ratings to tsumego files...")
+    # Normalize ratings to 0-1
+    # min_rating = tsumego_ratings_df['rating'].min()
+    # max_rating = tsumego_ratings_df['rating'].max()
+    # tsumego_ratings_df['rating'] = (tsumego_ratings_df['rating'] - min_rating) / (max_rating - min_rating)
+
+    # Apply order..
+    tsumego_ratings_df = tsumego_ratings_df.sort_values(by='rating', ascending=True).reset_index(drop=True)
+
+    total = len(tsumego_ratings_df)
+    # bottom 1% to linearly 0-1/29, middle to normalized 1/29-28/29, top 10% to linearly 28/29-1
+    bottom_1_count = int(0.01 * total)
+    middle_end = int(0.90 * total)
+    top_count = total - middle_end
+    # Bottom 1%: position-based linear interpolation to 0 - 1/29
+    if bottom_1_count > 1:
+        tsumego_ratings_df.loc[:bottom_1_count-1, 'rating'] = (tsumego_ratings_df.index[:bottom_1_count] / (bottom_1_count - 1)) * (1/29)
+    else:
+        tsumego_ratings_df.loc[:bottom_1_count-1, 'rating'] = 0.0
+    # Middle: normalize based on rating to 1/29 - 28/29
+    min_middle = tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'].min()
+    max_middle = tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'].max()
+    if max_middle > min_middle:
+        tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] = (tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] - min_middle) / (max_middle - min_middle) * (28/29 - 1/29) + 1/29
+    else:
+        tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] = 1/29
+    # Top: position-based to 28/29 - 1
+    if top_count > 1:
+        tsumego_ratings_df.loc[middle_end:, 'rating'] = ((tsumego_ratings_df.index[middle_end:] - middle_end) / (top_count - 1)) * (1 - 28/29) + 28/29
+    else:
+        tsumego_ratings_df.loc[middle_end:, 'rating'] = 28/29
+
+
+    tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], tsumego_ratings_df['rating']))
+
+    # 2. Get the quality map (tsumego_id -> quality).
+    tsumego_quality_df = pd.read_csv("ratings/tsumego_quality_final.csv")
+    # Normalize qualities to 0-1
+    min_quality = tsumego_quality_df['quality'].min()
+    max_quality = tsumego_quality_df['quality'].max()
+    tsumego_quality_df['quality'] = (tsumego_quality_df['quality'] - min_quality) / (max_quality - min_quality)
+    # tsumego_quality_df['quality'] = 1 - tsumego_quality_df['quality'] # test out how low quality tsumegos compare
+    tsumego_quality_map = dict(zip(tsumego_quality_df['tsumego_id'], tsumego_quality_df['quality']))
+
+    # 3. Build the final metadata list by matching files with their ratings and quality.
+    print(f"Found {len(tsumego_ratings_map)} rating values in ratings/tsumego_ratings_final.csv" )
+    print(f"Found {len(tsumego_ratings_map)} quality values in ratings/tsumego_quality_final.csv" )
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
+    print(f"Found {len(sgf_files)} SGF files in '{TSUMEGOS_DIR}'.")
+    skipped_count = 0
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
             rank = tsumego_ratings_map[tsumego_id]
-            all_metadata.append({"filename": filename, "rank": rank})
+            quality = tsumego_quality_map.get(tsumego_id, 0.0)
+            all_metadata.append({"filename": filename, "rank": rank, "quality": quality})
         else:
-            print(f"Warning: SGF file '{filename}' found but has no calculated rating. Skipping.")
+            skipped_count += 1
 
     print(f"\nSuccessfully created metadata for {len(all_metadata)} tsumegos.")
+    if skipped_count > 0:
+        print(f"Skipped {skipped_count} SGF files with no matching rating.")
 
     # 3. Create the zip packages and main metadata file.
     print("\n--- Creating Tsumego Packages ---")
@@ -126,6 +177,3 @@ if __name__ == "__main__":
 
     # 4. Print the final distribution report.
     print_rank_distribution(all_metadata)
-    
-    # 5. Sample tsumegos for testing
-    sample_tsumegos_with_links(sample_size=200)

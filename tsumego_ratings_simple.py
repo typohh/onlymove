@@ -78,16 +78,15 @@ def get_tsumego_ratings():
     The method is as follows:
     1.  Parse all attempt files to build a success/failure matrix for each bot.
     2.  Rank bots from strongest to weakest based on their total number of solved problems.
-    3.  For each tsumego, determine its difficulty by finding the rank of the 5th
-        strongest bot that FAILED it. This establishes a relative ordering.
-    4.  Sort the tsumegos based on this difficulty metric.
+    3.  For each tsumego, determine cutoff points where cumulative success reaches 95% and 50% among ranked bots, then combine with 90% weight on 95% cutoff and 10% on 50% cutoff.
+    4.  Sort the tsumegos based on this combined difficulty metric.
     5.  Assign a preliminary, uniformly distributed rank from 0.0 (easiest) to 1.0 (hardest).
     6.  Select an "anchor bot" and find the uniform rank where it solves ~50% of problems.
     7.  Create anchor points mapping this 50% point to a desired real-world rank (e.g., 4d).
     8.  Interpolate the final ratings based on these dynamic anchors.
 
     Returns:
-        A dictionary mapping each tsumego_id (str) to its calculated, calibrated rank (float).
+        A tuple of (difficulty_scores, quality_scores, sorted_ratings, sorted_quality).
     """
     attempts_path = Path(ATTEMPTS_DIR)
     if not attempts_path.is_dir():
@@ -110,6 +109,9 @@ def get_tsumego_ratings():
                 except (ValueError, IndexError):
                     continue
 
+    # Filter to only include tsumegos with SGF files
+    all_tsumegos = {tid for tid in all_tsumegos if Path(f"tsumegos/{tid}.sgf").exists()}
+
     # REVISED: Fail loudly if no data was loaded. This prevents the script from
     # producing meaningless results or crashing with obscure errors later on.
     if not all_tsumegos:
@@ -118,195 +120,60 @@ def get_tsumego_ratings():
             f"Check the attempts directory ('{ATTEMPTS_DIR}') and file formats."
         )
 
-    print(f"Parsed data for {len(bot_results)} bots and {len(all_tsumegos)} unique tsumegos.")
+    print(f"Parsed data for {len(bot_results)} bots and {len(all_tsumegos)} unique tsumegos (with SGF files).")
 
     # --- 2. Rank bots by success ---
     bot_solves = {bot: sum(results.values()) for bot, results in bot_results.items()}
-    ranked_bots = sorted(bot_solves.keys(), key=lambda bot: bot_solves[bot], reverse=True)
-    bot_strength_rank = {bot_id: i for i, bot_id in enumerate(ranked_bots)}
+    ranked_bots = sorted(bot_solves.keys(), key=lambda bot: bot_solves[bot], reverse=False)
 
     if not ranked_bots:
         raise ValueError("No bots found after parsing results.")
 
-    # --- 3. Determine tsumego difficulty based on 6th strongest failing bot ---
+    def find_cutoff(requirement, successes):
+        cumulative = 0
+        cutoff = 0
+        for i, success in enumerate(reversed(successes)):
+            cumulative += success
+            average = cumulative / (i + 1)
+            if average >= requirement:
+                cutoff = i
+        return len(successes)-(1+cutoff)
+
+    # --- 3. Determine tsumego difficulty based on cutoff points ---
     tsumego_difficulty_scores = {}
+    tsumego_quality_scores = {}
     print("\n--- Calculating Tsumego Difficulty ---")
     for tsumego_id in all_tsumegos:
-        found_failing_bots = []
-        for bot in ranked_bots:
-            if not bot_results.get(bot, {}).get(tsumego_id, True):
-                found_failing_bots.append(bot)
-                if len(found_failing_bots) >= 6:
-                    break
-
-        failure_bot = found_failing_bots[-1] if found_failing_bots else ranked_bots[-1]
-        tsumego_difficulty_scores[tsumego_id] = bot_strength_rank[failure_bot]
+        successes = [bot_results[bot][tsumego_id] for bot in ranked_bots]
+        cutoff_95 = find_cutoff(0.95, successes)
+        cutoff_55 = find_cutoff(0.55, successes[:cutoff_95])
+        rating = (0.9 * cutoff_95 + 0.1 * cutoff_55) / len(successes) # mainly what rank is required to have 95% confidence, with the rest a tiebreaker
+        difference = (cutoff_95 - cutoff_55)
+        quality = (len(successes) - difference) / (len(successes) + difference) # how quickly do we go from 55% to 95% confidence
+        tsumego_difficulty_scores[tsumego_id] = rating
+        tsumego_quality_scores[tsumego_id] = quality
 
     # --- 4. Sort tsumegos by their calculated difficulty ---
-    sorted_tsumegos = sorted(
+    sorted_ratings = sorted(
         tsumego_difficulty_scores.keys(),
         key=lambda tid: tsumego_difficulty_scores[tid],
         reverse=True
     )
-
-    # --- 5. Assign final uniform ranks ---
-    uniform_ratings = {}
-    total_tsumegos = len(sorted_tsumegos)
-    for i, tsumego_id in enumerate(sorted_tsumegos):
-        rank = i / (total_tsumegos - 1) if total_tsumegos > 1 else 0.0
-        uniform_ratings[tsumego_id] = rank
-
-    # -- assign rank to each bot ---
-
-    bot_ratings = {}
-
-    for bot_id in bot_results.keys():
-        bot_ratings[bot_id] = find_bot_50_percent_rating(bot_id, uniform_ratings, bot_results)
-
-    sorted(bot_ratings)
-    for bot_id in sorted(bot_ratings, key=bot_ratings.get, reverse=True):
-        print(bot_id, bot_ratings[bot_id])
-
-    # --- 6. Define bot-based anchors for interpolation ---
-    print("\n--- Calibrating Ratings Using Bot Performance Anchor ---")
-
-    anchors = {
-        1.0: 1.0,
-        find_bot_50_percent_rating("kata1-b6c96-s175395328-d26788732_corrupt21_1", uniform_ratings, bot_results): get_rank_number("4d"),
-        0.0: 0.0
-    }
-
-    pprint(anchors)
-
-    # --- 7. Interpolate final ratings based on anchors ---
-    anchor_x = np.array(sorted(anchors.keys()))
-    anchor_y = np.array([anchors[x] for x in anchor_x])
-
-    interpolated_ratings = {}
-    for tsumego_id, rating in uniform_ratings.items():
-        interpolated_ratings[tsumego_id] = np.interp(rating, anchor_x, anchor_y)
-
-    differences = [(interpolated_ratings[tid] - uniform_ratings[tid]) for tid in uniform_ratings.keys()]
-    avg_difference = sum(differences) / len(differences)
-    print(f"\nAverage difference between interpolated and uniform ratings: {avg_difference:.4f}")
-
-    return interpolated_ratings
-
-
-def reading_statistics():
-    """
-    Analyzes how additional reading (playouts) affects bot performance.
-    
-    This function examines bot IDs that contain playout information in the format
-    'name_x' where 'x' is the number of playouts, and determines:
-    1. How many bots show performance changes with additional reading
-    2. How much reading is needed to see significant performance improvements
-    """
-    attempts_path = Path(ATTEMPTS_DIR)
-    if not attempts_path.is_dir():
-        raise FileNotFoundError(f"Attempts directory not found at '{attempts_path}'")
-
-    # Parse all attempts
-    bot_results = defaultdict(dict)
-    all_tsumegos = set()
-
-    print("--- Parsing Bot Attempts for Reading Analysis ---")
-    for file_path in attempts_path.glob("*.txt"):
-        bot_id = file_path.stem
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    tsumego_id, result = line.strip().split()
-                    is_success = float(result) == 1.0
-                    bot_results[bot_id][tsumego_id] = is_success
-                    all_tsumegos.add(tsumego_id)
-                except (ValueError, IndexError):
-                    continue
-
-    if not all_tsumegos:
-        raise ValueError("No tsumego problems found in attempts directory.")
-
-    # Group bots by base name (without playout count)
-    bot_groups = defaultdict(list)
-    for bot_id in bot_results.keys():
-        # Extract playout count from bot ID (format: name_x where x is playouts)
-        if '_' in bot_id:
-            parts = bot_id.split('_')
-            if len(parts) >= 2 and parts[-1].isdigit():
-                base_name = '_'.join(parts[:-1])
-                playouts = int(parts[-1])
-                bot_groups[base_name].append((playouts, bot_id))
-            else:
-                # Bot ID doesn't follow the expected pattern, skip for this analysis
-                continue
-        # Bots without playout info are not included in this analysis
-
-    # Analyze reading effects for each bot group
-    print(f"\n--- Reading Statistics for {len(bot_groups)} Bot Groups ---")
-    
-    total_bots_with_reading_data = 0
-    bots_showing_improvement = 0
-    bots_with_insufficient_data = 0
-    
-    for base_name, bots in bot_groups.items():
-        if len(bots) < 2:
-            # Need at least 2 bots with different playouts to compare
-            bots_with_insufficient_data += 1
-            continue
-            
-        total_bots_with_reading_data += 1
-        
-        # Sort bots by playout count
-        sorted_bots = sorted(bots, key=lambda x: x[0])
-        playout_counts = [b[0] for b in sorted_bots]
-        bot_ids = [b[1] for b in sorted_bots]
-        
-        # Calculate success rates for each bot
-        success_rates = []
-        for bot_id in bot_ids:
-            results = bot_results[bot_id]
-            if results:
-                success_rate = sum(results.values()) / len(results)
-                success_rates.append(success_rate)
-            else:
-                success_rates.append(0.0)
-        
-        # Check if additional reading improves performance
-        shows_improvement = False
-        for i in range(1, len(success_rates)):
-            if success_rates[i] > success_rates[i-1]:
-                shows_improvement = True
-                break
-        
-        if shows_improvement:
-            bots_showing_improvement += 1
-            
-        # Print detailed statistics for this bot group
-        print(f"\nBot Group: {base_name}")
-        print(f"  Playouts -> Success Rate")
-        for playouts, success_rate in zip(playout_counts, success_rates):
-            print(f"  {playouts:>8} -> {success_rate:.4f}")
-        
-        if shows_improvement:
-            print("  Status: IMPROVEMENT with additional reading")
-        else:
-            print("  Status: NO IMPROVEMENT with additional reading")
-    
-    # Summary statistics
-    print(f"\n--- Summary ---")
-    print(f"Total bot groups with sufficient reading data: {total_bots_with_reading_data}")
-    print(f"Bot groups showing improvement with more reading: {bots_showing_improvement}")
-    
-    if total_bots_with_reading_data > 0:
-        improvement_percentage = (bots_showing_improvement / total_bots_with_reading_data) * 100
-        print(f"Percentage of bots improved with reading: {improvement_percentage:.1f}%")
-    else:
-        print("No bots with sufficient reading data found for comparison.")
-        
-    if bots_with_insufficient_data > 0:
-        print(f"Bots with insufficient data for reading analysis: {bots_with_insufficient_data}")
+    sorted_quality = sorted(
+        tsumego_quality_scores.keys(),
+        key=lambda tid: tsumego_quality_scores[tid],
+        reverse=True
+    )
+    return tsumego_difficulty_scores, tsumego_quality_scores, sorted_ratings, sorted_quality
 
 
 if __name__ == "__main__":
-    get_tsumego_ratings()
-    reading_statistics()
+    difficulty_scores, quality_scores, sorted_ratings, sorted_quality = get_tsumego_ratings()
+    samples = 10
+    sorted_by_rating_asc = sorted(difficulty_scores.keys(), key=lambda tid: difficulty_scores[tid])
+    for i in range(samples):
+        idx = int(len(sorted_by_rating_asc) * (i + 0.5) / samples)
+        tsumego_id = sorted_by_rating_asc[idx]
+        rating = difficulty_scores[tsumego_id]
+        quality = quality_scores[tsumego_id]
+        print(f"{tsumego_id} {rating:.5f} {quality:.5f} http://localhost:8000/?id={tsumego_id}")

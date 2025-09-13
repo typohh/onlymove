@@ -72,10 +72,10 @@ export function updateUserStats(isCorrect) {
     }
 
     if (isCorrect && oldStatus !== 'failure' && oldStatus !== 'in-between') {
-        const maxIncrease = (1.0 - rank) / 2;
+        const maxIncrease = (1.0 - rank) / 3;
         const intendedIncrease = momentum / 600;
         if(intendedIncrease > maxIncrease) {
-            momentum = Math.max( 0.5 , momentum * 0.8 );
+            momentum *= maxIncrease / intendedIncrease;
         } else {
             momentum *= 1.1;
         }

@@ -14,6 +14,17 @@ async function simpleHash(str) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function weightedRandomSelect(items, weightFn) {
+    const totalWeight = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
+    if (totalWeight === 0) return items[0]; // fallback to first if no weights
+    let random = Math.random() * totalWeight;
+    for (const item of items) {
+        random -= Math.max(0, weightFn(item));
+        if (random <= 0) return item;
+    }
+    return items[0]; // fallback
+}
+
 function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
@@ -62,9 +73,10 @@ function selectProblem() {
     }
 
     availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
-    const candidateProblems = availableProblems.slice(0, 500);
+    const candidateProblems = availableProblems.slice(0, 300);
 
-    const problem = candidateProblems[Math.floor(Math.random() * candidateProblems.length)];
+    // Select a problem using weighted random sampling based on quality
+    const problem = weightedRandomSelect(candidateProblems, p => p.quality);
     return { ...problem, status: 'success' };
 }
 
