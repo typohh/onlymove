@@ -24,8 +24,8 @@ DIFFERENCE_FOR_QUALITY = -np.pi / np.sqrt(3)  # Approx. 1.8138
 EPSILON = 1e-9
 
 # Set a fixed seed for reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
+torch.manual_seed(43)
+np.random.seed(43)
 
 
 # --- Data Loading ---
@@ -451,7 +451,7 @@ if __name__ == '__main__':
     df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf = load_data(DATA_DIRECTORY)
 
     # Step 1: Train the model and save the learned parameters
-    # rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
+    rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
 
     # Step 2: Load the saved parameters and calculate final ratings and quality
     # We pass all original names so it can handle non-monotonic ones if needed in the future
