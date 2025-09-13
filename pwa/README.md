@@ -154,13 +154,11 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 ### 7.0. LLM instructions
 
 - Rely on duduced file content whenever reasonable, instead of reading the content. Reading files "just in case" will slow down operation without improving performance.
-- If you read data files, including utf-8 encoded data files, for which content could be deduced from code, you will be fired.
-- THIS IS VERY IMPORTANT, YOU NEED TO ASK PERMISSION TO READ DATA FILES, DOIING SO OUT OF YOUR OWN INITIATIVE IS AGAINST THE POLICY AND WILL BE CAUSE FOR TERMINATION!
-- For small files, read the entire file, instead of reading parts of it.
+- If you want to read data files, including text data files like csv, only read as few lines as possible, usually something like 1-3.
+- For small code files, read the entire file, instead of reading parts of it.
 - After you have made the requested changes, run npm build, provide summary of changes made since last request and stop and wait for further instructions.
-- Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed.
-- When using the replace tool, avoid using \n new_string arguments, as this may insert literal "\n" instead of actual newlines, causing syntax errors. Use multi-line strings or ensure proper newline handling.
+- Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed, not just that it compiles.
 - Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.
-- Upon reading these instructions, quote back any you understand and think you are able to follow.
 - Try to rule out any "explanation" you have for a bug, by properly investigating the code before making any changes. Instead of hiding behind vague claims and jumping to conclusions.
+- Upon reading these instructions, quote back any you understand and think you are able to follow.
 
