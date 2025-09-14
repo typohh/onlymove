@@ -39,11 +39,18 @@ function updateSolvingModeUI() {
             document.getElementById('text1-h').textContent = '...';
         }
     } else {
-        // Normal display with rank information
-        const rank = getDescriptiveRank(state.userRank);
-        document.getElementById('text1').textContent = `${rank}`;
-        document.getElementById('text1-h').textContent = `${rank}`;
-        
+        // Normal display with tsumego rank information
+        const currentProblem = state.problemHistory[0];
+        if (currentProblem && currentProblem.rating !== undefined) {
+            const rank = getDescriptiveRank(currentProblem.rating);
+            document.getElementById('text1').textContent = `${rank}`;
+            document.getElementById('text1-h').textContent = `${rank}`;
+        } else {
+            // Fallback if rank not found
+            document.getElementById('text1').textContent = '...';
+            document.getElementById('text1-h').textContent = '...';
+        }
+
         // Set styles for click (event added in main.js)
         const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
         text1Elements.forEach(element => {
@@ -257,9 +264,12 @@ export function showDetailedStats() {
     const longTermRecollectionText = longTermRecollectionValue !== null ? `${longTermRecollectionValue}%` : '-';
 
     // Display the information
-    const detailText = `${getTerm('onTheWayToNextRank')}: ${Math.floor(progress)}%
+    const userRank = getDescriptiveRank(state.userRank);
+    const detailText = `${getTerm('userRank')}: ${userRank}
 ` +
-                       `${getTerm('standardDeviation')}: ${stddev.toFixed(1)}%
+                       `${getTerm('onTheWayToNextRank')}: ${Math.floor(progress)}%
+` +
+                       `${getTerm('standardDeviation')}: ${(stddev * TOTAL_RANKS).toFixed(1)} ranks
 ` +
                        `${getTerm('totalTsumegos')}: ${totalTsumegos}
 ` +

@@ -30,7 +30,8 @@ const localization = {
     standardDeviation: '标准差',
     totalTsumegos: '总题目数',
     shortTermRecollection: '短期记忆',
-    longTermRecollection: '长期记忆'
+    longTermRecollection: '长期记忆',
+    userRank: '用户等级'
   },
   ja: {
     kyu: '級',
@@ -59,7 +60,8 @@ const localization = {
     standardDeviation: '標準偏差',
     totalTsumegos: '合計問題数',
     shortTermRecollection: '短期記憶',
-    longTermRecollection: '長期記憶'
+    longTermRecollection: '長期記憶',
+    userRank: 'ユーザーランク'
   },
   ko: {
     kyu: '급',
@@ -88,7 +90,8 @@ const localization = {
     standardDeviation: '표준 편차',
     totalTsumegos: '총 문제 수',
     shortTermRecollection: '단기 기억',
-    longTermRecollection: '장기 기억'
+    longTermRecollection: '장기 기억',
+    userRank: '사용자 등급'
   },
   en: {
     kyu: 'kyu',
@@ -118,6 +121,7 @@ const localization = {
     totalTsumegos: 'Total Tsumegos',
     shortTermRecollection: 'Short Term Recollection',
     longTermRecollection: 'Long Term Recollection',
+    userRank: 'User Rank',
     rankChangeFormat: 'Rank {change}'
   }
 };
