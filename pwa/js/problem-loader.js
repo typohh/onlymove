@@ -72,7 +72,7 @@ function selectProblem() {
 	return null;
     }
 
-    availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
+    availableProblems.sort((a, b) => Math.abs(a.rating - state.userRank) - Math.abs(b.rating - state.userRank));
     const candidateProblems = availableProblems.slice(0, 300);
 
     // Select a problem using weighted random sampling based on quality
@@ -135,7 +135,7 @@ export async function loadZipProblems(zipFilename) {
 function findClosestUnloadedZip() {
     const unloadedZips = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
     return unloadedZips.reduce((closest, zip) => {
-        const diff = Math.min(Math.abs(state.userRank - zip.min_rank), Math.abs(state.userRank - zip.max_rank));
+        const diff = Math.min(Math.abs(state.userRank - zip.min_rating), Math.abs(state.userRank - zip.max_rating));
         return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
     }, { zip: null, minDiff: Infinity }).zip;
 }
@@ -221,7 +221,7 @@ export async function loadTsumego(isUpdate) {
             sgf: sgf,
             status: selectedProblem.status || 'success',
             linked: false,
-            rating: selectedProblem.rank
+            rating: selectedProblem.rating
         });
 
         if (history.length > 200) {
@@ -289,25 +289,31 @@ export async function loadTsumegoById(tsumegoId) {
         await loadZipProblems(zipFilename);
 
         const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
-        const problemRank = problem ? problem.rank : 0;
+        const problemRank = problem ? problem.rating : 0;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
         sgfContent = reorientSgf(sgfContent);
 
         const history = state.problemHistory;
 
-        // Move current to nextTsumego if not already set
-        if (!state.nextTsumego && history.length > 0) {
-            updateNextTsumego({ ...history[0], linked: false });
-        }
-
-                        history.unshift({
+        const newProblem = {
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
             status: 'success',
             linked: true,
             rating: problemRank
-        });
+        };
+
+        // If current problem is linked, replace it instead of shifting
+        if (history.length > 0 && history[0].linked) {
+            history[0] = newProblem;
+        } else {
+            // Move current to nextTsumego if not already set
+            if (!state.nextTsumego && history.length > 0) {
+                updateNextTsumego({ ...history[0], linked: false });
+            }
+            history.unshift(newProblem);
+        }
         if (history.length > 200) {
             history.length = 200;
         }

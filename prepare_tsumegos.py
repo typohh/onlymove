@@ -9,9 +9,9 @@ from katago_queries import get_all_ranks, get_rank_str
 
 
 def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
-    """Sorts, groups, and packages tsumegos into zip files based on their rank."""
+    """Sorts, groups, and packages tsumegos into zip files based on their rating."""
 
-    metadata.sort(key=lambda x: x["rank"])
+    metadata.sort(key=lambda x: x["rating"])
     group_count = int(len(metadata)**0.5)
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
@@ -31,8 +31,8 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
         if not group_items:
             continue
 
-        min_rank = min(item["rank"] for item in group_items)
-        max_rank = max(item["rank"] for item in group_items)
+        min_rating = min(item["rating"] for item in group_items)
+        max_rating = max(item["rating"] for item in group_items)
 
         zip_content = io.BytesIO()
         with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
@@ -54,7 +54,7 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
         with open(zip_path, 'wb') as f:
             f.write(zip_content.getvalue())
 
-        zip_metadata.append({"filename": zip_filename, "min_rank": min_rank, "max_rank": max_rank})
+        zip_metadata.append({"filename": zip_filename, "min_rating": min_rating, "max_rating": max_rating})
 
         # Add entries to lookup for each tsumego in this group
         for item in group_items:
@@ -73,24 +73,24 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
             f.write(f"{tsumego_id} {zip_id}\n")
 
 
-def print_rank_distribution(metadata):
-    """Prints the final distribution of problems by rank."""
+def print_rating_distribution(metadata):
+    """Prints the final distribution of problems by rating."""
     if not metadata:
         print("No metadata to generate distribution from.")
         return
 
-    rank_distribution = sorted([item['rank'] for item in metadata])
+    rating_distribution = sorted([item['rating'] for item in metadata])
 
-    print("\n--- Final Rank Distribution ---")
+    print("\n--- Final Rating Distribution ---")
     previous_rank = 0.0
-    total_problems = len(rank_distribution)
+    total_problems = len(rating_distribution)
     for rank in get_all_ranks():
         min_r = (rank + previous_rank) / 2
         max_r = rank + (rank - previous_rank) / 2 if rank < 1.0 else 1.01
 
-        count = sum(1 for x in rank_distribution if min_r <= x < max_r)
+        count = sum(1 for x in rating_distribution if min_r <= x < max_r)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
-        qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rank'] < max_r]
+        qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rating'] < max_r]
         avg_quality = sum(qualities_in_range) / len(qualities_in_range) if qualities_in_range else 0.0
         print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f})")
         previous_rank = rank
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     TSUMEGOS_DIR = "tsumegos"
     OUTPUT_DIR = "pwa"
 
-    # 1. Get the ratings map (tsumego_id -> rank).
+    # 1. Get the ratings map (tsumego_id -> rating).
     tsumego_ratings_df = pd.read_csv("ratings/tsumego_ratings_final.csv")
 
     # Normalize ratings to 0-1
@@ -157,9 +157,9 @@ if __name__ == "__main__":
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
-            rank = tsumego_ratings_map[tsumego_id]
+            rating = tsumego_ratings_map[tsumego_id]
             quality = tsumego_quality_map.get(tsumego_id, 0.0)
-            all_metadata.append({"filename": filename, "rank": rank, "quality": quality})
+            all_metadata.append({"filename": filename, "rating": rating, "quality": quality})
         else:
             skipped_count += 1
 
@@ -176,4 +176,4 @@ if __name__ == "__main__":
     print("\nProcessing complete.")
 
     # 4. Print the final distribution report.
-    print_rank_distribution(all_metadata)
+    print_rating_distribution(all_metadata)
