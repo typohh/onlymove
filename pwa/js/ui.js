@@ -269,7 +269,7 @@ export function showDetailedStats() {
 ` +
                        `${getTerm('onTheWayToNextRank')}: ${Math.floor(progress)}%
 ` +
-                       `${getTerm('standardDeviation')}: ${(stddev * TOTAL_RANKS).toFixed(1)} ranks
+                       `${getTerm('standardDeviation')}: ${stddev.toFixed(1)} ranks
 ` +
                        `${getTerm('totalTsumegos')}: ${totalTsumegos}
 ` +
