@@ -2,6 +2,7 @@
 
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats } from './state.js';
 import { updateAllUI } from './ui.js';
+import { TOTAL_RANKS } from './constants.js';
 
 // Function to send report to Cloudflare Worker
 export async function sendReport(success) {
@@ -27,11 +28,18 @@ export async function sendReport(success) {
     }
 }
 
+function getRankInfo(rating) {
+    const rankValue = rating * TOTAL_RANKS;
+    const rankIndex = Math.floor(rankValue);
+    const progress = (rankValue - rankIndex) * 100;
+    return { rankIndex, progress };
+}
+
 export function updateUserStats(isCorrect) {
     const history = state.problemHistory;
     const currentProblem = history[0];
 
-    if (!currentProblem) return;
+    if (!currentProblem) return {};
 
     const oldStatus = currentProblem.status;
 
@@ -47,10 +55,12 @@ export function updateUserStats(isCorrect) {
 
     if (state.appMode === 'linked') {
         updateProblemHistory(history);
-        return;
+        return {};
     }
 
-    let rank = state.userRank;
+    const oldRank = state.userRank;
+    const oldRankInfo = getRankInfo(oldRank);
+    let rank = oldRank;
     let momentum = state.momentum;
     const stats = { ...state.tsumegoStats };
 
@@ -90,4 +100,22 @@ export function updateUserStats(isCorrect) {
     updateProblemHistory(history);
     updateTsumegoStats(stats);
     updateAllUI();
+
+    const newRank = state.userRank;
+    const newRankInfo = getRankInfo(newRank);
+
+    const rankChange = newRank - oldRank;
+
+    let rankChangeDirection = 'same';
+    if (newRankInfo.rankIndex > oldRankInfo.rankIndex) {
+        rankChangeDirection = 'up';
+    } else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) {
+        rankChangeDirection = 'down';
+    }
+
+    return {
+        rankChange,
+        rankChangeDirection,
+        isCorrect
+    };
 }

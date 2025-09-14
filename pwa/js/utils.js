@@ -1,5 +1,7 @@
 // js/utils.js
 
+import { TOTAL_RANKS } from './constants.js';
+
 const localization = {
   zh: {
     kyu: '级',
@@ -21,7 +23,14 @@ const localization = {
     reviewMode: '复习模式',
     viewMode: '查看模式',
     carelessMistake: '粗心失误，请花更多时间阅读与判断。',
-    shouldKnowThis: '应当已经掌握，请多花时间复盘你的错误。'
+    shouldKnowThis: '应当已经掌握，请多花时间复盘你的错误。',
+    rankUpTo: '升级到{rank}',
+    rankDownTo: '降级到{rank}',
+    onTheWayToNextRank: '距离下一级',
+    standardDeviation: '标准差',
+    totalTsumegos: '总题目数',
+    shortTermRecollection: '短期记忆',
+    longTermRecollection: '长期记忆'
   },
   ja: {
     kyu: '級',
@@ -43,7 +52,14 @@ const localization = {
     reviewMode: '復習モード',
     viewMode: '閲覧モード',
     carelessMistake: '不注意によるミスです。読みと検討にもっと時間をかけましょう。',
-    shouldKnowThis: '既知のはずです。ミスを振り返る時間をもう少し取りましょう。'
+    shouldKnowThis: '既知のはずです。ミスを振り返る時間をもう少し取りましょう。',
+    rankUpTo: '{rank}に昇段',
+    rankDownTo: '{rank}に降段',
+    onTheWayToNextRank: '次の段級まで',
+    standardDeviation: '標準偏差',
+    totalTsumegos: '合計問題数',
+    shortTermRecollection: '短期記憶',
+    longTermRecollection: '長期記憶'
   },
   ko: {
     kyu: '급',
@@ -65,7 +81,14 @@ const localization = {
     reviewMode: '복습 모드',
     viewMode: '보기 모드',
     carelessMistake: '부주의한 실수입니다. 더 시간을 들여 읽고 판단하세요.',
-    shouldKnowThis: '이미 알고 있어야 합니다. 실수를 더 꼼꼼히 복기하세요.'
+    shouldKnowThis: '이미 알고 있어야 합니다. 실수를 더 꼼꼼히 복기하세요.',
+    rankUpTo: '{rank}으로 승급',
+    rankDownTo: '{rank}으로 강등',
+    onTheWayToNextRank: '다음 등급까지',
+    standardDeviation: '표준 편차',
+    totalTsumegos: '총 문제 수',
+    shortTermRecollection: '단기 기억',
+    longTermRecollection: '장기 기억'
   },
   en: {
     kyu: 'kyu',
@@ -87,7 +110,15 @@ const localization = {
     reviewMode: 'Review mode',
     viewMode: 'View mode',
     carelessMistake: 'Slow down! You could likely have avoided this mistake with a bit more effort.',
-    shouldKnowThis: 'A repeat mistake! During reviews try to understand difference between your move and the correct solution.'
+    shouldKnowThis: 'A repeat mistake! During reviews try to understand difference between your move and the correct solution.',
+    rankUpTo: 'Rank up to {rank}',
+    rankDownTo: 'Rank down to {rank}',
+    onTheWayToNextRank: 'On the way to next rank',
+    standardDeviation: 'Standard Deviation',
+    totalTsumegos: 'Total Tsumegos',
+    shortTermRecollection: 'Short Term Recollection',
+    longTermRecollection: 'Long Term Recollection',
+    rankChangeFormat: 'Rank {change}'
   }
 };
 
@@ -100,8 +131,7 @@ export function getTerm(key) {
 }
 
 export function getDescriptiveRank(numericRank) {
-    const totalRanks = 29;
-    const rankIndex = Math.floor(Math.pow(numericRank, 1.0) * totalRanks);
+    const rankIndex = Math.floor(Math.pow(numericRank, 1.0) * TOTAL_RANKS);
     const kyuTerm = getTerm('kyu');
     const danTerm = getTerm('dan');
     return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;

@@ -34,7 +34,7 @@ export const state = {
     
     // UI state
     acceptClicks: false,
-    currentPointLoss: null,
+    
     problemStartTime: (() => {
         const saved = localStorage.getItem('problemStartTime');
         return saved ? parseInt(saved) : null;
@@ -106,9 +106,7 @@ export function updateNextTsumego(nextTsumego) {
     localStorage.setItem('nextTsumego', JSON.stringify(nextTsumego));
 }
 
-export function setCurrentPointLoss(value) {
-    state.currentPointLoss = value;
-}
+
 
 export function setProblemStartTime(time) {
     state.problemStartTime = time;

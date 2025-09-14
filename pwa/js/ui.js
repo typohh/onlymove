@@ -2,6 +2,7 @@
 
 import { state } from './state.js';
 import { getTerm, getDescriptiveRank } from './utils.js';
+import { TOTAL_RANKS } from './constants.js';
 
 const boardContainer = document.getElementById('board-container');
 
@@ -40,9 +41,8 @@ function updateSolvingModeUI() {
     } else {
         // Normal display with rank information
         const rank = getDescriptiveRank(state.userRank);
-        const stddev = state.momentum / 4;
-        document.getElementById('text1').textContent = `${rank} (±${stddev.toFixed(1)})`;
-        document.getElementById('text1-h').textContent = `${rank} (±${stddev.toFixed(1)})`;
+        document.getElementById('text1').textContent = `${rank}`;
+        document.getElementById('text1-h').textContent = `${rank}`;
         
         // Set styles for click (event added in main.js)
         const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
@@ -94,7 +94,60 @@ function updateAnalysisModeUI() {
     document.getElementById('button3').textContent = getTerm('share');
 }
 
-export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)') {
+function createOverlayContent(stats, message, textColor) {
+    const container = document.createElement('div');
+    Object.assign(container.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: textColor,
+        fontWeight: 'bold',
+        textAlign: 'center',
+    });
+
+    if (stats && stats.rankChange) {
+        const rankChange = stats.rankChange;
+        if (rankChange !== 0) {
+            const rankChangeInUnits = rankChange * TOTAL_RANKS;
+            const rankChangeElement = document.createElement('div');
+            Object.assign(rankChangeElement.style, {
+                fontSize: `${boardContainer.offsetWidth / 20}px`,
+                marginBottom: '20px',
+            });
+            const sign = rankChangeInUnits > 0 ? '+' : '';
+            const formattedChange = `${sign}${rankChangeInUnits.toFixed(3)}`;
+            rankChangeElement.textContent = getTerm('rankChangeFormat').replace('{change}', formattedChange);
+            container.appendChild(rankChangeElement);
+        }
+
+        if (stats.rankChangeDirection === 'up' || stats.rankChangeDirection === 'down') {
+            const rankChangeMessageElement = document.createElement('div');
+            Object.assign(rankChangeMessageElement.style, {
+                fontSize: `${boardContainer.offsetWidth / 25}px`,
+                marginBottom: '20px',
+            });
+            const newRank = getDescriptiveRank(state.userRank);
+            const term = stats.rankChangeDirection === 'up' ? 'rankUpTo' : 'rankDownTo';
+            rankChangeMessageElement.textContent = getTerm(term).replace('{rank}', newRank);
+            container.appendChild(rankChangeMessageElement);
+        }
+    }
+
+    if (message) {
+        const messageElement = document.createElement('div');
+        Object.assign(messageElement.style, {
+            fontSize: `${boardContainer.offsetWidth / 30}px`,
+            maxWidth: '80%',
+        });
+        messageElement.textContent = message;
+        container.appendChild(messageElement);
+    }
+
+    return container;
+}
+
+export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', stats = null) {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     Object.assign(overlay.style, {
@@ -103,42 +156,9 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         alignItems: 'center', zIndex: '1000', opacity: '0'
     });
 
-    // Check if this is a failed problem overlay (has currentPointLoss)
-    const isFailedOverlay = state.currentPointLoss !== null;
-
-    if (isFailedOverlay) {
-        // Failed problem overlay
-        const container = document.createElement('div');
-        Object.assign(container.style, {
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center'
-        });
-
-        if (state.currentPointLoss) {
-            const pointLossElement = document.createElement('div');
-            Object.assign(pointLossElement.style, {
-                color: 'white', fontWeight: 'bold', textAlign: 'center',
-                fontSize: `${boardContainer.offsetWidth / 25}px`,
-                marginBottom: message ? '20px' : '0'
-            });
-            pointLossElement.textContent = state.currentPointLoss;
-            container.appendChild(pointLossElement);
-        }
-
-        if (message) {
-            const messageElement = document.createElement('div');
-            Object.assign(messageElement.style, {
-                color: 'white', fontWeight: 'bold', textAlign: 'center',
-                fontSize: `${boardContainer.offsetWidth / 30}px`,
-                maxWidth: '80%'
-            });
-            messageElement.textContent = message;
-            container.appendChild(messageElement);
-        }
-
-        overlay.appendChild(container);
+    if (stats) { // This is the new "failed problem" overlay
+        const content = createOverlayContent(stats, message, 'white');
+        overlay.appendChild(content);
         document.body.appendChild(overlay);
 
         // Fade in over duration, then remove
@@ -149,11 +169,10 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
 
         setTimeout(() => {
             overlay.remove();
-            state.currentPointLoss = null;
             if (callback) callback();
         }, duration);
-    } else {
-        // Simple message overlay
+
+    } else { // This is the simple message overlay
         if (message) {
             const messageElement = document.createElement('div');
             Object.assign(messageElement.style, {
@@ -181,12 +200,21 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
-export function fadeOverlay(duration, callback) {
+export function fadeOverlay(duration, callback, stats = null) {
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: 'white', zIndex: '1000', opacity: '0'
+        backgroundColor: 'white', zIndex: '1000', opacity: '0',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
     });
+
+    if (stats) {
+        const content = createOverlayContent(stats, '', 'black');
+        overlay.appendChild(content);
+    }
+
     document.body.appendChild(overlay);
 
     // Fade in (0.5s)
@@ -215,21 +243,29 @@ export function fadeOverlay(duration, callback) {
 export function showDetailedStats() {
     // Calculate progress to next rank
     const rating = state.userRank;
-    const totalRanks = 29;
-    const rankValue = rating * totalRanks;
+    const rankValue = rating * TOTAL_RANKS;
     const currentRankIndex = Math.floor(rankValue);
     const progress = (rankValue - currentRankIndex) * 100;
     
+    const stddev = state.momentum / 4;
     const stats = state.tsumegoStats;
     const totalTsumegos = stats.totalOnFail + stats.totalOnInBetween + stats.totalOnSuccess;
-    const shortTermMemory = stats.totalOnFail > 0 ? Math.round(100 - stats.failOnFail / stats.totalOnFail * 100) : 100;
-    const longTermMemory = stats.totalOnInBetween > 0 ? Math.round(100 - stats.failOnInBetween / stats.totalOnInBetween * 100) : 100;
+    const shortTermRecollectionValue = stats.totalOnFail > 0 ? Math.round(100 - stats.failOnFail / stats.totalOnFail * 100) : null;
+    const longTermRecollectionValue = stats.totalOnInBetween > 0 ? Math.round(100 - stats.failOnInBetween / stats.totalOnInBetween * 100) : null;
+
+    const shortTermRecollectionText = shortTermRecollectionValue !== null ? `${shortTermRecollectionValue}%` : '-';
+    const longTermRecollectionText = longTermRecollectionValue !== null ? `${longTermRecollectionValue}%` : '-';
 
     // Display the information
-    const detailText = `On the way to next rank: ${Math.floor(progress)}%
-Total Tsumegos: ${totalTsumegos}
-Short Term Memory: ${shortTermMemory}%
-Long Term Memory: ${longTermMemory}%`;
+    const detailText = `${getTerm('onTheWayToNextRank')}: ${Math.floor(progress)}%
+` +
+                       `${getTerm('standardDeviation')}: ${stddev.toFixed(1)}%
+` +
+                       `${getTerm('totalTsumegos')}: ${totalTsumegos}
+` +
+                       `${getTerm('shortTermRecollection')}: ${shortTermRecollectionText}
+` +
+                       `${getTerm('longTermRecollection')}: ${longTermRecollectionText}`;
     
     // Show in an alert for now (can be improved with a better UI later)
     alert(detailText);
