@@ -82,7 +82,7 @@ export function updateUserStats(isCorrect) {
     }
 
     if (isCorrect && oldStatus !== 'failure' && oldStatus !== 'in-between') {
-        const maxIncrease = (1.0 - rank) / 3;
+        const maxIncrease = (1.0 - rank) / 9;
         const intendedIncrease = momentum / 600;
         if(intendedIncrease > maxIncrease) {
             momentum *= maxIncrease / intendedIncrease;
