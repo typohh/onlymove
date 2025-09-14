@@ -53,7 +53,7 @@ export function updateUserStats(isCorrect) {
         currentProblem.status = 'failure';
     }
 
-    if (state.appMode === 'linked') {
+    if (currentProblem.linked) {
         updateProblemHistory(history);
         return {};
     }
