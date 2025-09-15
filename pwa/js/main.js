@@ -10,6 +10,28 @@ import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
 // --- INITIALIZATION ---
 
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (document.readyState === 'complete') {
+        showInstallPrompt();
+    } else {
+        document.addEventListener('DOMContentLoaded', showInstallPrompt);
+    }
+});
+
+window.addEventListener('resize', () => {
+    const prompt = document.getElementById('install-prompt');
+    if (prompt) {
+        prompt.remove();
+        if (deferredPrompt) {
+            showInstallPrompt();
+        }
+    }
+});
+
 document.addEventListener('DOMContentLoaded', async () => {
     // Log the hash of the main file
     const scriptElement = document.currentScript || document.querySelector('script[src*="main"]');
@@ -181,3 +203,117 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateAllUI();
 
 });
+
+function showInstallPrompt() {
+    if (!deferredPrompt) return;
+
+    const ratio = window.innerWidth / window.innerHeight;
+    let displayMethod;
+
+    if (ratio < 0.65) {
+        displayMethod = 'notification';
+    } else if (ratio > 1.3) {
+        displayMethod = 'below-buttons';
+    } else {
+        displayMethod = 'popup';
+    }
+
+    const promptElement = document.createElement('div');
+    promptElement.id = 'install-prompt';
+    promptElement.innerHTML = `
+        <button class="close-btn">×</button>
+        <div class="install-message">Install this app for a better experience!</div>
+        <button class="install-btn">Install</button>
+    `;
+
+    const installBtn = promptElement.querySelector('.install-btn');
+    const closeBtn = promptElement.querySelector('.close-btn');
+
+    if (displayMethod === 'notification') {
+        Object.assign(promptElement.style, {
+            position: 'fixed',
+            top: '-100px',
+            left: '0',
+            width: '100%',
+            backgroundColor: '#333',
+            color: 'white',
+            padding: '10px',
+            textAlign: 'center',
+            zIndex: '10000',
+            transition: 'top 0.5s ease-in-out',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px'
+        });
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '5px';
+        closeBtn.style.right = '10px';
+        document.body.appendChild(promptElement);
+        setTimeout(() => promptElement.style.top = '0', 100);
+    } else if (displayMethod === 'below-buttons') {
+        Object.assign(promptElement.style, {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px',
+            marginTop: '1vmin',
+            marginLeft: '4vmin',
+            marginRight: '1vmin',
+            padding: '1.5vmin 2.5vmin',
+            border: '1px solid #ccc',
+            borderRadius: '5px',
+            position: 'relative',
+            width: 'calc(100% - 5vmin)'
+        });
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '1vmin';
+        closeBtn.style.right = '1vmin';
+        closeBtn.style.verticalAlign = 'top';
+        // Apply dynamic font size to all text elements
+        const dynamicFontSize = 'calc(0.035 * min(0.84 * 100vh, 100vw))';
+        promptElement.style.fontSize = dynamicFontSize;
+        promptElement.querySelector('.install-message').style.fontSize = dynamicFontSize;
+        const installBtn = promptElement.querySelector('.install-btn');
+        installBtn.style.fontSize = dynamicFontSize;
+        installBtn.style.borderRadius = 'var(--radius)';
+        installBtn.style.padding = '0.5vmin 2vmin';
+        closeBtn.style.fontSize = dynamicFontSize;
+        document.getElementById('info-container').appendChild(promptElement);
+    } else { // popup
+        Object.assign(promptElement.style, {
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: '#333',
+            color: 'white',
+            padding: '20px',
+            borderRadius: '10px',
+            textAlign: 'center',
+            zIndex: '10000',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px',
+            minWidth: '200px'
+        });
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '5px';
+        closeBtn.style.right = '10px';
+        document.body.appendChild(promptElement);
+    }
+
+    promptElement.querySelector('.install-btn').addEventListener('click', async () => {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response to install prompt: ${outcome}`);
+        deferredPrompt = null;
+        promptElement.remove();
+    });
+
+    promptElement.querySelector('.close-btn').addEventListener('click', () => {
+        deferredPrompt = null;
+        promptElement.remove();
+    });
+}

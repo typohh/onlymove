@@ -211,3 +211,22 @@ body {
 
 
 }
+
+/* --- Install Prompt --- */
+#install-prompt {
+    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+}
+
+#install-prompt .install-btn {
+    border-radius: var(--radius);
+    padding: 0.5vmin 2vmin;
+}
+
+#install-prompt .close-btn {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 0;
+    vertical-align: top;
+}
