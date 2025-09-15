@@ -1,10 +1,10 @@
 // js/main.js
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory } from './state.js';
 import { updateAllUI, updateBoardSize, showDetailedStats } from './ui.js';
 import { loadSgf } from './board.js';
 import { initAudio } from './audio.js';
-import { loadTsumego, loadTsumegoById } from './problem-loader.js';
+import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 
@@ -12,6 +12,67 @@ window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     setDeferredInstallPrompt(e);
 });
+
+async function fixupZeroRatedProblems() {
+    const history = state.problemHistory;
+    const problemsToFix = history.filter(p => p.rating === 0 && p.status !== 'correct');
+
+    if (problemsToFix.length === 0) {
+        return;
+    }
+
+    console.log(`Found ${problemsToFix.length} problems with zero rating to fix.`);
+
+    // Run in the background
+    setTimeout(async () => {
+        let updated = false;
+        await loadZipMetadata();
+
+        for (const problem of problemsToFix) {
+            try {
+                const tsumegoId = problem.filename.replace('.sgf', '');
+                const zipId = await findZipIdForTsumegoId(tsumegoId);
+
+                if (!zipId) {
+                    console.warn(`Could not find zipId for ${tsumegoId}`);
+                    continue;
+                }
+
+                let zipFilename = null;
+                for (const zip of state.zipMetadata) {
+                    if (zip.filename.startsWith(zipId)) {
+                        zipFilename = zip.filename;
+                        break;
+                    }
+                }
+
+                if (!zipFilename) {
+                    console.warn(`Could not find zip filename for zipId ${zipId}`);
+                    continue;
+                }
+
+                // Ensure zip is loaded
+                if (!state.loadedZips[zipFilename]) {
+                    await loadZipProblems(zipFilename);
+                }
+
+                const problemInfo = state.allProblems.find(p => p.filename === problem.filename);
+
+                if (problemInfo && problemInfo.rating) {
+                    problem.rating = problemInfo.rating;
+                    updated = true;
+                }
+            } catch (error) {
+                console.error(`Failed to fix rating for ${problem.filename}:`, error);
+            }
+        }
+
+        if (updated) {
+            updateProblemHistory(history);
+            console.log("Finished fixing zero-rated problems in history.");
+        }
+    }, 0);
+}
 
 
 
@@ -185,6 +246,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('app-title').textContent = getTerm('appTitle');
     updateAllUI();
 
+    fixupZeroRatedProblems();
 });
-
-
