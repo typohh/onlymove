@@ -34,6 +34,7 @@ export const state = {
     
     // UI state
     acceptClicks: false,
+    deferredInstallPrompt: null,
     
     problemStartTime: (() => {
         const saved = localStorage.getItem('problemStartTime');
@@ -79,6 +80,10 @@ export function setKifuReader(kifuReader) {
 
 export function setAcceptClicks(canAccept) {
     state.acceptClicks = canAccept;
+}
+
+export function setDeferredInstallPrompt(prompt) {
+    state.deferredInstallPrompt = prompt;
 }
 
 export function updateUserRank(rank) {

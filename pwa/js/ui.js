@@ -1,12 +1,75 @@
 // js/ui.js
 
-import { state } from './state.js';
+import { state, setDeferredInstallPrompt } from './state.js';
 import { getTerm, getDescriptiveRank } from './utils.js';
 import { TOTAL_RANKS } from './constants.js';
 
 const boardContainer = document.getElementById('board-container');
 
+function showInstallPrompt() {
+    const deferredPrompt = state.deferredInstallPrompt;
+    if (!deferredPrompt) return;
+
+    const ratio = window.innerWidth / window.innerHeight;
+    let displayMethod;
+
+    if (ratio < 0.65) {
+        displayMethod = 'notification';
+    } else if (ratio > 1.3) {
+        displayMethod = 'below-buttons';
+    } else {
+        displayMethod = 'popup';
+    }
+
+    const promptElement = document.createElement('div');
+    promptElement.id = 'install-prompt';
+    promptElement.innerHTML = `
+        <button class="close-btn">×</button>
+        <div class="install-message">${getTerm('installPrompt')}</div>
+        <button class="install-btn">${getTerm('install')}</button>
+    `;
+
+    const installBtn = promptElement.querySelector('.install-btn');
+    const closeBtn = promptElement.querySelector('.close-btn');
+
+    if (displayMethod === 'notification') {
+        promptElement.classList.add('install-notification');
+        document.body.appendChild(promptElement);
+        setTimeout(() => promptElement.style.top = '0', 100);
+    } else if (displayMethod === 'below-buttons') {
+        promptElement.classList.add('install-below');
+        document.getElementById('info-container').appendChild(promptElement);
+    } else { // popup
+        promptElement.classList.add('install-popup');
+        document.body.appendChild(promptElement);
+    }
+
+    promptElement.querySelector('.install-btn').addEventListener('click', async () => {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response to install prompt: ${outcome}`);
+        setDeferredInstallPrompt(null);
+        promptElement.remove();
+    });
+
+    promptElement.querySelector('.close-btn').addEventListener('click', () => {
+        setDeferredInstallPrompt(null);
+        promptElement.remove();
+    });
+}
+
+function checkAndShowInstallPrompt() {
+    const historySize = state.problemHistory.length;
+    const isSolvingMode = state.appMode === 'solving';
+    const isPromptVisible = !!document.getElementById('install-prompt');
+
+    if (state.deferredInstallPrompt && !isPromptVisible && isSolvingMode && [2, 19, 190].includes(historySize)) {
+        showInstallPrompt();
+    }
+}
+
 export function updateAllUI() {
+    checkAndShowInstallPrompt();
     // Update UI based on current app mode
     if (state.appMode === 'solving' || state.appMode === 'linked') {
         updateSolvingModeUI();

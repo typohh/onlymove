@@ -215,6 +215,48 @@ body {
 /* --- Install Prompt --- */
 #install-prompt {
     font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-sizing: border-box;
+}
+
+#install-prompt.install-notification {
+    position: fixed;
+    top: -100px;
+    left: 0;
+    width: 100%;
+    background-color: #333;
+    color: white;
+    padding: 1vmin 2vmin;
+    text-align: center;
+    z-index: 10000;
+    transition: top 0.5s ease-in-out;
+}
+
+#install-prompt.install-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #333;
+    color: white;
+    padding: 2vmin;
+    text-align: center;
+    z-index: 10000;
+    min-width: 200px;
+}
+
+#install-prompt.install-below {
+    margin-top: 1vmin;
+    margin-left: 3vmin;
+    margin-right: 0vmin;
+    padding: 1.5vmin 2.5vmin;
+    width: calc(100% - 0vmin);
 }
 
 #install-prompt .install-btn {
@@ -229,4 +271,8 @@ body {
     cursor: pointer;
     padding: 0;
     vertical-align: top;
+    position: absolute;
+    top: 1vmin;
+    right: 1vmin;
+    font-size: 4vmin;
 }

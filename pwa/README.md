@@ -160,5 +160,6 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed, not just that it compiles.
 - Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.
 - Try to rule out any "explanation" you have for a bug, by properly investigating the code before making any changes. Instead of hiding behind vague claims and jumping to conclusions.
+- Always investigate code thoroughly for potential issues before assuming external causes, and avoid quick fixes or number adjustments without proper analysis.
 - Upon reading these instructions, quote back any you understand and think you are able to follow.
 

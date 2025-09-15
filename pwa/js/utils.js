@@ -31,7 +31,9 @@ const localization = {
     totalTsumegos: '总题目数',
     shortTermRecollection: '短期记忆',
     longTermRecollection: '长期记忆',
-    userRank: '用户等级'
+    userRank: '用户等级',
+    installPrompt: '安装为应用以获得更好的体验！',
+    install: '安装'
   },
   ja: {
     kyu: '級',
@@ -61,7 +63,9 @@ const localization = {
     totalTsumegos: '合計問題数',
     shortTermRecollection: '短期記憶',
     longTermRecollection: '長期記憶',
-    userRank: 'ユーザーランク'
+    userRank: 'ユーザーランク',
+    installPrompt: 'アプリとしてインストールして、より良い体験を！',
+    install: 'インストール'
   },
   ko: {
     kyu: '급',
@@ -91,7 +95,9 @@ const localization = {
     totalTsumegos: '총 문제 수',
     shortTermRecollection: '단기 기억',
     longTermRecollection: '장기 기억',
-    userRank: '사용자 등급'
+    userRank: '사용자 등급',
+    installPrompt: '앱으로 설치하여 더 나은 경험을!',
+    install: '설치'
   },
   en: {
     kyu: 'kyu',
@@ -122,6 +128,8 @@ const localization = {
     shortTermRecollection: 'Short Term Recollection',
     longTermRecollection: 'Long Term Recollection',
     userRank: 'User Rank',
+    installPrompt: 'Install as an app for a better experience!',
+    install: 'Install',
     rankChangeFormat: 'Rank {change}'
   }
 };
