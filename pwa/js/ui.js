@@ -404,7 +404,7 @@ export function updateAnalysisUI(score, bestMove) {
             const displayText = `${scoreText}: ${formattedScore}`;
             if (isUnreliable) {
                 const warningMsg = getTerm('unreliableWarning');
-                const html = `<span class="unreliable" onclick="alert('${warningMsg}')">${displayText}</span>`;
+                const html = `<span class=\"unreliable\" onclick=\"alert('${warningMsg}')\" style=\"user-select: none; -webkit-user-select: none;\">${displayText}</span>`;
                 document.getElementById('text1').innerHTML = html;
                 document.getElementById('text1-h').innerHTML = html;
             } else {
@@ -412,6 +412,13 @@ export function updateAnalysisUI(score, bestMove) {
                 document.getElementById('text1-h').textContent = displayText;
             }
         }
+        // Prevent text selection on Android to treat as button
+        const text1 = document.getElementById('text1');
+        const text1h = document.getElementById('text1-h');
+        text1.style.userSelect = 'none';
+        text1.style.webkitUserSelect = 'none';
+        text1h.style.userSelect = 'none';
+        text1h.style.webkitUserSelect = 'none';
     }
     // Future: could also use bestMove to highlight a button or provide a hint
 }

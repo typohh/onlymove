@@ -262,4 +262,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateAllUI();
 
     fixupZeroRatedProblems();
+
+    // Recovery from killed session
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) {
+            // From bfcache, check if state is intact
+            if (!state.board || !state.game) {
+                location.reload();
+            }
+        }
+    });
+
+    window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            if (!state.board || !state.game) {
+                location.reload();
+            }
+        }
+    });
 });
