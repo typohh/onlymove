@@ -142,7 +142,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (navigator.share) {
                 navigator.share({
                     title: 'Tsumego Problem',
-                    text: 'Check out this Go life and death problem',
                     url: shareUrl
                 }).then(() => {
                     // No visible message on success
