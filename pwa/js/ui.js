@@ -84,45 +84,44 @@ function updateSolvingModeUI() {
         document.getElementById('title').textContent = getTerm('viewMode');
         document.getElementById('title-h').textContent = getTerm('viewMode');
     } else {
-        document.getElementById('title').textContent = getTerm('tsumegoMode');
-        document.getElementById('title-h').textContent = getTerm('tsumegoMode');
+        document.getElementById('title').textContent = getTerm('challengeMode');
+        document.getElementById('title-h').textContent = getTerm('challengeMode');
     }
     
+    const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
+
     // Update Rank Display in the text area
     if (state.appMode === 'linked') {
         // When opened from a link, show the tsumego's rank from the history object.
         const currentProblem = state.problemHistory[0];
         if (currentProblem && currentProblem.rating !== undefined) {
             const rank = getDescriptiveRank(currentProblem.rating);
-            document.getElementById('text1').textContent = `${rank}`;
-            document.getElementById('text1-h').textContent = `${rank}`;
+            text1Elements.forEach(element => element.textContent = `${rank}`);
         } else {
             // Fallback if rank not found
-            document.getElementById('text1').textContent = '...';
-            document.getElementById('text1-h').textContent = '...';
+            text1Elements.forEach(element => element.textContent = '...');
         }
-    } else {
-        // Normal display with tsumego rank information
-        const currentProblem = state.problemHistory[0];
-        if (currentProblem && currentProblem.rating !== undefined) {
-            const rank = getDescriptiveRank(currentProblem.rating);
-            document.getElementById('text1').textContent = `${rank}`;
-            document.getElementById('text1-h').textContent = `${rank}`;
-        } else {
-            // Fallback if rank not found
-            document.getElementById('text1').textContent = '...';
-            document.getElementById('text1-h').textContent = '...';
-        }
-
-        // Set styles for click (event added in main.js)
-        const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
         text1Elements.forEach(element => {
-            element.style.cursor = 'pointer';
-            element.title = 'Click for detailed stats';
-            element.style.userSelect = 'none';
-            element.style.webkitUserSelect = 'none';
-            element.style.MozUserSelect = 'none';
+            element.classList.remove('progress-bar-wrapper');
+            element.style.removeProperty('--progress');
         });
+    } else {
+        // Normal display with user rank information
+        const rank = getDescriptiveRank(state.userRank);
+        text1Elements.forEach(element => element.textContent = `${rank}`);
+
+        // Add progress bar
+        const rating = state.userRank;
+        const rankValue = rating * TOTAL_RANKS;
+        const currentRankIndex = Math.floor(rankValue);
+        const progress = (rankValue - currentRankIndex) * 100;
+
+        text1Elements.forEach(element => {
+            element.classList.add('progress-bar-wrapper');
+            element.style.setProperty('--progress', `${progress}%`);
+        });
+
+        
     }
 
     // Update "Review" link (button1)
@@ -140,7 +139,7 @@ function updateSolvingModeUI() {
     document.getElementById('button2').textContent = getTerm('about');
     
     // Update "Share" link (button3)
-    document.getElementById('button3').textContent = getTerm('share');
+    document.getElementById('button3').textContent = getTerm('stats');
 }
 
 function updateAnalysisModeUI() {
@@ -149,8 +148,12 @@ function updateAnalysisModeUI() {
     document.getElementById('title-h').textContent = getTerm('reviewMode');
     
     // Update text area with analysis information
-    document.getElementById('text1').textContent = getTerm('analyzing');
-    document.getElementById('text1-h').textContent = getTerm('analyzing');
+    const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
+    text1Elements.forEach(element => {
+        element.textContent = getTerm('analyzing');
+        element.classList.remove('progress-bar-wrapper');
+        element.style.removeProperty('--progress');
+    });
 
     // Update "Exit" link (button1)
     const exitLink = document.getElementById('button1');
@@ -158,7 +161,13 @@ function updateAnalysisModeUI() {
     exitLink.classList.remove('disabled'); // Always enabled in analysis mode
     
     // Update "Undo" link (button2)
-    document.getElementById('button2').textContent = getTerm('undo');
+    const undoLink = document.getElementById('button2');
+    undoLink.textContent = getTerm('undo');
+    if (state.kifuReader && state.kifuReader.node.parent && state.kifuReader.node !== state.initialAnalysisNode) {
+        undoLink.classList.remove('disabled');
+    } else {
+        undoLink.classList.add('disabled');
+    }
     
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('share');

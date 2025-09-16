@@ -276,3 +276,28 @@ body {
     right: 1vmin;
     font-size: 4vmin;
 }
+
+.progress-bar-wrapper {
+    position: relative;
+}
+
+.progress-bar-wrapper::before {
+    content: '';
+    position: absolute;
+    bottom: 1vmin;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background-color: #555; /* Background of the bar */
+}
+
+.progress-bar-wrapper::after {
+    content: '';
+    position: absolute;
+    bottom: 1vmin;
+    left: 0;
+    height: 4px; /* Thin bar */
+    width: var(--progress, 0%);
+    background-color: #888; /* Foreground of the bar */
+    transition: width 0.5s ease-in-out;
+}

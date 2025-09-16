@@ -43,6 +43,7 @@ export const state = {
     
     // Analysis mode state
     lastMoveInAnalysis: null, // Track last move in analysis mode
+    initialAnalysisNode: null,
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
@@ -84,6 +85,10 @@ export function setAcceptClicks(canAccept) {
 
 export function setDeferredInstallPrompt(prompt) {
     state.deferredInstallPrompt = prompt;
+}
+
+export function setInitialAnalysisNode(node) {
+    state.initialAnalysisNode = node;
 }
 
 export function updateUserRank(rank) {

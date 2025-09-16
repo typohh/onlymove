@@ -1,6 +1,6 @@
 // js/analysis.js
 
-import { state, setAppMode, setAcceptClicks } from './state.js';
+import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
@@ -9,7 +9,7 @@ import { getTerm, updateUrlWithTsumegoId } from './utils.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 
 let analysisHintMove = null;
-let initialAnalysisNode = null;
+
 
 /**
  * Initializes and enters the analysis mode.
@@ -34,13 +34,18 @@ export function enterAnalysisMode() {
     }
 
     setAppMode('analyzing');
-    updateAllUI();
     setAcceptClicks(true);
 
     loadSgf(sgfToAnalyze);
-    // Set initialAnalysisNode after a small delay to ensure the SGF is fully loaded
+
+    // Defer the rest of the initialization to the next event loop tick.
+    // This is a workaround for a subtle timing issue in the wgo.js library where
+    // the kifuReader object is not fully initialized immediately after creation.
+    // This was causing issues where the initial analysis would fail because the
+    // children of the current node were not yet available.
     setTimeout(() => {
-        initialAnalysisNode = getCurrentNode();
+        setInitialAnalysisNode(getCurrentNode());
+        updateAllUI();
         requestAndDisplayAnalysis();
     }, 0);
     
@@ -58,6 +63,7 @@ export function handleBoardClick(x, y) {
 
     if (playMoveOnBranch(x, y)) {
         playStoneSound();
+        updateAllUI();
         requestAndDisplayAnalysis();
     }
 }
@@ -68,11 +74,12 @@ export function handleBoardClick(x, y) {
 export function undoLastMove() {
     if (!state.acceptClicks) return;
 
-    if (getCurrentNode() === initialAnalysisNode) {
+    if (getCurrentNode() === state.initialAnalysisNode) {
         return; // Don't undo past the initial position
     }
 
     if (undoMove()) {
+        updateAllUI(); // Update the whole UI, including button states
         requestAndDisplayAnalysis();
     }
 }
@@ -133,7 +140,7 @@ async function requestAndDisplayAnalysis() {
         // but its children do, use the best child's score
         // Check if we're at the initial position by checking if it's the same node object
         // or if it has the same properties (as a fallback)
-        const isInitialPosition = currentNode === initialAnalysisNode || 
+        const isInitialPosition = currentNode === state.initialAnalysisNode || 
             (!currentNode.parent && currentNode.comment && currentNode.comment.includes('Q'));
             
         if (isInitialPosition && bestMoveNode) {
