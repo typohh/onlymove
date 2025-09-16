@@ -3,10 +3,11 @@
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory } from './state.js';
 import { updateAllUI, updateBoardSize, showDetailedStats } from './ui.js';
 import { loadSgf } from './board.js';
+
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
-import { getTerm, updateUrlWithTsumegoId } from './utils.js';
+import { getTerm, cleanUrl } from './utils.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -94,22 +95,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
-        if (state.appMode === 'solving') {
-            // In solving mode, button1 is "Review"
+        if (state.appMode === 'solving' || state.appMode === 'linked') {
+            // In solving/linked mode, button1 is "Review"
             if (!e.target.classList.contains('disabled')) {
                 setAppMode('analyzing');
                 enterAnalysisMode();
                 updateAllUI(); // Update UI to show analysis mode
             }
         } else if (state.appMode === 'analyzing') {
-            // In analysis mode, button1 is "Exit"
-            setAppMode('solving');
-            // Update URL to match current tsumego
-            if (state.currentProblemFilename) {
-                const tsumegoId = state.currentProblemFilename.replace('.sgf', '');
-                updateUrlWithTsumegoId(tsumegoId);
+            if (state.nextTsumego) {
+                setAppMode('linked');
+            } else {
+                setAppMode('solving');
             }
-            loadTsumego(false);
+            loadTsumego(false); // In both refresh cases, we just load what's at history[0]
             updateAllUI(); // Update UI to show solving mode
         }
     });
@@ -134,67 +133,88 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (state.appMode === 'solving' || state.appMode === 'linked') {
             showDetailedStats();
         } else { // 'analyzing'
-            // Copy current URL to clipboard
-            navigator.clipboard.writeText(window.location.href).then(() => {
-                // Show a temporary confirmation message
-                const message = document.createElement('div');
-                message.textContent = getTerm('linkCopied');
-                Object.assign(message.style, {
-                    position: 'fixed',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    color: 'white',
-                    padding: '1vmin 2vmin',
-                    borderRadius: '0.5vmin',
-                    fontWeight: 'bold',
-                    fontSize: '3vmin',
-                    zIndex: '10000',
-                    pointerEvents: 'none',
-                    whiteSpace: 'nowrap',
-                    textAlign: 'center'
-                });
-                
-                document.body.appendChild(message);
-                
-                // Remove after 2 seconds
-                setTimeout(() => {
-                    if (message.parentNode) {
-                        message.parentNode.removeChild(message);
+            if (!state.problemHistory[0]) {
+                console.error('No current problem to share');
+                return;
+            }
+            const tsumegoId = state.problemHistory[0].filename.replace('.sgf', '');
+            const shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Tsumego Problem',
+                    text: 'Check out this Go life and death problem',
+                    url: shareUrl
+                }).then(() => {
+                    // No visible message on success
+                }).catch(err => {
+                    if (err.name !== 'AbortError') {
+                        console.error('Share failed: ', err);
+                        // No visible message on failure
                     }
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy URL: ', err);
-                // Show error message
-                const message = document.createElement('div');
-                message.textContent = getTerm('error');
-                Object.assign(message.style, {
-                    position: 'fixed',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
-                    color: 'white',
-                    padding: '1vmin 2vmin',
-                    borderRadius: '0.5vmin',
-                    fontWeight: 'bold',
-                    fontSize: '3vmin',
-                    zIndex: '10000',
-                    pointerEvents: 'none',
-                    whiteSpace: 'nowrap',
-                    textAlign: 'center'
                 });
-                
-                document.body.appendChild(message);
-                
-                // Remove after 2 seconds
-                setTimeout(() => {
-                    if (message.parentNode) {
-                        message.parentNode.removeChild(message);
-                    }
-                }, 2000);
-            });
+            } else {
+                // Fallback to copy to clipboard
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    // Show a temporary confirmation message
+                    const message = document.createElement('div');
+                    message.textContent = getTerm('linkCopied');
+                    Object.assign(message.style, {
+                        position: 'fixed',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        color: 'white',
+                        padding: '1vmin 2vmin',
+                        borderRadius: '0.5vmin',
+                        fontWeight: 'bold',
+                        fontSize: '3vmin',
+                        zIndex: '10000',
+                        pointerEvents: 'none',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'center'
+                    });
+
+                    document.body.appendChild(message);
+
+                    // Remove after 2 seconds
+                    setTimeout(() => {
+                        if (message.parentNode) {
+                            message.parentNode.removeChild(message);
+                        }
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy URL: ', err);
+                    // Show error message
+                    const message = document.createElement('div');
+                    message.textContent = getTerm('error');
+                    Object.assign(message.style, {
+                        position: 'fixed',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                        color: 'white',
+                        padding: '1vmin 2vmin',
+                        borderRadius: '0.5vmin',
+                        fontWeight: 'bold',
+                        fontSize: '3vmin',
+                        zIndex: '10000',
+                        pointerEvents: 'none',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'center'
+                    });
+
+                    document.body.appendChild(message);
+
+                    // Remove after 2 seconds
+                    setTimeout(() => {
+                        if (message.parentNode) {
+                            message.parentNode.removeChild(message);
+                        }
+                    }, 2000);
+                });
+            }
         }
     });
 
@@ -213,7 +233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } 
             // Case 2: Refresh of existing problem (solving or linked)
             else if (history.length > 0 && history[0].filename.startsWith(tsumegoId)) {
-                if (state.nextTsumego) {
+                if (history[0].linked) {
                     setAppMode('linked');
                 } else {
                     setAppMode('solving');
@@ -227,13 +247,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             // No ID in URL
             await loadTsumego(false);
+            if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
+                setAppMode('linked');
+            }
         }
 
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);
     }
 
-    document.getElementById('app-title').textContent = getTerm('appTitle');
+    cleanUrl();
+
+    document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();
 
     fixupZeroRatedProblems();

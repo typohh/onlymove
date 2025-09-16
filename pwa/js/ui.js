@@ -3,6 +3,7 @@
 import { state, setDeferredInstallPrompt } from './state.js';
 import { getTerm, getDescriptiveRank } from './utils.js';
 import { TOTAL_RANKS } from './constants.js';
+import { getCurrentNode } from './board.js';
 
 const boardContainer = document.getElementById('board-container');
 
@@ -92,15 +93,8 @@ function updateSolvingModeUI() {
 
     // Update Rank Display in the text area
     if (state.appMode === 'linked') {
-        // When opened from a link, show the tsumego's rank from the history object.
-        const currentProblem = state.problemHistory[0];
-        if (currentProblem && currentProblem.rating !== undefined) {
-            const rank = getDescriptiveRank(currentProblem.rating);
-            text1Elements.forEach(element => element.textContent = `${rank}`);
-        } else {
-            // Fallback if rank not found
-            text1Elements.forEach(element => element.textContent = '...');
-        }
+        // In view mode, don't show any rank
+        text1Elements.forEach(element => element.textContent = '');
         text1Elements.forEach(element => {
             element.classList.remove('progress-bar-wrapper');
             element.style.removeProperty('--progress');
@@ -148,9 +142,22 @@ function updateAnalysisModeUI() {
     document.getElementById('title-h').textContent = getTerm('reviewMode');
     
     // Update text area with analysis information
+
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
+    if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
+        // At starting position, show rank
+        const problem = state.problemHistory[1];
+        if (problem && problem.rating !== undefined) {
+            const rank = getDescriptiveRank(problem.rating);
+            text1Elements.forEach(element => element.textContent = rank);
+        } else {
+            text1Elements.forEach(element => element.textContent = '');
+        }
+    } else {
+        // For other positions, show analyzing initially
+        text1Elements.forEach(element => element.textContent = getTerm('analyzing'));
+    }
     text1Elements.forEach(element => {
-        element.textContent = getTerm('analyzing');
         element.classList.remove('progress-bar-wrapper');
         element.style.removeProperty('--progress');
     });
@@ -372,13 +379,39 @@ export function updateBoardSize() {
 // and updating button functionality based on the current mode
 
 export function updateAnalysisUI(score, bestMove) {
-    // In analysis mode, display the score in the text1 element
+    // In analysis mode, display rank at starting position, score otherwise
     if (state.appMode === 'analyzing') {
-        // Format score to 1 decimal place if it's a number
-        const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
-        const scoreText = getTerm('score');
-        document.getElementById('text1').textContent = `${scoreText}: ${formattedScore}`;
-        document.getElementById('text1-h').textContent = `${scoreText}: ${formattedScore}`;
+        if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
+            // At starting position, show rank
+            const problem = state.problemHistory[1];
+            if (problem && problem.rating !== undefined) {
+                const rank = getDescriptiveRank(problem.rating);
+                document.getElementById('text1').textContent = rank;
+                document.getElementById('text1-h').textContent = rank;
+            }
+        } else {
+            // For other positions, show score
+            const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
+            const scoreText = getTerm('score');
+            const currentNode = getCurrentNode();
+            let isUnreliable = false;
+            if (bestMove) {
+                const child = currentNode.children.find(c => c.move && c.move.x === bestMove.x && c.move.y === bestMove.y);
+                if (child && child.comment && child.comment.includes('100%/')) {
+                    isUnreliable = true;
+                }
+            }
+            const displayText = `${scoreText}: ${formattedScore}`;
+            if (isUnreliable) {
+                const warningMsg = getTerm('unreliableWarning');
+                const html = `<span class="unreliable" onclick="alert('${warningMsg}')">${displayText}</span>`;
+                document.getElementById('text1').innerHTML = html;
+                document.getElementById('text1-h').innerHTML = html;
+            } else {
+                document.getElementById('text1').textContent = displayText;
+                document.getElementById('text1-h').textContent = displayText;
+            }
+        }
     }
     // Future: could also use bestMove to highlight a button or provide a hint
 }

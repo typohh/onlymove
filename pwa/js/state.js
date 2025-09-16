@@ -51,6 +51,9 @@ export const state = {
     nextTsumego: JSON.parse(localStorage.getItem('nextTsumego')) || null,
     momentum: parseFloat(localStorage.getItem('momentum')) || 30,
 
+    // Linked problem ID
+    linkedId: null,
+
     // More stats
     tsumegoStats: JSON.parse(localStorage.getItem('tsumegoStats')) || {
         failOnFail: 0,

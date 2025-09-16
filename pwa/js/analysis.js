@@ -5,7 +5,7 @@ import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
-import { getTerm, updateUrlWithTsumegoId } from './utils.js';
+import { getTerm } from './utils.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 
 let analysisHintMove = null;
@@ -49,10 +49,7 @@ export function enterAnalysisMode() {
         requestAndDisplayAnalysis();
     }, 0);
     
-    if (problemToAnalyze.filename) {
-        const tsumegoId = problemToAnalyze.filename.replace('.sgf', '');
-        updateUrlWithTsumegoId(tsumegoId);
-    }
+    
 }
 
 /**

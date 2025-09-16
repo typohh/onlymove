@@ -3,7 +3,6 @@
 import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setProblemStartTime } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
-import { updateUrlWithTsumegoId } from './utils.js';
 import { reorientSgf } from './sgf.js';
 
 async function simpleHash(str) {
@@ -166,7 +165,7 @@ export async function loadTsumego(isUpdate) {
         if (!isUpdate && state.problemHistory.length > 0) {
             // On initial load, just load the last problem from history
             loadSgf(state.problemHistory[0].sgf);
-            updateUrlWithTsumegoId(state.problemHistory[0].filename.replace('.sgf', ''));
+            
             setAcceptClicks(true);
             return;
         }
@@ -245,7 +244,7 @@ export async function loadTsumego(isUpdate) {
         } catch (error) {
             throw new Error('Invalid SGF: ' + error.message);
         }
-        updateUrlWithTsumegoId(selectedProblem.filename.replace('.sgf', ''));
+        
         setAcceptClicks(true);
         setProblemStartTime(Date.now());
         backgroundLoadCloserZip();
@@ -333,7 +332,7 @@ export async function loadTsumegoById(tsumegoId) {
         setAppMode('linked');
 
         loadSgf(sgfContent);
-        updateUrlWithTsumegoId(tsumegoId);
+        
         setAcceptClicks(true);
         setProblemStartTime(Date.now());
         updateAllUI();

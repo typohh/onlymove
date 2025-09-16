@@ -34,7 +34,9 @@ const localization = {
     longTermRecollection: '长期记忆',
     userRank: '用户等级',
     installPrompt: '安装为应用以获得更好的体验！',
-    install: '安装'
+    install: '安装',
+    rankChangeFormat: '等级 {change}',
+    unreliableWarning: '警告：此位置没有预计算解决方案，最佳移动和得分不可靠。'
   },
   ja: {
     kyu: '級',
@@ -67,7 +69,9 @@ const localization = {
     longTermRecollection: '長期記憶',
     userRank: 'ユーザーランク',
     installPrompt: 'アプリとしてインストールして、より良い体験を！',
-    install: 'インストール'
+    install: 'インストール',
+    rankChangeFormat: 'ランク {change}',
+    unreliableWarning: '警告：この位置には事前計算されたソリューションがありません、最良の移動とスコアは信頼できません。'
   },
   ko: {
     kyu: '급',
@@ -100,7 +104,9 @@ const localization = {
     longTermRecollection: '장기 기억',
     userRank: '사용자 등급',
     installPrompt: '앱으로 설치하여 더 나은 경험을!',
-    install: '설치'
+    install: '설치',
+    rankChangeFormat: '등급 {change}',
+    unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.'
   },
   en: {
     kyu: 'kyu',
@@ -119,7 +125,7 @@ const localization = {
     share: 'Share',
     stats: 'Stats',
     linkCopied: 'Link copied to clipboard',
-    challengeMode: 'Challenge mode',
+    tsumegoMode: 'Challenge mode',
     reviewMode: 'Review mode',
     viewMode: 'View mode',
     carelessMistake: 'Slow down! You could likely have avoided this mistake with a bit more effort.',
@@ -134,7 +140,8 @@ const localization = {
     userRank: 'User Rank',
     installPrompt: 'Install as an app for a better experience!',
     install: 'Install',
-    rankChangeFormat: 'Rank {change}'
+    rankChangeFormat: 'Rank {change}',
+    unreliableWarning: 'WARNING: no precomputed solution available for this position, best move and score are unreliable.'
   }
 };
 
@@ -154,14 +161,11 @@ export function getDescriptiveRank(numericRank) {
 }
 
 /**
- * Updates the URL with the current tsumego ID
+ * Cleans the URL by removing the 'id' parameter and 'index.html'.
  */
-export function updateUrlWithTsumegoId(tsumegoId) {
+export function cleanUrl() {
     const url = new URL(window.location);
-    if (tsumegoId) {
-        url.searchParams.set('id', tsumegoId);
-    } else {
-        url.searchParams.delete('id');
-    }
-    window.history.replaceState({}, '', url);
+    url.searchParams.delete('id');
+    const newPath = url.pathname.replace(/index\.html$/, '');
+    window.history.replaceState({}, '', newPath + url.search + url.hash);
 }
