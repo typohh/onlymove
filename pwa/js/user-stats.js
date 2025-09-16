@@ -81,13 +81,17 @@ export function updateUserStats(isCorrect) {
         }
     }
 
-    if (isCorrect && oldStatus !== 'failure' && oldStatus !== 'in-between') {
+    if (isCorrect ) {
         const maxIncrease = (1.0 - rank) / 9;
-        const intendedIncrease = momentum / 600;
-        if(intendedIncrease > maxIncrease) {
-            momentum *= maxIncrease / intendedIncrease;
+        let intendedIncrease = momentum / 600;
+        if( oldStatus !== 'failure' && oldStatus !== 'in-between' ) {
+            if(intendedIncrease > maxIncrease) {
+                momentum *= maxIncrease / intendedIncrease;
+            } else {
+                momentum *= 1.1;
+            }
         } else {
-            momentum *= 1.1;
+            intendedIncrease *= 0.1
         }
         rank += Math.min(intendedIncrease, maxIncrease);
     } else if (!isCorrect) { // Incorrect
