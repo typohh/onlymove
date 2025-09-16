@@ -287,7 +287,7 @@ body {
     bottom: 1vmin;
     left: 0;
     right: 0;
-    height: 4px;
+    height: 0.5vmin;
     background-color: #555; /* Background of the bar */
 }
 
@@ -296,7 +296,7 @@ body {
     position: absolute;
     bottom: 1vmin;
     left: 0;
-    height: 4px; /* Thin bar */
+    height: 0.5vmin; /* Thin bar */
     width: var(--progress, 0%);
     background-color: #888; /* Foreground of the bar */
     transition: width 0.5s ease-in-out;
