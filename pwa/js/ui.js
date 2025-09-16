@@ -85,8 +85,8 @@ function updateSolvingModeUI() {
         document.getElementById('title').textContent = getTerm('viewMode');
         document.getElementById('title-h').textContent = getTerm('viewMode');
     } else {
-        document.getElementById('title').textContent = getTerm('challengeMode');
-        document.getElementById('title-h').textContent = getTerm('challengeMode');
+        document.getElementById('title').textContent = getTerm('tsumegoMode');
+        document.getElementById('title-h').textContent = getTerm('tsumegoMode');
     }
     
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
