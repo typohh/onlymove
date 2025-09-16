@@ -10,9 +10,32 @@ WGo.DIR = 'lib/wgo/';
 
 const boardContainer = document.getElementById('board-container');
 
+function isMobile() {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
 function handleBoardClick(x, y) {
     if (state.appMode === 'solving' || state.appMode === 'linked') {
-        handleTsumegoClick(x, y);
+        if (isMobile()) {
+            if (state.ghostMove) {
+                if (state.ghostMove.x === x && state.ghostMove.y === y) {
+                    // confirm
+                    state.ghostMove = null;
+                    handleTsumegoClick(x, y);
+                } else {
+                    // cancel
+                    state.ghostMove = null;
+                    redraw();
+                }
+            } else {
+                // first click
+                state.ghostMove = {x, y};
+                redraw();
+            }
+        } else {
+            // desktop: single click
+            handleTsumegoClick(x, y);
+        }
     } else if (state.appMode === 'analyzing') {
         handleAnalysisClick(x, y);
     }
@@ -39,6 +62,19 @@ export function initializeBoard(size) {
 }
 
 function drawAnalysisHintMarker(move) {
+    if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
+    
+    const x = move.x;
+    const y = move.y;
+    
+    if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
+    
+    const currentPlayer = state.kifuReader.game.turn;
+    
+    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
+}
+
+function drawGhostMarker(move) {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
     
     const x = move.x;
@@ -94,6 +130,10 @@ export function redraw(analysisHintMove = null) {
 
     if (state.appMode === 'analyzing' && analysisHintMove) {
         drawAnalysisHintMarker(analysisHintMove);
+    }
+
+    if (state.ghostMove) {
+        drawGhostMarker(state.ghostMove);
     }
 }
 
