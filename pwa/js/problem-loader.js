@@ -72,7 +72,22 @@ function selectProblem() {
     }
 
     availableProblems.sort((a, b) => Math.abs(a.rating - state.userRank) - Math.abs(b.rating - state.userRank));
-    const candidateProblems = availableProblems.slice(0, 300);
+    const candidateProblems = availableProblems.slice(0, 50);
+
+    // Check if we need to start background loading
+    if (candidateProblems.length < 50) {
+        backgroundLoadCloserZip();
+    } else {
+        const closestZip = findClosestUnloadedZip();
+        if (closestZip) {
+            const userRank = state.userRank;
+            const candidateDiff = Math.abs(candidateProblems[49].rating - userRank);
+            const zipDiff = Math.min(Math.abs(userRank - closestZip.min_rating), Math.abs(userRank - closestZip.max_rating));
+            if (zipDiff < candidateDiff) {
+                backgroundLoadCloserZip();
+            }
+        }
+    }
 
     // Select a problem using weighted random sampling based on quality
     const problem = weightedRandomSelect(candidateProblems, p => p.quality);
@@ -187,12 +202,7 @@ export async function loadTsumego(isUpdate) {
             }
         }
 
-        // Check if we need to load more zips
-        const historyFilenames = new Set(state.problemHistory.map(p => p.filename));
-        const availableCount = state.allProblems.filter(p => !historyFilenames.has(p.filename)).length;
-        if (availableCount < 5) {
-            loadNextZip();
-        }
+        
 
         let sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
         if (!sgf || !sgf.trim()) {
@@ -223,8 +233,8 @@ export async function loadTsumego(isUpdate) {
             rating: selectedProblem.rating
         });
 
-        if (history.length > 200) {
-            history.length = 200;
+        if (history.length > 500) {
+            history.length = 500;
         }
 
         if (history.length > 2 && history[2].status === 'success') {
@@ -313,8 +323,8 @@ export async function loadTsumegoById(tsumegoId) {
             }
             history.unshift(newProblem);
         }
-        if (history.length > 200) {
-            history.length = 200;
+        if (history.length > 500) {
+            history.length = 500;
         }
 
         if (history.length > 2 && history[2].status === 'success') {
