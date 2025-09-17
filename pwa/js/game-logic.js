@@ -1,7 +1,7 @@
 // js/game-logic.js
 
 import { state, setAcceptClicks, setAppMode } from './state.js';
-import { getCurrentNode, playMoveByIndex, playNextMove } from './board.js';
+import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
@@ -56,14 +56,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
 export function handleBoardClick(x, y) {
     if (!state.acceptClicks) return;
 
-    const node = getCurrentNode();
-    const children = node.children;
-
-    if (!children || children.length === 0) {
-        return;
-    }
-
-    const moveNode = children.find(child => child.move && child.move.x === x && child.move.y === y);
+    const moveNode = getLegalMoveNode(x, y);
     if (!moveNode) {
         return;
     }

@@ -29,8 +29,10 @@ function handleBoardClick(x, y) {
                 }
             } else {
                 // first click
-                state.ghostMove = {x, y};
-                redraw();
+                if (getLegalMoveNode(x, y)) {
+                    state.ghostMove = {x, y};
+                    redraw();
+                }
             }
         } else {
             // desktop: single click
@@ -183,6 +185,12 @@ export function undoMove() {
     state.kifuReader.previous();
     redraw();
     return true;
+}
+
+export function getLegalMoveNode(x, y) {
+    const node = state.kifuReader.node;
+    const children = node.children;
+    return children.find(child => child.move && child.move.x === x && child.move.y === y) || null;
 }
 
 export function getCurrentNode() {
