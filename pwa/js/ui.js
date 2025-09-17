@@ -5,6 +5,16 @@ import { getTerm, getDescriptiveRank } from './utils.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getCurrentNode } from './board.js';
 
+export function updateCapturesUI() {
+    if (state.kifuReader) {
+        const captures = state.kifuReader.game.position.capCount;
+        document.getElementById('black-captures').textContent = captures.white;
+        document.getElementById('white-captures').textContent = captures.black;
+        document.getElementById('black-captures-h').textContent = captures.white;
+        document.getElementById('white-captures-h').textContent = captures.black;
+    }
+}
+
 const boardContainer = document.getElementById('board-container');
 
 function showInstallPrompt() {
@@ -71,6 +81,7 @@ function checkAndShowInstallPrompt() {
 
 export function updateAllUI() {
     checkAndShowInstallPrompt();
+    updateCapturesUI();
     // Update UI based on current app mode
     if (state.appMode === 'solving' || state.appMode === 'linked') {
         updateSolvingModeUI();

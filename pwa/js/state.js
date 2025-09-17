@@ -41,7 +41,10 @@ export const state = {
         return saved ? parseInt(saved) : null;
     })(),
     
-    // Analysis mode state\n    lastMoveInAnalysis: null, // Track last move in analysis mode\n    initialAnalysisNode: null,\n    ghostMove: null, // Pending move for double-click confirmation
+    // Analysis mode state
+    lastMoveInAnalysis: null, // Track last move in analysis mode
+    initialAnalysisNode: null,
+    ghostMove: null, // Pending move for double-click confirmation
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,

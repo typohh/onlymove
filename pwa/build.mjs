@@ -49,6 +49,7 @@ async function main() {
         },
         metafile: true,
         define: { 'APP_VERSION': `"${gitHash}"` },
+        external: ['*.png'],
     }).catch(() => process.exit(1));
 
     console.log("✅ JavaScript and CSS bundled and hashed.");

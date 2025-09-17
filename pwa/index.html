@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="color-scheme" content="dark light">
   <link rel="manifest" href="manifest.json" />
   <title id="app-title">Only Move</title>
   <link rel="stylesheet" type="text/css" href="lib/wgo/wgo.player.css" />
@@ -13,6 +14,10 @@
   <div id="main-container">
     <div id="title-container">
       <div id="title" class="info-text">Title</div>
+      <div id="captures-container" class="captures-container">
+        <div id="black-captures" class="capture-count">0</div>
+        <div id="white-captures" class="capture-count">0</div>
+      </div>
       <div id="text1" class="info-text">Rank</div>
     </div>
     
@@ -22,6 +27,10 @@
     <div id="controls-wrapper">
       <div id="info-container">
         <div id="title-h" class="info-text horizontal-only">Title</div>
+        <div id="captures-container-h" class="captures-container horizontal-only">
+          <div id="black-captures-h" class="capture-count">0</div>
+          <div id="white-captures-h" class="capture-count">0</div>
+        </div>
         <div id="text1-h" class="info-text horizontal-only">Rank</div>
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>

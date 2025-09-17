@@ -3,7 +3,7 @@
 import { state, setBoard, setKifuReader } from './state.js';
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
-import { updateBoardSize } from './ui.js';
+import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { SGF_COMMENTS } from './constants.js';
 
 WGo.DIR = 'lib/wgo/';
@@ -137,6 +137,7 @@ export function redraw(analysisHintMove = null) {
     if (state.ghostMove) {
         drawGhostMarker(state.ghostMove);
     }
+    updateCapturesUI();
 }
 
 export function loadSgf(sgfContent) {

@@ -63,6 +63,7 @@ export function handleBoardClick(x, y) {
 
     setAcceptClicks(false);
 
+    const children = getCurrentNode().children;
     const moveIndex = children.indexOf(moveNode);
     if (isCorrectMove(moveNode, children)) {
         playMoveByIndex(moveIndex);
