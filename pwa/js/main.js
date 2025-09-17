@@ -141,7 +141,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             const shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
             if (navigator.share) {
                 navigator.share({
-                    title: 'Tsumego Problem',
                     url: shareUrl
                 }).then(() => {
                     // No visible message on success
