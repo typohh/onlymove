@@ -98,7 +98,7 @@ body {
 }
 
 /* --- MODES 1 & 2: PORTRAIT & SQUARISH LAYOUTS (Consolidated) --- */
-@media (max-aspect-ratio: 130/100) {
+@media (max-aspect-ratio: 125/100) {
     #main-container {
         flex-direction: column;
         width: 100%;
@@ -140,8 +140,8 @@ body {
     }
 }
 
-/* --- MODE 2 Override: "SQUARISH" LAYOUT --- */
-@media (min-aspect-ratio: 84/100) and (max-aspect-ratio: 130/100) {
+/* --- MODE 2 Override: \"SQUARISH\" LAYOUT --- */
+@media (min-aspect-ratio: 84/100) and (max-aspect-ratio: 125/100) {
     #main-container {
         width: 84vh;
         justify-content: center;
@@ -152,7 +152,7 @@ body {
 }
 
 /* --- MODE 3: LANDSCAPE LAYOUT --- */
-@media (min-aspect-ratio: 130/100) {
+@media (min-aspect-ratio: 125/100) {
     #main-container {
         display: flex;
         flex-direction: row;
