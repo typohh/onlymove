@@ -141,7 +141,9 @@ function updateSolvingModeUI() {
     }
     
     // Update "About" link (button2)
-    document.getElementById('button2').textContent = getTerm('about');
+    const aboutLink = document.getElementById('button2');
+    aboutLink.textContent = getTerm('about');
+    aboutLink.classList.remove('disabled'); // Ensure enabled in solving mode
     
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('stats');
