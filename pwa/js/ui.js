@@ -5,13 +5,25 @@ import { getTerm, getDescriptiveRank } from './utils.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getCurrentNode } from './board.js';
 
+function formatScore(score) {
+    return score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
+}
+
 export function updateCapturesUI() {
     if (state.kifuReader) {
         const captures = state.kifuReader.game.position.capCount;
-        document.getElementById('black-captures').textContent = captures.white;
-        document.getElementById('white-captures').textContent = captures.black;
-        document.getElementById('black-captures-h').textContent = captures.white;
-        document.getElementById('white-captures-h').textContent = captures.black;
+        const komi = 6.5;
+        const blackCaptures = captures.black;
+        const whiteCaptures = captures.white;
+        const score = komi + whiteCaptures - blackCaptures;
+        const formattedScore = formatScore(score);
+        document.getElementById('capture-score').textContent = formattedScore;
+        document.getElementById('capture-score-h').textContent = formattedScore;
+        // Prevent text selection to treat as button
+        document.getElementById('capture-score').style.userSelect = 'none';
+        document.getElementById('capture-score').style.webkitUserSelect = 'none';
+        document.getElementById('capture-score-h').style.userSelect = 'none';
+        document.getElementById('capture-score-h').style.webkitUserSelect = 'none';
     }
 }
 
@@ -373,6 +385,26 @@ export function showDetailedStats() {
     alert(detailText);
 }
 
+// Function to show capture details when user clicks on capture score
+export function showCaptureDetails() {
+    if (!state.kifuReader) return;
+    const captures = state.kifuReader.game.position.capCount;
+    const komi = 6.5;
+    const blackCaptures = captures.black;
+    const whiteCaptures = captures.white;
+    const score = komi + whiteCaptures - blackCaptures;
+
+    const detailText = `${getTerm('komi')}: ${komi}
+` +
+                       `${getTerm('blackCaptures')}: ${blackCaptures}
+` +
+                       `${getTerm('whiteCaptures')}: ${whiteCaptures}
+` +
+                       `${getTerm('whiteAdjustment')}: ${formatScore(score)}`;
+
+    alert(detailText);
+}
+
 export function updateBoardSize() {
     // Board sizing is now handled by CSS using vi units
     // We still need to update the WGo board dimensions
@@ -414,10 +446,15 @@ export function updateAnalysisUI(score, bestMove) {
                     isUnreliable = true;
                 }
             }
-            const displayText = `${scoreText}: ${formattedScore}`;
+            let displayText;
+            if (formattedScore === getTerm('analyzing')) {
+                displayText = formattedScore;
+            } else {
+                displayText = `${scoreText}: ${formattedScore}`;
+            }
             if (isUnreliable) {
                 const warningMsg = getTerm('unreliableWarning');
-                const html = `<span class=\"unreliable\" onclick=\"alert('${warningMsg}')\" style=\"user-select: none; -webkit-user-select: none;\">${displayText}</span>`;
+                const html = `<span class="unreliable" onclick="alert('${warningMsg}')" style="user-select: none; -webkit-user-select: none;">${displayText}</span>`;
                 document.getElementById('text1').innerHTML = html;
                 document.getElementById('text1-h').innerHTML = html;
             } else {

@@ -86,13 +86,15 @@ def print_rating_distribution(metadata):
     total_problems = len(rating_distribution)
     for rank in get_all_ranks():
         min_r = (rank + previous_rank) / 2
-        max_r = rank + (rank - previous_rank) / 2 if rank < 1.0 else 1.01
+        max_r = rank + (rank - previous_rank) / 2
 
         count = sum(1 for x in rating_distribution if min_r <= x < max_r)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
         qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rating'] < max_r]
         avg_quality = sum(qualities_in_range) / len(qualities_in_range) if qualities_in_range else 0.0
-        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f})")
+        raw_ratings_in_range = [item['raw_rating'] for item in metadata if min_r <= item['rating'] < max_r]
+        avg_raw_rating = sum(raw_ratings_in_range) / len(raw_ratings_in_range) if raw_ratings_in_range else 0.0
+        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f}, avg rating: {avg_raw_rating:.3f})")
         previous_rank = rank
 
 
@@ -104,39 +106,31 @@ if __name__ == "__main__":
     # 1. Get the ratings map (tsumego_id -> rating).
     tsumego_ratings_df = pd.read_csv("ratings/tsumego_ratings_final.csv")
 
-    # Normalize ratings to 0-1
-    # min_rating = tsumego_ratings_df['rating'].min()
-    # max_rating = tsumego_ratings_df['rating'].max()
-    # tsumego_ratings_df['rating'] = (tsumego_ratings_df['rating'] - min_rating) / (max_rating - min_rating)
+    # Store raw ratings before scaling
+    tsumego_ratings_df['raw_rating'] = tsumego_ratings_df['rating']
 
     # Apply order..
     tsumego_ratings_df = tsumego_ratings_df.sort_values(by='rating', ascending=True).reset_index(drop=True)
 
     total = len(tsumego_ratings_df)
-    # bottom 1% to linearly 0-1/29, middle to normalized 1/29-28/29, top 10% to linearly 28/29-1
-    bottom_1_count = int(0.01 * total)
-    middle_end = int(0.90 * total)
-    top_count = total - middle_end
-    # Bottom 1%: position-based linear interpolation to 0 - 1/29
-    if bottom_1_count > 1:
-        tsumego_ratings_df.loc[:bottom_1_count-1, 'rating'] = (tsumego_ratings_df.index[:bottom_1_count] / (bottom_1_count - 1)) * (1/29)
-    else:
-        tsumego_ratings_df.loc[:bottom_1_count-1, 'rating'] = 0.0
-    # Middle: normalize based on rating to 1/29 - 28/29
-    min_middle = tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'].min()
-    max_middle = tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'].max()
-    if max_middle > min_middle:
-        tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] = (tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] - min_middle) / (max_middle - min_middle) * (28/29 - 1/29) + 1/29
-    else:
-        tsumego_ratings_df.loc[bottom_1_count:middle_end-1, 'rating'] = 1/29
-    # Top: position-based to 28/29 - 1
-    if top_count > 1:
-        tsumego_ratings_df.loc[middle_end:, 'rating'] = ((tsumego_ratings_df.index[middle_end:] - middle_end) / (top_count - 1)) * (1 - 28/29) + 28/29
-    else:
-        tsumego_ratings_df.loc[middle_end:, 'rating'] = 28/29
+    # Read bot ratings
+    bot_ratings_df = pd.read_csv("ratings/bot_ratings_final.csv")
+    bot_8k = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k']['rating'].values[0]
+    bot_3d = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3d']['rating'].values[0]
+    f1 = 12.5 / 29
+    f2 = 22.5 / 29
+    a = (f2 - f1) / (bot_3d - bot_8k)
+    b = f1 - a * bot_8k
+    tsumego_ratings_df['rating'] = a * tsumego_ratings_df['raw_rating'] + b
+    bottom = tsumego_ratings_df[tsumego_ratings_df['rating'] < 1/29].index
+    for i, idx in enumerate(sorted(bottom, key=lambda x: tsumego_ratings_df.loc[x, 'raw_rating'])):
+        tsumego_ratings_df.loc[idx, 'rating'] = i / (len(bottom) - 1) * (1/29) if len(bottom) > 1 else 0
+    top = tsumego_ratings_df[tsumego_ratings_df['rating'] > 28/29].index
+    for i, idx in enumerate(sorted(top, key=lambda x: tsumego_ratings_df.loc[x, 'raw_rating'])):
+        tsumego_ratings_df.loc[idx, 'rating'] = (i / (len(top) - 1)) * (1 - 28/29) + 28/29 if len(top) > 1 else 28/29
 
 
-    tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], tsumego_ratings_df['rating']))
+    tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating'])))
 
     # 2. Get the quality map (tsumego_id -> quality).
     tsumego_quality_df = pd.read_csv("ratings/tsumego_quality_final.csv")
@@ -157,9 +151,9 @@ if __name__ == "__main__":
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
-            rating = tsumego_ratings_map[tsumego_id]
+            rating, raw_rating = tsumego_ratings_map[tsumego_id]
             quality = tsumego_quality_map.get(tsumego_id, 0.0)
-            all_metadata.append({"filename": filename, "rating": rating, "quality": quality})
+            all_metadata.append({"filename": filename, "rating": rating, "raw_rating": raw_rating, "quality": quality})
         else:
             skipped_count += 1
 

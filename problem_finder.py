@@ -76,24 +76,41 @@ class ProblemFinder:
             max_winrate_alternative = MAX_WINRATE_ALTERNATIVE + (MAX_WINRATE_ALTERNATIVE_VERIFY - MAX_WINRATE_ALTERNATIVE) * p
 
             best_move, best_winrate, best_score, _ = self.queries.get_best_move(self.queries.query(moves, playouts=playouts))
-            _, second_winrate, second_score, _ = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move, playouts=playouts))
+            second_move, second_winrate, second_score, _ = self.queries.get_best_move(self.queries.query(moves, exclude_move=best_move, playouts=playouts))
             debug(f"verify: {i}/{steps} {(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
             if best_winrate < min_winrate_correct or second_winrate > max_winrate_alternative or second_score > 0:
                 debug("looked promising, but failed after more playouts")
                 return False
 
         # and lets play the game to the end, just to make sure we arrive at the same conclusion..
-        full_game_moves = moves.copy()
-        while full_game_moves[-1] != 'pass' or full_game_moves[-2] != 'pass':
-            best_move, best_winrate, best_score, _ = self.queries.get_best_move(self.queries.query(full_game_moves, playouts=PLAYOUTS_GAME))
-            if best_winrate < 0.5 or best_score < 0:
-                debug(f"looked promising, but black fell behind after {len(full_game_moves) - len(moves)} moves.")
+        winning_game_moves = moves.copy()
+        winning_game_moves.append(best_move)
+        while winning_game_moves[-1] != 'pass' or winning_game_moves[-2] != 'pass':
+            move, winrate, score, _ = self.queries.get_best_move(self.queries.query(winning_game_moves, playouts=PLAYOUTS_GAME))
+            if winrate < 0.5 or score < 0:
+                debug(f"looked promising, but black fell behind after {len(winning_game_moves) - len(moves)} moves.")
                 return False
-            full_game_moves.append(best_move)
+            winning_game_moves.append(move)
 
-        score,winrate = self.queries.get_position_info(full_game_moves)
+        score,winrate = self.queries.get_position_info(winning_game_moves)
+        debug(f"playing correct move to the end : {(100 * winrate):.1f}% {score:.1f}")
         if winrate < 0.5 or score < 0:
             debug("looked promising, but playing to the end didnt give conclusive win")
+            return False
+
+        losing_game_moves = moves.copy()
+        losing_game_moves.append(second_move)
+        while losing_game_moves[-1] != 'pass' or losing_game_moves[-2] != 'pass':
+            move, winrate, score, _ = self.queries.get_best_move(self.queries.query(losing_game_moves, playouts=PLAYOUTS_GAME))
+            if winrate > 0.5 or score > 0:
+                debug(f"looked promising, but despite wrong move black got ahead after {len(losing_game_moves) - len(moves)} moves.")
+                return False
+            losing_game_moves.append(move)
+
+        score,winrate = self.queries.get_position_info(losing_game_moves)
+        debug(f"playing incorrect move to the end : {(100 * winrate):.1f}% {score:.1f}")
+        if winrate > 0.5 or score > 0:
+            debug("looked promising, but playing to the end didnt give conclusive loss despite second best move")
             return False
 
         return True

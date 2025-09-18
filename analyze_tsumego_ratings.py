@@ -1,10 +1,15 @@
-import json
 import csv
 import statistics
 
-# Load the JSON data
-with open('t.json', 'r') as f:
-    data = json.load(f)
+# Load the TSV data
+with open('t.txt', 'r') as f:
+    reader = csv.DictReader(f, delimiter='\t')
+    data = []
+    for row in reader:
+        data.append({
+            'filename': row['problem'] + '.sgf',
+            'status': 'success' if row['success'] == '1' else 'fail'
+        })
 
 # Extract IDs based on status
 success_ids = []

@@ -336,6 +336,21 @@ body {
     margin: 0 0.5vmin;
 }
 
+.capture-score {
+    width: calc(min(0.84 * 100vh, 100vw) / 10);
+    height: calc(min(0.84 * 100vh, 100vw) / 10);
+    border-radius: 50%;
+    border: 0.2vmin solid white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 2px black;
+    margin: 0 0.5vmin;
+    cursor: pointer;
+}
+
 #black-captures, #black-captures-h {
     background-image: url('../lib/wgo/stones/black_128.png');
     background-size: cover;

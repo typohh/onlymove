@@ -36,7 +36,11 @@ const localization = {
     installPrompt: '安装为应用以获得更好的体验！',
     install: '安装',
     rankChangeFormat: '等级 {change}',
-    unreliableWarning: '警告：此位置没有预计算解决方案，最佳移动和得分不可靠。'
+    unreliableWarning: '警告：此位置没有预计算解决方案，最佳移动和得分不可靠。',
+    komi: '贴目',
+    blackCaptures: '黑方提子',
+    whiteCaptures: '白方提子',
+    whiteAdjustment: '白方调整'
   },
   ja: {
     kyu: '級',
@@ -71,7 +75,11 @@ const localization = {
     installPrompt: 'アプリとしてインストールして、より良い体験を！',
     install: 'インストール',
     rankChangeFormat: 'ランク {change}',
-    unreliableWarning: '警告：この位置には事前計算されたソリューションがありません、最良の移動とスコアは信頼できません。'
+    unreliableWarning: '警告：この位置には事前計算されたソリューションがありません、最良の移動とスコアは信頼できません。',
+    komi: 'コミ',
+    blackCaptures: '黒の取り',
+    whiteCaptures: '白の取り',
+    whiteAdjustment: '白の調整'
   },
   ko: {
     kyu: '급',
@@ -106,7 +114,10 @@ const localization = {
     installPrompt: '앱으로 설치하여 더 나은 경험을!',
     install: '설치',
     rankChangeFormat: '등급 {change}',
-    unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.'
+    unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.',
+    komi: '코미',blackCaptures: '흑의 포획',
+    whiteCaptures: '백의 포획',
+    whiteAdjustment: '백의 조정'
   },
   en: {
     kyu: 'kyu',
@@ -141,7 +152,11 @@ const localization = {
     installPrompt: 'Install as an app for a better experience!',
     install: 'Install',
     rankChangeFormat: 'Rank {change}',
-    unreliableWarning: 'WARNING: no precomputed solution available for this position, best move and score are unreliable.'
+    unreliableWarning: 'WARNING: no precomputed solution available for this position, best move and score are unreliable.',
+    komi: 'Komi',
+    blackCaptures: 'Black Captures',
+    whiteCaptures: 'White Captures',
+    whiteAdjustment: 'White Adjustment'
   }
 };
 

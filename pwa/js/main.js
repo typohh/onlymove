@@ -1,7 +1,7 @@
 // js/main.js
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory } from './state.js';
-import { updateAllUI, updateBoardSize, showDetailedStats } from './ui.js';
+import { updateAllUI, updateBoardSize, showDetailedStats, showCaptureDetails } from './ui.js';
 import { loadSgf } from './board.js';
 
 import { initAudio } from './audio.js';
@@ -147,7 +147,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }).catch(err => {
                     if (err.name !== 'AbortError') {
                         console.error('Share failed: ', err);
-                        // No visible message on failure
                     }
                 });
             } else {
@@ -215,6 +214,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     });
+
+    // Handle capture score click
+    document.getElementById('capture-score').addEventListener('click', showCaptureDetails);
+    document.getElementById('capture-score-h').addEventListener('click', showCaptureDetails);
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
