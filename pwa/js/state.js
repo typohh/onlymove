@@ -100,6 +100,10 @@ export function setInitialAnalysisNode(node) {
     state.initialAnalysisNode = node;
 }
 
+export function setGhostMove(move) {
+    state.ghostMove = move;
+}
+
 export function updateUserRank(rank) {
     state.userRank = rank;
     localStorage.setItem('userRank', rank.toString());

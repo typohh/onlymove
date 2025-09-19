@@ -1,6 +1,6 @@
 // js/analysis.js
 
-import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode } from './state.js';
+import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
@@ -15,6 +15,8 @@ let analysisHintMove = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
+    setGhostMove(null); // Clear any ghost stone from previous modes
+
     if (!state.problemHistory || state.problemHistory.length < 2) {
         console.error("Not enough history to enter analysis mode.");
         setAppMode('solving');
