@@ -136,11 +136,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (state.appMode === 'solving' || state.appMode === 'linked') {
             showDetailedStats();
         } else { // 'analyzing'
-            if (!state.problemHistory[0]) {
+            if (!state.problemHistory[1]) {
                 console.error('No current problem to share');
                 return;
             }
-            const tsumegoId = state.problemHistory[0].filename.replace('.sgf', '');
+            const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
             const shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
             if (navigator.share) {
                 navigator.share({
