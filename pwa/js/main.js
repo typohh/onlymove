@@ -1,6 +1,6 @@
 // js/main.js
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted } from './state.js';
 import { updateAllUI, updateBoardSize, showDetailedStats, showCaptureDetails } from './ui.js';
 import { loadSgf } from './board.js';
 
@@ -13,6 +13,9 @@ window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     setDeferredInstallPrompt(e);
 });
+
+document.addEventListener('click', () => setUserHasInteracted(true));
+document.addEventListener('touchstart', () => setUserHasInteracted(true));
 
 async function fixupZeroRatedProblems() {
     const history = state.problemHistory;

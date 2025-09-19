@@ -35,6 +35,7 @@ export const state = {
     // UI state
     acceptClicks: false,
     deferredInstallPrompt: null,
+    userHasInteracted: false,
     
     problemStartTime: (() => {
         const saved = localStorage.getItem('problemStartTime');
@@ -89,6 +90,10 @@ export function setAcceptClicks(canAccept) {
 
 export function setDeferredInstallPrompt(prompt) {
     state.deferredInstallPrompt = prompt;
+}
+
+export function setUserHasInteracted(interacted) {
+    state.userHasInteracted = interacted;
 }
 
 export function setInitialAnalysisNode(node) {

@@ -121,6 +121,20 @@ export async function loadZipProblems(zipFilename) {
     const contentType = zipResponse.headers.get('content-type');
     if (!zipResponse.ok || (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream'))) {
         console.error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
+        // Check if likely missing file: 404 or wrong content type (indirect 404 detection)
+        const isLikelyMissing = zipResponse.status === 404 || (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream'));
+        if (isLikelyMissing) {
+            const lastReloadTime = localStorage.getItem('lastReloadTime');
+            const now = Date.now();
+            const reloadThreshold = 30000; // 30 seconds
+            const hasRecentReload = lastReloadTime && (now - parseInt(lastReloadTime)) < reloadThreshold;
+            if (state.userHasInteracted && !hasRecentReload) {
+                console.log('Detected missing zip file, likely due to new version. Reloading page.');
+                localStorage.setItem('lastReloadTime', now.toString());
+                location.reload();
+                return; // Prevent further execution
+            }
+        }
         throw new Error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
     }
 
