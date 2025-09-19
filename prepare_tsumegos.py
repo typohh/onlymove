@@ -117,8 +117,8 @@ if __name__ == "__main__":
     bot_ratings_df = pd.read_csv("ratings/bot_ratings_final.csv")
     bot_8k = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k']['rating'].values[0]
     bot_3d = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3d']['rating'].values[0]
-    f1 = 12.5 / 29
-    f2 = 22.5 / 29
+    f1 = 12 / 29
+    f2 = 22 / 29
     a = (f2 - f1) / (bot_3d - bot_8k)
     b = f1 - a * bot_8k
     tsumego_ratings_df['rating'] = a * tsumego_ratings_df['raw_rating'] + b
