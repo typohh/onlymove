@@ -149,8 +149,8 @@ export function updateUserStats(isCorrect) {
 export function showDetailedStats() {
     const history = state.answerHistory.slice(-500);
 
-    if (history.length < 10) { // Need enough data for regression
-        alert(getTerm('noHistory'));
+    if (history.length < 5) { // Need enough data for regression
+        alert(getTerm('statsNotEnough').replace('{count}', history.length));
         return;
     }
 
@@ -209,7 +209,7 @@ export function showDetailedStats() {
         const Xty = math.multiply(Xt, y);
         const beta = math.multiply(XtX_inv, Xty);
 
-        const variableNames = ['Time Spent', 'Problem Difficulty', 'Problem Quality', 'Date', 'Novel', 'Short-term Repeat', 'Long-term Repeat'];
+        const variableNames = [getTerm('timeSpent'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('novel'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const fullBeta = new Array(variableNames.length).fill('-');
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
@@ -225,7 +225,7 @@ export function showDetailedStats() {
             }
         }
 
-        let resultText = `Factors affecting your result from past ${history.length} problems:\n`;
+        let resultText = getTerm('statsIntro').replace('{count}', history.length) + '\n';
         fullBeta.forEach((b, i) => {
             let formattedB = b === '-' ? '-' : (parseFloat(b) > 0 ? '+' + b : b);
             if (formattedB !== '-' && Math.abs(parseFloat(b)) > 5) {
@@ -234,7 +234,7 @@ export function showDetailedStats() {
             resultText += `${variableNames[i]}: ${formattedB}\n`;
         });
 
-        resultText += '\nPositive beta coefficients suggest a higher chance of a correct answer, negative beta coefficients suggest a lower chance.';
+        resultText += '\n' + getTerm('statsExplanation');
 
         alert(resultText);
     } catch (error) {

@@ -55,7 +55,14 @@ const localization = {
     problemTypeAnalysis: '问题类型分析',
     novel: '新问题',
     shortTermRepeat: '短期重复',
-    longTermRepeat: '长期重复'
+    longTermRepeat: '长期重复',
+    statsIntro: '过去 {count} 个问题的结果影响因素：',
+    timeSpent: '花费时间',
+    problemDifficulty: '问题难度',
+    problemQuality: '问题质量',
+    date: '日期',
+    statsExplanation: '正beta系数表明正确答案的可能性更高，负beta系数表明正确答案的可能性更低。',
+    statsNotEnough: '您已完成 {count} 个数独，启用统计需要5个。'
   },
   ja: {
     kyu: '級',
@@ -109,7 +116,14 @@ const localization = {
     problemTypeAnalysis: '問題タイプ分析',
     novel: '新しい問題',
     shortTermRepeat: '短期繰り返し',
-    longTermRepeat: '長期繰り返し'
+    longTermRepeat: '長期繰り返し',
+    statsIntro: '過去 {count} 件の問題の結果に影響する要因：',
+    timeSpent: '費やした時間',
+    problemDifficulty: '問題の難易度',
+    problemQuality: '問題の品質',
+    date: '日付',
+    statsExplanation: '正のベータ係数は正解の確率が高いことを示し、負のベータ係数は正解の確率が低いことを示します。',
+    statsNotEnough: '{count} つのツメゴを完了しました、統計を有効にするには5つが必要です。'
   },
   ko: {
     kyu: '급',
@@ -162,7 +176,14 @@ const localization = {
     problemTypeAnalysis: '문제 유형 분석',
     novel: '새로운 문제',
     shortTermRepeat: '단기 반복',
-    longTermRepeat: '장기 반복'
+    longTermRepeat: '장기 반복',
+    statsIntro: '지난 {count}개 문제의 결과에 영향을 미치는 요인:',
+    timeSpent: '소요 시간',
+    problemDifficulty: '문제 난이도',
+    problemQuality: '문제 품질',
+    date: '날짜',
+    statsExplanation: '양의 베타 계수는 정답 확률이 높음을 나타내고, 음의 베타 계수는 정답 확률이 낮음을 나타냅니다.',
+    statsNotEnough: '{count}개의 츠메고를 완료했습니다, 통계를 활성화하려면 5개가 필요합니다.'
   },
   en: {
     kyu: 'kyu',
@@ -216,7 +237,14 @@ const localization = {
     problemTypeAnalysis: 'Problem Type Analysis',
     novel: 'Novel',
     shortTermRepeat: 'Short-term Repeat',
-    longTermRepeat: 'Long-term Repeat'
+    longTermRepeat: 'Long-term Repeat',
+    statsIntro: 'Factors affecting your result from past {count} problems:',
+    timeSpent: 'Time Spent',
+    problemDifficulty: 'Problem Difficulty',
+    problemQuality: 'Problem Quality',
+    date: 'Date',
+    statsExplanation: 'Positive beta coefficients suggest a higher chance of a correct answer, negative beta coefficients suggest a lower chance.',
+    statsNotEnough: 'You have completed {count} tsumegos, 5 needed to enable statistics.'
   }
 };
 
