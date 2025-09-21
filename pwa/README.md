@@ -163,6 +163,6 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - Always investigate code thoroughly for potential issues before assuming external causes, and avoid quick fixes or number adjustments without proper analysis.
 - Avoid workarounds for issues that are not fully understood. Investigate the root cause of a problem before implementing a solution. Do not use 'just-in-case' code that can hide underlying issues or make the code harder to understand.
 - When using the edit tool, avoid providing escaped special characters in the new_string; use literal newlines and unescaped quotes to prevent the tool from introducing syntax errors in code, HTML, or other files.
-
+- Avoid performing broad project-level searches with searchText, as they may return too many results; instead, limit searches to specific files or subfolders where you know the content is relevant.
 - Upon reading these instructions, quote back any you understand and think you are able to follow.
 

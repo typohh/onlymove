@@ -147,11 +147,33 @@ export function updateUserStats(isCorrect) {
 
 // Function to show detailed stats when user clicks on rank
 export function showDetailedStats() {
-    const history = state.answerHistory.slice(-500);
+    // Remove invalid answerHistory entries that lack required fields
+    const originalLength = state.answerHistory.length;
+    const validHistory = state.answerHistory.filter(p =>
+        p.problemRating !== undefined &&
+        p.problemQuality !== undefined &&
+        p.timeTaken !== undefined &&
+        p.date !== undefined
+    );
+    const removedCount = originalLength - validHistory.length;
+    if (removedCount > 0) {
+        console.warn(`Removed ${removedCount} invalid answerHistory entries out of ${originalLength}`);
+        updateAnswerHistory(validHistory);
+    }
+
+    const history = validHistory.slice(-500);
 
     if (history.length < 5) { // Need enough data for regression
         alert(getTerm('statsNotEnough').replace('{count}', history.length));
         return;
+    }
+
+    // Debug: Check for invalid values
+    for (const p of history) {
+        if (typeof p.timeTaken !== 'number' || isNaN(p.timeTaken)) console.log('Invalid timeTaken:', p.timeTaken, p);
+        if (typeof p.problemRating !== 'number' || isNaN(p.problemRating)) console.log('Invalid problemRating:', p.problemRating, p);
+        if (typeof p.problemQuality !== 'number' || isNaN(p.problemQuality)) console.log('Invalid problemQuality:', p.problemQuality, p);
+        if (typeof p.date !== 'number' || isNaN(p.date)) console.log('Invalid date:', p.date, p);
     }
 
     try {
