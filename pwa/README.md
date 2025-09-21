@@ -161,7 +161,8 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.
 - Try to rule out any "explanation" you have for a bug, by properly investigating the code before making any changes. Instead of hiding behind vague claims and jumping to conclusions.
 - Always investigate code thoroughly for potential issues before assuming external causes, and avoid quick fixes or number adjustments without proper analysis.
-- Upon reading these instructions, quote back any you understand and think you are able to follow.
 - Avoid workarounds for issues that are not fully understood. Investigate the root cause of a problem before implementing a solution. Do not use 'just-in-case' code that can hide underlying issues or make the code harder to understand.
 - When using the edit tool, avoid providing escaped special characters in the new_string; use literal newlines and unescaped quotes to prevent the tool from introducing syntax errors in code, HTML, or other files.
+
+- Upon reading these instructions, quote back any you understand and think you are able to follow.
 

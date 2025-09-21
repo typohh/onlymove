@@ -65,6 +65,8 @@ export const state = {
         failOnSuccess: 0,
         totalOnSuccess: 0,
     },
+
+    answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
 };
 
 // MODIFICATION: Cache for loaded zip files
@@ -127,6 +129,11 @@ export function updateProblemHistory(history) {
 export function updateNextTsumego(nextTsumego) {
     state.nextTsumego = nextTsumego;
     localStorage.setItem('nextTsumego', JSON.stringify(nextTsumego));
+}
+
+export function updateAnswerHistory(history) {
+    state.answerHistory = history;
+    localStorage.setItem('answerHistory', JSON.stringify(history));
 }
 
 

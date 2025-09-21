@@ -1,7 +1,8 @@
 // js/main.js
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted } from './state.js';
-import { updateAllUI, updateBoardSize, showDetailedStats, showCaptureDetails } from './ui.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, setProblemStartTime } from './state.js';
+import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
+import { showDetailedStats } from './user-stats.js';
 import { loadSgf } from './board.js';
 
 import { initAudio } from './audio.js';
@@ -219,8 +220,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Handle capture score click
-    document.getElementById('capture-score').addEventListener('click', showCaptureDetails);
-    document.getElementById('capture-score-h').addEventListener('click', showCaptureDetails);
+    document.getElementById('capture-score').addEventListener('click', (e) => {
+    e.preventDefault();
+    showCaptureDetails();
+});
+document.getElementById('capture-score-h').addEventListener('click', (e) => {
+    e.preventDefault();
+    showCaptureDetails();
+});
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);

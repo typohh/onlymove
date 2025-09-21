@@ -19,11 +19,6 @@ export function updateCapturesUI() {
         const formattedScore = formatScore(score);
         document.getElementById('capture-score').textContent = formattedScore;
         document.getElementById('capture-score-h').textContent = formattedScore;
-        // Prevent text selection to treat as button
-        document.getElementById('capture-score').style.userSelect = 'none';
-        document.getElementById('capture-score').style.webkitUserSelect = 'none';
-        document.getElementById('capture-score-h').style.userSelect = 'none';
-        document.getElementById('capture-score-h').style.webkitUserSelect = 'none';
     }
 }
 
@@ -350,40 +345,7 @@ export function fadeOverlay(duration, callback, stats = null) {
 }
 
 
-// Function to show detailed stats when user clicks on rank
-export function showDetailedStats() {
-    // Calculate progress to next rank
-    const rating = state.userRank;
-    const rankValue = rating * TOTAL_RANKS;
-    const currentRankIndex = Math.floor(rankValue);
-    const progress = (rankValue - currentRankIndex) * 100;
-    
-    const stddev = state.momentum / 4;
-    const stats = state.tsumegoStats;
-    const totalTsumegos = stats.totalOnFail + stats.totalOnInBetween + stats.totalOnSuccess;
-    const shortTermRecollectionValue = stats.totalOnFail > 0 ? Math.round(100 - stats.failOnFail / stats.totalOnFail * 100) : null;
-    const longTermRecollectionValue = stats.totalOnInBetween > 0 ? Math.round(100 - stats.failOnInBetween / stats.totalOnInBetween * 100) : null;
 
-    const shortTermRecollectionText = shortTermRecollectionValue !== null ? `${shortTermRecollectionValue}%` : '-';
-    const longTermRecollectionText = longTermRecollectionValue !== null ? `${longTermRecollectionValue}%` : '-';
-
-    // Display the information
-    const userRank = getDescriptiveRank(state.userRank);
-    const detailText = `${getTerm('userRank')}: ${userRank}
-` +
-                       `${getTerm('onTheWayToNextRank')}: ${Math.floor(progress)}%
-` +
-                       `${getTerm('standardDeviation')}: ${stddev.toFixed(1)} ranks
-` +
-                       `${getTerm('totalTsumegos')}: ${totalTsumegos}
-` +
-                       `${getTerm('shortTermRecollection')}: ${shortTermRecollectionText}
-` +
-                       `${getTerm('longTermRecollection')}: ${longTermRecollectionText}`;
-    
-    // Show in an alert for now (can be improved with a better UI later)
-    alert(detailText);
-}
 
 // Function to show capture details when user clicks on capture score
 export function showCaptureDetails() {
@@ -454,7 +416,7 @@ export function updateAnalysisUI(score, bestMove) {
             }
             if (isUnreliable) {
                 const warningMsg = getTerm('unreliableWarning');
-                const html = `<span class="unreliable" onclick="alert('${warningMsg}')" style="user-select: none; -webkit-user-select: none;">${displayText}</span>`;
+                const html = `<span class="unreliable" onclick="alert('${warningMsg}')" role="button" tabindex="0">${displayText}</span>`;
                 document.getElementById('text1').innerHTML = html;
                 document.getElementById('text1-h').innerHTML = html;
             } else {

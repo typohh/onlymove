@@ -59,7 +59,7 @@ function selectProblem() {
         }
 
         if (Math.random() < probability) {
-            return historyItem;
+            return { ...historyItem, isRepeat: true };
         }
     }
 
@@ -91,7 +91,7 @@ function selectProblem() {
 
     // Select a problem using weighted random sampling based on quality
     const problem = weightedRandomSelect(candidateProblems, p => p.quality);
-    return { ...problem, status: 'success' };
+    return { ...problem, status: 'success', isRepeat: false };
 }
 
 async function fetchSgfFromZip(filename, zipFilename) {
@@ -239,12 +239,14 @@ export async function loadTsumego(isUpdate) {
             history.splice(indicesToRemove[i], 1);
         }
 
-                        history.unshift({
+        history.unshift({
             filename: selectedProblem.filename,
             sgf: sgf,
             status: selectedProblem.status || 'success',
             linked: false,
-            rating: selectedProblem.rating
+            rating: selectedProblem.rating,
+            quality: selectedProblem.quality || 0,
+            isRepeat: selectedProblem.isRepeat || false
         });
 
         if (history.length > 500) {
@@ -313,6 +315,7 @@ export async function loadTsumegoById(tsumegoId) {
 
         const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
         const problemRank = problem ? problem.rating : 0;
+        const problemQuality = problem ? problem.quality : 0;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
         sgfContent = reorientSgf(sgfContent);
@@ -324,7 +327,9 @@ export async function loadTsumegoById(tsumegoId) {
             sgf: sgfContent,
             status: 'success',
             linked: true,
-            rating: problemRank
+            rating: problemRank,
+            quality: problemQuality,
+            isRepeat: false
         };
 
         // If current problem is linked, replace it instead of shifting
