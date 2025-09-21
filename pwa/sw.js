@@ -1,5 +1,5 @@
 // This version string is dynamically replaced by the build script (build.mjs)
-const VERSION = '3';
+const VERSION = '4';
 const PRECACHE_NAME = `only-move-precache-${VERSION}`;
 const RUNTIME_CACHE_NAME = 'only-move-runtime';
 
@@ -13,6 +13,7 @@ const PRECACHE_URLS = [
     '/lib/wgo/wgo.min.js',
     '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js'
+    '/lib/math.min.js'
 ];
 
 self.addEventListener('install', event => {
