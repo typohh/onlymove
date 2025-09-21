@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         borderRadius: '0.5vmin',
                         fontWeight: 'bold',
                         fontSize: '3vmin',
-                        zIndex: '10000',
+                        zIndex: '9999',
                         pointerEvents: 'none',
                         whiteSpace: 'nowrap',
                         textAlign: 'center'
