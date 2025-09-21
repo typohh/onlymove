@@ -254,7 +254,7 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names):
 
         final_results.append({
             "tsumego_id": tsumego_id,
-            "rating": rating - 3 * quality,
+            "rating": rating - 2.5 * quality,
             "quality": quality
         })
 

@@ -141,8 +141,8 @@ body {
     }
 
     #title, #text1 {
-        white-space: normal;
-        overflow-wrap: break-word;
+        white-space: nowrap;
+        overflow-wrap: normal;
     }
 }
 
