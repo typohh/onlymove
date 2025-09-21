@@ -12,7 +12,7 @@ const PRECACHE_URLS = [
     '/lib/wgo/wgo.player.css',
     '/lib/wgo/wgo.min.js',
     '/lib/wgo/wgo.player.min.js',
-    '/lib/jszip.min.js'
+    '/lib/jszip.min.js',
     '/lib/math.min.js'
 ];
 

@@ -127,7 +127,7 @@ body {
         border-radius: 0 0 var(--radius) var(--radius);
     }
     /* Apply horizontal margin only to elements that follow another */
-    
+
     #info-container > * + * {
         margin-left: 1vmin;
     }
@@ -138,6 +138,11 @@ body {
 
     .horizontal-only {
         display: none !important;
+    }
+
+    #title, #text1 {
+        white-space: normal;
+        overflow-wrap: break-word;
     }
 }
 
@@ -210,6 +215,11 @@ body {
     /* Apply vertical margin only to elements that follow another */
     #info-container > * + * {
         margin-top: 1vmin;
+    }
+
+    #title-h {
+        white-space: normal;
+        overflow-wrap: break-word;
     }
 
 

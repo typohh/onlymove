@@ -238,7 +238,7 @@ const localization = {
     novel: 'Novel',
     shortTermRepeat: 'Short-term Repeat',
     longTermRepeat: 'Long-term Repeat',
-    statsIntro: 'Factors affecting your result from past {count} problems:',
+    statsIntro: 'Factors affecting your result of the past {count} challenges:',
     timeSpent: 'Time Spent',
     problemDifficulty: 'Problem Difficulty',
     problemQuality: 'Problem Quality',
