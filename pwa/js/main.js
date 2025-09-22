@@ -1,6 +1,6 @@
 // js/main.js
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, setProblemStartTime } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, setProblemStartTime, updateAnswerHistory, setReviewStartTime } from './state.js';
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
 import { showDetailedStats } from './user-stats.js';
 import { loadSgf } from './board.js';
@@ -113,6 +113,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateAllUI(); // Update UI to show analysis mode
             }
         } else if (state.appMode === 'analyzing') {
+            // Record review time (accumulate if multiple sessions)
+            if (state.reviewStartTime !== null) {
+                const reviewTime = Date.now() - state.reviewStartTime;
+                const answerHistory = [...state.answerHistory];
+                const lastAnswer = answerHistory[answerHistory.length - 1];
+                if (lastAnswer) {
+                    lastAnswer.reviewTime += reviewTime;
+                    updateAnswerHistory(answerHistory);
+                }
+                setReviewStartTime(null);
+            }
             if (state.nextTsumego) {
                 setAppMode('linked');
             } else {

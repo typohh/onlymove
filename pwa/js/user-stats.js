@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory, addToAccumulatedSolvingTime } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './utils.js';
@@ -59,12 +59,15 @@ export function updateUserStats(isCorrect) {
         return {};
     }
 
-    const timeTaken = Date.now() - state.problemStartTime;
+    const currentSessionTime = state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0;
+    addToAccumulatedSolvingTime(currentSessionTime);
+    const timeTaken = state.accumulatedSolvingTime;
     const answer = {
         problemId: currentProblem.filename.replace('.sgf', ''),
         problemRating: currentProblem.rating,
         problemQuality: currentProblem.quality || 0,
         timeTaken,
+        reviewTime: 0,
         correct: isCorrect,
         date: Date.now(),
         problemType: !currentProblem.isRepeat
@@ -78,6 +81,9 @@ export function updateUserStats(isCorrect) {
 
     const answerHistory = [...state.answerHistory, answer];
     updateAnswerHistory(answerHistory);
+
+    // Reset solving timer after recording
+    state.currentSolvingStartTime = null;
 
     const oldRank = state.userRank;
     const oldRankInfo = getRankInfo(oldRank);
@@ -153,6 +159,7 @@ export function showDetailedStats() {
         p.problemRating !== undefined &&
         p.problemQuality !== undefined &&
         p.timeTaken !== undefined &&
+        p.reviewTime !== undefined &&
         p.date !== undefined
     );
     const removedCount = originalLength - validHistory.length;
@@ -163,40 +170,69 @@ export function showDetailedStats() {
 
     const history = validHistory.slice(-500);
 
-    console.log('Time values for stats calculation (in ms):', history.map(p => p.timeTaken));
-
     if (history.length < 5) { // Need enough data for regression
         alert(getTerm('statsNotEnough').replace('{count}', history.length));
         return;
     }
 
-    // Debug: Check for invalid values
-    for (const p of history) {
-        if (typeof p.timeTaken !== 'number' || isNaN(p.timeTaken)) console.log('Invalid timeTaken:', p.timeTaken, p);
-        if (typeof p.problemRating !== 'number' || isNaN(p.problemRating)) console.log('Invalid problemRating:', p.problemRating, p);
-        if (typeof p.problemQuality !== 'number' || isNaN(p.problemQuality)) console.log('Invalid problemQuality:', p.problemQuality, p);
-        if (typeof p.date !== 'number' || isNaN(p.date)) console.log('Invalid date:', p.date, p);
-    }
-
     try {
-        // Cap timeTaken at 2 std deviations
+        // Transform timeTaken to percentiles
         const timeTakenValues = history.map(p => p.timeTaken);
-        const timeMean = math.mean(timeTakenValues);
-        const timeStdDev = math.std(timeTakenValues);
-        const timeCap = timeMean + 2 * timeStdDev;
-        const cappedTimeTaken = timeTakenValues.map(t => Math.min(t, timeCap));
+        const sortedTime = timeTakenValues.slice().sort((a, b) => a - b);
+        const p_low = 0.45;
+        const p_high = 0.55;
+        const idx_low = Math.floor(p_low * (sortedTime.length - 1));
+        const idx_high = Math.floor(p_high * (sortedTime.length - 1));
+        const time_low = sortedTime[idx_low];
+        const time_high = sortedTime[idx_high];
+        const delta_time_ms = time_high - time_low;
+        const time_per_percentile_min = delta_time_ms / (60000 * 0.1);
+        const percentileTime = timeTakenValues.map(t => {
+            const below = sortedTime.filter(s => s < t).length;
+            const equal = sortedTime.filter(s => s === t).length;
+            return (below + 0.5 * equal) / sortedTime.length;
+        });
 
-        // Normalize date to be 0 for the earliest entry
-        const dates = history.map(p => p.date);
-        const minDate = Math.min(...dates);
+        // Calculate previous review time for repeats
+        const previousReviewTimes = history.map((p, i) => {
+            if (p.problemType === 'short-term-repeat' || p.problemType === 'long-term-repeat') {
+                // Find the last previous answer for same problemId with reviewTime > 0
+                const prev = history.slice(0, i).reverse().find(ans => ans.problemId === p.problemId && ans.reviewTime > 0);
+                return prev ? prev.reviewTime : 0;
+            }
+            return 0;
+        });
+
+        // Transform review times to percentiles
+        const reviewTimeValues = history.map(p => p.reviewTime).filter(t => t > 0);
+        let percentileReview = previousReviewTimes.map(t => 0);
+        let time_per_percentile_min_r = 0;
+        if (reviewTimeValues.length > 0) {
+            const sortedReview = reviewTimeValues.slice().sort((a, b) => a - b);
+            const p_low_r = 0.45;
+            const p_high_r = 0.55;
+            const idx_low_r = Math.floor(p_low_r * (sortedReview.length - 1));
+            const idx_high_r = Math.floor(p_high_r * (sortedReview.length - 1));
+            const time_low_r = sortedReview[idx_low_r];
+            const time_high_r = sortedReview[idx_high_r];
+            const delta_time_ms_r = time_high_r - time_low_r;
+            time_per_percentile_min_r = delta_time_ms_r / (60000 * 0.1);
+            percentileReview = previousReviewTimes.map(t => {
+                if (t === 0) return 0;
+                const below = sortedReview.filter(s => s < t).length;
+                const equal = sortedReview.filter(s => s === t).length;
+                return (below + 0.5 * equal) / sortedReview.length;
+            });
+        }
 
         const y = history.map(p => p.correct ? 1 : 0);
         const X_original = history.map((p, i) => [
             1, // Intercept
-            cappedTimeTaken[i] / 1000, // Time in seconds
+            percentileTime[i], // Time taken percentile
+            percentileReview[i], // Review time percentile
             p.problemRating,
             p.problemQuality,
-            p.date - minDate,
+            i, // History index
             p.problemType === 'short-term-repeat' ? 1 : 0,
             p.problemType === 'long-term-repeat' ? 1 : 0
         ]);
@@ -226,23 +262,44 @@ export function showDetailedStats() {
         const Xty = math.multiply(Xt, y);
         const beta = math.multiply(XtX_inv, Xty);
 
-        const variableNames = [getTerm('timeSpent'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
+        const variableNames = [getTerm('timeSpent'), getTerm('reviewTime'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const fullBeta = new Array(variableNames.length).fill('-');
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
-            fullBeta[varIndex] = beta[i].toFixed(6);
+            let coeff = beta[i];
+            if (varIndex === 0 && time_per_percentile_min > 0) { // timeSpent
+                coeff /= time_per_percentile_min;
+            }
+            if (varIndex === 1 && time_per_percentile_min_r > 0) { // reviewTime
+                coeff /= time_per_percentile_min_r;
+            }
+            if (varIndex === 2) { // problemDifficulty
+                coeff /= 29;
+            }
+            if (varIndex === 3) { // problemQuality
+                coeff = -coeff;
+            }
+            coeff *= 100;  // Convert to %
+            fullBeta[varIndex] = coeff.toFixed(1);
         }
 
         let resultText = getTerm('statsIntro').replace('{count}', history.length) + '\n';
         fullBeta.forEach((b, i) => {
             let formattedB = b === '-' ? '-' : (parseFloat(b) > 0 ? '+' + b : b);
-            if (formattedB !== '-' && Math.abs(parseFloat(b)) > 5) {
-                formattedB = '-';
-            }
-            resultText += `${variableNames[i]}: ${formattedB}\n`;
+            let unit = '';
+            if (i === 0) unit = getTerm('statsPerMinuteSolving');
+            else if (i === 1) unit = getTerm('statsPerMinuteReviewing');
+            else if (i === 2) unit = getTerm('statsPerProblemRank');
+            else if (i === 3) unit = getTerm('statsIfIntuitiveProblem');
+            else if (i === 4) unit = getTerm('statsPerProblemSolved');
+            else if (i === 5) unit = getTerm('statsIfRecentlyFailed');
+            else if (i === 6) unit = getTerm('statsIfFailedLongTimeAgo');
+            else unit = getTerm('statsDefault');
+            resultText += `${formattedB}${unit}
+`;
         });
 
-        resultText += '\n' + getTerm('statsExplanation');
+        
 
         alert(resultText);
     } catch (error) {

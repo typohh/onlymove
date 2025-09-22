@@ -1,6 +1,6 @@
 // js/analysis.js
 
-import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove } from './state.js';
+import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
@@ -37,6 +37,7 @@ export function enterAnalysisMode() {
 
     setAppMode('analyzing');
     setAcceptClicks(true);
+    setReviewStartTime(Date.now());
 
     loadSgf(sgfToAnalyze);
 

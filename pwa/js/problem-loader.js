@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setProblemStartTime } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setProblemStartTime, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI, displayOverlay } from './ui.js';
 import { reorientSgf } from './sgf.js';
@@ -272,7 +272,8 @@ export async function loadTsumego(isUpdate) {
         }
         
         setAcceptClicks(true);
-        setProblemStartTime(Date.now());
+        setCurrentSolvingStartTime(Date.now());
+        resetAccumulatedSolvingTime();
         backgroundLoadCloserZip();
         updateAllUI();
 
@@ -363,7 +364,8 @@ export async function loadTsumegoById(tsumegoId) {
         loadSgf(sgfContent);
         
         setAcceptClicks(true);
-        setProblemStartTime(Date.now());
+        setCurrentSolvingStartTime(Date.now());
+        resetAccumulatedSolvingTime();
         updateAllUI();
 
         return true;

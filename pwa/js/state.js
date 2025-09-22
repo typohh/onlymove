@@ -41,6 +41,8 @@ export const state = {
         const saved = localStorage.getItem('problemStartTime');
         return saved ? parseInt(saved) : null;
     })(),
+    currentSolvingStartTime: null,
+    accumulatedSolvingTime: 0,
     
     // Analysis mode state
     lastMoveInAnalysis: null, // Track last move in analysis mode
@@ -150,4 +152,16 @@ export function setProblemStartTime(time) {
 
 export function setReviewStartTime(time) {
     state.reviewStartTime = time;
+}
+
+export function setCurrentSolvingStartTime(time) {
+    state.currentSolvingStartTime = time;
+}
+
+export function addToAccumulatedSolvingTime(time) {
+    state.accumulatedSolvingTime += time;
+}
+
+export function resetAccumulatedSolvingTime() {
+    state.accumulatedSolvingTime = 0;
 }
