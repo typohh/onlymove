@@ -163,6 +163,8 @@ export function showDetailedStats() {
 
     const history = validHistory.slice(-500);
 
+    console.log('Time values for stats calculation (in ms):', history.map(p => p.timeTaken));
+
     if (history.length < 5) { // Need enough data for regression
         alert(getTerm('statsNotEnough').replace('{count}', history.length));
         return;
@@ -177,14 +179,24 @@ export function showDetailedStats() {
     }
 
     try {
+        // Cap timeTaken at 2 std deviations
+        const timeTakenValues = history.map(p => p.timeTaken);
+        const timeMean = math.mean(timeTakenValues);
+        const timeStdDev = math.std(timeTakenValues);
+        const timeCap = timeMean + 2 * timeStdDev;
+        const cappedTimeTaken = timeTakenValues.map(t => Math.min(t, timeCap));
+
+        // Normalize date to be 0 for the earliest entry
+        const dates = history.map(p => p.date);
+        const minDate = Math.min(...dates);
+
         const y = history.map(p => p.correct ? 1 : 0);
-        const X_original = history.map(p => [
+        const X_original = history.map((p, i) => [
             1, // Intercept
-            p.timeTaken / 1000, // Time in seconds
+            cappedTimeTaken[i] / 1000, // Time in seconds
             p.problemRating,
             p.problemQuality,
-            p.date,
-            p.problemType === 'novel' ? 1 : 0,
+            p.date - minDate,
             p.problemType === 'short-term-repeat' ? 1 : 0,
             p.problemType === 'long-term-repeat' ? 1 : 0
         ]);
@@ -198,10 +210,9 @@ export function showDetailedStats() {
         }
 
         // Include intercept always, exclude variables with 0 stddev
-        // If long-term repeat has 0 stddev, exclude short-term repeat too
         const includedIndices = [0]; // intercept
         for (let j = 1; j < stdDevs.length + 1; j++) {
-            if (stdDevs[j - 1] > 0 && !(j === 6 && stdDevs[6] === 0)) {
+            if (stdDevs[j - 1] > 0) {
                 includedIndices.push(j);
             }
         }
@@ -209,42 +220,17 @@ export function showDetailedStats() {
         // Create X with only included columns
         const X = X_original.map(row => includedIndices.map(idx => row[idx]));
 
-        // Add noise to prevent perfect collinearity (only for included variables with stddev > 0)
-        for (let j = 1; j < X[0].length; j++) { // Start from 1 to skip intercept
-            const col = X.map(row => row[j]);
-            const stdDev = math.std(col);
-            const varIndex = includedIndices[j];
-            let effectiveStdDev = stdDev;
-            if (varIndex >= 5 && varIndex <= 7) { // For category variables (novel, short-term, long-term), assume stddev >= 1
-                effectiveStdDev = Math.max(stdDev, 1);
-            }
-
-            for (let i = 0; i < X.length; i++) {
-                const noise = effectiveStdDev * 0.0001 * (Math.random() * 2 - 1); // Noise between -0.01% and +0.01% of stdDev
-                X[i][j] += noise;
-            }
-        }
-
         const Xt = math.transpose(X);
         const XtX = math.multiply(Xt, X);
         const XtX_inv = math.inv(XtX);
         const Xty = math.multiply(Xt, y);
         const beta = math.multiply(XtX_inv, Xty);
 
-        const variableNames = [getTerm('timeSpent'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('novel'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
+        const variableNames = [getTerm('timeSpent'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const fullBeta = new Array(variableNames.length).fill('-');
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
-            fullBeta[varIndex] = beta[i].toFixed(3);
-        }
-
-        // If long-term repeat has stddev 0, set short-term to negative of novel
-        if (stdDevs[6] === 0) {
-            if (fullBeta[4] !== '-') {
-                fullBeta[5] = (-parseFloat(fullBeta[4])).toFixed(3);
-            } else {
-                fullBeta[5] = '-';
-            }
+            fullBeta[varIndex] = beta[i].toFixed(6);
         }
 
         let resultText = getTerm('statsIntro').replace('{count}', history.length) + '\n';

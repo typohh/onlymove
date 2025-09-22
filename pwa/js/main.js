@@ -92,7 +92,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     updateBoardSize();
     // Using CSS vi units for responsive sizing, but still need to update WGo board on resize
-    window.addEventListener('resize', updateBoardSize);
+    window.addEventListener('resize', () => {
+        updateBoardSize();
+        const installPrompt = document.getElementById('install-prompt');
+        if (installPrompt) {
+            installPrompt.remove();
+        }
+    });
 
     
 

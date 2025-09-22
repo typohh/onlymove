@@ -46,6 +46,7 @@ export const state = {
     lastMoveInAnalysis: null, // Track last move in analysis mode
     initialAnalysisNode: null,
     ghostMove: null, // Pending move for double-click confirmation
+    reviewStartTime: null,
 
     // User stats
     userRank: parseFloat(localStorage.getItem('userRank')) || 0,
@@ -145,4 +146,8 @@ export function setProblemStartTime(time) {
     } else {
         localStorage.removeItem('problemStartTime');
     }
+}
+
+export function setReviewStartTime(time) {
+    state.reviewStartTime = time;
 }

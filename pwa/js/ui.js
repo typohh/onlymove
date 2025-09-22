@@ -44,7 +44,7 @@ function showInstallPrompt() {
     promptElement.innerHTML = `
         <button class="close-btn">×</button>
         <div class="install-message">${getTerm('installPrompt')}</div>
-        <button class="install-btn">${getTerm('install')}</button>
+        <button class="btn install-btn">${getTerm('install')}</button>
     `;
 
     const installBtn = promptElement.querySelector('.install-btn');
