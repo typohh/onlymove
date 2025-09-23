@@ -276,6 +276,8 @@ export function showDetailedStats() {
 
         // Create X with only included columns
         const X = X_original.map(row => includedIndices.map(idx => row[idx]));
+        const n = X.length;
+        const k = X[0].length;
 
         const Xt = math.transpose(X);
         const XtX = math.multiply(Xt, X);
@@ -283,47 +285,100 @@ export function showDetailedStats() {
         const Xty = math.multiply(Xt, y);
         const beta = math.multiply(XtX_inv, Xty);
 
+        // Calculate Standard Errors
+        const y_hat = math.multiply(X, beta);
+        const residuals = math.subtract(y, y_hat);
+        const ssr = math.multiply(math.transpose(residuals), residuals);
+        const s2 = ssr / (n - k);
+        const varCovarMatrix = math.multiply(s2, XtX_inv);
+        const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt);
+
         const variableNames = [getTerm('timeSpent'), getTerm('reviewTimeShortTerm'), getTerm('reviewTimeLongTerm'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
-        const fullBeta = new Array(variableNames.length).fill('-');
+        const finalValues = new Array(variableNames.length).fill('-');
+
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
             let coeff = beta[i];
+            let se = stdErrors[i];
+
+            // Scale coefficient and SE
+            let scaleFactor = 1;
             if (varIndex === 0 && time_per_percentile_min > 0) { // timeSpent
-                coeff /= time_per_percentile_min;
+                scaleFactor = 1 / time_per_percentile_min;
+            } else if (varIndex === 1 && time_per_percentile_min_r_short > 0) { // reviewTimeShortTerm
+                scaleFactor = 1 / time_per_percentile_min_r_short;
+            } else if (varIndex === 2 && time_per_percentile_min_r_long > 0) { // reviewTimeLongTerm
+                scaleFactor = 1 / time_per_percentile_min_r_long;
+            } else if (varIndex === 3) { // problemDifficulty
+                scaleFactor = 1 / 29;
+            } else if (varIndex === 4) { // problemQuality
+                scaleFactor = -1;
+            } else if (varIndex === 5) { // date
+                scaleFactor = 100; // Scale to per 100 problems
             }
-            if (varIndex === 1 && time_per_percentile_min_r_short > 0) { // reviewTimeShortTerm
-                coeff /= time_per_percentile_min_r_short;
+
+            coeff *= scaleFactor;
+            se *= Math.abs(scaleFactor); // Use absolute for SE
+
+            // Calculate 85% CI
+            const lowerBound = coeff - 1.44 * se;
+            const upperBound = coeff + 1.44 * se;
+
+            let finalCoeff = 0;
+            if (lowerBound > 0) {
+                finalCoeff = lowerBound; // Entirely positive CI
+            } else if (upperBound < 0) {
+                finalCoeff = upperBound; // Entirely negative CI
             }
-            if (varIndex === 2 && time_per_percentile_min_r_long > 0) { // reviewTimeLongTerm
-                coeff /= time_per_percentile_min_r_long;
-            }
-            if (varIndex === 3) { // problemDifficulty
-                coeff /= 29;
-            }
-            if (varIndex === 4) { // problemQuality
-                coeff = -coeff;
-            }
-            coeff *= 100;  // Convert to %
-            fullBeta[varIndex] = coeff.toFixed(1);
+
+            finalCoeff *= 100; // Convert to %
+            finalValues[varIndex] = finalCoeff.toFixed(1);
         }
 
-        let resultText = getTerm('statsIntro').replace('{count}', history.length) + '\n';
-        fullBeta.forEach((b, i) => {
-            if (i === 6 || i === 7) return; // Skip shortTermRepeat and longTermRepeat
-            let formattedB = b === '-' ? '-' : (parseFloat(b) > 0 ? '+' + b : b);
-            let unit = '';
-            if (i === 0) unit = getTerm('statsPerMinuteSolving');
-            else if (i === 1) unit = getTerm('statsPerMinuteReviewingShortTerm');
-            else if (i === 2) unit = getTerm('statsPerMinuteReviewingLongTerm');
-            else if (i === 3) unit = getTerm('statsPerProblemRank');
-            else if (i === 4) unit = getTerm('statsIfIntuitiveProblem');
-            else if (i === 5) unit = getTerm('statsPerProblemSolved');
-            else unit = getTerm('statsDefault');
-            resultText += `${formattedB}${unit}
-`;
-        });
+        const messages = [];
+        const finalNumericValues = finalValues.map(v => v === '-' ? 0 : parseFloat(v));
 
-        
+        // timeSpent (varIndex 0)
+        if (finalNumericValues[0] > 0) {
+            messages.push(`For each minute you spend solving you are at least ${finalNumericValues[0]}% more likely to find the correct answer.`);
+        }
+
+        // reviewTimeShortTerm (varIndex 1)
+        if (finalNumericValues[1] > 0) {
+            messages.push(`For each minute you spend reviewing a problem, you are at least ${finalNumericValues[1]}% more likely to solve it correctly in the near future.`);
+        }
+
+        // reviewTimeLongTerm (varIndex 2)
+        if (finalNumericValues[2] > 0) {
+            messages.push(`For each minute you spend reviewing, you are at least ${finalNumericValues[2]}% more likely to still remember the correct answer 200 tsumegos later.`);
+        }
+
+        // problemQuality (varIndex 4)
+        const qualityVal = finalNumericValues[4];
+        if (qualityVal > 0) {
+            messages.push(`You are ${qualityVal}% better with analytical than intuitive problems.`);
+        } else if (qualityVal < 0) {
+            messages.push(`You are ${Math.abs(qualityVal)}% better with intuitive than analytical problems.`);
+        }
+
+        // date (varIndex 5)
+        const dateVal = finalNumericValues[5];
+        if (dateVal > 0) {
+            messages.push(`Your performance has been improving by about ${dateVal}% per 100 problems.`);
+        } else if (dateVal < 0) {
+            messages.push(`Your performance has been declining by about ${Math.abs(dateVal)}% per 100 problems.`);
+        }
+
+        const totalProblems = originalLength;
+        const analysisProblems = history.length;
+        let resultText = "";
+
+        if (messages.length > 0) {
+            const intro = `You have completed ${totalProblems} problems. Based on your last ${analysisProblems}, here are some insights:\n\n`;
+            resultText = intro + "- " + messages.join("\n- ");
+        } else {
+            resultText = `You have completed ${totalProblems} problems. Based on your last ${analysisProblems}, there are no statistically significant trends in your recent activity. Keep playing to gather more data!`;
+        }
 
         alert(resultText);
     } catch (error) {
