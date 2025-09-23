@@ -203,25 +203,45 @@ export function showDetailedStats() {
             return 0;
         });
 
-        // Transform review times to percentiles
-        const reviewTimeValues = history.map(p => p.reviewTime).filter(t => t > 0);
-        let percentileReview = previousReviewTimes.map(t => 0);
-        let time_per_percentile_min_r = 0;
-        if (reviewTimeValues.length > 0) {
-            const sortedReview = reviewTimeValues.slice().sort((a, b) => a - b);
+        // Transform review times to percentiles for short-term and long-term separately
+        const shortTermReviewTimes = history.map((p, i) => p.problemType === 'short-term-repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
+        const longTermReviewTimes = history.map((p, i) => p.problemType === 'long-term-repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
+        let percentileReviewShort = previousReviewTimes.map(t => 0);
+        let percentileReviewLong = previousReviewTimes.map(t => 0);
+        let time_per_percentile_min_r_short = 0;
+        let time_per_percentile_min_r_long = 0;
+        if (shortTermReviewTimes.length > 0) {
+            const sortedReviewShort = shortTermReviewTimes.slice().sort((a, b) => a - b);
             const p_low_r = 0.45;
             const p_high_r = 0.55;
-            const idx_low_r = Math.floor(p_low_r * (sortedReview.length - 1));
-            const idx_high_r = Math.floor(p_high_r * (sortedReview.length - 1));
-            const time_low_r = sortedReview[idx_low_r];
-            const time_high_r = sortedReview[idx_high_r];
+            const idx_low_r = Math.floor(p_low_r * (sortedReviewShort.length - 1));
+            const idx_high_r = Math.floor(p_high_r * (sortedReviewShort.length - 1));
+            const time_low_r = sortedReviewShort[idx_low_r];
+            const time_high_r = sortedReviewShort[idx_high_r];
             const delta_time_ms_r = time_high_r - time_low_r;
-            time_per_percentile_min_r = delta_time_ms_r / (60000 * 0.1);
-            percentileReview = previousReviewTimes.map(t => {
-                if (t === 0) return 0;
-                const below = sortedReview.filter(s => s < t).length;
-                const equal = sortedReview.filter(s => s === t).length;
-                return (below + 0.5 * equal) / sortedReview.length;
+            time_per_percentile_min_r_short = delta_time_ms_r / (60000 * 0.1);
+            percentileReviewShort = previousReviewTimes.map((t, i) => {
+                if (t === 0 || history[i].problemType !== 'short-term-repeat') return 0;
+                const below = sortedReviewShort.filter(s => s < t).length;
+                const equal = sortedReviewShort.filter(s => s === t).length;
+                return (below + 0.5 * equal) / sortedReviewShort.length;
+            });
+        }
+        if (longTermReviewTimes.length > 0) {
+            const sortedReviewLong = longTermReviewTimes.slice().sort((a, b) => a - b);
+            const p_low_r = 0.45;
+            const p_high_r = 0.55;
+            const idx_low_r = Math.floor(p_low_r * (sortedReviewLong.length - 1));
+            const idx_high_r = Math.floor(p_high_r * (sortedReviewLong.length - 1));
+            const time_low_r = sortedReviewLong[idx_low_r];
+            const time_high_r = sortedReviewLong[idx_high_r];
+            const delta_time_ms_r = time_high_r - time_low_r;
+            time_per_percentile_min_r_long = delta_time_ms_r / (60000 * 0.1);
+            percentileReviewLong = previousReviewTimes.map((t, i) => {
+                if (t === 0 || history[i].problemType !== 'long-term-repeat') return 0;
+                const below = sortedReviewLong.filter(s => s < t).length;
+                const equal = sortedReviewLong.filter(s => s === t).length;
+                return (below + 0.5 * equal) / sortedReviewLong.length;
             });
         }
 
@@ -229,7 +249,8 @@ export function showDetailedStats() {
         const X_original = history.map((p, i) => [
             1, // Intercept
             percentileTime[i], // Time taken percentile
-            percentileReview[i], // Review time percentile
+            percentileReviewShort[i], // Short-term review time percentile
+            percentileReviewLong[i], // Long-term review time percentile
             p.problemRating,
             p.problemQuality,
             i, // History index
@@ -262,7 +283,7 @@ export function showDetailedStats() {
         const Xty = math.multiply(Xt, y);
         const beta = math.multiply(XtX_inv, Xty);
 
-        const variableNames = [getTerm('timeSpent'), getTerm('reviewTime'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
+        const variableNames = [getTerm('timeSpent'), getTerm('reviewTimeShortTerm'), getTerm('reviewTimeLongTerm'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const fullBeta = new Array(variableNames.length).fill('-');
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
@@ -270,13 +291,16 @@ export function showDetailedStats() {
             if (varIndex === 0 && time_per_percentile_min > 0) { // timeSpent
                 coeff /= time_per_percentile_min;
             }
-            if (varIndex === 1 && time_per_percentile_min_r > 0) { // reviewTime
-                coeff /= time_per_percentile_min_r;
+            if (varIndex === 1 && time_per_percentile_min_r_short > 0) { // reviewTimeShortTerm
+                coeff /= time_per_percentile_min_r_short;
             }
-            if (varIndex === 2) { // problemDifficulty
+            if (varIndex === 2 && time_per_percentile_min_r_long > 0) { // reviewTimeLongTerm
+                coeff /= time_per_percentile_min_r_long;
+            }
+            if (varIndex === 3) { // problemDifficulty
                 coeff /= 29;
             }
-            if (varIndex === 3) { // problemQuality
+            if (varIndex === 4) { // problemQuality
                 coeff = -coeff;
             }
             coeff *= 100;  // Convert to %
@@ -285,15 +309,15 @@ export function showDetailedStats() {
 
         let resultText = getTerm('statsIntro').replace('{count}', history.length) + '\n';
         fullBeta.forEach((b, i) => {
+            if (i === 6 || i === 7) return; // Skip shortTermRepeat and longTermRepeat
             let formattedB = b === '-' ? '-' : (parseFloat(b) > 0 ? '+' + b : b);
             let unit = '';
             if (i === 0) unit = getTerm('statsPerMinuteSolving');
-            else if (i === 1) unit = getTerm('statsPerMinuteReviewing');
-            else if (i === 2) unit = getTerm('statsPerProblemRank');
-            else if (i === 3) unit = getTerm('statsIfIntuitiveProblem');
-            else if (i === 4) unit = getTerm('statsPerProblemSolved');
-            else if (i === 5) unit = getTerm('statsIfRecentlyFailed');
-            else if (i === 6) unit = getTerm('statsIfFailedLongTimeAgo');
+            else if (i === 1) unit = getTerm('statsPerMinuteReviewingShortTerm');
+            else if (i === 2) unit = getTerm('statsPerMinuteReviewingLongTerm');
+            else if (i === 3) unit = getTerm('statsPerProblemRank');
+            else if (i === 4) unit = getTerm('statsIfIntuitiveProblem');
+            else if (i === 5) unit = getTerm('statsPerProblemSolved');
             else unit = getTerm('statsDefault');
             resultText += `${formattedB}${unit}
 `;
