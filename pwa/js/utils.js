@@ -48,8 +48,16 @@ const localization = {
     statsIfIntuitiveProblem: ' % 对于直观问题',
     statsPerProblemSolved: ' % 每解决的问题',
     statsIfRecentlyFailed: ' % 如果最近失败',
-    statsIfFailedLongTimeAgo: ' % 如果很久前失败',
-    statsDefault: ' %'
+    statsDefault: ' %',
+    statsSolvingTime: '每多花一分钟解题，您找到正确答案的可能性至少增加{value}%。',
+    statsReviewTimeShort: '每多花一分钟复盘，您在短期内正确解答该问题的可能性至少增加{value}%。',
+    statsReviewTimeLong: '每多花一分钟复盘，您在200个题目后仍能记住正确答案的可能性至少增加{value}%。',
+    statsQualityAnalytical: '您在分析性问题上的表现比直觉性问题好{value}%。',
+    statsQualityIntuitive: '您在直觉性问题上的表现比分析性问题好{value}%。',
+    statsProgress: '您的表现似乎在进步，每100个问题的正确率约提高{value}%。',
+    statsRegression: '您的表现似乎在下滑，每100个问题的正确率约降低{value}%。',
+    statsIntroNew: '您已完成{total}个题目。基于最近的{analysis}个题目，我们发现了一些规律：\n\n',
+    statsNoTrends: '您已完成{total}个题目。在您最近的{analysis}个题目中，我们没有发现明显的统计规律。请继续练习以获取更精确的分析！'
   },
   ja: {
     kyu: '級',
@@ -96,8 +104,16 @@ const localization = {
     statsIfIntuitiveProblem: ' % 直感的な問題に対して',
     statsPerProblemSolved: ' % 毎解決問題',
     statsIfRecentlyFailed: ' % 最近失敗した場合',
-    statsIfFailedLongTimeAgo: ' % ずっと前に失敗した場合',
-    statsDefault: ' %'
+    statsDefault: ' %',
+    statsSolvingTime: '解答に1分多く時間をかけるごとに、正解する可能性が少なくとも{value}%高まります。',
+    statsReviewTimeShort: '問題のレビューに1分多く時間をかけるごとに、近い将来に正解する可能性が少なくとも{value}%高まります。',
+    statsReviewTimeLong: 'レビューに1分多く時間をかけるごとに、200問後も正解を覚えている可能性が少なくとも{value}%高まります。',
+    statsQualityAnalytical: 'あなたは直感的な問題よりも分析的な問題の方が{value}%得意です。',
+    statsQualityIntuitive: 'あなたは分析的な問題よりも直感的な問題の方が{value}%得意です。',
+    statsProgress: 'あなたのパフォーマンスは向上傾向にあり、100問あたり約{value}%改善しています。',
+    statsRegression: 'あなたのパフォーマンスは低下傾向にあり、100問あたり約{value}%低下しています。',
+    statsIntroNew: '合計{total}問を完了しました。最新の{analysis}問に基づいた分析結果は以下の通りです：\n\n',
+    statsNoTrends: '合計{total}問を完了しました。最新の{analysis}問のデータでは、統計的に有意な傾向は見られませんでした。より多くのデータを集めるために、練習を続けてください！'
   },
   ko: {
     kyu: '급',
@@ -144,7 +160,16 @@ const localization = {
     statsPerProblemSolved: ' % 해결된 문제당',
     statsIfRecentlyFailed: ' % 최근에 실패한 경우',
     statsIfFailedLongTimeAgo: ' % 오래 전에 실패한 경우',
-    statsDefault: ' %'
+    statsDefault: ' %',
+    statsSolvingTime: '문제를 푸는 데 1분을 더 쓸 때마다 정답을 맞힐 확률이 최소 {value}% 증가합니다.',
+    statsReviewTimeShort: '문제를 복기하는 데 1분을 더 쓸 때마다 가까운 미래에 다시 맞힐 확률이 최소 {value}% 증가합니다.',
+    statsReviewTimeLong: '복기하는 데 1분을 더 쓸 때마다 200문제 뒤에도 정답을 기억할 확률이 최소 {value}% 증가합니다.',
+    statsQualityAnalytical: '직관적인 문제보다 분석적인 문제에 {value}% 더 강합니다.',
+    statsQualityIntuitive: '분석적인 문제보다 직관적인 문제에 {value}% 더 강합니다.',
+    statsProgress: '실력이 향상되는 추세이며, 100문제당 약 {value}%씩 개선되고 있습니다.',
+    statsRegression: '실력이 하락하는 추세이며, 100문제당 약 {value}%씩 감소하고 있습니다.',
+    statsIntroNew: '총 {total}개의 문제를 완료했습니다. 최근 {analysis}개의 문제에 대한 분석 결과는 다음과 같습니다：\n\n',
+    statsNoTrends: '총 {total}개의 문제를 완료했습니다. 최근 {analysis}개의 문제에서는 통계적으로 유의미한 경향을 발견하지 못했습니다. 더 많은 데이터를 모으기 위해 계속 풀어보세요！'
   },
   en: {
     kyu: 'kyu',
@@ -191,8 +216,16 @@ const localization = {
     statsIfIntuitiveProblem: ' % for intuitive problems',
     statsPerProblemSolved: ' % per problem solved',
     statsIfRecentlyFailed: ' % if recently failed',
-    statsIfFailedLongTimeAgo: ' % if failed long time ago',
-    statsDefault: ' %'
+    statsDefault: ' %',
+    statsSolvingTime: 'For each minute you spend solving you are at least {value}% more likely to find the correct answer.',
+    statsReviewTimeShort: 'For each minute you spend reviewing a problem, you are at least {value}% more likely to solve it correctly in the near future.',
+    statsReviewTimeLong: 'For each minute you spend reviewing, you are at least {value}% more likely to still remember the correct answer 200 tsumegos later.',
+    statsQualityAnalytical: 'You are at least {value}% better with analytical than intuitive problems.',
+    statsQualityIntuitive: 'You are at least {value}% better with intuitive than analytical problems.',
+    statsProgress: 'Your accuracy has been improving by at least {value}% per 100 problems.',
+    statsRegression: 'Your accuracy has been declining by at least {value}% per 100 problems.',
+    statsIntroNew: 'You have completed {total} problems. Based on your last {analysis}, here are some insights:\n\n',
+    statsNoTrends: 'You have completed {total} problems. Based on your last {analysis}, there are no statistically significant trends in your recent activity. Keep playing to gather more data!'
   }
 };
 

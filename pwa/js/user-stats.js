@@ -340,33 +340,33 @@ export function showDetailedStats() {
 
         // timeSpent (varIndex 0)
         if (finalNumericValues[0] > 0) {
-            messages.push(`For each minute you spend solving you are at least ${finalNumericValues[0]}% more likely to find the correct answer.`);
+            messages.push(getTerm('statsSolvingTime').replace('{value}', finalNumericValues[0]));
         }
 
         // reviewTimeShortTerm (varIndex 1)
         if (finalNumericValues[1] > 0) {
-            messages.push(`For each minute you spend reviewing a problem, you are at least ${finalNumericValues[1]}% more likely to solve it correctly in the near future.`);
+            messages.push(getTerm('statsReviewTimeShort').replace('{value}', finalNumericValues[1]));
         }
 
         // reviewTimeLongTerm (varIndex 2)
         if (finalNumericValues[2] > 0) {
-            messages.push(`For each minute you spend reviewing, you are at least ${finalNumericValues[2]}% more likely to still remember the correct answer 200 tsumegos later.`);
+            messages.push(getTerm('statsReviewTimeLong').replace('{value}', finalNumericValues[2]));
         }
 
         // problemQuality (varIndex 4)
         const qualityVal = finalNumericValues[4];
         if (qualityVal > 0) {
-            messages.push(`You are ${qualityVal}% better with analytical than intuitive problems.`);
+            messages.push(getTerm('statsQualityAnalytical').replace('{value}', qualityVal));
         } else if (qualityVal < 0) {
-            messages.push(`You are ${Math.abs(qualityVal)}% better with intuitive than analytical problems.`);
+            messages.push(getTerm('statsQualityIntuitive').replace('{value}', Math.abs(qualityVal)));
         }
 
         // date (varIndex 5)
         const dateVal = finalNumericValues[5];
         if (dateVal > 0) {
-            messages.push(`Your performance has been improving by about ${dateVal}% per 100 problems.`);
+            messages.push(getTerm('statsProgress').replace('{value}', dateVal));
         } else if (dateVal < 0) {
-            messages.push(`Your performance has been declining by about ${Math.abs(dateVal)}% per 100 problems.`);
+            messages.push(getTerm('statsRegression').replace('{value}', Math.abs(dateVal)));
         }
 
         const totalProblems = originalLength;
@@ -374,10 +374,10 @@ export function showDetailedStats() {
         let resultText = "";
 
         if (messages.length > 0) {
-            const intro = `You have completed ${totalProblems} problems. Based on your last ${analysisProblems}, here are some insights:\n\n`;
+            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
             resultText = intro + "- " + messages.join("\n- ");
         } else {
-            resultText = `You have completed ${totalProblems} problems. Based on your last ${analysisProblems}, there are no statistically significant trends in your recent activity. Keep playing to gather more data!`;
+            resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
         }
 
         alert(resultText);
