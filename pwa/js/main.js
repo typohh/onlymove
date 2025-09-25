@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
             if (!e.target.classList.contains('disabled')) {
-                setAppMode(APP_MODES.ANALYZING);
+                enterAnalysisMode();
             }
         } else if (state.appMode === APP_MODES.ANALYZING) {
             if (state.reviewStartTime !== null) {
@@ -149,9 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             window.open('about.html', '_blank');
         } else if (state.appMode === APP_MODES.ANALYZING) {
             // In analysis mode, button2 is "Undo"
-            if (state.kifuReader && state.kifuReader.node.parent) {
-                undoLastMove();
-            }
+            undoLastMove();
         }
     });
 
