@@ -4,18 +4,16 @@ import { state, setBoard, setKifuReader } from './state.js';
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
-import { SGF_COMMENTS } from './constants.js';
+import { SGF_COMMENTS, APP_MODES } from './constants.js';
 
 WGo.DIR = 'lib/wgo/';
 
 const boardContainer = document.getElementById('board-container');
 
-function isMobile() {
-    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-}
+const isMobile = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-function handleBoardClick(x, y) {
-    if (state.appMode === 'solving' || state.appMode === 'linked') {
+const handleBoardClick = (x, y) => {
+    if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
         if (isMobile()) {
             if (state.ghostMove) {
                 if (state.ghostMove.x === x && state.ghostMove.y === y) {
@@ -38,7 +36,7 @@ function handleBoardClick(x, y) {
             // desktop: single click
             handleTsumegoClick(x, y);
         }
-    } else if (state.appMode === 'analyzing') {
+    } else if (state.appMode === APP_MODES.ANALYZING) {
         handleAnalysisClick(x, y);
     }
 }
@@ -63,7 +61,7 @@ export function initializeBoard(size) {
     updateBoardSize();
 }
 
-function drawAnalysisHintMarker(move) {
+const drawAnalysisHintMarker = (move) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
     
     const x = move.x;
@@ -76,7 +74,7 @@ function drawAnalysisHintMarker(move) {
     state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
 }
 
-function drawGhostMarker(move) {
+const drawGhostMarker = (move) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
     
     const x = move.x;
@@ -89,7 +87,7 @@ function drawGhostMarker(move) {
     state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
 }
 
-function drawIllegalDueToKoMarker() {
+const drawIllegalDueToKoMarker = () => {
     if (!state.kifuReader || !state.kifuReader.node.move) return;
     
     const game = state.kifuReader.game;
@@ -130,7 +128,7 @@ export function redraw(analysisHintMove = null) {
     
     drawIllegalDueToKoMarker();
 
-    if (state.appMode === 'analyzing' && analysisHintMove) {
+    if (state.appMode === APP_MODES.ANALYZING && analysisHintMove) {
         drawAnalysisHintMarker(analysisHintMove);
     }
 

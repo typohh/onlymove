@@ -1,4 +1,5 @@
 // js/api.js
+import { ANALYSIS_STATUS } from './constants.js';
 
 // Analysis server endpoint
 const ANALYSIS_SERVER_URL = 'https://api.onlymove.net/';
@@ -21,7 +22,7 @@ export async function fetchAnalysis(sgf) {
 
         if (!response.ok) {
             if (response.status === 499) {
-                return { bestMove: null, score: 'Retry' };
+                return { bestMove: null, score: ANALYSIS_STATUS.RETRY };
             }
             // Log simple message instead of full stack trace
             console.log(`Analysis server returned ${response.status}: ${response.statusText}`);
@@ -33,7 +34,7 @@ export async function fetchAnalysis(sgf) {
         // Log simple message instead of full stack trace
         console.log("Analysis server unavailable or request failed");
         // Return a default error object so the calling function can handle it
-        return { bestMove: null, score: 'Error' };
+        return { bestMove: null, score: ANALYSIS_STATUS.ERROR };
     }
 }
 

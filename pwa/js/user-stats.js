@@ -2,7 +2,7 @@
 
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory, addToAccumulatedSolvingTime } from './state.js';
 import { updateAllUI } from './ui.js';
-import { TOTAL_RANKS } from './constants.js';
+import { TOTAL_RANKS, PROBLEM_STATUS } from './constants.js';
 import { getTerm } from './utils.js';
 
 // Function to send report to Cloudflare Worker
@@ -29,7 +29,7 @@ export async function sendReport(success) {
     }
 }
 
-function getRankInfo(rating) {
+const getRankInfo = (rating) => {
     const rankValue = rating * TOTAL_RANKS;
     const rankIndex = Math.floor(rankValue);
     const progress = (rankValue - rankIndex) * 100;
@@ -45,13 +45,13 @@ export function updateUserStats(isCorrect) {
     const oldStatus = currentProblem.status;
 
     if (isCorrect) {
-        if (oldStatus === 'failure') {
-            currentProblem.status = 'in-between';
-        } else if (oldStatus === 'in-between') {
-            currentProblem.status = 'success';
+        if (oldStatus === PROBLEM_STATUS.FAILURE) {
+            currentProblem.status = PROBLEM_STATUS.IN_BETWEEN;
+        } else if (oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
+            currentProblem.status = PROBLEM_STATUS.SUCCESS;
         }
     } else {
-        currentProblem.status = 'failure';
+        currentProblem.status = PROBLEM_STATUS.FAILURE;
     }
 
     if (currentProblem.linked) {
@@ -72,9 +72,9 @@ export function updateUserStats(isCorrect) {
         date: Date.now(),
         problemType: !currentProblem.isRepeat
             ? 'novel'
-            : oldStatus === 'failure'
+            : oldStatus === PROBLEM_STATUS.FAILURE
                 ? 'short-term-repeat'
-                : oldStatus === 'in-between'
+                : oldStatus === PROBLEM_STATUS.IN_BETWEEN
                     ? 'long-term-repeat'
                     : 'repeat',
     };
@@ -91,12 +91,12 @@ export function updateUserStats(isCorrect) {
     let momentum = state.momentum;
     const stats = { ...state.tsumegoStats };
 
-    if (oldStatus === 'failure') {
+    if (oldStatus === PROBLEM_STATUS.FAILURE) {
         stats.totalOnFail++;
         if (!isCorrect) {
             stats.failOnFail++;
         }
-    } else if (oldStatus === 'in-between') {
+    } else if (oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
         stats.totalOnInBetween++;
         if (!isCorrect) {
             stats.failOnInBetween++;
@@ -111,7 +111,7 @@ export function updateUserStats(isCorrect) {
     if (isCorrect ) {
         const maxIncrease = (1.0 - rank) / 9;
         let intendedIncrease = momentum / 600;
-        if( oldStatus !== 'failure' && oldStatus !== 'in-between' ) {
+        if( oldStatus !== PROBLEM_STATUS.FAILURE && oldStatus !== PROBLEM_STATUS.IN_BETWEEN ) {
             if(intendedIncrease > maxIncrease) {
                 momentum *= maxIncrease / intendedIncrease;
             } else {
@@ -295,6 +295,7 @@ export function showDetailedStats() {
 
         const variableNames = [getTerm('timeSpent'), getTerm('reviewTimeShortTerm'), getTerm('reviewTimeLongTerm'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const finalValues = new Array(variableNames.length).fill('-');
+        const finalValues65 = new Array(variableNames.length).fill('-');
 
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
@@ -333,24 +334,49 @@ export function showDetailedStats() {
 
             finalCoeff *= 100; // Convert to %
             finalValues[varIndex] = finalCoeff.toFixed(1);
+
+            // Calculate 65% CI
+            const lowerBound65 = coeff - 0.93 * se;
+            const upperBound65 = coeff + 0.93 * se;
+
+            let finalCoeff65 = 0;
+            if (lowerBound65 > 0) {
+                finalCoeff65 = lowerBound65; // Entirely positive CI
+            } else if (upperBound65 < 0) {
+                finalCoeff65 = upperBound65; // Entirely negative CI
+            }
+
+            finalCoeff65 *= 100; // Convert to %
+            finalValues65[varIndex] = finalCoeff65.toFixed(1);
         }
 
         const messages = [];
         const finalNumericValues = finalValues.map(v => v === '-' ? 0 : parseFloat(v));
+        const finalNumericValues65 = finalValues65.map(v => v === '-' ? 0 : parseFloat(v));
+        const messages65 = [];
 
         // timeSpent (varIndex 0)
         if (finalNumericValues[0] > 0) {
             messages.push(getTerm('statsSolvingTime').replace('{value}', finalNumericValues[0]));
+        }
+        if (finalNumericValues65[0] > 0 && finalNumericValues[0] <= 0) {
+            messages65.push(getTerm('statsSolvingTime').replace('{value}', finalNumericValues65[0]));
         }
 
         // reviewTimeShortTerm (varIndex 1)
         if (finalNumericValues[1] > 0) {
             messages.push(getTerm('statsReviewTimeShort').replace('{value}', finalNumericValues[1]));
         }
+        if (finalNumericValues65[1] > 0 && finalNumericValues[1] <= 0) {
+            messages65.push(getTerm('statsReviewTimeShort').replace('{value}', finalNumericValues65[1]));
+        }
 
         // reviewTimeLongTerm (varIndex 2)
         if (finalNumericValues[2] > 0) {
             messages.push(getTerm('statsReviewTimeLong').replace('{value}', finalNumericValues[2]));
+        }
+        if (finalNumericValues65[2] > 0 && finalNumericValues[2] <= 0) {
+            messages65.push(getTerm('statsReviewTimeLong').replace('{value}', finalNumericValues65[2]));
         }
 
         // problemQuality (varIndex 4)
@@ -360,6 +386,14 @@ export function showDetailedStats() {
         } else if (qualityVal < 0) {
             messages.push(getTerm('statsQualityIntuitive').replace('{value}', Math.abs(qualityVal)));
         }
+        const qualityVal65 = finalNumericValues65[4];
+        if ((qualityVal65 > 0 || qualityVal65 < 0) && qualityVal === 0) {
+            if (qualityVal65 > 0) {
+                messages65.push(getTerm('statsQualityAnalytical').replace('{value}', qualityVal65));
+            } else if (qualityVal65 < 0) {
+                messages65.push(getTerm('statsQualityIntuitive').replace('{value}', Math.abs(qualityVal65)));
+            }
+        }
 
         // date (varIndex 5)
         const dateVal = finalNumericValues[5];
@@ -367,6 +401,14 @@ export function showDetailedStats() {
             messages.push(getTerm('statsProgress').replace('{value}', dateVal));
         } else if (dateVal < 0) {
             messages.push(getTerm('statsRegression').replace('{value}', Math.abs(dateVal)));
+        }
+        const dateVal65 = finalNumericValues65[5];
+        if ((dateVal65 > 0 || dateVal65 < 0) && dateVal === 0) {
+            if (dateVal65 > 0) {
+                messages65.push(getTerm('statsProgress').replace('{value}', dateVal65));
+            } else if (dateVal65 < 0) {
+                messages65.push(getTerm('statsRegression').replace('{value}', Math.abs(dateVal65)));
+            }
         }
 
         const totalProblems = originalLength;
@@ -378,6 +420,10 @@ export function showDetailedStats() {
             resultText = intro + "- " + messages.join("\n- ");
         } else {
             resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+        }
+
+        if (messages65.length > 0) {
+            resultText += "\n\nThe following trends are unreliable:\n\n- " + messages65.join("\n- ");
         }
 
         alert(resultText);

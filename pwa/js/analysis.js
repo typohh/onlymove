@@ -7,6 +7,7 @@ import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './utils.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
+import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 
 let analysisHintMove = null;
 
@@ -18,8 +19,7 @@ export function enterAnalysisMode() {
     setGhostMove(null); // Clear any ghost stone from previous modes
 
     if (!state.problemHistory || state.problemHistory.length < 2) {
-        console.error("Not enough history to enter analysis mode.");
-        setAppMode('solving');
+        setAppMode(APP_MODES.SOLVING);
         updateAllUI();
         return;
     }
@@ -35,7 +35,7 @@ export function enterAnalysisMode() {
         return;
     }
 
-    setAppMode('analyzing');
+    setAppMode(APP_MODES.ANALYZING);
     setAcceptClicks(true);
     setReviewStartTime(Date.now());
 
@@ -87,7 +87,7 @@ export function undoLastMove() {
 /**
  * Converts the current board state to an SGF string for the server.
  */
-function getCurrentSgf() {
+const getCurrentSgf = () => {
     let sgf = "(;FF[4]GM[1]CA[UTF-8]SZ[" + state.board.size + "]";
 
     if (state.kifuReader.kifu.info && state.kifuReader.kifu.info.RU) {
@@ -175,14 +175,14 @@ async function requestAndDisplayAnalysis() {
         const sgf = getCurrentSgf();
         let { bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf);
 
-        if (score === 'Retry') {
+        if (score === ANALYSIS_STATUS.RETRY) {
             const currentSgfCheck = getCurrentSgf();
             if (currentSgfCheck === sgf) {
                 ({ bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf));
             }
         }
 
-        if (state.appMode === 'analyzing' && bestMoveSgf) {
+        if (state.appMode === APP_MODES.ANALYZING && bestMoveSgf) {
             const currentSgfCheck = getCurrentSgf();
             if (currentSgfCheck === sgf) {
                 const bestMove = {
@@ -217,13 +217,13 @@ async function requestAndDisplayAnalysis() {
                 updateAnalysisUI(score, bestMove);
                 redraw(analysisHintMove);
             }
-        } else if (state.appMode !== 'analyzing') {
+        } else if (state.appMode !== APP_MODES.ANALYZING) {
             updateAnalysisUI(score, null);
         }
 
     } catch (error) {
         console.error("Analysis request failed:", error);
-        if (state.appMode === 'analyzing') {
+        if (state.appMode === APP_MODES.ANALYZING) {
             updateAnalysisUI(getTerm('error'), null);
         }
     }

@@ -2,7 +2,8 @@
 
 import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setProblemStartTime, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
 import { loadSgf } from './board.js';
-import { updateAllUI, displayOverlay } from './ui.js';
+import { updateAllUI } from './ui.js';
+import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
 
 async function simpleHash(str) {

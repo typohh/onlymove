@@ -3,7 +3,7 @@
 let stoneSound = null;
 let isAudioInitialized = false;
 
-function _playSound(audioObject) {
+const _playSound = (audioObject) => {
     if (audioObject) {
         try {
             audioObject.currentTime = 0;

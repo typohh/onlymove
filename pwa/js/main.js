@@ -8,7 +8,7 @@ import { loadSgf } from './board.js';
 import { initAudio } from './audio.js';
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
-import { getTerm, cleanUrl } from './utils.js';
+import { APP_MODES } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -18,7 +18,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 document.addEventListener('click', () => setUserHasInteracted(true));
 document.addEventListener('touchstart', () => setUserHasInteracted(true));
 
-async function fixupZeroRatedProblems() {
+const fixupZeroRatedProblems = async () => {
     const history = state.problemHistory;
     const problemsToFix = history.filter(p => p.rating === 0 && p.status !== 'correct');
 
@@ -105,15 +105,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
-        if (state.appMode === 'solving' || state.appMode === 'linked') {
-            // In solving/linked mode, button1 is "Review"
+        if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
             if (!e.target.classList.contains('disabled')) {
-                setAppMode('analyzing');
-                enterAnalysisMode();
-                updateAllUI(); // Update UI to show analysis mode
+                setAppMode(APP_MODES.ANALYZING);
             }
-        } else if (state.appMode === 'analyzing') {
-            // Record review time (accumulate if multiple sessions)
+        } else if (state.appMode === APP_MODES.ANALYZING) {
             if (state.reviewStartTime !== null) {
                 const reviewTime = Date.now() - state.reviewStartTime;
                 const answerHistory = [...state.answerHistory];
@@ -125,9 +121,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 setReviewStartTime(null);
             }
             if (state.nextTsumego) {
-                setAppMode('linked');
+                setAppMode(APP_MODES.LINKED);
             } else {
-                setAppMode('solving');
+                setAppMode(APP_MODES.SOLVING);
             }
             loadTsumego(false); // In both refresh cases, we just load what's at history[0]
             updateAllUI(); // Update UI to show solving mode
@@ -137,10 +133,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle button2 click - behavior depends on current mode
     document.getElementById('button2').addEventListener('click', (e) => {
         e.preventDefault();
-        if (state.appMode === 'solving') {
+        if (state.appMode === APP_MODES.SOLVING) {
             // In solving mode, button2 is "About"
             window.open('about.html', '_blank');
-        } else if (state.appMode === 'analyzing') {
+        } else if (state.appMode === APP_MODES.ANALYZING) {
             // In analysis mode, button2 is "Undo"
             if (state.kifuReader && state.kifuReader.node.parent) {
                 undoLastMove();
@@ -151,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle button3 click - share functionality
     document.getElementById('button3').addEventListener('click', (e) => {
         e.preventDefault();
-        if (state.appMode === 'solving' || state.appMode === 'linked') {
+        if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
             showDetailedStats();
         } else { // 'analyzing'
             if (!state.problemHistory[1]) {
@@ -256,15 +252,15 @@ document.getElementById('capture-score-h').addEventListener('click', (e) => {
 
             // Case 1: Review mode
             if (history.length > 1 && history[1].filename.startsWith(tsumegoId)) {
-                setAppMode('analyzing');
+                setAppMode(APP_MODES.ANALYZING);
                 enterAnalysisMode();
             } 
             // Case 2: Refresh of existing problem (solving or linked)
             else if (history.length > 0 && history[0].filename.startsWith(tsumegoId)) {
                 if (history[0].linked) {
-                    setAppMode('linked');
+                    setAppMode(APP_MODES.LINKED);
                 } else {
-                    setAppMode('solving');
+                    setAppMode(APP_MODES.SOLVING);
                 }
                 await loadTsumego(false); // In both refresh cases, we just load what's at history[0]
             }
@@ -276,7 +272,7 @@ document.getElementById('capture-score-h').addEventListener('click', (e) => {
             // No ID in URL
             await loadTsumego(false);
             if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
-                setAppMode('linked');
+                setAppMode(APP_MODES.LINKED);
             }
         }
 

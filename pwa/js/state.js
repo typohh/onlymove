@@ -1,7 +1,8 @@
 // js/state.js
+import { APP_MODES } from './constants.js';
 
 // Generate or retrieve a persistent user ID
-function getOrCreateUserId() {
+const getOrCreateUserId = () => {
     let userId = localStorage.getItem('userId');
     if (!userId) {
         // Generate a random user ID (8 characters)
@@ -17,7 +18,7 @@ function getOrCreateUserId() {
 
 export const state = {
     // App mode: 'solving', 'analyzing', or 'linked'
-    appMode: 'solving',
+    appMode: APP_MODES.SOLVING,
 
     // Board and Game state
     board: null,

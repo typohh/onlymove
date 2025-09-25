@@ -2,16 +2,17 @@
 
 import { state, setAcceptClicks, setAppMode } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
-import { displayOverlay, fadeOverlay } from './ui.js';
+import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
+import { APP_MODES, PROBLEM_STATUS } from './constants.js';
 import { getTerm } from './utils.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 
-function handleCorrectAnswer() {
-    setAppMode('solving');
+const handleCorrectAnswer = () => {
+    setAppMode(APP_MODES.SOLVING);
     sendReport(true);
     const stats = updateUserStats(true);
 
@@ -39,7 +40,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const timeSpent = Date.now() - (state.problemStartTime || Date.now());
     let duration = 2000; // 2s default
     let message = '';
-    if (oldStatus === 'failure' || oldStatus === 'in-between') {
+    if (oldStatus === PROBLEM_STATUS.FAILURE || oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
         duration = 6000;
         message = getTerm('shouldKnowThis');
     } else if (timeSpent < 15000) { // less than 15s
