@@ -4,8 +4,19 @@ import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updatePro
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
 import { showDetailedStats } from './user-stats.js';
 import { loadSgf } from './board.js';
+import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
+
+/**
+ * Cleans the URL by removing the 'id' parameter and 'index.html'.
+ */
+function cleanUrl() {
+    const url = new URL(window.location);
+    url.searchParams.delete('id');
+    const newPath = url.pathname.replace(/index\.html$/, '');
+    window.history.replaceState({}, '', newPath + url.search + url.hash);
+}
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { APP_MODES } from './constants.js';

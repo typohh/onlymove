@@ -1,7 +1,7 @@
 // js/ui.js
 
 import { state, setDeferredInstallPrompt } from './state.js';
-import { getTerm, getDescriptiveRank } from './utils.js';
+import { getTerm, getDescriptiveRank } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { getCurrentNode } from './board.js';
 

@@ -5,7 +5,7 @@ import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
-import { getTerm } from './utils.js';
+import { getTerm } from './i18n.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 

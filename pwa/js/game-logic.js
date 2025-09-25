@@ -6,7 +6,7 @@ import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
 import { APP_MODES, PROBLEM_STATUS } from './constants.js';
-import { getTerm } from './utils.js';
+import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';

@@ -3,7 +3,7 @@
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory, addToAccumulatedSolvingTime } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS, PROBLEM_STATUS } from './constants.js';
-import { getTerm } from './utils.js';
+import { getTerm } from './i18n.js';
 
 // Function to send report to Cloudflare Worker
 export async function sendReport(success) {
@@ -415,15 +415,19 @@ export function showDetailedStats() {
         const analysisProblems = history.length;
         let resultText = "";
 
+        const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+        resultText = intro;
         if (messages.length > 0) {
-            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-            resultText = intro + "- " + messages.join("\n- ");
+            resultText += "- " + messages.join("\n- ");
         } else {
-            resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+            resultText += getTerm('statsNone');
         }
 
+        resultText += "\n\n" + getTerm('statsPossibleTrends') + "\n\n";
         if (messages65.length > 0) {
-            resultText += "\n\nThe following trends are unreliable:\n\n- " + messages65.join("\n- ");
+            resultText += "- " + messages65.join("\n- ");
+        } else {
+            resultText += getTerm('statsNone');
         }
 
         alert(resultText);
