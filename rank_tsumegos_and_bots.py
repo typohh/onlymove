@@ -292,7 +292,7 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names):
 
         final_results.append({
             "tsumego_id": tsumego_id,
-            "rating": rating + 2.5 * (quality-0.5), # difficult to guess feel almost 2 stones more difficult on average..
+            "rating": rating + 2.5 * (quality-1), # easy to guess tsumegos are almost 2 stones easier..
             "quality": quality
         })
 
