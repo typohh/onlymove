@@ -33,7 +33,7 @@ The application is built with vanilla JavaScript (ESM), organized into a modular
 
 ## 4. Project Structure
 
-The codebase is organized into a modular structure to separate concerns. The monolithic `tsumego.js` has been decomposed into smaller, more focused modules.
+The codebase is organized into a modular structure to separate concerns.
 
 ```
 /
@@ -48,11 +48,12 @@ The codebase is organized into a modular structure to separate concerns. The mon
 │   ├── analysis.js           # Analysis mode logic
 │   ├── board.js              # Abstraction layer for WGo.js board interaction
 │   ├── state.js              # Centralized application state management
-│   ├── sgf.js                # SGF data parsing and interpretation
+│   ├── sgf.js                # SGF data parsing, interpretation, and transformation
 │   ├── api.js                # Server communication for analysis
 │   ├── ui.js                 # All DOM manipulation and UI updates
+│   ├── overlays.js           # Manages temporary informational overlays
 │   ├── audio.js              # Audio playback functions
-│   ├── utils.js              # General helper functions (localization, etc.)
+│   ├── i18n.js               # Internationalization and localization
 │   └── constants.js          # Shared application constants
 ├── lib/                      # Third-party libraries
 │   ├── wgo/                  # WGo.js library files and assets (stones, CSS)
@@ -72,11 +73,11 @@ The codebase is organized into a modular structure to separate concerns. The mon
 
 ### 5.1. State Management (`js/state.js`)
 
-The application uses a centralized state object, but all modifications are handled through exported setter functions (e.g., `setAppMode`, `setUserRank`). This provides a single source of truth while making state changes more explicit and trackable, improving debuggability.
+The application uses a centralized state object, but all modifications are handled through exported setter functions (e.g., `setAppMode`, `setUserRank`). This provides a single source of truth while making state changes more explicit and trackable. The state is persisted in `localStorage` to allow session recovery.
 
 ### 5.2. Application Modes
 
-The app operates in two primary modes, controlled by `state.appMode`:
+The app operates in three primary modes, controlled by `state.appMode`:
 
 1.  **Solving Mode (`'solving'`)**:
     *   This is the default mode for practicing tsumego.
@@ -91,26 +92,38 @@ The app operates in two primary modes, controlled by `state.appMode`:
     *   The best move and score are determined client-side by parsing the SGF via **`js/sgf.js`**. If the SGF lacks this data, **`js/api.js`** sends the position to a server for AI evaluation.
     *   The UI shows controls to "Exit" and "Undo".
 
-### 5.3. SGF Data Format
+3.  **Linked Mode (`'linked'`)**:
+    *   Entered when a user opens a URL with a specific problem ID.
+    *   This mode allows viewing and analyzing a specific problem without affecting the user's rank or problem history.
 
-The application now primarily relies on a rich SGF format.
+### 5.3. SGF Data Format & Handling (`js/sgf.js`)
+
+The application relies on a rich SGF format.
 *   The starting position of the problem is marked with a `"Q"` comment.
 *   Each branch after this point contains a comment with win-rate and score information (e.g., `"86.4%/3.1"`).
-*   The application's **`sgf.js`** module parses this information to determine the correct move (the one with the highest win rate) without needing a "Correct" text marker. This allows for more nuanced problems and client-side answer checking.
+*   The **`sgf.js`** module parses this information to determine the correct move without needing a "Correct" text marker.
+*   This module also handles random reorientation of problems to provide variety.
 
-### 5.3.1. Tsumego Quality Attribute
+### 5.4. Tsumego Loading Pipeline (`js/problem-loader.js`)
 
-Each tsumego in the collection has a quality attribute (a numerical value) that represents its overall quality or desirability. During problem selection, the system uses weighted random sampling where the quality value serves as the weight, allowing higher-quality problems to have a greater chance of being chosen without always selecting the absolute best ones.
+The loading pipeline is a core component, managed by **`js/problem-loader.js`**. It uses `.zip` archives and a sophisticated selection algorithm:
+*   **Weighted Random Selection**: Selects from a pool of 50 candidate problems closest to the user's rank. The selection is weighted by the problem's `quality` attribute, making higher-quality problems more likely to be chosen.
+*   **Spaced Repetition**: Re-introduces failed problems into the selection pool at increasing intervals (after ~30 and ~180 problems).
+*   **Background Loading**: To ensure a smooth user experience, the system proactively loads the next most relevant `.zip` archive in the background based on the user's current rank.
 
-### 5.4. Tsumego Loading Pipeline
+### 5.5. Board Interaction (`js/board.js`)
 
-The loading pipeline, managed by **`js/problem-loader.js`**, uses `.zip` archives and a weighted random selection algorithm based on each tsumego's quality attribute to serve problems to the user. This ensures that higher-quality problems are more likely to be selected while maintaining randomness and adapting to the user's rank.
+This module acts as an abstraction layer over the WGo.js library. It is responsible for:
+*   Initializing and rendering the board.
+*   Drawing stones, markers, and analysis hints.
+*   Handling all click events and routing them to the appropriate handler (`game-logic.js` or `analysis.js`) based on the current `appMode`.
+*   Implementing a "ghost stone" for double-click move confirmation on mobile devices.
 
-### 5.5. Build Process (`build.mjs`)
+### 5.6. Build Process (`build.mjs`)
 
 The build process is unchanged. The project **must be built** before it can be run using `npm run build`.
 
-### 5.6. Cloudflare Functions & D1 Database Integration
+### 5.7. Cloudflare Functions & D1 Database Integration
 
 The backend integration for reporting results is also unchanged, now handled by the dedicated **`js/user-stats.js`** module on the frontend.
 
