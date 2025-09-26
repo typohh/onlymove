@@ -296,6 +296,8 @@ document.getElementById('capture-score-h').addEventListener('click', (e) => {
 
     fixupZeroRatedProblems();
 
+    const resumeOverlay = document.getElementById('resume-overlay');
+
     // Recovery from killed session
     window.addEventListener('pageshow', (event) => {
         if (event.persisted) {
@@ -307,10 +309,17 @@ document.getElementById('capture-score-h').addEventListener('click', (e) => {
     });
 
     window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'hidden') {
+            resumeOverlay.className = 'resume-overlay';
+        } else if (document.visibilityState === 'visible') {
+            resumeOverlay.className = 'resume-overlay-hidden';
             if (!state.board || !state.game) {
                 location.reload();
             }
         }
+    });
+
+    resumeOverlay.addEventListener('click', () => {
+        resumeOverlay.className = 'resume-overlay-hidden';
     });
 });
