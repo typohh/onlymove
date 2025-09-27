@@ -38,6 +38,7 @@ def load_data(data_dir):
     all_participant_ids = set()
     all_tsumego_ids = set()
     records_to_process = []
+    attempt_counts = {}
 
     # --- 1. Load Bot Data ---
     bot_files = glob.glob(os.path.join(data_dir, "*.txt"))
@@ -47,6 +48,7 @@ def load_data(data_dir):
         for bot_file in tqdm(bot_files, desc="Loading Bot Files"):
             bot_name = os.path.splitext(os.path.basename(bot_file))[0]
             all_participant_ids.add(bot_name)
+            lines = []
             with open(bot_file, "r") as f:
                 for line in f:
                     parts = line.strip().split()
@@ -54,35 +56,43 @@ def load_data(data_dir):
                         tsumego_name, success_rate = parts
                         all_tsumego_ids.add(tsumego_name)
                         records_to_process.append((bot_name, tsumego_name, float(success_rate)))
+                        lines.append(line)
+            attempt_counts[bot_name] = len(lines)
 
     # --- 2. Load User Data from database.sql ---
-    sql_file = 'database.sql'
+    sql_file = os.path.join(data_dir, 'database.sql')
     user_attempts = []
-    if os.path.exists(sql_file):
-        print(f"Loading user data from {sql_file}...")
-        insert_pattern = re.compile(r"INSERT INTO tsumego_reports VALUES\(\d+,'([^']+)','([^']+)',([01]),'.*?'\);")
-        with open(sql_file, 'r') as f:
-            for line in tqdm(f, desc="Parsing SQL"):
-                match = insert_pattern.match(line)
-                if match:
-                    user_id, tsumego_id, success = match.groups()
-                    user_attempts.append({'user_id': user_id, 'tsumego_id': tsumego_id, 'success': int(success)})
+    print(f"Loading user data from {sql_file}...")
+    insert_pattern = re.compile(r"INSERT INTO `?tsumego_reports`? VALUES\(\d+,'([^']+)','([^']+)',([01]),'.*?'\);")
+    with open(sql_file, 'r') as f:
+        for line in tqdm(f, desc="Parsing SQL"):
+            match = insert_pattern.match(line)
+            if match:
+                user_id, tsumego_id, success = match.groups()
+                user_attempts.append({'user_id': user_id, 'tsumego_id': tsumego_id, 'success': int(success)})
 
-        if user_attempts:
-            user_df = pd.DataFrame(user_attempts)
-            user_df['user_id'] = user_df['user_id'].str[:8]  # Truncate user IDs
+    if user_attempts:
+        user_df = pd.DataFrame(user_attempts)
+        user_df['user_id'] = user_df['user_id'].str[:8]  # Truncate user IDs
 
-            # Calculate success rate for each user on each tsumego
-            user_success_rates = user_df.groupby(['user_id', 'tsumego_id'])['success'].mean().reset_index()
-            user_success_rates.rename(columns={'success': 'success_rate'}, inplace=True)
+        # Calculate success rate for each user on each tsumego
+        user_success_rates = user_df.groupby(['user_id', 'tsumego_id'])['success'].mean().reset_index()
+        user_success_rates.rename(columns={'success': 'success_rate'}, inplace=True)
 
-            # Add user data to processing lists
-            for _, row in tqdm(user_success_rates.iterrows(), total=len(user_success_rates), desc="Processing Users"):
-                all_participant_ids.add(row['user_id'])
-                all_tsumego_ids.add(row['tsumego_id'])
-                records_to_process.append((row['user_id'], row['tsumego_id'], row['success_rate']))
-    else:
-        print(f"Warning: {sql_file} not found. Skipping user data loading.")
+        # Add all user_ids to participants, even if they have no valid attempts
+        unique_users = user_df['user_id'].unique()
+        for user_id in unique_users:
+            all_participant_ids.add(user_id)
+
+        # Calculate attempt counts for users (number of valid tsumegos attempted)
+        user_attempt_counts = user_success_rates.groupby('user_id').size().to_dict()
+        for user_id, count in user_attempt_counts.items():
+            attempt_counts[user_id] = count
+
+        # Add user data to processing lists
+        for _, row in tqdm(user_success_rates.iterrows(), total=len(user_success_rates), desc="Processing Users"):
+            all_tsumego_ids.add(row['tsumego_id'])
+            records_to_process.append((row['user_id'], row['tsumego_id'], row['success_rate']))
 
 
     # --- 3. Create Mappings and Final DataFrame ---
@@ -109,7 +119,7 @@ def load_data(data_dir):
     df = pd.DataFrame(records, columns=["bot_id", "tsumego_id", "success_rate"])
     tqdm.write(f"Loaded {len(df)} total solve attempts.")
     # The 'bot_map' is now a 'participant_map', but we'll keep the variable name for compatibility
-    return df, participant_map, tsumego_map, tsumego_ids
+    return df, participant_map, tsumego_map, tsumego_ids, attempt_counts
 
 
 # --- Preliminary Bot Ranking ---
@@ -225,7 +235,7 @@ class RatingModel(nn.Module):
 
 
 # --- Calculate Tsumego Ratings Numerically ---
-def wrapper_calculate_tsumego_ratings(all_tsumego_names):
+def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts):
     """
     Recalculates tsumego ratings and quality from the saved parameters CSV file
     using numerical methods.
@@ -304,8 +314,14 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names):
     tsumego_quality_df = pd.DataFrame(final_results)[['tsumego_id', 'quality']].sort_values(by="quality", ascending=False)
     tsumego_quality_df.to_csv('ratings/tsumego_quality_final.csv', index=False)
 
+    # Create user_profiles_final.csv
+    user_profiles_df = bots_df.copy()
+    user_profiles_df['attempts'] = user_profiles_df['bot_id'].map(attempt_counts).fillna(0).astype(int)
+    user_profiles_df.to_csv('ratings/user_profiles_final.csv', index=False)
+
     print("\nRecalculated ratings saved to 'ratings/tsumego_ratings_final.csv'")
     print("Recalculated quality saved to 'ratings/tsumego_quality_final.csv'")
+    print("User profiles with attempts saved to 'ratings/user_profiles_final.csv'")
 
 
 # --- Save ratings snapshot ---
@@ -488,7 +504,7 @@ def rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names):
 if __name__ == '__main__':
     # "cd pwa && npx wrangler d1 export DB --remote --output=../attempts/database.sql"
 
-    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf = load_data(DATA_DIRECTORY)
+    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts = load_data(DATA_DIRECTORY)
 
     # Step 1: Train the model and save the learned parameters
     # rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
@@ -496,4 +512,4 @@ if __name__ == '__main__':
     # Step 2: Load the saved parameters and calculate final ratings and quality
     # We pass all original names so it can handle non-monotonic ones if needed in the future
     # (Currently, they are just excluded from the parameter file)
-    wrapper_calculate_tsumego_ratings(all_tsumego_names_with_sgf)
+    wrapper_calculate_tsumego_ratings(all_tsumego_names_with_sgf, attempt_counts)
