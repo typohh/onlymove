@@ -364,7 +364,7 @@ export function showDetailedStats() {
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = (2 * cdf - 1) * 100;
-                if (conf >= 50) {
+                if (conf >= 50 && !([0, 1, 2].includes(idx) && coeff <= 0)) {
                     observations.push({mean: (coeff * 100).toFixed(1), conf: conf.toFixed(0), varIndex: idx});
                 }
             }
