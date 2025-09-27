@@ -22,6 +22,12 @@ const handleCorrectAnswer = () => {
 }
 
 async function _handleIncorrectMoveSequence(moveIndex) {
+    Sentry.addBreadcrumb({
+        category: 'flow',
+        message: '_handleIncorrectMoveSequence started',
+        level: 'info',
+        data: { moveIndex }
+    });
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
     playMoveByIndex(moveIndex);

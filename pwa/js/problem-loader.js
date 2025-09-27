@@ -130,6 +130,10 @@ export async function loadZipProblems(zipFilename) {
             const reloadThreshold = 30000; // 30 seconds
             const hasRecentReload = lastReloadTime && (now - parseInt(lastReloadTime)) < reloadThreshold;
             if (state.userHasInteracted && !hasRecentReload) {
+                Sentry.captureMessage('Reloading due to missing zip file', {
+                    level: 'warning',
+                    extra: { zipFilename }
+                });
                 console.log('Detected missing zip file, likely due to new version. Reloading page.');
                 localStorage.setItem('lastReloadTime', now.toString());
                 location.reload();

@@ -294,6 +294,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();
 
+    Sentry.setUser({ id: state.userId });
+
     fixupZeroRatedProblems();
 
     const resumeOverlay = document.getElementById('resume-overlay');
@@ -314,6 +316,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else if (document.visibilityState === 'visible') {
             resumeOverlay.className = 'resume-overlay-hidden';
             if (!state.board || !state.game) {
+                Sentry.captureMessage('Reloading due to missing board or game state on visibilitychange', 'error');
                 location.reload();
             }
         }

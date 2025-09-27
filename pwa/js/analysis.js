@@ -16,6 +16,11 @@ let analysisHintMove = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
+    Sentry.addBreadcrumb({
+        category: 'flow',
+        message: 'enterAnalysisMode started',
+        level: 'info'
+    });
     return new Promise((resolve) => {
         setGhostMove(null); // Clear any ghost stone from previous modes
 
