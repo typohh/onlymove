@@ -10,5 +10,8 @@
   "devDependencies": {
     "esbuild": "^0.19.2",
     "wrangler": "^3.5.1"
+  },
+  "dependencies": {
+    "@sentry/browser": "^10.15.0"
   }
 }

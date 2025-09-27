@@ -1,6 +1,17 @@
 // js/main.js
+import * as Sentry from "@sentry/browser";
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, setProblemStartTime, updateAnswerHistory, setReviewStartTime } from './state.js';
+
+try {
+    // Initialize Sentry
+    Sentry.init({ dsn: 'https://50b747ee522c1bc41c8243563ce7adc1@o4510091105665024.ingest.de.sentry.io/4510091110187088' });
+    window.Sentry = Sentry; // Make Sentry globally available
+    Sentry.setUser({ id: state.userId });
+} catch (error) {
+    console.error("Sentry initialization failed:", error);
+}
+
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
 import { showDetailedStats } from './user-stats.js';
 import { loadSgf } from './board.js';
