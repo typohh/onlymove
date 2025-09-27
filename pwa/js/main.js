@@ -323,6 +323,4 @@ document.addEventListener('DOMContentLoaded', async () => {
         resumeOverlay.className = 'resume-overlay-hidden';
     });
 
-    myUndefinedFunction();
-
 });
