@@ -243,13 +243,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Handle capture score click
     document.getElementById('capture-score').addEventListener('click', (e) => {
-    e.preventDefault();
-    showCaptureDetails();
-});
-document.getElementById('capture-score-h').addEventListener('click', (e) => {
-    e.preventDefault();
-    showCaptureDetails();
-});
+        e.preventDefault();
+        showCaptureDetails();
+    });
+    document.getElementById('capture-score-h').addEventListener('click', (e) => {
+        e.preventDefault();
+        showCaptureDetails();
+    });
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
@@ -322,4 +322,7 @@ document.getElementById('capture-score-h').addEventListener('click', (e) => {
     resumeOverlay.addEventListener('click', () => {
         resumeOverlay.className = 'resume-overlay-hidden';
     });
+
+    myUndefinedFunction();
+
 });
