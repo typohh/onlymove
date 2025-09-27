@@ -89,10 +89,20 @@ self.addEventListener('fetch', event => {
             return fetch(request).then(networkResponse => {
                 // Ensure we have a valid response and it's a GET request before caching
                 if (networkResponse && networkResponse.status === 200 && request.method === 'GET') {
-                    const responseToCache = networkResponse.clone();
-                    caches.open(RUNTIME_CACHE_NAME).then(cache => {
-                        cache.put(request, responseToCache);
-                    });
+                    if (request.url.endsWith('.zip')) {
+                        const contentType = networkResponse.headers.get('content-type');
+                        if (contentType && (contentType.includes('application/zip') || contentType.includes('application/octet-stream'))) {
+                            const responseToCache = networkResponse.clone();
+                            caches.open(RUNTIME_CACHE_NAME).then(cache => {
+                                cache.put(request, responseToCache);
+                            });
+                        }
+                    } else {
+                        const responseToCache = networkResponse.clone();
+                        caches.open(RUNTIME_CACHE_NAME).then(cache => {
+                            cache.put(request, responseToCache);
+                        });
+                    }
                 }
                 return networkResponse;
             });
