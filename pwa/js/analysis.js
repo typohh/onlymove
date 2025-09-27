@@ -19,19 +19,8 @@ export function enterAnalysisMode() {
     return new Promise((resolve) => {
         setGhostMove(null); // Clear any ghost stone from previous modes
 
-        if (!state.problemHistory || state.problemHistory.length < 2) {
+        if (!state.problemHistory || state.problemHistory.length < 2 || !state.problemHistory[1].sgf ) {
             setAppMode(APP_MODES.SOLVING);
-            updateAllUI();
-            resolve();
-            return;
-        }
-
-        const problemToAnalyze = state.problemHistory[1];
-        const sgfToAnalyze = problemToAnalyze.sgf;
-
-        if (!sgfToAnalyze) {
-            console.error("No SGF found to enter analysis mode.");
-            setAppMode('solving');
             updateAllUI();
             resolve();
             return;
@@ -40,8 +29,7 @@ export function enterAnalysisMode() {
         setAppMode(APP_MODES.ANALYZING);
         setAcceptClicks(true);
         setReviewStartTime(Date.now());
-
-        loadSgf(sgfToAnalyze);
+        loadSgf(state.problemHistory[1].sgf);
 
         // Defer the rest of the initialization to the next event loop tick.
         // This is a workaround for a subtle timing issue in the wgo.js library where
