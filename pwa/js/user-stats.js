@@ -296,6 +296,7 @@ export function showDetailedStats() {
         const variableNames = [getTerm('timeSpent'), getTerm('reviewTimeShortTerm'), getTerm('reviewTimeLongTerm'), getTerm('problemDifficulty'), getTerm('problemQuality'), getTerm('date'), getTerm('shortTermRepeat'), getTerm('longTermRepeat')];
         const finalValues = new Array(variableNames.length).fill('-');
         const finalValues65 = new Array(variableNames.length).fill('-');
+        const coeffs = new Array(variableNames.length).fill(0);
 
         for (let i = 1; i < includedIndices.length; i++) { // Skip intercept
             const varIndex = includedIndices[i] - 1;
@@ -319,6 +320,7 @@ export function showDetailedStats() {
             }
 
             coeff *= scaleFactor;
+            coeffs[varIndex] = coeff;
             se *= Math.abs(scaleFactor); // Use absolute for SE
 
             // Calculate 85% CI
@@ -350,84 +352,55 @@ export function showDetailedStats() {
             finalValues65[varIndex] = finalCoeff65.toFixed(1);
         }
 
-        const messages = [];
         const finalNumericValues = finalValues.map(v => v === '-' ? 0 : parseFloat(v));
         const finalNumericValues65 = finalValues65.map(v => v === '-' ? 0 : parseFloat(v));
-        const messages65 = [];
 
-        // timeSpent (varIndex 0)
-        if (finalNumericValues[0] > 0) {
-            messages.push(getTerm('statsSolvingTime').replace('{value}', finalNumericValues[0]));
-        }
-        if (finalNumericValues65[0] > 0 && finalNumericValues[0] <= 0) {
-            messages65.push(getTerm('statsSolvingTime').replace('{value}', finalNumericValues65[0]));
-        }
-
-        // reviewTimeShortTerm (varIndex 1)
-        if (finalNumericValues[1] > 0) {
-            messages.push(getTerm('statsReviewTimeShort').replace('{value}', finalNumericValues[1]));
-        }
-        if (finalNumericValues65[1] > 0 && finalNumericValues[1] <= 0) {
-            messages65.push(getTerm('statsReviewTimeShort').replace('{value}', finalNumericValues65[1]));
-        }
-
-        // reviewTimeLongTerm (varIndex 2)
-        if (finalNumericValues[2] > 0) {
-            messages.push(getTerm('statsReviewTimeLong').replace('{value}', finalNumericValues[2]));
-        }
-        if (finalNumericValues65[2] > 0 && finalNumericValues[2] <= 0) {
-            messages65.push(getTerm('statsReviewTimeLong').replace('{value}', finalNumericValues65[2]));
-        }
-
-        // problemQuality (varIndex 4)
-        const qualityVal = finalNumericValues[4];
-        if (qualityVal > 0) {
-            messages.push(getTerm('statsQualityAnalytical').replace('{value}', qualityVal));
-        } else if (qualityVal < 0) {
-            messages.push(getTerm('statsQualityIntuitive').replace('{value}', Math.abs(qualityVal)));
-        }
-        const qualityVal65 = finalNumericValues65[4];
-        if ((qualityVal65 > 0 || qualityVal65 < 0) && qualityVal === 0) {
-            if (qualityVal65 > 0) {
-                messages65.push(getTerm('statsQualityAnalytical').replace('{value}', qualityVal65));
-            } else if (qualityVal65 < 0) {
-                messages65.push(getTerm('statsQualityIntuitive').replace('{value}', Math.abs(qualityVal65)));
+        const observations = [];
+        const handledIndices = [0, 1, 2, 4, 5];
+        for (let idx of handledIndices) {
+            const coeff = coeffs[idx];
+            const se = stdErrors[includedIndices.indexOf(idx + 1)]; // since includedIndices has 1-based
+            if (se > 0) {
+                const z = Math.abs(coeff) / se;
+                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+                const conf = (2 * cdf - 1) * 100;
+                if (conf >= 50) {
+                    observations.push({mean: (coeff * 100).toFixed(1), conf: conf.toFixed(0), varIndex: idx});
+                }
             }
         }
+        observations.sort((a, b) => b.conf - a.conf);
 
-        // date (varIndex 5)
-        const dateVal = finalNumericValues[5];
-        if (dateVal > 0) {
-            messages.push(getTerm('statsProgress').replace('{value}', dateVal));
-        } else if (dateVal < 0) {
-            messages.push(getTerm('statsRegression').replace('{value}', Math.abs(dateVal)));
-        }
-        const dateVal65 = finalNumericValues65[5];
-        if ((dateVal65 > 0 || dateVal65 < 0) && dateVal === 0) {
-            if (dateVal65 > 0) {
-                messages65.push(getTerm('statsProgress').replace('{value}', dateVal65));
-            } else if (dateVal65 < 0) {
-                messages65.push(getTerm('statsRegression').replace('{value}', Math.abs(dateVal65)));
+        for (let obs of observations) {
+            let termKey;
+            let meanVal = obs.mean;
+            let meanNum = parseFloat(obs.mean);
+            if (obs.varIndex === 0) {
+                termKey = 'statsSolvingTime';
+            } else if (obs.varIndex === 1) {
+                termKey = 'statsReviewTimeShort';
+            } else if (obs.varIndex === 2) {
+                termKey = 'statsReviewTimeLong';
+            } else if (obs.varIndex === 4) {
+                termKey = meanNum > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
+                meanVal = Math.abs(meanNum).toFixed(1);
+            } else if (obs.varIndex === 5) {
+                termKey = meanNum > 0 ? 'statsProgress' : 'statsRegression';
+                meanVal = Math.abs(meanNum).toFixed(1);
             }
+            obs.message = getTerm(termKey).replace('{mean}', meanVal).replace('{conf}', obs.conf);
         }
 
         const totalProblems = originalLength;
         const analysisProblems = history.length;
         let resultText = "";
 
-        const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-        resultText = intro;
-        if (messages.length > 0) {
-            resultText += "- " + messages.join("\n- ");
+        if (observations.length > 0) {
+            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+            resultText = intro + "- " + observations.map(o => o.message).join("\n- ");
         } else {
-            resultText += getTerm('statsNone');
-        }
-
-        resultText += "\n\n" + getTerm('statsPossibleTrends') + "\n\n";
-        if (messages65.length > 0) {
-            resultText += "- " + messages65.join("\n- ");
-        } else {
-            resultText += getTerm('statsNone');
+            const intro = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+            resultText = intro;
         }
 
         alert(resultText);
