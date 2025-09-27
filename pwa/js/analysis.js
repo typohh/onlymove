@@ -16,43 +16,45 @@ let analysisHintMove = null;
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
-    setGhostMove(null); // Clear any ghost stone from previous modes
+    return new Promise((resolve) => {
+        setGhostMove(null); // Clear any ghost stone from previous modes
 
-    if (!state.problemHistory || state.problemHistory.length < 2) {
-        setAppMode(APP_MODES.SOLVING);
-        updateAllUI();
-        return;
-    }
+        if (!state.problemHistory || state.problemHistory.length < 2) {
+            setAppMode(APP_MODES.SOLVING);
+            updateAllUI();
+            resolve();
+            return;
+        }
 
-    const problemToAnalyze = state.problemHistory[1];
-    const sgfToAnalyze = problemToAnalyze.sgf;
-    const tsumegoFilename = problemToAnalyze.filename;
+        const problemToAnalyze = state.problemHistory[1];
+        const sgfToAnalyze = problemToAnalyze.sgf;
 
-    if (!sgfToAnalyze) {
-        console.error("No SGF found to enter analysis mode.");
-        setAppMode('solving');
-        updateAllUI();
-        return;
-    }
+        if (!sgfToAnalyze) {
+            console.error("No SGF found to enter analysis mode.");
+            setAppMode('solving');
+            updateAllUI();
+            resolve();
+            return;
+        }
 
-    setAppMode(APP_MODES.ANALYZING);
-    setAcceptClicks(true);
-    setReviewStartTime(Date.now());
+        setAppMode(APP_MODES.ANALYZING);
+        setAcceptClicks(true);
+        setReviewStartTime(Date.now());
 
-    loadSgf(sgfToAnalyze);
+        loadSgf(sgfToAnalyze);
 
-    // Defer the rest of the initialization to the next event loop tick.
-    // This is a workaround for a subtle timing issue in the wgo.js library where
-    // the kifuReader object is not fully initialized immediately after creation.
-    // This was causing issues where the initial analysis would fail because the
-    // children of the current node were not yet available.
-    setTimeout(() => {
-        setInitialAnalysisNode(getCurrentNode());
-        updateAllUI();
-        requestAndDisplayAnalysis();
-    }, 0);
-    
-    
+        // Defer the rest of the initialization to the next event loop tick.
+        // This is a workaround for a subtle timing issue in the wgo.js library where
+        // the kifuReader object is not fully initialized immediately after creation.
+        // This was causing issues where the initial analysis would fail because the
+        // children of the current node were not yet available.
+        setTimeout(() => {
+            setInitialAnalysisNode(getCurrentNode());
+            updateAllUI();
+            requestAndDisplayAnalysis();
+            resolve();
+        }, 0);
+    });
 }
 
 /**

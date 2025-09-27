@@ -51,7 +51,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats));
 
     await loadTsumego(true);
-    enterAnalysisMode();
+    await enterAnalysisMode();
 }
 
 export function handleBoardClick(x, y) {
