@@ -94,8 +94,10 @@ body {
 }
 
 #title, #title-h {
-    text-decoration: underline;
-    font-size: 1.5em;
+    text-decoration: none;
+    font-size: 1.25em;
+    font-weight: bold;
+    text-transform: uppercase;
 }
 
 /* --- MODES 1 & 2: PORTRAIT & SQUARISH LAYOUTS (Consolidated) --- */
