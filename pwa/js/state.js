@@ -99,6 +99,9 @@ export function setDeferredInstallPrompt(prompt) {
 }
 
 export function setUserHasInteracted(interacted) {
+    if (interacted && !state.userHasInteracted) {
+        Sentry.setUser({ id: state.userId });
+    }
     state.userHasInteracted = interacted;
 }
 

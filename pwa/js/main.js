@@ -294,8 +294,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();
 
-    Sentry.setUser({ id: state.userId });
-
     fixupZeroRatedProblems();
 
     const resumeOverlay = document.getElementById('resume-overlay');
