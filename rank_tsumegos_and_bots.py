@@ -7,8 +7,9 @@ import torch.nn.functional as func
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import numpy as np
-import random  # Keep for potential future sampling/testing
+import random
 import re
+import scipy.optimize as opt
 
 # --- Configuration ---
 DATA_DIRECTORY = "attempts"
@@ -71,6 +72,11 @@ def load_data(data_dir):
                 user_id, tsumego_id, success = match.groups()
                 user_attempts.append({'user_id': user_id, 'tsumego_id': tsumego_id, 'success': int(success)})
 
+    # Capture the raw attempts before aggregation
+    raw_user_attempts_df = pd.DataFrame(user_attempts)
+    if not raw_user_attempts_df.empty:
+        raw_user_attempts_df['user_id'] = raw_user_attempts_df['user_id'].str[:8]
+
     if user_attempts:
         user_df = pd.DataFrame(user_attempts)
         user_df['user_id'] = user_df['user_id'].str[:8]  # Truncate user IDs
@@ -94,10 +100,9 @@ def load_data(data_dir):
             all_tsumego_ids.add(row['tsumego_id'])
             records_to_process.append((row['user_id'], row['tsumego_id'], row['success_rate']))
 
-
     # --- 3. Create Mappings and Final DataFrame ---
     if not records_to_process:
-         raise ValueError("No records found from bots or users. Cannot proceed.")
+        raise ValueError("No records found from bots or users. Cannot proceed.")
 
     participant_ids = sorted(list(all_participant_ids))
     participant_map = {name: i for i, name in enumerate(participant_ids)}
@@ -118,8 +123,8 @@ def load_data(data_dir):
 
     df = pd.DataFrame(records, columns=["bot_id", "tsumego_id", "success_rate"])
     tqdm.write(f"Loaded {len(df)} total solve attempts.")
-    # The 'bot_map' is now a 'participant_map', but we'll keep the variable name for compatibility
-    return df, participant_map, tsumego_map, tsumego_ids, attempt_counts
+
+    return df, participant_map, tsumego_map, tsumego_ids, attempt_counts, raw_user_attempts_df
 
 
 # --- Preliminary Bot Ranking ---
@@ -234,20 +239,78 @@ class RatingModel(nn.Module):
         return final_prob
 
 
+# --- Quality Factor Optimization ---
+def find_optimal_quality_adjustment(raw_user_attempts, user_ratings_df, tsumego_ratings_df, tsumego_quality_df):
+    """
+    Finds the optimal quality adjustment factor by driving the correlation between
+    prediction error and problem quality to zero for human players.
+    """
+    print("\nOptimizing quality adjustment factor for human players...")
+
+    # 1. Prepare the data by merging everything into one DataFrame.
+    # This will crash if there are no human players or data is misaligned.
+    human_ids = raw_user_attempts['user_id'].unique()
+    human_ratings_df = user_ratings_df[user_ratings_df['bot_id'].isin(human_ids)]
+
+    df = pd.merge(raw_user_attempts, human_ratings_df, left_on='user_id', right_on='bot_id')
+    df = pd.merge(df, tsumego_ratings_df, on='tsumego_id')
+    df = pd.merge(df, tsumego_quality_df, on='tsumego_id')
+    df.rename(columns={'rating_x': 'user_rating', 'rating_y': 'tsumego_rating', 'success': 'is_correct'}, inplace=True)
+
+    # 2. Define the objective function for the optimizer.
+    # The goal is to find a q_factor that makes problem quality uncorrelated
+    # with the success/failure prediction error.
+    def get_quality_error_correlation(q_factor, data):
+        # Calculate adjusted rating and the skill delta for each attempt
+        data['adjusted_rating'] = data['tsumego_rating'] - q_factor * (1 - data['quality'])
+        data['delta'] = data['user_rating'] - data['adjusted_rating']
+
+        # Model the probability of success using a standard logistic function of the delta.
+        predicted_prob = 1.0 / (1.0 + np.exp(-data['delta']))
+
+        # The error (residual) is the difference between the actual outcome and the prediction.
+        residuals = data['is_correct'] - predicted_prob
+
+        # Calculate the Pearson correlation between problem quality and the prediction error.
+        correlation = data['quality'].corr(residuals)
+
+        # If correlation is NaN (e.g., if quality or residuals have no variance),
+        # the script will fail later, but we can return a large value for the optimizer.
+        if pd.isna(correlation):
+            return 1e9
+
+        # The loss is how far the correlation is from zero. We want to minimize this.
+        return abs(correlation)
+
+    # 3. Run the optimization to find the q_factor that minimizes the absolute correlation.
+    result = opt.minimize_scalar(
+        fun=get_quality_error_correlation,
+        args=(df,),
+        bounds=(0, 10),  # Search for a factor between 0 and 10
+        method='bounded'
+    )
+
+    optimal_q_factor = result.x
+    final_corr = get_quality_error_correlation(optimal_q_factor, df)
+    print(f"Optimization complete. Optimal Q_factor found: {optimal_q_factor:.4f} (Final absolute correlation: {final_corr:.6f})")
+
+    return optimal_q_factor
+
+
 # --- Calculate Tsumego Ratings Numerically ---
-def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts):
+def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_factor=2.5, produce_unadjusted_for_optim=False):
     """
     Recalculates tsumego ratings and quality from the saved parameters CSV file
-    using numerical methods.
+    using numerical methods. This function will fail if required files are not found.
     """
-    print("\nCalculating final tsumego ratings and quality from parameters...")
-    try:
-        params_df = pd.read_csv('ratings/tsumego_parameters_final.csv')
-        bots_df = pd.read_csv('ratings/bot_ratings_final.csv')
-    except FileNotFoundError as e:
-        print(f"Error: Missing required file for calculation: {e.filename}")
-        print("Please ensure the model has been trained and parameters have been saved.")
-        return
+    if produce_unadjusted_for_optim:
+        print("\nCalculating initial UNADJUSTED tsumego ratings and quality...")
+    else:
+        print("\nCalculating FINAL tsumego ratings and quality...")
+
+    # This will now raise FileNotFoundError if files are missing, as requested.
+    params_df = pd.read_csv('ratings/tsumego_parameters_final.csv')
+    bots_df = pd.read_csv('ratings/bot_ratings_final.csv')
 
     # Use the empirical range of bot ratings to define a safe search space for theta
     bot_rating_min = bots_df['rating'].min()
@@ -277,8 +340,8 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts):
         return (low + high) / 2
 
     final_results = []
-    # Process all tsumegos (all are monotonic in the final parameter file)
-    for _, row in tqdm(params_df.iterrows(), total=len(params_df), desc="Calculating Ratings"):
+    desc = "Calculating UNADJUSTED Ratings" if produce_unadjusted_for_optim else "Calculating FINAL Ratings"
+    for _, row in tqdm(params_df.iterrows(), total=len(params_df), desc=desc):
         tsumego_id = row['tsumego_id']
 
         # Extract parameters for the current tsumego
@@ -288,11 +351,10 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts):
             'weights': np.array([row[f'weight_{i + 1}'] for i in range(NUM_EXPERTS)])
         }
 
-        # 1. Calculate Rating
+        # 1. Calculate unadjusted Rating
         rating = find_rating_for_tsumego(params, PROB_TARGET)
 
         # 2. Calculate Quality
-        # Use the theoretical standard deviation of the logistic distribution for skill difference
         theta_for_quality = rating + DIFFERENCE_FOR_QUALITY
         prob_at_quality_theta = predict_prob_for_tsumego(theta_for_quality, params)
         if DIFFERENCE_FOR_QUALITY > 0:
@@ -300,28 +362,41 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts):
         else:
             quality = (PROB_TARGET - prob_at_quality_theta) / PROB_TARGET
 
+        # 3. Apply adjustment if this is the final run
+        if produce_unadjusted_for_optim:
+            adjusted_rating = rating
+        else:
+            adjusted_rating = rating - q_factor * (1 - quality)
+
         final_results.append({
             "tsumego_id": tsumego_id,
-            "rating": rating - 2.5 * (1-quality), # easy to guess tsumegos are almost 2 stones easier..
+            "rating": adjusted_rating,
             "quality": quality
         })
 
+    # --- Save files ---
+    # Choose filename based on run type
+    if produce_unadjusted_for_optim:
+        rating_filename = 'ratings/tsumego_ratings_unadjusted.csv'
+    else:
+        rating_filename = 'ratings/tsumego_ratings_final.csv'
+
     # Save ratings
     tsumego_rating_df = pd.DataFrame(final_results)[['tsumego_id', 'rating']].sort_values(by="rating", ascending=False)
-    tsumego_rating_df.to_csv('ratings/tsumego_ratings_final.csv', index=False)
+    tsumego_rating_df.to_csv(rating_filename, index=False)
+    print(f"\nRatings saved to '{rating_filename}'")
 
-    # Save quality
+    # Save quality and user profiles on both runs, as they don't change
     tsumego_quality_df = pd.DataFrame(final_results)[['tsumego_id', 'quality']].sort_values(by="quality", ascending=False)
     tsumego_quality_df.to_csv('ratings/tsumego_quality_final.csv', index=False)
+    print("Quality saved to 'ratings/tsumego_quality_final.csv'")
 
-    # Create user_profiles_final.csv
-    user_profiles_df = bots_df.copy()
-    user_profiles_df['attempts'] = user_profiles_df['bot_id'].map(attempt_counts).fillna(0).astype(int)
-    user_profiles_df.to_csv('ratings/user_profiles_final.csv', index=False)
-
-    print("\nRecalculated ratings saved to 'ratings/tsumego_ratings_final.csv'")
-    print("Recalculated quality saved to 'ratings/tsumego_quality_final.csv'")
-    print("User profiles with attempts saved to 'ratings/user_profiles_final.csv'")
+    # Create user_profiles_final.csv only on the final run for clarity
+    if not produce_unadjusted_for_optim:
+        user_profiles_df = bots_df.copy()
+        user_profiles_df['attempts'] = user_profiles_df['bot_id'].map(attempt_counts).fillna(0).astype(int)
+        user_profiles_df.to_csv('ratings/user_profiles_final.csv', index=False)
+        print("User profiles with attempts saved to 'ratings/user_profiles_final.csv'")
 
 
 # --- Save ratings snapshot ---
@@ -403,7 +478,7 @@ def train_model(model, data_loader, device):
                 rate_batch = rate_batch.to(device).float()
 
                 optimizer.zero_grad()
-                predicted_rates = model(bot_batch, tsumego_batch)  # Squeeze is not needed anymore
+                predicted_rates = model(bot_batch, tsumego_batch)
 
                 # Clamp predictions to avoid log(0) or log(1) with BCELoss
                 predicted_rates = torch.clamp(predicted_rates, EPSILON, 1 - EPSILON)
@@ -467,7 +542,7 @@ def rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names):
         torch.LongTensor(df_monotonic.tsumego_id_monotonic.values),
         torch.Tensor(df_monotonic.success_rate.values)
     )
-    # Determine num_workers based on CPU count, capped to avoid issues
+    # Determine num_workers. This will raise a TypeError if os.cpu_count() returns None.
     num_workers = min(os.cpu_count(), 4)
     data_loader_monotonic = DataLoader(dataset_monotonic, batch_size=BATCH_SIZE, shuffle=True, num_workers=num_workers)
 
@@ -495,7 +570,7 @@ def rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names):
         model,
         bot_map,
         tsumego_map,
-        monotonic_tsumego_names,  # Pass only the names of tsumegos that were trained
+        monotonic_tsumego_names,
         monotonic_tsumego_map
     )
 
@@ -504,12 +579,36 @@ def rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names):
 if __name__ == '__main__':
     # "cd pwa && npx wrangler d1 export DB --remote --output=../attempts/database.sql"
 
-    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts = load_data(DATA_DIRECTORY)
+    # Step 1: Load all data from files.
+    # Will raise ValueError if no data is found.
+    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts, raw_user_attempts = load_data(DATA_DIRECTORY)
 
-    # Step 1: Train the model and save the learned parameters
+    # Step 2: Train the model and save the learned parameters.
     # rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
 
-    # Step 2: Load the saved parameters and calculate final ratings and quality
-    # We pass all original names so it can handle non-monotonic ones if needed in the future
-    # (Currently, they are just excluded from the parameter file)
-    wrapper_calculate_tsumego_ratings(all_tsumego_names_with_sgf, attempt_counts)
+    # Step 3: Generate UNADJUSTED ratings and quality from the saved parameters.
+    # This will raise FileNotFoundError if the previous step failed to produce output.
+    wrapper_calculate_tsumego_ratings(all_tsumego_names_with_sgf, attempt_counts, produce_unadjusted_for_optim=True)
+
+    # Step 4: Find the optimal quality adjustment factor.
+    # This section will raise errors if inputs are missing or data is invalid.
+    user_ratings = pd.read_csv('ratings/bot_ratings_final.csv')
+    tsumego_ratings_unadjusted = pd.read_csv('ratings/tsumego_ratings_unadjusted.csv')
+    tsumego_quality = pd.read_csv('ratings/tsumego_quality_final.csv')
+
+    optimal_factor = find_optimal_quality_adjustment(
+        raw_user_attempts,
+        user_ratings,
+        tsumego_ratings_unadjusted,
+        tsumego_quality
+    )
+
+    # Step 5: Recalculate the FINAL ratings using the optimal factor.
+    print(f"\n--- Recalculating final ratings with optimal Q_factor: {optimal_factor:.4f} ---")
+    wrapper_calculate_tsumego_ratings(
+        all_tsumego_names_with_sgf,
+        attempt_counts,
+        q_factor=optimal_factor
+    )
+
+    print("\n\nProcess finished successfully.")

@@ -14,7 +14,7 @@ try {
 
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
 import { showDetailedStats } from './user-stats.js';
-import { loadSgf } from './board.js';
+import { loadSgf, redraw } from './board.js';
 import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
@@ -327,6 +327,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!state.board || !state.game) {
                 Sentry.captureMessage('Reloading due to missing board or game state on visibilitychange', 'error');
                 location.reload();
+            } else {
+                redraw();
             }
         }
     });
