@@ -120,10 +120,13 @@ export function updateUserStats(isCorrect) {
         } else {
             intendedIncrease *= 0.1
         }
+        intendedIncrease *= (currentProblem.quality || 0.5);
         rank += Math.min(intendedIncrease, maxIncrease);
     } else if (!isCorrect) { // Incorrect
         momentum = (momentum + 1) / 3;
-        rank = Math.max(0, rank - 4 * (momentum / 600));
+        let rankChange = 4 * (momentum / 600);
+        rankChange *= (currentProblem.quality || 0.5);
+        rank = Math.max(0, rank - rankChange);
     }
 
     updateUserRank(rank);
