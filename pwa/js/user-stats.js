@@ -148,14 +148,9 @@ export function updateUserStats(isCorrect) {
     }
 
     // Trigger background calculation of detailed stats
-    if (!isCalculatingStats) {
-        isCalculatingStats = true;
-        setTimeout(() => {
-            calculateAndStoreStatsResults().finally(() => {
-                isCalculatingStats = false;
-            });
-        }, 0);
-    }
+    setTimeout(() => {
+        calculateAndStoreStatsResults();
+    }, 0);
 
     return {
         rankChange,
@@ -167,6 +162,8 @@ export function updateUserStats(isCorrect) {
 let isCalculatingStats = false;
 
 async function calculateAndStoreStatsResults() {
+    if (isCalculatingStats) return;
+    isCalculatingStats = true;
     try {
         const validHistory = state.answerHistory.filter(p =>
             p.problemRating !== undefined &&
@@ -307,19 +304,31 @@ async function calculateAndStoreStatsResults() {
 
     } catch (error) {
         console.error('OLS Regression failed during background calculation:', error);
+        Sentry.captureException(error);
         setStatsResults(null); // Set empty results on failure
+    } finally {
+        isCalculatingStats = false;
     }
 }
 
 // Function to show detailed stats when user clicks on rank
-export function showDetailedStats() {
-    if (state.statsResults === null) {
-        alert(getTerm('statsCalculating'));
+export async function showDetailedStats() {
+    if (isCalculatingStats) {
+        Sentry.captureMessage("showDetailedStats called while isCalculatingStats is true");
         return;
     }
-    
+
+    if (state.statsResults === null && state.answerHistory.length >= 5) {
+        await calculateAndStoreStatsResults();
+    }
+
     if (state.answerHistory.length < 5) {
         alert(getTerm('statsNotEnough').replace('{count}', state.answerHistory.length));
+        return;
+    }
+
+    if (state.statsResults === null) {
+        alert(getTerm('statsFailed'));
         return;
     }
 
