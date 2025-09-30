@@ -59,7 +59,8 @@ const localization = {
     statsIntroNew: '基于您最近的{analysis}个问题（共{total}个），我们有以下观察：\n\n',
     statsNoTrends: '基于您最近的{analysis}个问题（共{total}个），我们没有发现明显的统计规律。请继续练习以获取更精确的分析！',
     statsNone: '无',
-    statsPossibleTrends: '还有以下可能的趋势：'
+    statsPossibleTrends: '还有以下可能的趋势：',
+    statsCalculating: '统计数据正在计算中，请稍后再试。'
   },
   ja: {
     kyu: '級',
@@ -117,7 +118,8 @@ const localization = {
     statsIntroNew: '最近の{analysis}問（合計{total}問）に基づいて、以下の観察があります：\n\n',
     statsNoTrends: '最近の{analysis}問（合計{total}問）では、統計的に有意な傾向は見られませんでした。より多くのデータを集めるために、練習を続けてください！',
     statsNone: 'なし',
-    statsPossibleTrends: 'また、以下の可能な傾向があります：'
+    statsPossibleTrends: 'また、以下の可能な傾向があります：',
+    statsCalculating: '統計を計算中です。しばらくしてからもう一度お試しください。'
   },
   ko: {
     kyu: '급',
@@ -175,7 +177,8 @@ const localization = {
     statsIntroNew: '최근 {analysis}개 문제（총 {total}개）를 기반으로 다음과 같은 관찰이 있습니다：\n\n',
     statsNoTrends: '최근 {analysis}개 문제（총 {total}개）에서는 통계적으로 유의미한 경향을 발견하지 못했습니다. 더 많은 데이터를 모으기 위해 계속 풀어보세요！',
     statsNone: '없음',
-    statsPossibleTrends: '또한 다음과 같은 가능한 추세가 있습니다:'
+    statsPossibleTrends: '또한 다음과 같은 가능한 추세가 있습니다:',
+    statsCalculating: '통계를 계산 중입니다. 잠시 후 다시 시도해 주세요.'
   },
   en: {
     kyu: 'kyu',
@@ -233,7 +236,8 @@ const localization = {
     statsIntroNew: 'Based on your most recent {analysis} out of {total} problems we have the following observation(s):\n\n',
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsNone: 'None',
-    statsPossibleTrends: 'There are also the following possible trends:'
+    statsPossibleTrends: 'There are also the following possible trends:',
+    statsCalculating: 'Statistics are being calculated, please try again shortly.'
   }
 };
 
