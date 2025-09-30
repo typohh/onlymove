@@ -2,7 +2,7 @@
 
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults } from './state.js';
 import { updateAllUI } from './ui.js';
-import { TOTAL_RANKS, PROBLEM_STATUS } from './constants.js';
+import { TOTAL_RANKS, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
 
 // Function to send report to Cloudflare Worker
@@ -177,7 +177,7 @@ async function calculateAndStoreStatsResults() {
         );
 
         if (validHistory.length < 5) {
-            setStatsResults([]); // Set empty results if not enough data
+        setStatsResults(null);
             return;
         }
         const history = validHistory.slice(-500);
@@ -185,6 +185,7 @@ async function calculateAndStoreStatsResults() {
         // ... [All existing percentile and OLS calculations] ...
         const timeTakenValues = history.map(p => p.timeTaken);
         const sortedTime = timeTakenValues.slice().sort((a, b) => a - b);
+
         const p_low = 0.45;
         const p_high = 0.55;
         const idx_low = Math.floor(p_low * (sortedTime.length - 1));
@@ -201,8 +202,8 @@ async function calculateAndStoreStatsResults() {
 
         const previousReviewTimes = history.map((p, i) => {
             if (p.problemType === 'short-term-repeat' || p.problemType === 'long-term-repeat') {
-                const prev = history.slice(0, i).reverse().find(ans => ans.problemId === p.problemId && ans.reviewTime > 0);
-                return prev ? prev.reviewTime : 0;
+                const prevs = history.slice(0, i).filter(ans => ans.problemId === p.problemId);
+                return prevs.reduce((sum, ans) => sum + ans.reviewTime, 0);
             }
             return 0;
         });
@@ -290,12 +291,12 @@ async function calculateAndStoreStatsResults() {
             let se = stdErrors[i];
 
             let scaleFactor = 1;
-            if (varIndex === 0 && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
-            else if (varIndex === 1 && time_per_percentile_min_r_short > 0) scaleFactor = 1 / time_per_percentile_min_r_short;
-            else if (varIndex === 2 && time_per_percentile_min_r_long > 0) scaleFactor = 1 / time_per_percentile_min_r_long;
-            else if (varIndex === 3) scaleFactor = 1 / 29;
-            else if (varIndex === 4) scaleFactor = -1;
-            else if (varIndex === 5) scaleFactor = 100;
+            if (varIndex === OLS_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
+            else if (varIndex === OLS_INDICES.REVIEW_TIME_SHORT && time_per_percentile_min_r_short > 0) scaleFactor = 1 / time_per_percentile_min_r_short;
+            else if (varIndex === OLS_INDICES.REVIEW_TIME_LONG && time_per_percentile_min_r_long > 0) scaleFactor = 1 / time_per_percentile_min_r_long;
+            else if (varIndex === OLS_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
+            else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) scaleFactor = -1;
+            else if (varIndex === OLS_INDICES.DATE) scaleFactor = 100;
 
             coeff *= scaleFactor;
             se *= Math.abs(scaleFactor);
@@ -306,7 +307,7 @@ async function calculateAndStoreStatsResults() {
 
     } catch (error) {
         console.error('OLS Regression failed during background calculation:', error);
-        setStatsResults([]); // Set empty results on failure
+        setStatsResults(null); // Set empty results on failure
     }
 }
 
@@ -332,7 +333,7 @@ export function showDetailedStats() {
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = (2 * cdf - 1) * 100;
-                if (conf >= 50 && !([0, 1, 2].includes(varIndex) && coeff <= 0)) {
+                if (conf >= 50 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME_SHORT, OLS_INDICES.REVIEW_TIME_LONG].includes(varIndex) && coeff <= 0)) {
                     observations.push({ mean: (coeff * 100).toFixed(1), conf: conf.toFixed(0), varIndex });
                 }
             }
@@ -343,13 +344,13 @@ export function showDetailedStats() {
             let termKey;
             let meanVal = obs.mean;
             let meanNum = parseFloat(obs.mean);
-            if (obs.varIndex === 0) termKey = 'statsSolvingTime';
-            else if (obs.varIndex === 1) termKey = 'statsReviewTimeShort';
-            else if (obs.varIndex === 2) termKey = 'statsReviewTimeLong';
-            else if (obs.varIndex === 4) {
+            if (obs.varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
+            else if (obs.varIndex === OLS_INDICES.REVIEW_TIME_SHORT) termKey = 'statsReviewTimeShort';
+            else if (obs.varIndex === OLS_INDICES.REVIEW_TIME_LONG) termKey = 'statsReviewTimeLong';
+            else if (obs.varIndex === OLS_INDICES.PROBLEM_QUALITY) {
                 termKey = meanNum > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
                 meanVal = Math.abs(meanNum).toFixed(1);
-            } else if (obs.varIndex === 5) {
+            } else if (obs.varIndex === OLS_INDICES.DATE) {
                 termKey = meanNum > 0 ? 'statsProgress' : 'statsRegression';
                 meanVal = Math.abs(meanNum).toFixed(1);
             }

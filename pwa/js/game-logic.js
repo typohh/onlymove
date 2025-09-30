@@ -5,7 +5,7 @@ import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from 
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
-import { APP_MODES, PROBLEM_STATUS } from './constants.js';
+import { APP_MODES, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
@@ -46,12 +46,51 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     let duration = 2000; // 2s default
     let message = '';
+    const statsResults = state.statsResults;
+    const statsAreAvailable = statsResults && statsResults.length > 0;
+
+
+
     if (oldStatus === PROBLEM_STATUS.FAILURE || oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
-        duration = 6000;
-        message = getTerm('shouldKnowThis');
-    } else if (timeSpent < 15000) { // less than 15s
-        duration = 6000;
-        message = getTerm('carelessMistake');
+        let reviewTimeIsBeneficial = false;
+        let meanReviewTime = 0;
+        let previousReviewTime = 0;
+        if (statsAreAvailable) {
+            const reviewTimeValues = state.answerHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
+            meanReviewTime = reviewTimeValues.length > 0 ? reviewTimeValues.reduce((a, b) => a + b, 0) / reviewTimeValues.length : 0;
+
+            // Get accumulated review time for this problem
+            const currentProblem = state.problemHistory[0];
+            const problemId = currentProblem.filename.replace('.sgf', '');
+            const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
+            const previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
+
+            const targetVarIndex = (oldStatus === PROBLEM_STATUS.FAILURE) ? OLS_INDICES.REVIEW_TIME_SHORT : OLS_INDICES.REVIEW_TIME_LONG;
+            const reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
+            if (reviewStat && reviewStat.coeff > 0) {
+                reviewTimeIsBeneficial = true;
+            }
+        }
+
+        if (reviewTimeIsBeneficial && previousReviewTime < meanReviewTime) {
+            duration = 6000;
+            message = getTerm('shouldKnowThis');
+        }
+    } else { // Careless mistake for new problems
+        let timeIsBeneficial = false;
+        let meanSolvingTime = 0;
+        if (statsAreAvailable) {
+            const timeTakenValues = state.answerHistory.map(p => p.timeTaken).filter(t => t !== undefined);
+            meanSolvingTime = timeTakenValues.length > 0 ? timeTakenValues.reduce((a, b) => a + b, 0) / timeTakenValues.length : 0;
+
+            const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
+            timeIsBeneficial = timeStat ? timeStat.coeff > 0 : false;
+        }
+
+        if (timeIsBeneficial && state.accumulatedSolvingTime < meanSolvingTime) {
+            duration = 6000;
+            message = getTerm('carelessMistake');
+        }
     }
 
     await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats));
