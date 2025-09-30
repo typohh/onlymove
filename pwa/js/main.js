@@ -1,7 +1,7 @@
 // js/main.js
 import * as Sentry from "@sentry/browser";
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, setProblemStartTime, updateAnswerHistory, setReviewStartTime } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime } from './state.js';
 
 try {
     // Initialize Sentry
@@ -328,7 +328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 Sentry.captureMessage('Reloading due to missing board or game state on visibilitychange', 'error');
                 location.reload();
             } else {
-                redraw();
+                setTimeout(() => redraw(), 0);
             }
         }
     });

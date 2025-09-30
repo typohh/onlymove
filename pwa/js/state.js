@@ -38,10 +38,7 @@ export const state = {
     deferredInstallPrompt: null,
     userHasInteracted: false,
     
-    problemStartTime: (() => {
-        const saved = localStorage.getItem('problemStartTime');
-        return saved ? parseInt(saved) : null;
-    })(),
+
     currentSolvingStartTime: null,
     accumulatedSolvingTime: 0,
     
@@ -142,14 +139,7 @@ export function updateAnswerHistory(history) {
 
 
 
-export function setProblemStartTime(time) {
-    state.problemStartTime = time;
-    if (time !== null) {
-        localStorage.setItem('problemStartTime', time.toString());
-    } else {
-        localStorage.removeItem('problemStartTime');
-    }
-}
+
 
 export function setReviewStartTime(time) {
     state.reviewStartTime = time;

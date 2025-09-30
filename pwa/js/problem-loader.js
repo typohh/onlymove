@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setProblemStartTime, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';

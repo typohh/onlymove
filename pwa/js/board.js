@@ -158,6 +158,12 @@ export function playMoveOnBranch(x, y) {
 
     if (position.get(x, y) !== 0) return false;
 
+    // Check for illegal moves (like suicide or ko).
+    // A legal move returns false. Illegal moves return a numeric code (e.g., 3 for suicide, 4 for ko).
+    if (game.play(x, y, game.turn, true) !== false) {
+        return false;
+    }
+
     const currentNode = state.kifuReader.node;
     const children = currentNode.children;
 

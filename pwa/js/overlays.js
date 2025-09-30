@@ -74,10 +74,10 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         document.body.appendChild(overlay);
 
         // Fade in over duration, then remove
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             overlay.style.transition = `opacity ${duration}ms ease-out`;
             overlay.style.opacity = '0.9';
-        }, 0);
+        });
 
         setTimeout(() => {
             overlay.remove();

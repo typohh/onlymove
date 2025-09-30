@@ -43,7 +43,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const stats = updateUserStats(false);
 
     // Calculate overlay duration and message based on time spent
-    const timeSpent = Date.now() - (state.problemStartTime || Date.now());
+    const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     let duration = 2000; // 2s default
     let message = '';
     if (oldStatus === PROBLEM_STATUS.FAILURE || oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
