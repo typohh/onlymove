@@ -55,6 +55,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
         let reviewTimeIsBeneficial = false;
         let meanReviewTime = 0;
         let previousReviewTime = 0;
+        let reviewStat;
         if (statsAreAvailable) {
             const reviewTimeValues = state.answerHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
             meanReviewTime = reviewTimeValues.length > 0 ? reviewTimeValues.reduce((a, b) => a + b, 0) / reviewTimeValues.length : 0;
@@ -63,10 +64,10 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             const currentProblem = state.problemHistory[0];
             const problemId = currentProblem.filename.replace('.sgf', '');
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
-            const previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
+            previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
 
             const targetVarIndex = (oldStatus === PROBLEM_STATUS.FAILURE) ? OLS_INDICES.REVIEW_TIME_SHORT : OLS_INDICES.REVIEW_TIME_LONG;
-            const reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
+            reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
             if (reviewStat && reviewStat.coeff > 0) {
                 reviewTimeIsBeneficial = true;
             }
@@ -74,7 +75,14 @@ async function _handleIncorrectMoveSequence(moveIndex) {
 
         if (reviewTimeIsBeneficial && previousReviewTime < meanReviewTime) {
             duration = 6000;
-            message = getTerm('shouldKnowThis');
+            if (reviewStat) {
+                const { coeff, se } = reviewStat;
+                const z = Math.abs(coeff) / se;
+                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+                const conf = (2 * cdf - 1) * 100;
+                const x = Math.round(previousReviewTime / 1000);
+                message = getTerm('insufficientReviewMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
+            }
         }
     } else { // Careless mistake for new problems
         let timeIsBeneficial = false;
@@ -82,14 +90,19 @@ async function _handleIncorrectMoveSequence(moveIndex) {
         if (statsAreAvailable) {
             const timeTakenValues = state.answerHistory.map(p => p.timeTaken).filter(t => t !== undefined);
             meanSolvingTime = timeTakenValues.length > 0 ? timeTakenValues.reduce((a, b) => a + b, 0) / timeTakenValues.length : 0;
-
             const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
             timeIsBeneficial = timeStat ? timeStat.coeff > 0 : false;
         }
 
         if (timeIsBeneficial && state.accumulatedSolvingTime < meanSolvingTime) {
             duration = 6000;
-            message = getTerm('carelessMistake');
+            const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
+            const { coeff, se } = timeStat;
+            const z = Math.abs(coeff) / se;
+            const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+            const conf = (2 * cdf - 1) * 100;
+            const x = Math.round(timeSpent / 1000);
+            message = getTerm('rushingMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
         }
     }
 
