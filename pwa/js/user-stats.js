@@ -281,6 +281,12 @@ async function calculateAndStoreStatsResults() {
         const varCovarMatrix = math.multiply(s2, XtX_inv);
         const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt);
 
+        const diff_idx_in_X = includedIndices.indexOf(OLS_INDICES.PROBLEM_DIFFICULTY + 1);
+        let beta_diff = 0;
+        if (diff_idx_in_X > -1) {
+            beta_diff = beta[diff_idx_in_X];
+        }
+
         const results = [];
         for (let i = 1; i < includedIndices.length; i++) {
             const varIndex = includedIndices[i] - 1;
@@ -293,14 +299,14 @@ async function calculateAndStoreStatsResults() {
             else if (varIndex === OLS_INDICES.REVIEW_TIME_LONG && time_per_percentile_min_r_long > 0) scaleFactor = 1 / time_per_percentile_min_r_long;
             else if (varIndex === OLS_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
             else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) scaleFactor = -1;
-            else if (varIndex === OLS_INDICES.DATE) scaleFactor = 100;
+            else if (varIndex === OLS_INDICES.DATE) scaleFactor = n;
 
             coeff *= scaleFactor;
             se *= Math.abs(scaleFactor);
             
             results.push({ coeff, se, varIndex });
         }
-        setStatsResults(results);
+        setStatsResults({ results, beta_diff });
 
     } catch (error) {
         console.error('OLS Regression failed during background calculation:', error);
@@ -333,43 +339,53 @@ export async function showDetailedStats() {
     }
 
     try {
-        const results = state.statsResults;
+        const { results, beta_diff } = state.statsResults;
+        const analysisProblems = Math.min(state.answerHistory.length, 500);
+
+        const rank_conversion_factor = 1 / 0.28; // User-defined constant
         const observations = [];
-        
+
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             if (se > 0) {
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = (2 * cdf - 1) * 100;
+
                 if (conf >= 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME_SHORT, OLS_INDICES.REVIEW_TIME_LONG].includes(varIndex) && coeff <= 0)) {
-                    observations.push({ mean: (coeff * 100).toFixed(1), conf: conf.toFixed(0), varIndex });
+                    const rank_change = coeff * rank_conversion_factor;
+                    let termKey;
+                    let rank_change_val = rank_change;
+
+                    if (varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
+                    else if (varIndex === OLS_INDICES.REVIEW_TIME_SHORT) termKey = 'statsReviewTimeShort';
+                    else if (varIndex === OLS_INDICES.REVIEW_TIME_LONG) termKey = 'statsReviewTimeLong';
+                    else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
+                        termKey = rank_change > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
+                        rank_change_val = Math.abs(rank_change);
+                    } else if (varIndex === OLS_INDICES.DATE) {
+                        termKey = rank_change > 0 ? 'statsProgress' : 'statsRegression';
+                        rank_change_val = Math.abs(rank_change);
+                    }
+
+                    if (termKey) {
+                        let message = getTerm(termKey)
+                            .replace('{rank_change}', rank_change_val.toFixed(1))
+                            .replace('{conf}', conf.toFixed(0));
+                        
+                        if (varIndex === OLS_INDICES.DATE) {
+                            message = message.replace('{analysis_count}', analysisProblems);
+                        }
+                        
+                        observations.push({ message, conf });
+                    }
                 }
             }
         }
+
         observations.sort((a, b) => b.conf - a.conf);
 
-        for (let obs of observations) {
-            let termKey;
-            let meanVal = obs.mean;
-            let meanNum = parseFloat(obs.mean);
-            if (obs.varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
-            else if (obs.varIndex === OLS_INDICES.REVIEW_TIME_SHORT) termKey = 'statsReviewTimeShort';
-            else if (obs.varIndex === OLS_INDICES.REVIEW_TIME_LONG) termKey = 'statsReviewTimeLong';
-            else if (obs.varIndex === OLS_INDICES.PROBLEM_QUALITY) {
-                termKey = meanNum > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
-                meanVal = Math.abs(meanNum).toFixed(1);
-            } else if (obs.varIndex === OLS_INDICES.DATE) {
-                termKey = meanNum > 0 ? 'statsProgress' : 'statsRegression';
-                meanVal = Math.abs(meanNum).toFixed(1);
-            }
-            if (termKey) {
-                obs.message = getTerm(termKey).replace('{mean}', meanVal).replace('{conf}', obs.conf);
-            }
-        }
-
         const totalProblems = state.answerHistory.length;
-        const analysisProblems = Math.min(totalProblems, 500);
         let resultText = "";
 
         const validObservations = observations.filter(o => o.message);
