@@ -22,7 +22,7 @@
         "client_mode": "navigate-existing"
     },
     "categories": ["games","education"],
-    "orientation": "natural",
+    "orientation": "vertical",
     "description": "Whole board tsumegos on 9x9, where each postion only has one correct answer as verified by katago. All difficulties from 20k to 9d, and review mode where AI helps you explore variations.",
     "screenshots": [
         {
