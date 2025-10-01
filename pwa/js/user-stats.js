@@ -354,6 +354,11 @@ export async function showDetailedStats() {
 
                 if (conf >= 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME_SHORT, OLS_INDICES.REVIEW_TIME_LONG].includes(varIndex) && coeff <= 0)) {
                     const rank_change = coeff * rank_conversion_factor;
+
+                    if (Math.abs(rank_change) < 0.1) {
+                        continue;
+                    }
+
                     let termKey;
                     let rank_change_val = rank_change;
 
