@@ -18,7 +18,7 @@ LEARNING_RATE = 0.01
 LOSS_DROP_THRESHOLD = 0.001  # Stop training if loss improves by less than 0.1%
 MIN_BATCHES = 50  # Minimum number of batches before checking loss drop
 PROB_TARGET = 0.95  # Target probability for tsumego rating calculation
-NUM_EXPERTS = 2  # Number of sigmoid experts in the mixture model
+NUM_EXPERTS = 3  # Number of sigmoid experts in the mixture model
 # This constant represents 1 standard deviation of the latent ability in a standard logistic distribution.
 DIFFERENCE_FOR_QUALITY = -np.pi / np.sqrt(3)  # Approx. 1.8138
 
@@ -64,7 +64,7 @@ def load_data(data_dir):
     sql_file = os.path.join(data_dir, 'database.sql')
     user_attempts = []
     print(f"Loading user data from {sql_file}...")
-    insert_pattern = re.compile(r"INSERT INTO `?tsumego_reports`? VALUES\(\d+,'([^']+)','([^']+)',([01]),'.*?'\);")
+    insert_pattern = re.compile(r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\(\d+,'([^']+)','([^']+)',([01]),'.*?'\);")
     with open(sql_file, 'r') as f:
         for line in tqdm(f, desc="Parsing SQL"):
             match = insert_pattern.match(line)
@@ -81,12 +81,13 @@ def load_data(data_dir):
         user_df = pd.DataFrame(user_attempts)
         user_df['user_id'] = user_df['user_id'].str[:8]  # Truncate user IDs
 
-        # Calculate success rate for each user on each tsumego
-        user_success_rates = user_df.groupby(['user_id', 'tsumego_id'])['success'].mean().reset_index()
-        user_success_rates.rename(columns={'success': 'success_rate'}, inplace=True)
+        # The schema has a UNIQUE(user_id, problem) constraint, so groupby().mean() is redundant.
+        # We just rename 'success' to 'success_rate' for consistency with the bot data format.
+        user_df.rename(columns={'success': 'success_rate'}, inplace=True)
+        user_success_rates = user_df
 
         # Add all user_ids to participants, even if they have no valid attempts
-        unique_users = user_df['user_id'].unique()
+        unique_users = user_success_rates['user_id'].unique()
         for user_id in unique_users:
             all_participant_ids.add(user_id)
 
@@ -584,7 +585,7 @@ if __name__ == '__main__':
     df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts, raw_user_attempts = load_data(DATA_DIRECTORY)
 
     # Step 2: Train the model and save the learned parameters.
-    # rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
+    rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
 
     # Step 3: Generate UNADJUSTED ratings and quality from the saved parameters.
     # This will raise FileNotFoundError if the previous step failed to produce output.
@@ -612,3 +613,6 @@ if __name__ == '__main__':
     )
 
     print("\n\nProcess finished successfully.")
+
+    # 2 sigmoids : 0.317173
+    # 3 sigmoids : 0.317043
