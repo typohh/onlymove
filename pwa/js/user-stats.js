@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateTsumegoStats, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
@@ -89,24 +89,6 @@ export function updateUserStats(isCorrect) {
     const oldRankInfo = getRankInfo(oldRank);
     let rank = oldRank;
     let momentum = state.momentum;
-    const stats = { ...state.tsumegoStats };
-
-    if (oldStatus === PROBLEM_STATUS.FAILURE) {
-        stats.totalOnFail++;
-        if (!isCorrect) {
-            stats.failOnFail++;
-        }
-    } else if (oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
-        stats.totalOnInBetween++;
-        if (!isCorrect) {
-            stats.failOnInBetween++;
-        }
-    } else { // success or new
-        stats.totalOnSuccess++;
-        if (!isCorrect) {
-            stats.failOnSuccess++;
-        }
-    }
 
     if (isCorrect ) {
         const maxIncrease = (1.0 - rank) / 9;
@@ -132,7 +114,6 @@ export function updateUserStats(isCorrect) {
     updateUserRank(rank);
     updateMomentum(momentum);
     updateProblemHistory(history);
-    updateTsumegoStats(stats);
     updateAllUI();
 
     const newRank = state.userRank;

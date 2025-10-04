@@ -43,7 +43,6 @@ export const state = {
     accumulatedSolvingTime: 0,
     
     // Analysis mode state
-    lastMoveInAnalysis: null, // Track last move in analysis mode
     initialAnalysisNode: null,
     ghostMove: null, // Pending move for double-click confirmation
     reviewStartTime: null,
@@ -56,16 +55,6 @@ export const state = {
 
     // Linked problem ID
     linkedId: null,
-
-    // More stats
-    tsumegoStats: JSON.parse(localStorage.getItem('tsumegoStats')) || {
-        failOnFail: 0,
-        totalOnFail: 0,
-        failOnInBetween: 0,
-        totalOnInBetween: 0,
-        failOnSuccess: 0,
-        totalOnSuccess: 0,
-    },
 
     answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
     statsResults: null,
@@ -116,11 +105,6 @@ export function updateUserRank(rank) {
 export function updateMomentum(momentum) {
     state.momentum = momentum;
     localStorage.setItem('momentum', momentum.toString());
-}
-
-export function updateTsumegoStats(stats) {
-    state.tsumegoStats = stats;
-    localStorage.setItem('tsumegoStats', JSON.stringify(stats));
 }
 
 export function updateProblemHistory(history) {
