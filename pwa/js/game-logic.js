@@ -46,7 +46,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     let duration = 2000; // 2s default
     let message = '';
-    const statsResults = state.statsResults;
+    const statsResults = state.statsResults ? state.statsResults.results : null;
     const statsAreAvailable = statsResults && statsResults.length > 0;
 
 
