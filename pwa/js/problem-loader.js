@@ -25,9 +25,13 @@ function weightedRandomSelect(items, weightFn) {
     return items[0]; // fallback
 }
 
-export function getReviewCandidates() {
-    const K = 410333792.4; // k = 86400000 / (0.8 ^ (-1 / 1.3) - 1)
+export function calculateRecallRate(t, r, k) {
     const B = 1.3;
+    return Math.pow(1 + t / (k * Math.pow(2.5, r)), -B);
+}
+
+export function getReviewCandidates() {
+    const K = state.userK || 410333792.4; // k = 86400000 / (0.8 ^ (-1 / 1.3) - 1)
     const now = Date.now();
     const reviewCandidates = [];
     const allRecallRates = []; // For logging
@@ -42,7 +46,7 @@ export function getReviewCandidates() {
         if (lastAnswer.successSinceFailure !== undefined && lastAnswer.problemRating < state.userRank) {
             const t = now - lastAnswer.date;
             const r = lastAnswer.successSinceFailure;
-            const recallRate = Math.pow(1 + t / (K * Math.pow(2.5, r)), -B);
+            const recallRate = calculateRecallRate(t, r, K);
 
             allRecallRates.push({ problemId, recallRate }); // Log all of them
 
@@ -51,8 +55,6 @@ export function getReviewCandidates() {
             }
         }
     }
-
-    console.table(allRecallRates.sort((a, b) => a.recallRate - b.recallRate)); // Log as a table
 
     return reviewCandidates;
 }

@@ -58,6 +58,7 @@ export const state = {
 
     answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
     statsResults: null,
+    userK: parseFloat(localStorage.getItem('userK')) || null,
 };
 
 // MODIFICATION: Cache for loaded zip files
@@ -144,4 +145,9 @@ export function resetAccumulatedSolvingTime() {
 
 export function setStatsResults(results) {
     state.statsResults = results;
+}
+
+export function setUserK(k) {
+    state.userK = k;
+    localStorage.setItem('userK', k.toString());
 }

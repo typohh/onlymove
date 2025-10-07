@@ -1,9 +1,10 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setUserK } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
+import { calculateRecallRate } from './problem-loader.js';
 
 // Function to send report to Cloudflare Worker
 export async function sendReport(success) {
@@ -141,9 +142,10 @@ export function updateUserStats(isCorrect) {
         rankChangeDirection = 'down';
     }
 
-    // Trigger background calculation of detailed stats
+    // Trigger background calculation of detailed stats and K estimation
     setTimeout(() => {
         calculateAndStoreStatsResults();
+        estimateUserK();
     }, 0);
 
     return {
@@ -151,6 +153,102 @@ export function updateUserStats(isCorrect) {
         rankChangeDirection,
         isCorrect
     };
+}
+
+function estimateUserK() {
+    const B = 1.3;
+
+    // Prior data points to anchor the estimation
+    const priors = [
+        { t: 86400000, r: 0, correct: true }, // 1 day, 1st repeat
+        { t: 86400000 * 2.5, r: 1, correct: true }, // 2.5 days, 2nd repeat
+        { t: 86400000 * 6.25, r: 2, correct: true }, // 6.25 days, 3rd repeat
+    ];
+
+    const history = [];
+    const answersByProblem = {};
+    for (const answer of state.answerHistory) {
+        if (!answersByProblem[answer.problemId]) {
+            answersByProblem[answer.problemId] = [];
+        }
+        answersByProblem[answer.problemId].push(answer);
+    }
+
+    for (const problemId in answersByProblem) {
+        const problemAnswers = answersByProblem[problemId];
+        for (let i = 1; i < problemAnswers.length; i++) {
+            const prevAnswer = problemAnswers[i - 1];
+            const currentAnswer = problemAnswers[i];
+
+            if (prevAnswer.successSinceFailure !== undefined) {
+                const t = currentAnswer.date - prevAnswer.date;
+                const r = prevAnswer.successSinceFailure;
+                if (t > 0) {
+                    history.push({ t, r, correct: currentAnswer.correct });
+                }
+            }
+        }
+    }
+
+    if (history.length === 0) {
+        return; // Not enough data to estimate K
+    }
+
+    const fullHistory = [...priors, ...history];
+
+    const logLikelihoodDerivative = (k) => {
+        let derivative = 0;
+        for (const item of fullHistory) {
+            const { t, r, correct } = item;
+            const R = calculateRecallRate(t, r, k);
+            
+            if (R === 1) { // Avoid division by zero if R is 1
+                if (!correct) derivative -= 1e9; // Large penalty
+                continue;
+            }
+            if (R === 0) { // Avoid division by zero if R is 0
+                if (correct) derivative += 1e9; // Large penalty
+                continue;
+            }
+
+            const c = Math.pow(2.5, r);
+            const dR_dk = (B * t * Math.pow(1 + t / (c * k), -B - 1)) / (c * k * k);
+
+            if (correct) {
+                derivative += dR_dk / R;
+            } else {
+                derivative -= dR_dk / (1 - R);
+            }
+        }
+        return derivative;
+    };
+
+    let k_min = 1e7;
+    let k_max = 1e11;
+    let d_min = logLikelihoodDerivative(k_min);
+    let d_max = logLikelihoodDerivative(k_max);
+
+    if (d_min < 0) {
+        setUserK(k_min);
+        return;
+    }
+    if (d_max > 0) {
+        setUserK(k_max);
+        return;
+    }
+
+    for (let i = 0; i < 10; i++) { // 10 iterations for high precision
+        const k_mid = (k_min + k_max) / 2;
+        const d_mid = logLikelihoodDerivative(k_mid);
+        if (d_mid > 0) {
+            k_min = k_mid;
+        } else {
+            k_max = k_mid;
+        }
+    }
+
+    const estimatedK = (k_min + k_max) / 2;
+    setUserK(estimatedK);
 }
 
 let isCalculatingStats = false;
