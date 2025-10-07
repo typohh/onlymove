@@ -25,7 +25,39 @@ function weightedRandomSelect(items, weightFn) {
     return items[0]; // fallback
 }
 
-function selectProblem() {
+export function getReviewCandidates() {
+    const K = 410333792.4; // k = 86400000 / (0.8 ^ (-1 / 1.3) - 1)
+    const B = 1.3;
+    const now = Date.now();
+    const reviewCandidates = [];
+    const allRecallRates = []; // For logging
+
+    const lastAnswers = {};
+    for (const answer of state.answerHistory) {
+        lastAnswers[answer.problemId] = answer;
+    }
+
+    for (const problemId in lastAnswers) {
+        const lastAnswer = lastAnswers[problemId];
+        if (lastAnswer.successSinceFailure !== undefined && lastAnswer.problemRating < state.userRank) {
+            const t = now - lastAnswer.date;
+            const r = lastAnswer.successSinceFailure;
+            const recallRate = Math.pow(1 + t / (K * Math.pow(2.5, r)), -B);
+
+            allRecallRates.push({ problemId, recallRate }); // Log all of them
+
+            if (recallRate >= 0.7 && recallRate <= 0.8) {
+                reviewCandidates.push({ problemId, recallRate, rating: lastAnswer.problemRating });
+            }
+        }
+    }
+
+    console.table(allRecallRates.sort((a, b) => a.recallRate - b.recallRate)); // Log as a table
+
+    return reviewCandidates;
+}
+
+async function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
     // Check for nextTsumego first
@@ -35,41 +67,45 @@ function selectProblem() {
         return problem;
     }
 
-    // Check for re-selection from history
-    for (let i = 0; i < state.problemHistory.length; i++) {
-        const historyItem = state.problemHistory[i];
+    const reviewCandidates = getReviewCandidates();
 
-        if (historyItem.rating >= state.userRank) {
-            continue; // Skip this problem if its rating is not less than the user's current rank
+    if (reviewCandidates.length > 0) {
+        reviewCandidates.sort((a, b) => a.recallRate - b.recallRate);
+        const chosenProblemInfo = reviewCandidates[0];
+        let problem = state.allProblems.find(p => p.filename === `${chosenProblemInfo.problemId}.sgf`);
+
+        if (problem) {
+            return { ...problem, isRepeat: true };
         }
 
-        if (!historyItem.sgf) {
-            continue;
-        }
+        // If problem is not in memory, load its zip file
+        console.warn(`Problem ${chosenProblemInfo.problemId} not found in allProblems. Attempting to load it.`);
 
-        let probability = 0;
-
-        if (historyItem.status === 'failure') {
-            if (i >= 20) {
-                probability = Math.min(1, (i - 19) / 30);
+        const zipId = await findZipIdForTsumegoId(chosenProblemInfo.problemId);
+        if (zipId) {
+            await loadZipMetadata(); // Ensure metadata is loaded
+            const zipInfo = state.zipMetadata.find(zip => zip.filename.startsWith(zipId));
+            if (zipInfo) {
+                await loadZipProblems(zipInfo.filename);
+                // Try to find the problem again
+                problem = state.allProblems.find(p => p.filename === `${chosenProblemInfo.problemId}.sgf`);
+                if (problem) {
+                    return { ...problem, isRepeat: true };
+                }
             }
-        } else if (historyItem.status === 'in-between') {
-            if (i >= 150) {
-                probability = Math.min(1, (i - 149) / 50);
-            }
         }
-
-        if (Math.random() < probability) {
-            return { ...historyItem, isRepeat: true };
-        }
+        
+        // If we still can't find it, log an error and fall back.
+        console.error(`Failed to load review problem ${chosenProblemInfo.problemId}.`);
     }
 
-    // Default selection logic
-    const historyFilenames = new Set(state.problemHistory.map(p => p.filename));
+    // Default selection logic (fallback)
+    const recentAnswers = state.answerHistory.slice(0, 500);
+    const historyFilenames = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
     let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
 
     if (availableProblems.length === 0) {
-	return null;
+        return null;
     }
 
     availableProblems.sort((a, b) => Math.abs(a.rating - state.userRank) - Math.abs(b.rating - state.userRank));
@@ -207,7 +243,7 @@ export async function loadTsumego(isUpdate) {
 
         await loadZipMetadata();
 
-        let selectedProblem = selectProblem();
+        let selectedProblem = await selectProblem(); // Await the result
         if (selectedProblem) {
         }
 
@@ -215,7 +251,7 @@ export async function loadTsumego(isUpdate) {
             const closestZip = findClosestUnloadedZip();
             if (closestZip) {
                 await loadZipProblems(closestZip.filename);
-                selectedProblem = selectProblem();
+                selectedProblem = await selectProblem(); // Await the result
                 if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
             } else {
                 throw new Error("No zip files found in metadata.");
@@ -255,21 +291,11 @@ export async function loadTsumego(isUpdate) {
             isRepeat: selectedProblem.isRepeat || false
         });
 
-        if (history.length > 500) {
-            history.length = 500;
-        }
-
-        if (history.length > 2 && history[2].status === 'success') {
-            history[2].sgf = null;
+        if (history.length > 2) {
+            history.length = 2;
         }
         
         updateProblemHistory(history);
-
-        // Remove history[2] if it's linked
-        if (history.length > 2 && history[2].linked) {
-            history.splice(2, 1);
-            updateProblemHistory(history);
-        }
 
         try {
             loadSgf(sgf);

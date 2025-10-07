@@ -62,6 +62,24 @@ export function updateUserStats(isCorrect) {
     const currentSessionTime = state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0;
     addToAccumulatedSolvingTime(currentSessionTime);
     const timeTaken = state.accumulatedSolvingTime;
+
+    let successSinceFailure;
+    const problemId = currentProblem.filename.replace('.sgf', '');
+    const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
+    const lastAnswer = previousAnswers.length > 0 ? previousAnswers[previousAnswers.length - 1] : null;
+
+    if (!isCorrect) {
+        successSinceFailure = 0;
+    } else { // isCorrect
+        if (lastAnswer && lastAnswer.successSinceFailure !== undefined) {
+            successSinceFailure = lastAnswer.successSinceFailure + 1;
+        } else if (previousAnswers.some(a => a.correct === false)) {
+            // First success after a failure
+            successSinceFailure = 1;
+        }
+        // If it was never failed, successSinceFailure remains undefined.
+    }
+
     const answer = {
         problemId: currentProblem.filename.replace('.sgf', ''),
         problemRating: currentProblem.rating,
@@ -70,13 +88,8 @@ export function updateUserStats(isCorrect) {
         reviewTime: 0,
         correct: isCorrect,
         date: Date.now(),
-        problemType: !currentProblem.isRepeat
-            ? 'novel'
-            : oldStatus === PROBLEM_STATUS.FAILURE
-                ? 'short-term-repeat'
-                : oldStatus === PROBLEM_STATUS.IN_BETWEEN
-                    ? 'long-term-repeat'
-                    : 'repeat',
+        successSinceFailure,
+        problemType: !currentProblem.isRepeat ? 'novel' : 'repeat',
     };
 
     const answerHistory = [...state.answerHistory, answer];
@@ -155,15 +168,14 @@ async function calculateAndStoreStatsResults() {
         );
 
         if (validHistory.length < 5) {
-        setStatsResults(null);
+            setStatsResults(null);
             return;
         }
         const history = validHistory.slice(-500);
 
-        // ... [All existing percentile and OLS calculations] ...
+        // Time taken calculations (no changes)
         const timeTakenValues = history.map(p => p.timeTaken);
         const sortedTime = timeTakenValues.slice().sort((a, b) => a - b);
-
         const p_low = 0.45;
         const p_high = 0.55;
         const idx_low = Math.floor(p_low * (sortedTime.length - 1));
@@ -178,60 +190,45 @@ async function calculateAndStoreStatsResults() {
             return (below + 0.5 * equal) / sortedTime.length;
         });
 
+        // Merged Review Time calculations
         const previousReviewTimes = history.map((p, i) => {
-            if (p.problemType === 'short-term-repeat' || p.problemType === 'long-term-repeat') {
+            if (p.problemType === 'repeat') {
                 const prevs = history.slice(0, i).filter(ans => ans.problemId === p.problemId);
                 return prevs.reduce((sum, ans) => sum + ans.reviewTime, 0);
             }
             return 0;
         });
 
-        const shortTermReviewTimes = history.map((p, i) => p.problemType === 'short-term-repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
-        const longTermReviewTimes = history.map((p, i) => p.problemType === 'long-term-repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
-        let time_per_percentile_min_r_short = 0;
-        let time_per_percentile_min_r_long = 0;
-        if (shortTermReviewTimes.length > 0) {
-            const sortedReviewShort = shortTermReviewTimes.slice().sort((a, b) => a - b);
+        const reviewTimes = history.map((p, i) => p.problemType === 'repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
+        let time_per_percentile_min_r = 0;
+        if (reviewTimes.length > 0) {
+            const sortedReview = reviewTimes.slice().sort((a, b) => a - b);
             const p_low_r = 0.45;
             const p_high_r = 0.55;
-            const idx_low_r = Math.floor(p_low_r * (sortedReviewShort.length - 1));
-            const idx_high_r = Math.floor(p_high_r * (sortedReviewShort.length - 1));
-            const time_low_r = sortedReviewShort[idx_low_r];
-            const time_high_r = sortedReviewShort[idx_high_r];
+            const idx_low_r = Math.floor(p_low_r * (sortedReview.length - 1));
+            const idx_high_r = Math.floor(p_high_r * (sortedReview.length - 1));
+            const time_low_r = sortedReview[idx_low_r];
+            const time_high_r = sortedReview[idx_high_r];
             const delta_time_ms_r = time_high_r - time_low_r;
-            time_per_percentile_min_r_short = delta_time_ms_r / (60000 * 0.1);
+            time_per_percentile_min_r = delta_time_ms_r / (60000 * 0.1);
         }
-        if (longTermReviewTimes.length > 0) {
-            const sortedReviewLong = longTermReviewTimes.slice().sort((a, b) => a - b);
-            const p_low_r = 0.45;
-            const p_high_r = 0.55;
-            const idx_low_r = Math.floor(p_low_r * (sortedReviewLong.length - 1));
-            const idx_high_r = Math.floor(p_high_r * (sortedReviewLong.length - 1));
-            const time_low_r = sortedReviewLong[idx_low_r];
-            const time_high_r = sortedReviewLong[idx_high_r];
-            const delta_time_ms_r = time_high_r - time_low_r;
-            time_per_percentile_min_r_long = delta_time_ms_r / (60000 * 0.1);
-        }
-        
-        const percentileReviewShort = previousReviewTimes.map((t, i) => {
-            if (t === 0 || history[i].problemType !== 'short-term-repeat' || shortTermReviewTimes.length === 0) return 0;
-            const below = shortTermReviewTimes.filter(s => s < t).length;
-            const equal = shortTermReviewTimes.filter(s => s === t).length;
-            return (below + 0.5 * equal) / shortTermReviewTimes.length;
-        });
-        const percentileReviewLong = previousReviewTimes.map((t, i) => {
-            if (t === 0 || history[i].problemType !== 'long-term-repeat' || longTermReviewTimes.length === 0) return 0;
-            const below = longTermReviewTimes.filter(s => s < t).length;
-            const equal = longTermReviewTimes.filter(s => s === t).length;
-            return (below + 0.5 * equal) / longTermReviewTimes.length;
+
+        const percentileReview = previousReviewTimes.map((t, i) => {
+            if (t === 0 || history[i].problemType !== 'repeat' || reviewTimes.length === 0) return 0;
+            const below = reviewTimes.filter(s => s < t).length;
+            const equal = reviewTimes.filter(s => s === t).length;
+            return (below + 0.5 * equal) / reviewTimes.length;
         });
 
         const y = history.map(p => p.correct ? 1 : 0);
         const X_original = history.map((p, i) => [
-            1, percentileTime[i], percentileReviewShort[i], percentileReviewLong[i],
-            p.problemRating, p.problemQuality, i,
-            p.problemType === 'short-term-repeat' ? 1 : 0,
-            p.problemType === 'long-term-repeat' ? 1 : 0
+            1,
+            percentileTime[i],
+            percentileReview[i],
+            p.problemRating,
+            p.problemQuality,
+            i,
+            p.problemType === 'repeat' ? 1 : 0,
         ]);
 
         const stdDevs = [];
@@ -276,8 +273,7 @@ async function calculateAndStoreStatsResults() {
 
             let scaleFactor = 1;
             if (varIndex === OLS_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
-            else if (varIndex === OLS_INDICES.REVIEW_TIME_SHORT && time_per_percentile_min_r_short > 0) scaleFactor = 1 / time_per_percentile_min_r_short;
-            else if (varIndex === OLS_INDICES.REVIEW_TIME_LONG && time_per_percentile_min_r_long > 0) scaleFactor = 1 / time_per_percentile_min_r_long;
+            else if (varIndex === OLS_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
             else if (varIndex === OLS_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
             else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) scaleFactor = -1;
             else if (varIndex === OLS_INDICES.DATE) scaleFactor = n;
@@ -333,7 +329,7 @@ export async function showDetailedStats() {
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = (2 * cdf - 1) * 100;
 
-                if (conf >= 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME_SHORT, OLS_INDICES.REVIEW_TIME_LONG].includes(varIndex) && coeff <= 0)) {
+                if (conf >= 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME].includes(varIndex) && coeff <= 0)) {
                     const rank_change = coeff * rank_conversion_factor;
 
                     if (Math.abs(rank_change) < 0.1) {
@@ -344,8 +340,7 @@ export async function showDetailedStats() {
                     let rank_change_val = rank_change;
 
                     if (varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
-                    else if (varIndex === OLS_INDICES.REVIEW_TIME_SHORT) termKey = 'statsReviewTimeShort';
-                    else if (varIndex === OLS_INDICES.REVIEW_TIME_LONG) termKey = 'statsReviewTimeLong';
+                    else if (varIndex === OLS_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
                     else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
                         termKey = rank_change > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
                         rank_change_val = Math.abs(rank_change);

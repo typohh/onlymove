@@ -4,6 +4,7 @@ import { state, setDeferredInstallPrompt } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { getCurrentNode } from './board.js';
+import { getReviewCandidates } from './problem-loader.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -134,8 +135,13 @@ const updateSolvingModeUI = () => {
     }
 
     // Update "Review" link (button1)
+    const reviewCandidates = getReviewCandidates();
     const prevTsumegoLink = document.getElementById('button1');
-    prevTsumegoLink.textContent = getTerm('review');
+    if (reviewCandidates.length > 0) {
+        prevTsumegoLink.textContent = `${getTerm('review')} (${reviewCandidates.length})`;
+    } else {
+        prevTsumegoLink.textContent = getTerm('review');
+    }
     
     // Enable review button if there is a problem to review in the history
     if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {

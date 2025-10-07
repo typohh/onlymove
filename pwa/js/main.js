@@ -40,66 +40,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 document.addEventListener('click', () => setUserHasInteracted(true));
 document.addEventListener('touchstart', () => setUserHasInteracted(true));
 
-const fixupZeroRatedProblems = async () => {
-    const history = state.problemHistory;
-    const problemsToFix = history.filter(p => p.rating === 0 && p.status !== 'correct');
 
-    if (problemsToFix.length === 0) {
-        return;
-    }
-
-    console.log(`Found ${problemsToFix.length} problems with zero rating to fix.`);
-
-    // Run in the background
-    setTimeout(async () => {
-        let updated = false;
-        await loadZipMetadata();
-
-        for (const problem of problemsToFix) {
-            try {
-                const tsumegoId = problem.filename.replace('.sgf', '');
-                const zipId = await findZipIdForTsumegoId(tsumegoId);
-
-                if (!zipId) {
-                    console.warn(`Could not find zipId for ${tsumegoId}`);
-                    continue;
-                }
-
-                let zipFilename = null;
-                for (const zip of state.zipMetadata) {
-                    if (zip.filename.startsWith(zipId)) {
-                        zipFilename = zip.filename;
-                        break;
-                    }
-                }
-
-                if (!zipFilename) {
-                    console.warn(`Could not find zip filename for zipId ${zipId}`);
-                    continue;
-                }
-
-                // Ensure zip is loaded
-                if (!state.loadedZips[zipFilename]) {
-                    await loadZipProblems(zipFilename);
-                }
-
-                const problemInfo = state.allProblems.find(p => p.filename === problem.filename);
-
-                if (problemInfo && problemInfo.rating) {
-                    problem.rating = problemInfo.rating;
-                    updated = true;
-                }
-            } catch (error) {
-                console.error(`Failed to fix rating for ${problem.filename}:`, error);
-            }
-        }
-
-        if (updated) {
-            updateProblemHistory(history);
-            console.log("Finished fixing zero-rated problems in history.");
-        }
-    }, 0);
-}
 
 
 
@@ -262,6 +203,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         showCaptureDetails();
     });
 
+    const migrateAnswerHistory = () => {
+        if (localStorage.getItem('answerHistoryMigrated_v2')) {
+            return;
+        }
+
+        console.log('Running answer history migration for successSinceFailure...');
+
+        const answerHistory = state.answerHistory;
+        const answersByProblem = {};
+
+        for (const answer of answerHistory) {
+            if (!answersByProblem[answer.problemId]) {
+                answersByProblem[answer.problemId] = [];
+            }
+            answersByProblem[answer.problemId].push(answer);
+        }
+
+        for (const problemId in answersByProblem) {
+            const problemAnswers = answersByProblem[problemId];
+            let successCounter = 0;
+            let hasFailed = false;
+
+            for (const answer of problemAnswers) {
+                if (!answer.correct) {
+                    hasFailed = true;
+                    successCounter = 0;
+                    answer.successSinceFailure = 0;
+                } else if (hasFailed) {
+                    successCounter++;
+                    answer.successSinceFailure = successCounter;
+                }
+            }
+        }
+
+        updateAnswerHistory(answerHistory);
+        localStorage.setItem('answerHistoryMigrated_v2', 'true');
+        console.log('Answer history migration complete.');
+    };
+
+    migrateAnswerHistory();
+
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const tsumegoId = urlParams.get('id');
@@ -305,7 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();
 
-    fixupZeroRatedProblems();
+
 
     const resumeOverlay = document.getElementById('resume-overlay');
 
