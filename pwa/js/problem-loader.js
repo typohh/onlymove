@@ -199,7 +199,8 @@ export async function loadTsumego(isUpdate) {
         if (!isUpdate && state.problemHistory.length > 0) {
             // On initial load, just load the last problem from history
             loadSgf(state.problemHistory[0].sgf);
-            
+            setCurrentSolvingStartTime(Date.now());
+            resetAccumulatedSolvingTime();
             setAcceptClicks(true);
             return;
         }
