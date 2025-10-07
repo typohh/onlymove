@@ -130,7 +130,7 @@ async function selectProblem() {
 
     // Select a problem using weighted random sampling based on quality
     const problem = weightedRandomSelect(candidateProblems, p => p.quality);
-    return { ...problem, status: 'success', isRepeat: false };
+    return { ...problem, isRepeat: false };
 }
 
 async function fetchSgfFromZip(filename, zipFilename) {
@@ -286,7 +286,6 @@ export async function loadTsumego(isUpdate) {
         history.unshift({
             filename: selectedProblem.filename,
             sgf: sgf,
-            status: selectedProblem.status || 'success',
             linked: false,
             rating: selectedProblem.rating,
             quality: selectedProblem.quality || 0,
@@ -360,7 +359,6 @@ export async function loadTsumegoById(tsumegoId) {
         const newProblem = {
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
-            status: 'success',
             linked: true,
             rating: problemRank,
             quality: problemQuality,
@@ -377,21 +375,11 @@ export async function loadTsumegoById(tsumegoId) {
             }
             history.unshift(newProblem);
         }
-        if (history.length > 500) {
-            history.length = 500;
-        }
-
-        if (history.length > 2 && history[2].status === 'success') {
-            history[2].sgf = null;
+        if (history.length > 2) {
+            history.length = 2;
         }
 
         updateProblemHistory(history);
-
-        // Remove history[2] if it's linked
-        if (history.length > 2 && history[2].linked) {
-            history.splice(2, 1);
-            updateProblemHistory(history);
-        }
 
         setAppMode('linked');
 

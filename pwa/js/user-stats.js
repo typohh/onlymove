@@ -2,7 +2,7 @@
 
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setUserK } from './state.js';
 import { updateAllUI } from './ui.js';
-import { TOTAL_RANKS, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
+import { TOTAL_RANKS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
 import { calculateRecallRate } from './problem-loader.js';
 
@@ -42,18 +42,6 @@ export function updateUserStats(isCorrect) {
     const currentProblem = history[0];
 
     if (!currentProblem) return {};
-
-    const oldStatus = currentProblem.status;
-
-    if (isCorrect) {
-        if (oldStatus === PROBLEM_STATUS.FAILURE) {
-            currentProblem.status = PROBLEM_STATUS.IN_BETWEEN;
-        } else if (oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
-            currentProblem.status = PROBLEM_STATUS.SUCCESS;
-        }
-    } else {
-        currentProblem.status = PROBLEM_STATUS.FAILURE;
-    }
 
     if (currentProblem.linked) {
         updateProblemHistory(history);
@@ -107,14 +95,10 @@ export function updateUserStats(isCorrect) {
     if (isCorrect ) {
         const maxIncrease = (1.0 - rank) / 9;
         let intendedIncrease = momentum / 600;
-        if( oldStatus !== PROBLEM_STATUS.FAILURE && oldStatus !== PROBLEM_STATUS.IN_BETWEEN ) {
-            if(intendedIncrease > maxIncrease) {
-                momentum *= maxIncrease / intendedIncrease;
-            } else {
-                momentum *= 1.1;
-            }
+        if(intendedIncrease > maxIncrease) {
+            momentum *= maxIncrease / intendedIncrease;
         } else {
-            intendedIncrease *= 0.1
+            momentum *= 1.1;
         }
         intendedIncrease *= (currentProblem.quality || 0.5);
         rank += Math.min(intendedIncrease, maxIncrease);
@@ -474,6 +458,13 @@ export async function showDetailedStats() {
         } else {
             const intro = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
             resultText = intro;
+        }
+
+        if (state.userK) {
+            const t = 0.25 * state.userK;
+            const hours = Math.round(t / (1000 * 3600));
+            const forgettingLine = getTerm('statsForgettingCurve').replace('{hours}', hours);
+            resultText += '\n- ' + forgettingLine;
         }
 
         alert(resultText);

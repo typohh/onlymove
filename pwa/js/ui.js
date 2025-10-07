@@ -76,7 +76,7 @@ const showInstallPrompt = () => {
 }
 
 const checkAndShowInstallPrompt = () => {
-    const historySize = state.problemHistory.length;
+    const historySize = state.answerHistory.length;
     const isSolvingMode = state.appMode === APP_MODES.SOLVING;
     const isPromptVisible = !!document.getElementById('install-prompt');
 

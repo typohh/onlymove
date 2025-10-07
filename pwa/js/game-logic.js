@@ -5,7 +5,7 @@ import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from 
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
-import { APP_MODES, PROBLEM_STATUS, OLS_INDICES } from './constants.js';
+import { APP_MODES, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
@@ -37,8 +37,6 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     playNextMove();
     playStoneSound();
 
-    const oldStatus = state.problemHistory[0]?.status;
-
     sendReport(false);
     const stats = updateUserStats(false);
 
@@ -51,7 +49,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
 
 
 
-    if (oldStatus === PROBLEM_STATUS.FAILURE || oldStatus === PROBLEM_STATUS.IN_BETWEEN) {
+    if (state.problemHistory[0]?.isRepeat) {
         let reviewTimeIsBeneficial = false;
         let meanReviewTime = 0;
         let previousReviewTime = 0;
@@ -66,7 +64,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
             previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
 
-            const targetVarIndex = (oldStatus === PROBLEM_STATUS.FAILURE) ? OLS_INDICES.REVIEW_TIME_SHORT : OLS_INDICES.REVIEW_TIME_LONG;
+            const targetVarIndex = OLS_INDICES.REVIEW_TIME;
             reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
             if (reviewStat && reviewStat.coeff > 0) {
                 reviewTimeIsBeneficial = true;
