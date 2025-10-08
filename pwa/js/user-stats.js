@@ -144,14 +144,16 @@ function estimateUserK() {
 
     // Prior data points to anchor the estimation
     const priors = [
-        { t: 86400000, r: 0, correct: true }, // 1 day, 1st repeat
-        { t: 86400000 * 2.5, r: 1, correct: true }, // 2.5 days, 2nd repeat
-        { t: 86400000 * 6.25, r: 2, correct: true }, // 6.25 days, 3rd repeat
+        { t: 82800000, r: 0, correct: true }, // 23 hours
+        { t: 82800000, r: 0, correct: true }, // 23 hours
+        { t: 82800000, r: 0, correct: true }, // 23 hours
+        { t: 90000000, r: 0, correct: false }, // 25 hours
     ];
 
     const history = [];
     const answersByProblem = {};
-    for (const answer of state.answerHistory) {
+    const answerHistory = state.answerHistory.slice(-500);
+    for (const answer of answerHistory) {
         if (!answersByProblem[answer.problemId]) {
             answersByProblem[answer.problemId] = [];
         }
@@ -461,7 +463,8 @@ export async function showDetailedStats() {
         }
 
         if (state.userK) {
-            const t = 0.25 * state.userK;
+            // t = k * (R^(-1/B) - 1) where R=0.8, B=1.3
+            const t = 0.2966 * state.userK;
             const hours = Math.round(t / (1000 * 3600));
             const forgettingLine = getTerm('statsForgettingCurve').replace('{hours}', hours);
             resultText += '\n- ' + forgettingLine;

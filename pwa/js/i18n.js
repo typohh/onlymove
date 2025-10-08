@@ -46,13 +46,13 @@ const localization = {
     statsReviewTime: '每复习一分钟，你对该问题的实力会强 {rank_change} 个等级（置信度：{conf}%）。',
     statsQualityAnalytical: '在分析性问题上，你比在直觉性问题上强 {rank_change} 个等级（置信度：{conf}%）。',
     statsQualityIntuitive: '在直觉性问题上，你比在分析性问题上强 {rank_change} 个等级（置信度：{conf}%）。',
-    statsProgress: '在过去的 {analysis_count} 个问题中，你的实力提升了 {rank_change} 个等级（置信度：{conf}%）。',
-    statsRegression: '在过去的 {analysis_count} 个问题中，你的实力下降了 {rank_change} 个等级（置信度：{conf}%）。',
+    statsProgress: '你的实力提升了 {rank_change} 个等级（置信度：{conf}%）。',
+    statsRegression: '你的实力下降了 {rank_change} 个等级（置信度：{conf}%）。',
     statsIntroNew: '基于您最近的{analysis}个问题（共{total}个），我们有以下观察：\n\n',
     statsNoTrends: '基于您最近的{analysis}个问题（共{total}个），我们没有发现明显的统计规律。请继续练习以获取更精确的分析！',
     statsNone: '无',
     statsFailed: '无法计算统计数据。',
-    statsForgettingCurve: '复习{hours}小时后，您仍能以80%的概率记住正确答案。'
+    statsForgettingCurve: '首次复习后，您在{hours}小时内会忘记20%的答案。'
   },
   ja: {
     kyu: '級',
@@ -97,13 +97,13 @@ const localization = {
     statsReviewTime: 'レビューに1分費やすごとに、その問題に対してあなたは{rank_change}ランク強くなります（信頼度：{conf}%）。',
     statsQualityAnalytical: '分析的な問題では、直感的な問題に比べてあなたは{rank_change}ランク強いです（信頼度：{conf}%）。',
     statsQualityIntuitive: '直感的な問題では、分析的な問題に比べてあなたは{rank_change}ランク強いです（信頼度：{conf}%）。',
-    statsProgress: '過去{analysis_count}問で、あなたは{rank_change}ランク強くなりました（信頼度：{conf}%）。',
-    statsRegression: '過去{analysis_count}問で、あなたは{rank_change}ランク弱くなりました（信頼度：{conf}%）。',
+    statsProgress: 'あなたは{rank_change}ランク強くなりました（信頼度：{conf}%）。',
+    statsRegression: 'あなたは{rank_change}ランク弱くなりました（信頼度：{conf}%）。',
     statsIntroNew: '最近の{analysis}問（合計{total}問）に基づいて、以下の観察があります：\n\n',
     statsNoTrends: '最近の{analysis}問（合計{total}問）では、統計的に有意な傾向は見られませんでした。より多くのデータを集めるために、練習を続けてください！',
     statsNone: 'なし',
     statsFailed: '統計を計算できませんでした。',
-    statsForgettingCurve: 'レビュー後{hours}時間で、正解を80%の確率で覚えていることができます。'
+    statsForgettingCurve: '最初のレビュー後、{hours}時間で答えの20%を忘れてしまいます。'
   },
   ko: {
     kyu: '급',
@@ -147,13 +147,13 @@ const localization = {
     statsReviewTime: '복습에 1분을 더 쓸 때마다 해당 문제에 대해 {rank_change} 등급 더 강해집니다 (신뢰도: {conf}%).',
     statsQualityAnalytical: '분석적인 문제에서 직관적인 문제보다 {rank_change} 등급 더 강합니다 (신뢰도: {conf}%).',
     statsQualityIntuitive: '직관적인 문제에서 분석적인 문제보다 {rank_change} 등급 더 강합니다 (신뢰도: {conf}%).',
-    statsProgress: '지난 {analysis_count}개의 문제 동안 {rank_change} 등급 더 강해졌습니다 (신뢰도: {conf}%).',
-    statsRegression: '지난 {analysis_count}개의 문제 동안 {rank_change} 등급 더 약해졌습니다 (신뢰도: {conf}%).',
+    statsProgress: '{rank_change} 등급 더 강해졌습니다 (신뢰도: {conf}%).',
+    statsRegression: '{rank_change} 등급 더 약해졌습니다 (신뢰도: {conf}%).',
     statsIntroNew: '최근 {analysis}개 문제（총 {total}개）를 기반으로 다음과 같은 관찰이 있습니다：\n\n',
     statsNoTrends: '최근 {analysis}개 문제（총 {total}개）에서는 통계적으로 유의미한 경향을 발견하지 못했습니다. 더 많은 데이터를 모으기 위해 계속 풀어보세요！',
     statsNone: '없음',
     statsFailed: '통계를 계산할 수 없습니다.',
-    statsForgettingCurve: '복습 후 {hours}시간이 지나도 정답을 80% 확률로 기억할 수 있습니다.'
+    statsForgettingCurve: '첫 복습 후 {hours}시간 안에 답의 20%를 잊어버립니다.'
   },
   en: {
     kyu: 'kyu',
@@ -198,13 +198,13 @@ const localization = {
     statsReviewTime: 'Each minute of review makes you {rank_change} ranks stronger on that problem (confidence: {conf}%).',
     statsQualityAnalytical: 'You are {rank_change} ranks stronger on analytical problems compared to intuitive ones (confidence: {conf}%).',
     statsQualityIntuitive: 'You are {rank_change} ranks stronger on intuitive problems compared to analytical ones (confidence: {conf}%).',
-    statsProgress: 'Over the last {analysis_count} problems, you have gotten {rank_change} ranks stronger (confidence: {conf}%).',
-    statsRegression: 'Over the last {analysis_count} problems, you have gotten {rank_change} ranks weaker (confidence: {conf}%).',
+    statsProgress: 'You have gotten {rank_change} ranks stronger (confidence: {conf}%).',
+    statsRegression: 'You have gotten {rank_change} ranks weaker (confidence: {conf}%).',
     statsIntroNew: 'Based on your most recent {analysis} out of {total} problems we have the following observation(s):\n\n',
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsNone: 'None',
     statsFailed: 'Could not calculate stats.',
-    statsForgettingCurve: '{hours} hours after reviewing you can still remember the correct answer 80% of the time.'
+    statsForgettingCurve: 'After first time reviews, you forget 20% of the answers in {hours} hours.'
   }
 };
 
