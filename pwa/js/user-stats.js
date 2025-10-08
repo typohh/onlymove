@@ -275,10 +275,11 @@ async function calculateAndStoreStatsResults() {
         });
 
         // Merged Review Time calculations
-        const previousReviewTimes = history.map((p, i) => {
+        const previousReviewTimes = history.map(p => {
             if (p.problemType === 'repeat') {
-                const prevs = history.slice(0, i).filter(ans => ans.problemId === p.problemId);
-                return prevs.reduce((sum, ans) => sum + ans.reviewTime, 0);
+                // Search the full validHistory for answers to the same problem that are older
+                const prevs = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date);
+                return prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
             }
             return 0;
         });
