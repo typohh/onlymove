@@ -102,7 +102,7 @@ async function selectProblem() {
     }
 
     // Default selection logic (fallback)
-    const recentAnswers = state.answerHistory.slice(0, 500);
+    const recentAnswers = state.answerHistory.slice(-500);
     const historyFilenames = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
     let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
 
@@ -307,7 +307,6 @@ export async function loadTsumego(isUpdate) {
         setAcceptClicks(true);
         setCurrentSolvingStartTime(Date.now());
         resetAccumulatedSolvingTime();
-        backgroundLoadCloserZip();
         updateAllUI();
 
     } catch (error) {
