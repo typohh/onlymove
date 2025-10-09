@@ -91,22 +91,23 @@ export function updateUserStats(isCorrect) {
     const oldRankInfo = getRankInfo(oldRank);
     let rank = oldRank;
     let momentum = state.momentum;
+    const scalingFactor = (currentProblem.quality || 0.5) * currentProblem.isRepeat ? 1 / 5 : 1;
 
     if (isCorrect ) {
         const maxIncrease = (1.0 - rank) / 9;
-        let intendedIncrease = momentum / 600;
-        if(intendedIncrease > maxIncrease) {
-            momentum *= maxIncrease / intendedIncrease;
-        } else {
-            momentum *= 1.1;
+        let intendedRatingIncrease = scalingFactor * momentum / 600;
+        let intendedMomentumIncrease = scalingFactor * 0.1;
+
+        if(intendedRatingIncrease > maxIncrease) {
+            intendedMomentumIncrease *= maxIncrease / intendedRatingIncrease;
+            intendedRatingIncrease = maxIncrease
         }
-        intendedIncrease *= (currentProblem.quality || 0.5);
-        rank += Math.min(intendedIncrease, maxIncrease);
-    } else if (!isCorrect) { // Incorrect
-        momentum = (momentum + 1) / 3;
-        let rankChange = 4 * (momentum / 600);
-        rankChange *= (currentProblem.quality || 0.5);
-        rank = Math.max(0, rank - rankChange);
+        momentum *= 1 + intendedMomentumIncrease
+        rank += intendedRatingIncrease
+
+    } else { // Incorrect
+        momentum -= scalingFactor * ((momentum + 1) / 3 - momentum);
+        rank = Math.max( 0 , rank - 4 * scalingFactor * (momentum / 600));
     }
 
     updateUserRank(rank);

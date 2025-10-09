@@ -50,7 +50,7 @@ export function getReviewCandidates() {
 
             allRecallRates.push({ problemId, recallRate }); // Log all of them
 
-            if (recallRate >= 0.7 && recallRate <= 0.8) {
+            if (recallRate >= 0.6 && recallRate <= 0.8) {
                 reviewCandidates.push({ problemId, recallRate, rating: lastAnswer.problemRating });
             }
         }
