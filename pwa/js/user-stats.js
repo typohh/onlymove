@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setUserK } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setUserK, setUserKStdDev } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
@@ -235,6 +235,41 @@ function estimateUserK() {
 
     const estimatedK = (k_min + k_max) / 2;
     setUserK(estimatedK);
+
+    const logLikelihoodSecondDerivative = (k) => {
+        let secondDerivative = 0;
+        for (const item of fullHistory) {
+            const { t, r, correct: y } = item;
+            const R = calculateRecallRate(t, r, k);
+
+            if (R <= 0 || R >= 1) { // Avoid division by zero
+                continue;
+            }
+
+            const c = Math.pow(2.5, r);
+            const X = 1 + t / (c * k);
+
+            // First derivative of R w.r.t. k
+            const dR_dk = (B * t * Math.pow(X, -B - 1)) / (c * k * k);
+
+            // Second derivative of R w.r.t. k
+            const d2R_dk2 = (B * t / (c * Math.pow(k, 3))) * Math.pow(X, -B - 2) * ((B - 1) * X - (B + 1));
+
+            const term1 = -Math.pow(dR_dk, 2) / (R * (1 - R));
+            const term2 = ((y - R) / (R * (1 - R))) * d2R_dk2;
+            secondDerivative += term1 + term2;
+        }
+        return secondDerivative;
+    };
+
+    const secondDerivative = logLikelihoodSecondDerivative(estimatedK);
+    if (secondDerivative < 0) {
+        const variance = -1 / secondDerivative;
+        const stdDev = Math.sqrt(variance);
+        setUserKStdDev(stdDev);
+    } else {
+        setUserKStdDev(null);
+    }
 }
 
 let isCalculatingStats = false;
@@ -464,10 +499,20 @@ export async function showDetailedStats() {
         }
 
         if (state.userK) {
-            // t = k * (R^(-1/B) - 1) where R=0.8, B=1.3
-            const t = 0.2966 * state.userK;
+            const constant = 0.2966; // R=0.8, B=1.3 -> (R^(-1/B) - 1)
+            const t = constant * state.userK;
             const hours = Math.round(t / (1000 * 3600));
-            const forgettingLine = getTerm('statsForgettingCurve').replace('{hours}', hours);
+            let forgettingLine;
+
+            if (state.userKStdDev) {
+                const t_stddev = constant * state.userKStdDev;
+                const hours_stddev = Math.round(t_stddev / (1000 * 3600));
+                forgettingLine = getTerm('statsForgettingCurveWithStdDev')
+                    .replace('{hours}', hours)
+                    .replace('{stddev}', hours_stddev);
+            } else {
+                forgettingLine = getTerm('statsForgettingCurve').replace('{hours}', hours);
+            }
             resultText += '\n- ' + forgettingLine;
         }
 

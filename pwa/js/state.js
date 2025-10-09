@@ -59,6 +59,7 @@ export const state = {
     answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
     statsResults: null,
     userK: parseFloat(localStorage.getItem('userK')) || null,
+    userKStdDev: parseFloat(localStorage.getItem('userKStdDev')) || null,
 };
 
 // MODIFICATION: Cache for loaded zip files
@@ -150,4 +151,9 @@ export function setStatsResults(results) {
 export function setUserK(k) {
     state.userK = k;
     localStorage.setItem('userK', k.toString());
+}
+
+export function setUserKStdDev(stdDev) {
+    state.userKStdDev = stdDev;
+    localStorage.setItem('userKStdDev', stdDev.toString());
 }

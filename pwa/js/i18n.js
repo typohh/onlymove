@@ -52,7 +52,8 @@ const localization = {
     statsNoTrends: '基于您最近的{analysis}个问题（共{total}个），我们没有发现明显的统计规律。请继续练习以获取更精确的分析！',
     statsNone: '无',
     statsFailed: '无法计算统计数据。',
-    statsForgettingCurve: '首次复习后，您在{hours}小时内会忘记20%的答案。'
+    statsForgettingCurve: '首次复习后，您在{hours}小时内会忘记20%的答案。',
+    statsForgettingCurveWithStdDev: '首次复习后，您在{hours} ± {stddev}小时内会忘记20%的答案。'
   },
   ja: {
     kyu: '級',
@@ -103,7 +104,8 @@ const localization = {
     statsNoTrends: '最近の{analysis}問（合計{total}問）では、統計的に有意な傾向は見られませんでした。より多くのデータを集めるために、練習を続けてください！',
     statsNone: 'なし',
     statsFailed: '統計を計算できませんでした。',
-    statsForgettingCurve: '最初のレビュー後、{hours}時間で答えの20%を忘れてしまいます。'
+    statsForgettingCurve: '最初のレビュー後、{hours}時間で答えの20%を忘れてしまいます。',
+    statsForgettingCurveWithStdDev: '最初のレビュー後、{hours} ± {stddev}時間で答えの20%を忘れてしまいます。'
   },
   ko: {
     kyu: '급',
@@ -153,7 +155,8 @@ const localization = {
     statsNoTrends: '최근 {analysis}개 문제（총 {total}개）에서는 통계적으로 유의미한 경향을 발견하지 못했습니다. 더 많은 데이터를 모으기 위해 계속 풀어보세요！',
     statsNone: '없음',
     statsFailed: '통계를 계산할 수 없습니다.',
-    statsForgettingCurve: '첫 복습 후 {hours}시간 안에 답의 20%를 잊어버립니다.'
+    statsForgettingCurve: '첫 복습 후 {hours}시간 안에 답의 20%를 잊어버립니다。',
+    statsForgettingCurveWithStdDev: '첫 복습 후 {hours} ± {stddev}시간 안에 답의 20%를 잊어버립니다。'
   },
   en: {
     kyu: 'kyu',
@@ -204,7 +207,8 @@ const localization = {
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsNone: 'None',
     statsFailed: 'Could not calculate stats.',
-    statsForgettingCurve: 'After first time reviews, you forget 20% of the answers in {hours} hours.'
+    statsForgettingCurve: 'After first time reviews, you forget 20% of the answers in {hours} hours.',
+    statsForgettingCurveWithStdDev: 'After first time reviews, you forget 20% of the answers in {hours} ± {stddev} hours.'
   }
 };
 
