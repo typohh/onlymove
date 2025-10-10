@@ -108,7 +108,7 @@ export function updateUserStats(isCorrect) {
         rank += intendedRatingIncrease
 
     } else { // Incorrect
-        momentum -= scalingFactor * ((momentum + 1) / 3 - momentum);
+        momentum -= scalingFactor * (momentum - (momentum + 1) / 3);
         rank = Math.max( 0 , rank - 4 * scalingFactor * (momentum / 600));
     }
 
