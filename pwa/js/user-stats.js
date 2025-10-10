@@ -102,7 +102,7 @@ export function updateUserStats(isCorrect) {
             intendedMomentumIncrease *= maxIncrease / intendedRatingIncrease;
             intendedRatingIncrease = maxIncrease
         }
-        if( !currentAnswer.isRepeat ) {
+        if( !currentProblem.isRepeat ) {
             momentum *= 1 + intendedMomentumIncrease
         }
         rank += intendedRatingIncrease
