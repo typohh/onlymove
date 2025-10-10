@@ -147,10 +147,8 @@ function estimateUserK() {
 
     // Prior data points to anchor the estimation
     const priors = [
-        { t: 82800000, r: 0, correct: true }, // 23 hours
-        { t: 82800000, r: 0, correct: true }, // 23 hours
-        { t: 82800000, r: 0, correct: true }, // 23 hours
-        { t: 90000000, r: 0, correct: false }, // 25 hours
+        { t: 86400000, r: 0, correct: true }, // 24 hours
+        { t: 129600000, r: 0, correct: false }, // 36 hours
     ];
 
     const history = [];
@@ -452,8 +450,9 @@ export async function showDetailedStats() {
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = (2 * cdf - 1) * 100;
 
-                if (conf >= 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME].includes(varIndex) && coeff <= 0)) {
+                if (se > 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME].includes(varIndex) && coeff <= 0)) {
                     const rank_change = coeff * rank_conversion_factor;
+                    const rank_stddev = se * rank_conversion_factor;
 
                     if (Math.abs(rank_change) < 0.1) {
                         continue;
@@ -467,20 +466,13 @@ export async function showDetailedStats() {
                     else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
                         termKey = rank_change > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
                         rank_change_val = Math.abs(rank_change);
-                    } else if (varIndex === OLS_INDICES.DATE) {
-                        termKey = rank_change > 0 ? 'statsProgress' : 'statsRegression';
-                        rank_change_val = Math.abs(rank_change);
                     }
 
                     if (termKey) {
                         let message = getTerm(termKey)
                             .replace('{rank_change}', rank_change_val.toFixed(1))
-                            .replace('{conf}', conf.toFixed(0));
-                        
-                        if (varIndex === OLS_INDICES.DATE) {
-                            message = message.replace('{analysis_count}', analysisProblems);
-                        }
-                        
+                            .replace('{stddev}', rank_stddev.toFixed(1));
+
                         observations.push({ message, conf });
                     }
                 }
