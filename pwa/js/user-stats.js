@@ -445,37 +445,32 @@ export async function showDetailedStats() {
 
         for (const result of results) {
             const { coeff, se, varIndex } = result;
-            if (se > 0) {
-                const z = Math.abs(coeff) / se;
-                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = (2 * cdf - 1) * 100;
+            const z = Math.abs(coeff) / se;
+            const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+            const conf = (2 * cdf - 1) * 100;
 
-                if (se > 0 && !([OLS_INDICES.TIME_SOLVING, OLS_INDICES.REVIEW_TIME].includes(varIndex) && coeff <= 0)) {
-                    const rank_change = coeff * rank_conversion_factor;
-                    const rank_stddev = se * rank_conversion_factor;
+            const rank_change = coeff * rank_conversion_factor;
+            const rank_stddev = se * rank_conversion_factor;
 
-                    if (Math.abs(rank_change) < 0.1) {
-                        continue;
-                    }
+            if (Math.abs(rank_change) < 0.1) {
+                continue;
+            }
 
-                    let termKey;
-                    let rank_change_val = rank_change;
+            let termKey;
+            let rank_change_val = rank_change;
 
-                    if (varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
-                    else if (varIndex === OLS_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
-                    else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
-                        termKey = rank_change > 0 ? 'statsQualityAnalytical' : 'statsQualityIntuitive';
-                        rank_change_val = Math.abs(rank_change);
-                    }
+            if (varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
+            else if (varIndex === OLS_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
+            else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
+                termKey = 'statsProblemQuality';
+            }
 
-                    if (termKey) {
-                        let message = getTerm(termKey)
-                            .replace('{rank_change}', rank_change_val.toFixed(1))
-                            .replace('{stddev}', rank_stddev.toFixed(1));
+            if (termKey) {
+                let message = getTerm(termKey)
+                    .replace('{rank_change}', rank_change_val.toFixed(1))
+                    .replace('{stddev}', rank_stddev.toFixed(1));
 
-                        observations.push({ message, conf });
-                    }
-                }
+                observations.push({ message, conf });
             }
         }
 
@@ -493,21 +488,23 @@ export async function showDetailedStats() {
             resultText = intro;
         }
 
-        if (state.userK) {
-            const constant = 0.2966; // R=0.8, B=1.3 -> (R^(-1/B) - 1)
-            const t = constant * state.userK;
-            const hours = Math.round(t / (1000 * 3600));
-            let forgettingLine;
+        if (state.userK && state.userKStdDev) {
+            const t = 24 * 3600 * 1000; // 24 hours
+            const recallRate_24h = calculateRecallRate(t, 0, state.userK);
+            const delta_recall = recallRate_24h - 1;
+            const rank_change = delta_recall * rank_conversion_factor;
 
-            if (state.userKStdDev) {
-                const t_stddev = constant * state.userKStdDev;
-                const hours_stddev = Math.round(t_stddev / (1000 * 3600));
-                forgettingLine = getTerm('statsForgettingCurveWithStdDev')
-                    .replace('{hours}', hours)
-                    .replace('{stddev}', hours_stddev);
-            } else {
-                forgettingLine = getTerm('statsForgettingCurve').replace('{hours}', hours);
-            }
+            const k = state.userK;
+            const k_stddev = state.userKStdDev;
+            const B = 1.3;
+            const dk = (B * t / (k*k)) * Math.pow(1 + t / k, -B - 1);
+            const stddev_recallRate = dk * k_stddev;
+            const rank_stddev = stddev_recallRate * rank_conversion_factor;
+
+            const forgettingLine = getTerm('statsForgettingCurveWithStdDev')
+                .replace('{rank_change}', rank_change.toFixed(1))
+                .replace('{stddev}', rank_stddev.toFixed(1));
+            
             resultText += '\n- ' + forgettingLine;
         }
 

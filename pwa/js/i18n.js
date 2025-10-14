@@ -42,18 +42,17 @@ const localization = {
     statsIfIntuitiveProblem: ' % 对于直观问题',
     statsPerProblemSolved: ' % 每解决的问题',
     statsDefault: ' %',
-    statsSolvingTime: '每多花一分钟解题，你的实力会强 {rank_change} ± {stddev} 个等级。',
-    statsReviewTime: '每复习一分钟，你对该问题的实力会强 {rank_change} ± {stddev} 个等级。',
-    statsQualityAnalytical: '在分析性问题上，你比在直觉性问题上强 {rank_change} ± {stddev} 个等级。',
-    statsQualityIntuitive: '在直觉性问题上，你比在分析性问题上强 {rank_change} ± {stddev} 个等级。',
+    statsSolvingTime: 'Solving time: {rank_change} ± {stddev} ranks',
+    statsReviewTime: 'Review time: {rank_change} ± {stddev} ranks',
+    statsProblemQuality: 'Problem quality: {rank_change} ± {stddev} ranks',
     statsProgress: '你的实力提升了 {rank_change} 个等级（置信度：{conf}%）。',
     statsRegression: '你的实力下降了 {rank_change} 个等级（置信度：{conf}%）。',
     statsIntroNew: '基于您最近的{analysis}个问题（共{total}个），我们有以下观察：\n\n',
     statsNoTrends: '基于您最近的{analysis}个问题（共{total}个），我们没有发现明显的统计规律。请继续练习以获取更精确的分析！',
     statsNone: '无',
     statsFailed: '无法计算统计数据。',
-    statsForgettingCurve: '您需要{hours}小时才会忘记20%的答案，没有重复。',
-    statsForgettingCurveWithStdDev: '您需要{hours} ± {stddev}小时才会忘记20%的答案，没有重复。'
+    statsForgettingCurve: 'Time since review (24 hours): {rank_change} ranks',
+    statsForgettingCurveWithStdDev: 'Time since review (24 hours): {rank_change} ± {stddev} ranks'
   },
   ja: {
     kyu: '級',
@@ -94,18 +93,17 @@ const localization = {
     statsIfIntuitiveProblem: ' % 直感的な問題に対して',
     statsPerProblemSolved: ' % 毎解決問題',
     statsDefault: ' %',
-    statsSolvingTime: '問題を解くのに1分余分に費やすごとに、あなたは{rank_change} ± {stddev}ランク強くなります。',
-    statsReviewTime: 'レビューに1分費やすごとに、その問題に対してあなたは{rank_change} ± {stddev}ランク強くなります。',
-    statsQualityAnalytical: '分析的な問題では、直感的な問題に比べてあなたは{rank_change} ± {stddev}ランク強いです。',
-    statsQualityIntuitive: '直感的な問題では、分析的な問題に比べてあなたは{rank_change} ± {stddev}ランク強いです。',
+    statsSolvingTime: 'Solving time: {rank_change} ± {stddev} ranks',
+    statsReviewTime: 'Review time: {rank_change} ± {stddev} ranks',
+    statsProblemQuality: 'Problem quality: {rank_change} ± {stddev} ranks',
     statsProgress: 'あなたは{rank_change}ランク強くなりました（信頼度：{conf}%）。',
     statsRegression: 'あなたは{rank_change}ランク弱くなりました（信頼度：{conf}%）。',
     statsIntroNew: '最近の{analysis}問（合計{total}問）に基づいて、以下の観察があります：\n\n',
     statsNoTrends: '最近の{analysis}問（合計{total}問）では、統計的に有意な傾向は見られませんでした。より多くのデータを集めるために、練習を続けてください！',
     statsNone: 'なし',
     statsFailed: '統計を計算できませんでした。',
-    statsForgettingCurve: '答えの20%を忘れるのに{hours}時間かかります。繰り返しなし。',
-    statsForgettingCurveWithStdDev: '答えの20%を忘れるのに{hours} ± {stddev}時間かかります。繰り返しなし。'
+    statsForgettingCurve: 'Time since review (24 hours): {rank_change} ranks',
+    statsForgettingCurveWithStdDev: 'Time since review (24 hours): {rank_change} ± {stddev} ranks'
   },
   ko: {
     kyu: '급',
@@ -145,18 +143,17 @@ const localization = {
     statsIfIntuitiveProblem: ' % 직관적인 문제에 대해',
     statsPerProblemSolved: ' % 해결된 문제당',
     statsDefault: ' %',
-    statsSolvingTime: '문제를 푸는 데 1분을 더 쓸 때마다 {rank_change} ± {stddev} 등급 더 강해집니다.',
-    statsReviewTime: '복습에 1분을 더 쓸 때마다 해당 문제에 대해 {rank_change} ± {stddev} 등급 더 강해집니다.',
-    statsQualityAnalytical: '분석적인 문제에서 직관적인 문제보다 {rank_change} ± {stddev} 등급 더 강합니다.',
-    statsQualityIntuitive: '직관적인 문제에서 분석적인 문제보다 {rank_change} ± {stddev} 등급 더 강합니다.',
+    statsSolvingTime: 'Solving time: {rank_change} ± {stddev} ranks',
+    statsReviewTime: 'Review time: {rank_change} ± {stddev} ranks',
+    statsProblemQuality: 'Problem quality: {rank_change} ± {stddev} ranks',
     statsProgress: '{rank_change} 등급 더 강해졌습니다 (신뢰도: {conf}%).',
     statsRegression: '{rank_change} 등급 더 약해졌습니다 (신뢰도: {conf}%).',
     statsIntroNew: '최근 {analysis}개 문제（총 {total}개）를 기반으로 다음과 같은 관찰이 있습니다：\n\n',
     statsNoTrends: '최근 {analysis}개 문제（총 {total}개）에서는 통계적으로 유의미한 경향을 발견하지 못했습니다. 더 많은 데이터를 모으기 위해 계속 풀어보세요！',
     statsNone: '없음',
     statsFailed: '통계를 계산할 수 없습니다.',
-    statsForgettingCurve: '답의 20%를 잊는 데 {hours}시간이 걸립니다. 반복 없이.',
-    statsForgettingCurveWithStdDev: '답의 20%를 잊는 데 {hours} ± {stddev}시간이 걸립니다. 반복 없이.'
+    statsForgettingCurve: 'Time since review (24 hours): {rank_change} ranks',
+    statsForgettingCurveWithStdDev: 'Time since review (24 hours): {rank_change} ± {stddev} ranks'
   },
   en: {
     kyu: 'kyu',
@@ -197,26 +194,36 @@ const localization = {
     statsIfIntuitiveProblem: ' % for intuitive problems',
     statsPerProblemSolved: ' % per problem solved',
     statsDefault: ' %',
-    statsSolvingTime: 'For each extra minute you spend solving a problem, you are {rank_change} ± {stddev} ranks stronger.',
-    statsReviewTime: 'Each minute of review makes you {rank_change} ± {stddev} ranks stronger on that problem.',
-    statsQualityAnalytical: 'You are {rank_change} ± {stddev} ranks stronger on analytical problems compared to intuitive ones.',
-    statsQualityIntuitive: 'You are {rank_change} ± {stddev} ranks stronger on intuitive problems compared to analytical ones.',
+    statsSolvingTime: 'Solving time: {rank_change} ± {stddev} ranks',
+    statsReviewTime: 'Review time: {rank_change} ± {stddev} ranks',
+    statsProblemQuality: 'Problem quality: {rank_change} ± {stddev} ranks',
     statsProgress: 'You have gotten {rank_change} ranks stronger (confidence: {conf}%).',
     statsRegression: 'You have gotten {rank_change} ranks weaker (confidence: {conf}%).',
     statsIntroNew: 'Based on your most recent {analysis} out of {total} problems we have the following observation(s):\n\n',
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsNone: 'None',
     statsFailed: 'Could not calculate stats.',
-    statsForgettingCurve: 'It takes you {hours} hours to forget 20% of the answers, without repetition.',
-    statsForgettingCurveWithStdDev: 'It takes you {hours} ± {stddev} hours to forget 20% of the answers, without repetition.'
+    statsForgettingCurve: 'Time since review (24 hours): {rank_change} ranks',
+    statsForgettingCurveWithStdDev: 'Time since review (24 hours): {rank_change} ± {stddev} ranks'
   }
 };
 
 export function getTerm(key) {
     const lang = navigator.language || 'en';
-    if (lang.startsWith('zh')) return localization.zh[key];
-    if (lang.startsWith('ja')) return localization.ja[key];
-    if (lang.startsWith('ko')) return localization.ko[key];
+    let langDb;
+    if (lang.startsWith('zh')) {
+        langDb = localization.zh;
+    } else if (lang.startsWith('ja')) {
+        langDb = localization.ja;
+    } else if (lang.startsWith('ko')) {
+        langDb = localization.ko;
+    } else {
+        langDb = localization.en;
+    }
+
+    if (langDb && key in langDb) {
+        return langDb[key];
+    }
     return localization.en[key];
 }
 
