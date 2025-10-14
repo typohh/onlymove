@@ -6,6 +6,17 @@ import { TOTAL_RANKS, OLS_INDICES } from './constants.js';
 import { getTerm } from './i18n.js';
 import { calculateRecallRate } from './problem-loader.js';
 
+function probToRank(start, end) {
+    // Clamp probabilities to avoid log(0) or division by zero
+    const epsilon = 1e-9;
+    start = Math.max(epsilon, Math.min(1 - epsilon, start));
+    end = Math.max(epsilon, Math.min(1 - epsilon, end));
+
+    const logOddsStart = Math.log(start / (1 - start));
+    const logOddsEnd = Math.log(end / (1 - end));
+    return (1 / 0.28) * (logOddsEnd - logOddsStart);
+}
+
 // Function to send report to Cloudflare Worker
 export async function sendReport(success) {
     try {
@@ -396,7 +407,6 @@ async function calculateAndStoreStatsResults() {
             if (varIndex === OLS_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
             else if (varIndex === OLS_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
             else if (varIndex === OLS_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
-            else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) scaleFactor = -1;
             else if (varIndex === OLS_INDICES.DATE) scaleFactor = n;
 
             coeff *= scaleFactor;
@@ -440,21 +450,25 @@ export async function showDetailedStats() {
         const { results, beta_diff } = state.statsResults;
         const analysisProblems = Math.min(state.answerHistory.length, 500);
 
-        const rank_conversion_factor = 1 / 0.28; // User-defined constant
         const observations = [];
 
         for (const result of results) {
             const { coeff, se, varIndex } = result;
+            
+            const start_prob_ols = 0.8;
+            const end_prob_ols = start_prob_ols + coeff;
+
+            const rank_change = probToRank(start_prob_ols, end_prob_ols);
+
+            const epsilon = 1e-9;
+            const end_prob_ols_clamped = Math.max(epsilon, Math.min(1 - epsilon, end_prob_ols));
+            const derivative = (1 / 0.28) / (end_prob_ols_clamped * (1 - end_prob_ols_clamped));
+            const rank_stddev = se * derivative;
+
+
             const z = Math.abs(coeff) / se;
             const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
             const conf = (2 * cdf - 1) * 100;
-
-            const rank_change = coeff * rank_conversion_factor;
-            const rank_stddev = se * rank_conversion_factor;
-
-            if (Math.abs(rank_change) < 0.1) {
-                continue;
-            }
 
             let termKey;
             let rank_change_val = rank_change;
@@ -466,8 +480,9 @@ export async function showDetailedStats() {
             }
 
             if (termKey) {
+                const formattedRankChange = rank_change_val > 0 ? `+${rank_change_val.toFixed(1)}` : rank_change_val.toFixed(1);
                 let message = getTerm(termKey)
-                    .replace('{rank_change}', rank_change_val.toFixed(1))
+                    .replace('{rank_change}', formattedRankChange)
                     .replace('{stddev}', rank_stddev.toFixed(1));
 
                 observations.push({ message, conf });
@@ -480,32 +495,45 @@ export async function showDetailedStats() {
         let resultText = "";
 
         const validObservations = observations.filter(o => o.message);
-        if (validObservations.length > 0) {
-            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-            resultText = intro + "- " + validObservations.map(o => o.message).join("\n- ");
+        const hasForgettingCurve = state.userK && state.userKStdDev;
+
+        if (validObservations.length === 0 && !hasForgettingCurve) {
+            resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
         } else {
-            const intro = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-            resultText = intro;
-        }
+            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+            const allLines = [];
 
-        if (state.userK && state.userKStdDev) {
-            const t = 24 * 3600 * 1000; // 24 hours
-            const recallRate_24h = calculateRecallRate(t, 0, state.userK);
-            const delta_recall = recallRate_24h - 1;
-            const rank_change = delta_recall * rank_conversion_factor;
+            if (validObservations.length > 0) {
+                allLines.push(...validObservations.map(o => o.message));
+            }
 
-            const k = state.userK;
-            const k_stddev = state.userKStdDev;
-            const B = 1.3;
-            const dk = (B * t / (k*k)) * Math.pow(1 + t / k, -B - 1);
-            const stddev_recallRate = dk * k_stddev;
-            const rank_stddev = stddev_recallRate * rank_conversion_factor;
+            if (hasForgettingCurve) {
+                const t = 24 * 3600 * 1000; // 24 hours
+                const start_prob_forget = 0.8;
+                const recallRate_24h = calculateRecallRate(t, 0, state.userK);
+                const end_prob_forget = start_prob_forget * recallRate_24h;
+                const rank_change = probToRank(start_prob_forget, end_prob_forget);
 
-            const forgettingLine = getTerm('statsForgettingCurveWithStdDev')
-                .replace('{rank_change}', rank_change.toFixed(1))
-                .replace('{stddev}', rank_stddev.toFixed(1));
+                const k = state.userK;
+                const k_stddev = state.userKStdDev;
+                const B = 1.3;
+
+                const d_rank_d_end = (1 / 0.28) / (end_prob_forget * (1 - end_prob_forget));
+
+                const d_recall_dk = (B * t / (k*k)) * Math.pow(1 + t / k, -B - 1);
+                const d_end_dk = start_prob_forget * d_recall_dk;
+
+                const d_rank_dk = d_rank_d_end * d_end_dk;
+                const rank_stddev = Math.abs(d_rank_dk) * k_stddev;
+
+                const formattedRankChange = rank_change > 0 ? `+${rank_change.toFixed(1)}` : rank_change.toFixed(1);
+                const forgettingLine = getTerm('statsForgettingCurveWithStdDev')
+                    .replace('{rank_change}', formattedRankChange)
+                    .replace('{stddev}', rank_stddev.toFixed(1));
+                allLines.push(forgettingLine);
+            }
             
-            resultText += '\n- ' + forgettingLine;
+            resultText = intro + "- " + allLines.join("\n- ");
         }
 
         alert(resultText);

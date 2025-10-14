@@ -44,10 +44,9 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     let duration = 2000; // 2s default
     let message = '';
+    let buttonText = null;
     const statsResults = state.statsResults ? state.statsResults.results : null;
     const statsAreAvailable = statsResults && statsResults.length > 0;
-
-
 
     if (state.problemHistory[0]?.isRepeat) {
         let reviewTimeIsBeneficial = false;
@@ -93,7 +92,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
         }
 
         if (timeIsBeneficial && state.accumulatedSolvingTime < meanSolvingTime) {
-            duration = 6000;
+            duration = 6000; // This duration will be ignored as buttonText is set
             const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
             const { coeff, se } = timeStat;
             const z = Math.abs(coeff) / se;
@@ -101,10 +100,11 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             const conf = (2 * cdf - 1) * 100;
             const x = Math.round(timeSpent / 1000);
             message = getTerm('rushingMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
+            buttonText = getTerm('iWontRushIt');
         }
     }
 
-    await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats));
+    await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats, buttonText));
 
     await loadTsumego(true);
     await enterAnalysisMode();

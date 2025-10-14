@@ -59,7 +59,7 @@ function createOverlayContent(stats, message, textColor) {
     return container;
 }
 
-export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', stats = null) {
+export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', stats = null, buttonText = null) {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     Object.assign(overlay.style, {
@@ -74,16 +74,36 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         document.body.appendChild(overlay);
 
         requestAnimationFrame(() => {
-            overlay.style.transition = `opacity ${duration}ms ease-out`;
+            overlay.style.transition = `opacity 0.5s ease-out`; // Faster fade-in
             requestAnimationFrame(() => {
                 overlay.style.opacity = '0.9';
             });
         });
 
-        setTimeout(() => {
+        const dismiss = () => {
             overlay.remove();
             if (callback) callback();
-        }, duration);
+        };
+
+        if (buttonText) {
+            const button = document.createElement('button');
+            button.textContent = buttonText;
+            Object.assign(button.style, {
+                marginTop: '20px',
+                padding: '10px 20px',
+                fontSize: `${boardContainer.offsetWidth / 30}px`,
+                cursor: 'pointer',
+                border: '1px solid white',
+                borderRadius: '5px',
+                backgroundColor: 'transparent',
+                color: 'white',
+                fontWeight: 'bold',
+            });
+            button.onclick = dismiss;
+            content.appendChild(button);
+        } else {
+            setTimeout(dismiss, duration);
+        }
 
     } else { // This is the simple message overlay
         if (message) {
