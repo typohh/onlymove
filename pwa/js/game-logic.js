@@ -80,6 +80,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
                 const conf = cdf * 100;
                 const x = Math.round(previousReviewTime / 1000);
                 message = getTerm('insufficientReviewMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
+                buttonText = getTerm('iWontRushIt');
             }
         }
     } else { // Careless mistake for new problems
