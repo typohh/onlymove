@@ -5,6 +5,7 @@ import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
+import { MODEL_INDICES } from './user-stats.js';
 
 async function simpleHash(str) {
     const encoder = new TextEncoder();
@@ -25,33 +26,60 @@ function weightedRandomSelect(items, weightFn) {
     return items[0]; // fallback
 }
 
-export function calculateRecallRate(t, r, k) {
-    const B = 1.3;
-    return Math.pow(1 + t / (k * Math.pow(2.5, r)), -B);
-}
+
 
 export function getReviewCandidates() {
-    const K = state.userK || 410333792.4; // k = 86400000 / (0.8 ^ (-1 / 1.3) - 1)
     const now = Date.now();
     const reviewCandidates = [];
-    const allRecallRates = []; // For logging
+
+    if (!state.modelParams || state.modelParams.length === 0) {
+        return []; // Model not ready
+    }
+    const finalParams = state.modelParams;
+
+    const recentHistory = state.answerHistory.slice(-500);
 
     const lastAnswers = {};
-    for (const answer of state.answerHistory) {
+    for (const answer of recentHistory) {
         lastAnswers[answer.problemId] = answer;
     }
 
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
+
+        // Conditions: failed at least once, and problem rating is lower than user rank.
         if (lastAnswer.successSinceFailure !== undefined && lastAnswer.problemRating < state.userRank) {
+            
+            const features = Array(finalParams.length).fill(0);
+
+            features[MODEL_INDICES.INTERCEPT] = 1;
+            features[MODEL_INDICES.TIME_SOLVING] = 0.5; // Neutral value for prediction
+
+            // Approximate review time percentile
+            const reviewTime = state.answerHistory
+                .filter(ans => ans.problemId === problemId && ans.date < now)
+                .reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
+            features[MODEL_INDICES.REVIEW_TIME] = reviewTime > 0 ? 0.5 : 0;
+
+            features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
+            features[MODEL_INDICES.PROBLEM_QUALITY] = lastAnswer.problemQuality || 0.5;
+            features[MODEL_INDICES.DATE] = 1.0; // For a new attempt, it's the latest
+            features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
+
             const t = now - lastAnswer.date;
             const r = lastAnswer.successSinceFailure;
-            const recallRate = calculateRecallRate(t, r, K);
+            const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
+            features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
 
-            allRecallRates.push({ problemId, recallRate }); // Log all of them
+            const logit = features.reduce((acc, val, j) => acc + val * finalParams[j], 0);
+            const probability = 1 / (1 + Math.exp(-logit));
 
-            if (recallRate >= 0.6 && recallRate <= 0.8) {
-                reviewCandidates.push({ problemId, recallRate, rating: lastAnswer.problemRating });
+            if (probability >= 0.60 && probability <= 0.80) {
+                reviewCandidates.push({ 
+                    problemId,
+                    recallRate: probability,
+                    rating: lastAnswer.problemRating 
+                });
             }
         }
     }

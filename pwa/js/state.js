@@ -58,8 +58,9 @@ export const state = {
 
     answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
     statsResults: null,
-    userK: parseFloat(localStorage.getItem('userK')) || null,
-    userKStdDev: parseFloat(localStorage.getItem('userKStdDev')) || null,
+    modelParams: JSON.parse(localStorage.getItem('modelParams')) || null,
+    adamState: JSON.parse(localStorage.getItem('adamState')) || null,
+    learningRate: parseFloat(localStorage.getItem('learningRate')) || 5,
 };
 
 // MODIFICATION: Cache for loaded zip files
@@ -148,12 +149,17 @@ export function setStatsResults(results) {
     state.statsResults = results;
 }
 
-export function setUserK(k) {
-    state.userK = k;
-    localStorage.setItem('userK', k.toString());
+export function setModelParams(params) {
+    state.modelParams = params;
+    localStorage.setItem('modelParams', JSON.stringify(params));
 }
 
-export function setUserKStdDev(stdDev) {
-    state.userKStdDev = stdDev;
-    localStorage.setItem('userKStdDev', stdDev.toString());
+export function setAdamState(adamState) {
+    state.adamState = adamState;
+    localStorage.setItem('adamState', JSON.stringify(adamState));
+}
+
+export function setLearningRate(rate) {
+    state.learningRate = rate;
+    localStorage.setItem('learningRate', rate.toString());
 }

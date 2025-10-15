@@ -5,7 +5,8 @@ import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from 
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
-import { APP_MODES, OLS_INDICES } from './constants.js';
+import { APP_MODES } from './constants.js';
+import { MODEL_INDICES } from './user-stats.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
@@ -63,7 +64,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
             previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
 
-            const targetVarIndex = OLS_INDICES.REVIEW_TIME;
+            const targetVarIndex = MODEL_INDICES.REVIEW_TIME;
             reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
             if (reviewStat && reviewStat.coeff > 0) {
                 reviewTimeIsBeneficial = true;
@@ -76,7 +77,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
                 const { coeff, se } = reviewStat;
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = (2 * cdf - 1) * 100;
+                const conf = cdf * 100;
                 const x = Math.round(previousReviewTime / 1000);
                 message = getTerm('insufficientReviewMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
             }
@@ -87,17 +88,17 @@ async function _handleIncorrectMoveSequence(moveIndex) {
         if (statsAreAvailable) {
             const timeTakenValues = state.answerHistory.map(p => p.timeTaken).filter(t => t !== undefined);
             meanSolvingTime = timeTakenValues.length > 0 ? timeTakenValues.reduce((a, b) => a + b, 0) / timeTakenValues.length : 0;
-            const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
+            const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
             timeIsBeneficial = timeStat ? timeStat.coeff > 0 : false;
         }
 
         if (timeIsBeneficial && state.accumulatedSolvingTime < meanSolvingTime) {
             duration = 6000; // This duration will be ignored as buttonText is set
-            const timeStat = statsResults.find(r => r.varIndex === OLS_INDICES.TIME_SOLVING);
+            const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
             const { coeff, se } = timeStat;
             const z = Math.abs(coeff) / se;
             const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-            const conf = (2 * cdf - 1) * 100;
+            const conf = cdf * 100;
             const x = Math.round(timeSpent / 1000);
             message = getTerm('rushingMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
             buttonText = getTerm('iWontRushIt');

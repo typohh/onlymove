@@ -171,7 +171,7 @@ Therefore, to deploy a new version, a developer only needs to **push their commi
 - For small code files, read the entire file, instead of reading parts of it.
 - After you have made the requested changes, run npm build, provide summary of changes made since last request and stop and wait for further instructions.
 - Do not remove debug outputs, etc. until the bug is fixed and is also TESTED that it is fixed, not just that it compiles.
-- Stick strictly to the user's explicit requests without adding unsolicited features or changes. If you think additional modifications would be beneficial, suggest them separately instead of implementing them proactively.
+- Confine your actions strictly to the user's explicit instructions. Do not perform any additional actions, even if you assess them as beneficial or corrective. If you identify potential issues or improvements outside the scope of the current task, complete the requested task first. Then, separately, present your observations and ask for permission before taking any further action.
 - Try to rule out any "explanation" you have for a bug, by properly investigating the code before making any changes. Instead of hiding behind vague claims and jumping to conclusions.
 - Always investigate code thoroughly for potential issues before assuming external causes, and avoid quick fixes or number adjustments without proper analysis.
 - Avoid workarounds for issues that are not fully understood. Investigate the root cause of a problem before implementing a solution. Do not use 'just-in-case' code that can hide underlying issues or make the code harder to understand.

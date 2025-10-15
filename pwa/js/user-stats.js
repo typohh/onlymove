@@ -1,40 +1,43 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setUserK, setUserKStdDev } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setStatsResults, setModelParams, setAdamState } from './state.js';
 import { updateAllUI } from './ui.js';
-import { TOTAL_RANKS, OLS_INDICES } from './constants.js';
+import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { calculateRecallRate } from './problem-loader.js';
+
+// Indices for the features in our statistical model.
+export const MODEL_INDICES = {
+    INTERCEPT: 0,
+    TIME_SOLVING: 1,
+    REVIEW_TIME: 2,
+    PROBLEM_DIFFICULTY: 3,
+    PROBLEM_QUALITY: 4,
+    DATE: 5,
+    IS_NOVEL: 6,
+    RECALL_FORMULA: 7,
+};
 
 function probToRank(start, end) {
-    // Clamp probabilities to avoid log(0) or division by zero
     const epsilon = 1e-9;
     start = Math.max(epsilon, Math.min(1 - epsilon, start));
     end = Math.max(epsilon, Math.min(1 - epsilon, end));
-
     const logOddsStart = Math.log(start / (1 - start));
     const logOddsEnd = Math.log(end / (1 - end));
     return (1 / 0.28) * (logOddsEnd - logOddsStart);
 }
 
-// Function to send report to Cloudflare Worker
+function logitsToRank(startLogit, endLogit) {
+    return (1 / 0.28) * (endLogit - startLogit);
+}
+
 export async function sendReport(success) {
     try {
         const problemFilename = state.problemHistory[0].filename;
         const problemId = problemFilename.replace(/\.[^/.]+$/, "");
-        
-        const reportData = {
-            userId: state.userId,
-            problem: problemId,
-            success: success
-        };
-        
         await fetch('/report', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(reportData)
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: state.userId, problem: problemId, success: success })
         });
     } catch (error) {
         console.error('Failed to send report:', error);
@@ -52,10 +55,8 @@ export function updateUserStats(isCorrect) {
     const history = state.problemHistory;
     const currentProblem = history[0];
 
-    if (!currentProblem) return {};
-
-    if (currentProblem.linked) {
-        updateProblemHistory(history);
+    if (!currentProblem || currentProblem.linked) {
+        if (currentProblem.linked) updateProblemHistory(history);
         return {};
     }
 
@@ -63,25 +64,20 @@ export function updateUserStats(isCorrect) {
     addToAccumulatedSolvingTime(currentSessionTime);
     const timeTaken = state.accumulatedSolvingTime;
 
-    let successSinceFailure;
     const problemId = currentProblem.filename.replace('.sgf', '');
-    const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
-    const lastAnswer = previousAnswers.length > 0 ? previousAnswers[previousAnswers.length - 1] : null;
-
-    if (!isCorrect) {
-        successSinceFailure = 0;
-    } else { // isCorrect
-        if (lastAnswer && lastAnswer.successSinceFailure !== undefined) {
-            successSinceFailure = lastAnswer.successSinceFailure + 1;
-        } else if (previousAnswers.some(a => a.correct === false)) {
-            // First success after a failure
-            successSinceFailure = 1;
+    let successSinceFailure;
+    if (currentProblem.isRepeat) {
+        const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
+        const lastAnswer = previousAnswers.pop();
+        if (!isCorrect) {
+            successSinceFailure = 0;
+        } else {
+            successSinceFailure = (lastAnswer && lastAnswer.successSinceFailure !== undefined) ? lastAnswer.successSinceFailure + 1 : 1;
         }
-        // If it was never failed, successSinceFailure remains undefined.
     }
 
     const answer = {
-        problemId: currentProblem.filename.replace('.sgf', ''),
+        problemId,
         problemRating: currentProblem.rating,
         problemQuality: currentProblem.quality || 0,
         timeTaken,
@@ -92,35 +88,29 @@ export function updateUserStats(isCorrect) {
         problemType: !currentProblem.isRepeat ? 'novel' : 'repeat',
     };
 
-    const answerHistory = [...state.answerHistory, answer];
-    updateAnswerHistory(answerHistory);
-
-    // Reset solving timer after recording
+    updateAnswerHistory([...state.answerHistory, answer]);
     state.currentSolvingStartTime = null;
 
     const oldRank = state.userRank;
-    const oldRankInfo = getRankInfo(oldRank);
     let rank = oldRank;
     let momentum = state.momentum;
-    const scalingFactor = (currentProblem.quality || 0.5) * currentProblem.isRepeat ? 1 / 5 : 1;
+    const scalingFactor = (currentProblem.quality || 0.5) * (currentProblem.isRepeat ? 1 / 5 : 1);
 
-    if (isCorrect ) {
+    if (isCorrect) {
         const maxIncrease = (1.0 - rank) / 9;
         let intendedRatingIncrease = scalingFactor * momentum / 600;
         let intendedMomentumIncrease = scalingFactor * 0.1;
-
-        if(intendedRatingIncrease > maxIncrease) {
+        if (intendedRatingIncrease > maxIncrease) {
             intendedMomentumIncrease *= maxIncrease / intendedRatingIncrease;
-            intendedRatingIncrease = maxIncrease
+            intendedRatingIncrease = maxIncrease;
         }
-        if( !currentProblem.isRepeat ) {
-            momentum *= 1 + intendedMomentumIncrease
+        if (!currentProblem.isRepeat) {
+            momentum *= 1 + intendedMomentumIncrease;
         }
-        rank += intendedRatingIncrease
-
-    } else { // Incorrect
+        rank += intendedRatingIncrease;
+    } else {
         momentum -= scalingFactor * (momentum - (momentum + 1) / 3);
-        rank = Math.max( 0 , rank - 4 * scalingFactor * (momentum / 600));
+        rank = Math.max(0, rank - 4 * scalingFactor * (momentum / 600));
     }
 
     updateUserRank(rank);
@@ -128,317 +118,245 @@ export function updateUserStats(isCorrect) {
     updateProblemHistory(history);
     updateAllUI();
 
-    const newRank = state.userRank;
-    const newRankInfo = getRankInfo(newRank);
-
-    const rankChange = newRank - oldRank;
-
+    const oldRankInfo = getRankInfo(oldRank);
+    const newRankInfo = getRankInfo(state.userRank);
     let rankChangeDirection = 'same';
-    if (newRankInfo.rankIndex > oldRankInfo.rankIndex) {
-        rankChangeDirection = 'up';
-    } else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) {
-        rankChangeDirection = 'down';
-    }
+    if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
+    else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
-    // Trigger background calculation of detailed stats and K estimation
-    setTimeout(() => {
-        calculateAndStoreStatsResults();
-        estimateUserK();
-    }, 0);
+    setTimeout(calculateAndStoreStatsResults, 0);
 
-    return {
-        rankChange,
-        rankChangeDirection,
-        isCorrect
-    };
+    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
 }
 
-function estimateUserK() {
-    const B = 1.3;
-
-    // Prior data points to anchor the estimation
-    const priors = [
-        { t: 86400000, r: 0, correct: true }, // 24 hours
-        { t: 129600000, r: 0, correct: false }, // 36 hours
-    ];
-
-    const history = [];
-    const answersByProblem = {};
-    const answerHistory = state.answerHistory.slice(-500);
-    for (const answer of answerHistory) {
-        if (!answersByProblem[answer.problemId]) {
-            answersByProblem[answer.problemId] = [];
-        }
-        answersByProblem[answer.problemId].push(answer);
-    }
-
-    for (const problemId in answersByProblem) {
-        const problemAnswers = answersByProblem[problemId];
-        for (let i = 1; i < problemAnswers.length; i++) {
-            const prevAnswer = problemAnswers[i - 1];
-            const currentAnswer = problemAnswers[i];
-
-            if (prevAnswer.successSinceFailure !== undefined) {
-                const t = currentAnswer.date - prevAnswer.date;
-                const r = prevAnswer.successSinceFailure;
-                if (t > 0) {
-                    history.push({ t, r, correct: currentAnswer.correct });
-                }
-            }
-        }
-    }
-
-    if (history.length === 0) {
-        return; // Not enough data to estimate K
-    }
-
-    const fullHistory = [...priors, ...history];
-
-    const logLikelihoodDerivative = (k) => {
-        let derivative = 0;
-        for (const item of fullHistory) {
-            const { t, r, correct } = item;
-            const R = calculateRecallRate(t, r, k);
-            
-            if (R === 1) { // Avoid division by zero if R is 1
-                if (!correct) derivative -= 1e9; // Large penalty
-                continue;
-            }
-            if (R === 0) { // Avoid division by zero if R is 0
-                if (correct) derivative += 1e9; // Large penalty
-                continue;
-            }
-
-            const c = Math.pow(2.5, r);
-            const dR_dk = (B * t * Math.pow(1 + t / (c * k), -B - 1)) / (c * k * k);
-
-            if (correct) {
-                derivative += dR_dk / R;
-            } else {
-                derivative -= dR_dk / (1 - R);
-            }
-        }
-        return derivative;
-    };
-
-    let k_min = 1e7;
-    let k_max = 1e11;
-    let d_min = logLikelihoodDerivative(k_min);
-    let d_max = logLikelihoodDerivative(k_max);
-
-    if (d_min < 0) {
-        setUserK(k_min);
-        return;
-    }
-    if (d_max > 0) {
-        setUserK(k_max);
-        return;
-    }
-
-    for (let i = 0; i < 10; i++) { // 10 iterations for high precision
-        const k_mid = (k_min + k_max) / 2;
-        const d_mid = logLikelihoodDerivative(k_mid);
-        if (d_mid > 0) {
-            k_min = k_mid;
-        } else {
-            k_max = k_mid;
-        }
-    }
-
-    const estimatedK = (k_min + k_max) / 2;
-    setUserK(estimatedK);
-
-    const logLikelihoodSecondDerivative = (k) => {
-        let secondDerivative = 0;
-        for (const item of fullHistory) {
-            const { t, r, correct: y } = item;
-            const R = calculateRecallRate(t, r, k);
-
-            if (R <= 0 || R >= 1) { // Avoid division by zero
-                continue;
-            }
-
-            const c = Math.pow(2.5, r);
-            const X = 1 + t / (c * k);
-
-            // First derivative of R w.r.t. k
-            const dR_dk = (B * t * Math.pow(X, -B - 1)) / (c * k * k);
-
-            // Second derivative of R w.r.t. k
-            const d2R_dk2 = (B * t / (c * Math.pow(k, 3))) * Math.pow(X, -B - 2) * ((B - 1) * X - (B + 1));
-
-            const term1 = -Math.pow(dR_dk, 2) / (R * (1 - R));
-            const term2 = ((y - R) / (R * (1 - R))) * d2R_dk2;
-            secondDerivative += term1 + term2;
-        }
-        return secondDerivative;
-    };
-
-    const secondDerivative = logLikelihoodSecondDerivative(estimatedK);
-    if (secondDerivative < 0) {
-        const variance = -1 / secondDerivative;
-        const stdDev = Math.sqrt(variance);
-        setUserKStdDev(stdDev);
-    } else {
-        setUserKStdDev(null);
-    }
-}
 
 let isCalculatingStats = false;
 
 async function calculateAndStoreStatsResults() {
     if (isCalculatingStats) return;
     isCalculatingStats = true;
-    try {
-        const validHistory = state.answerHistory.filter(p =>
-            p.problemRating !== undefined &&
-            p.problemQuality !== undefined &&
-            p.timeTaken !== undefined &&
-            p.reviewTime !== undefined &&
-            p.date !== undefined
-        );
 
-        if (validHistory.length < 5) {
+    try {
+        const validHistory = state.answerHistory.filter(p => p.problemRating !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        if (validHistory.length < 10) {
             setStatsResults(null);
             return;
         }
         const history = validHistory.slice(-500);
 
-        // Time taken calculations (no changes)
-        const timeTakenValues = history.map(p => p.timeTaken);
-        const sortedTime = timeTakenValues.slice().sort((a, b) => a - b);
-        const p_low = 0.45;
-        const p_high = 0.55;
-        const idx_low = Math.floor(p_low * (sortedTime.length - 1));
-        const idx_high = Math.floor(p_high * (sortedTime.length - 1));
-        const time_low = sortedTime[idx_low];
-        const time_high = sortedTime[idx_high];
-        const delta_time_ms = time_high - time_low;
-        const time_per_percentile_min = delta_time_ms / (60000 * 0.1);
-        const percentileTime = timeTakenValues.map(t => {
-            const below = sortedTime.filter(s => s < t).length;
-            const equal = sortedTime.filter(s => s === t).length;
-            return (below + 0.5 * equal) / sortedTime.length;
-        });
+        const trainingData = prepareTrainingData(history, validHistory);
 
-        // Merged Review Time calculations
-        const previousReviewTimes = history.map(p => {
-            if (p.problemType === 'repeat') {
-                // Search the full validHistory for answers to the same problem that are older
-                const prevs = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date);
-                return prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
-            }
-            return 0;
-        });
+        const numParams = Object.keys(MODEL_INDICES).length;
+        let params = (state.modelParams && state.modelParams.length === numParams) ? [...state.modelParams] : Array(numParams).fill(0);
 
-        const reviewTimes = history.map((p, i) => p.problemType === 'repeat' ? previousReviewTimes[i] : 0).filter(t => t > 0);
-        let time_per_percentile_min_r = 0;
-        if (reviewTimes.length > 0) {
-            const sortedReview = reviewTimes.slice().sort((a, b) => a - b);
-            const p_low_r = 0.45;
-            const p_high_r = 0.55;
-            const idx_low_r = Math.floor(p_low_r * (sortedReview.length - 1));
-            const idx_high_r = Math.floor(p_high_r * (sortedReview.length - 1));
-            const time_low_r = sortedReview[idx_low_r];
-            const time_high_r = sortedReview[idx_high_r];
-            const delta_time_ms_r = time_high_r - time_low_r;
-            time_per_percentile_min_r = delta_time_ms_r / (60000 * 0.1);
-        }
+        let adamState = (state.adamState && state.adamState.m.length === numParams)
+            ? JSON.parse(JSON.stringify(state.adamState))
+            : { m: Array(numParams).fill(0), v: Array(numParams).fill(0), t: 0 };
 
-        const percentileReview = previousReviewTimes.map((t, i) => {
-            if (t === 0 || history[i].problemType !== 'repeat' || reviewTimes.length === 0) return 0;
-            const below = reviewTimes.filter(s => s < t).length;
-            const equal = reviewTimes.filter(s => s === t).length;
-            return (below + 0.5 * equal) / reviewTimes.length;
-        });
+        const { trainedParams, finalAdamState } = await trainUserModel(trainingData, { params, adamState });
+        const finalResults = calculateResultsAndStdErrors(trainedParams, trainingData);
 
-        const y = history.map(p => p.correct ? 1 : 0);
-        const X_original = history.map((p, i) => [
-            1,
-            percentileTime[i],
-            percentileReview[i],
-            p.problemRating,
-            p.problemQuality,
-            i,
-            p.problemType === 'repeat' ? 1 : 0,
-        ]);
-
-        const stdDevs = [];
-        for (let j = 1; j < X_original[0].length; j++) {
-            const col = X_original.map(row => row[j]);
-            stdDevs.push(math.std(col));
-        }
-
-        const includedIndices = [0];
-        for (let j = 1; j < stdDevs.length + 1; j++) {
-            if (stdDevs[j - 1] > 0) includedIndices.push(j);
-        }
-
-        const X = X_original.map(row => includedIndices.map(idx => row[idx]));
-        const n = X.length;
-        const k = X[0].length;
-
-        const Xt = math.transpose(X);
-        const XtX = math.multiply(Xt, X);
-        const XtX_inv = math.inv(XtX);
-        const Xty = math.multiply(Xt, y);
-        const beta = math.multiply(XtX_inv, Xty);
-
-        const y_hat = math.multiply(X, beta);
-        const residuals = math.subtract(y, y_hat);
-        const ssr = math.multiply(math.transpose(residuals), residuals);
-        const s2 = ssr / (n - k);
-        const varCovarMatrix = math.multiply(s2, XtX_inv);
-        const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt);
-
-        const diff_idx_in_X = includedIndices.indexOf(OLS_INDICES.PROBLEM_DIFFICULTY + 1);
-        let beta_diff = 0;
-        if (diff_idx_in_X > -1) {
-            beta_diff = beta[diff_idx_in_X];
-        }
-
-        const results = [];
-        for (let i = 1; i < includedIndices.length; i++) {
-            const varIndex = includedIndices[i] - 1;
-            let coeff = beta[i];
-            let se = stdErrors[i];
-
-            let scaleFactor = 1;
-            if (varIndex === OLS_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
-            else if (varIndex === OLS_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
-            else if (varIndex === OLS_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
-            else if (varIndex === OLS_INDICES.DATE) scaleFactor = n;
-
-            coeff *= scaleFactor;
-            se *= Math.abs(scaleFactor);
-            
-            results.push({ coeff, se, varIndex });
-        }
-        setStatsResults({ results, beta_diff });
+        setModelParams(trainedParams);
+        setAdamState(finalAdamState);
+        setStatsResults(finalResults);
 
     } catch (error) {
-        console.error('OLS Regression failed during background calculation:', error);
+        console.error('Unified model training failed:', error);
         Sentry.captureException(error);
-        setStatsResults(null); // Set empty results on failure
     } finally {
         isCalculatingStats = false;
     }
 }
 
-// Function to show detailed stats when user clicks on rank
+function prepareTrainingData(history, validHistory) {
+    const n = history.length;
+    const p_low = 0.45, p_high = 0.55;
+
+    const timeTakenValues = history.map(p => p.timeTaken);
+    const sortedTime = [...timeTakenValues].sort((a, b) => a - b);
+    const time_per_percentile_min = (sortedTime[Math.ceil(p_high * (n - 1))] - sortedTime[Math.floor(p_low * (n - 1))]) / (60000 * (p_high - p_low));
+    const percentileTime = timeTakenValues.map(t => {
+        const below = sortedTime.filter(s => s < t).length;
+        const equal = sortedTime.filter(s => s === t).length;
+        return n > 0 ? (below + 0.5 * equal) / n : 0;
+    });
+
+    const previousReviewTimes = history.map(p => {
+        if (p.problemType === 'repeat') {
+            const prevs = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date);
+            return prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
+        }
+        return 0;
+    });
+    const reviewTimes = previousReviewTimes.filter(t => t > 0);
+    let time_per_percentile_min_r = 0;
+    if (reviewTimes.length > 0) {
+        const sortedReview = [...reviewTimes].sort((a, b) => a - b);
+        const idx_low_r = Math.floor(p_low * (sortedReview.length - 1));
+        const idx_high_r = Math.ceil(p_high * (sortedReview.length - 1));
+        time_per_percentile_min_r = (sortedReview[idx_high_r] - sortedReview[idx_low_r]) / (60000 * (p_high - p_low));
+    }
+    const percentileReview = previousReviewTimes.map(t => {
+        if (t === 0 || reviewTimes.length === 0) return 0;
+        const below = reviewTimes.filter(s => s < t).length;
+        const equal = reviewTimes.filter(s => s === t).length;
+        return (below + 0.5 * equal) / reviewTimes.length;
+    });
+
+    return {
+        y: history.map(p => p.correct ? 1 : 0),
+        weights: Array.from({ length: n }, (_, i) => (i + 1) / n),
+        percentileTime,
+        percentileReview,
+        time_per_percentile_min,
+        time_per_percentile_min_r,
+        history,
+        validHistory,
+        n
+    };
+}
+
+async function trainUserModel(trainingData, modelState) {
+    const { y, weights, percentileTime, percentileReview, history, validHistory, n } = trainingData;
+    let { params, adamState } = modelState;
+
+    const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
+    const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
+    const lambda = 0.001; // L2 regularization parameter
+
+    let prevLoss = Infinity;
+    const startTime = Date.now();
+
+    for (let epoch = 0; epoch < maxEpochs; epoch++) {
+        adamState.t++;
+
+        const X = history.map((p, i) => {
+            const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
+            features[MODEL_INDICES.INTERCEPT] = 1;
+            features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
+            features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
+            features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
+            features[MODEL_INDICES.PROBLEM_QUALITY] = p.problemQuality || 0.5;
+            features[MODEL_INDICES.DATE] = i / n;
+            if (p.problemType === 'novel') {
+                features[MODEL_INDICES.IS_NOVEL] = 1;
+            } else {
+                const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
+                const t = p.date - (prevAnswer ? prevAnswer.date : p.date);
+                const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
+
+                const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
+                
+                features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
+            }
+            return features;
+        });
+
+        const gradient = Array(params.length).fill(0);
+        let currentLoss = 0;
+
+        for (let i = 0; i < n; i++) {
+            const logit = X[i].reduce((acc, val, j) => acc + val * params[j], 0);
+            const predicted = 1 / (1 + Math.exp(-logit));
+            const clipped = Math.max(1e-15, Math.min(1 - 1e-15, predicted));
+            currentLoss += weights[i] * (-y[i] * Math.log(clipped) - (1 - y[i]) * Math.log(1 - clipped));
+            const error = weights[i] * (predicted - y[i]);
+            for (let j = 0; j < Object.keys(MODEL_INDICES).length; j++) gradient[j] += error * X[i][j];
+        }
+
+        let l2_penalty = 0;
+        for (let j = 0; j < params.length; j++) {
+            if (j === MODEL_INDICES.INTERCEPT) continue;
+            let target = 0;
+            if (j === MODEL_INDICES.RECALL_FORMULA) {
+                target = -1;
+            } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
+                target = -10;
+            }
+            l2_penalty += Math.pow(params[j] - target, 2);
+        }
+        currentLoss += (lambda / 2) * l2_penalty;
+        currentLoss /= n;
+
+        for (let j = 0; j < params.length; j++) {
+            gradient[j] /= n;
+            if (j !== MODEL_INDICES.INTERCEPT) {
+                let target = 0;
+                if (j === MODEL_INDICES.RECALL_FORMULA) {
+                    target = -1;
+                } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
+                    target = -10;
+                }
+                gradient[j] += (lambda / n) * (params[j] - target);
+            }
+            adamState.m[j] = beta1 * adamState.m[j] + (1 - beta1) * gradient[j];
+            adamState.v[j] = beta2 * adamState.v[j] + (1 - beta2) * Math.pow(gradient[j], 2);
+            const m_hat = adamState.m[j] / (1 - Math.pow(beta1, adamState.t));
+            const v_hat = adamState.v[j] / (1 - Math.pow(beta2, adamState.t));
+            params[j] -= learningRate * m_hat / (Math.sqrt(v_hat) + epsilon);
+        }
+
+        if (Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold || Date.now() - startTime > maxTrainingTimeMs) break;
+        prevLoss = currentLoss;
+    }
+    return { trainedParams: params, finalAdamState: adamState };
+}
+
+function calculateResultsAndStdErrors(finalParams, trainingData) {
+    const { percentileTime, percentileReview, history, validHistory, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
+
+    const X = history.map((p, i) => {
+        const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
+        features[MODEL_INDICES.INTERCEPT] = 1;
+        features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
+        features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
+        features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
+        features[MODEL_INDICES.PROBLEM_QUALITY] = p.problemQuality || 0.5;
+        features[MODEL_INDICES.DATE] = i / n;
+        if (p.problemType === 'novel') {
+            features[MODEL_INDICES.IS_NOVEL] = 1;
+        } else {
+            const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
+            const t = p.date - (prevAnswer ? prevAnswer.date : p.date);
+            const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
+            
+            const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
+            
+            features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
+        }
+        return features;
+    });
+
+    const p_hat = X.map(xi => 1 / (1 + Math.exp(-xi.reduce((acc, val, j) => acc + val * finalParams[j], 0))));
+    const W = math.diag(p_hat.map((pi, i) => trainingData.weights[i] * pi * (1 - pi)));
+    const Xt = math.transpose(X);
+    const fisherInfo = math.add(math.multiply(Xt, W, X), math.diag(Array(X[0].length).fill(1e-6)));
+    const varCovarMatrix = math.inv(fisherInfo);
+    const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt);
+
+    const results = [];
+    for (let i = 1; i < Object.keys(MODEL_INDICES).length; i++) {
+        let coeff = finalParams[i], se = stdErrors[i], scaleFactor = 1;
+        if (i === MODEL_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
+        else if (i === MODEL_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
+        else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
+        else if (i === MODEL_INDICES.DATE) scaleFactor = n;
+        results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
+    }
+    return { results };
+}
+
+
 export async function showDetailedStats() {
-    if (isCalculatingStats) {
-        Sentry.captureMessage("showDetailedStats called while isCalculatingStats is true");
-        return;
-    }
-
-    if (state.statsResults === null && state.answerHistory.length >= 5) {
-        await calculateAndStoreStatsResults();
-    }
-
-    if (state.answerHistory.length < 5) {
+    if (state.answerHistory.length < 10) {
         alert(getTerm('statsNotEnough').replace('{count}', state.answerHistory.length));
         return;
+    }
+
+    if (isCalculatingStats) {
+        Sentry.captureMessage("showDetailedStats called while isCalculatingStats is true, showing previous results");
+    } else {
+        await calculateAndStoreStatsResults();
     }
 
     if (state.statsResults === null) {
@@ -447,98 +365,106 @@ export async function showDetailedStats() {
     }
 
     try {
-        const { results, beta_diff } = state.statsResults;
+        const { results } = state.statsResults;
         const analysisProblems = Math.min(state.answerHistory.length, 500);
-
         const observations = [];
+        
+        // Get the raw model parameters from state
+        const finalParams = state.modelParams || Array(Object.keys(MODEL_INDICES).length).fill(0);
+
+        // Calculate base probability for a typical non-novel problem
+        const base_logit = finalParams[MODEL_INDICES.INTERCEPT] +
+            finalParams[MODEL_INDICES.TIME_SOLVING] * 0.5 +
+            finalParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * state.userRank +
+            finalParams[MODEL_INDICES.PROBLEM_QUALITY] * 0.5 +
+            finalParams[MODEL_INDICES.DATE] * 0.5;
+        const base_prob = 1 / (1 + Math.exp(-base_logit));
+
+        if( true ) {
+            // Console log all logit weights and standard deviations
+            console.log("=== Logit Weights and Standard Deviations ===");
+
+            // Calculate standard errors using the results (reverse the scaling)
+            const stdErrors = Array(Object.keys(MODEL_INDICES).length).fill(0);
+            results.forEach(result => {
+                const scaleFactor = result.scaleFactor || 1;
+                stdErrors[result.varIndex] = result.se / Math.abs(scaleFactor);
+            });
+
+            // Log each parameter with its name
+            Object.entries(MODEL_INDICES).forEach(([name, index]) => {
+                const mean = finalParams[index];
+                const sd = stdErrors[index];
+                console.log(`${index}_${name} : ${mean.toFixed(4)}±${sd.toFixed(4)}`);
+            });
+            console.log("==============================================");
+        }
 
         for (const result of results) {
             const { coeff, se, varIndex } = result;
-            
-            const start_prob_ols = 0.8;
-            const end_prob_ols = start_prob_ols + coeff;
-
-            const rank_change = probToRank(start_prob_ols, end_prob_ols);
-
-            const epsilon = 1e-9;
-            const end_prob_ols_clamped = Math.max(epsilon, Math.min(1 - epsilon, end_prob_ols));
-            const derivative = (1 / 0.28) / (end_prob_ols_clamped * (1 - end_prob_ols_clamped));
-            const rank_stddev = se * derivative;
-
-
-            const z = Math.abs(coeff) / se;
-            const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-            const conf = (2 * cdf - 1) * 100;
+            if (varIndex === MODEL_INDICES.IS_NOVEL || 
+                varIndex === MODEL_INDICES.RECALL_FORMULA) continue;
 
             let termKey;
-            let rank_change_val = rank_change;
-
-            if (varIndex === OLS_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
-            else if (varIndex === OLS_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
-            else if (varIndex === OLS_INDICES.PROBLEM_QUALITY) {
-                termKey = 'statsProblemQuality';
-            }
+            if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
+            else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
+            else if (varIndex === MODEL_INDICES.PROBLEM_QUALITY) termKey = 'statsProblemQuality';
 
             if (termKey) {
-                const formattedRankChange = rank_change_val > 0 ? `+${rank_change_val.toFixed(1)}` : rank_change_val.toFixed(1);
-                let message = getTerm(termKey)
-                    .replace('{rank_change}', formattedRankChange)
-                    .replace('{stddev}', rank_stddev.toFixed(1));
+                const z = Math.abs(coeff) / se;
+                const conf = (2 * (0.5 * (1 + math.erf(z / Math.sqrt(2)))) - 1) * 100;
 
-                observations.push({ message, conf });
+                const rank_change = logitsToRank(base_logit, base_logit + coeff);
+                const rank_stddev = Math.abs(se / 0.28);
+                const formattedRankChange = rank_change > 0 ? `+${rank_change.toFixed(1)}` : rank_change.toFixed(1);
+                observations.push({
+                    message: getTerm(termKey).replace('{rank_change}', formattedRankChange).replace('{stddev}', rank_stddev.toFixed(1)),
+                    conf
+                });
             }
         }
-
         observations.sort((a, b) => b.conf - a.conf);
 
+        const allLines = observations.map(o => o.message);
+
+        // Calculate 24-hour deterioration rate
+        const t_23h_ms = 23 * 3600 * 1000;
+        const t_25h_ms = 25 * 3600 * 1000;
+
+        const forgetting_term_23h = Math.log(1 + t_23h_ms);
+        const forgetting_term_25h = Math.log(1 + t_25h_ms);
+
+        // Get the RECALL_FORMULA coefficient from the model results
+        const interactionTermResult = results.find(r => r.varIndex === MODEL_INDICES.RECALL_FORMULA);
+        const interactionTermCoeff = interactionTermResult ? interactionTermResult.coeff : 0;
+        
+        // Calculate the rate of change and normalize to 1 day
+        const rank_change_forget = (interactionTermCoeff / 0.28) * (forgetting_term_25h - forgetting_term_23h) * 12;
+
+        // Calculate standard error for rank change
+        const scaleFactor = interactionTermResult ? (interactionTermResult.scaleFactor || 1) : 1;
+        const rawInteractionTermStdErr = interactionTermResult ? (interactionTermResult.se / Math.abs(scaleFactor)) : 0;
+        
+        const derivative_term = (12 / 0.28) * (forgetting_term_25h - forgetting_term_23h);
+        const rank_stddev_forget = Math.abs(rawInteractionTermStdErr * derivative_term);
+
+        const formattedRankChange = rank_change_forget > 0 ? `+${rank_change_forget.toFixed(1)}` : rank_change_forget.toFixed(1);
+        const outputStdDev = isFinite(rank_stddev_forget) ? rank_stddev_forget.toFixed(1) : "???";
+        allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
+
+        let resultText;
         const totalProblems = state.answerHistory.length;
-        let resultText = "";
-
-        const validObservations = observations.filter(o => o.message);
-        const hasForgettingCurve = state.userK && state.userKStdDev;
-
-        if (validObservations.length === 0 && !hasForgettingCurve) {
+        if (allLines.length === 0) {
+            // This case should be practically unreachable now that forgetting curve text is unconditioned
             resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
         } else {
             const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-            const allLines = [];
-
-            if (validObservations.length > 0) {
-                allLines.push(...validObservations.map(o => o.message));
-            }
-
-            if (hasForgettingCurve) {
-                const t = 24 * 3600 * 1000; // 24 hours
-                const start_prob_forget = 0.8;
-                const recallRate_24h = calculateRecallRate(t, 0, state.userK);
-                const end_prob_forget = start_prob_forget * recallRate_24h;
-                const rank_change = probToRank(start_prob_forget, end_prob_forget);
-
-                const k = state.userK;
-                const k_stddev = state.userKStdDev;
-                const B = 1.3;
-
-                const d_rank_d_end = (1 / 0.28) / (end_prob_forget * (1 - end_prob_forget));
-
-                const d_recall_dk = (B * t / (k*k)) * Math.pow(1 + t / k, -B - 1);
-                const d_end_dk = start_prob_forget * d_recall_dk;
-
-                const d_rank_dk = d_rank_d_end * d_end_dk;
-                const rank_stddev = Math.abs(d_rank_dk) * k_stddev;
-
-                const formattedRankChange = rank_change > 0 ? `+${rank_change.toFixed(1)}` : rank_change.toFixed(1);
-                const forgettingLine = getTerm('statsForgettingCurveWithStdDev')
-                    .replace('{rank_change}', formattedRankChange)
-                    .replace('{stddev}', rank_stddev.toFixed(1));
-                allLines.push(forgettingLine);
-            }
-            
             resultText = intro + "- " + allLines.join("\n- ");
         }
-
         alert(resultText);
     } catch (error) {
         console.error('Failed to generate stats text:', error);
+        Sentry.captureException(error);
         alert('Could not display statistical analysis.');
     }
 }
