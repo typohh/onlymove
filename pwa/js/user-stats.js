@@ -393,7 +393,7 @@ export async function showDetailedStats() {
             finalParams[MODEL_INDICES.DATE] * 0.5;
         const base_prob = 1 / (1 + Math.exp(-base_logit));
 
-        if( true ) {
+        if( false ) {
             // Console log all logit weights and standard deviations
             console.log("=== Logit Weights and Standard Deviations ===");
 
@@ -481,18 +481,22 @@ export async function showDetailedStats() {
 
                 const formattedRankChange = rank_change_per_day > 0 ? `+${rank_change_per_day.toFixed(2)}` : rank_change_per_day.toFixed(2);
                 const outputStdDev = isFinite(rank_stddev_per_day) ? rank_stddev_per_day.toFixed(2) : "???";
-                allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
+//                allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
 
-                const reviewCandidatesForCount = getReviewCandidates({
-                    lowerProbabilityBound: 0,
-                    upperProbabilityBound: Infinity,
+                const firstTimeFailures = getReviewCandidates({
+                    lowerProbabilityBound: 0.6,
+                    upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: true
-                });
-                const x = reviewCandidatesForCount.length;
-                const y = t_eq_ms / (3600 * 1000);
+                }).length;
+                const firsttimeFailureTime = t_eq_ms / (3600 * 1000);
+                const allRepeats = getReviewCandidates({
+                    lowerProbabilityBound: 0.6,
+                    upperProbabilityBound: 1.0,
+                    requireLastAnswerIncorrect: false
+                }).length;
 
-                if (x > 0 && y > 0) {
-                    allLines.push(getTerm('statsFailuresRepeat').replace('{count}', x).replace('{hours}', Math.round(y)));
+                if (allRepeats) {
+                    allLines.push(getTerm('statsFailuresRepeat').replace('{count_other}', allRepeats-firstTimeFailures).replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)));
                 }
             }
         }
