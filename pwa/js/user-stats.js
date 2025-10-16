@@ -86,7 +86,7 @@ export function updateUserStats(isCorrect) {
         correct: isCorrect,
         date: Date.now(),
         successSinceFailure,
-        problemType: !currentProblem.isRepeat ? 'novel' : 'repeat',
+        isRepeat: currentProblem.isRepeat || false,
     };
 
     updateAnswerHistory([...state.answerHistory, answer]);
@@ -194,7 +194,7 @@ function prepareTrainingData(history, validHistory) {
     });
 
     const previousReviewTimes = history.map(p => {
-        if (p.problemType === 'repeat') {
+        if (p.isRepeat) {
             const prevs = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date);
             return prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
         }
@@ -250,7 +250,7 @@ async function trainUserModel(trainingData, modelState) {
             features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
             features[MODEL_INDICES.PROBLEM_QUALITY] = p.problemQuality || 0.5;
             features[MODEL_INDICES.DATE] = i / n;
-            if (p.problemType === 'novel') {
+            if (!p.isRepeat) {
                 features[MODEL_INDICES.IS_NOVEL] = 1;
             } else {
                 const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();

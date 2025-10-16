@@ -203,6 +203,59 @@ document.addEventListener('DOMContentLoaded', async () => {
         showCaptureDetails();
     });
 
+    // Handle button4 click - Ignore functionality
+    document.getElementById('button4').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (e.target.classList.contains('disabled')) return;
+
+        if (state.appMode === APP_MODES.ANALYZING) {
+            if (confirm(getTerm('ignoreConfirm'))) { // Assuming 'ignoreConfirm' key will be added to i18n
+                const problem = state.problemHistory[1];
+                if (!problem) return;
+
+                const problemId = problem.filename.replace('.sgf', '');
+                const answerHistory = [...state.answerHistory];
+                const lastAnswer = answerHistory.findLast(a => a.problemId === problemId);
+
+                if (lastAnswer) {
+                    lastAnswer.ignored = true;
+                    updateAnswerHistory(answerHistory);
+                }
+
+                // Exit analysis mode and load next problem
+                if (state.nextTsumego) {
+                    setAppMode(APP_MODES.LINKED);
+                } else {
+                    setAppMode(APP_MODES.SOLVING);
+                }
+                loadTsumego(false);
+                updateAllUI();
+            }
+        }
+    });
+
+    const migrateProblemTypeToIsRepeat = () => {
+        if (localStorage.getItem('answerHistoryMigrated_v3_isRepeat')) {
+            return;
+        }
+        console.log('Running answer history migration for isRepeat...');
+
+        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const newHistory = answerHistory.map(answer => {
+            if (answer.problemType !== undefined) {
+                answer.isRepeat = answer.problemType === 'repeat';
+                delete answer.problemType;
+            }
+            return answer;
+        });
+
+        updateAnswerHistory(newHistory); // Use the state function to also update state
+        localStorage.setItem('answerHistoryMigrated_v3_isRepeat', 'true');
+        console.log('Answer history migration for isRepeat complete.');
+    };
+
+    migrateProblemTypeToIsRepeat();
+
     const migrateAnswerHistory = () => {
         if (localStorage.getItem('answerHistoryMigrated_v2')) {
             return;

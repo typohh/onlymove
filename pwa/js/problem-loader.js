@@ -53,6 +53,8 @@ export function getReviewCandidates(options = {}) {
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
 
+        if (lastAnswer.ignored) continue; // Exclude ignored problems
+
         let condition = lastAnswer.problemRating < state.userRank;
         if (requireLastAnswerIncorrect) {
             condition = condition && !lastAnswer.correct;

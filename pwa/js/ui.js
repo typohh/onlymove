@@ -157,6 +157,9 @@ const updateSolvingModeUI = () => {
     
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('stats');
+
+    // Hide button4 in solving mode
+    document.getElementById('button4').style.display = 'none';
 }
 
 const updateAnalysisModeUI = () => {
@@ -201,6 +204,18 @@ const updateAnalysisModeUI = () => {
     
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('share');
+
+    // Show and configure button4 ('Ignore')
+    const ignoreButton = document.getElementById('button4');
+    ignoreButton.style.display = 'inline-block';
+    ignoreButton.textContent = getTerm('ignore'); // Assuming 'ignore' key will be added to i18n
+
+    const problem = state.problemHistory[1];
+    if ((problem && problem.linked) || (problem && !problem.isRepeat)) {
+        ignoreButton.classList.add('disabled');
+    } else {
+        ignoreButton.classList.remove('disabled');
+    }
 }
 
 import { displayOverlay, fadeOverlay } from './overlays.js';
