@@ -28,7 +28,13 @@ function weightedRandomSelect(items, weightFn) {
 
 
 
-export function getReviewCandidates() {
+export function getReviewCandidates(options = {}) {
+    const {
+        lowerProbabilityBound = 0.60,
+        upperProbabilityBound = 0.80,
+        requireLastAnswerIncorrect = false
+    } = options;
+
     const now = Date.now();
     const reviewCandidates = [];
 
@@ -47,9 +53,14 @@ export function getReviewCandidates() {
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
 
-        // Conditions: failed at least once, and problem rating is lower than user rank.
-        if (lastAnswer.successSinceFailure !== undefined && lastAnswer.problemRating < state.userRank) {
-            
+        let condition = lastAnswer.problemRating < state.userRank;
+        if (requireLastAnswerIncorrect) {
+            condition = condition && !lastAnswer.correct;
+        } else {
+            condition = condition && lastAnswer.successSinceFailure !== undefined;
+        }
+
+        if (condition) {
             const features = Array(finalParams.length).fill(0);
 
             features[MODEL_INDICES.INTERCEPT] = 1;
@@ -67,18 +78,18 @@ export function getReviewCandidates() {
             features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
 
             const t = now - lastAnswer.date;
-            const r = lastAnswer.successSinceFailure;
+            const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
             const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
             features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
 
             const logit = features.reduce((acc, val, j) => acc + val * finalParams[j], 0);
             const probability = 1 / (1 + Math.exp(-logit));
 
-            if (probability >= 0.60 && probability <= 0.80) {
-                reviewCandidates.push({ 
+            if (probability >= lowerProbabilityBound && probability <= upperProbabilityBound) {
+                reviewCandidates.push({
                     problemId,
                     recallRate: probability,
-                    rating: lastAnswer.problemRating 
+                    rating: lastAnswer.problemRating
                 });
             }
         }

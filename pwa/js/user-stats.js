@@ -4,6 +4,7 @@ import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnsw
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
+import { getReviewCandidates } from './problem-loader.js';
 
 // Indices for the features in our statistical model.
 export const MODEL_INDICES = {
@@ -154,11 +155,22 @@ async function calculateAndStoreStatsResults() {
             : { m: Array(numParams).fill(0), v: Array(numParams).fill(0), t: 0 };
 
         const { trainedParams, finalAdamState } = await trainUserModel(trainingData, { params, adamState });
-        const finalResults = calculateResultsAndStdErrors(trainedParams, trainingData);
 
-        setModelParams(trainedParams);
-        setAdamState(finalAdamState);
-        setStatsResults(finalResults);
+        // Sanity check for non-numeric values
+        const areParamsValid = trainedParams.every(p => isFinite(p));
+
+        if (areParamsValid) {
+            const finalResults = calculateResultsAndStdErrors(trainedParams, trainingData);
+            setModelParams(trainedParams);
+            setAdamState(finalAdamState);
+            setStatsResults(finalResults);
+        } else {
+            console.error("Model training resulted in non-numeric weights. Wiping model state.");
+            Sentry.captureMessage("Model training resulted in non-numeric weights.");
+            setModelParams(null);
+            setAdamState(null);
+            setStatsResults(null);
+        }
 
     } catch (error) {
         console.error('Unified model training failed:', error);
@@ -327,12 +339,13 @@ function calculateResultsAndStdErrors(finalParams, trainingData) {
         return features;
     });
 
+    const X_matrix = math.matrix(X);
     const p_hat = X.map(xi => 1 / (1 + Math.exp(-xi.reduce((acc, val, j) => acc + val * finalParams[j], 0))));
     const W = math.diag(p_hat.map((pi, i) => trainingData.weights[i] * pi * (1 - pi)));
-    const Xt = math.transpose(X);
-    const fisherInfo = math.add(math.multiply(Xt, W, X), math.diag(Array(X[0].length).fill(1e-6)));
+    const Xt = math.transpose(X_matrix);
+    const fisherInfo = math.add(math.multiply(Xt, W, X_matrix), math.diag(Array(X[0].length).fill(1e-6)));
     const varCovarMatrix = math.inv(fisherInfo);
-    const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt);
+    const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt).toArray();
 
     const results = [];
     for (let i = 1; i < Object.keys(MODEL_INDICES).length; i++) {
@@ -343,7 +356,7 @@ function calculateResultsAndStdErrors(finalParams, trainingData) {
         else if (i === MODEL_INDICES.DATE) scaleFactor = n;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }
-    return { results };
+    return { results, varCovarMatrix };
 }
 
 
@@ -427,30 +440,62 @@ export async function showDetailedStats() {
 
         const allLines = observations.map(o => o.message);
 
-        // Calculate 24-hour deterioration rate
-        const t_23h_ms = 23 * 3600 * 1000;
-        const t_25h_ms = 25 * 3600 * 1000;
+        // Refactored calculation for the forgetting curve
+        const { varCovarMatrix } = state.statsResults;
+        if (varCovarMatrix) {
+            const N_idx = MODEL_INDICES.IS_NOVEL;
+            const R_idx = MODEL_INDICES.RECALL_FORMULA;
 
-        const forgetting_term_23h = Math.log(1 + t_23h_ms);
-        const forgetting_term_25h = Math.log(1 + t_25h_ms);
+            const N = finalParams[N_idx];
+            const R = finalParams[R_idx];
 
-        // Get the RECALL_FORMULA coefficient from the model results
-        const interactionTermResult = results.find(r => r.varIndex === MODEL_INDICES.RECALL_FORMULA);
-        const interactionTermCoeff = interactionTermResult ? interactionTermResult.coeff : 0;
-        
-        // Calculate the rate of change and normalize to 1 day
-        const rank_change_forget = (interactionTermCoeff / 0.28) * (forgetting_term_25h - forgetting_term_23h) * 12;
+            if (Math.abs(R) > 1e-9) {
+                const t_eq_ms = Math.exp(N / R) - 1;
 
-        // Calculate standard error for rank change
-        const scaleFactor = interactionTermResult ? (interactionTermResult.scaleFactor || 1) : 1;
-        const rawInteractionTermStdErr = interactionTermResult ? (interactionTermResult.se / Math.abs(scaleFactor)) : 0;
-        
-        const derivative_term = (12 / 0.28) * (forgetting_term_25h - forgetting_term_23h);
-        const rank_stddev_forget = Math.abs(rawInteractionTermStdErr * derivative_term);
+                const k = (24 * 3600 * 1000) / 0.28; // 24 hours in milliseconds
+                const rank_change_per_day = k * R * Math.exp(-N / R);
 
-        const formattedRankChange = rank_change_forget > 0 ? `+${rank_change_forget.toFixed(1)}` : rank_change_forget.toFixed(1);
-        const outputStdDev = isFinite(rank_stddev_forget) ? rank_stddev_forget.toFixed(1) : "???";
-        allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
+                const var_N = varCovarMatrix.get([N_idx, N_idx]);
+                const var_R = varCovarMatrix.get([R_idx, R_idx]);
+                const cov_NR = varCovarMatrix.get([N_idx, R_idx]);
+
+                const exp_term = Math.exp(-N / R);
+                const d_dN = -k * exp_term;
+                const d_dR = k * exp_term * (1 + N / R);
+
+                const var_f = d_dN**2 * var_N + d_dR**2 * var_R + 2 * d_dN * d_dR * cov_NR;
+                const rank_stddev_per_day = Math.sqrt(var_f);
+
+                let time_point_text = "";
+                if (t_eq_ms > 0) {
+                    const hours = t_eq_ms / (3600 * 1000);
+                    const days = Math.floor(hours / 24);
+                    const remaining_hours = hours % 24;
+
+                    if (days > 0) {
+                        time_point_text = `${days}d ${remaining_hours.toFixed(1)}h`;
+                    } else {
+                        time_point_text = `${hours.toFixed(1)}h`;
+                    }
+                }
+
+                const formattedRankChange = rank_change_per_day > 0 ? `+${rank_change_per_day.toFixed(2)}` : rank_change_per_day.toFixed(2);
+                const outputStdDev = isFinite(rank_stddev_per_day) ? rank_stddev_per_day.toFixed(2) : "???";
+                allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
+
+                const reviewCandidatesForCount = getReviewCandidates({
+                    lowerProbabilityBound: 0,
+                    upperProbabilityBound: Infinity,
+                    requireLastAnswerIncorrect: true
+                });
+                const x = reviewCandidatesForCount.length;
+                const y = t_eq_ms / (3600 * 1000);
+
+                if (x > 0 && y > 0) {
+                    allLines.push(getTerm('statsFailuresRepeat').replace('{count}', x).replace('{hours}', Math.round(y)));
+                }
+            }
+        }
 
         let resultText;
         const totalProblems = state.answerHistory.length;

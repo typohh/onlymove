@@ -186,7 +186,8 @@ const localization = {
     statsIntroNew: 'Based on your most recent {analysis} out of {total} problems we have the following observation(s):\n\n',
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsFailed: 'Could not calculate stats.',
-    statsForgettingCurveWithStdDev: 'Time since review (+24 hours): {rank_change} ± {stddev} ranks'
+    statsForgettingCurveWithStdDev: 'Time since review (+24 hours): {rank_change} ± {stddev} ranks',
+    statsFailuresRepeat: 'You have {count} recent failures, each which will be shown again after a {hours} hour delay.'
   }
 };
 
