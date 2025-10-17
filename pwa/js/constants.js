@@ -27,3 +27,6 @@ export const OLS_INDICES = {
   IS_NOVEL: 6,
   RECALL_STRENGTH: 7,
 };
+
+export const MODEL_INPUT_HISTORY_LENGTH = 500;
+export const REVIEW_CANDIDATE_HISTORY_LENGTH = 3000;

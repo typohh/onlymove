@@ -4,7 +4,7 @@ import { state, setDeferredInstallPrompt } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { getCurrentNode } from './board.js';
-import { getReviewCandidates } from './problem-loader.js';
+import { getReviewCandidates } from './model.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 

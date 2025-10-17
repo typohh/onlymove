@@ -6,7 +6,7 @@ import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
 import { APP_MODES } from './constants.js';
-import { MODEL_INDICES } from './user-stats.js';
+import { MODEL_INDICES } from './model.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
@@ -62,7 +62,10 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             const currentProblem = state.problemHistory[0];
             const problemId = currentProblem.filename.replace('.sgf', '');
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
-            previousReviewTime = previousAnswers.reduce((sum, ans) => sum + ans.reviewTime, 0);
+            if (previousAnswers.length > 0) {
+                const lastAnswer = previousAnswers[previousAnswers.length - 1];
+                previousReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
+            }
 
             const targetVarIndex = MODEL_INDICES.REVIEW_TIME;
             reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);

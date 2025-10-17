@@ -13,7 +13,7 @@ try {
 }
 
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
-import { showDetailedStats } from './user-stats.js';
+import { showDetailedStats } from './model.js';
 import { loadSgf, redraw } from './board.js';
 import { getTerm } from './i18n.js';
 
@@ -233,6 +233,48 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     });
+
+    const migrateAccumulatedReview = () => {
+        if (localStorage.getItem('answerHistoryMigrated_v4_accumulatedReview')) {
+            return;
+        }
+        console.log('Running answer history migration for accumulatedReview...');
+
+        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const answersByProblem = {};
+
+        // First, group answers by problemId
+        for (const answer of answerHistory) {
+            if (!answersByProblem[answer.problemId]) {
+                answersByProblem[answer.problemId] = [];
+            }
+            answersByProblem[answer.problemId].push(answer);
+        }
+
+        // Sort each problem's answers by date
+        for (const problemId in answersByProblem) {
+            answersByProblem[problemId].sort((a, b) => a.date - b.date);
+        }
+
+        const newHistory = [];
+        for (const answer of answerHistory) {
+            const problemAnswers = answersByProblem[answer.problemId];
+            const prevAnswers = problemAnswers.filter(a => a.date < answer.date);
+            const accumulatedReview = prevAnswers.reduce((sum, a) => sum + (a.reviewTime || 0), 0);
+            
+            const newAnswer = { ...answer };
+            if (newAnswer.accumulatedReview === undefined) {
+                newAnswer.accumulatedReview = accumulatedReview;
+            }
+            newHistory.push(newAnswer);
+        }
+
+        updateAnswerHistory(newHistory);
+        localStorage.setItem('answerHistoryMigrated_v4_accumulatedReview', 'true');
+        console.log('Answer history migration for accumulatedReview complete.');
+    };
+
+    migrateAccumulatedReview();
 
     const migrateProblemTypeToIsRepeat = () => {
         if (localStorage.getItem('answerHistoryMigrated_v3_isRepeat')) {

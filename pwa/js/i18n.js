@@ -187,7 +187,7 @@ const localization = {
     statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
     statsFailed: 'Could not calculate stats.',
     statsForgettingCurveWithStdDev: 'Time since review (+24 hours): {rank_change} ± {stddev} ranks',
-    statsFailuresRepeat: 'You have {count_recent} recent failures, each which will be shown again after a {hours} hour delay. There are an additional {count_other} past failures that are occasionally repeated to reinforce the memory.', 
+    statsFailuresRepeat: 'You have {count_recent} recent failures, each which will be shown again after a {hours} hour delay. There are an additional {count_other} past failures that are occasionally repeated to reinforce the memory.',
     ignore: 'Ignore',
     ignoreConfirm: 'Do you feel like you cannot learn anything from this problem and don\'t want to see it again in the future?'
   }
