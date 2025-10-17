@@ -396,44 +396,19 @@ export async function showDetailedStats() {
 
     try {
         const { results } = state.statsResults;
-        const analysisProblems = Math.min(state.answerHistory.length, 500);
         const observations = [];
         
-        // Get the raw model parameters from state
         const finalParams = state.modelParams || Array(Object.keys(MODEL_INDICES).length).fill(0);
 
-        // Calculate base probability for a typical non-novel problem
         const base_logit = finalParams[MODEL_INDICES.INTERCEPT] +
             finalParams[MODEL_INDICES.TIME_SOLVING] * 0.5 +
             finalParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * state.userRank +
             finalParams[MODEL_INDICES.PROBLEM_QUALITY] * 0.5 +
             finalParams[MODEL_INDICES.DATE] * 0.5;
-        const base_prob = 1 / (1 + Math.exp(-base_logit));
-
-        if( false ) {
-            // Console log all logit weights and standard deviations
-            console.log("=== Logit Weights and Standard Deviations ===");
-
-            // Calculate standard errors using the results (reverse the scaling)
-            const stdErrors = Array(Object.keys(MODEL_INDICES).length).fill(0);
-            results.forEach(result => {
-                const scaleFactor = result.scaleFactor || 1;
-                stdErrors[result.varIndex] = result.se / Math.abs(scaleFactor);
-            });
-
-            // Log each parameter with its name
-            Object.entries(MODEL_INDICES).forEach(([name, index]) => {
-                const mean = finalParams[index];
-                const sd = stdErrors[index];
-                console.log(`${index}_${name} : ${mean.toFixed(4)}±${sd.toFixed(4)}`);
-            });
-            console.log("==============================================");
-        }
 
         for (const result of results) {
             const { coeff, se, varIndex } = result;
-            if (varIndex === MODEL_INDICES.IS_NOVEL || 
-                varIndex === MODEL_INDICES.RECALL_FORMULA) continue;
+            if (varIndex === MODEL_INDICES.IS_NOVEL || varIndex === MODEL_INDICES.RECALL_FORMULA) continue;
 
             let termKey;
             if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
@@ -443,7 +418,6 @@ export async function showDetailedStats() {
             if (termKey) {
                 const z = Math.abs(coeff) / se;
                 const conf = (2 * (0.5 * (1 + math.erf(z / Math.sqrt(2)))) - 1) * 100;
-
                 const rank_change = logitsToRank(base_logit, base_logit + coeff);
                 const rank_stddev = Math.abs(se / 0.28);
                 const formattedRankChange = rank_change > 0 ? `+${rank_change.toFixed(1)}` : rank_change.toFixed(1);
@@ -455,51 +429,19 @@ export async function showDetailedStats() {
         }
         observations.sort((a, b) => b.conf - a.conf);
 
-        const allLines = observations.map(o => o.message);
+        const observationLines = observations.map(o => o.message);
+        let failureText = '';
+        let oldFailureText = '';
 
-        // Refactored calculation for the forgetting curve
         const { varCovarMatrix } = state.statsResults;
         if (varCovarMatrix) {
             const N_idx = MODEL_INDICES.IS_NOVEL;
             const R_idx = MODEL_INDICES.RECALL_FORMULA;
-
             const N = finalParams[N_idx];
             const R = finalParams[R_idx];
 
             if (Math.abs(R) > 1e-9) {
                 const t_eq_ms = Math.exp(N / R) - 1;
-
-                const k = (24 * 3600 * 1000) / 0.28; // 24 hours in milliseconds
-                const rank_change_per_day = k * R * Math.exp(-N / R);
-
-                const var_N = varCovarMatrix.get([N_idx, N_idx]);
-                const var_R = varCovarMatrix.get([R_idx, R_idx]);
-                const cov_NR = varCovarMatrix.get([N_idx, R_idx]);
-
-                const exp_term = Math.exp(-N / R);
-                const d_dN = -k * exp_term;
-                const d_dR = k * exp_term * (1 + N / R);
-
-                const var_f = d_dN**2 * var_N + d_dR**2 * var_R + 2 * d_dN * d_dR * cov_NR;
-                const rank_stddev_per_day = Math.sqrt(var_f);
-
-                let time_point_text = "";
-                if (t_eq_ms > 0) {
-                    const hours = t_eq_ms / (3600 * 1000);
-                    const days = Math.floor(hours / 24);
-                    const remaining_hours = hours % 24;
-
-                    if (days > 0) {
-                        time_point_text = `${days}d ${remaining_hours.toFixed(1)}h`;
-                    } else {
-                        time_point_text = `${hours.toFixed(1)}h`;
-                    }
-                }
-
-                const formattedRankChange = rank_change_per_day > 0 ? `+${rank_change_per_day.toFixed(2)}` : rank_change_per_day.toFixed(2);
-                const outputStdDev = isFinite(rank_stddev_per_day) ? rank_stddev_per_day.toFixed(2) : "???";
-//                allLines.push(getTerm('statsForgettingCurveWithStdDev').replace('{rank_change}', formattedRankChange).replace('{stddev}', outputStdDev));
-
                 const firstTimeFailures = getReviewCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
@@ -512,20 +454,26 @@ export async function showDetailedStats() {
                     requireLastAnswerIncorrect: false
                 }).length;
 
-                if (allRepeats) {
-                    allLines.push(getTerm('statsFailuresRepeat').replace('{count_other}', allRepeats-firstTimeFailures).replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)));
+                if (firstTimeFailures > 0) {
+                    failureText = getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime));
+                }
+                if (allRepeats - firstTimeFailures > 0) {
+                    oldFailureText = getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures);
                 }
             }
         }
 
+        const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
+        const novelProblemText = getTerm('statsNovelProblems').replace('{count}', novelProblemCount);
+
         let resultText;
-        const totalProblems = state.answerHistory.length;
-        if (allLines.length === 0) {
-            // This case should be practically unreachable now that forgetting curve text is unconditioned
-            resultText = getTerm('statsNoTrends').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
+        if (observationLines.length === 0) {
+            resultText = getTerm('statsNoTrends').replace('{total}', state.answerHistory.length).replace('{analysis}', Math.min(state.answerHistory.length, 500));
         } else {
-            const intro = getTerm('statsIntroNew').replace('{total}', totalProblems).replace('{analysis}', analysisProblems);
-            resultText = intro + "- " + allLines.join("\n- ");
+            const intro = getTerm('statsIntroNew');
+            const observationBlock = "- " + observationLines.join("\n- ");
+            const summaryBlock = [failureText, oldFailureText, novelProblemText].filter(Boolean).join('\n');
+            resultText = [intro, observationBlock, summaryBlock].filter(Boolean).join("\n\n");
         }
         alert(resultText);
     } catch (error) {
