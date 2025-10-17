@@ -109,5 +109,10 @@ def generate_variations_directly_to_sgf(
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
             new_cumulative_perc,
-            is_primary and move_info == current_pos_analysis["moveInfos"][0]
+            is_primary
         )
+
+        is_primary = False
+
+        if cumulative_playout_perc < MIN_PLAYOUT_PERC:
+            break
