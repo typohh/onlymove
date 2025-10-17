@@ -16,6 +16,17 @@ async function simpleHash(str) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function weightedRandomSelect(items, weightFn) {
+    const totalWeight = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
+    if (totalWeight === 0) return items[0]; // fallback to first if no weights
+    let random = Math.random() * totalWeight;
+    for (const item of items) {
+        random -= Math.max(0, weightFn(item));
+        if (random <= 0) return item;
+    }
+    return items[0]; // fallback
+}
+
 async function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
