@@ -207,14 +207,25 @@ const updateAnalysisModeUI = () => {
 
     // Show and configure button4 ('Ignore')
     const ignoreButton = document.getElementById('button4');
-    ignoreButton.style.display = 'inline-block';
-    ignoreButton.textContent = getTerm('ignore'); // Assuming 'ignore' key will be added to i18n
-
     const problem = state.problemHistory[1];
-    if ((problem && problem.linked) || (problem && !problem.isRepeat)) {
-        ignoreButton.classList.add('disabled');
+
+    if (problem && problem.linked) {
+        ignoreButton.style.display = 'none';
+    } else if (problem) {
+        ignoreButton.style.display = 'inline-block';
+        ignoreButton.textContent = getTerm('ignore');
+
+        const lastAnswer = state.answerHistory[state.answerHistory.length - 1];
+        const wasFailure = lastAnswer && lastAnswer.problemId === problem.filename.replace('.sgf', '') && !lastAnswer.correct;
+        const isRepeat = problem.isRepeat;
+
+        if (isRepeat || wasFailure) {
+            ignoreButton.classList.remove('disabled');
+        } else {
+            ignoreButton.classList.add('disabled');
+        }
     } else {
-        ignoreButton.classList.remove('disabled');
+        ignoreButton.style.display = 'none';
     }
 }
 

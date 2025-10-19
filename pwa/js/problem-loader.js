@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, updateAnswerHistory } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -67,6 +67,12 @@ async function selectProblem() {
         
         // If we still can't find it, log an error and fall back.
         console.error(`Failed to load review problem ${chosenProblemInfo.problemId}.`);
+        const answerIndex = state.answerHistory.map(a => a.problemId).lastIndexOf(chosenProblemInfo.problemId);
+        if (answerIndex !== -1) {
+            const newAnswerHistory = [...state.answerHistory];
+            newAnswerHistory[answerIndex] = { ...newAnswerHistory[answerIndex], ignored: true };
+            updateAnswerHistory(newAnswerHistory);
+        }
     }
 
     // Default selection logic (fallback)

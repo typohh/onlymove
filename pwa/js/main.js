@@ -209,17 +209,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.classList.contains('disabled')) return;
 
         if (state.appMode === APP_MODES.ANALYZING) {
-            if (confirm(getTerm('ignoreConfirm'))) { // Assuming 'ignoreConfirm' key will be added to i18n
+            if (confirm(getTerm('ignoreConfirm'))) {
                 const problem = state.problemHistory[1];
                 if (!problem) return;
 
                 const problemId = problem.filename.replace('.sgf', '');
                 const answerHistory = [...state.answerHistory];
-                const lastAnswer = answerHistory.findLast(a => a.problemId === problemId);
+                const lastAnswer = answerHistory[answerHistory.length - 1];
 
-                if (lastAnswer) {
+                if (lastAnswer && lastAnswer.problemId === problemId) {
                     lastAnswer.ignored = true;
                     updateAnswerHistory(answerHistory);
+                } else {
+                    Sentry.captureMessage("Ignore button: last answer does not match problem.", {
+                        extra: {
+                            lastAnswer,
+                            problemId
+                        }
+                    });
                 }
 
                 // Exit analysis mode and load next problem
