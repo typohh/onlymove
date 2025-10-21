@@ -266,7 +266,8 @@ async function trainUserModel(trainingData, modelState) {
             features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
             features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
             features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
-            features[MODEL_INDICES.DATE] = i / n;
+            // features[MODEL_INDICES.DATE] = i / n;
+            features[MODEL_INDICES.DATE] = 0;
             if (!p.isRepeat) {
                 features[MODEL_INDICES.IS_NOVEL] = 1;
             } else {
@@ -463,11 +464,12 @@ export async function showDetailedStats() {
         const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
         const novelProblemText = getTerm('statsNovelProblems').replace('{count}', novelProblemCount);
 
-        let olsResults = `\n\n${getTerm('statsOlsResults')}\n${getTerm('statsIntercept')} ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
+        let olsResults = `\n\n${getTerm('statsModelCoefficients')}\n${getTerm('statsIntercept')} ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
-            if( varIndex == MODEL_INDICES.PROBLEM_QUALITY ) {
+            // Disable output for PROBLEM_QUALITY and DATE
+            if (varIndex == MODEL_INDICES.PROBLEM_QUALITY || varIndex == MODEL_INDICES.DATE) {
                 continue;
             }
             olsResults += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
