@@ -417,7 +417,7 @@ export async function showDetailedStats() {
             if (termKey) {
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = cdf * 100;
+                const conf = (1-cdf) * 100;
 
                 observations.push({
                     message: getTerm(termKey).replace('{percent_change}', conf.toFixed(0)),

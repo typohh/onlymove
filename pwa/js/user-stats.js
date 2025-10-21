@@ -103,7 +103,7 @@ export function updateUserStats(isCorrect) {
     if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
     else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
-    setTimeout(calculateAndStoreStatsResults, 0);
+    setTimeout(calculateAndStoreStatsResults, 1000); // a bit crude, but animations should be completed in 1 second.
 
     return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
 }
