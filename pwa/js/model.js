@@ -103,7 +103,7 @@ export function getReviewCandidates(options = {}) {
             features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
 
             features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
-            features[MODEL_INDICES.PROBLEM_QUALITY] = lastAnswer.problemQuality || 0.5;
+            features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
             features[MODEL_INDICES.DATE] = 1.0; // For a new attempt, it's the latest
             features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
 
@@ -251,7 +251,7 @@ async function trainUserModel(trainingData, modelState) {
 
     const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
     const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
-    const lambda = 0.001; // L2 regularization parameter
+    const lambda = 0.1; // L2 regularization parameter
 
     let prevLoss = Infinity;
     const startTime = Date.now();
@@ -265,7 +265,7 @@ async function trainUserModel(trainingData, modelState) {
             features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
             features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
             features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
-            features[MODEL_INDICES.PROBLEM_QUALITY] = p.problemQuality || 0.5;
+            features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
             features[MODEL_INDICES.DATE] = i / n;
             if (!p.isRepeat) {
                 features[MODEL_INDICES.IS_NOVEL] = 1;
@@ -408,21 +408,18 @@ export async function showDetailedStats() {
 
         for (const result of results) {
             const { coeff, se, varIndex } = result;
-            if (varIndex === MODEL_INDICES.IS_NOVEL || varIndex === MODEL_INDICES.RECALL_FORMULA) continue;
 
             let termKey;
-            if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTime';
-            else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTime';
-            else if (varIndex === MODEL_INDICES.PROBLEM_QUALITY) termKey = 'statsProblemQuality';
+            if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTimeNatural';
+            else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTimeNatural';
 
             if (termKey) {
                 const z = Math.abs(coeff) / se;
-                const conf = (2 * (0.5 * (1 + math.erf(z / Math.sqrt(2)))) - 1) * 100;
-                const rank_change = logitsToRank(base_logit, base_logit + coeff);
-                const rank_stddev = Math.abs(se / 0.28);
-                const formattedRankChange = rank_change > 0 ? `+${rank_change.toFixed(1)}` : rank_change.toFixed(1);
+                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+                const conf = cdf * 100;
+
                 observations.push({
-                    message: getTerm(termKey).replace('{rank_change}', formattedRankChange).replace('{stddev}', rank_stddev.toFixed(1)),
+                    message: getTerm(termKey).replace('{percent_change}', conf.toFixed(0)),
                     conf
                 });
             }
@@ -466,15 +463,24 @@ export async function showDetailedStats() {
         const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
         const novelProblemText = getTerm('statsNovelProblems').replace('{count}', novelProblemCount);
 
+        let olsResults = `\n\n${getTerm('statsOlsResults')}\n${getTerm('statsIntercept')} ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
+        for (const result of results) {
+            const { coeff, se, varIndex } = result;
+            const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
+            if( varIndex == MODEL_INDICES.PROBLEM_QUALITY ) {
+                continue;
+            }
+            olsResults += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
+        }
+
         let resultText;
         if (observationLines.length === 0) {
             resultText = getTerm('statsNoTrends').replace('{total}', state.answerHistory.length).replace('{analysis}', Math.min(state.answerHistory.length, 500));
         } else {
-            const intro = getTerm('statsIntroNew');
-            const observationBlock = "- " + observationLines.join("\n- ");
             const summaryBlock = [failureText, oldFailureText, novelProblemText].filter(Boolean).join('\n');
-            resultText = [intro, observationBlock, summaryBlock].filter(Boolean).join("\n\n");
+            resultText = [observationLines.join("\n"), summaryBlock].filter(Boolean).join("\n");
         }
+        resultText += olsResults;
         alert(resultText);
     } catch (error) {
         console.error('Failed to generate stats text:', error);

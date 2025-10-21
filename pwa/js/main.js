@@ -412,7 +412,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 Sentry.captureMessage('Reloading due to missing board or game state on visibilitychange', 'error');
                 location.reload();
             } else {
-                setTimeout(() => redraw(), 0);
+                requestAnimationFrame(() => redraw());
             }
         }
     });
