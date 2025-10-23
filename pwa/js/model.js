@@ -464,7 +464,18 @@ export async function showDetailedStats() {
         const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
         const novelProblemText = getTerm('statsNovelProblems').replace('{count}', novelProblemCount);
 
-        let olsResults = `\n\n${getTerm('statsModelCoefficients')}\n${getTerm('statsIntercept')} ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
+        const slippedProblemCount = getReviewCandidates({
+            lowerProbabilityBound: 0,
+            upperProbabilityBound: 0.6,
+            requireLastAnswerIncorrect: false
+        }).length;
+
+        const ignoredProblemCount = state.answerHistory.filter(p => p.ignored).length;
+        const ignoredProblemText = getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount);
+
+
+        let olsResults = getTerm('statsModelCoefficients');
+        olsResults += `\nINTERCEPT ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
@@ -479,9 +490,10 @@ export async function showDetailedStats() {
         if (observationLines.length === 0) {
             resultText = getTerm('statsNoTrends').replace('{total}', state.answerHistory.length).replace('{analysis}', Math.min(state.answerHistory.length, 500));
         } else {
-            const summaryBlock = [failureText, oldFailureText, novelProblemText].filter(Boolean).join('\n');
+            const summaryBlock = [failureText, oldFailureText, novelProblemText, ignoredProblemText].filter(Boolean).join('\n');
             resultText = [observationLines.join("\n"), summaryBlock].filter(Boolean).join("\n");
         }
+        resultText += "\n\n";
         resultText += olsResults;
         alert(resultText);
     } catch (error) {
