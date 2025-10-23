@@ -384,32 +384,32 @@ export async function showDetailedStats() {
         return;
     }
 
-    if (isCalculatingStats) {
-        Sentry.captureMessage("showDetailedStats called while isCalculatingStats is true, showing previous results");
-    } else {
-        await calculateAndStoreStatsResults();
+    if (!state.modelParams) {
+        alert(getTerm('statsFailed'));
+        return;
     }
 
-    if (state.statsResults === null) {
+    if (!state.statsResults) {
+        const validHistory = state.answerHistory.filter(p => p.problemRating !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+        const trainingData = prepareTrainingData(history, validHistory);
+        const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
+        setStatsResults(finalResults);
+    }
+
+    if (!state.statsResults) {
         alert(getTerm('statsFailed'));
         return;
     }
 
     try {
-        const { results } = state.statsResults;
-        const observations = [];
-        
-        const finalParams = state.modelParams || Array(Object.keys(MODEL_INDICES).length).fill(0);
+        const { results, varCovarMatrix } = state.statsResults;
+        const finalParams = state.modelParams;
+        let resultText = '';
 
-        const base_logit = finalParams[MODEL_INDICES.INTERCEPT] +
-            finalParams[MODEL_INDICES.TIME_SOLVING] * 0.5 +
-            finalParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * state.userRank +
-            finalParams[MODEL_INDICES.PROBLEM_QUALITY] * 0.5 +
-            finalParams[MODEL_INDICES.DATE] * 0.5;
-
+        // Block 1: Observations
         for (const result of results) {
             const { coeff, se, varIndex } = result;
-
             let termKey;
             if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTimeNatural';
             else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTimeNatural';
@@ -417,21 +417,15 @@ export async function showDetailedStats() {
             if (termKey) {
                 const z = Math.abs(coeff) / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = (1-cdf) * 100;
-
-                observations.push({
-                    message: getTerm(termKey).replace('{percent_change}', conf.toFixed(0)),
-                    conf
-                });
+                const conf = (1 - cdf) * 100;
+                resultText += getTerm(termKey).replace('{percent_change}', conf.toFixed(0)) + '\n';
             }
         }
-        observations.sort((a, b) => b.conf - a.conf);
 
-        const observationLines = observations.map(o => o.message);
-        let failureText = '';
-        let oldFailureText = '';
+        // Separator
+        resultText += '\n';
 
-        const { varCovarMatrix } = state.statsResults;
+        // Block 2: Summary Text
         if (varCovarMatrix) {
             const N_idx = MODEL_INDICES.IS_NOVEL;
             const R_idx = MODEL_INDICES.RECALL_FORMULA;
@@ -453,52 +447,44 @@ export async function showDetailedStats() {
                 }).length;
 
                 if (firstTimeFailures > 0) {
-                    failureText = getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime));
+                    resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
                 }
                 if (allRepeats - firstTimeFailures > 0) {
-                    oldFailureText = getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures);
+                    resultText += getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures) + '\n';
                 }
             }
         }
 
         const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
-        const novelProblemText = getTerm('statsNovelProblems').replace('{count}', novelProblemCount);
+        resultText += getTerm('statsNovelProblems').replace('{count}', novelProblemCount) + '\n';
 
         const slippedProblemCount = getReviewCandidates({
             lowerProbabilityBound: 0,
             upperProbabilityBound: 0.6,
             requireLastAnswerIncorrect: false
         }).length;
-
         const ignoredProblemCount = state.answerHistory.filter(p => p.ignored).length;
-        const ignoredProblemText = getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount);
+        resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
 
+        // Separator
+        resultText += '\n';
 
-        let olsResults = getTerm('statsModelCoefficients');
-        olsResults += `\nINTERCEPT ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
+        // Block 3: OLS Model Coefficients
+        resultText += getTerm('statsModelCoefficients');
+        resultText += `\nINTERCEPT ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
-            // Disable output for PROBLEM_QUALITY and DATE
-            if (varIndex == MODEL_INDICES.PROBLEM_QUALITY || varIndex == MODEL_INDICES.DATE) {
-                continue;
+            if (varIndex !== MODEL_INDICES.PROBLEM_QUALITY && varIndex !== MODEL_INDICES.DATE) {
+                resultText += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
             }
-            olsResults += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
         }
 
-        let resultText;
-        if (observationLines.length === 0) {
-            resultText = getTerm('statsNoTrends').replace('{total}', state.answerHistory.length).replace('{analysis}', Math.min(state.answerHistory.length, 500));
-        } else {
-            const summaryBlock = [failureText, oldFailureText, novelProblemText, ignoredProblemText].filter(Boolean).join('\n');
-            resultText = [observationLines.join("\n"), summaryBlock].filter(Boolean).join("\n");
-        }
-        resultText += "\n\n";
-        resultText += olsResults;
         alert(resultText);
+
     } catch (error) {
         console.error('Failed to generate stats text:', error);
         Sentry.captureException(error);
-        alert('Could not display statistical analysis.');
+        alert(getTerm('statsFailed'));
     }
 }

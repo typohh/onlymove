@@ -150,7 +150,7 @@ const localization = {
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',
     insufficientReviewMessage: 'Repeat mistake! You have spent only {seconds} seconds reviewing this problem. Your past results suggest there is a {confidence}% probability you will remember it better with more time spent reviewing.',
-    iWontRushIt: "I won't rush it.",
+    iWontRushIt: "I promise to not to rush!",
     rankUpTo: 'Rank up to {rank}',
     rankDownTo: 'Rank down to {rank}',
     installPrompt: 'Install as an app for a better experience!',
@@ -161,17 +161,20 @@ const localization = {
     blackCaptures: 'Black Captures',
     whiteCaptures: 'White Captures',
     whiteAdjustment: 'White Adjustment',
+
     statsNotEnough: 'You have completed {count} tsumegos, 5 needed to enable statistics.',
-    statsSolvingTimeNatural: 'When you have spent more time solving there has been a {percent_change}% chance finding the correct move.',
-    statsReviewTimeNatural: 'When you spend more time reviewing, there’s a {percent_change}% chance that you will find the correct move when encounter the problem again later.',
-    statsNoTrends: 'Based on your most recent {analysis} out of {total} problems, there are no statistically significant trends. Keep playing to gather more data!',
-    statsFailed: 'Could not calculate stats.',
-    statsFailures: 'You have {count_recent} recent failures that will be repeated after a {hours} hour delay.',
+    statsFailed: 'No stats available right now, try completing another problem.',
+
+    statsSolvingTimeNatural: 'There is a {percent_change}% likelihood that using more time solving also makes you more likely to play the correct move.',
+    statsReviewTimeNatural: 'There is a {percent_change}% likelihood that using more time reviewing also makes you more likely to play the correct move next time you see the problem.',
+    statsFailures: 'You have {count_recent} recent failures, each which will be repeated after a {hours} hour delay.',
     statsOldFailures: 'There are an additional {count_other} past failures that are occasionally repeated.',
     statsNovelProblems: 'You have sofar attempted {count} unique problems.',
     statsIgnoredProblems: "You have ignored {count_ignored} problems, and another {count_slipped} were abandoned due to irregular practice.",
+
     statsModelCoefficients: 'Model Coefficients:',
     statsIntercept: 'Intercept:',
+
     ignore: 'Ignore',
     ignoreConfirm: 'Do you feel like you cannot learn anything from this problem and don\'t want to see it again in the future?'
   }
