@@ -107,7 +107,7 @@ export function getReviewCandidates(options = {}) {
             features[MODEL_INDICES.DATE] = 1.0; // For a new attempt, it's the latest
             features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
 
-            const t = now - lastAnswer.date;
+            const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
             const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
             const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
             features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
@@ -251,7 +251,7 @@ async function trainUserModel(trainingData, modelState) {
 
     const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
     const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
-    const lambda = 0.1; // L2 regularization parameter
+    const lambda = 1; // L2 regularization parameter
 
     let prevLoss = Infinity;
     const startTime = Date.now();
@@ -266,13 +266,13 @@ async function trainUserModel(trainingData, modelState) {
             features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
             features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
             features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
-            // features[MODEL_INDICES.DATE] = i / n;
+         features[MODEL_INDICES.DATE] = i / n;
             features[MODEL_INDICES.DATE] = 0;
             if (!p.isRepeat) {
                 features[MODEL_INDICES.IS_NOVEL] = 1;
             } else {
                 const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
-                const t = p.date - (prevAnswer ? prevAnswer.date : p.date);
+                const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
                 const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
 
                 const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
@@ -302,6 +302,8 @@ async function trainUserModel(trainingData, modelState) {
                 target = -1;
             } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
                 target = -10;
+            } else if (j === MODEL_INDICES.IS_NOVEL) {
+                target = -1;
             }
             l2_penalty += Math.pow(params[j] - target, 2);
         }
@@ -316,6 +318,8 @@ async function trainUserModel(trainingData, modelState) {
                     target = -1;
                 } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
                     target = -10;
+                } else if (j === MODEL_INDICES.IS_NOVEL) {
+                    target = -1;
                 }
                 gradient[j] += (lambda / n) * (params[j] - target);
             }
@@ -347,7 +351,7 @@ function calculateResultsAndStdErrors(finalParams, trainingData) {
             features[MODEL_INDICES.IS_NOVEL] = 1;
         } else {
             const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
-            const t = p.date - (prevAnswer ? prevAnswer.date : p.date);
+            const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
             const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
             
             const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
@@ -433,25 +437,21 @@ export async function showDetailedStats() {
             const R = finalParams[R_idx];
 
             if (Math.abs(R) > 1e-9) {
-                const t_eq_ms = Math.exp(N / R) - 1;
+                const t_eq_days = Math.exp(N / R) - 1;
                 const firstTimeFailures = getReviewCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: true
                 }).length;
-                const firsttimeFailureTime = t_eq_ms / (3600 * 1000);
+                const firsttimeFailureTime = t_eq_days * 24;
                 const allRepeats = getReviewCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: false
                 }).length;
 
-                if (firstTimeFailures > 0) {
-                    resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
-                }
-                if (allRepeats - firstTimeFailures > 0) {
-                    resultText += getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures) + '\n';
-                }
+                resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
+                resultText += getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures) + '\n';
             }
         }
 
