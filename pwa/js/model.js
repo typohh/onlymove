@@ -53,6 +53,46 @@ export function calculatePercentile(sortedArr, target) {
     return (below + 0.5 * equal) / sortedArr.length;
 }
 
+function getFeaturesForPrediction(lastAnswer, { allReviewTimes, now }) {
+    const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
+    features[MODEL_INDICES.INTERCEPT] = 1;
+    features[MODEL_INDICES.TIME_SOLVING] = 0.5; // Neutral value for prediction
+
+    const candidateReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
+    const reviewTimeFeature = calculatePercentile(allReviewTimes, candidateReviewTime);
+    features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
+
+    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
+    features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
+
+    const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
+    const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
+    const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
+    features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
+    
+    return features;
+}
+
+function getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }) {
+    const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
+    features[MODEL_INDICES.INTERCEPT] = 1;
+    features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
+    features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
+    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
+
+    if (!p.isRepeat) {
+        features[MODEL_INDICES.IS_NOVEL] = 1;
+    } else {
+        const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
+        const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
+        const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
+        const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r));
+        features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
+    }
+    return features;
+}
+
+
 export function getReviewCandidates(options = {}) {
     const {
         lowerProbabilityBound = 0.60,
@@ -93,25 +133,7 @@ export function getReviewCandidates(options = {}) {
         }
 
         if (condition) {
-            const features = Array(finalParams.length).fill(0);
-
-            features[MODEL_INDICES.INTERCEPT] = 1;
-            features[MODEL_INDICES.TIME_SOLVING] = 0.5; // Neutral value for prediction
-
-            const candidateReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
-            const reviewTimeFeature = calculatePercentile(allReviewTimes, candidateReviewTime);
-            features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
-
-            features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
-            features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
-            features[MODEL_INDICES.DATE] = 1.0; // For a new attempt, it's the latest
-            features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
-
-            const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
-            const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
-            const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
-            features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
-
+            const features = getFeaturesForPrediction(lastAnswer, { allReviewTimes, now });
             const logit = features.reduce((acc, val, j) => acc + val * finalParams[j], 0);
             const probability = 1 / (1 + Math.exp(-logit));
 
@@ -137,10 +159,8 @@ export const MODEL_INDICES = {
     TIME_SOLVING: 1,
     REVIEW_TIME: 2,
     PROBLEM_DIFFICULTY: 3,
-    PROBLEM_QUALITY: 4,
-    DATE: 5,
-    IS_NOVEL: 6,
-    RECALL_FORMULA: 7,
+    IS_NOVEL: 4,
+    RECALL_FORMULA: 5,
 };
 
 export function probToRank(start, end) {
@@ -259,28 +279,7 @@ async function trainUserModel(trainingData, modelState) {
     for (let epoch = 0; epoch < maxEpochs; epoch++) {
         adamState.t++;
 
-        const X = history.map((p, i) => {
-            const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
-            features[MODEL_INDICES.INTERCEPT] = 1;
-            features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
-            features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
-            features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
-            features[MODEL_INDICES.PROBLEM_QUALITY] = 0;
-         features[MODEL_INDICES.DATE] = i / n;
-            features[MODEL_INDICES.DATE] = 0;
-            if (!p.isRepeat) {
-                features[MODEL_INDICES.IS_NOVEL] = 1;
-            } else {
-                const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
-                const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
-                const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
-
-                const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
-                
-                features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
-            }
-            return features;
-        });
+        const X = history.map((p, i) => getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }));
 
         const gradient = Array(params.length).fill(0);
         let currentLoss = 0;
@@ -339,27 +338,7 @@ async function trainUserModel(trainingData, modelState) {
 function calculateResultsAndStdErrors(finalParams, trainingData) {
     const { percentileTime, percentileReview, history, validHistory, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
 
-    const X = history.map((p, i) => {
-        const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
-        features[MODEL_INDICES.INTERCEPT] = 1;
-        features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
-        features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
-        features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
-        features[MODEL_INDICES.PROBLEM_QUALITY] = p.problemQuality || 0.5;
-        features[MODEL_INDICES.DATE] = i / n;
-        if (p.problemType === 'novel') {
-            features[MODEL_INDICES.IS_NOVEL] = 1;
-        } else {
-            const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
-            const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
-            const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
-            
-            const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r))
-            
-            features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
-        }
-        return features;
-    });
+    const X = history.map((p, i) => getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }));
 
     const X_matrix = math.matrix(X);
     const p_hat = X.map(xi => 1 / (1 + Math.exp(-xi.reduce((acc, val, j) => acc + val * finalParams[j], 0))));
@@ -375,7 +354,6 @@ function calculateResultsAndStdErrors(finalParams, trainingData) {
         if (i === MODEL_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
         else if (i === MODEL_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
         else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
-        else if (i === MODEL_INDICES.DATE) scaleFactor = n;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }
     return { results, varCovarMatrix };
@@ -475,9 +453,7 @@ export async function showDetailedStats() {
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
-            if (varIndex !== MODEL_INDICES.PROBLEM_QUALITY && varIndex !== MODEL_INDICES.DATE) {
-                resultText += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
-            }
+            resultText += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
         }
 
         alert(resultText);
