@@ -163,6 +163,14 @@ export const MODEL_INDICES = {
     RECALL_FORMULA: 5,
 };
 
+const L2_REGULARIZATION_TARGETS = {
+    [MODEL_INDICES.TIME_SOLVING]: -0.1,
+    [MODEL_INDICES.REVIEW_TIME]: -0.1,
+    [MODEL_INDICES.PROBLEM_DIFFICULTY]: -10,
+    [MODEL_INDICES.IS_NOVEL]: -1,
+    [MODEL_INDICES.RECALL_FORMULA]: -1,
+};
+
 export function probToRank(start, end) {
     const epsilon = 1e-9;
     start = Math.max(epsilon, Math.min(1 - epsilon, start));
@@ -271,7 +279,7 @@ async function trainUserModel(trainingData, modelState) {
 
     const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
     const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
-    const lambda = 1; // L2 regularization parameter
+    const lambda = 10; // L2 regularization parameter
 
     let prevLoss = Infinity;
     const startTime = Date.now();
@@ -296,14 +304,7 @@ async function trainUserModel(trainingData, modelState) {
         let l2_penalty = 0;
         for (let j = 0; j < params.length; j++) {
             if (j === MODEL_INDICES.INTERCEPT) continue;
-            let target = 0;
-            if (j === MODEL_INDICES.RECALL_FORMULA) {
-                target = -1;
-            } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
-                target = -10;
-            } else if (j === MODEL_INDICES.IS_NOVEL) {
-                target = -1;
-            }
+            const target = L2_REGULARIZATION_TARGETS[j] || 0;
             l2_penalty += Math.pow(params[j] - target, 2);
         }
         currentLoss += (lambda / 2) * l2_penalty;
@@ -312,14 +313,7 @@ async function trainUserModel(trainingData, modelState) {
         for (let j = 0; j < params.length; j++) {
             gradient[j] /= n;
             if (j !== MODEL_INDICES.INTERCEPT) {
-                let target = 0;
-                if (j === MODEL_INDICES.RECALL_FORMULA) {
-                    target = -1;
-                } else if (j === MODEL_INDICES.PROBLEM_DIFFICULTY) {
-                    target = -10;
-                } else if (j === MODEL_INDICES.IS_NOVEL) {
-                    target = -1;
-                }
+                const target = L2_REGULARIZATION_TARGETS[j] || 0;
                 gradient[j] += (lambda / n) * (params[j] - target);
             }
             adamState.m[j] = beta1 * adamState.m[j] + (1 - beta1) * gradient[j];
