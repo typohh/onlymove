@@ -108,6 +108,22 @@ export function getReviewCandidates(options = {}) {
     }
     const finalParams = state.modelParams;
 
+    const clippedParams = [...finalParams];
+    const N = clippedParams[MODEL_INDICES.IS_NOVEL];
+    const R = clippedParams[MODEL_INDICES.RECALL_FORMULA];
+
+    const min_hours = 18;
+    const max_hours = 168; // 7 days
+    const min_ratio = Math.log(1 + min_hours / 24);
+    const max_ratio = Math.log(1 + max_hours / 24);
+    const current_ratio = N / R;
+
+    if (current_ratio < min_ratio) {
+        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / min_ratio;
+    } else if (current_ratio > max_ratio) {
+        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
+    }
+
     const recentHistory = state.answerHistory.slice(-REVIEW_CANDIDATE_HISTORY_LENGTH);
 
     const allReviewTimes = recentHistory
@@ -134,7 +150,7 @@ export function getReviewCandidates(options = {}) {
 
         if (condition) {
             const features = getFeaturesForPrediction(lastAnswer, { allReviewTimes, now });
-            const logit = features.reduce((acc, val, j) => acc + val * finalParams[j], 0);
+            const logit = features.reduce((acc, val, j) => acc + val * clippedParams[j], 0);
             const probability = 1 / (1 + Math.exp(-logit));
 
             if (probability >= lowerProbabilityBound && probability <= upperProbabilityBound) {
