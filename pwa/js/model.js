@@ -407,9 +407,9 @@ export async function showDetailedStats() {
             else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTimeNatural';
 
             if (termKey) {
-                const z = Math.abs(coeff) / se;
+                const z = coeff / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = (1 - cdf) * 100;
+                const conf = cdf * 100;
                 resultText += getTerm(termKey).replace('{percent_change}', conf.toFixed(0)) + '\n';
             }
         }
