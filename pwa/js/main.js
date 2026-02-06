@@ -14,7 +14,7 @@ try {
 
 import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
 import { showDetailedStats } from './model.js';
-import { loadSgf, redraw } from './board.js';
+import { loadSgf, redraw, initializeBoard } from './board.js';
 import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
@@ -408,12 +408,45 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
     const resumeOverlay = document.getElementById('resume-overlay');
+    const boardContainer = document.getElementById('board-container');
 
-    // Recovery from killed session
+    /**
+     * Check if board container has valid canvases and reinitialize if needed.
+     * This addresses Android PWA canvas loss after task switching.
+     * Returns true if board was recovered, false if reload is needed.
+     */
+    const recoverBoardIfNeeded = () => {
+        // Solution #6: Check if board container actually has canvases
+        const hasCanvases = boardContainer.children.length > 0 && 
+                           boardContainer.querySelector('canvas');
+        
+        if (!hasCanvases || !state.board || !state.kifuReader) {
+            // Canvas was lost or state is invalid
+            if (state.kifuReader) {
+                // Solution #2: Fully reinitialize the board instead of just redrawing
+                try {
+                    const size = state.kifuReader.game.position.size;
+                    initializeBoard(size);
+                    redraw();
+                    return true;
+                } catch (e) {
+                    Sentry.captureMessage('Board recovery failed: ' + e.message, 'error');
+                    return false;
+                }
+            }
+            return false;
+        }
+        
+        // Canvas exists, just redraw
+        redraw();
+        return true;
+    };
+
+    // Recovery from killed session or bfcache
     window.addEventListener('pageshow', (event) => {
         if (event.persisted) {
-            // From bfcache, check if state is intact
-            if (!state.board || !state.game) {
+            // From bfcache, attempt recovery
+            if (!recoverBoardIfNeeded()) {
                 location.reload();
             }
         }
@@ -424,17 +457,31 @@ document.addEventListener('DOMContentLoaded', async () => {
             resumeOverlay.className = 'resume-overlay';
         } else if (document.visibilityState === 'visible') {
             resumeOverlay.className = 'resume-overlay-hidden';
-            if (!state.board || !state.game) {
-                Sentry.captureMessage('Reloading due to missing board or game state on visibilitychange', 'error');
-                location.reload();
-            } else {
-                requestAnimationFrame(() => redraw());
-            }
+            
+            requestAnimationFrame(() => {
+                if (!recoverBoardIfNeeded()) {
+                    Sentry.captureMessage('Canvas recovery failed on visibilitychange, reloading', 'error');
+                    location.reload();
+                }
+            });
         }
     });
 
+    // Solution #4: Resume overlay click triggers full board recreation for manual recovery
     resumeOverlay.addEventListener('click', () => {
         resumeOverlay.className = 'resume-overlay-hidden';
+        
+        // Force full board recreation when user clicks to resume
+        if (state.kifuReader) {
+            try {
+                const size = state.kifuReader.game.position.size;
+                initializeBoard(size);
+                redraw();
+            } catch (e) {
+                Sentry.captureMessage('Manual board recovery failed: ' + e.message, 'error');
+                location.reload();
+            }
+        }
     });
 
 });

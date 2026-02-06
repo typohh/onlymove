@@ -255,7 +255,10 @@ function prepareTrainingData(history, validHistory) {
 
     const timeTakenValues = history.map(p => p.timeTaken);
     const sortedTime = [...timeTakenValues].sort((a, b) => a - b);
-    const time_per_percentile_min = (sortedTime[Math.ceil(p_high * (n - 1))] - sortedTime[Math.floor(p_low * (n - 1))]) / (60000 * (p_high - p_low));
+    const denominator = 60000 * (p_high - p_low);
+    const time_per_percentile_min = denominator > 0 
+        ? (sortedTime[Math.ceil(p_high * (n - 1))] - sortedTime[Math.floor(p_low * (n - 1))]) / denominator
+        : 0;
     
     const percentileTime = timeTakenValues.map(t => calculatePercentile(sortedTime, t));
 
@@ -271,7 +274,10 @@ function prepareTrainingData(history, validHistory) {
     if (reviewTimes.length > 0) {
         const idx_low_r = Math.floor(p_low * (sortedReview.length - 1));
         const idx_high_r = Math.ceil(p_high * (sortedReview.length - 1));
-        time_per_percentile_min_r = (sortedReview[idx_high_r] - sortedReview[idx_low_r]) / (60000 * (p_high - p_low));
+        const denominator_r = 60000 * (p_high - p_low);
+        time_per_percentile_min_r = denominator_r > 0
+            ? (sortedReview[idx_high_r] - sortedReview[idx_low_r]) / denominator_r
+            : 0;
     }
     
     const percentileReview = previousReviewTimes.map(t => calculatePercentile(sortedReview, t));

@@ -1,4 +1,5 @@
-// js/sgf.js\nimport { SGF_COMMENTS } from './constants.js';
+// js/sgf.js
+import { SGF_COMMENTS } from './constants.js';
 
 /**
  * Parses the score from an SGF comment.

@@ -5,7 +5,7 @@ import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
-import { MODEL_INPUT_HISTORY_LENGTH, REVIEW_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, REVIEW_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getReviewCandidates } from './model.js';
 
 async function simpleHash(str) {
@@ -354,7 +354,7 @@ export async function loadTsumegoById(tsumegoId) {
 
         updateProblemHistory(history);
 
-        setAppMode('linked');
+        setAppMode(APP_MODES.LINKED);
 
         loadSgf(sgfContent);
         

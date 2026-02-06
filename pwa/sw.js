@@ -67,7 +67,7 @@ self.addEventListener('fetch', event => {
                     const responseToCache = networkResponse.clone();
                     caches.open(RUNTIME_CACHE_NAME).then(cache => {
                         cache.put(strippedUrl.href, responseToCache);
-                    });
+                    }).catch(err => console.error('Cache put failed:', err));
                     return networkResponse;
                 })
                 .catch(() => {
@@ -96,13 +96,13 @@ self.addEventListener('fetch', event => {
                             const responseToCache = networkResponse.clone();
                             caches.open(RUNTIME_CACHE_NAME).then(cache => {
                                 cache.put(request, responseToCache);
-                            });
+                            }).catch(err => console.error('Cache put failed:', err));
                         }
                     } else {
                         const responseToCache = networkResponse.clone();
                         caches.open(RUNTIME_CACHE_NAME).then(cache => {
                             cache.put(request, responseToCache);
-                        });
+                        }).catch(err => console.error('Cache put failed:', err));
                     }
                 }
                 return networkResponse;

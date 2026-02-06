@@ -108,7 +108,7 @@ const updateSolvingModeUI = () => {
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
 
     // Update Rank Display in the text area
-    if (state.appMode === 'linked') {
+    if (state.appMode === APP_MODES.LINKED) {
         // In view mode, don't show any rank
         text1Elements.forEach(element => element.textContent = '');
         text1Elements.forEach(element => {
