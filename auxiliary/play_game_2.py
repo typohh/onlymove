@@ -1,10 +1,10 @@
 import threading
 import time
 
-from helper import construct_initial_sgf
-from katago_controller import KatagoController
-from katago_queries import KatagoQueries
-from models import get_model, MODEL_FULL, MODEL_9X9
+from utils.helper import construct_initial_sgf
+from utils.katago_controller import KatagoController
+from utils.katago_queries import KatagoQueries
+from utils.models import get_model, MODEL_FULL, MODEL_9X9
 
 DEBUG = True
 MAX_GAMES = 2000

@@ -1,6 +1,42 @@
+# Dependencies
+node_modules/
 .venv/
+env/
+venv/
+.wrangler/
+
+# Python
 __pycache__/
-models/
-.idea/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Build outputs
 /pwa/dist/
 /pwa/wgo.js/
+
+# IDEs and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+models/

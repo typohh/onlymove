@@ -1,12 +1,20 @@
+import os
+import sys
+
+# --- Path Setup ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 # --- Histograms and Correlation ---
 def print_histograms_and_correlation():
     import pandas as pd
     import numpy as np
 
     # Load data
-    rating_df = pd.read_csv('ratings/tsumego_ratings_final.csv')
-    quality_df = pd.read_csv('ratings/tsumego_quality_final.csv')
-    # params_df = pd.read_csv('ratings/tsumego_parameters_final.csv')
+    rating_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv'))
+    quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
+    # params_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_parameters_final.csv'))
     # df = rating_df.merge(quality_df, on='tsumego_id').merge(params_df, on='tsumego_id')
 
     df = rating_df.merge(quality_df, on='tsumego_id')
@@ -37,13 +45,13 @@ def sample_tsumegos_near_rating_with_categories(target_rating, num_closest=500, 
     import pandas as pd
     import numpy as np
 
-    tsumegos_dir = "tsumegos"
+    tsumegos_dir = os.path.join(PROJECT_ROOT, "tsumegos")
 
     # Load data
-    rating_df = pd.read_csv('ratings/tsumego_ratings_final.csv')
-    quality_df = pd.read_csv('ratings/tsumego_quality_final.csv')
-    params_df = pd.read_csv('ratings/tsumego_parameters_final.csv')
-    bot_df = pd.read_csv('ratings/bot_ratings_final.csv')
+    rating_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv'))
+    quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
+    params_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_parameters_final.csv'))
+    bot_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
 
     # Merge tsumego data
     df = rating_df.merge(quality_df, on='tsumego_id').merge(params_df, on='tsumego_id')
@@ -132,13 +140,13 @@ def sample_tsumegos(rating_start, rating_end, quality_start, quality_end, num_sa
     import pandas as pd
     import numpy as np
 
-    tsumegos_dir = "tsumegos"
+    tsumegos_dir = os.path.join(PROJECT_ROOT, "tsumegos")
 
     # Load data
     try:
-        rating_df = pd.read_csv('ratings/tsumego_ratings_final.csv')
-        quality_df = pd.read_csv('ratings/tsumego_quality_final.csv')
-        bot_df = pd.read_csv('ratings/bot_ratings_final.csv')
+        rating_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv'))
+        quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
+        bot_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
     except FileNotFoundError as e:
         print(f"Error loading data file: {e}. Make sure the ratings CSV files are in the 'ratings/' directory.")
         return
@@ -239,12 +247,12 @@ def sample_tsumegos_near_rating_by_quality(target_rating, num_closest=500, num_p
     import pandas as pd
     import numpy as np
 
-    tsumegos_dir = "tsumegos"
+    tsumegos_dir = os.path.join(PROJECT_ROOT, "tsumegos")
 
     # Load data
-    rating_df = pd.read_csv('ratings/tsumego_ratings_final.csv')
-    quality_df = pd.read_csv('ratings/tsumego_quality_final.csv')
-    bot_df = pd.read_csv('ratings/bot_ratings_final.csv')
+    rating_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv'))
+    quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
+    bot_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
 
     # Merge tsumego data
     df = rating_df.merge(quality_df, on='tsumego_id')
@@ -307,13 +315,13 @@ def sample_tsumego_pairs_similar_rating_different_quality(num_pairs=10, bin_size
     import pandas as pd
     import numpy as np
 
-    tsumegos_dir = "tsumegos"
+    tsumegos_dir = os.path.join(PROJECT_ROOT, "tsumegos")
 
     # Load data
     try:
-        rating_df = pd.read_csv('ratings/tsumego_ratings_final.csv')
-        quality_df = pd.read_csv('ratings/tsumego_quality_final.csv')
-        bot_df = pd.read_csv('ratings/bot_ratings_final.csv')
+        rating_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv'))
+        quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
+        bot_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
     except FileNotFoundError as e:
         print(f"Error loading data file: {e}. Make sure the ratings CSV files are in the 'ratings/' directory.")
         return

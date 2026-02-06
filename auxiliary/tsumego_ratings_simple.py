@@ -1,10 +1,18 @@
+import os
+import sys
+import numpy as np
 from collections import defaultdict
 from pathlib import Path
 from pprint import pprint
-from katago_queries import get_rank_number
-import numpy as np
 
-ATTEMPTS_DIR = "attempts"
+# --- Path Setup ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from utils.katago_queries import get_rank_number
+
+ATTEMPTS_DIR = os.path.join(PROJECT_ROOT, "attempts")
 
 
 def find_bot_50_percent_rating(bot_id: str, uniform_ratings: dict, bot_results: dict) -> float:
@@ -110,7 +118,7 @@ def get_tsumego_ratings():
                     continue
 
     # Filter to only include tsumegos with SGF files
-    all_tsumegos = {tid for tid in all_tsumegos if Path(f"tsumegos/{tid}.sgf").exists()}
+    all_tsumegos = {tid for tid in all_tsumegos if Path(os.path.join(PROJECT_ROOT, "tsumegos", f"{tid}.sgf")).exists()}
 
     # REVISED: Fail loudly if no data was loaded. This prevents the script from
     # producing meaningless results or crashing with obscure errors later on.

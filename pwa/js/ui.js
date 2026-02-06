@@ -104,7 +104,7 @@ const updateSolvingModeUI = () => {
         document.getElementById('title').textContent = getTerm('tsumegoMode');
         document.getElementById('title-h').textContent = getTerm('tsumegoMode');
     }
-    
+
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
 
     // Update Rank Display in the text area
@@ -131,30 +131,37 @@ const updateSolvingModeUI = () => {
             element.style.setProperty('--progress', `${progress}%`);
         });
 
-        
+
     }
 
-    // Update "Review" link (button1)
-    const reviewCandidates = getReviewCandidates();
+    // Update button1 (Review/Exit)
     const prevTsumegoLink = document.getElementById('button1');
-    if (reviewCandidates.length > 0) {
-        prevTsumegoLink.textContent = `${getTerm('review')} (${reviewCandidates.length})`;
-    } else {
-        prevTsumegoLink.textContent = getTerm('review');
-    }
-    
-    // Enable review button if there is a problem to review in the history
-    if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {
+    if (state.appMode === APP_MODES.LINKED) {
+        // In view mode, button1 exits back to challenge mode
+        prevTsumegoLink.textContent = getTerm('exit');
         prevTsumegoLink.classList.remove('disabled');
     } else {
-        prevTsumegoLink.classList.add('disabled');
+        // In solving mode, button1 is review
+        const reviewCandidates = getReviewCandidates();
+        if (reviewCandidates.length > 0) {
+            prevTsumegoLink.textContent = `${getTerm('review')} (${reviewCandidates.length})`;
+        } else {
+            prevTsumegoLink.textContent = getTerm('review');
+        }
+
+        // Enable review button if there is a problem to review in the history
+        if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {
+            prevTsumegoLink.classList.remove('disabled');
+        } else {
+            prevTsumegoLink.classList.add('disabled');
+        }
     }
-    
+
     // Update "About" link (button2)
     const aboutLink = document.getElementById('button2');
     aboutLink.textContent = getTerm('about');
     aboutLink.classList.remove('disabled'); // Ensure enabled in solving mode
-    
+
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('stats');
 
@@ -166,7 +173,7 @@ const updateAnalysisModeUI = () => {
     // Update Title Display
     document.getElementById('title').textContent = getTerm('reviewMode');
     document.getElementById('title-h').textContent = getTerm('reviewMode');
-    
+
     // Update text area with analysis information
 
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
@@ -192,7 +199,7 @@ const updateAnalysisModeUI = () => {
     const exitLink = document.getElementById('button1');
     exitLink.textContent = getTerm('exit');
     exitLink.classList.remove('disabled'); // Always enabled in analysis mode
-    
+
     // Update "Undo" link (button2)
     const undoLink = document.getElementById('button2');
     undoLink.textContent = getTerm('undo');
@@ -201,7 +208,7 @@ const updateAnalysisModeUI = () => {
     } else {
         undoLink.classList.add('disabled');
     }
-    
+
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('share');
 
@@ -245,11 +252,11 @@ export function showCaptureDetails() {
 
     const detailText = `${getTerm('komi')}: ${komi}
 ` +
-                       `${getTerm('blackCaptures')}: ${blackCaptures}
+        `${getTerm('blackCaptures')}: ${blackCaptures}
 ` +
-                       `${getTerm('whiteCaptures')}: ${whiteCaptures}
+        `${getTerm('whiteCaptures')}: ${whiteCaptures}
 ` +
-                       `${getTerm('whiteAdjustment')}: ${formatScore(score)}`;
+        `${getTerm('whiteAdjustment')}: ${formatScore(score)}`;
 
     alert(detailText);
 }

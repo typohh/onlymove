@@ -1,6 +1,7 @@
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import traceback
@@ -8,11 +9,17 @@ from decimal import Decimal
 
 import sgfmill.sgf
 
-from katago_controller import KatagoController
-from katago_queries import KatagoQueries, get_all_ranks, get_rank_number, get_rank_str, _get_rank_str
-from models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
+# --- Path Setup ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
-TSUMEGO_DIR = "tsumegos"
+from utils.katago_controller import KatagoController
+from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_number, get_rank_str, _get_rank_str
+from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
+
+TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
+ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts")
 DEBUG = False
 
 class PropagatingThread(threading.Thread):
@@ -168,7 +175,6 @@ class KataGo:
                 return self._query.get_move_probability(policy, next_move_gtp)
             except Exception as e:
                 traceback.print_exc()
-                exit(-1)
                 print(f"KataGo attempt {i + 1}/3 failed. Retrying... Error: {e}")
                 if i == 2:
                     print(f"FATAL: KataGo failed after 3 attempts. Raising exception.")
@@ -333,7 +339,8 @@ def test_bot(bot, attempts_file):
             f.write(f"{key} {value}\n")
 
 
-ATTEMPTS_DIRECTORY = "attempts"
+
+# ATTEMPTS_DIRECTORY is defined at the top
 SKIP_IF_EXISTS = False
 
 if __name__ == "__main__":

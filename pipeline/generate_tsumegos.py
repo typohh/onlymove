@@ -4,17 +4,17 @@ import threading
 import time
 import traceback
 
-from add_variations import add_shallow_variations, generate_variations_directly_to_sgf
-from configurations import BOARD_SIZE, DEBUG, debug
-from helper import construct_initial_sgf
-from katago_controller import KatagoController
-from katago_queries import KatagoQueries, katago_to_sgf_coords
-from models import MODEL_9X9, get_model
-from problem_finder import ProblemFinder
+from utils.add_variations import add_shallow_variations, generate_variations_directly_to_sgf
+from utils.configurations import BOARD_SIZE, DEBUG, debug
+from utils.helper import construct_initial_sgf
+from utils.katago_controller import KatagoController
+from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
+from utils.models import MODEL_9X9, get_model
+from utils.problem_finder import ProblemFinder
 from sgfmill import boards
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "tsumegos")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
 
 print_lock = threading.Lock()
 

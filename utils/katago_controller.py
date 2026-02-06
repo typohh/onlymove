@@ -4,11 +4,11 @@ import re
 import subprocess
 import threading
 
-from models import MODEL_HUMAN, get_model
+from utils.models import MODEL_HUMAN, get_model
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "bots", "analysis.cfg")
-KATAGO_PATH = os.path.join(BASE_DIR, "bots", "katago")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_FILE = os.path.join(PROJECT_ROOT, "bots", "analysis.cfg")
+KATAGO_PATH = os.path.join(PROJECT_ROOT, "bots", "katago")
 
 
 class KatagoController:

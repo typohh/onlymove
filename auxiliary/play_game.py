@@ -1,10 +1,10 @@
 import threading
 import time
 
-from katago_controller import KatagoController
-from katago_queries import KatagoQueries, get_rank_number
-from models import MODEL_BEST_SMALL, get_model, MODEL_FULL
-from problem_finder import problem_to_sgf
+from utils.katago_controller import KatagoController
+from utils.katago_queries import KatagoQueries, get_rank_number
+from utils.models import MODEL_BEST_SMALL, get_model, MODEL_FULL
+from utils.problem_finder import problem_to_sgf
 
 DEBUG = False
 MAX_GAMES = 2000

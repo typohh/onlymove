@@ -9,8 +9,8 @@ import re
 import argparse
 import traceback
 
-from katago_controller import KATAGO_PATH, CONFIG_FILE
-from models import get_model, MODEL_9X9, MODEL_HUMAN, MODEL_BEST_SMALL
+from utils.katago_controller import KATAGO_PATH, CONFIG_FILE
+from utils.models import get_model, MODEL_9X9, MODEL_HUMAN, MODEL_BEST_SMALL
 
 
 verbose = False
@@ -193,7 +193,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='KataGo batch size optimization')
     parser.add_argument('--batchsize', type=int, help='Set specific batch size and skip testing')
-    parser.add_argument('--verbose', help='set verbose mode')
+    parser.add_argument('--verbose', action='store_true', help='set verbose mode')
     args = parser.parse_args()
 
     if args.verbose:

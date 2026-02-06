@@ -1,7 +1,7 @@
 from sgfmill import sgf
 
-from configurations import BOARD_SIZE, KOMI, RULES
-from katago_queries import katago_to_sgf_coords
+from utils.configurations import BOARD_SIZE, KOMI, RULES
+from utils.katago_queries import katago_to_sgf_coords
 
 
 def construct_initial_sgf(moves, solution):

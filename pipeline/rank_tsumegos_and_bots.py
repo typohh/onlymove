@@ -1,5 +1,6 @@
 import glob
 import os
+import sys
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -10,9 +11,15 @@ import numpy as np
 import random
 import re
 import scipy.optimize as opt
+from datetime import datetime
+
+# --- Path Setup ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
 # --- Configuration ---
-DATA_DIRECTORY = "attempts"
+DATA_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts")
 BATCH_SIZE = 8192
 LEARNING_RATE = 0.01
 LOSS_DROP_THRESHOLD = 0.001  # Stop training if loss improves by less than 0.1%
@@ -64,22 +71,52 @@ def load_data(data_dir):
     sql_file = os.path.join(data_dir, 'database.sql')
     user_attempts = []
     print(f"Loading user data from {sql_file}...")
-    insert_pattern = re.compile(r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\(\d+,'([^']+)','([^']+)',([01]),'.*?'\);")
+    # Updated regex to capture timestamp: VALUES(..., 'timestamp');
+    insert_pattern = re.compile(r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\(\d+,'([^']+)','([^']+)',([01]),'([^']+)'\);")
+    
     with open(sql_file, 'r') as f:
         for line in tqdm(f, desc="Parsing SQL"):
             match = insert_pattern.match(line)
             if match:
-                user_id, tsumego_id, success = match.groups()
-                user_attempts.append({'user_id': user_id, 'tsumego_id': tsumego_id, 'success': int(success)})
+                user_id, tsumego_id, success, timestamp_str = match.groups()
+                
+                # Parse timestamp
+                # Format example: '2025-08-20T23:04:55.761Z'
+                # We only need year and month.
+                try:
+                    # Taking the first 7 chars is risky if format changes, but safe for ISO-8601 YYYY-MM
+                     # More robust parsing:
+                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    
+                    profiles_to_add = []
+                    
+                    # 1. Current month profile
+                    current_profile = f"{user_id[:8]}_{dt.year}-{dt.month:02d}"
+                    profiles_to_add.append(current_profile)
+                    
+                    # 2. Previous month profile (for overlap)
+                    prev_month = dt.month - 1
+                    prev_year = dt.year
+                    if prev_month == 0:
+                        prev_month = 12
+                        prev_year -= 1
+                    prev_profile = f"{user_id[:8]}_{prev_year}-{prev_month:02d}"
+                    profiles_to_add.append(prev_profile)
+                    
+                    for profile_id in profiles_to_add:
+                        user_attempts.append({'user_id': profile_id, 'tsumego_id': tsumego_id, 'success': int(success)})
+                        
+                except ValueError as e:
+                    print(f"Skipping malformed timestamp: {timestamp_str} ({e})")
+                    continue
 
     # Capture the raw attempts before aggregation
     raw_user_attempts_df = pd.DataFrame(user_attempts)
-    if not raw_user_attempts_df.empty:
-        raw_user_attempts_df['user_id'] = raw_user_attempts_df['user_id'].str[:8]
+    # user_id is already formatted as {id[:8]}_{YYYY-MM}, so no further truncation needed.
 
     if user_attempts:
         user_df = pd.DataFrame(user_attempts)
-        user_df['user_id'] = user_df['user_id'].str[:8]  # Truncate user IDs
+        # user_df['user_id'] = user_df['user_id'].str[:8]  # REMOVED: Truncation handled during profile generation
 
         # The schema has a UNIQUE(user_id, problem) constraint, so groupby().mean() is redundant.
         # We just rename 'success' to 'success_rate' for consistency with the bot data format.
@@ -110,7 +147,7 @@ def load_data(data_dir):
 
     tsumego_ids_unfiltered = sorted(list(all_tsumego_ids))
     # Filter to only include tsumegos with SGF files
-    tsumego_ids = [tid for tid in tsumego_ids_unfiltered if os.path.exists(os.path.join("tsumegos", f"{tid}.sgf"))]
+    tsumego_ids = [tid for tid in tsumego_ids_unfiltered if os.path.exists(os.path.join(PROJECT_ROOT, "tsumegos", f"{tid}.sgf"))]
     tsumego_map = {name: i for i, name in enumerate(tsumego_ids)}
 
     tqdm.write(f"Discovered {len(participant_map)} participants (bots/users) and {len(tsumego_map)} valid tsumegos.")
@@ -310,8 +347,8 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_facto
         print("\nCalculating FINAL tsumego ratings and quality...")
 
     # This will now raise FileNotFoundError if files are missing, as requested.
-    params_df = pd.read_csv('ratings/tsumego_parameters_final.csv')
-    bots_df = pd.read_csv('ratings/bot_ratings_final.csv')
+    params_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_parameters_final.csv'))
+    bots_df = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
 
     # Use the empirical range of bot ratings to define a safe search space for theta
     bot_rating_min = bots_df['rating'].min()
@@ -378,9 +415,9 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_facto
     # --- Save files ---
     # Choose filename based on run type
     if produce_unadjusted_for_optim:
-        rating_filename = 'ratings/tsumego_ratings_unadjusted.csv'
+        rating_filename = os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_unadjusted.csv')
     else:
-        rating_filename = 'ratings/tsumego_ratings_final.csv'
+        rating_filename = os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_final.csv')
 
     # Save ratings
     tsumego_rating_df = pd.DataFrame(final_results)[['tsumego_id', 'rating']].sort_values(by="rating", ascending=False)
@@ -389,14 +426,14 @@ def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_facto
 
     # Save quality and user profiles on both runs, as they don't change
     tsumego_quality_df = pd.DataFrame(final_results)[['tsumego_id', 'quality']].sort_values(by="quality", ascending=False)
-    tsumego_quality_df.to_csv('ratings/tsumego_quality_final.csv', index=False)
+    tsumego_quality_df.to_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'), index=False)
     print("Quality saved to 'ratings/tsumego_quality_final.csv'")
 
     # Create user_profiles_final.csv only on the final run for clarity
     if not produce_unadjusted_for_optim:
         user_profiles_df = bots_df.copy()
         user_profiles_df['attempts'] = user_profiles_df['bot_id'].map(attempt_counts).fillna(0).astype(int)
-        user_profiles_df.to_csv('ratings/user_profiles_final.csv', index=False)
+        user_profiles_df.to_csv(os.path.join(PROJECT_ROOT, 'ratings/user_profiles_final.csv'), index=False)
         print("User profiles with attempts saved to 'ratings/user_profiles_final.csv'")
 
 
@@ -407,10 +444,10 @@ def save_ratings_snapshot(model, bot_map, tsumego_map, all_tsumego_names,
     Calculates and saves the bot and tsumego parameters to CSV files.
     """
     model.eval()
-    bot_filename = "ratings/bot_ratings_final.csv"
-    tsumego_parameters_filename = "ratings/tsumego_parameters_final.csv"
+    bot_filename = os.path.join(PROJECT_ROOT, "ratings/bot_ratings_final.csv")
+    tsumego_parameters_filename = os.path.join(PROJECT_ROOT, "ratings/tsumego_parameters_final.csv")
 
-    os.makedirs("ratings", exist_ok=True)
+    os.makedirs(os.path.join(PROJECT_ROOT, "ratings"), exist_ok=True)
 
     with torch.no_grad():
         bot_ratings_np = model.bot_ratings.weight.cpu().numpy().flatten()
@@ -593,9 +630,9 @@ if __name__ == '__main__':
 
     # Step 4: Find the optimal quality adjustment factor.
     # This section will raise errors if inputs are missing or data is invalid.
-    user_ratings = pd.read_csv('ratings/bot_ratings_final.csv')
-    tsumego_ratings_unadjusted = pd.read_csv('ratings/tsumego_ratings_unadjusted.csv')
-    tsumego_quality = pd.read_csv('ratings/tsumego_quality_final.csv')
+    user_ratings = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/bot_ratings_final.csv'))
+    tsumego_ratings_unadjusted = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_ratings_unadjusted.csv'))
+    tsumego_quality = pd.read_csv(os.path.join(PROJECT_ROOT, 'ratings/tsumego_quality_final.csv'))
 
     optimal_factor = find_optimal_quality_adjustment(
         raw_user_attempts,

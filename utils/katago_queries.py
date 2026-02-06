@@ -1,6 +1,6 @@
 import random
 import numpy as np
-from configurations import BOARD_SIZE, RULES, KOMI
+from utils.configurations import BOARD_SIZE, RULES, KOMI
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",

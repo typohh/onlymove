@@ -1,5 +1,5 @@
-from configurations import BOARD_SIZE
-from katago_queries import KatagoQueries, katago_to_sgf_coords
+from utils.configurations import BOARD_SIZE
+from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
 from sgfmill import sgf
 
 PLAYOUTS_SHALLOW = 30

@@ -85,47 +85,47 @@ const localization = {
     ignore: '無視',
     ignoreConfirm: 'この問題から何も学べないと感じて、今後また見たくないですか？'
   },
-    ko: {
-      kyu: '급',
-      dan: '단',
-      review: '이전',
-      about: '정보',
-      analyzing: '분석 중…',
-      error: '오류',
-      exit: '다음',
-      score: '점수',
-      undo: '실행 취소',
-      share: '공유',
-      stats: '통계',
-      linkCopied: '링크가 클립보드에 복사되었습니다',
-      tsumegoMode: '챌린지 모드',
-      reviewMode: '복습 모드',
-      viewMode: '보기 모드',
-      rushingMessage: '단 {seconds}초 만에 답변하셨습니다. 과거 결과에 따르면, 이렇게 서두르면 {confidence}%의 확률로 더 많은 실수로 이어질 수 있습니다.',
-      insufficientReviewMessage: '반복된 실수입니다! 이 문제를 복습하는 데 {seconds}초만 사용하셨습니다. 과거 결과에 따르면, 복습에 더 많은 시간을 투자하면 {confidence}%의 확률로 더 잘 기억할 수 있습니다.',
-      iWontRushIt: '서두르지 않겠다고 약속합니다!',
-      rankUpTo: '{rank}으로 승급',
-      rankDownTo: '{rank}으로 강등',
-      installPrompt: '앱으로 설치하여 더 나은 경험을!',
-      install: '설치',
-      rankChangeFormat: '등급 {change}',
-      unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.',
-      komi: '코미',
-      blackCaptures: '흑의 포획',
-      whiteCaptures: '백의 포획',
-      whiteAdjustment: '백의 조정',
-      statsNotEnough: '{count}개의 사활 문제를 완료했습니다, 통계를 활성화하려면 5개가 필요합니다.',
-      statsFailed: '지금은 통계가 없습니다. 다른 문제를 풀어보세요.',
-      statsSolvingTimeNatural: '문제를 푸는 데 더 많은 시간을 사용하면 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
-      statsReviewTimeNatural: '복습에 더 많은 시간을 사용하면 다음에 문제를 볼 때 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
-      statsFailures: '{count_recent}개의 최근 실패가 있으며 {hours}시간 지연 후 반복됩니다.',
-      statsOldFailures: '추가로 {count_other}개의 과거 실패가 때때로 반복됩니다.',
-      statsNovelProblems: '지금까지 {count}개의 고유한 문제를 시도했습니다.',
-      statsIgnoredProblems: "당신은 {count_ignored}개의 문제를 무시했으며, 불규칙한 연습으로 인해 {count_slipped}개의 문제가 포기되었습니다.",
-      statsModelCoefficients: '로짓 모델 계수:',
-      ignore: '무시',
-      ignoreConfirm: '이 문제에서 아무것도 배울 수 없다고 생각하며 앞으로 다시 보고 싶지 않으신가요?'
-    },
+  ko: {
+    kyu: '급',
+    dan: '단',
+    review: '이전',
+    about: '정보',
+    analyzing: '분석 중…',
+    error: '오류',
+    exit: '다음',
+    score: '점수',
+    undo: '실행 취소',
+    share: '공유',
+    stats: '통계',
+    linkCopied: '링크가 클립보드에 복사되었습니다',
+    tsumegoMode: '챌린지 모드',
+    reviewMode: '복습 모드',
+    viewMode: '보기 모드',
+    rushingMessage: '단 {seconds}초 만에 답변하셨습니다. 과거 결과에 따르면, 이렇게 서두르면 {confidence}%의 확률로 더 많은 실수로 이어질 수 있습니다.',
+    insufficientReviewMessage: '반복된 실수입니다! 이 문제를 복습하는 데 {seconds}초만 사용하셨습니다. 과거 결과에 따르면, 복습에 더 많은 시간을 투자하면 {confidence}%의 확률로 더 잘 기억할 수 있습니다.',
+    iWontRushIt: '서두르지 않겠다고 약속합니다!',
+    rankUpTo: '{rank}으로 승급',
+    rankDownTo: '{rank}으로 강등',
+    installPrompt: '앱으로 설치하여 더 나은 경험을!',
+    install: '설치',
+    rankChangeFormat: '등급 {change}',
+    unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.',
+    komi: '코미',
+    blackCaptures: '흑의 포획',
+    whiteCaptures: '백의 포획',
+    whiteAdjustment: '백의 조정',
+    statsNotEnough: '{count}개의 사활 문제를 완료했습니다, 통계를 활성화하려면 5개가 필요합니다.',
+    statsFailed: '지금은 통계가 없습니다. 다른 문제를 풀어보세요.',
+    statsSolvingTimeNatural: '문제를 푸는 데 더 많은 시간을 사용하면 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
+    statsReviewTimeNatural: '복습에 더 많은 시간을 사용하면 다음에 문제를 볼 때 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
+    statsFailures: '{count_recent}개의 최근 실패가 있으며 {hours}시간 지연 후 반복됩니다.',
+    statsOldFailures: '추가로 {count_other}개의 과거 실패가 때때로 반복됩니다.',
+    statsNovelProblems: '지금까지 {count}개의 고유한 문제를 시도했습니다.',
+    statsIgnoredProblems: "당신은 {count_ignored}개의 문제를 무시했으며, 불규칙한 연습으로 인해 {count_slipped}개의 문제가 포기되었습니다.",
+    statsModelCoefficients: '로짓 모델 계수:',
+    ignore: '무시',
+    ignoreConfirm: '이 문제에서 아무것도 배울 수 없다고 생각하며 앞으로 다시 보고 싶지 않으신가요?'
+  },
   en: {
     kyu: 'kyu',
     dan: 'dan',
@@ -144,7 +144,7 @@ const localization = {
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',
     insufficientReviewMessage: 'Repeat mistake! You have spent only {seconds} seconds reviewing this problem. Your past results suggest there is a {confidence}% probability you will remember it better with more time spent reviewing.',
-    iWontRushIt: "I promise to not to rush!",
+    iWontRushIt: "I promise not to rush!",
     rankUpTo: 'Rank up to {rank}',
     rankDownTo: 'Rank down to {rank}',
     installPrompt: 'Install as an app for a better experience!',
@@ -163,7 +163,7 @@ const localization = {
     statsReviewTimeNatural: 'There is a {percent_change}% probability that using more time reviewing also makes you more likely to choose the correct move next time you see the problem.',
     statsFailures: 'You have {count_recent} recent failures, each which will be repeated after a {hours} hour delay.',
     statsOldFailures: 'There are an additional {count_other} past failures that are occasionally repeated.',
-    statsNovelProblems: 'You have sofar attempted {count} unique problems.',
+    statsNovelProblems: 'You have so far attempted {count} unique problems.',
     statsIgnoredProblems: "You have ignored {count_ignored} problems, and another {count_slipped} were abandoned due to irregular practice.",
 
     statsModelCoefficients: 'Logit Model Coefficients:',
@@ -174,27 +174,27 @@ const localization = {
 };
 
 export function getTerm(key) {
-    const lang = navigator.language || 'en';
-    let langDb;
-    if (lang.startsWith('zh')) {
-        langDb = localization.zh;
-    } else if (lang.startsWith('ja')) {
-        langDb = localization.ja;
-    } else if (lang.startsWith('ko')) {
-        langDb = localization.ko;
-    } else {
-        langDb = localization.en;
-    }
+  const lang = navigator.language || 'en';
+  let langDb;
+  if (lang.startsWith('zh')) {
+    langDb = localization.zh;
+  } else if (lang.startsWith('ja')) {
+    langDb = localization.ja;
+  } else if (lang.startsWith('ko')) {
+    langDb = localization.ko;
+  } else {
+    langDb = localization.en;
+  }
 
-    if (langDb && key in langDb) {
-        return langDb[key];
-    }
-    return localization.en[key];
+  if (langDb && key in langDb) {
+    return langDb[key];
+  }
+  return localization.en[key];
 }
 
 export function getDescriptiveRank(numericRank) {
-    const rankIndex = Math.floor(Math.pow(numericRank, 1.0) * TOTAL_RANKS);
-    const kyuTerm = getTerm('kyu');
-    const danTerm = getTerm('dan');
-    return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
+  const rankIndex = Math.floor(Math.pow(numericRank, 1.0) * TOTAL_RANKS);
+  const kyuTerm = getTerm('kyu');
+  const danTerm = getTerm('dan');
+  return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
 }

@@ -2,10 +2,16 @@ import hashlib
 import io
 import json
 import os
+import sys
 import zipfile
 import pandas as pd
 
-from katago_queries import get_all_ranks, get_rank_str
+# --- Path Setup ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from utils.katago_queries import get_all_ranks, get_rank_str
 
 
 def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
@@ -100,11 +106,11 @@ def print_rating_distribution(metadata):
 
 if __name__ == "__main__":
 
-    TSUMEGOS_DIR = "tsumegos"
-    OUTPUT_DIR = "pwa"
+    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
 
     # 1. Get the ratings map (tsumego_id -> rating).
-    tsumego_ratings_df = pd.read_csv("ratings/tsumego_ratings_final.csv")
+    tsumego_ratings_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/tsumego_ratings_final.csv"))
 
     # Store raw ratings before scaling
     tsumego_ratings_df['raw_rating'] = tsumego_ratings_df['rating']
@@ -114,7 +120,7 @@ if __name__ == "__main__":
 
     total = len(tsumego_ratings_df)
     # Read bot ratings
-    bot_ratings_df = pd.read_csv("ratings/bot_ratings_final.csv")
+    bot_ratings_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/bot_ratings_final.csv"))
     bot_8k = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k']['rating'].values[0]
     bot_3d = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3d']['rating'].values[0]
     rank_adjustment = + 0
@@ -134,7 +140,7 @@ if __name__ == "__main__":
     tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating'])))
 
     # 2. Get the quality map (tsumego_id -> quality).
-    tsumego_quality_df = pd.read_csv("ratings/tsumego_quality_final.csv")
+    tsumego_quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/tsumego_quality_final.csv"))
     # Normalize qualities to 0-1
     min_quality = tsumego_quality_df['quality'].min()
     max_quality = tsumego_quality_df['quality'].max()
@@ -144,7 +150,7 @@ if __name__ == "__main__":
 
     # 3. Build the final metadata list by matching files with their ratings and quality.
     print(f"Found {len(tsumego_ratings_map)} rating values in ratings/tsumego_ratings_final.csv" )
-    print(f"Found {len(tsumego_ratings_map)} quality values in ratings/tsumego_quality_final.csv" )
+    print(f"Found {len(tsumego_quality_map)} quality values in ratings/tsumego_quality_final.csv")
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
     print(f"Found {len(sgf_files)} SGF files in '{TSUMEGOS_DIR}'.")

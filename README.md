@@ -2,16 +2,51 @@
 
 This project generates Go problems using KataGo.
 
-- We generate a random position by playing 4 moves anywhere except first line.
-- We then play two moves that attempt to get the game back to balance according to score and winrate.
-- We evaluate if position is a good tsumego, if best move has a high winrate (70%), second best has a low winrate (30%), and score is 0-2 for white for the second best move.
+## Project Structure
 
-## Usage
+The project code is organized into three main directories:
+- **`pipeline/`**: Executable scripts that form the core workflow (generation, benchmarking, ranking, packaging).
+- **`utils/`**: Core logic, shared helpers, and engine controllers.
+- **`auxiliary/`**: Analysis tools, diagnostic scripts, and legacy code.
 
-To generate Go problems, run the `main.py` script using the virtual environment's Python:
+## Pipeline Execution
 
+To generate, rank, and package tsumegos, run the following scripts in order using the virtual environment:
+
+### 1. Fetch Database
+Downloads the latest tsumego attempt data from Cloudflare D1.
 ```bash
-.venv/bin/python3 main.py
+./.venv/bin/python3 -m pipeline.fetch_database
+```
+
+### 2. Tune Engine
+Optimizes KataGo batch sizes for your hardware.
+```bash
+./.venv/bin/python3 -m pipeline.tune_engine
+```
+
+### 3. Generate Tsumegos
+Continuously generates new tsumego positions.
+```bash
+./.venv/bin/python3 -m pipeline.generate_tsumegos
+```
+
+### 4. Benchmark Bots
+Runs various bots against the generated tsumegos to collect performance data.
+```bash
+./.venv/bin/python3 -m pipeline.benchmark_bots
+```
+
+### 5. Rank Tsumegos and Bots
+Trains the rating model based on the benchmark results.
+```bash
+./.venv/bin/python3 -m pipeline.rank_tsumegos_and_bots
+```
+
+### 6. Package for PWA
+Groups tsumegos and ratings into ZIP files for the web app.
+```bash
+./.venv/bin/python3 -m pipeline.package_for_pwa
 ```
 
 ## PWA
@@ -37,4 +72,3 @@ The PWA uses a history-based problem selection logic:
 - Failed problems have a linearly increasing probability of being shown again.
 - In-between problems also have a (slower) linearly increasing probability of being shown again.
 - If no problem is selected from the history, a new problem close to your rating is chosen.
-

@@ -1,7 +1,7 @@
 // js/main.js
 import * as Sentry from "@sentry/browser";
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego } from './state.js';
 
 try {
     // Initialize Sentry
@@ -63,12 +63,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    
+
 
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
-        if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
+        if (state.appMode === APP_MODES.LINKED) {
+            // In view mode, button1 exits back to the challenge tsumego
+            if (state.nextTsumego) {
+                const history = state.problemHistory;
+                // Remove the linked problem from history
+                if (history.length > 0 && history[0].linked) {
+                    history.shift();
+                }
+                // Put the saved challenge at the front
+                history.unshift(state.nextTsumego);
+                updateProblemHistory(history);
+                updateNextTsumego(null);
+                setAppMode(APP_MODES.SOLVING);
+                loadTsumego(false);
+                updateAllUI();
+            }
+        } else if (state.appMode === APP_MODES.SOLVING) {
             if (!e.target.classList.contains('disabled')) {
                 enterAnalysisMode();
             }
@@ -88,8 +104,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 setAppMode(APP_MODES.SOLVING);
             }
-            loadTsumego(false); // In both refresh cases, we just load what's at history[0]
-            updateAllUI(); // Update UI to show solving mode
+            loadTsumego(false);
+            updateAllUI();
         }
     });
 
@@ -268,7 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const problemAnswers = answersByProblem[answer.problemId];
             const prevAnswers = problemAnswers.filter(a => a.date < answer.date);
             const accumulatedReview = prevAnswers.reduce((sum, a) => sum + (a.reviewTime || 0), 0);
-            
+
             const newAnswer = { ...answer };
             if (newAnswer.accumulatedReview === undefined) {
                 newAnswer.accumulatedReview = accumulatedReview;
@@ -358,7 +374,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (history.length > 1 && history[1].filename.startsWith(tsumegoId)) {
                 setAppMode(APP_MODES.ANALYZING);
                 enterAnalysisMode();
-            } 
+            }
             // Case 2: Refresh of existing problem (solving or linked)
             else if (history.length > 0 && history[0].filename.startsWith(tsumegoId)) {
                 if (history[0].linked) {

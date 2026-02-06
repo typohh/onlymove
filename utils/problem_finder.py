@@ -1,8 +1,8 @@
 import math
 import random
 
-from configurations import debug, DEBUG
-from katago_queries import KatagoQueries
+from utils.configurations import debug, DEBUG
+from utils.katago_queries import KatagoQueries
 
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4

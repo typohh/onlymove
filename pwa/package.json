@@ -8,8 +8,7 @@
     "deploy": "npm run build && wrangler pages deploy dist"
   },
   "devDependencies": {
-    "esbuild": "^0.19.2",
-    "wrangler": "^3.5.1"
+    "esbuild": "^0.19.2"
   },
   "dependencies": {
     "@sentry/browser": "^10.15.0"
