@@ -355,6 +355,14 @@ if __name__ == "__main__":
         test_bot(bot, filename)
         bot.stop()
 
+    for human_rank in get_all_ranks():
+        filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}_t0.5.txt")
+        if SKIP_IF_EXISTS and os.path.exists(filename):
+            continue
+        bot = KataGo(get_model(MODEL_BEST_SMALL), 1 , human_rank=human_rank, temperature=0.5)
+        test_bot(bot, filename)
+        bot.stop()
+
     # for model in MODELS[0:]:
     #     model_filename = get_model(model)
     #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}.txt")
