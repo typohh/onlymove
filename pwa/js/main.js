@@ -416,30 +416,24 @@ document.addEventListener('DOMContentLoaded', async () => {
      * Returns true if board was recovered, false if reload is needed.
      */
     const recoverBoardIfNeeded = () => {
-        // Solution #6: Check if board container actually has canvases
-        const hasCanvases = boardContainer.children.length > 0 && 
-                           boardContainer.querySelector('canvas');
+        // Solution #6: Force re-initialization to handle broken/white canvas context
+        // We ignore whether canvas exists or not, because it might be technically present but visually broken
         
-        if (!hasCanvases || !state.board || !state.kifuReader) {
-            // Canvas was lost or state is invalid
-            if (state.kifuReader) {
-                // Solution #2: Fully reinitialize the board instead of just redrawing
-                try {
-                    const size = state.kifuReader.game.position.size;
-                    initializeBoard(size);
-                    redraw();
-                    return true;
-                } catch (e) {
-                    Sentry.captureMessage('Board recovery failed: ' + e.message, 'error');
-                    return false;
-                }
+        if (state.kifuReader) {
+            // Solution #2: Fully reinitialize the board instead of just redrawing
+            try {
+                const size = state.kifuReader.game.position.size;
+                initializeBoard(size);
+                redraw();
+                return true;
+            } catch (e) {
+                Sentry.captureMessage('Board recovery failed: ' + e.message, 'error');
+                return false;
             }
-            return false;
         }
         
-        // Canvas exists, just redraw
-        redraw();
-        return true;
+        // If no kifuReader, we can't really recover the board content
+        return false;
     };
 
     // Recovery from killed session or bfcache

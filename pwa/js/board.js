@@ -27,10 +27,12 @@ const handleBoardClick = (x, y) => {
                 }
             } else {
                 // first click
-                if (getLegalMoveNode(x, y)) {
+                const legalNode = getLegalMoveNode(x, y);
+                if (legalNode) {
                     state.ghostMove = {x, y};
-                    redraw();
                 }
+                // Always redraw to ensure board state is correct, even if click was invalid
+                redraw();
             }
         } else {
             // desktop: single click
