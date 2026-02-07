@@ -460,7 +460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             requestAnimationFrame(() => {
                 if (!recoverBoardIfNeeded()) {
-                    Sentry.captureMessage('Canvas recovery failed on visibilitychange, reloading', 'error');
+                    Sentry.captureMessage('Canvas recovery failed on visibilitychange, reloading...', 'error');
                     location.reload();
                 }
             });
