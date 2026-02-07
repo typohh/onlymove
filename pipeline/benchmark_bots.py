@@ -1,3 +1,4 @@
+import math
 import os
 import queue
 import re
@@ -21,6 +22,7 @@ from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_
 TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
 ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts")
 DEBUG = False
+BATCH_SIZE = 10000
 
 class PropagatingThread(threading.Thread):
     def run(self):
@@ -98,8 +100,25 @@ def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
 
 
 class HeuristicBot:
-    def __init__(self, accuracy):
-        self.accuracy = accuracy
+    def __init__(self):
+        # Tuned parameters optimized for ~6-13 kyu players
+        self.score_decay = 0.9808
+        self.moves_decay = 3.4782
+        self.score_weight = 2.3564
+        self.moves_weight = 2.7749
+        self.base_prob = 0.5968
+
+    def _get_moves_remaining(self, game):
+        _, variation_nodes = parse_tsumego_sgf(game)
+        if not variation_nodes:
+            return 0
+        
+        count = 1
+        current_node = variation_nodes[0]
+        while len(current_node) > 0:
+            current_node = current_node[0]
+            count += 1
+        return count
 
     def get_probability(self, game: sgfmill.sgf.Sgf_game) -> float:
         _, variation_nodes = parse_tsumego_sgf(game)
@@ -111,32 +130,34 @@ class HeuristicBot:
             score_found = False
             for comment_bytes in node.get_raw_list("C"):
                 comment = comment_bytes.decode('utf-8')
-                match = re.search(r"Score: ([-]?\d+\.?\d*)", comment)
+                # Format: "100.0%/34.1"
+                match = re.search(r"(\d+\.?\d*)%/([-]?\d+\.?\d*)", comment)
                 if match:
-                    scores.append(float(match.group(1)))
+                    scores.append(float(match.group(2)))
                     score_found = True
                     break
             if not score_found:
                 color, move_bytes = node.get_raw_move()
-                raise ValueError(f"SGF variation for move '{color.upper()} {move_bytes.decode('utf-8')}' is missing a 'Score:' comment.")
+                raise ValueError(f"SGF variation for move '{color.upper()} {move_bytes.decode('utf-8')}' is missing a probability/score comment.")
 
-        num_scores = len(scores)
-        if num_scores < 3:
-            return 1.0
-        scores.sort(reverse=True)
-        best_score, second_best_score = scores[0], scores[1]
-        epsilon = 0.5
-        if num_scores >= 5:
-            nth_best_score = scores[4]
-        elif num_scores == 4:
-            nth_best_score = scores[3]
+        if len(scores) < 2:
+            score_diff = 100.0
         else:
-            nth_best_score = scores[2]
-        difficulty = 1 - (epsilon + best_score - second_best_score) / (epsilon + best_score - nth_best_score)
-        return 1.0 if difficulty < self.accuracy else 0.0
+            scores.sort(reverse=True)
+            score_diff = scores[0] - scores[1]
+
+        # Compute probability components
+        p_score = 1.0 - math.exp(-score_diff / self.score_decay)
+        moves_remaining = self._get_moves_remaining(game)
+        p_moves = math.exp(-moves_remaining / self.moves_decay)
+
+        # Weighted combination with base probability
+        w_sum = self.score_weight + self.moves_weight
+        combined = (self.score_weight * p_score + self.moves_weight * p_moves) / w_sum
+        return self.base_prob + (1.0 - self.base_prob) * combined
 
     def copy(self):
-        return HeuristicBot(self.accuracy)
+        return HeuristicBot()
 
     def stop(self):
         pass
@@ -291,9 +312,30 @@ def list_outcomes():
     outcomes.sort(key=lambda x: x[1], reverse=True)
     for filename, score in outcomes:
         print(f"{filename}: {score:.2f}%")
+        
+
+def get_all_tsumego_ids():
+    """Returns a sorted list of all tsumego IDs in the tsumego directory."""
+    ids = []
+    for filename in os.listdir(TSUMEGO_DIR):
+        if filename.endswith(".sgf"):
+            ids.append(filename[:-4])
+    ids.sort()
+    return ids
 
 
-def test_bot(bot, attempts_file):
+def test_bot(bot, attempts_file, batch_ids):
+    """
+    Process a batch of tsumegos specified by their IDs.
+    
+    Args:
+        bot: The bot to use for processing
+        attempts_file: Path to the file storing attempt results
+        batch_ids: Set of tsumego IDs to process in this batch
+    
+    Returns:
+        None
+    """
     file_queue = queue.Queue()
     lock = threading.Lock()
     probabilities = {}
@@ -303,16 +345,20 @@ def test_bot(bot, attempts_file):
             for line in f:
                 key, value = line.strip().split()
                 probabilities[key] = float(value)
-    for filename in os.listdir(TSUMEGO_DIR):
-        if filename.endswith(".sgf"):
-            key = filename[:-4]
-            if key not in probabilities:
-                file_queue.put(filename)
-                if DEBUG and file_queue.qsize() >= 5000:
-                    break
+    
+    # Queue only files from the batch that haven't been processed yet
+    queued_count = 0
+    for tsumego_id in batch_ids:
+        if tsumego_id not in probabilities:
+            file_queue.put(tsumego_id + ".sgf")
+            queued_count += 1
+            if DEBUG and queued_count >= 5000:
+                break
+    
     if file_queue.empty():
         return
-    print(f"generating {file_queue.qsize()} attempts for {attempts_file}")
+    
+    print(f"Generating {file_queue.qsize()} attempts for {attempts_file}")
     threads = []
     num_threads = 1 if DEBUG else (bot.get_batch_size() * 2 if isinstance(bot, KataGo) else 8)
     for _ in range(num_threads):
@@ -325,11 +371,11 @@ def test_bot(bot, attempts_file):
     solved_count = sum(probabilities.values())
     elapsed_time = time.time() - start_time
     print(f"Saving: {attempts_file}")
-    print(f"Processed: {total_count}")
+    print(f"Processed: {queued_count} new out of {total_count} total")
     if total_count > 0:
         print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
     if elapsed_time > 0:
-        print(f"Tsumegos per second: {total_count / elapsed_time:.2f}")
+        print(f"Tsumegos per second: {queued_count / elapsed_time:.2f}")
     print(f"Time: {time.time() - start_time:.2f} seconds")
     print()
     if DEBUG:
@@ -343,80 +389,102 @@ def test_bot(bot, attempts_file):
 # ATTEMPTS_DIRECTORY is defined at the top
 SKIP_IF_EXISTS = False
 
-if __name__ == "__main__":
 
-    os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
-
+def get_bot_configs():
+    """
+    Returns a list of (bot_factory, attempts_filename) tuples.
+    bot_factory is a callable that creates the bot when called.
+    """
+    configs = []
+    
+    # Human rank bots with temperature 1.0
     for human_rank in get_all_ranks():
         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}.txt")
-        if SKIP_IF_EXISTS and os.path.exists(filename):
-            continue
-        bot = KataGo(get_model(MODEL_BEST_SMALL), 1 , human_rank=human_rank, temperature=1.0)
-        test_bot(bot, filename)
-        bot.stop()
-
-    for human_rank in get_all_ranks():
-        filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}_t0.5.txt")
-        if SKIP_IF_EXISTS and os.path.exists(filename):
-            continue
-        bot = KataGo(get_model(MODEL_BEST_SMALL), 1 , human_rank=human_rank, temperature=0.5)
-        test_bot(bot, filename)
-        bot.stop()
-
-    # for model in MODELS[0:]:
-    #     model_filename = get_model(model)
-    #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}.txt")
-    #     if SKIP_IF_EXISTS and os.path.exists(filename):
-    #         continue
-    #     bot = KataGo(model_filename)
-    #     test_bot(bot, filename)
-    #     bot.stop()
-    #
-    for model in [MODEL_FULL,MODEL_9X9]:
-        for temperature in [1,0.8,0.6,0.4,0.2,0.1,0.05,0.02]:
+        configs.append((
+            lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), 1, human_rank=hr, temperature=1.0),
+            filename
+        ))
+    
+    # Human rank bots with temperature 0.5, they are better players, but much worse at predicting human play.
+    if False:
+        for human_rank in get_all_ranks():
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}_t0.5.txt")
+            configs.append((
+                lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), 1, human_rank=hr, temperature=0.5),
+                filename
+            ))
+    
+    # Model + temperature combinations
+    for model in [MODEL_FULL, MODEL_9X9]:
+        for temperature in [1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
             model_filename = get_model(model)
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f') }.txt")
-            if SKIP_IF_EXISTS and os.path.exists(filename):
-                continue
-            bot = KataGo(model_filename, temperature=temperature)
-            test_bot(bot, filename)
-            bot.stop()
-
-    for temperature in [1.1,1.2,1.3,1.4,1.5,1.7,2,3,5,10,50]:
+            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
+            configs.append((
+                lambda mf=model_filename, t=temperature: KataGo(mf, temperature=t),
+                filename
+            ))
+    
+    # High temperature variants for 20k rank
+    for temperature in [1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 2, 3, 5, 10, 50]:
         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_20k_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
-        if SKIP_IF_EXISTS and os.path.exists(filename):
-            continue
-        bot = KataGo(get_model(MODEL_BEST_SMALL), human_rank=get_all_ranks()[0], temperature=temperature)
-        test_bot(bot, filename)
-        bot.stop()
+        configs.append((
+            lambda t=temperature: KataGo(get_model(MODEL_BEST_SMALL), human_rank=get_all_ranks()[0], temperature=t),
+            filename
+        ))
+    
+    # Heuristic bot
+    configs.append((
+        lambda: HeuristicBot(),
+        os.path.join(ATTEMPTS_DIRECTORY, "heuristic.txt")
+    ))
 
-    # for human_rank in get_all_ranks():
-    #     model_filename = get_model(MODEL_FULL)
-    #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_{playouts}.txt")
-    #     if SKIP_IF_EXISTS and os.path.exists(filename):
-    #         continue
-    #     bot = KataGoFullGame(model_filename,human_rank=human_rank)
-    #     test_bot(bot, filename)
-    #     bot.stop()
-
-    # for accuracy in [0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05 ]:
-    #     filename = os.path.join(ATTEMPTS_DIRECTORY, f"heuristic_{str(accuracy)[2:]}.txt")
-    #     if SKIP_IF_EXISTS and os.path.exists(filename):
-    #         continue
-    #     bot = HeuristicBot(accuracy)
-    #     test_bot(bot, filename)
-    #     bot.stop()
-
-    # for c in range(1, 120):
-    #     corruption = c / 200
-    #     for playouts in [1, 3, 10, 30]:
-    #         model_filename = get_corrupted_model(corruption)
-    #         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename) + f'_{playouts}.txt'}")
-    #         if SKIP_IF_EXISTS and os.path.exists(filename):
-    #             continue
-    #         bot = KataGo(model_filename, playouts)
-    #         test_bot(bot, filename)
-    #         bot.stop()
+    return configs
 
 
+if __name__ == "__main__":
+    os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
+    
+    bot_configs = get_bot_configs()
+    
+    # Filter out configs where SKIP_IF_EXISTS applies
+    if SKIP_IF_EXISTS:
+        bot_configs = [(factory, filename) for factory, filename in bot_configs if not os.path.exists(filename)]
+    
+    if not bot_configs:
+        print("All bots already have complete attempt files.")
+        list_outcomes()
+        exit(0)
+    
+    all_ids = get_all_tsumego_ids()
+    total_count = len(all_ids)
+    
+    iteration = 0
+    while True:
+        # Calculate batch for this iteration
+        start_idx = iteration * BATCH_SIZE
+        end_idx = start_idx + BATCH_SIZE
+        batch_ids = set(all_ids[start_idx:end_idx])
+        
+        if not batch_ids:
+            print("\nAll tsumegos processed for all bots.")
+            break
+        
+        remaining = total_count - end_idx
+        print(f"\n{'='*60}")
+        print(f"ITERATION {iteration}: Processing tsumegos {start_idx}-{min(end_idx, total_count) - 1} ({len(batch_ids)} files, {max(0, remaining)} remaining)")
+        print(f"{'='*60}\n")
+        
+        for bot_factory, attempts_file in bot_configs:
+            bot = bot_factory()
+            try:
+                test_bot(bot, attempts_file, batch_ids)
+            finally:
+                bot.stop()
+        
+        # Clear the cache between iterations to free memory
+        print(f"\nClearing cache ({len(cache)} entries)...")
+        cache.clear()
+        
+        iteration += 1
+    
     list_outcomes()
