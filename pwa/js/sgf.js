@@ -92,16 +92,25 @@ function transformKifuTree(node, transformation) {
 }
 
 /**
- * Reorients the SGF by applying a random transformation.
+ * Reorients the SGF by applying a transformation.
  * @param {string} sgf - Original SGF string.
- * @returns {string} - Reoriented SGF string.
+ * @param {number|null} forcedOrientation - Optional orientation index (0-7). If null, random is used.
+ * @returns {object} - Object containing { sgf: string, orientation: number }.
  */
-export function reorientSgf(sgf) {
-    const randomTransformation = Math.floor(Math.random() * 8);
+export function reorientSgf(sgf, forcedOrientation = null) {
+    let transformation;
+    if (typeof forcedOrientation === 'number' && forcedOrientation >= 0 && forcedOrientation <= 7) {
+        transformation = forcedOrientation;
+    } else {
+        transformation = Math.floor(Math.random() * 8);
+    }
 
     const kifu = WGo.Kifu.fromSgf(sgf);
-    transformKifuTree(kifu.root, randomTransformation);
+    transformKifuTree(kifu.root, transformation);
 
     // Assuming WGo.Kifu has toSgf method
-    return kifu.toSgf();
+    return {
+        sgf: kifu.toSgf(),
+        orientation: transformation
+    };
 }

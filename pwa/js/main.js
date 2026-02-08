@@ -132,7 +132,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
-            const shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
+            const orientation = state.problemHistory[1].orientation;
+            let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
+            if (typeof orientation === 'number') {
+                shareUrl += `&o=${orientation}`;
+            }
             if (navigator.share) {
                 navigator.share({
                     url: shareUrl
@@ -365,6 +369,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const tsumegoId = urlParams.get('id');
+    const orientationParam = urlParams.get('o');
+    let orientation = null;
+    if (orientationParam !== null) {
+        const parsed = parseInt(orientationParam);
+        if (!isNaN(parsed) && parsed >= 0 && parsed <= 7) {
+            orientation = parsed;
+        }
+    } else if (tsumegoId) {
+        // If id is present but o is missing, default to 0 (user request)
+        orientation = 0;
+    }
 
     try {
         if (tsumegoId && tsumegoId.length > 0) {
@@ -386,7 +401,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             // Case 3: Default - new linked problem
             else {
-                await loadTsumegoById(tsumegoId);
+                await loadTsumegoById(tsumegoId, orientation);
             }
         } else {
             // No ID in URL

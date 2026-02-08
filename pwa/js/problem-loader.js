@@ -236,11 +236,14 @@ export async function loadTsumego(isUpdate) {
 
         
 
-        let sgf = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
-        if (!sgf || !sgf.trim()) {
+        let sgfContent = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
+        if (!sgfContent || !sgfContent.trim()) {
             throw new Error('Invalid or empty SGF');
         }
-        sgf = reorientSgf(sgf);
+        
+        const reoriented = reorientSgf(sgfContent);
+        const sgf = reoriented.sgf;
+        const orientation = reoriented.orientation;
 
         const history = state.problemHistory;
         
@@ -263,7 +266,8 @@ export async function loadTsumego(isUpdate) {
             linked: false,
             rating: selectedProblem.rating,
             quality: selectedProblem.quality || 0,
-            isRepeat: selectedProblem.isRepeat || false
+            isRepeat: selectedProblem.isRepeat || false,
+            orientation: orientation
         });
 
         if (history.length > 2) {
@@ -289,9 +293,10 @@ export async function loadTsumego(isUpdate) {
     }
 }
 
-export async function loadTsumegoById(tsumegoId) {
+export async function loadTsumegoById(tsumegoId, orientation = null) {
     try {
-        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf`) {
+        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf` && 
+           (orientation === null || state.problemHistory[0].orientation === orientation)) {
             return false;
         }
 
@@ -325,7 +330,10 @@ export async function loadTsumegoById(tsumegoId) {
         const problemQuality = problem ? problem.quality : 0;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
-        sgfContent = reorientSgf(sgfContent);
+        
+        const reoriented = reorientSgf(sgfContent, orientation);
+        sgfContent = reoriented.sgf;
+        const actualOrientation = reoriented.orientation;
 
         const history = state.problemHistory;
 
@@ -335,7 +343,8 @@ export async function loadTsumegoById(tsumegoId) {
             linked: true,
             rating: problemRank,
             quality: problemQuality,
-            isRepeat: false
+            isRepeat: false,
+            orientation: actualOrientation
         };
 
         // If current problem is linked, replace it instead of shifting
