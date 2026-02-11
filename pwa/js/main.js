@@ -137,18 +137,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (typeof orientation === 'number') {
                 shareUrl += `&o=${orientation}`;
             }
-            if (navigator.share) {
-                navigator.share({
-                    url: shareUrl
-                }).then(() => {
-                    // No visible message on success
-                }).catch(err => {
-                    if (err.name !== 'AbortError') {
-                        console.error('Share failed: ', err);
-                    }
-                });
-            } else {
-                // Fallback to copy to clipboard
+            const copyToClipboard = () => {
                 navigator.clipboard.writeText(shareUrl).then(() => {
                     // Show a temporary confirmation message
                     const message = document.createElement('div');
@@ -209,6 +198,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                         }
                     }, 2000);
                 });
+            };
+
+            const shareData = { url: shareUrl };
+            if (navigator.canShare && navigator.canShare(shareData) && navigator.share) {
+                navigator.share(shareData).then(() => {
+                    // No visible message on success
+                }).catch(err => {
+                    if (err.name !== 'AbortError') {
+                        console.error('Share failed: ', err);
+                        copyToClipboard();
+                    }
+                });
+            } else {
+                copyToClipboard();
             }
         }
     });

@@ -146,6 +146,10 @@ body {
         white-space: nowrap;
         overflow-wrap: normal;
     }
+
+    #title {
+        flex: 1.5;
+    }
 }
 
 /* --- MODE 2 Override: \"SQUARISH\" LAYOUT --- */
