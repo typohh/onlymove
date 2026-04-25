@@ -57,6 +57,7 @@ export const state = {
     linkedId: null,
 
     answerHistory: JSON.parse(localStorage.getItem('answerHistory')) || [],
+    unavailableProblemIds: new Set(),
     statsResults: null,
     modelParams: JSON.parse(localStorage.getItem('modelParams')) || null,
     adamState: JSON.parse(localStorage.getItem('adamState')) || null,

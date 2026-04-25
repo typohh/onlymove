@@ -99,6 +99,37 @@ def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
     return setup_moves, variation_nodes
 
 
+
+class SgfMoveBot:
+    def __init__(self):
+        pass
+
+    def get_probability(self, game):
+        setup_moves, variation_nodes = parse_tsumego_sgf(game)
+        
+        # In YoseTsumego, variation_nodes[0] is the correct move
+        correct_node = variation_nodes[0]
+        
+        if correct_node.has_property("C"):
+            for comment_bytes in correct_node.get_raw_list("C"):
+                comment = comment_bytes.decode('utf-8')
+                match = re.search(r"(\d+\.?\d*)%/([-]?\d+\.?\d*)", comment)
+                if match:
+                    winrate = float(match.group(1)) / 100.0
+                    return max(winrate, 1.0 - winrate)
+                    
+        raise ValueError("Could not find winrate comment in SGF for the correct move.")
+
+    def get_batch_size(self):
+        return 1000
+
+    def stop(self):
+        pass
+
+    def copy(self):
+        return self
+
+
 class HeuristicBot:
     def __init__(self):
         # Tuned parameters optimized for ~6-13 kyu players
@@ -436,6 +467,12 @@ def get_bot_configs():
     configs.append((
         lambda: HeuristicBot(),
         os.path.join(ATTEMPTS_DIRECTORY, "heuristic.txt")
+    ))
+
+    # SGF Move Bot
+    configs.append((
+        lambda: SgfMoveBot(),
+        os.path.join(ATTEMPTS_DIRECTORY, "sgf_move.txt")
     ))
 
     return configs

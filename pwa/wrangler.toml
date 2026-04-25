@@ -1,5 +1,14 @@
-name = "dummy"
+name = "onlymove"
 compatibility_date = "2023-12-01"
+main = "src/index.js"
+
+routes = [
+    { pattern = "onlymove.net", custom_domain = true },
+    { pattern = "www.onlymove.net", custom_domain = true }
+]
+
+[assets]
+directory = "dist"
 
 [[d1_databases]]
 binding = "DB"

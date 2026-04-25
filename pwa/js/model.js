@@ -116,6 +116,7 @@ export function getReviewCandidates(options = {}) {
     const max_hours = 168; // 7 days
     const min_ratio = Math.log(1 + min_hours / 24);
     const max_ratio = Math.log(1 + max_hours / 24);
+    if (Math.abs(R) < 1e-9) return [];
     const current_ratio = N / R;
 
     if (current_ratio < min_ratio) {
@@ -140,12 +141,11 @@ export function getReviewCandidates(options = {}) {
         const lastAnswer = lastAnswers[problemId];
 
         if (lastAnswer.ignored) continue; // Exclude ignored problems
+        if (state.unavailableProblemIds.has(problemId)) continue; // Exclude problems that failed to load this session
 
-        let condition = lastAnswer.problemRating < state.userRank;
+        let condition = lastAnswer.problemRating < state.userRank && lastAnswer.successSinceFailure !== undefined;
         if (requireLastAnswerIncorrect) {
             condition = condition && !lastAnswer.correct;
-        } else {
-            condition = condition && lastAnswer.successSinceFailure !== undefined;
         }
 
         if (condition) {
@@ -425,25 +425,25 @@ export async function showDetailedStats() {
             const R = finalParams[R_idx];
 
             if (Math.abs(R) > 1e-9) {
-                const t_eq_days = Math.exp(N / R) - 1;
+                const t_eq_days = Math.max(0, Math.exp(N / R) - 1);
+                const allRepeats = getReviewCandidates({
+                    lowerProbabilityBound: 0.6,
+                    upperProbabilityBound: 1.0,
+                    requireLastAnswerIncorrect: false
+                }).length;
                 const firstTimeFailures = getReviewCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: true
                 }).length;
                 const firsttimeFailureTime = t_eq_days * 24;
-                const allRepeats = getReviewCandidates({
-                    lowerProbabilityBound: 0.6,
-                    upperProbabilityBound: 1.0,
-                    requireLastAnswerIncorrect: false
-                }).length;
 
                 resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
-                resultText += getTerm('statsOldFailures').replace('{count_other}', allRepeats - firstTimeFailures) + '\n';
+                resultText += getTerm('statsOldFailures').replace('{count_other}', Math.max(0, allRepeats - firstTimeFailures)) + '\n';
             }
         }
 
-        const novelProblemCount = state.answerHistory.filter(p => !p.isRepeat).length;
+        const novelProblemCount = new Set(state.answerHistory.filter(p => !p.isRepeat).map(p => p.problemId)).size;
         resultText += getTerm('statsNovelProblems').replace('{count}', novelProblemCount) + '\n';
 
         const slippedProblemCount = getReviewCandidates({

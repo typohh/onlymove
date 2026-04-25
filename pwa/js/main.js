@@ -12,9 +12,9 @@ try {
     console.error("Sentry initialization failed:", error);
 }
 
-import { updateAllUI, updateBoardSize, showCaptureDetails } from './ui.js';
+import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick } from './ui.js';
 import { showDetailedStats } from './model.js';
-import { loadSgf, redraw, initializeBoard } from './board.js';
+import { loadSgf, redraw, initializeBoard, getBoardImageBlob } from './board.js';
 import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
@@ -57,10 +57,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Using CSS vi units for responsive sizing, but still need to update WGo board on resize
     window.addEventListener('resize', () => {
         updateBoardSize();
-        const installPrompt = document.getElementById('install-prompt');
-        if (installPrompt) {
-            installPrompt.remove();
-        }
     });
 
 
@@ -72,12 +68,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             // In view mode, button1 exits back to the challenge tsumego
             if (state.nextTsumego) {
                 const history = state.problemHistory;
-                // Remove the linked problem from history
+                // Remove the linked problem from history — the challenge problem
+                // is already at history[1] (it was pushed there when the linked
+                // problem was loaded), so after the shift it becomes history[0].
                 if (history.length > 0 && history[0].linked) {
                     history.shift();
                 }
-                // Put the saved challenge at the front
-                history.unshift(state.nextTsumego);
                 updateProblemHistory(history);
                 updateNextTsumego(null);
                 setAppMode(APP_MODES.SOLVING);
@@ -134,7 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
             const orientation = state.problemHistory[1].orientation;
             let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
-            if (typeof orientation === 'number') {
+            if (typeof orientation === 'number' && orientation !== 0) {
                 shareUrl += `&o=${orientation}`;
             }
             const copyToClipboard = () => {
@@ -199,20 +195,91 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }, 2000);
                 });
             };
+            const shareLink = () => {
+                if (navigator.share && navigator.canShare && navigator.canShare({ url: shareUrl })) {
+                    navigator.share({ url: shareUrl }).catch(err => {
+                        if (err.name !== 'AbortError') {
+                            console.error('Share link failed: ', err);
+                            copyToClipboard();
+                        }
+                    });
+                } else {
+                    copyToClipboard();
+                }
+            };
 
-            const shareData = { url: shareUrl };
-            if (navigator.canShare && navigator.canShare(shareData) && navigator.share) {
-                navigator.share(shareData).then(() => {
-                    // No visible message on success
-                }).catch(err => {
-                    if (err.name !== 'AbortError') {
-                        console.error('Share failed: ', err);
-                        copyToClipboard();
+            const shareImage = (file) => {
+                const data = { files: [file], title: getTerm('tsumegoMode') };
+                if (navigator.share && navigator.canShare && navigator.canShare(data)) {
+                    navigator.share(data).catch(err => {
+                        if (err.name !== 'AbortError') {
+                            console.error('Share image failed: ', err);
+                            shareLink();
+                        }
+                    });
+                } else {
+                    shareLink();
+                }
+            };
+
+            const shareBoth = (file) => {
+                const data = { files: [file], url: shareUrl, title: getTerm('tsumegoMode') };
+                if (navigator.share && navigator.canShare && navigator.canShare(data)) {
+                    navigator.share(data).catch(err => {
+                        if (err.name !== 'AbortError') {
+                            console.error('Share both failed: ', err);
+                            copyToClipboard();
+                        }
+                    });
+                } else {
+                    shareLink();
+                }
+            };
+
+            const showShareChooser = (file) => {
+                const overlay = document.createElement('div');
+                overlay.id = 'ios-install-overlay';
+
+                const modal = document.createElement('div');
+                modal.id = 'ios-install-modal';
+
+                const bothBtn = document.createElement('button');
+                bothBtn.className = 'btn';
+                bothBtn.textContent = getTerm('shareBoth');
+                bothBtn.addEventListener('click', () => { overlay.remove(); shareBoth(file); });
+
+                const linkBtn = document.createElement('button');
+                linkBtn.className = 'btn';
+                linkBtn.textContent = getTerm('shareLink');
+                linkBtn.addEventListener('click', () => { overlay.remove(); shareLink(); });
+
+                const imageBtn = document.createElement('button');
+                imageBtn.className = 'btn';
+                imageBtn.textContent = getTerm('shareImage');
+                imageBtn.addEventListener('click', () => { overlay.remove(); shareImage(file); });
+
+                overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+                modal.appendChild(bothBtn);
+                modal.appendChild(linkBtn);
+                modal.appendChild(imageBtn);
+                overlay.appendChild(modal);
+                document.body.appendChild(overlay);
+            };
+
+            getBoardImageBlob().then(blob => {
+                if (blob) {
+                    const file = new File([blob], 'tsumego.png', { type: 'image/png' });
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        showShareChooser(file);
+                        return;
                     }
-                });
-            } else {
-                copyToClipboard();
-            }
+                }
+                shareLink();
+            }).catch(err => {
+                console.error("Failed to generate image blob, falling back to link share", err);
+                shareLink();
+            });
         }
     });
 
@@ -226,12 +293,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         showCaptureDetails();
     });
 
-    // Handle button4 click - Ignore functionality
+    // Handle button4 click - Install (solving/linked), Ignore (analyzing)
     document.getElementById('button4').addEventListener('click', (e) => {
         e.preventDefault();
         if (e.target.classList.contains('disabled')) return;
 
-        if (state.appMode === APP_MODES.ANALYZING) {
+        if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
+            handleInstallClick();
+        } else if (state.appMode === APP_MODES.ANALYZING) {
             if (confirm(getTerm('ignoreConfirm'))) {
                 const problem = state.problemHistory[1];
                 if (!problem) return;
@@ -306,6 +375,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     migrateAccumulatedReview();
 
+    const migrateFailedNovelSuccessSinceFailure = () => {
+        if (localStorage.getItem('answerHistoryMigrated_v5_failedNovelSsf')) {
+            return;
+        }
+        console.log('Running answer history migration for failed novel successSinceFailure...');
+
+        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        let changed = 0;
+        for (const answer of answerHistory) {
+            if (!answer.correct && answer.successSinceFailure === undefined) {
+                answer.successSinceFailure = 0;
+                changed++;
+            }
+        }
+
+        if (changed > 0) {
+            updateAnswerHistory(answerHistory);
+            console.log(`Patched ${changed} answers with missing successSinceFailure.`);
+        }
+        localStorage.setItem('answerHistoryMigrated_v5_failedNovelSsf', 'true');
+        console.log('Answer history migration for failed novel successSinceFailure complete.');
+    };
+
+    migrateFailedNovelSuccessSinceFailure();
+
     const migrateProblemTypeToIsRepeat = () => {
         if (localStorage.getItem('answerHistoryMigrated_v3_isRepeat')) {
             return;
@@ -327,6 +421,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     migrateProblemTypeToIsRepeat();
+
+    const migrateClearIgnoredFlag = () => {
+        if (localStorage.getItem('answerHistoryMigrated_v6_clearIgnored')) {
+            return;
+        }
+        console.log('Running answer history migration to clear confounded ignored flags...');
+
+        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        let cleared = 0;
+        for (const answer of answerHistory) {
+            if (answer.ignored !== undefined) {
+                delete answer.ignored;
+                cleared++;
+            }
+        }
+
+        if (cleared > 0) {
+            updateAnswerHistory(answerHistory);
+            console.log(`Cleared ignored flag from ${cleared} answers.`);
+        }
+        localStorage.setItem('answerHistoryMigrated_v6_clearIgnored', 'true');
+        console.log('Answer history migration for clearing ignored flags complete.');
+    };
+
+    migrateClearIgnoredFlag();
 
     const migrateAnswerHistory = () => {
         if (localStorage.getItem('answerHistoryMigrated_v2')) {

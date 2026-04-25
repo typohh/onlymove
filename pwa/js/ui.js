@@ -2,9 +2,15 @@
 
 import { state, setDeferredInstallPrompt } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
+
+/**
+ * Returns true if the app is already running as an installed PWA.
+ */
+const isInstalled = () =>
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { getCurrentNode } from './board.js';
-import { getReviewCandidates } from './model.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -23,70 +29,82 @@ export function updateCapturesUI() {
 
 const boardContainer = document.getElementById('board-container');
 
-const showInstallPrompt = () => {
-    const deferredPrompt = state.deferredInstallPrompt;
-    if (!deferredPrompt) return;
+/**
+ * Shows an iOS-style modal with step-by-step instructions to add to Home Screen.
+ */
+const showIosInstallModal = () => {
+    const overlay = document.createElement('div');
+    overlay.id = 'ios-install-overlay';
 
-    const ratio = window.innerWidth / window.innerHeight;
-    let displayMethod;
+    const modal = document.createElement('div');
+    modal.id = 'ios-install-modal';
 
-    if (ratio < 0.65) {
-        displayMethod = 'notification';
-    } else if (ratio > 1.3) {
-        displayMethod = 'below-buttons';
-    } else {
-        displayMethod = 'popup';
-    }
+    const title = document.createElement('div');
+    title.id = 'ios-install-title';
+    title.textContent = getTerm('installIosTitle');
 
-    const promptElement = document.createElement('div');
-    promptElement.id = 'install-prompt';
-    promptElement.innerHTML = `
-        <button class="close-btn">×</button>
-        <div class="install-message">${getTerm('installPrompt')}</div>
-        <button class="btn install-btn">${getTerm('install')}</button>
-    `;
+    const instructions = document.createElement('div');
+    instructions.id = 'ios-install-instructions';
+    // Replace literal \n with line breaks
+    getTerm('installIosInstructions').split('\n').forEach((line, i, arr) => {
+        instructions.appendChild(document.createTextNode(line));
+        if (i < arr.length - 1) instructions.appendChild(document.createElement('br'));
+    });
 
-    const installBtn = promptElement.querySelector('.install-btn');
-    const closeBtn = promptElement.querySelector('.close-btn');
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'ios-install-close';
+    closeBtn.className = 'btn';
+    closeBtn.textContent = getTerm('installIosClose');
+    closeBtn.addEventListener('click', () => overlay.remove());
 
-    if (displayMethod === 'notification') {
-        promptElement.classList.add('install-notification');
-        document.body.appendChild(promptElement);
-        setTimeout(() => promptElement.style.top = '0', 100);
-    } else if (displayMethod === 'below-buttons') {
-        promptElement.classList.add('install-below');
-        document.getElementById('info-container').appendChild(promptElement);
-    } else { // popup
-        promptElement.classList.add('install-popup');
-        document.body.appendChild(promptElement);
-    }
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
 
-    promptElement.querySelector('.install-btn').addEventListener('click', async () => {
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
+    modal.appendChild(title);
+    modal.appendChild(instructions);
+    modal.appendChild(closeBtn);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+};
+
+/**
+ * Handles a click on the Install button.
+ * - If a deferred install prompt exists (Chrome/Android), triggers it.
+ * - Otherwise shows an iOS instructions modal.
+ */
+export const handleInstallClick = async () => {
+    if (isInstalled()) return;
+
+    if (state.deferredInstallPrompt) {
+        const prompt = state.deferredInstallPrompt;
+        prompt.prompt();
+        const { outcome } = await prompt.userChoice;
         console.log(`User response to install prompt: ${outcome}`);
         setDeferredInstallPrompt(null);
-        promptElement.remove();
-    });
-
-    promptElement.querySelector('.close-btn').addEventListener('click', () => {
-        setDeferredInstallPrompt(null);
-        promptElement.remove();
-    });
-}
-
-const checkAndShowInstallPrompt = () => {
-    const historySize = state.answerHistory.length;
-    const isSolvingMode = state.appMode === APP_MODES.SOLVING;
-    const isPromptVisible = !!document.getElementById('install-prompt');
-
-    if (state.deferredInstallPrompt && !isPromptVisible && isSolvingMode && [2, 19, 190].includes(historySize)) {
-        showInstallPrompt();
+        // Refresh button state
+        updateInstallButton();
+    } else {
+        showIosInstallModal();
     }
-}
+};
+
+/**
+ * Updates the install button (button4) text and disabled state in solving/linked mode.
+ */
+const updateInstallButton = () => {
+    const btn = document.getElementById('button4');
+    btn.style.display = 'inline-block';
+    if (isInstalled()) {
+        btn.textContent = getTerm('installed');
+        btn.classList.add('disabled');
+    } else {
+        btn.textContent = getTerm('install');
+        btn.classList.remove('disabled');
+    }
+};
 
 export function updateAllUI() {
-    checkAndShowInstallPrompt();
     updateCapturesUI();
     // Update UI based on current app mode
     if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
@@ -101,8 +119,10 @@ const updateSolvingModeUI = () => {
         document.getElementById('title').textContent = getTerm('viewMode');
         document.getElementById('title-h').textContent = getTerm('viewMode');
     } else {
-        document.getElementById('title').textContent = getTerm('tsumegoMode');
-        document.getElementById('title-h').textContent = getTerm('tsumegoMode');
+        const currentProblem = state.problemHistory[0];
+        const titleKey = (currentProblem && currentProblem.isRepeat) ? 'recallMode' : 'tsumegoMode';
+        document.getElementById('title').textContent = getTerm(titleKey);
+        document.getElementById('title-h').textContent = getTerm(titleKey);
     }
 
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
@@ -142,12 +162,7 @@ const updateSolvingModeUI = () => {
         prevTsumegoLink.classList.remove('disabled');
     } else {
         // In solving mode, button1 is review
-        const reviewCandidates = getReviewCandidates();
-        if (reviewCandidates.length > 0) {
-            prevTsumegoLink.textContent = `${getTerm('review')} (${reviewCandidates.length})`;
-        } else {
-            prevTsumegoLink.textContent = getTerm('review');
-        }
+        prevTsumegoLink.textContent = getTerm('review');
 
         // Enable review button if there is a problem to review in the history
         if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {
@@ -165,8 +180,8 @@ const updateSolvingModeUI = () => {
     // Update "Share" link (button3)
     document.getElementById('button3').textContent = getTerm('stats');
 
-    // Hide button4 in solving mode
-    document.getElementById('button4').style.display = 'none';
+    // Show button4 as Install button
+    updateInstallButton();
 }
 
 const updateAnalysisModeUI = () => {
@@ -310,9 +325,18 @@ export function updateAnalysisUI(score, bestMove) {
             }
             if (isUnreliable) {
                 const warningMsg = getTerm('unreliableWarning');
-                const html = `<span class="unreliable" onclick="alert('${warningMsg}')" role="button" tabindex="0">${displayText}</span>`;
-                document.getElementById('text1').innerHTML = html;
-                document.getElementById('text1-h').innerHTML = html;
+                for (const id of ['text1', 'text1-h']) {
+                    const el = document.getElementById(id);
+                    el.textContent = displayText;
+                    const span = document.createElement('span');
+                    span.className = 'unreliable';
+                    span.setAttribute('role', 'button');
+                    span.setAttribute('tabindex', '0');
+                    span.textContent = displayText;
+                    span.addEventListener('click', () => alert(warningMsg));
+                    el.textContent = '';
+                    el.appendChild(span);
+                }
             } else {
                 document.getElementById('text1').textContent = displayText;
                 document.getElementById('text1-h').textContent = displayText;

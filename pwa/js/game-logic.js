@@ -5,12 +5,19 @@ import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from 
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
-import { APP_MODES } from './constants.js';
+import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES } from './model.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
+
+const median = (values) => {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
 
 const handleCorrectAnswer = () => {
     setAppMode(APP_MODES.SOLVING);
@@ -51,12 +58,13 @@ async function _handleIncorrectMoveSequence(moveIndex) {
 
     if (state.problemHistory[0]?.isRepeat) {
         let reviewTimeIsBeneficial = false;
-        let meanReviewTime = 0;
+        let medianReviewTime = 0;
         let previousReviewTime = 0;
         let reviewStat;
         if (statsAreAvailable) {
-            const reviewTimeValues = state.answerHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
-            meanReviewTime = reviewTimeValues.length > 0 ? reviewTimeValues.reduce((a, b) => a + b, 0) / reviewTimeValues.length : 0;
+            const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+            const reviewTimeValues = recentHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
+            medianReviewTime = median(reviewTimeValues);
 
             // Get accumulated review time for this problem
             const currentProblem = state.problemHistory[0];
@@ -74,7 +82,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
             }
         }
 
-        if (reviewTimeIsBeneficial && previousReviewTime < meanReviewTime) {
+        if (reviewTimeIsBeneficial && previousReviewTime < medianReviewTime) {
             duration = 6000;
             if (reviewStat) {
                 const { coeff, se } = reviewStat;
@@ -88,15 +96,16 @@ async function _handleIncorrectMoveSequence(moveIndex) {
         }
     } else { // Careless mistake for new problems
         let timeIsBeneficial = false;
-        let meanSolvingTime = 0;
+        let medianSolvingTime = 0;
         if (statsAreAvailable) {
-            const timeTakenValues = state.answerHistory.map(p => p.timeTaken).filter(t => t !== undefined);
-            meanSolvingTime = timeTakenValues.length > 0 ? timeTakenValues.reduce((a, b) => a + b, 0) / timeTakenValues.length : 0;
+            const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+            const timeTakenValues = recentHistory.map(p => p.timeTaken).filter(t => t !== undefined);
+            medianSolvingTime = median(timeTakenValues);
             const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
             timeIsBeneficial = timeStat ? timeStat.coeff > 0 : false;
         }
 
-        if (timeIsBeneficial && state.accumulatedSolvingTime < meanSolvingTime) {
+        if (timeIsBeneficial && state.accumulatedSolvingTime < medianSolvingTime) {
             duration = 6000; // This duration will be ignored as buttonText is set
             const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
             const { coeff, se } = timeStat;

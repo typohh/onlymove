@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, updateAnswerHistory } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -65,14 +65,11 @@ async function selectProblem() {
             }
         }
         
-        // If we still can't find it, log an error and fall back.
-        console.error(`Failed to load review problem ${chosenProblemInfo.problemId}.`);
-        const answerIndex = state.answerHistory.map(a => a.problemId).lastIndexOf(chosenProblemInfo.problemId);
-        if (answerIndex !== -1) {
-            const newAnswerHistory = [...state.answerHistory];
-            newAnswerHistory[answerIndex] = { ...newAnswerHistory[answerIndex], ignored: true };
-            updateAnswerHistory(newAnswerHistory);
-        }
+        // If we still can't find it, log an error and mark it unavailable for this session.
+        // Next session we'll try again — files may come back, or the user may update the app.
+        console.error(`Failed to load recall problem ${chosenProblemInfo.problemId}.`);
+        state.unavailableProblemIds.add(chosenProblemInfo.problemId);
+        return await selectProblem();
     }
 
     // Default selection logic (fallback)
@@ -241,7 +238,9 @@ export async function loadTsumego(isUpdate) {
             throw new Error('Invalid or empty SGF');
         }
         
-        const reoriented = reorientSgf(sgfContent);
+        const isRepeat = selectedProblem.isRepeat;
+        const orientationParam = isRepeat ? null : 0;
+        const reoriented = reorientSgf(sgfContent, orientationParam);
         const sgf = reoriented.sgf;
         const orientation = reoriented.orientation;
 

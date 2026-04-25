@@ -17,6 +17,7 @@ const localization = {
     stats: '统计',
     linkCopied: '链接已复制到剪贴板',
     tsumegoMode: '挑战模式',
+    recallMode: '回忆模式',
     reviewMode: '复习模式',
     viewMode: '查看模式',
     rushingMessage: '您只用了{seconds}秒就回答了。您过去的结果表明，这样仓促行事有{confidence}%的概率导致更多错误。',
@@ -26,6 +27,10 @@ const localization = {
     rankDownTo: '降至{rank}',
     installPrompt: '安装为应用以获得更好的体验！',
     install: '安装',
+    installed: '已安装',
+    installIosTitle: '安装为应用',
+    installIosInstructions: '在 Safari 中：\n1. 点击底部的 共享 按钮（□↑）\n2. 向下滚动并点击「添加到主屏幕」\n3. 点击右上角的「添加」',
+    installIosClose: '关闭',
     rankChangeFormat: '等级 {change}',
     unreliableWarning: '警告：此位置没有预计算解决方案，最佳移动和得分不可靠。',
     komi: '贴目',
@@ -42,7 +47,10 @@ const localization = {
     statsIgnoredProblems: "您已忽略{count_ignored}个问题，另有{count_slipped}个问题因不规律的练习而被放弃。",
     statsModelCoefficients: '逻辑回归模型系数：',
     ignore: '忽略',
-    ignoreConfirm: '您觉得从这个问题中无法学到任何东西，并且不想在未来再次看到它吗？'
+    ignoreConfirm: '您觉得从这个问题中无法学到任何东西，并且不想在未来再次看到它吗？',
+    shareLink: '分享链接',
+    shareImage: '分享图片',
+    shareBoth: '分享两者'
   },
   ja: {
     kyu: '級',
@@ -58,6 +66,7 @@ const localization = {
     stats: '統計',
     linkCopied: 'リンクをクリップボードにコピーしました',
     tsumegoMode: 'チャレンジモード',
+    recallMode: 'リコールモード',
     reviewMode: '復習モード',
     viewMode: '閲覧モード',
     rushingMessage: 'あなたはわずか{seconds}秒で回答しました。過去の結果から、このように急ぐと{confidence}%の確率でミスが増えることが示唆されます。',
@@ -67,6 +76,10 @@ const localization = {
     rankDownTo: '{rank}に降段',
     installPrompt: 'アプリとしてインストールして、より良い体験を！',
     install: 'インストール',
+    installed: 'インストール済み',
+    installIosTitle: 'アプリとしてインストール',
+    installIosInstructions: 'Safari で：\n1. 画面下部の 共有 ボタン（□↑）をタップ\n2. スクロールして「ホーム画面に追加」をタップ\n3. 右上の「追加」をタップ',
+    installIosClose: '閉じる',
     rankChangeFormat: 'ランク {change}',
     unreliableWarning: '警告：この位置には事前計算されたソリューションがありません、最良の移動とスコアは信頼できません。',
     komi: 'コミ',
@@ -83,7 +96,10 @@ const localization = {
     statsIgnoredProblems: "あなたは{count_ignored}個の問題を無視し、不規則な練習のためにさらに{count_slipped}個が放棄されました。",
     statsModelCoefficients: 'ロジットモデル係数：',
     ignore: '無視',
-    ignoreConfirm: 'この問題から何も学べないと感じて、今後また見たくないですか？'
+    ignoreConfirm: 'この問題から何も学べないと感じて、今後また見たくないですか？',
+    shareLink: 'リンクを共有',
+    shareImage: '画像を共有',
+    shareBoth: '両方を共有'
   },
   ko: {
     kyu: '급',
@@ -99,6 +115,7 @@ const localization = {
     stats: '통계',
     linkCopied: '링크가 클립보드에 복사되었습니다',
     tsumegoMode: '챌린지 모드',
+    recallMode: '리콜 모드',
     reviewMode: '복습 모드',
     viewMode: '보기 모드',
     rushingMessage: '단 {seconds}초 만에 답변하셨습니다. 과거 결과에 따르면, 이렇게 서두르면 {confidence}%의 확률로 더 많은 실수로 이어질 수 있습니다.',
@@ -108,6 +125,10 @@ const localization = {
     rankDownTo: '{rank}으로 강등',
     installPrompt: '앱으로 설치하여 더 나은 경험을!',
     install: '설치',
+    installed: '설치됨',
+    installIosTitle: '앱으로 설치',
+    installIosInstructions: 'Safari에서:\n1. 하단의 공유 버튼(□↑)을 탭\n2. 스크롤하여 「홈 화면에 추가」를 탭\n3. 오른쪽 상단의 「추가」를 탭',
+    installIosClose: '닫기',
     rankChangeFormat: '등급 {change}',
     unreliableWarning: '경고: 이 위치에 대해 사전 계산된 솔루션이 없으며, 최상의 이동과 점수는 신뢰할 수 없습니다.',
     komi: '코미',
@@ -124,7 +145,10 @@ const localization = {
     statsIgnoredProblems: "당신은 {count_ignored}개의 문제를 무시했으며, 불규칙한 연습으로 인해 {count_slipped}개의 문제가 포기되었습니다.",
     statsModelCoefficients: '로짓 모델 계수:',
     ignore: '무시',
-    ignoreConfirm: '이 문제에서 아무것도 배울 수 없다고 생각하며 앞으로 다시 보고 싶지 않으신가요?'
+    ignoreConfirm: '이 문제에서 아무것도 배울 수 없다고 생각하며 앞으로 다시 보고 싶지 않으신가요?',
+    shareLink: '링크 공유',
+    shareImage: '이미지 공유',
+    shareBoth: '모두 공유'
   },
   en: {
     kyu: 'kyu',
@@ -140,6 +164,7 @@ const localization = {
     stats: 'Stats',
     linkCopied: 'Link copied to clipboard',
     tsumegoMode: 'Challenge mode',
+    recallMode: 'Recall mode',
     reviewMode: 'Review mode',
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',
@@ -149,6 +174,10 @@ const localization = {
     rankDownTo: 'Rank down to {rank}',
     installPrompt: 'Install as an app for a better experience!',
     install: 'Install',
+    installed: 'Installed',
+    installIosTitle: 'Install as App',
+    installIosInstructions: 'In Safari:\n1. Tap the Share button (□↑) at the bottom\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" in the top right',
+    installIosClose: 'Close',
     rankChangeFormat: 'Rank {change}',
     unreliableWarning: 'WARNING: no precomputed solution available for this position, best move and score are unreliable.',
     komi: 'Komi',
@@ -169,7 +198,10 @@ const localization = {
     statsModelCoefficients: 'Logit Model Coefficients:',
 
     ignore: 'Ignore',
-    ignoreConfirm: 'Do you feel like you cannot learn anything from this problem and don\'t want to see it again in the future?'
+    ignoreConfirm: 'Do you feel like you cannot learn anything from this problem and don\'t want to see it again in the future?',
+    shareLink: 'Share link',
+    shareImage: 'Share image',
+    shareBoth: 'Share both'
   }
 };
 
@@ -193,7 +225,7 @@ export function getTerm(key) {
 }
 
 export function getDescriptiveRank(numericRank) {
-  const rankIndex = Math.floor(Math.pow(numericRank, 1.0) * TOTAL_RANKS);
+  const rankIndex = Math.min(Math.floor(numericRank * TOTAL_RANKS), TOTAL_RANKS - 1);
   const kyuTerm = getTerm('kyu');
   const danTerm = getTerm('dan');
   return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;

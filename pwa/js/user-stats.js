@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
@@ -31,7 +31,7 @@ export function updateUserStats(isCorrect) {
     const currentProblem = history[0];
 
     if (!currentProblem || currentProblem.linked) {
-        if (currentProblem.linked) updateProblemHistory(history);
+        if (currentProblem && currentProblem.linked) updateProblemHistory(history);
         return {};
     }
 
@@ -49,6 +49,8 @@ export function updateUserStats(isCorrect) {
         } else {
             successSinceFailure = (lastAnswer && lastAnswer.successSinceFailure !== undefined) ? lastAnswer.successSinceFailure + 1 : 1;
         }
+    } else if (!isCorrect) {
+        successSinceFailure = 0;
     }
 
     const prevs = state.answerHistory.filter(ans => ans.problemId === problemId);
@@ -68,7 +70,7 @@ export function updateUserStats(isCorrect) {
     };
 
     updateAnswerHistory([...state.answerHistory, answer]);
-    state.currentSolvingStartTime = null;
+    setCurrentSolvingStartTime(null);
 
     const oldRank = state.userRank;
     let rank = oldRank;

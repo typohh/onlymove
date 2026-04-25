@@ -217,3 +217,100 @@ export function playNextMove() {
     redraw();
     return true;
 }
+
+export async function getBoardImageBlob() {
+    if (!state.board) return null;
+
+    const width = state.board.pixel_width || state.board.width || 600;
+    const height = state.board.pixel_height || state.board.height || 600;
+
+    const bgImg = new Image();
+    bgImg.src = WGo.DIR + "wood_1024.jpg";
+    await new Promise(resolve => {
+        bgImg.onload = resolve;
+        bgImg.onerror = resolve;
+    });
+
+    // Create a temporary hidden container for an off-screen board
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.top = '-9999px';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.width = width + 'px';
+    tempContainer.style.height = height + 'px';
+    document.body.appendChild(tempContainer);
+
+    try {
+        // Clone the kifu reader to find the start position without affecting the game
+        let startPosition = state.kifuReader ? state.kifuReader.game.position : null;
+        let cloneReader = null;
+        if (state.kifuReader) {
+            cloneReader = new WGo.KifuReader(state.kifuReader.kifu);
+            while (cloneReader.node.children && cloneReader.node.children.length === 1) {
+                cloneReader.next();
+            }
+            startPosition = cloneReader.game.position;
+        }
+
+        // Initialize temporary board
+        const tempBoard = new WGo.Board(tempContainer, {
+            size: startPosition ? startPosition.size : state.board.size,
+            background: "", // We will draw the background manually
+            stoneHandler: WGo.Board.drawHandlers.REALISTIC,
+            width: width
+        });
+        
+        // Populate the temporary board
+        if (startPosition) {
+            for (let x = 0; x < startPosition.size; x++) {
+                for (let y = 0; y < startPosition.size; y++) {
+                    if (startPosition.get(x, y) !== 0) {
+                        tempBoard.addObject({ x, y, c: startPosition.get(x, y) });
+                    }
+                }
+            }
+        }
+
+        // Add markers for the latest move and ko
+        if (cloneReader && cloneReader.node.move) {
+            tempBoard.addObject({ x: cloneReader.node.move.x, y: cloneReader.node.move.y, type: 'CR' });
+            
+            const game = cloneReader.game;
+            const move = cloneReader.node.move;
+            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+            for (const [dx, dy] of directions) {
+                const adjX = move.x + dx;
+                const adjY = move.y + dy;
+                const adjResult = game.play(adjX, adjY, game.turn, true);
+                if (adjResult === 4) { // illegal due to ko
+                    tempBoard.addObject({ x: adjX, y: adjY, type: 'SQ' });
+                }
+            }
+        }
+
+        // Wait a small tick to ensure WGo has asynchronously rendered to the canvas layers
+        await new Promise(r => setTimeout(r, 50));
+
+        const finalCanvas = document.createElement('canvas');
+        finalCanvas.width = width;
+        finalCanvas.height = height;
+        const ctx = finalCanvas.getContext('2d');
+        
+        ctx.fillStyle = '#DCB35C';
+        ctx.fillRect(0, 0, width, height);
+
+        if (bgImg.complete && bgImg.naturalWidth > 0) {
+            ctx.drawImage(bgImg, 0, 0, width, height);
+        }
+
+        // Copy all canvas layers from the temporary board
+        const canvases = Array.from(tempContainer.querySelectorAll('canvas'));
+        canvases.forEach(c => {
+            ctx.drawImage(c, 0, 0, width, height);
+        });
+
+        return await new Promise(resolve => finalCanvas.toBlob(resolve, 'image/png'));
+    } finally {
+        document.body.removeChild(tempContainer);
+    }
+}

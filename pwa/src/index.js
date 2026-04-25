@@ -1,15 +1,23 @@
-// Cloudflare Pages Function for handling tsumego reports
-// This function receives reports from users and stores them in a D1 database
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-export async function onRequestPost({ request, env }) {
-  // Handle CORS preflight requests
-  if (request.method === 'OPTIONS') {
-    return handleCors();
+    // Only handle /report endpoint
+    if (url.pathname === '/report') {
+      if (request.method === 'OPTIONS') {
+        return handleCors();
+      }
+
+      if (request.method === 'POST') {
+        return handleReport(request, env);
+      }
+    }
+
+    // Static assets are served before the worker is invoked by default,
+    // so if a request reaches here and it's not /report, it's not found.
+    return new Response('Not found', { status: 404 });
   }
-
-  // Handle POST requests to /report
-  return handleReport(request, env);
-}
+};
 
 // Handle CORS headers
 function handleCors() {
