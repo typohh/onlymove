@@ -45,6 +45,7 @@ export const state = {
     // Analysis mode state
     initialAnalysisNode: null,
     ghostMove: null, // Pending move for double-click confirmation
+    analysisHintMove: null, // Best-move hint shown in analysis mode
     reviewStartTime: null,
 
     // User stats
@@ -99,6 +100,10 @@ export function setInitialAnalysisNode(node) {
 
 export function setGhostMove(move) {
     state.ghostMove = move;
+}
+
+export function setAnalysisHintMove(move) {
+    state.analysisHintMove = move;
 }
 
 export function updateUserRank(rank) {

@@ -1,6 +1,6 @@
 // js/analysis.js
 
-import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime } from './state.js';
+import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
@@ -8,8 +8,6 @@ import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
 import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
-
-let analysisHintMove = null;
 
 
 /**
@@ -23,6 +21,7 @@ export function enterAnalysisMode() {
     });
     return new Promise((resolve) => {
         setGhostMove(null); // Clear any ghost stone from previous modes
+        setAnalysisHintMove(null); // Clear stale hint from a prior analysis session
 
         if (!state.problemHistory || state.problemHistory.length < 2 || !state.problemHistory[1].sgf ) {
             setAppMode(APP_MODES.SOLVING);
@@ -123,7 +122,7 @@ const getCurrentSgf = () => {
  * Fetches analysis from the server and updates the UI without blocking.
  */
 async function requestAndDisplayAnalysis() {
-    analysisHintMove = null;
+    setAnalysisHintMove(null);
     redraw();
 
     try {
@@ -148,9 +147,9 @@ async function requestAndDisplayAnalysis() {
                 scoreText = `${bestScore.toFixed(1)}`;
             }
             
-            analysisHintMove = bestMove;
+            setAnalysisHintMove(bestMove);
             updateAnalysisUI(scoreText, bestMove);
-            redraw(analysisHintMove);
+            redraw();
             return;
         }
 
@@ -161,9 +160,9 @@ async function requestAndDisplayAnalysis() {
             const bestMove = bestMoveNode.move;
             const bestScore = getScoreFromComment(bestMoveNode.comment);
             const scoreText = bestScore !== null ? `${bestScore.toFixed(1)}` : 'N/A';
-            analysisHintMove = bestMove;
+            setAnalysisHintMove(bestMove);
             updateAnalysisUI(scoreText, bestMove);
-            redraw(analysisHintMove);
+            redraw();
             return;
         }
 
@@ -208,9 +207,9 @@ async function requestAndDisplayAnalysis() {
                     currentNode.children.unshift(newNode);
                     newNode.parent = currentNode;
                 }
-                analysisHintMove = bestMove;
+                setAnalysisHintMove(bestMove);
                 updateAnalysisUI(score, bestMove);
-                redraw(analysisHintMove);
+                redraw();
             }
         } else if (state.appMode !== APP_MODES.ANALYZING) {
             updateAnalysisUI(score, null);

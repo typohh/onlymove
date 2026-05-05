@@ -50,7 +50,10 @@ const localization = {
     ignoreConfirm: '您觉得从这个问题中无法学到任何东西，并且不想在未来再次看到它吗？',
     shareLink: '分享链接',
     shareImage: '分享图片',
-    shareBoth: '分享两者'
+    shareBoth: '分享两者',
+    preparingImage: '正在准备图片…',
+    shareFailed: '分享失败',
+    imageCaptureFailed: '图片捕获失败'
   },
   ja: {
     kyu: '級',
@@ -99,7 +102,10 @@ const localization = {
     ignoreConfirm: 'この問題から何も学べないと感じて、今後また見たくないですか？',
     shareLink: 'リンクを共有',
     shareImage: '画像を共有',
-    shareBoth: '両方を共有'
+    shareBoth: '両方を共有',
+    preparingImage: '画像を準備中…',
+    shareFailed: '共有に失敗しました',
+    imageCaptureFailed: '画像のキャプチャに失敗しました'
   },
   ko: {
     kyu: '급',
@@ -148,7 +154,10 @@ const localization = {
     ignoreConfirm: '이 문제에서 아무것도 배울 수 없다고 생각하며 앞으로 다시 보고 싶지 않으신가요?',
     shareLink: '링크 공유',
     shareImage: '이미지 공유',
-    shareBoth: '모두 공유'
+    shareBoth: '모두 공유',
+    preparingImage: '이미지를 준비하는 중…',
+    shareFailed: '공유 실패',
+    imageCaptureFailed: '이미지 캡처 실패'
   },
   en: {
     kyu: 'kyu',
@@ -201,7 +210,10 @@ const localization = {
     ignoreConfirm: 'Do you feel like you cannot learn anything from this problem and don\'t want to see it again in the future?',
     shareLink: 'Share link',
     shareImage: 'Share image',
-    shareBoth: 'Share both'
+    shareBoth: 'Share both',
+    preparingImage: 'Preparing image…',
+    shareFailed: 'Failed to share',
+    imageCaptureFailed: 'Failed to capture image'
   }
 };
 

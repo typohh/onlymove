@@ -5,8 +5,8 @@ import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
-import { MODEL_INPUT_HISTORY_LENGTH, REVIEW_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
-import { getReviewCandidates } from './model.js';
+import { MODEL_INPUT_HISTORY_LENGTH, APP_MODES } from './constants.js';
+import { getRecallCandidates } from './model.js';
 
 async function simpleHash(str) {
     const encoder = new TextEncoder();
@@ -37,11 +37,11 @@ async function selectProblem() {
         return problem;
     }
 
-    const reviewCandidates = getReviewCandidates();
+    const recallCandidates = getRecallCandidates();
 
-    if (reviewCandidates.length > 0) {
-        reviewCandidates.sort((a, b) => a.recallRate - b.recallRate);
-        const chosenProblemInfo = reviewCandidates[0];
+    if (recallCandidates.length > 0) {
+        recallCandidates.sort((a, b) => a.recallRate - b.recallRate);
+        const chosenProblemInfo = recallCandidates[0];
         let problem = state.allProblems.find(p => p.filename === `${chosenProblemInfo.problemId}.sgf`);
 
         if (problem) {

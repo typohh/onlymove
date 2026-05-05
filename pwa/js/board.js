@@ -106,7 +106,7 @@ const drawIllegalDueToKoMarker = () => {
     }
 }
 
-export function redraw(analysisHintMove = null) {
+export function redraw() {
     if (!state.kifuReader) return;
 
     const position = state.kifuReader.game.position;
@@ -127,11 +127,11 @@ export function redraw(analysisHintMove = null) {
     if (state.kifuReader.node.move) {
         state.board.addObject({ x: state.kifuReader.node.move.x, y: state.kifuReader.node.move.y, type: 'CR' });
     }
-    
+
     drawIllegalDueToKoMarker();
 
-    if (state.appMode === APP_MODES.ANALYZING && analysisHintMove) {
-        drawAnalysisHintMarker(analysisHintMove);
+    if (state.appMode === APP_MODES.ANALYZING && state.analysisHintMove) {
+        drawAnalysisHintMarker(state.analysisHintMove);
     }
 
     if (state.ghostMove) {

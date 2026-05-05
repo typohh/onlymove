@@ -118,168 +118,187 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Handle button3 click - share functionality
+    let isSharing = false;
     document.getElementById('button3').addEventListener('click', (e) => {
         e.preventDefault();
         if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
             showDetailedStats();
-        } else { // 'analyzing'
-            if (!state.problemHistory[1]) {
-                console.error('No current problem to share');
-                return;
-            }
-            const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
-            const orientation = state.problemHistory[1].orientation;
-            let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
-            if (typeof orientation === 'number' && orientation !== 0) {
-                shareUrl += `&o=${orientation}`;
-            }
-            const copyToClipboard = () => {
-                navigator.clipboard.writeText(shareUrl).then(() => {
-                    // Show a temporary confirmation message
-                    const message = document.createElement('div');
-                    message.textContent = getTerm('linkCopied');
-                    Object.assign(message.style, {
-                        position: 'fixed',
-                        top: '50%',
-                        left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                        color: 'white',
-                        padding: '1vmin 2vmin',
-                        borderRadius: '0.5vmin',
-                        fontWeight: 'bold',
-                        fontSize: '3vmin',
-                        zIndex: '9999',
-                        pointerEvents: 'none',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center'
-                    });
+            return;
+        }
+        // analyzing
+        if (isSharing) return;
+        if (!state.problemHistory[1]) {
+            console.error('No current problem to share');
+            return;
+        }
+        isSharing = true;
+        const releaseGuard = () => { isSharing = false; };
 
-                    document.body.appendChild(message);
+        const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
+        const orientation = state.problemHistory[1].orientation;
+        let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
+        if (typeof orientation === 'number' && orientation !== 0) {
+            shareUrl += `&o=${orientation}`;
+        }
 
-                    // Remove after 2 seconds
-                    setTimeout(() => {
-                        if (message.parentNode) {
-                            message.parentNode.removeChild(message);
-                        }
-                    }, 2000);
-                }).catch(err => {
-                    console.error('Failed to copy URL: ', err);
-                    // Show error message
-                    const message = document.createElement('div');
-                    message.textContent = getTerm('error');
-                    Object.assign(message.style, {
-                        position: 'fixed',
-                        top: '50%',
-                        left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        backgroundColor: 'rgba(255, 0, 0, 0.8)',
-                        color: 'white',
-                        padding: '1vmin 2vmin',
-                        borderRadius: '0.5vmin',
-                        fontWeight: 'bold',
-                        fontSize: '3vmin',
-                        zIndex: '10000',
-                        pointerEvents: 'none',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center'
-                    });
-
-                    document.body.appendChild(message);
-
-                    // Remove after 2 seconds
-                    setTimeout(() => {
-                        if (message.parentNode) {
-                            message.parentNode.removeChild(message);
-                        }
-                    }, 2000);
-                });
-            };
-            const shareLink = () => {
-                if (navigator.share && navigator.canShare && navigator.canShare({ url: shareUrl })) {
-                    navigator.share({ url: shareUrl }).catch(err => {
-                        if (err.name !== 'AbortError') {
-                            console.error('Share link failed: ', err);
-                            copyToClipboard();
-                        }
-                    });
-                } else {
-                    copyToClipboard();
-                }
-            };
-
-            const shareImage = (file) => {
-                const data = { files: [file], title: getTerm('tsumegoMode') };
-                if (navigator.share && navigator.canShare && navigator.canShare(data)) {
-                    navigator.share(data).catch(err => {
-                        if (err.name !== 'AbortError') {
-                            console.error('Share image failed: ', err);
-                            shareLink();
-                        }
-                    });
-                } else {
-                    shareLink();
-                }
-            };
-
-            const shareBoth = (file) => {
-                const data = { files: [file], url: shareUrl, title: getTerm('tsumegoMode') };
-                if (navigator.share && navigator.canShare && navigator.canShare(data)) {
-                    navigator.share(data).catch(err => {
-                        if (err.name !== 'AbortError') {
-                            console.error('Share both failed: ', err);
-                            copyToClipboard();
-                        }
-                    });
-                } else {
-                    shareLink();
-                }
-            };
-
-            const showShareChooser = (file) => {
-                const overlay = document.createElement('div');
-                overlay.id = 'ios-install-overlay';
-
-                const modal = document.createElement('div');
-                modal.id = 'ios-install-modal';
-
-                const bothBtn = document.createElement('button');
-                bothBtn.className = 'btn';
-                bothBtn.textContent = getTerm('shareBoth');
-                bothBtn.addEventListener('click', () => { overlay.remove(); shareBoth(file); });
-
-                const linkBtn = document.createElement('button');
-                linkBtn.className = 'btn';
-                linkBtn.textContent = getTerm('shareLink');
-                linkBtn.addEventListener('click', () => { overlay.remove(); shareLink(); });
-
-                const imageBtn = document.createElement('button');
-                imageBtn.className = 'btn';
-                imageBtn.textContent = getTerm('shareImage');
-                imageBtn.addEventListener('click', () => { overlay.remove(); shareImage(file); });
-
-                overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
-
-                modal.appendChild(bothBtn);
-                modal.appendChild(linkBtn);
-                modal.appendChild(imageBtn);
-                overlay.appendChild(modal);
-                document.body.appendChild(overlay);
-            };
-
-            getBoardImageBlob().then(blob => {
-                if (blob) {
-                    const file = new File([blob], 'tsumego.png', { type: 'image/png' });
-                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                        showShareChooser(file);
-                        return;
-                    }
-                }
-                shareLink();
-            }).catch(err => {
-                console.error("Failed to generate image blob, falling back to link share", err);
-                shareLink();
+        const showToast = (text, { isError = false, autoDismiss = true } = {}) => {
+            const message = document.createElement('div');
+            message.textContent = text;
+            Object.assign(message.style, {
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                padding: '1vmin 2vmin',
+                borderRadius: '0.5vmin',
+                fontWeight: 'bold',
+                fontSize: '3vmin',
+                zIndex: isError ? '10000' : '9999',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+                textAlign: 'center'
             });
+            document.body.appendChild(message);
+            if (autoDismiss) {
+                setTimeout(() => {
+                    if (message.parentNode) message.parentNode.removeChild(message);
+                }, 2000);
+            }
+            return message;
+        };
+
+        const copyToClipboard = () => {
+            return navigator.clipboard.writeText(shareUrl).then(() => {
+                showToast(getTerm('linkCopied'));
+            }).catch(err => {
+                console.error('Failed to copy URL: ', err);
+                showToast(getTerm('error'), { isError: true });
+            });
+        };
+
+        const shareLink = () => {
+            if (navigator.share && navigator.canShare && navigator.canShare({ url: shareUrl })) {
+                return navigator.share({ url: shareUrl }).catch(err => {
+                    if (err.name === 'AbortError') return;
+                    console.error('Share link failed: ', err);
+                    showToast(getTerm('shareFailed'), { isError: true });
+                    return copyToClipboard();
+                });
+            }
+            return copyToClipboard();
+        };
+
+        // Generate the board image with a visible "preparing…" toast and a
+        // hard timeout so canvas/render hangs surface as an error rather than
+        // a silent forever-spinner.
+        const generateImageFile = async () => {
+            const toast = showToast(getTerm('preparingImage'), { autoDismiss: false });
+            const cleanup = () => { if (toast.parentNode) toast.parentNode.removeChild(toast); };
+            try {
+                const blob = await Promise.race([
+                    getBoardImageBlob(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('image generation timed out')), 10000))
+                ]);
+                cleanup();
+                if (!blob) throw new Error('No blob returned from getBoardImageBlob');
+                return new File([blob], 'tsumego.png', { type: 'image/png' });
+            } catch (err) {
+                cleanup();
+                console.error('Failed to capture image: ', err);
+                showToast(getTerm('imageCaptureFailed'), { isError: true });
+                throw err;
+            }
+        };
+
+        const shareImage = async () => {
+            let file;
+            try {
+                file = await generateImageFile();
+            } catch {
+                return shareLink();
+            }
+            const data = { files: [file], title: getTerm('tsumegoMode') };
+            if (navigator.share && navigator.canShare && navigator.canShare(data)) {
+                return navigator.share(data).catch(err => {
+                    if (err.name === 'AbortError') return;
+                    console.error('Share image failed: ', err);
+                    showToast(getTerm('shareFailed'), { isError: true });
+                    return shareLink();
+                });
+            }
+            return shareLink();
+        };
+
+        const shareBoth = async () => {
+            let file;
+            try {
+                file = await generateImageFile();
+            } catch {
+                return shareLink();
+            }
+            const data = { files: [file], url: shareUrl, title: getTerm('tsumegoMode') };
+            if (navigator.share && navigator.canShare && navigator.canShare(data)) {
+                return navigator.share(data).catch(err => {
+                    if (err.name === 'AbortError') return;
+                    console.error('Share both failed: ', err);
+                    showToast(getTerm('shareFailed'), { isError: true });
+                    return copyToClipboard();
+                });
+            }
+            return shareLink();
+        };
+
+        const showShareChooser = () => {
+            const overlay = document.createElement('div');
+            overlay.id = 'ios-install-overlay';
+
+            const modal = document.createElement('div');
+            modal.id = 'ios-install-modal';
+
+            const bothBtn = document.createElement('button');
+            bothBtn.className = 'btn';
+            bothBtn.textContent = getTerm('shareBoth');
+            bothBtn.addEventListener('click', () => { overlay.remove(); shareBoth().finally(releaseGuard); });
+
+            const linkBtn = document.createElement('button');
+            linkBtn.className = 'btn';
+            linkBtn.textContent = getTerm('shareLink');
+            linkBtn.addEventListener('click', () => { overlay.remove(); shareLink().finally(releaseGuard); });
+
+            const imageBtn = document.createElement('button');
+            imageBtn.className = 'btn';
+            imageBtn.textContent = getTerm('shareImage');
+            imageBtn.addEventListener('click', () => { overlay.remove(); shareImage().finally(releaseGuard); });
+
+            overlay.addEventListener('click', (ev) => {
+                if (ev.target === overlay) {
+                    overlay.remove();
+                    releaseGuard();
+                }
+            });
+
+            modal.appendChild(bothBtn);
+            modal.appendChild(linkBtn);
+            modal.appendChild(imageBtn);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        };
+
+        // Probe whether the browser can share files at all, without actually generating one.
+        let filesSupported = false;
+        try {
+            filesSupported = !!(navigator.share && navigator.canShare &&
+                navigator.canShare({ files: [new File([], 'p.png', { type: 'image/png' })] }));
+        } catch {
+            filesSupported = false;
+        }
+
+        if (filesSupported) {
+            showShareChooser();
+        } else {
+            shareLink().finally(releaseGuard);
         }
     });
 

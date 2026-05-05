@@ -2,7 +2,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH, REVIEW_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';
 
 // ------------------------------------------------------------------------------------------------
@@ -63,7 +63,7 @@ function getFeaturesForPrediction(lastAnswer, { allReviewTimes, now }) {
     features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
 
     features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
-    features[MODEL_INDICES.IS_NOVEL] = 0; // This is a review problem
+    features[MODEL_INDICES.IS_NOVEL] = 0; // This is a recall problem
 
     const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
     const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
@@ -93,7 +93,7 @@ function getFeaturesForTraining(p, i, { percentileTime, percentileReview, validH
 }
 
 
-export function getReviewCandidates(options = {}) {
+export function getRecallCandidates(options = {}) {
     const {
         lowerProbabilityBound = 0.60,
         upperProbabilityBound = 0.80,
@@ -101,7 +101,7 @@ export function getReviewCandidates(options = {}) {
     } = options;
 
     const now = Date.now();
-    const reviewCandidates = [];
+    const recallCandidates = [];
 
     if (!state.modelParams || state.modelParams.length === 0) {
         return []; // Model not ready
@@ -125,7 +125,7 @@ export function getReviewCandidates(options = {}) {
         clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
     }
 
-    const recentHistory = state.answerHistory.slice(-REVIEW_CANDIDATE_HISTORY_LENGTH);
+    const recentHistory = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
 
     const allReviewTimes = recentHistory
         .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
@@ -154,7 +154,7 @@ export function getReviewCandidates(options = {}) {
             const probability = 1 / (1 + Math.exp(-logit));
 
             if (probability >= lowerProbabilityBound && probability <= upperProbabilityBound) {
-                reviewCandidates.push({
+                recallCandidates.push({
                     problemId,
                     recallRate: probability,
                     rating: lastAnswer.problemRating
@@ -163,7 +163,7 @@ export function getReviewCandidates(options = {}) {
         }
     }
 
-    return reviewCandidates;
+    return recallCandidates;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -426,12 +426,12 @@ export async function showDetailedStats() {
 
             if (Math.abs(R) > 1e-9) {
                 const t_eq_days = Math.max(0, Math.exp(N / R) - 1);
-                const allRepeats = getReviewCandidates({
+                const allRepeats = getRecallCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: false
                 }).length;
-                const firstTimeFailures = getReviewCandidates({
+                const firstTimeFailures = getRecallCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
                     requireLastAnswerIncorrect: true
@@ -446,7 +446,7 @@ export async function showDetailedStats() {
         const novelProblemCount = new Set(state.answerHistory.filter(p => !p.isRepeat).map(p => p.problemId)).size;
         resultText += getTerm('statsNovelProblems').replace('{count}', novelProblemCount) + '\n';
 
-        const slippedProblemCount = getReviewCandidates({
+        const slippedProblemCount = getRecallCandidates({
             lowerProbabilityBound: 0,
             upperProbabilityBound: 0.6,
             requireLastAnswerIncorrect: false
