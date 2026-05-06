@@ -313,7 +313,7 @@ export function updateAnalysisUI(score, bestMove) {
             let isUnreliable = false;
             if (bestMove) {
                 const child = currentNode.children.find(c => c.move && c.move.x === bestMove.x && c.move.y === bestMove.y);
-                if (child && child.comment && child.comment.includes('100%/')) {
+                if (child && child._origin === 'api') {
                     isUnreliable = true;
                 }
             }

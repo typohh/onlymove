@@ -1,12 +1,12 @@
 // js/analysis.js
 
-import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove } from './state.js';
+import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove, setCandidateMoves } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { findBestMoveFromChildren, getScoreFromComment } from './sgf.js';
+import { getScoreFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 
 
@@ -22,6 +22,7 @@ export function enterAnalysisMode() {
     return new Promise((resolve) => {
         setGhostMove(null); // Clear any ghost stone from previous modes
         setAnalysisHintMove(null); // Clear stale hint from a prior analysis session
+        setCandidateMoves([]);
 
         if (!state.problemHistory || state.problemHistory.length < 2 || !state.problemHistory[1].sgf ) {
             setAppMode(APP_MODES.SOLVING);
@@ -123,48 +124,39 @@ const getCurrentSgf = () => {
  */
 async function requestAndDisplayAnalysis() {
     setAnalysisHintMove(null);
+    setCandidateMoves([]);
     redraw();
 
     try {
         const currentNode = getCurrentNode();
         const children = currentNode.children;
-        const bestMoveNode = findBestMoveFromChildren(children);
 
-        // Special case: if we're at the initial position and it has no score,
-        // but its children do, use the best child's score
-        // Check if we're at the initial position by checking if it's the same node object
-        // or if it has the same properties (as a fallback)
-        const isInitialPosition = currentNode === state.initialAnalysisNode || 
-            (!currentNode.parent && currentNode.comment && currentNode.comment.includes('Q'));
-            
-        if (isInitialPosition && bestMoveNode) {
-            const bestMove = bestMoveNode.move;
-            const bestScore = getScoreFromComment(bestMoveNode.comment);
-            
-            // Use score if available, otherwise 'N/A'
-            let scoreText = 'N/A';
-            if (bestScore !== null) {
-                scoreText = `${bestScore.toFixed(1)}`;
-            }
-            
-            setAnalysisHintMove(bestMove);
-            updateAnalysisUI(scoreText, bestMove);
-            redraw();
-            return;
+        // Collect every engine-evaluated child as a candidate. SGF-baked children carry a
+        // "X%/Y" comment from the pipeline; API-added nodes (this session only) carry the
+        // same comment shape plus _origin='api'. Anything without a %/ comment is a
+        // user-explored branch and isn't a candidate.
+        const sgfCandidates = [];
+        let bestSgfChild = null;
+        for (const child of children) {
+            if (!child.move || !child.comment || !child.comment.match(/%\//)) continue;
+            sgfCandidates.push({ x: child.move.x, y: child.move.y });
+            if (!bestSgfChild) bestSgfChild = child;
         }
 
-        // For all other cases, show analyzing state first
-        updateAnalysisUI(getTerm('analyzing'), null);
-
-        if (bestMoveNode) {
-            const bestMove = bestMoveNode.move;
-            const bestScore = getScoreFromComment(bestMoveNode.comment);
+        // If the SGF already evaluated this position, never call the API — baked analysis is
+        // higher quality. Show all baked candidates and use the first as the score-display hint.
+        if (sgfCandidates.length > 0) {
+            const bestMove = bestSgfChild.move;
+            const bestScore = getScoreFromComment(bestSgfChild.comment);
             const scoreText = bestScore !== null ? `${bestScore.toFixed(1)}` : 'N/A';
             setAnalysisHintMove(bestMove);
+            setCandidateMoves(sgfCandidates);
             updateAnalysisUI(scoreText, bestMove);
             redraw();
             return;
         }
+
+        updateAnalysisUI(getTerm('analyzing'), null);
 
         const sgf = getCurrentSgf();
         let { bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf);
@@ -184,30 +176,28 @@ async function requestAndDisplayAnalysis() {
                     y: bestMoveSgf.charCodeAt(1) - 97,
                     c: state.kifuReader.game.turn
                 };
-                // Check if the move already exists in children
+                // The early-return above guarantees no existing child has a %/ comment, so any
+                // matching existing child is a user-exploration node — safe to attach API data.
                 const existingChild = children.find(child => child.move && child.move.x === bestMove.x && child.move.y === bestMove.y);
                 if (existingChild) {
-                    // Set comment if not set
-                    if (!existingChild.comment) {
-                        existingChild.comment = `100%/${score}`;
-                    }
-                    // Move to first if not already
+                    existingChild.comment = `100%/${score}`;
+                    existingChild._origin = 'api';
                     const index = children.indexOf(existingChild);
                     if (index > 0) {
                         children.splice(index, 1);
                         children.unshift(existingChild);
                     }
                 } else {
-                    // Create new node
                     const newNode = new WGo.KNode({
                         move: bestMove,
                         comment: `100%/${score}`
                     });
-                    // Prepend
+                    newNode._origin = 'api';
                     currentNode.children.unshift(newNode);
                     newNode.parent = currentNode;
                 }
                 setAnalysisHintMove(bestMove);
+                setCandidateMoves([{ x: bestMove.x, y: bestMove.y }]);
                 updateAnalysisUI(score, bestMove);
                 redraw();
             }

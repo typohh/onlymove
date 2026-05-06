@@ -6,6 +6,15 @@ PLAYOUTS_SHALLOW = 30
 PLAYOUTS = 30
 MIN_PLAYOUT_PERC = 0.01
 
+# Utility reweighting that makes KataGo prefer preserving the score over flipping
+# the win/loss outcome. Used when generating the post-solution continuation so the
+# losing side plays calm capitulation moves instead of swindle attempts.
+CALM_UTILITY_OVERRIDE = {
+    "winLossUtilityFactor": 0.1,
+    "staticScoreUtilityFactor": 0.5,
+    "dynamicScoreUtilityFactor": 0.5,
+}
+
 
 def get_child_move(node: sgf.Tree_node, color, move: str, has_to_exist=False):
     """
@@ -70,10 +79,14 @@ def generate_variations_directly_to_sgf(
         cumulative_playout_perc: float,
         is_primary: bool,
         exclude_move=None,
+        override_settings=None,
 ):
     """
     Recursively generates variations and adds them directly as child nodes to the parent_sgf_node.
     'is_first_level_branch_node' indicates if the node being added is the first move in a new variation branch.
+
+    override_settings is forwarded to KataGo (e.g. utility reweighting for the calm post-solution line).
+    Existing comments are left untouched so the first pass's numbers win on nodes shared between passes.
     """
     if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
         return
@@ -81,7 +94,12 @@ def generate_variations_directly_to_sgf(
     if cumulative_playout_perc < MIN_PLAYOUT_PERC and not is_primary:
         return
 
-    current_pos_analysis = queries.query(current_moves, playouts=PLAYOUTS, exclude_move=exclude_move)
+    current_pos_analysis = queries.query(
+        current_moves,
+        playouts=PLAYOUTS,
+        exclude_move=exclude_move,
+        override_settings=override_settings,
+    )
     if not current_pos_analysis or "moveInfos" not in current_pos_analysis:
         return
 
@@ -100,8 +118,8 @@ def generate_variations_directly_to_sgf(
         # Create a new child node for this variation
         var_node = get_child_move(parent_sgf_node, "b" if (len(current_moves) % 2 == 0) else "w", move_info["move"])
 
-        comment = f"{move_info['winrate'] * 100:.1f}%/{move_info['scoreLead']:.1f}"
-        var_node.set("C", comment)
+        if not var_node.has_property("C"):
+            var_node.set("C", f"{move_info['winrate'] * 100:.1f}%/{move_info['scoreLead']:.1f}")
 
         # Recursively add deeper variations from this new node
         generate_variations_directly_to_sgf(
@@ -109,7 +127,8 @@ def generate_variations_directly_to_sgf(
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
             new_cumulative_perc,
-            is_primary
+            is_primary,
+            override_settings=override_settings,
         )
 
         is_primary = False

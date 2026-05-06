@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 import numpy as np
+from utils.configurations import BOARD_SIZE
 from utils.katago_queries import get_all_ranks, get_rank_str
 
 
@@ -117,11 +118,12 @@ def print_rating_distribution(metadata):
 
 if __name__ == "__main__":
 
-    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
+    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
+    RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings", str(BOARD_SIZE))
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
 
     # 1. Get the ratings map (tsumego_id -> rating).
-    tsumego_ratings_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/tsumego_ratings_final.csv"))
+    tsumego_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv"))
 
     # Store raw ratings before scaling
     tsumego_ratings_df['raw_rating'] = tsumego_ratings_df['rating']
@@ -131,7 +133,7 @@ if __name__ == "__main__":
 
     total = len(tsumego_ratings_df)
     # Read bot ratings
-    bot_ratings_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/bot_ratings_final.csv"))
+    bot_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
     # --- Exponential Mapping Implementation ---
     # 1. Get Anchor Ratings
     # 8k is index 12 in 0-based 20k-9d scale. Center of bin is 12.5.
@@ -193,7 +195,7 @@ if __name__ == "__main__":
     tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating'])))
 
     # 2. Get the quality map (tsumego_id -> quality).
-    tsumego_quality_df = pd.read_csv(os.path.join(PROJECT_ROOT, "ratings/tsumego_quality_final.csv"))
+    tsumego_quality_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_quality_final.csv"))
     # Normalize qualities to 0-1
     min_quality = tsumego_quality_df['quality'].min()
     max_quality = tsumego_quality_df['quality'].max()
@@ -202,8 +204,8 @@ if __name__ == "__main__":
     tsumego_quality_map = dict(zip(tsumego_quality_df['tsumego_id'], tsumego_quality_df['quality']))
 
     # 3. Build the final metadata list by matching files with their ratings and quality.
-    print(f"Found {len(tsumego_ratings_map)} rating values in ratings/tsumego_ratings_final.csv" )
-    print(f"Found {len(tsumego_quality_map)} quality values in ratings/tsumego_quality_final.csv")
+    print(f"Found {len(tsumego_ratings_map)} rating values in {os.path.join(RATINGS_DIR, 'tsumego_ratings_final.csv')}")
+    print(f"Found {len(tsumego_quality_map)} quality values in {os.path.join(RATINGS_DIR, 'tsumego_quality_final.csv')}")
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
     print(f"Found {len(sgf_files)} SGF files in '{TSUMEGOS_DIR}'.")

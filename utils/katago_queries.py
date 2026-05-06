@@ -115,7 +115,7 @@ class KatagoQueries:
         ]
         return np.interp(human_rank, ratings, temperatures)
 
-    def query(self, moves, human_rank=None, exclude_move=None, playouts=1):
+    def query(self, moves, human_rank=None, exclude_move=None, playouts=1, override_settings=None):
         """
         Provides a high playout query, where specific first move may be excluded.
         """
@@ -137,13 +137,17 @@ class KatagoQueries:
                     "untilDepth": 1
                 }
             ]
+        settings = {}
         if human_rank is not None:
-            # noinspection PyTypeChecker
-            query["overrideSettings"] = {
+            settings.update({
                 "humanSLProfile": _get_rank_str(human_rank),
                 "ignorePreRootHistory": False,
                 "rootNumSymmetriesToSample": 1
-            }
+            })
+        if override_settings:
+            settings.update(override_settings)
+        if settings:
+            query["overrideSettings"] = settings
 
         return self._katago_controller.send_query(query)
 

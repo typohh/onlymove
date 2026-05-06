@@ -40,3 +40,7 @@ Thumbs.db
 *.log
 
 models/
+
+# Vast.ai orchestration
+orchestration_state.json
+.env

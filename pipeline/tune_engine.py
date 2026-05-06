@@ -9,21 +9,31 @@ import re
 import argparse
 import traceback
 
+from utils.configurations import BOARD_SIZE, DEFAULT_MODEL
 from utils.katago_controller import KATAGO_PATH, CONFIG_FILE
-from utils.models import get_model, MODEL_9X9, MODEL_HUMAN, MODEL_BEST_SMALL
+from utils.models import get_model, MODEL_HUMAN, MODEL_BEST_SMALL
 
 
 verbose = False
+
+# Discard this many batches' worth of queries before timing — long enough that
+# the slow model-load + first-batch warmup is fully absorbed.
+WARMUP_BATCHES = 20
+# Time this many batches' worth of queries — large enough to be stable but
+# bounded so each iteration finishes in seconds.
+TIMED_BATCHES = 100
+# numAnalysisThreads : nnMaxBatchSize. > 1 keeps the inference batch full when
+# any single thread stalls. KataGo recommends ≈1.5–2×.
+ANALYSIS_THREAD_FACTOR = 1.5
 # --- Helper Function for Query Generation ---
 
 def generate_random_query(query_id: str) -> dict:
     """
     Generates a query with 2 black and 2 white stones placed randomly
-    on a 9x9 board.
+    on a board of size BOARD_SIZE.
     """
-    board_size = 9
-    cols = "ABCDEFGHJ"  # No 'I' in Go coordinates
-    all_coords = [f"{c}{r}" for c in cols for r in range(1, board_size + 1)]
+    cols = "ABCDEFGHJKLMNOPQRST"[:BOARD_SIZE]  # No 'I' in Go coordinates
+    all_coords = [f"{c}{r}" for c in cols for r in range(1, BOARD_SIZE + 1)]
     try:
         positions = random.sample(all_coords, 4)
     except ValueError:
@@ -36,22 +46,26 @@ def generate_random_query(query_id: str) -> dict:
 
     return {
         "id": query_id, "moves": [], "initialStones": initial_stones,
-        "rules": "tromp-taylor", "komi": 7.5, "boardXSize": board_size,
-        "boardYSize": board_size, "maxVisits": 1,
+        "rules": "tromp-taylor", "komi": 7.5, "boardXSize": BOARD_SIZE,
+        "boardYSize": BOARD_SIZE, "maxVisits": 1,
         # "includePolicy": True, "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False, "rootNumSymmetriesToSample": 1 }
     }
 
 
-def update_config_file(config_path: str, optimal_size: int):
+def update_config_file(config_path: str, batch_size: int):
     """
-    Updates the nnMaxBatchSize and numAnalysisThreads in the given config file.
+    Updates nnMaxBatchSize (= batch_size) and numAnalysisThreads
+    (= ANALYSIS_THREAD_FACTOR × batch_size) in the given config file.
     """
+    target_values = {
+        "nnMaxBatchSize": batch_size,
+        "numAnalysisThreads": max(1, int(batch_size * ANALYSIS_THREAD_FACTOR)),
+    }
     try:
         with open(config_path, 'r') as f:
             lines = f.readlines()
 
         updated_lines = []
-        keys_to_update = {"nnMaxBatchSize", "numAnalysisThreads"}
         keys_found = set()
 
         for line in lines:
@@ -61,24 +75,25 @@ def update_config_file(config_path: str, optimal_size: int):
                 match = re.match(r"^\s*(\w+)\s*=", stripped_line)
                 if match:
                     key = match.group(1)
-                    if key in keys_to_update:
-                        updated_lines.append(f"{key} = {optimal_size}\n")
+                    if key in target_values:
+                        updated_lines.append(f"{key} = {target_values[key]}\n")
                         keys_found.add(key)
                         continue  # Skip appending the old line
             # If the line doesn't match, add it as-is
             updated_lines.append(line)
 
         # If any key was not found in the file, add it to the end
-        for key in keys_to_update:
+        for key, value in target_values.items():
             if key not in keys_found:
-                updated_lines.append(f"\n# Added by performance test\n{key} = {optimal_size}\n")
+                updated_lines.append(f"\n# Added by performance test\n{key} = {value}\n")
 
         with open(config_path, 'w') as f:
             f.writelines(updated_lines)
 
         print(f"\n--- Configuration Updated ---")
-        print(f"Successfully set nnMaxBatchSize and numAnalysisThreads to {optimal_size} in:")
-        print(f"'{config_path}'")
+        for key, value in target_values.items():
+            print(f"  {key} = {value}")
+        print(f"in: '{config_path}'")
 
     except Exception as e:
         print(f"\nError: Failed to update config file: {e}", file=sys.stderr)
@@ -88,12 +103,16 @@ def run_test(batch_size, best_queries_per_second):
     # One-line status message for the current test
     print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
+    analysis_threads = max(1, int(batch_size * ANALYSIS_THREAD_FACTOR))
     command = [
         KATAGO_PATH, "analysis",
         "-config", CONFIG_FILE,
-        "-override-config", f"numAnalysisThreads={batch_size},nnMaxBatchSize={batch_size},numSearchThreadsPerAnalysisThread=1",
-        # "-model", get_model(MODEL_9X9), "-human-model", get_model(MODEL_HUMAN)
-        "-model", get_model(MODEL_9X9)
+        "-override-config",
+        f"numAnalysisThreads={analysis_threads},nnMaxBatchSize={batch_size},"
+        f"numSearchThreadsPerAnalysisThread=1,"
+        f"maxBoardXSizeForNNBuffer={BOARD_SIZE},maxBoardYSizeForNNBuffer={BOARD_SIZE}",
+        # "-model", get_model(DEFAULT_MODEL), "-human-model", get_model(MODEL_HUMAN)
+        "-model", get_model(DEFAULT_MODEL)
         # "-model", get_model(MODEL_BEST_SMALL)
     ]
 
@@ -113,45 +132,34 @@ def run_test(batch_size, best_queries_per_second):
             stderr_thread.daemon = True  # Allow main program to exit even if thread is still running
             stderr_thread.start()
 
-        num_queries_per_round = 2 * batch_size
+        warmup_count = WARMUP_BATCHES * batch_size
+        timed_count = TIMED_BATCHES * batch_size
 
-        # Round 1: Warm-up
-        warmup_queries = [generate_random_query(f"w_{i}") for i in range(max(1, int(num_queries_per_round / 4)))]
+        # Warmup absorbs model load (~20–40s on the b18c384nbt) plus first-batch
+        # latency. Send all queries up front and drain the responses; the model
+        # load happens transparently while we're waiting.
+        warmup_queries = [generate_random_query(f"w_{i}") for i in range(warmup_count)]
         for query in warmup_queries:
             process.stdin.write(json.dumps(query) + "\n")
         process.stdin.flush()
-        for _ in range(len(warmup_queries)):
+        for _ in range(warmup_count):
             if not process.stdout.readline():
                 raise RuntimeError("exited during warm-up")
 
-        # Round 2: Timed Test
-        timed_queries = [generate_random_query(f"t_{i}") for i in range(num_queries_per_round)]
+        # Timed window: now at steady state. No per-iteration stall check —
+        # the outer thread join already bounds total time.
+        timed_queries = [generate_random_query(f"t_{i}") for i in range(timed_count)]
         start_time = time.perf_counter()
         for query in timed_queries:
             process.stdin.write(json.dumps(query) + "\n")
         process.stdin.flush()
-
-        predicted_total_time = num_queries_per_round / best_queries_per_second
-        predicted_time_limit = predicted_total_time * 1.5
-
-        has_stalled = False
-        for i in range(num_queries_per_round):
-            if predicted_time_limit > 0:
-                elapsed_time = time.perf_counter() - start_time
-                if elapsed_time > predicted_time_limit:
-                    print(f"STALLED | Time ({elapsed_time:.2f}s) exceeded 150% of predicted time ({predicted_total_time:.2f}s). Halting.")
-                    has_stalled = True
-                    break
+        for _ in range(timed_count):
             if not process.stdout.readline():
                 raise RuntimeError("exited during timed test")
-
-        if has_stalled:
-            return 0
-
         end_time = time.perf_counter()
-        queries_per_second = num_queries_per_round / (end_time - start_time)
-        print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
 
+        queries_per_second = timed_count / (end_time - start_time)
+        print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
         return queries_per_second
 
     except (RuntimeError, BrokenPipeError) as e:
@@ -179,7 +187,18 @@ def run_test_in_thread(batch_size, best_queries_per_second):
 
     thread = threading.Thread(target=thread_target)
     thread.start()
-    thread.join(timeout=5 + 2 * batch_size / best_queries_per_second if best_queries_per_second > 0 else None)
+    if best_queries_per_second > 0:
+        # 60s buffer for KataGo startup + model load, then 2× the expected
+        # query time at the prior throughput. The previous formula
+        # (5 + 2*batch/qps) didn't include startup at all and could
+        # falsely time out high batches before the model finished loading.
+        expected_query_seconds = (
+            (WARMUP_BATCHES + TIMED_BATCHES) * batch_size / best_queries_per_second
+        )
+        timeout = 60 + expected_query_seconds * 2
+    else:
+        timeout = None  # First iteration: no prior estimate.
+    thread.join(timeout=timeout)
     if thread.is_alive():
         return 0  # Abort if thread is still running after timeout
     return result[0]
@@ -200,7 +219,7 @@ def main():
         global verbose
         verbose = True
 
-    for path in [KATAGO_PATH, CONFIG_FILE, get_model(MODEL_9X9), get_model(MODEL_HUMAN)]:
+    for path in [KATAGO_PATH, CONFIG_FILE, get_model(DEFAULT_MODEL), get_model(MODEL_HUMAN)]:
         if not os.path.exists(path):
             print(f"Error: Required file not found at '{path}'", file=sys.stderr)
             sys.exit(1)
@@ -214,6 +233,11 @@ def main():
     best_queries_per_second = 0.01
     all_results = []
 
+    # Stop the doubling search when a step yields less than this fractional
+    # throughput gain. At saturation each doubling brings near-zero benefit;
+    # anything below ~5% is dominated by measurement noise, not real headroom.
+    min_improvement = 0.05
+
     print("--- Starting KataGo Throughput Test ---")
     while True:
 
@@ -221,7 +245,15 @@ def main():
         all_results.append((batch_size, queries_per_second))
 
         if queries_per_second == 0:
+            # OOM, stall, or model-load timeout. End the search.
             break
+
+        # Stop when doubling stops paying off (within a noise margin).
+        if len(all_results) >= 2:
+            prev_qps = all_results[-2][1]
+            if prev_qps > 0 and queries_per_second < prev_qps * (1 + min_improvement):
+                print(f"  No meaningful improvement (+{(queries_per_second/prev_qps-1)*100:.1f}%). Stopping search.")
+                break
 
         if queries_per_second > best_queries_per_second:
             best_queries_per_second = queries_per_second

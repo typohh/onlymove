@@ -1,22 +1,25 @@
+import argparse
 import hashlib
 import os
 import threading
 import time
 import traceback
 
-from utils.add_variations import add_shallow_variations, generate_variations_directly_to_sgf
-from utils.configurations import BOARD_SIZE, DEBUG, debug
+from utils.add_variations import CALM_UTILITY_OVERRIDE, add_shallow_variations, generate_variations_directly_to_sgf
+from utils.configurations import BOARD_SIZE, DEBUG, DEFAULT_MODEL, debug
 from utils.helper import construct_initial_sgf
 from utils.katago_controller import KatagoController
 from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
-from utils.models import MODEL_9X9, get_model
+from utils.models import get_model
 from utils.problem_finder import ProblemFinder
 from sgfmill import boards
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
 
 print_lock = threading.Lock()
+stop_event = threading.Event()
+max_problems = None
 
 
 class RunningStats:
@@ -156,7 +159,7 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
     Generates problems continuously.
     """
     try:
-        while True:  # Keep working continuously
+        while not stop_event.is_set():
             STATS.set_state("problem_creation")
             moves,solution = problem_finder.create_problem()
             if solution:
@@ -175,7 +178,11 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                 game,node,answer = construct_initial_sgf(moves, solution)
 
                 STATS.set_state("deep_variations")
-                generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True,None)
+                generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True, None)
+                generate_variations_directly_to_sgf(
+                    queries, answer, moves + [solution], 1.0, True, None,
+                    override_settings=CALM_UTILITY_OVERRIDE,
+                )
                 generate_variations_directly_to_sgf(queries, node, moves, 1.0, True, solution)
 
                 STATS.set_state("shallow_variations")
@@ -194,6 +201,8 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                         # Count active and alive threads
                         active_threads = sum(1 for t in threads_list if t.is_alive())
                         print_stats(active_threads)
+                if max_problems is not None and STATS.problems_found >= max_problems:
+                    stop_event.set()
             else:
                 STATS.add_failure_to_create_problem()
 
@@ -211,13 +220,20 @@ def print_stats(active_threads=0):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Generate tsumegos')
+    parser.add_argument('--max-problems', type=int, default=None,
+                        help='Stop after this many problems have been generated')
+    args = parser.parse_args()
+
+    global max_problems
+    max_problems = args.max_problems
 
     controller = None
     threads = []
     try:
         print("Starting KataGo engines...")
         controller = KatagoController()
-        controller.start_engine(get_model(MODEL_9X9), verbose=DEBUG)
+        controller.start_engine(get_model(DEFAULT_MODEL), verbose=DEBUG)
         print("KataGo engines started.")
 
         queries = KatagoQueries(controller)
@@ -236,8 +252,11 @@ def main():
             threads.append(thread)
 
         # Keep main thread alive
-        while True:
+        while not stop_event.is_set():
             time.sleep(1)
+
+        if max_problems is not None:
+            print(f"\nReached max_problems={max_problems}; shutting down.")
 
     except KeyboardInterrupt:
         print("\nCaught KeyboardInterrupt, shutting down.")

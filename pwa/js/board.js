@@ -65,15 +65,23 @@ export function initializeBoard(size) {
 
 const drawAnalysisHintMarker = (move) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
-    
+
     const x = move.x;
     const y = move.y;
-    
+
     if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
-    
+
     const currentPlayer = state.kifuReader.game.turn;
-    
+
     state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
+}
+
+const drawCandidateMarker = (candidate) => {
+    if (!candidate || typeof candidate.x === 'undefined' || typeof candidate.y === 'undefined') return;
+    if (candidate.x < 0 || candidate.x >= state.board.size || candidate.y < 0 || candidate.y >= state.board.size) return;
+
+    const currentPlayer = state.kifuReader.game.turn;
+    state.board.addObject({ x: candidate.x, y: candidate.y, c: currentPlayer, type: 'outline' });
 }
 
 const drawGhostMarker = (move) => {
@@ -130,8 +138,13 @@ export function redraw() {
 
     drawIllegalDueToKoMarker();
 
-    if (state.appMode === APP_MODES.ANALYZING && state.analysisHintMove) {
-        drawAnalysisHintMarker(state.analysisHintMove);
+    if (state.appMode === APP_MODES.ANALYZING) {
+        for (const candidate of state.candidateMoves) {
+            drawCandidateMarker(candidate);
+        }
+        if (state.analysisHintMove && !state.candidateMoves.some(c => c.x === state.analysisHintMove.x && c.y === state.analysisHintMove.y)) {
+            drawAnalysisHintMarker(state.analysisHintMove);
+        }
     }
 
     if (state.ghostMove) {
