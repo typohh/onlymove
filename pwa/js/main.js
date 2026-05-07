@@ -49,13 +49,14 @@ function getBoardSizeFromPath() {
  * Cold-start picker shown to brand-new users (no `boardSize` in localStorage
  * and no URL hint). Returns a Promise that resolves to the chosen size.
  */
-function showBoardSizePicker() {
+function showBoardSizePicker({ dismissable = false } = {}) {
     return new Promise((resolve) => {
         const overlay = document.createElement('div');
         overlay.id = 'ios-install-overlay';
 
         const modal = document.createElement('div');
         modal.id = 'ios-install-modal';
+        modal.style.width = 'max-content';
 
         const title = document.createElement('div');
         title.id = 'ios-install-title';
@@ -70,11 +71,24 @@ function showBoardSizePicker() {
             const btn = document.createElement('button');
             btn.className = 'btn';
             btn.textContent = `${size}x${size}`;
+            btn.style.flex = '0 0 auto';
+            btn.style.width = 'auto';
+            btn.style.minWidth = '6em';
+            btn.style.borderRadius = 'var(--radius)';
             btn.addEventListener('click', () => {
                 overlay.remove();
                 resolve(size);
             });
             buttonRow.appendChild(btn);
+        }
+
+        if (dismissable) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve(null);
+                }
+            });
         }
 
         modal.appendChild(title);
@@ -124,8 +138,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const handleSizeToggle = async (e) => {
         e.preventDefault();
-        const idx = SUPPORTED_BOARD_SIZES.indexOf(state.boardSize);
-        const next = SUPPORTED_BOARD_SIZES[(idx + 1) % SUPPORTED_BOARD_SIZES.length];
+        const next = await showBoardSizePicker({ dismissable: true });
+        if (next === null || next === state.boardSize) return;
         setBoardSize(next);
         // Linked mode exits on size switch: the linked challenge belongs to
         // the previous size's problem space.
@@ -624,6 +638,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (!tsumegoId && pathSize === null && !localStorage.getItem('boardSize')) {
+        // Render an empty board (and refresh the size pill) behind the picker
+        // so the dialog overlays a real-looking board instead of empty void.
+        initializeBoard(state.boardSize);
+        refreshSizeToggleLabel();
         const chosen = await showBoardSizePicker();
         setBoardSize(chosen);
         // Same reason as above — force-persist when chosen equals the default.

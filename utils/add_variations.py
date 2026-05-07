@@ -6,6 +6,18 @@ PLAYOUTS_SHALLOW = 30
 PLAYOUTS = 30
 MIN_PLAYOUT_PERC = 0.01
 
+# Stay well under Python's default recursion limit (1000). KataGo under Japanese
+# rules will sometimes refuse to pass in a settled position; this guard prevents
+# the primary line from blowing the stack.
+MAX_VARIATION_DEPTH = 800
+
+
+class VariationDepthExceeded(Exception):
+    """Raised when generate_variations_directly_to_sgf goes too deep without terminating."""
+    def __init__(self, moves):
+        self.moves = list(moves)
+        super().__init__(f"variation depth {len(self.moves)} exceeded; sequence: {self.moves}")
+
 # Utility reweighting that makes KataGo prefer preserving the score over flipping
 # the win/loss outcome. Used when generating the post-solution continuation so the
 # losing side plays calm capitulation moves instead of swindle attempts.
@@ -88,6 +100,9 @@ def generate_variations_directly_to_sgf(
     override_settings is forwarded to KataGo (e.g. utility reweighting for the calm post-solution line).
     Existing comments are left untouched so the first pass's numbers win on nodes shared between passes.
     """
+    if len(current_moves) >= MAX_VARIATION_DEPTH:
+        raise VariationDepthExceeded(current_moves)
+
     if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
         return
 

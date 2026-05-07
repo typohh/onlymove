@@ -6,7 +6,12 @@ import threading
 import time
 import traceback
 
-from utils.add_variations import CALM_UTILITY_OVERRIDE, add_shallow_variations, generate_variations_directly_to_sgf
+from utils.add_variations import (
+    CALM_UTILITY_OVERRIDE,
+    VariationDepthExceeded,
+    add_shallow_variations,
+    generate_variations_directly_to_sgf,
+)
 from utils.configurations import BOARD_SIZE, DEBUG, DEFAULT_MODEL, debug
 from utils.helper import construct_initial_sgf
 from utils.katago_controller import KatagoController
@@ -161,51 +166,58 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
     """
     try:
         while not stop_event.is_set():
-            STATS.set_state("problem_creation")
-            moves,solution = problem_finder.create_problem()
-            if solution:
-                STATS.add_problem_found(len(moves))
+            try:
+                STATS.set_state("problem_creation")
+                moves,solution = problem_finder.create_problem()
+                if solution:
+                    STATS.add_problem_found(len(moves))
 
-                STATS.set_state("other")
-                # Compute board state for hashing
-                board = boards.Board(BOARD_SIZE)
-                player = 'b'
-                for move in moves:
-                    if move != "pass":
-                        row, col = katago_to_sgf_coords(move, BOARD_SIZE)
-                        board.play(row, col, player)
-                    player = 'w' if player == 'b' else 'b'
-                # 1. Construct initial SGF
-                game,node,answer = construct_initial_sgf(moves, solution)
+                    STATS.set_state("other")
+                    # Compute board state for hashing
+                    board = boards.Board(BOARD_SIZE)
+                    player = 'b'
+                    for move in moves:
+                        if move != "pass":
+                            row, col = katago_to_sgf_coords(move, BOARD_SIZE)
+                            board.play(row, col, player)
+                        player = 'w' if player == 'b' else 'b'
+                    # 1. Construct initial SGF
+                    game,node,answer = construct_initial_sgf(moves, solution)
 
-                STATS.set_state("deep_variations")
-                generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True, None)
-                generate_variations_directly_to_sgf(
-                    queries, answer, moves + [solution], 1.0, True, None,
-                    override_settings=CALM_UTILITY_OVERRIDE,
-                )
-                generate_variations_directly_to_sgf(queries, node, moves, 1.0, True, solution)
+                    STATS.set_state("deep_variations")
+                    generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True, None)
+                    generate_variations_directly_to_sgf(
+                        queries, answer, moves + [solution], 1.0, True, None,
+                        override_settings=CALM_UTILITY_OVERRIDE,
+                    )
+                    generate_variations_directly_to_sgf(queries, node, moves, 1.0, True, solution)
 
-                STATS.set_state("shallow_variations")
-                add_shallow_variations(queries, node, moves)
+                    STATS.set_state("shallow_variations")
+                    add_shallow_variations(queries, node, moves)
 
-                STATS.set_state("other")
-                os.makedirs(OUTPUT_DIR, exist_ok=True)
-                board_hash = get_orientation_invariant_hash(board)
-                filename = board_hash[:8] + ".sgf"
-                with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
-                    f.write(game.serialise(None).decode())
+                    STATS.set_state("other")
+                    os.makedirs(OUTPUT_DIR, exist_ok=True)
+                    board_hash = get_orientation_invariant_hash(board)
+                    filename = board_hash[:8] + ".sgf"
+                    with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
+                        f.write(game.serialise(None).decode())
+                    with print_lock:
+                        debug(filename)
+                        # Print stats at most once per minute
+                        if STATS.should_print_stats():
+                            # Count active and alive threads
+                            active_threads = sum(1 for t in threads_list if t.is_alive())
+                            print_stats(active_threads)
+                    if max_problems is not None and STATS.problems_found >= max_problems:
+                        stop_event.set()
+                else:
+                    STATS.add_failure_to_create_problem()
+            except VariationDepthExceeded as e:
                 with print_lock:
-                    debug(filename)
-                    # Print stats at most once per minute
-                    if STATS.should_print_stats():
-                        # Count active and alive threads
-                        active_threads = sum(1 for t in threads_list if t.is_alive())
-                        print_stats(active_threads)
-                if max_problems is not None and STATS.problems_found >= max_problems:
-                    stop_event.set()
-            else:
-                STATS.add_failure_to_create_problem()
+                    print(f"[skip] runaway variation ({len(e.moves)} moves); ignoring this problem")
+                    print(f"  sequence: {e.moves}")
+                STATS.set_state("other")
+                continue
 
     except Exception as e:
         print(e)

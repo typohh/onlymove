@@ -1,43 +1,49 @@
-# YoseTsumego
+# YoseTsumego / onlymove.net
 
-This project generates Go problems using KataGo.
+This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, rates them against a stable of bots, and serves the result through a PWA at [onlymove.net](https://onlymove.net). Both 9×9 and 13×13 are supported.
 
-## Project Structure
+## Project structure
 
-The project code is organized into three main directories:
-- **`pipeline/`**: Executable scripts that form the core workflow (generation, benchmarking, ranking, packaging).
-- **`utils/`**: Core logic, shared helpers, and engine controllers.
-- **`auxiliary/`**: Analysis tools, diagnostic scripts, and legacy code.
+- **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, ranking, packaging).
+- **`utils/`** — core logic, shared helpers, and the KataGo controller.
+- **`auxiliary/`** — analysis tools, diagnostic scripts, and legacy code.
+- **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
+- **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
+- **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
-## Pipeline Execution
+## Board size
 
-To generate, rank, and package tsumegos, run the following scripts in order using the virtual environment:
+`BOARD_SIZE` in `utils/configurations.py` is a single global switch (`9` or `13`). All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run the pipeline once with `BOARD_SIZE = 9`, then again with `BOARD_SIZE = 13`.
 
-### 1. Fetch Database
+## Pipeline execution
+
+Run each step through the venv's Python so imports resolve:
+
+### 1. Fetch database
 Downloads the latest tsumego attempt data from Cloudflare D1.
 ```bash
 ./.venv/bin/python3 -m pipeline.fetch_database
 ```
 
-### 2. Tune Engine
-Optimizes KataGo batch sizes for your hardware.
+### 2. Tune engine
+Optimizes KataGo batch sizes for your hardware (rewrites `bots/analysis.cfg` in place).
 ```bash
 ./.venv/bin/python3 -m pipeline.tune_engine
 ```
 
-### 3. Generate Tsumegos
+### 3. Generate tsumegos
 Continuously generates new tsumego positions.
 ```bash
 ./.venv/bin/python3 -m pipeline.generate_tsumegos
 ```
 
-### 4. Benchmark Bots
+### 4. Benchmark bots
 Runs various bots against the generated tsumegos to collect performance data.
 ```bash
 ./.venv/bin/python3 -m pipeline.benchmark_bots
 ```
 
-### 5. Rank Tsumegos and Bots
+### 5. Rank tsumegos and bots
 Trains the rating model based on the benchmark results.
 ```bash
 ./.venv/bin/python3 -m pipeline.rank_tsumegos_and_bots
@@ -51,24 +57,26 @@ Groups tsumegos and ratings into ZIP files for the web app.
 
 ## PWA
 
-This project includes a Progressive Web App (PWA) for solving tsumegos.
+The web app lives in `pwa/` and is deployed as a Cloudflare Worker (with a D1 database for attempt logging). See `pwa/README.md` for the front-end architecture.
 
-### Building the PWA
-
-To build the PWA, navigate to the `pwa` directory and run the build command:
+### Build
 
 ```bash
 cd pwa
 npm install
-npm run build
+npm run build       # esbuild → pwa/dist/
 ```
 
-### Problem Selection Logic
+### Local dev
 
-The PWA uses a history-based problem selection logic:
+```bash
+npm run dev         # build + wrangler dev
+```
 
-- It tracks the last 200 problems you've faced.
-- Each problem is marked as `success`, `failure`, or `in-between`.
-- Failed problems have a linearly increasing probability of being shown again.
-- In-between problems also have a (slower) linearly increasing probability of being shown again.
-- If no problem is selected from the history, a new problem close to your rating is chosen.
+### Deploy
+
+Deployment is manual:
+
+```bash
+npm run deploy      # build + wrangler deploy
+```

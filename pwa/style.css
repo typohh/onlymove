@@ -129,6 +129,7 @@ body {
     #title-container {
         order: 1;
         flex-shrink: 0;
+        padding: 0 1vmin;
     }
     #board-container {
         order: 2;
@@ -143,14 +144,12 @@ body {
     }
     #info-container {
         width: 100%;
+        padding: 0 1vmin;
+        box-sizing: border-box;
+        gap: 1vmin;
     }
     .btn {
         border-radius: 0 0 var(--radius) var(--radius);
-    }
-    /* Apply horizontal margin only to elements that follow another */
-
-    #info-container > * + * {
-        margin-left: 1vmin;
     }
 
     #text1 {
