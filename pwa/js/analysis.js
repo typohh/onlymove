@@ -249,17 +249,13 @@ async function requestAndDisplayAnalysis() {
                     currentNode.children.unshift(newNode);
                     newNode.parent = currentNode;
                 }
-                // Same display rule as the cached path: API moves never render
-                // as on-board markers when it's white's turn. The score
-                // (and its "unreliable" warning) is still shown via
-                // updateAnalysisUI, which finds the API child by bestMove.
-                if (state.kifuReader.game.turn === WGo.B) {
-                    setAnalysisHintMove(bestMove);
-                    setCandidateMoves([{ x: bestMove.x, y: bestMove.y }]);
-                } else {
-                    setAnalysisHintMove(null);
-                    setCandidateMoves([]);
-                }
+                // Path 2 only fires when the cache check found no SGF or API
+                // children at all, so this position falls into white-case-3 of
+                // the waterfall ("only API available — show best API"). Black's
+                // rule is the same: show the single best move. Either way we
+                // render the API best as the on-board hint.
+                setAnalysisHintMove(bestMove);
+                setCandidateMoves([{ x: bestMove.x, y: bestMove.y }]);
                 updateAnalysisUI(score, bestMove);
                 redraw();
             }

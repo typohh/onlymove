@@ -9,3 +9,6 @@
 
 /*.css
   Content-Type: text/css
+
+/sw.js
+  Cache-Control: no-cache

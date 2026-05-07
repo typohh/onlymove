@@ -11,12 +11,16 @@ import sgfmill.sgf
 # --- Configuration ---
 KATAGO_PATH = "./katago"
 # MODEL_PATH = "kata1-b6c96-s175395328-d26788732.txt.gz"
-# MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
+MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
 # MODEL_PATH = "kata1-b15c192-s1672170752-d466197061.txt.gz"
-MODEL_PATH = "kata9x9-b18c384nbt-20231025.bin.gz"
+# MODEL_PATH = "kata9x9-b18c384nbt-20231025.bin.gz"
 CONFIG_PATH = "analysis.cfg"
 SERVER_PORT = 8080
 PLAYOUTS = 1
+
+
+# --- Coordinate Helper Functions ---
+GTP_COLUMNS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
 
 
 def get_move_from_idx(idx, board_size=9):
@@ -29,15 +33,8 @@ def get_move_from_idx(idx, board_size=9):
     row = idx // board_size
     col = idx % board_size
 
-    col_char = chr(ord('A') + col)
-    if col >= 8:  # Skip 'I'
-        col_char = chr(ord('A') + col + 1)
-    row_char = str(board_size - row)
+    return f"{GTP_COLUMNS[col]}{board_size - row}"
 
-    return f"{col_char}{row_char}"
-
-# --- Coordinate Helper Functions ---
-GTP_COLUMNS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
 
 
 def sgf_to_gtp_coords(sgf_coord, board_size):
@@ -155,10 +152,10 @@ class KataGoHandler(BaseHTTPRequestHandler):
             client_ip = self.client_address[0]
             content_length = int(self.headers['Content-Length'])
             sgf_data = self.rfile.read(content_length).decode('utf-8')
-            moves, komi, rules = self.parse_sgf(sgf_data)
+            moves, komi, rules, board_size = self.parse_sgf(sgf_data)
             query_data = {
                 "moves": moves, "initialStones": [], "rules": rules,
-                "komi": komi, "boardXSize": 9, "boardYSize": 9, 
+                "komi": komi, "boardXSize": board_size, "boardYSize": board_size, 
                 "maxVisits": PLAYOUTS, "includePolicy": PLAYOUTS == 1
             }
             response = katago_controller.submit_and_wait(query_data, client_ip)
@@ -181,15 +178,15 @@ class KataGoHandler(BaseHTTPRequestHandler):
                 else:
                     # Find the move with the highest policy probability
                     best_move_idx = policy.index(max(policy))
-                    gtp_move = get_move_from_idx(best_move_idx, 9)
-                    sgf_move = gtp_to_sgf_coords(gtp_move, 9)
+                    gtp_move = get_move_from_idx(best_move_idx, board_size)
+                    sgf_move = gtp_to_sgf_coords(gtp_move, board_size)
                     analysis_result = {"bestMove": sgf_move, "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
             elif not response.get("moveInfos"):
                 analysis_result = {"bestMove": "pass", "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
             else:
                 best_move_info = response["moveInfos"][0]
                 gtp_move = best_move_info.get("move")
-                sgf_move = gtp_to_sgf_coords(gtp_move, 9)
+                sgf_move = gtp_to_sgf_coords(gtp_move, board_size)
                 analysis_result = {"bestMove": sgf_move, "winrate": best_move_info.get("winrate"), "score": best_move_info.get("scoreLead")}
 
             status_message = "Success"
@@ -215,7 +212,7 @@ class KataGoHandler(BaseHTTPRequestHandler):
 
     def parse_sgf(self, sgf_string):
         game = sgfmill.sgf.Sgf_game.from_string(sgf_string)
-        if game.get_size() != 9: raise ValueError("SGF must be for a 9x9 board")
+        board_size = game.get_size()
         root_node = game.get_root()
         komi = float(root_node.get('KM'))
         rules = root_node.get('RU').lower()
@@ -230,7 +227,7 @@ class KataGoHandler(BaseHTTPRequestHandler):
             if len(node) > 1: raise ValueError("SGF is not linear (contains variations)")
             if len(node) == 0: break
             node = node[0]
-        return moves, komi, rules
+        return moves, komi, rules, board_size
 
     def log_message(self, format, *args):
         """This method is overridden to suppress the default server logs."""

@@ -447,8 +447,8 @@ def get_bot_configs():
             ))
     
     # Model + temperature combinations
-    for model in [MODEL_FULL, MODEL_9X9]:
-        for temperature in [1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
+    for model in [MODEL_FULL]:
+        for temperature in [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
             model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
             configs.append((

@@ -14,7 +14,8 @@ const PRECACHE_URLS = [
     '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js',
     '/lib/math.min.js',
-    'https://browser.sentry-cdn.com/10.15.0/bundle.min.js'
+    '/manifest.json',
+    '/sound/stone.wav'
 ];
 
 self.addEventListener('install', event => {
@@ -29,22 +30,37 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  clients.claim();
-  // On activation, clean up all old caches to ensure fresh content.
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          // We are deleting all caches except for the new precache.
-          // This includes old precaches and the runtime cache.
-          if (cacheName !== PRECACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
+  // Only delete stale precaches. The runtime cache is preserved across
+  // versions because its entries are content-addressed (hashed JS/CSS,
+  // hashed zip filenames, version-busted query strings on metadata/lookup),
+  // so old versions can't poison new ones and re-downloading every release
+  // would waste bandwidth on offline-first clients.
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter(name => name.startsWith('only-move-precache-') && name !== PRECACHE_NAME)
+        .map(name => {
+          console.log('Deleting old precache:', name);
+          return caches.delete(name);
         })
-      );
-    })
-  );
+    );
+
+    // Prune runtime cache entries whose ?v= no longer matches the current
+    // VERSION (lookup.txt, metadata.json) so they don't accumulate one
+    // entry per release.
+    const runtimeCache = await caches.open(RUNTIME_CACHE_NAME);
+    const requests = await runtimeCache.keys();
+    await Promise.all(requests.map(req => {
+      const v = new URL(req.url).searchParams.get('v');
+      if (v && v !== VERSION) {
+        console.log('Pruning stale versioned cache entry:', req.url);
+        return runtimeCache.delete(req);
+      }
+    }));
+
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', event => {

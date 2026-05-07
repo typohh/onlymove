@@ -53,8 +53,19 @@
   <script>
     // Register Service Worker
     if ('serviceWorker' in navigator) {
+        // If the page already has a controller, any future controllerchange
+        // means a new SW took over — reload once so the page picks up the
+        // new hashed bundles before the old ones disappear from the server.
+        if (navigator.serviceWorker.controller) {
+            let reloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (reloading) return;
+                reloading = true;
+                window.location.reload();
+            });
+        }
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js').then(registration => {
+            navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(registration => {
             }).catch(err => {
                 console.error('Service Worker registration failed:', err);
             });

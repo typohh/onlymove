@@ -8,8 +8,10 @@ const DIST_DIR = 'dist';
 async function main() {
     console.log("🚀 Starting production build...");
 
-        const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
-    console.log(`✅ Version (Git Hash): ${gitHash}`);
+    const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
+    const isDirty = execSync('git status --porcelain').toString().trim().length > 0;
+    const version = isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
+    console.log(`✅ Version: ${version}${isDirty ? ' (dirty tree)' : ''}`);
 
     await fs.rm(DIST_DIR, { recursive: true, force: true });
     await fs.mkdir(DIST_DIR);
@@ -51,7 +53,7 @@ async function main() {
             '.woff': 'file', '.woff2': 'file', '.ttf': 'file', '.eot': 'file',
         },
         metafile: true,
-        define: { 'APP_VERSION': `"${gitHash}"` },
+        define: { 'APP_VERSION': `"${version}"` },
         external: ['*.png'],
     }).catch(() => process.exit(1));
 
@@ -112,7 +114,7 @@ async function main() {
 
     const swPath = path.join(DIST_DIR, 'sw.js');
     let swContent = await fs.readFile(swPath, 'utf-8');
-    swContent = swContent.replace(/'initial-version'/, `'${gitHash}'`);
+    swContent = swContent.replace(/'initial-version'/, `'${version}'`);
     await fs.writeFile(swPath, swContent);
     console.log("✅ Service worker updated with new version.");
 
