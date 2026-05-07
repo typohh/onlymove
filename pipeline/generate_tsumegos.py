@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import os
+import signal
 import threading
 import time
 import traceback
@@ -228,6 +229,14 @@ def main():
     global max_problems
     max_problems = args.max_problems
 
+    # Treat SIGHUP / SIGTERM as KeyboardInterrupt so the main try/finally runs
+    # and KataGo gets stop_engine'd. tmux kill-session sends SIGHUP; without
+    # this, Python exits without running cleanup and katago is orphaned.
+    def _signal_to_kbi(signum, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGHUP, _signal_to_kbi)
+    signal.signal(signal.SIGTERM, _signal_to_kbi)
+
     controller = None
     threads = []
     try:
@@ -240,7 +249,9 @@ def main():
         problem_finder = ProblemFinder(queries)
         problem_finder.debug = DEBUG
 
-        worker_count = 1 if DEBUG else int(controller.get_batch_size() * 1.5)
+        # Match ANALYSIS_THREAD_FACTOR in pipeline.tune_engine — python workers
+        # need to keep KataGo's analysis queue full despite GIL serialization.
+        worker_count = 1 if DEBUG else int(controller.get_batch_size() * 3)
 
         print(f"Starting {worker_count} worker threads for continuous problem generation.")
 

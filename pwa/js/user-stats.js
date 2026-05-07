@@ -12,7 +12,7 @@ export async function sendReport(success) {
         await fetch('/report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: state.userId, problem: problemId, success: success })
+            body: JSON.stringify({ userId: state.userId, problem: problemId, success: success, size: state.boardSize })
         });
     } catch (error) {
         console.error('Failed to send report:', error);

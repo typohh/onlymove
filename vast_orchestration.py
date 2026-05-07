@@ -36,8 +36,13 @@ PIPELINE_STEPS = {
 # not uploaded. utils/katago_controller.py reads KATAGO_PATH from the
 # environment, so we set that to bots/katago_cuda when launching the step.
 LOCAL_UPLOAD_FILES = [
-    "bots/analysis.cfg",
     "bots/katago_cuda",
+]
+# bots/analysis.cfg is special: it's hardware-tuned (numAnalysisThreads,
+# nnMaxBatchSize) by the remote tune step. Uploading from local would clobber
+# those values. So it's only pushed during initial `setup`; `update` skips it.
+SETUP_ONLY_UPLOAD_FILES = [
+    "bots/analysis.cfg",
 ]
 REMOTE_KATAGO_PATH = "bots/katago_cuda"
 LOCAL_UPLOAD_DIRS = ["pipeline", "utils"]
@@ -62,13 +67,41 @@ MODEL_DOWNLOADS = {
 # Output dirs to rsync back. Each contains per-size subdirs (e.g. tsumegos/13/).
 REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
 
+# Per-step input dirs pushed TO the remote before launching a step. These are
+# state dirs the step reads to resume incrementally. For benchmark, attempts/
+# holds prior bot results — uploading them lets test_bot skip already-processed
+# tsumegos and append only new entries (it already merges existing+new on write).
+STEP_INPUT_DIRS = {
+    "benchmark": ["attempts"],
+}
+
 # Minimal pip deps for the two remote steps. The full requirements.txt brings
 # torch/scipy/sklearn for rank+package, which we never run remotely.
 REMOTE_PIP_PACKAGES = ["sgfmill>=1.1.1", "numpy>=1.21.0"]
 
-# Single tmux session name for the running pipeline step.
-TMUX_SESSION = "pipeline"
-LOG_FILENAME = "pipeline.log"
+# tmux session and log files use the prefix; multi-instance generate runs use
+# {prefix}_{i} so they don't collide.
+TMUX_SESSION_PREFIX = "pipeline"
+LOG_FILENAME_PREFIX = "pipeline"
+
+# Auto-tuner for parallel `generate` instances. We can't predict the optimal N
+# from static probing — CUDA-context contention on a single GPU is hard to
+# model without measuring. Instead, ramp up incrementally and watch GPU util:
+#  * keep adding while util increases by ≥ TUNE_THRESHOLD
+#  * stop when it plateaus or drops (the N=7 collapse case)
+# Result is cached per GPU model in state["_gpu_cache"], so subsequent runs
+# on a same-GPU host (or even a brand-new vast.ai instance with the same GPU)
+# skip the ramp.
+TUNE_WARMUP_SECS = 90    # KataGo b18c384nbt cold start on a fast GPU
+TUNE_SAMPLE_SECS = 30    # window over which GPU util is averaged
+TUNE_SAMPLE_INTERVAL = 2 # seconds between nvidia-smi samples
+TUNE_THRESHOLD = 0.05    # 5% gain to count as meaningful improvement
+TUNE_HARD_CAP = 8        # safety cap on the doubling-style ramp
+# CPU floor: max N a host with a small CPU could actually run regardless of
+# what the GPU cache says. ~10 cores per instance was measured at batch=64
+# (~8.5 katago + ~1 python).
+CPU_PER_INSTANCE = 10
+INSTANCE_HEADROOM = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -240,9 +273,18 @@ def get_instance_step(inst_id):
     return info.get("step")
 
 
-def find_instance(target):
-    """Find an instance by numeric ID."""
+def find_instance(target=None):
+    """Find an instance by numeric ID, or auto-select if only one exists."""
     instances = get_all_instances()
+    if target is None:
+        if len(instances) == 1:
+            return instances[0]
+        if not instances:
+            print("No instances. Run 'add' first.")
+            return None
+        ids = ", ".join(str(i["id"]) for i in instances)
+        print(f"Multiple instances; specify ID. Available: {ids}")
+        return None
     try:
         target_id = int(target)
         inst = next((i for i in instances if i["id"] == target_id), None)
@@ -258,12 +300,17 @@ def find_instance(target):
 # Code/data upload helpers
 # ---------------------------------------------------------------------------
 
-def upload_code(host, base_rsync):
-    """Push pipeline/, utils/, requirements.txt, bots/analysis.cfg, bots/katago.
+def upload_code(host, base_rsync, include_setup_only=False):
+    """Push pipeline/, utils/, the katago binary, and (when include_setup_only)
+    bots/analysis.cfg. Excludes __pycache__ and .pyc files.
 
-    Excludes __pycache__ and .pyc files.
+    `include_setup_only` is True from `setup` and False from `update`, so the
+    remote's hardware-tuned analysis.cfg survives code refreshes.
     """
     excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc"]
+    files = list(LOCAL_UPLOAD_FILES)
+    if include_setup_only:
+        files = list(SETUP_ONLY_UPLOAD_FILES) + files
     for d in LOCAL_UPLOAD_DIRS:
         if not os.path.isdir(d):
             print(f"  Warning: {d}/ not found, skipping")
@@ -274,7 +321,7 @@ def upload_code(host, base_rsync):
         if res.returncode != 0:
             print(f"  {d}/ upload failed.")
             return False
-    for f in LOCAL_UPLOAD_FILES:
+    for f in files:
         if not os.path.exists(f):
             print(f"  Warning: {f} not found, skipping")
             continue
@@ -290,6 +337,198 @@ def upload_code(host, base_rsync):
             print(f"  {f} upload failed.")
             return False
     return True
+
+
+def upload_input_dirs(host, base_rsync, dirs):
+    """Push state dirs (e.g. attempts/) to the remote so a step can resume.
+
+    Excludes database.sql (local-only D1 dump) — same as cmd_sync.
+    """
+    excludes = ["--exclude", "database.sql", "--exclude", "__pycache__/",
+                "--exclude", "*.pyc"]
+    for d in dirs:
+        if not os.path.isdir(d):
+            print(f"  {d}/ not present locally, skipping upload")
+            continue
+        res = subprocess.run(
+            base_rsync + excludes + [f"{d}/", f"root@{host}:{REMOTE_DIR}/{d}/"],
+            timeout=1800,
+        )
+        if res.returncode != 0:
+            print(f"  {d}/ upload failed (rsync rc={res.returncode}).")
+            return False
+        print(f"  {d}/ uploaded.")
+    return True
+
+
+def _probe_remote_capacity(base_ssh):
+    """Return (gpu_model, cpu_cores) from the remote, or (None, None) on error."""
+    try:
+        res = subprocess.run(
+            base_ssh + [
+                "nproc; "
+                "nvidia-smi --query-gpu=name --format=csv,noheader | head -1"
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        if res.returncode != 0:
+            return None, None
+        lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+        cores = int(lines[0])
+        gpu_model = lines[1] if len(lines) > 1 else None
+        return gpu_model, cores
+    except (ValueError, IndexError, subprocess.TimeoutExpired):
+        return None, None
+
+
+def _spawn_pipeline_session(base_ssh, idx, module, extra=""):
+    """Start one pipeline_<idx> tmux session running `python -m module extra`."""
+    log_path = f"{REMOTE_DIR}/{LOG_FILENAME_PREFIX}_{idx}.log"
+    session = f"{TMUX_SESSION_PREFIX}_{idx}"
+    cmd = (
+        f": > {log_path} && "
+        f"cd {REMOTE_DIR} && "
+        f"tmux new-session -d -s {session} "
+        f"'KATAGO_PATH={REMOTE_KATAGO_PATH} PYTHONUNBUFFERED=1 "
+        f"python3 -u -m {module} {extra} "
+        f">> {log_path} 2>&1'"
+    )
+    res = subprocess.run(base_ssh + [cmd])
+    return res.returncode == 0
+
+
+def _kill_pipeline_session(base_ssh, idx):
+    """Stop a single pipeline_<idx> session.
+
+    tmux kill-session sends SIGHUP; generate_tsumegos.py installs a SIGHUP
+    handler that raises KeyboardInterrupt, so its finally calls stop_engine
+    on KataGo and katago exits cleanly.
+    """
+    cmd = (
+        f"tmux kill-session -t {TMUX_SESSION_PREFIX}_{idx} 2>/dev/null; "
+        f"sleep 5"
+    )
+    subprocess.run(base_ssh + [cmd], capture_output=True)
+
+
+def _wait_and_measure_util(base_ssh, warmup_secs, sample_secs,
+                           interval=TUNE_SAMPLE_INTERVAL):
+    """Sleep `warmup_secs`, then sample GPU util over `sample_secs`. Returns avg %."""
+    samples = max(1, sample_secs // interval)
+    cmd = (
+        f"sleep {warmup_secs}; "
+        f"sum=0; n=0; "
+        f"for i in $(seq 1 {samples}); do "
+        f"  u=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | head -1); "
+        f"  sum=$((sum + u)); n=$((n + 1)); "
+        f"  sleep {interval}; "
+        f"done; "
+        f"echo \"$sum $n\""
+    )
+    timeout = warmup_secs + sample_secs + 30
+    try:
+        res = subprocess.run(base_ssh + [cmd], capture_output=True,
+                             text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"    util measurement ssh timed out after {timeout}s")
+        return 0.0
+    if res.returncode != 0:
+        print(f"    util measurement failed (rc={res.returncode})")
+        return 0.0
+    parts = (res.stdout or "").strip().split()
+    if len(parts) < 2:
+        return 0.0
+    try:
+        return int(parts[0]) / max(1, int(parts[1]))
+    except ValueError:
+        return 0.0
+
+
+def tune_parallelism(base_ssh, module, extra=""):
+    """Ramp parallel instances incrementally until GPU util plateaus.
+
+    Spawns instances one at a time. After each spawn, waits TUNE_WARMUP_SECS
+    for KataGo to warm up, then samples nvidia-smi GPU util over
+    TUNE_SAMPLE_SECS. Stops when a step adds < TUNE_THRESHOLD relative
+    improvement, kills the most recent instance, and returns the prior N.
+
+    On exit `final_n` instances are running on the remote.
+    """
+    print("Auto-tuning parallel instance count (each step ~2 min)...")
+    util_history = []
+    final_n = 0
+
+    for n in range(1, TUNE_HARD_CAP + 1):
+        if not _spawn_pipeline_session(base_ssh, n - 1, module, extra):
+            print(f"  failed to spawn instance {n - 1}")
+            break
+        print(f"  spawned instance #{n - 1}; warmup {TUNE_WARMUP_SECS}s + "
+              f"sample {TUNE_SAMPLE_SECS}s at N={n}...")
+        util = _wait_and_measure_util(base_ssh, TUNE_WARMUP_SECS, TUNE_SAMPLE_SECS)
+        print(f"    GPU util at N={n}: {util:.1f}%")
+
+        if util_history and util < util_history[-1] * (1 + TUNE_THRESHOLD):
+            change_pct = (util / util_history[-1] - 1) * 100 if util_history[-1] else 0
+            print(f"  no meaningful improvement ({change_pct:+.1f}%); "
+                  f"reverting to N={n - 1}")
+            _kill_pipeline_session(base_ssh, n - 1)
+            break
+        util_history.append(util)
+        final_n = n
+
+    if final_n == 0:
+        print("  WARNING: tune could not establish even N=1; defaulting to N=1")
+        final_n = 1
+    print(f"  settled at N={final_n}")
+    return final_n
+
+
+def determine_parallelism(base_ssh, step, module, extra=""):
+    """Resolve N for `step`. For non-generate, always 1. For generate, look in
+    the per-GPU-model cache and use it (with a CPU floor); else run the ramp,
+    cache the result.
+
+    On return, if `step == 'generate'` and we ran the tune, the chosen N
+    instances are already running on the remote. If we used the cache, they
+    are NOT running — caller must spawn them.
+
+    Returns (n, was_just_tuned).
+    """
+    if step != "generate":
+        return 1, False
+
+    gpu_model, cores = _probe_remote_capacity(base_ssh)
+    cpu_floor = (
+        max(1, int((cores or 96) * INSTANCE_HEADROOM // CPU_PER_INSTANCE))
+        if cores else None
+    )
+
+    state = load_state()
+    cache = state.get("_gpu_cache", {})
+    cached = cache.get(gpu_model) if gpu_model else None
+    if cached:
+        n = cached
+        if cpu_floor is not None and cpu_floor < n:
+            print(f"  cached N={cached} for '{gpu_model}' but CPU caps at "
+                  f"{cpu_floor}; using {cpu_floor}")
+            n = cpu_floor
+        else:
+            print(f"  using cached N={n} for '{gpu_model}'")
+        return n, False
+
+    print(f"  no cached N for '{gpu_model}'; running ramp tune...")
+    n = tune_parallelism(base_ssh, module, extra)
+    if cpu_floor is not None and cpu_floor < n:
+        print(f"  capping {n} → {cpu_floor} due to CPU floor")
+        n = cpu_floor
+
+    if gpu_model:
+        cache[gpu_model] = n
+        state = load_state()  # re-read in case other writes happened
+        state["_gpu_cache"] = cache
+        save_state(state)
+        print(f"  cached N={n} for '{gpu_model}'")
+    return n, True
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +576,7 @@ def setup_instance(inst):
         print("ERROR: pip install failed after 3 attempts.")
         return False
 
-    if not upload_code(host, base_rsync):
+    if not upload_code(host, base_rsync, include_setup_only=True):
         return False
 
     # Make katago executable on the remote.
@@ -428,12 +667,21 @@ def _is_step_running(base_ssh):
 def cmd_run(args):
     """Start a pipeline step in tmux on an instance.
 
-    Usage: run <id> <step> [-- <step args...>]
+    Usage: run [<id>] <step> [-- <step args...>]
+    If <id> is omitted and only one instance exists, it is used.
     """
-    if len(args) < 2:
-        print(f"Usage: run <id> <step> [args...]   step ∈ {{{', '.join(PIPELINE_STEPS)}}}")
+    if not args:
+        print(f"Usage: run [<id>] <step> [args...]   step ∈ {{{', '.join(PIPELINE_STEPS)}}}")
         return
-    target, step, *step_args = args
+    # First arg is a step name → auto-select instance. Otherwise it's an ID.
+    if args[0] in PIPELINE_STEPS:
+        target = None
+        step, *step_args = args
+    else:
+        if len(args) < 2:
+            print(f"Usage: run [<id>] <step> [args...]   step ∈ {{{', '.join(PIPELINE_STEPS)}}}")
+            return
+        target, step, *step_args = args
     if step not in PIPELINE_STEPS:
         print(f"Unknown step '{step}'. Available: {', '.join(PIPELINE_STEPS)}")
         return
@@ -446,37 +694,48 @@ def cmd_run(args):
     if not host or not port:
         print(f"Instance {inst_id} not reachable.")
         return
-    base_ssh, _ = get_ssh_cmds(host, port)
+    base_ssh, base_rsync = get_ssh_cmds(host, port)
 
     if _is_step_running(base_ssh):
         print(f"Instance {inst_id} already has a pipeline step running. "
               f"Run 'stop' first.")
         return
 
+    input_dirs = STEP_INPUT_DIRS.get(step, [])
+    if input_dirs:
+        print(f"Uploading input dirs for '{step}': {', '.join(input_dirs)}")
+        if not upload_input_dirs(host, base_rsync, input_dirs):
+            return
+
     module = PIPELINE_STEPS[step]
     extra = " ".join(step_args)
-    log_path = f"{REMOTE_DIR}/{LOG_FILENAME}"
     started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-    print(f"Starting '{step}' on instance {inst_id}...")
-    cmd = (
-        f"echo '{step}' > {REMOTE_DIR}/running_step && "
-        f"date -Iseconds > {REMOTE_DIR}/running_started && "
-        f": > {log_path} && "
-        f"cd {REMOTE_DIR} && "
-        f"tmux new-session -d -s {TMUX_SESSION} "
-        f"'KATAGO_PATH={REMOTE_KATAGO_PATH} PYTHONUNBUFFERED=1 "
-        f"python3 -u -m {module} {extra} "
-        f">> {log_path} 2>&1'"
+    parallel, was_tuned = determine_parallelism(base_ssh, step, module, extra)
+
+    if was_tuned:
+        # tune_parallelism left `parallel` instances already running.
+        print(f"Tune completed; {parallel} instance(s) running.")
+    else:
+        # Cached or single-instance path: spawn fresh.
+        print(f"Starting '{step}' (×{parallel}) on instance {inst_id}...")
+        for i in range(parallel):
+            if not _spawn_pipeline_session(base_ssh, i, module, extra):
+                print(f"  failed to start tmux session pipeline_{i}.")
+                return
+
+    # Mark remote state regardless of which path produced the running set.
+    subprocess.run(
+        base_ssh + [f"echo '{step}' > {REMOTE_DIR}/running_step && "
+                    f"date -Iseconds > {REMOTE_DIR}/running_started"],
+        capture_output=True,
     )
-    res = subprocess.run(base_ssh + [cmd])
-    if res.returncode != 0:
-        print(f"  failed to start tmux session.")
-        return
     register_instance(inst_id, step=step, started=started)
-    print(f"Instance {inst_id} running '{step}' (tmux '{TMUX_SESSION}').")
-    print(f"  log: {log_path}")
-    print(f"  follow with: stream {inst_id}")
+    suffix = f" × {parallel}" if parallel > 1 else ""
+    sessions = (f"{TMUX_SESSION_PREFIX}_0..{parallel - 1}"
+                if parallel > 1 else f"{TMUX_SESSION_PREFIX}_0")
+    print(f"Instance {inst_id} running '{step}'{suffix} (tmux '{sessions}').")
+    print(f"  follow with: stream {inst_id}  (tails {LOG_FILENAME_PREFIX}_0.log)")
 
 
 def cmd_stop(target):
@@ -493,9 +752,12 @@ def cmd_stop(target):
 
     print(f"Stopping pipeline step on instance {inst_id}...")
     # SIGTERM first so generate_tsumegos's KeyboardInterrupt branch can clean up
-    # the KataGo subprocess. Then wait, then force-kill stragglers.
+    # the KataGo subprocess. Then wait, then force-kill stragglers. Iterates
+    # over all tmux sessions matching the pipeline prefix so multi-instance
+    # generate runs are all torn down.
     stop_cmd = (
-        f"tmux kill-session -t {TMUX_SESSION} 2>/dev/null; "
+        f"for s in $(tmux ls 2>/dev/null | grep '^{TMUX_SESSION_PREFIX}_' "
+        f"| cut -d: -f1); do tmux kill-session -t \"$s\" 2>/dev/null; done; "
         f"pkill -f '[p]ython3.*pipeline\\.' 2>/dev/null; "
         f"for i in $(seq 1 30); do "
         f"  pgrep -f '[p]ython3.*pipeline\\.' >/dev/null 2>&1 || break; "
@@ -586,10 +848,12 @@ def cmd_stream(target):
         print(f"Instance {inst_id} not reachable.")
         return
     base_ssh, _ = get_ssh_cmds(host, port)
-    log_path = f"{REMOTE_DIR}/{LOG_FILENAME}"
+    log_path = f"{REMOTE_DIR}/{LOG_FILENAME_PREFIX}_0.log"
 
     step = get_instance_step(inst_id) or "?"
     print(f"Streaming {log_path} for step '{step}' (Ctrl-C to stop)...")
+    print(f"  (tails the first instance only — for multi-instance generate, "
+          f"others log to {LOG_FILENAME_PREFIX}_1.log etc.)")
 
     offset = 0
     interval = 2.0
@@ -741,12 +1005,11 @@ def cmd_list(_args):
 # CLI dispatch
 # ---------------------------------------------------------------------------
 
-def _require_arg(usage, fn):
+def _optional_id(fn):
+    """Dispatch with args[0] as the ID, or None if no ID given. find_instance
+    auto-selects when there's only one instance."""
     def handler(args):
-        if not args:
-            print(f"Usage: {usage}")
-            return
-        fn(args[0])
+        fn(args[0] if args else None)
     return handler
 
 
@@ -757,12 +1020,12 @@ COMMANDS = {
         "handler": lambda args: cmd_add(),
     },
     "setup": {
-        "usage": "setup <id>",
+        "usage": "setup [<id>]",
         "help": ["Re-run setup on an existing instance"],
-        "handler": _require_arg("setup <id>", cmd_setup),
+        "handler": _optional_id(cmd_setup),
     },
     "run": {
-        "usage": "run <id> <step> [args...]",
+        "usage": "run [<id>] <step> [args...]",
         "help": [
             f"Start a pipeline step in tmux. step ∈ {{{', '.join(PIPELINE_STEPS)}}}",
             "Extra args are forwarded to python -m pipeline.<step>",
@@ -770,29 +1033,29 @@ COMMANDS = {
         "handler": cmd_run,
     },
     "stop": {
-        "usage": "stop <id>",
+        "usage": "stop [<id>]",
         "help": ["Kill the running pipeline step (instance stays alive)"],
-        "handler": _require_arg("stop <id>", cmd_stop),
+        "handler": _optional_id(cmd_stop),
     },
     "shutdown": {
-        "usage": "shutdown <id>",
+        "usage": "shutdown [<id>]",
         "help": ["Destroy an instance"],
-        "handler": _require_arg("shutdown <id>", cmd_shutdown),
+        "handler": _optional_id(cmd_shutdown),
     },
     "sync": {
-        "usage": "sync <id>",
+        "usage": "sync [<id>]",
         "help": ["Pull tsumegos/ and attempts/ from remote into the local repo"],
-        "handler": _require_arg("sync <id>", cmd_sync),
+        "handler": _optional_id(cmd_sync),
     },
     "stream": {
-        "usage": "stream <id>",
+        "usage": "stream [<id>]",
         "help": ["Continuously tail the pipeline log on an instance"],
-        "handler": _require_arg("stream <id>", cmd_stream),
+        "handler": _optional_id(cmd_stream),
     },
     "update": {
-        "usage": "update <id>",
+        "usage": "update [<id>]",
         "help": ["Re-upload pipeline/utils/cfg/katago code (does NOT restart)"],
-        "handler": _require_arg("update <id>", cmd_update),
+        "handler": _optional_id(cmd_update),
     },
     "list": {
         "usage": "list",

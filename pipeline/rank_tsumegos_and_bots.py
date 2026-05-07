@@ -348,7 +348,7 @@ def find_optimal_quality_adjustment(raw_user_attempts, user_ratings_df, tsumego_
 
 
 # --- Calculate Tsumego Ratings Numerically ---
-def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_factor=2.5, produce_unadjusted_for_optim=False):
+def wrapper_calculate_tsumego_ratings(all_tsumego_names, attempt_counts, q_factor=1.5, produce_unadjusted_for_optim=False):
     """
     Recalculates tsumego ratings and quality from the saved parameters CSV file
     using numerical methods. This function will fail if required files are not found.
@@ -645,7 +645,7 @@ if __name__ == '__main__':
     # (e.g. new board sizes that have no user attempts yet) and fall back to default.
     if raw_user_attempts.empty:
         print("\nSkipping quality-adjustment optimization: no user attempts available.")
-        optimal_factor = 2.5  # default in wrapper_calculate_tsumego_ratings
+        optimal_factor = 1.5  # default in wrapper_calculate_tsumego_ratings
     else:
         user_ratings = pd.read_csv(os.path.join(RATINGS_DIRECTORY, 'bot_ratings_final.csv'))
         tsumego_ratings_unadjusted = pd.read_csv(os.path.join(RATINGS_DIRECTORY, 'tsumego_ratings_unadjusted.csv'))

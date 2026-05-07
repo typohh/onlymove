@@ -1,8 +1,12 @@
 import math
 import random
 
-from utils.configurations import debug, DEBUG
+from utils.configurations import debug, DEBUG, BOARD_SIZE
 from utils.katago_queries import KatagoQueries
+
+KATAGO_COLS = "ABCDEFGHJKLMNOPQRST"
+EDGE_COLS = {KATAGO_COLS[0], KATAGO_COLS[1], KATAGO_COLS[BOARD_SIZE - 2], KATAGO_COLS[BOARD_SIZE - 1]}
+EDGE_ROWS = {"1", "2", str(BOARD_SIZE - 1), str(BOARD_SIZE)}
 
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4
@@ -40,13 +44,13 @@ class ProblemFinder:
         def is_valid(move):
             if move == "pass":
                 return False
-            if move[0] == "A" or move[0] == "B" or move[0] == "H" or move[0] == "J":
+            if move[0] in EDGE_COLS:
                 return False
-            if move[1] == "1" or move[1] == "2" or move[1] == "8" or move[1] == "9":
+            if move[1:] in EDGE_ROWS:
                 return False
             return True
 
-        # Play random moves, anywhere except 1st line
+        # Play random moves, anywhere except 1st and 2nd lines
         for _ in range(RANDOM_MOVE_COUNT):
             response = self.queries.query(moves)
             legal_moves = [

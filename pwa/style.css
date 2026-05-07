@@ -100,6 +100,25 @@ body {
     text-transform: uppercase;
 }
 
+.board-size-toggle {
+    color: #aaa;
+    background-color: transparent;
+    text-decoration: none;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.9em;
+    padding: 0.4vmin 1vmin;
+    border: 0.2vmin solid #555;
+    border-radius: var(--radius);
+    line-height: 1;
+    flex: 0 0 auto;
+}
+
+.board-size-toggle:hover {
+    color: #fff;
+    border-color: #888;
+}
+
 /* --- MODES 1 & 2: PORTRAIT & SQUARISH LAYOUTS (Consolidated) --- */
 @media (max-aspect-ratio: 125/100) {
     #main-container {
@@ -342,8 +361,8 @@ body {
 }
 
 .capture-score {
-    width: calc(min(0.84 * 100vh, 100vw) / 10);
-    height: calc(min(0.84 * 100vh, 100vw) / 10);
+    width: calc(min(0.84 * 100vh, 100vw) / 14);
+    height: calc(min(0.84 * 100vh, 100vw) / 14);
     border-radius: 50%;
     border: 0.2vmin solid white;
     display: flex;
@@ -352,11 +371,12 @@ body {
     font-weight: bold;
     color: white;
     text-shadow: 0 0 2px black;
-    margin: 0 0.5vmin;
+    margin: 0.6vmin 0.5vmin;
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
+    font-size: 0.85em;
 }
 
 #black-captures, #black-captures-h {

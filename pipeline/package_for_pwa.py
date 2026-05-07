@@ -16,24 +16,30 @@ from utils.configurations import BOARD_SIZE
 from utils.katago_queries import get_all_ranks, get_rank_str
 
 
-def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
-    """Sorts, groups, and packages tsumegos into zip files based on their rating."""
+def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="pwa"):
+    """Sorts, groups, and packages tsumegos into zip files based on their rating.
+
+    Output layout:
+        {output_dir}/tsumegos/{board_size}/{hash}.zip
+        {output_dir}/tsumegos/{board_size}/metadata.json
+        {output_dir}/lookup.txt   (merged across sizes; rows: "id zipHash size")
+    """
 
     metadata.sort(key=lambda x: x["rating"])
     group_count = int(len(metadata)**0.5)
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
 
-    zip_dir = os.path.join(output_dir, "tsumegos")
+    zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
     if os.path.exists(zip_dir):
         for f in os.listdir(zip_dir):
-            if f.endswith(".zip"):
+            if f.endswith(".zip") or f == "metadata.json":
                 os.remove(os.path.join(zip_dir, f))
     else:
         os.makedirs(zip_dir)
 
     zip_metadata = []
-    lookup_entries = []  # To store tsumego_id to zip_id mappings
+    new_lookup_entries = []  # entries for the size we are (re)building now
     for group in range(group_count):
         group_items = [item for item in metadata if item["group"] == group]
         if not group_items:
@@ -44,13 +50,11 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
 
         zip_content = io.BytesIO()
         with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
-            # Add SGF files to zip
             for item in group_items:
                 file_path = os.path.join(tsumegos_dir, item["filename"])
                 with open(file_path, 'rb') as f:
                     temp_zip.writestr(item["filename"], f.read())
 
-            # Add metadata.json to zip
             group_metadata_content = [{k: v for k, v in item.items() if k != "group"} for item in group_items]
             temp_zip.writestr("metadata.json", json.dumps(group_metadata_content, indent=2))
 
@@ -64,21 +68,44 @@ def create_packages(metadata, tsumegos_dir="tsumegos", output_dir="pwa"):
 
         zip_metadata.append({"filename": zip_filename, "min_rating": min_rating, "max_rating": max_rating})
 
-        # Add entries to lookup for each tsumego in this group
         for item in group_items:
             tsumego_id = item["filename"].split('.')[0]
-            lookup_entries.append((tsumego_id, zip_hash))
+            new_lookup_entries.append((tsumego_id, zip_hash, board_size))
 
-    metadata_path = os.path.join(output_dir, "metadata.json")
+    # Per-size metadata.json sits inside the size subdirectory.
+    metadata_path = os.path.join(zip_dir, "metadata.json")
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(zip_metadata, f, indent=2)
 
-    # Create lookup.txt file sorted by tsumego_id
-    lookup_entries.sort(key=lambda x: x[0])  # Sort by tsumego_id
+    # Stale root metadata.json (legacy single-size layout) is no longer used.
+    legacy_root_metadata = os.path.join(output_dir, "metadata.json")
+    if os.path.exists(legacy_root_metadata):
+        os.remove(legacy_root_metadata)
+
+    # Merge new entries into the global lookup, replacing any rows for this size.
     lookup_path = os.path.join(output_dir, "lookup.txt")
+    merged = []
+    if os.path.exists(lookup_path):
+        with open(lookup_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) == 3:
+                    tsumego_id, zip_id, size_str = parts
+                    try:
+                        size_int = int(size_str)
+                    except ValueError:
+                        continue
+                    if size_int != board_size:
+                        merged.append((tsumego_id, zip_id, size_int))
+                # Rows shorter than 3 cols are pre-multi-size legacy data and
+                # are dropped — they belong to the size we are rebuilding now
+                # (only one size existed before this change).
+
+    merged.extend(new_lookup_entries)
+    merged.sort(key=lambda x: x[0])
     with open(lookup_path, 'w', encoding='utf-8') as f:
-        for tsumego_id, zip_id in lookup_entries:
-            f.write(f"{tsumego_id} {zip_id}\n")
+        for tsumego_id, zip_id, size_int in merged:
+            f.write(f"{tsumego_id} {zip_id} {size_int}\n")
 
 
 def print_rating_distribution(metadata):
@@ -225,9 +252,11 @@ if __name__ == "__main__":
 
     # 3. Create the zip packages and main metadata file.
     print("\n--- Creating Tsumego Packages ---")
-    create_packages(all_metadata, TSUMEGOS_DIR, OUTPUT_DIR)
-    print(f"Created packages in '{os.path.join(OUTPUT_DIR, 'tsumegos')}'")
-    print(f"Created main metadata file at '{os.path.join(OUTPUT_DIR, 'metadata.json')}'")
+    create_packages(all_metadata, BOARD_SIZE, TSUMEGOS_DIR, OUTPUT_DIR)
+    size_dir = os.path.join(OUTPUT_DIR, 'tsumegos', str(BOARD_SIZE))
+    print(f"Created packages in '{size_dir}'")
+    print(f"Created per-size metadata file at '{os.path.join(size_dir, 'metadata.json')}'")
+    print(f"Updated global lookup at '{os.path.join(OUTPUT_DIR, 'lookup.txt')}'")
 
     print("\nProcessing complete.")
 

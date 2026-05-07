@@ -14,9 +14,12 @@ async function main() {
     await fs.rm(DIST_DIR, { recursive: true, force: true });
     await fs.mkdir(DIST_DIR);
 
+    // tsumegos is now a directory of size-keyed subdirs (e.g. tsumegos/9/,
+    // tsumegos/13/), each containing its own zips and metadata.json.
+    // fs.cp recursive picks up the whole tree.
     const staticAssets = [
         'index.html',
-        'sound', 'lib', 'tsumegos', 'metadata.json', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
+        'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
         'apple-touch-icon.png',
         'favicon.ico',
         'icon-192.png',

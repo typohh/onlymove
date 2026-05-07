@@ -1,7 +1,7 @@
 // js/main.js
 import * as Sentry from "@sentry/browser";
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES } from './state.js';
 
 try {
     // Initialize Sentry
@@ -20,13 +20,68 @@ import { getTerm } from './i18n.js';
 import { initAudio } from './audio.js';
 
 /**
- * Cleans the URL by removing the 'id' parameter and 'index.html'.
+ * Cleans the URL by removing the 'id' parameter, the size-hint path
+ * (`/9` or `/13`), and 'index.html'. The path always collapses to '/'
+ * so the deep-link doesn't stick in the address bar.
  */
 function cleanUrl() {
     const url = new URL(window.location);
     url.searchParams.delete('id');
-    const newPath = url.pathname.replace(/index\.html$/, '');
+    let newPath = url.pathname.replace(/index\.html$/, '');
+    if (/^\/(9|13)\/?$/.test(newPath)) {
+        newPath = '/';
+    }
     window.history.replaceState({}, '', newPath + url.search + url.hash);
+}
+
+/**
+ * Reads `/9` or `/13` from the pathname. Returns null if the path is anything
+ * else. The caller decides whether to apply it as a size hint.
+ */
+function getBoardSizeFromPath() {
+    const match = window.location.pathname.match(/^\/(9|13)\/?$/);
+    if (!match) return null;
+    const size = parseInt(match[1]);
+    return SUPPORTED_BOARD_SIZES.includes(size) ? size : null;
+}
+
+/**
+ * Cold-start picker shown to brand-new users (no `boardSize` in localStorage
+ * and no URL hint). Returns a Promise that resolves to the chosen size.
+ */
+function showBoardSizePicker() {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.id = 'ios-install-overlay';
+
+        const modal = document.createElement('div');
+        modal.id = 'ios-install-modal';
+
+        const title = document.createElement('div');
+        title.id = 'ios-install-title';
+        title.textContent = getTerm('boardSizePickerTitle');
+
+        const buttonRow = document.createElement('div');
+        buttonRow.style.display = 'flex';
+        buttonRow.style.gap = '1.5vmin';
+        buttonRow.style.justifyContent = 'center';
+
+        for (const size of SUPPORTED_BOARD_SIZES) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = `${size}x${size}`;
+            btn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(size);
+            });
+            buttonRow.appendChild(btn);
+        }
+
+        modal.appendChild(title);
+        modal.appendChild(buttonRow);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    });
 }
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
@@ -58,6 +113,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('resize', () => {
         updateBoardSize();
     });
+
+    const refreshSizeToggleLabel = () => {
+        const label = `${state.boardSize}x${state.boardSize}`;
+        for (const id of ['board-size-toggle', 'board-size-toggle-h']) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = label;
+        }
+    };
+
+    const handleSizeToggle = async (e) => {
+        e.preventDefault();
+        const idx = SUPPORTED_BOARD_SIZES.indexOf(state.boardSize);
+        const next = SUPPORTED_BOARD_SIZES[(idx + 1) % SUPPORTED_BOARD_SIZES.length];
+        setBoardSize(next);
+        // Linked mode exits on size switch: the linked challenge belongs to
+        // the previous size's problem space.
+        setAppMode(APP_MODES.SOLVING);
+        try {
+            await loadTsumego(false);
+        } catch (err) {
+            console.error('Failed to load tsumego after size switch:', err);
+        }
+        if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
+            setAppMode(APP_MODES.LINKED);
+        }
+        refreshSizeToggleLabel();
+        updateAllUI();
+    };
+    document.getElementById('board-size-toggle').addEventListener('click', handleSizeToggle);
+    document.getElementById('board-size-toggle-h').addEventListener('click', handleSizeToggle);
 
 
 
@@ -352,16 +437,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // The board-size migration in state.js has already wrapped any pre-existing
+    // answerHistory under the 9 bucket. These legacy migrations therefore read
+    // and write via state.answerHistory (the active size's view) rather than
+    // touching the raw localStorage value directly.
     const migrateAccumulatedReview = () => {
         if (localStorage.getItem('answerHistoryMigrated_v4_accumulatedReview')) {
             return;
         }
         console.log('Running answer history migration for accumulatedReview...');
 
-        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const answerHistory = state.answerHistory;
         const answersByProblem = {};
 
-        // First, group answers by problemId
         for (const answer of answerHistory) {
             if (!answersByProblem[answer.problemId]) {
                 answersByProblem[answer.problemId] = [];
@@ -369,7 +457,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             answersByProblem[answer.problemId].push(answer);
         }
 
-        // Sort each problem's answers by date
         for (const problemId in answersByProblem) {
             answersByProblem[problemId].sort((a, b) => a.date - b.date);
         }
@@ -400,7 +487,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         console.log('Running answer history migration for failed novel successSinceFailure...');
 
-        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const answerHistory = [...state.answerHistory];
         let changed = 0;
         for (const answer of answerHistory) {
             if (!answer.correct && answer.successSinceFailure === undefined) {
@@ -425,7 +512,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         console.log('Running answer history migration for isRepeat...');
 
-        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const answerHistory = state.answerHistory;
         const newHistory = answerHistory.map(answer => {
             if (answer.problemType !== undefined) {
                 answer.isRepeat = answer.problemType === 'repeat';
@@ -434,7 +521,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return answer;
         });
 
-        updateAnswerHistory(newHistory); // Use the state function to also update state
+        updateAnswerHistory(newHistory);
         localStorage.setItem('answerHistoryMigrated_v3_isRepeat', 'true');
         console.log('Answer history migration for isRepeat complete.');
     };
@@ -447,7 +534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         console.log('Running answer history migration to clear confounded ignored flags...');
 
-        const answerHistory = JSON.parse(localStorage.getItem('answerHistory')) || [];
+        const answerHistory = [...state.answerHistory];
         let cleared = 0;
         for (const answer of answerHistory) {
             if (answer.ignored !== undefined) {
@@ -522,6 +609,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         orientation = 0;
     }
 
+    // Resolve board size before any tsumego load. Order of precedence:
+    //   1. ?id=X — let loadTsumegoById set the size from the lookup column.
+    //   2. /9 or /13 path hint — set immediately, then strip the path.
+    //   3. Persisted boardSize — already in state.
+    //   4. Cold start — show the size picker and persist the choice.
+    const pathSize = getBoardSizeFromPath();
+    if (pathSize !== null && !tsumegoId) {
+        setBoardSize(pathSize);
+        // The URL path is also a persistent choice (a user who deep-linked
+        // /13 expects the next plain visit to land on 13). Force-persist
+        // because setBoardSize is a no-op when the value already matches.
+        localStorage.setItem('boardSize', String(pathSize));
+    }
+
+    if (!tsumegoId && pathSize === null && !localStorage.getItem('boardSize')) {
+        const chosen = await showBoardSizePicker();
+        setBoardSize(chosen);
+        // Same reason as above — force-persist when chosen equals the default.
+        localStorage.setItem('boardSize', String(chosen));
+    }
+
     try {
         if (tsumegoId && tsumegoId.length > 0) {
             const history = state.problemHistory;
@@ -559,6 +667,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     cleanUrl();
 
     document.getElementById('title').textContent = getTerm('tsumegoMode');
+    refreshSizeToggleLabel();
     updateAllUI();
 
 

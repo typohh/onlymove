@@ -9,6 +9,14 @@ routes = [
 
 [assets]
 directory = "dist"
+binding = "ASSETS"
+# `none` disables the default trailing-slash redirect so /9 and /13 don't
+# 307 to / before the SPA fallback can run.
+html_handling = "none"
+# Anything that doesn't map to a real file (including `/`, `/9`, `/13`)
+# falls back to index.html with the original URL preserved, so JS can read
+# the size hint from window.location.pathname.
+not_found_handling = "single-page-application"
 
 [[d1_databases]]
 binding = "DB"

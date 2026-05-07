@@ -2,7 +2,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Only handle /report endpoint
     if (url.pathname === '/report') {
       if (request.method === 'OPTIONS') {
         return handleCors();
@@ -13,8 +12,27 @@ export default {
       }
     }
 
-    // Static assets are served before the worker is invoked by default,
-    // so if a request reaches here and it's not /report, it's not found.
+    // SPA fallback for navigations only. Static assets are served before
+    // the worker; if no asset matches and the request looks like a page
+    // navigation (e.g. /9, /13, or `/`), we serve index.html so the URL
+    // stays intact for the SPA to read.
+    //
+    // Restricting to navigations matters: after a rebuild the bundle hash
+    // changes, and a stale service-worker cache may request the *old*
+    // hashed asset. Falling back to index.html for that request returns
+    // HTML where JS is expected and trips strict MIME checking. For asset
+    // misses we want a real 404 so the SW invalidates and re-fetches the
+    // current HTML.
+    if (env.ASSETS && request.method === 'GET') {
+      const isNavigation = request.mode === 'navigate' ||
+                           request.headers.get('sec-fetch-dest') === 'document' ||
+                           (request.headers.get('accept') || '').includes('text/html');
+      if (isNavigation) {
+        const indexUrl = new URL('/index.html', url);
+        return env.ASSETS.fetch(new Request(indexUrl, request));
+      }
+    }
+
     return new Response('Not found', { status: 404 });
   }
 };
@@ -38,26 +56,29 @@ async function handleReport(request, env) {
     
     // Validate required fields
     if (!data.userId || !data.problem || typeof data.success !== 'boolean') {
-      return new Response('Invalid request body', { 
+      return new Response('Invalid request body', {
         status: 400,
         headers: { 'Access-Control-Allow-Origin': '*' }
       });
     }
-    
+
+    // Older clients didn't send size; default to 9 to match the historical corpus.
+    const size = (data.size === 9 || data.size === 13) ? data.size : 9;
+
     // Check if DB binding is available
     if (!env.DB) {
-      return new Response('Database not configured', { 
+      return new Response('Database not configured', {
         status: 500,
         headers: { 'Access-Control-Allow-Origin': '*' }
       });
     }
-    
+
     // Try to insert the new report
     try {
       const result = await env.DB.prepare(
-        'INSERT INTO tsumego_reports (user_id, problem, success, created_at) VALUES (?, ?, ?, ?)'
+        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size) VALUES (?, ?, ?, ?, ?)'
       )
-        .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString())
+        .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString(), size)
         .run();
       
       // If we get here, the insert succeeded

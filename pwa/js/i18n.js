@@ -53,7 +53,8 @@ const localization = {
     shareBoth: '分享两者',
     preparingImage: '正在准备图片…',
     shareFailed: '分享失败',
-    imageCaptureFailed: '图片捕获失败'
+    imageCaptureFailed: '图片捕获失败',
+    boardSizePickerTitle: '选择棋盘大小'
   },
   ja: {
     kyu: '級',
@@ -105,7 +106,8 @@ const localization = {
     shareBoth: '両方を共有',
     preparingImage: '画像を準備中…',
     shareFailed: '共有に失敗しました',
-    imageCaptureFailed: '画像のキャプチャに失敗しました'
+    imageCaptureFailed: '画像のキャプチャに失敗しました',
+    boardSizePickerTitle: '盤の大きさを選んでください'
   },
   ko: {
     kyu: '급',
@@ -157,7 +159,8 @@ const localization = {
     shareBoth: '모두 공유',
     preparingImage: '이미지를 준비하는 중…',
     shareFailed: '공유 실패',
-    imageCaptureFailed: '이미지 캡처 실패'
+    imageCaptureFailed: '이미지 캡처 실패',
+    boardSizePickerTitle: '바둑판 크기를 선택하세요'
   },
   en: {
     kyu: 'kyu',
@@ -213,7 +216,8 @@ const localization = {
     shareBoth: 'Share both',
     preparingImage: 'Preparing image…',
     shareFailed: 'Failed to share',
-    imageCaptureFailed: 'Failed to capture image'
+    imageCaptureFailed: 'Failed to capture image',
+    boardSizePickerTitle: 'Pick a board size'
   }
 };
 

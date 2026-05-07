@@ -10,6 +10,23 @@ import { getScoreFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 
 
+// Iterative DFS — true if the subtree rooted at `node` contains a pass move.
+// Pipeline-baked variations terminate with a pass once the position is fully
+// resolved; subtrees with no pass anywhere are dead-end engine evaluations
+// that weren't pursued to a conclusion.
+function subtreeReachesPass(node) {
+    if (!node) return false;
+    const stack = [node];
+    while (stack.length > 0) {
+        const n = stack.pop();
+        if (n.move && n.move.pass) return true;
+        if (n.children && n.children.length > 0) {
+            for (const c of n.children) stack.push(c);
+        }
+    }
+    return false;
+}
+
 /**
  * Initializes and enters the analysis mode.
  */
@@ -131,27 +148,63 @@ async function requestAndDisplayAnalysis() {
         const currentNode = getCurrentNode();
         const children = currentNode.children;
 
-        // Collect every engine-evaluated child as a candidate. SGF-baked children carry a
-        // "X%/Y" comment from the pipeline; API-added nodes (this session only) carry the
-        // same comment shape plus _origin='api'. Anything without a %/ comment is a
-        // user-explored branch and isn't a candidate.
-        const sgfCandidates = [];
-        let bestSgfChild = null;
+        // Collect every engine-evaluated child. SGF-baked children carry a "X%/Y" comment
+        // from the pipeline; API-added nodes (this session only) carry the same comment
+        // shape plus _origin='api'. Anything without a %/ comment is a user-explored
+        // branch and isn't a candidate.
+        //
+        // Display rule:
+        //   - Black to play: show only the best move (the move the user is being asked
+        //     to find).
+        //   - White to play: waterfall —
+        //       1. SGF moves whose subtree reaches a pass → show all of them.
+        //       2. Otherwise, any SGF move at all → show only the best SGF move.
+        //       3. Otherwise (only API additions exist) → show the best API move.
+        //     Pipeline-baked variations terminate with a pass once solved, so a subtree
+        //     with no pass anywhere is a dead-end engine evaluation that wasn't pursued
+        //     to a conclusion.
+        // The API-cache check still uses *all* %/ children so we don't re-query the
+        // API for a position we've already evaluated this session.
+        const allEvaluatedCandidates = [];
+        const sgfMovesLeadingToEnd = [];
+        let bestChild = null;        // first %/ child of any origin (best overall)
+        let bestSgfChild = null;     // first %/ child that isn't an API addition
         for (const child of children) {
             if (!child.move || !child.comment || !child.comment.match(/%\//)) continue;
-            sgfCandidates.push({ x: child.move.x, y: child.move.y });
-            if (!bestSgfChild) bestSgfChild = child;
+            allEvaluatedCandidates.push({ x: child.move.x, y: child.move.y });
+            const isApi = child._origin === 'api';
+            if (!isApi && subtreeReachesPass(child)) {
+                sgfMovesLeadingToEnd.push({ x: child.move.x, y: child.move.y });
+            }
+            if (!bestChild) bestChild = child;
+            if (!bestSgfChild && !isApi) bestSgfChild = child;
         }
 
-        // If the SGF already evaluated this position, never call the API — baked analysis is
-        // higher quality. Show all baked candidates and use the first as the score-display hint.
-        if (sgfCandidates.length > 0) {
-            const bestMove = bestSgfChild.move;
-            const bestScore = getScoreFromComment(bestSgfChild.comment);
-            const scoreText = bestScore !== null ? `${bestScore.toFixed(1)}` : 'N/A';
-            setAnalysisHintMove(bestMove);
-            setCandidateMoves(sgfCandidates);
-            updateAnalysisUI(scoreText, bestMove);
+        if (allEvaluatedCandidates.length > 0) {
+            const isBlackToPlay = state.kifuReader.game.turn === WGo.B;
+
+            let displayChild;
+            let candidatesToShow;
+            if (isBlackToPlay) {
+                displayChild = bestChild;
+                candidatesToShow = [{ x: bestChild.move.x, y: bestChild.move.y }];
+            } else if (sgfMovesLeadingToEnd.length > 0) {
+                displayChild = bestSgfChild || bestChild;
+                candidatesToShow = sgfMovesLeadingToEnd;
+            } else if (bestSgfChild) {
+                displayChild = bestSgfChild;
+                candidatesToShow = [{ x: bestSgfChild.move.x, y: bestSgfChild.move.y }];
+            } else {
+                // Only API children exist — show the API best.
+                displayChild = bestChild;
+                candidatesToShow = [{ x: bestChild.move.x, y: bestChild.move.y }];
+            }
+
+            const displayScore = getScoreFromComment(displayChild.comment);
+            const scoreText = displayScore !== null ? `${displayScore.toFixed(1)}` : 'N/A';
+            setAnalysisHintMove(displayChild.move);
+            setCandidateMoves(candidatesToShow);
+            updateAnalysisUI(scoreText, displayChild.move);
             redraw();
             return;
         }
@@ -196,8 +249,17 @@ async function requestAndDisplayAnalysis() {
                     currentNode.children.unshift(newNode);
                     newNode.parent = currentNode;
                 }
-                setAnalysisHintMove(bestMove);
-                setCandidateMoves([{ x: bestMove.x, y: bestMove.y }]);
+                // Same display rule as the cached path: API moves never render
+                // as on-board markers when it's white's turn. The score
+                // (and its "unreliable" warning) is still shown via
+                // updateAnalysisUI, which finds the API child by bestMove.
+                if (state.kifuReader.game.turn === WGo.B) {
+                    setAnalysisHintMove(bestMove);
+                    setCandidateMoves([{ x: bestMove.x, y: bestMove.y }]);
+                } else {
+                    setAnalysisHintMove(null);
+                    setCandidateMoves([]);
+                }
                 updateAnalysisUI(score, bestMove);
                 redraw();
             }

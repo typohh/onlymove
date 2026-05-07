@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime } from './state.js';
+import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -51,10 +51,12 @@ async function selectProblem() {
         // If problem is not in memory, load its zip file
         console.warn(`Problem ${chosenProblemInfo.problemId} not found in allProblems. Attempting to load it.`);
 
-        const zipId = await findZipIdForTsumegoId(chosenProblemInfo.problemId);
-        if (zipId) {
+        const lookupResult = await findZipIdForTsumegoId(chosenProblemInfo.problemId);
+        // Recall problems must belong to the active size (answerHistory is per-size).
+        // Skip cross-size matches defensively rather than load the wrong pool.
+        if (lookupResult && (lookupResult.size === null || lookupResult.size === state.boardSize)) {
             await loadZipMetadata(); // Ensure metadata is loaded
-            const zipInfo = state.zipMetadata.find(zip => zip.filename.startsWith(zipId));
+            const zipInfo = state.zipMetadata.find(zip => zip.filename.startsWith(lookupResult.zipId));
             if (zipInfo) {
                 await loadZipProblems(zipInfo.filename);
                 // Try to find the problem again
@@ -115,7 +117,7 @@ async function fetchSgfFromZip(filename, zipFilename) {
 
 export async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
-        const response = await fetch(`metadata.json?v=${APP_VERSION}`);
+        const response = await fetch(`tsumegos/${state.boardSize}/metadata.json?v=${APP_VERSION}`);
         state.zipMetadata = await response.json();
         const metadataStr = JSON.stringify(state.zipMetadata);
         console.log('Metadata hash:', await simpleHash(metadataStr));
@@ -125,7 +127,7 @@ export async function loadZipMetadata() {
 export async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
-    const cacheKey = `tsumegos/${zipFilename}`;
+    const cacheKey = `tsumegos/${state.boardSize}/${zipFilename}`;
         const zipResponse = await fetch(cacheKey);
 
     const contentType = zipResponse.headers.get('content-type');
@@ -294,17 +296,25 @@ export async function loadTsumego(isUpdate) {
 
 export async function loadTsumegoById(tsumegoId, orientation = null) {
     try {
-        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf` && 
+        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf` &&
            (orientation === null || state.problemHistory[0].orientation === orientation)) {
             return false;
         }
 
-        const zipId = await findZipIdForTsumegoId(tsumegoId);
-        if (!zipId) {
+        const lookupResult = await findZipIdForTsumegoId(tsumegoId);
+        if (!lookupResult) {
             const message = `No tsumego with id ${tsumegoId}`;
             console.error(message);
             displayOverlay(message, 3000);
             return false;
+        }
+
+        const { zipId, size } = lookupResult;
+
+        // The lookup column is authoritative — switch sizes if the linked
+        // problem belongs to a different board than the active one.
+        if (size && size !== state.boardSize) {
+            setBoardSize(size);
         }
 
         await loadZipMetadata();
@@ -378,6 +388,9 @@ export async function loadTsumegoById(tsumegoId, orientation = null) {
     }
 }
 
+// Resolves a tsumego id to its zip hash and board size by binary-searching
+// the global lookup.txt. Each row is "id zipHash size". Returns null when
+// the id is unknown, otherwise { zipId, size }.
 export async function findZipIdForTsumegoId(tsumegoId) {
     const response = await fetch(`lookup.txt?v=${APP_VERSION}`);
     const text = await response.text();
@@ -388,10 +401,13 @@ export async function findZipIdForTsumegoId(tsumegoId) {
 
     while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        const [id, zipId] = lines[mid].trim().split(/\s+/);
+        const parts = lines[mid].trim().split(/\s+/);
+        const id = parts[0];
 
         if (id === tsumegoId) {
-            return zipId;
+            const zipId = parts[1];
+            const size = parts.length >= 3 ? parseInt(parts[2]) : null;
+            return { zipId, size };
         } else if (id < tsumegoId) {
             low = mid + 1;
         } else {

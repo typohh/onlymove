@@ -22,9 +22,13 @@ WARMUP_BATCHES = 20
 # Time this many batches' worth of queries — large enough to be stable but
 # bounded so each iteration finishes in seconds.
 TIMED_BATCHES = 100
-# numAnalysisThreads : nnMaxBatchSize. > 1 keeps the inference batch full when
-# any single thread stalls. KataGo recommends ≈1.5–2×.
-ANALYSIS_THREAD_FACTOR = 1.5
+# numAnalysisThreads : nnMaxBatchSize. With Python's GIL holding back per-process
+# query rate, we want generous oversubscription on the KataGo side so the NN
+# batch is full whenever the GIL is held. 3× costs a few hundred extra OS
+# threads (each cheap) and ensures inference batches don't run half-empty.
+# generate_tsumegos.py's worker_count should match this so python workers
+# fill the queue katago is willing to accept.
+ANALYSIS_THREAD_FACTOR = 3.0
 # --- Helper Function for Query Generation ---
 
 def generate_random_query(query_id: str) -> dict:
@@ -99,7 +103,7 @@ def update_config_file(config_path: str, batch_size: int):
         print(f"\nError: Failed to update config file: {e}", file=sys.stderr)
 
 
-def run_test(batch_size, best_queries_per_second):
+def run_test(batch_size, best_queries_per_second, proc_holder=None):
     # One-line status message for the current test
     print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
@@ -122,6 +126,8 @@ def run_test(batch_size, best_queries_per_second):
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1
         )
+        if proc_holder is not None:
+            proc_holder[0] = process  # publish so the watchdog can kill on timeout
 
         if verbose:
             def read_stderr(process):
@@ -134,29 +140,41 @@ def run_test(batch_size, best_queries_per_second):
 
         warmup_count = WARMUP_BATCHES * batch_size
         timed_count = TIMED_BATCHES * batch_size
+        total_count = warmup_count + timed_count
 
-        # Warmup absorbs model load (~20–40s on the b18c384nbt) plus first-batch
-        # latency. Send all queries up front and drain the responses; the model
-        # load happens transparently while we're waiting.
-        warmup_queries = [generate_random_query(f"w_{i}") for i in range(warmup_count)]
-        for query in warmup_queries:
-            process.stdin.write(json.dumps(query) + "\n")
-        process.stdin.flush()
+        # Concurrent writer thread to avoid pipe-buffer deadlock: at higher
+        # batch sizes, total query bytes (~250B × N) and response bytes
+        # easily exceed Linux's ~64KB default pipe size, so writing all
+        # queries before reading any responses can deadlock both sides.
+        all_queries = [generate_random_query(f"q_{i}") for i in range(total_count)]
+        write_error = [None]
+
+        def writer():
+            try:
+                for q in all_queries:
+                    process.stdin.write(json.dumps(q) + "\n")
+                process.stdin.flush()
+            except Exception as e:
+                write_error[0] = e
+
+        writer_thread = threading.Thread(target=writer, daemon=True)
+        writer_thread.start()
+
+        # Reader: drain warmup responses (absorbs model load + first-batch
+        # warmup), then time the next chunk at steady state.
         for _ in range(warmup_count):
             if not process.stdout.readline():
                 raise RuntimeError("exited during warm-up")
 
-        # Timed window: now at steady state. No per-iteration stall check —
-        # the outer thread join already bounds total time.
-        timed_queries = [generate_random_query(f"t_{i}") for i in range(timed_count)]
         start_time = time.perf_counter()
-        for query in timed_queries:
-            process.stdin.write(json.dumps(query) + "\n")
-        process.stdin.flush()
         for _ in range(timed_count):
             if not process.stdout.readline():
                 raise RuntimeError("exited during timed test")
         end_time = time.perf_counter()
+
+        writer_thread.join(timeout=10)
+        if write_error[0] is not None:
+            raise write_error[0]
 
         queries_per_second = timed_count / (end_time - start_time)
         print(f"SUCCESS | Throughput: {queries_per_second:.2f} q/s")
@@ -180,27 +198,38 @@ def run_test(batch_size, best_queries_per_second):
 
 
 def run_test_in_thread(batch_size, best_queries_per_second):
-    result = [0]  # Use list to store result from thread
+    result = [0]  # shared between threads
+    proc_holder = [None]  # the thread publishes its subprocess here
 
     def thread_target():
-        result[0] = run_test(batch_size, best_queries_per_second)
+        result[0] = run_test(batch_size, best_queries_per_second, proc_holder=proc_holder)
 
     thread = threading.Thread(target=thread_target)
     thread.start()
     if best_queries_per_second > 0:
-        # 60s buffer for KataGo startup + model load, then 2× the expected
-        # query time at the prior throughput. The previous formula
-        # (5 + 2*batch/qps) didn't include startup at all and could
-        # falsely time out high batches before the model finished loading.
+        # 120s buffer for KataGo startup + model load + GPU init (the
+        # b18c384nbt + CUDA combo is consistently 30–60s, with occasional
+        # spikes), then 2× the expected query time at the prior throughput.
         expected_query_seconds = (
             (WARMUP_BATCHES + TIMED_BATCHES) * batch_size / best_queries_per_second
         )
-        timeout = 60 + expected_query_seconds * 2
+        timeout = 120 + expected_query_seconds * 2
     else:
         timeout = None  # First iteration: no prior estimate.
     thread.join(timeout=timeout)
     if thread.is_alive():
-        return 0  # Abort if thread is still running after timeout
+        # Kill the subprocess so it doesn't keep eating GPU while the next
+        # iteration tries to start.
+        proc = proc_holder[0]
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        thread.join(timeout=5)
+        print(f"TIMED OUT after {timeout:.1f}s")
+        return 0
     return result[0]
 
 
