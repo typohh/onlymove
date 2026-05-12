@@ -1,0 +1,16 @@
+This directory vendors a subset of KataGo's Python code, used by the
+feature-embedding pipeline (pipeline/extract_activations.py and friends)
+to load b18c384nbt model weights into PyTorch and run forward passes
+with hooks on residual-block outputs.
+
+Upstream:      https://github.com/lightvector/KataGo
+Pinned commit: 92ad583d4852ebaacd5f0398f052bdb537affe19
+Vendored on:   2026-05-08
+
+What was copied: the entire katago/ Python subpackage (game/, train/,
+utils/) plus KataGo's top-level LICENSE. Some files in train/ and game/
+are training-pipeline-only and unused by inference; they are kept to
+avoid breaking intra-package imports and may be pruned later.
+
+License: see LICENSE in this directory (KataGo's terms).
+Modifications to vendored files: none.

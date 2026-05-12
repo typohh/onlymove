@@ -4,6 +4,8 @@ import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnsw
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
+import { trainWeakness } from './weakness.js';
+import { maybeUploadSchedule } from './notifications.js';
 
 export async function sendReport(success) {
     try {
@@ -68,6 +70,13 @@ export function updateUserStats(isCorrect) {
         successSinceFailure,
         isRepeat: currentProblem.isRepeat || false,
     };
+    if (Array.isArray(currentProblem.embedding)) {
+        // Quantize to 2 decimal places to keep localStorage footprint small.
+        // PCA scores are unit-variance per component; 2 decimals = ±0.005
+        // resolution, which is well under the noise floor for the ridge-
+        // regularized weakness regression.
+        answer.embedding = currentProblem.embedding.map(v => Math.round(v * 100) / 100);
+    }
 
     updateAnswerHistory([...state.answerHistory, answer]);
     setCurrentSolvingStartTime(null);
@@ -106,6 +115,11 @@ export function updateUserStats(isCorrect) {
     else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
     setTimeout(calculateAndStoreStatsResults, 1000); // a bit crude, but animations should be completed in 1 second.
+    setTimeout(trainWeakness, 1100);  // run shortly after the recall model so they don't compete for the main thread
+    // After the recall model retrains, push the updated schedule so the
+    // notification cron has fresh enter/exit timestamps. No-op for users
+    // who haven't enabled notifications.
+    setTimeout(maybeUploadSchedule, 1200);
 
     return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
 }

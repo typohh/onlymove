@@ -236,9 +236,15 @@ def save_state(state):
 
 
 def prune_state(state, live_instances):
-    """Drop state entries whose instance ID no longer exists on vast.ai."""
+    """Drop state entries whose instance ID no longer exists on vast.ai.
+
+    Keys starting with `_` are non-instance metadata (e.g. `_gpu_cache`) and
+    must be skipped — otherwise the cache gets pruned every time `list` runs
+    against an instance set that doesn't contain a key called `_gpu_cache`.
+    """
     live_ids = {str(inst["id"]) for inst in live_instances}
-    stale = [(k, v.get("step")) for k, v in state.items() if k not in live_ids]
+    stale = [(k, v.get("step")) for k, v in state.items()
+             if not k.startswith("_") and k not in live_ids]
     for k, _ in stale:
         del state[k]
     return stale
@@ -548,11 +554,17 @@ def setup_instance(inst):
 
     base_ssh, base_rsync = get_ssh_cmds(host, port)
 
-    # System packages: python, rsync, tmux, curl for model downloads. The
-    # CUDA katago build needs libcublas + cuDNN, which already ship in the
-    # nvidia/cuda:*-cudnn-runtime image we provision below.
+    # System packages: python, rsync, tmux, curl for model downloads.
+    # The CUDA katago build links against libcublas.so.13 (CUDA 13) and
+    # libzip.so.4 — neither is present in the vast.ai CUDA-12.8 base image,
+    # so install them explicitly. libcudnn.so.9 already ships in the image.
+    # --allow-change-held-packages: the image holds the CUDA 12.8 metapackage
+    # to prevent accidental upgrades; libcublas-13-0 doesn't conflict with the
+    # 12.8 install (they coexist under /usr/local/cuda-{12.8,13.0}/) but apt
+    # still wants to nudge the held packages, so we whitelist that.
     apt_cmd = ("bash -l -c 'apt-get update && apt-get install -y "
-               "python3-pip rsync tmux curl'")
+               "--allow-change-held-packages "
+               "python3-pip rsync tmux curl libcublas-13-0 libzip4t64'")
     for attempt in range(3):
         res = subprocess.run(base_ssh + [apt_cmd])
         if res.returncode == 0:
@@ -606,13 +618,19 @@ def setup_instance_with_retry(inst, attempts=3):
 
 def cmd_add():
     """Create a new Vast.ai NVIDIA-GPU instance and run setup."""
+    # bots/katago_cuda is built against CUDA 13, so the host's driver must
+    # support it (cuda_max_good>=13.0). Forward compat is unavailable on
+    # consumer GPUs. reliability2>0.99 avoids hosts that drop offline mid-run
+    # (full pipeline takes hours and a reschedule means starting over).
+    base_filter = ("rented=False rentable=True "
+                   "cuda_max_good>=13.0 reliability>0.99")
     print("Searching for RTX 5090 offers...")
     offers = run_vast_cmd(["search", "offers",
-                           "gpu_name=RTX_5090 rented=False rentable=True"])
+                           f"gpu_name=RTX_5090 {base_filter}"])
     if not offers:
         print("No RTX 5090 offers; falling back to RTX 4090.")
         offers = run_vast_cmd(["search", "offers",
-                               "gpu_name=RTX_4090 rented=False rentable=True"])
+                               f"gpu_name=RTX_4090 {base_filter}"])
     if not offers:
         print("No offers found.")
         return
@@ -627,9 +645,7 @@ def cmd_add():
           f"${best['dph_total']:.2f}/hr)...")
     res = run_vast_cmd([
         "create", "instance", str(best["id"]),
-        # cudnn-runtime brings libcublas and libcudnn that the CUDA katago
-        # build links against. The plain base image does not.
-        "--image", "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04",
+        "--template_hash", "f779495b2d83b2c5b56e3c03f233f0ad",
         "--disk", "32", "--ssh",
     ])
     instance_id = res["new_contract"]
@@ -806,8 +822,12 @@ def cmd_shutdown(target):
     print(f"Instance {inst_id} destroyed.")
 
 
-def cmd_sync(target):
-    """rsync tsumegos/ and attempts/ from the remote into the local repo."""
+def cmd_sync(target, sgf_only=False):
+    """rsync tsumegos/ and attempts/ from the remote into the local repo.
+
+    With sgf_only=True, only tsumegos/ is pulled (attempts/ can be large and
+    isn't needed when you just want fresh SGFs locally).
+    """
     inst = find_instance(target)
     if not inst:
         return
@@ -818,8 +838,10 @@ def cmd_sync(target):
         return
     _, base_rsync = get_ssh_cmds(host, port)
 
-    print(f"Syncing outputs from instance {inst_id}...")
-    for d in REMOTE_OUTPUT_DIRS:
+    dirs = ["tsumegos"] if sgf_only else REMOTE_OUTPUT_DIRS
+    suffix = " (sgf only)" if sgf_only else ""
+    print(f"Syncing outputs from instance {inst_id}{suffix}...")
+    for d in dirs:
         os.makedirs(d, exist_ok=True)
         # Trailing slash on src + dst means "copy contents".
         # Don't pull database.sql back — it's a local-only D1 dump.
@@ -835,6 +857,17 @@ def cmd_sync(target):
             print(f"  {d}/ synced.")
         else:
             print(f"  {d}/ sync had errors (rsync rc={res.returncode}).")
+
+
+def cmd_sync_cli(args):
+    """Parse `[<id>] [--sgf]` and call cmd_sync."""
+    args = list(args)
+    sgf_only = False
+    if "--sgf" in args:
+        sgf_only = True
+        args.remove("--sgf")
+    target = args[0] if args else None
+    cmd_sync(target, sgf_only=sgf_only)
 
 
 def cmd_stream(target):
@@ -1001,6 +1034,53 @@ def cmd_list(_args):
         print(results[inst["id"]])
 
 
+def cmd_monitor(args):
+    """Every `interval` seconds, sync outputs from each instance with a step
+    registered in local state. Default 1h, override with `monitor <secs>`.
+
+    Generate runs for hours; if the host disappears mid-run we lose
+    everything not yet synced. Periodic sync keeps the local copy current
+    so a destroy or preemption costs at most one cycle.
+
+    Pass `--sgf` to skip attempts/ on each cycle.
+    """
+    args = list(args)
+    sgf_only = False
+    if "--sgf" in args:
+        sgf_only = True
+        args.remove("--sgf")
+    interval = int(args[0]) if args else 3600
+    suffix = " (sgf only)" if sgf_only else ""
+    print(f"Monitor started (interval {interval}s{suffix}, Ctrl-C to stop).")
+    try:
+        while True:
+            cycle_start = time.time()
+            print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] sync cycle")
+
+            instances = get_all_instances()
+            state = load_state()
+            live_ids = {str(i["id"]) for i in instances}
+            active_ids = [k for k, v in state.items()
+                          if not k.startswith("_")
+                          and v.get("step")
+                          and k in live_ids]
+
+            if not active_ids:
+                print("  no instances with an active step.")
+            for inst_id in active_ids:
+                try:
+                    cmd_sync(inst_id, sgf_only=sgf_only)
+                except Exception as e:
+                    print(f"  sync error for {inst_id}: {e}")
+
+            elapsed = time.time() - cycle_start
+            sleep_for = max(0, interval - elapsed)
+            print(f"Cycle done in {int(elapsed)}s. Sleeping {int(sleep_for)}s.")
+            time.sleep(sleep_for)
+    except KeyboardInterrupt:
+        print("\nMonitor stopped.")
+
+
 # ---------------------------------------------------------------------------
 # CLI dispatch
 # ---------------------------------------------------------------------------
@@ -1043,9 +1123,12 @@ COMMANDS = {
         "handler": _optional_id(cmd_shutdown),
     },
     "sync": {
-        "usage": "sync [<id>]",
-        "help": ["Pull tsumegos/ and attempts/ from remote into the local repo"],
-        "handler": _optional_id(cmd_sync),
+        "usage": "sync [<id>] [--sgf]",
+        "help": [
+            "Pull tsumegos/ and attempts/ from remote into the local repo",
+            "--sgf: only pull tsumegos/ (skip attempts/)",
+        ],
+        "handler": lambda args: cmd_sync_cli(args),
     },
     "stream": {
         "usage": "stream [<id>]",
@@ -1061,6 +1144,15 @@ COMMANDS = {
         "usage": "list",
         "help": ["Show status of all instances"],
         "handler": cmd_list,
+    },
+    "monitor": {
+        "usage": "monitor [interval_secs] [--sgf]",
+        "help": [
+            "Every interval (default 3600s): sync outputs from each instance",
+            "with an active step. Runs until Ctrl-C.",
+            "--sgf: only pull tsumegos/ (skip attempts/) each cycle",
+        ],
+        "handler": cmd_monitor,
     },
 }
 

@@ -1,5 +1,8 @@
 name = "onlymove"
 compatibility_date = "2023-12-01"
+# @block65/webcrypto-web-push imports `node:crypto` in one isomorphic
+# fallback path; nodejs_compat lets Workers polyfill it cleanly.
+compatibility_flags = ["nodejs_compat"]
 main = "src/index.js"
 
 routes = [
@@ -22,3 +25,15 @@ not_found_handling = "single-page-application"
 binding = "DB"
 database_name = "tsumego-reports"
 database_id = "1ad806c8-464d-44be-9cf0-134ebca8d4ac"
+
+# Hourly cron for the recall-notification scheduler. See the `scheduled`
+# handler in src/index.js.
+[triggers]
+crons = ["0 * * * *"]
+
+# VAPID identity for Web Push. The private key is a wrangler secret:
+#   wrangler secret put VAPID_PRIVATE_KEY
+# Public key is non-secret (clients fetch it via GET /push/vapid-public-key).
+[vars]
+VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
+VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"

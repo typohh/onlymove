@@ -143,6 +143,71 @@ def print_rating_distribution(metadata):
         print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f}, avg rating: {avg_raw_rating:.3f})")
 
 
+def load_embeddings(board_size):
+    """Load per-problem PCA scores filtered to this board size, plus the
+    shared embedding metadata (model is fit jointly across sizes).
+
+    Returns (embedding_map, embedding_meta) where:
+      embedding_map: tsumego_id -> list of K floats (or None if not available)
+      embedding_meta: dict with K, embedding_version, labels.
+                     The PWA only reads version (for cache invalidation) and
+                     labels (for stats display); fields like explained-variance
+                     and extreme_problems are kept locally in embeddings/joint/
+                     as inspection aids and not shipped.
+    """
+    joint_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
+    legacy_dir = os.path.join(PROJECT_ROOT, "embeddings", str(board_size))
+
+    # Prefer the joint model. Fall back to per-size for backward compat
+    # if the joint pipeline hasn't been run yet.
+    if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
+        embed_dir = joint_dir
+        is_joint = True
+    elif os.path.exists(os.path.join(legacy_dir, "per_problem.csv")):
+        embed_dir = legacy_dir
+        is_joint = False
+    else:
+        print(f"  no embeddings at {joint_dir} or {legacy_dir}; skipping embedding fields")
+        return None, None
+
+    print(f"  reading embeddings from {embed_dir}")
+    df = pd.read_csv(os.path.join(embed_dir, "per_problem.csv"))
+    if is_joint and "size" in df.columns:
+        df = df[df["size"] == board_size]
+    embed_cols = sorted(
+        [c for c in df.columns if c.startswith("embed_")],
+        key=lambda c: int(c.split("_")[1]),
+    )
+    K = len(embed_cols)
+    embedding_map = {}
+    for _, row in df.iterrows():
+        embedding_map[row["tsumego_id"]] = [float(row[c]) for c in embed_cols]
+
+    labels_path = os.path.join(embed_dir, "labels.json")
+    pca_path = os.path.join(embed_dir, "pca.npz")
+    labels = None
+    embedding_version = None
+    if os.path.exists(labels_path):
+        with open(labels_path, "r", encoding="utf-8") as f:
+            labels = json.load(f)
+    # The version travels with the model state; the PWA reads it from
+    # embedding_meta.json to auto-invalidate localStorage on refits.
+    if os.path.exists(pca_path):
+        try:
+            arc = np.load(pca_path, allow_pickle=False)
+            if "embedding_version" in arc.files:
+                embedding_version = str(arc["embedding_version"].item())
+        except Exception as e:
+            print(f"  couldn't read embedding_version from pca.npz: {e}")
+
+    embedding_meta = {
+        "K": K,
+        "embedding_version": embedding_version,
+        "labels": labels,
+    }
+    return embedding_map, embedding_meta
+
+
 if __name__ == "__main__":
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
@@ -233,22 +298,37 @@ if __name__ == "__main__":
     # 3. Build the final metadata list by matching files with their ratings and quality.
     print(f"Found {len(tsumego_ratings_map)} rating values in {os.path.join(RATINGS_DIR, 'tsumego_ratings_final.csv')}")
     print(f"Found {len(tsumego_quality_map)} quality values in {os.path.join(RATINGS_DIR, 'tsumego_quality_final.csv')}")
+    print("\n--- Loading embeddings (if available) ---")
+    embedding_map, embedding_meta = load_embeddings(BOARD_SIZE)
+
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
     print(f"Found {len(sgf_files)} SGF files in '{TSUMEGOS_DIR}'.")
     skipped_count = 0
+    embedding_missing = 0
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
             rating, raw_rating = tsumego_ratings_map[tsumego_id]
             quality = tsumego_quality_map.get(tsumego_id, 0.0)
-            all_metadata.append({"filename": filename, "rating": rating, "raw_rating": raw_rating, "quality": quality})
+            item = {"filename": filename, "rating": rating, "raw_rating": raw_rating, "quality": quality}
+            if embedding_map is not None:
+                emb = embedding_map.get(tsumego_id)
+                if emb is None:
+                    embedding_missing += 1
+                else:
+                    item["embedding"] = emb
+            all_metadata.append(item)
         else:
             skipped_count += 1
 
     print(f"\nSuccessfully created metadata for {len(all_metadata)} tsumegos.")
     if skipped_count > 0:
         print(f"Skipped {skipped_count} SGF files with no matching rating.")
+    if embedding_map is not None:
+        n_with = sum(1 for m in all_metadata if "embedding" in m)
+        print(f"Embeddings: {n_with}/{len(all_metadata)} entries have one "
+              f"(missing for {embedding_missing}).")
 
     # 3. Create the zip packages and main metadata file.
     print("\n--- Creating Tsumego Packages ---")
@@ -257,6 +337,17 @@ if __name__ == "__main__":
     print(f"Created packages in '{size_dir}'")
     print(f"Created per-size metadata file at '{os.path.join(size_dir, 'metadata.json')}'")
     print(f"Updated global lookup at '{os.path.join(OUTPUT_DIR, 'lookup.txt')}'")
+
+    if embedding_meta is not None:
+        # embedding_meta is joint across board sizes (PCA + ICA fit jointly),
+        # so it lives at pwa/tsumegos/embedding_meta.json rather than under
+        # each size's directory. Re-running for a second size overwrites with
+        # identical content, which is fine.
+        embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
+        with open(embedding_meta_path, 'w', encoding='utf-8') as f:
+            json.dump(embedding_meta, f, indent=2)
+        print(f"Created joint embedding metadata at '{embedding_meta_path}' "
+              f"(K={embedding_meta['K']})")
 
     print("\nProcessing complete.")
 

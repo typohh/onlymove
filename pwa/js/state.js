@@ -20,6 +20,9 @@ const DEFAULT_BOARD_SIZE = 9;
         'momentum',
         'modelParams',
         'adamState',
+        'weaknessParams',
+        'weaknessAdam',
+        'weaknessSe',
     ];
 
     for (const key of perSizeKeys) {
@@ -67,8 +70,53 @@ function readPerSize(key, fallback) {
     return {};
 }
 
+// Number of most-recent entries that should keep their `embedding` field.
+// Older entries get their embedding stripped on quota pressure (the entry
+// itself stays — preserving stats like novel-problem count and the recall
+// model's history). Aligned with MODEL_INPUT_HISTORY_LENGTH which is what
+// the trainers actually use.
+const ANSWER_HISTORY_EMBEDDING_KEEP_LAST = 500;
+
 function writePerSize(key, obj) {
-    localStorage.setItem(key, JSON.stringify(obj));
+    try {
+        localStorage.setItem(key, JSON.stringify(obj));
+        return;
+    } catch (e) {
+        const isQuota = e && (
+            e.name === 'QuotaExceededError' ||
+            e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+            e.code === 22 || e.code === 1014
+        );
+        if (!isQuota) throw e;
+    }
+    if (key !== 'answerHistory' || !obj || typeof obj !== 'object') {
+        console.error(`localStorage quota exceeded for ${key}; write skipped`);
+        return;
+    }
+    // Strip the heavy `embedding` field from entries beyond the keep-last
+    // window. Preserve the entry shape otherwise so stats and the recall
+    // model still see the full history.
+    let stripped = 0;
+    for (const sz of Object.keys(obj)) {
+        const arr = obj[sz];
+        if (!Array.isArray(arr)) continue;
+        const cutoff = Math.max(0, arr.length - ANSWER_HISTORY_EMBEDDING_KEEP_LAST);
+        for (let i = 0; i < cutoff; i++) {
+            const entry = arr[i];
+            if (entry && entry.embedding !== undefined) {
+                delete entry.embedding;
+                stripped++;
+            }
+        }
+    }
+    try {
+        localStorage.setItem(key, JSON.stringify(obj));
+        if (stripped > 0) {
+            console.warn(`localStorage quota relieved by stripping embedding from ${stripped} old answerHistory entries`);
+        }
+    } catch (e2) {
+        console.error(`localStorage still over quota after stripping ${stripped} embeddings; write skipped to keep play flow alive`);
+    }
 }
 
 const perSize = {
@@ -79,6 +127,9 @@ const perSize = {
     momentum: readPerSize('momentum'),
     modelParams: readPerSize('modelParams'),
     adamState: readPerSize('adamState'),
+    weaknessParams: readPerSize('weaknessParams'),
+    weaknessAdam: readPerSize('weaknessAdam'),
+    weaknessSe: readPerSize('weaknessSe'),
 };
 
 // Per-size session state — not persisted, but bucketed so it doesn't bleed
@@ -145,6 +196,12 @@ export const state = {
 
     statsResults: null,
     learningRate: parseFloat(localStorage.getItem('learningRate')) || 5,
+
+    // In-memory cache of labels.components (joint across board sizes —
+    // the PCA + ICA fit is joint, so labels are shared). Populated by
+    // embedding-backfill.js after fetching any size's embedding_meta.json.
+    // Used by the stats panel to name top weakness PCs. Not persisted.
+    embeddingLabels: null,
 
     // --- Per-size state (read/write proxies onto the active size's bucket). ---
     get boardSize() { return _boardSize; },
@@ -217,6 +274,30 @@ export const state = {
     set adamState(v) {
         perSize.adamState[_boardSize] = v;
         writePerSize('adamState', perSize.adamState);
+    },
+
+    get weaknessParams() {
+        return perSize.weaknessParams[_boardSize] ?? null;
+    },
+    set weaknessParams(v) {
+        perSize.weaknessParams[_boardSize] = v;
+        writePerSize('weaknessParams', perSize.weaknessParams);
+    },
+
+    get weaknessAdam() {
+        return perSize.weaknessAdam[_boardSize] ?? null;
+    },
+    set weaknessAdam(v) {
+        perSize.weaknessAdam[_boardSize] = v;
+        writePerSize('weaknessAdam', perSize.weaknessAdam);
+    },
+
+    get weaknessSe() {
+        return perSize.weaknessSe[_boardSize] ?? null;
+    },
+    set weaknessSe(v) {
+        perSize.weaknessSe[_boardSize] = v;
+        writePerSize('weaknessSe', perSize.weaknessSe);
     },
 
     get unavailableProblemIds() { return getOrCreateSessionSet('unavailableProblemIds'); },
@@ -300,6 +381,37 @@ export function updateNextTsumego(nextTsumego) {
 
 export function updateAnswerHistory(history) {
     state.answerHistory = history;
+}
+
+// Cross-size accessors for migrations / backfill that need to operate on a
+// non-active size's data without mutating state.boardSize (which would clear
+// the in-memory zip pool). Use sparingly.
+export function getAnswerHistoryForSize(size) {
+    return Array.isArray(perSize.answerHistory[size]) ? perSize.answerHistory[size] : [];
+}
+
+export function setAnswerHistoryForSize(size, history) {
+    perSize.answerHistory[size] = history;
+    writePerSize('answerHistory', perSize.answerHistory);
+}
+
+export function getWeaknessParamsForSize(size) {
+    return perSize.weaknessParams[size] ?? null;
+}
+
+export function setWeaknessParamsForSize(size, params) {
+    perSize.weaknessParams[size] = params;
+    writePerSize('weaknessParams', perSize.weaknessParams);
+}
+
+export function setWeaknessAdamForSize(size, adam) {
+    perSize.weaknessAdam[size] = adam;
+    writePerSize('weaknessAdam', perSize.weaknessAdam);
+}
+
+export function setWeaknessSeForSize(size, se) {
+    perSize.weaknessSe[size] = se;
+    writePerSize('weaknessSe', perSize.weaknessSe);
 }
 
 export function setReviewStartTime(time) {

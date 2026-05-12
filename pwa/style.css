@@ -299,6 +299,57 @@ body {
     }
 }
 
+/* --- Selectable-text modal (detailed stats) --- */
+.stats-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.stats-modal-card {
+    background-color: #333;
+    color: #fff;
+    padding: 2vmin 3vmin;
+    border-radius: var(--radius);
+    max-width: 90vw;
+    max-height: 85vh;
+    min-width: min(420px, 90vw);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5vmin;
+}
+
+.stats-modal-pre {
+    margin: 0;
+    overflow: auto;
+    max-height: 70vh;
+    font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.stats-modal-close {
+    align-self: center;
+    border-radius: var(--radius);
+    padding: 0.5vmin 2vmin;
+    font-size: inherit;
+    margin-top: 0.5vmin;
+    cursor: pointer;
+}
+
+@media (prefers-color-scheme: light) {
+    .stats-modal-card {
+        background-color: #f0f0f0;
+        color: #000;
+    }
+}
+
 .progress-bar-wrapper {
     position: relative;
 }

@@ -30,6 +30,11 @@ wheels/
 /pwa/dist/
 /pwa/wgo.js/
 
+# Deployed tsumego zips: regenerable via pipeline/package_for_pwa.py from the
+# raw SGFs in tsumegos/ + embeddings + ratings. The expensive-to-regenerate
+# inputs stay in the repo; the packaged outputs do not.
+/pwa/tsumegos/
+
 # IDEs and OS
 .idea/
 .vscode/
@@ -40,6 +45,10 @@ Thumbs.db
 *.log
 
 models/
+
+# Pipeline-extracted activations: per-cell trunk vectors, ~tens of GB at fp16,
+# regenerable via pipeline/extract_activations.py. Not for version control.
+activations/
 
 # Vast.ai orchestration
 orchestration_state.json

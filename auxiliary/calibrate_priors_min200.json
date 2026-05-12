@@ -1,0 +1,60 @@
+{
+  "config": {
+    "window_days": 60,
+    "stride_days": 30,
+    "min_attempts_per_chunk": 200,
+    "cv_folds": 5,
+    "k_embed": 64,
+    "lambda_grid": [
+      30.0,
+      60.0,
+      100.0,
+      150.0,
+      200.0,
+      300.0,
+      500.0,
+      1000.0
+    ],
+    "n_total_chunks": 160
+  },
+  "caveat": "Overlapping chunks (60d window, 30d stride) are not independent. Population std reported here is an upper bound; use the CV-best lambda as the primary recommendation.",
+  "analysis_a_difficulty_slope": {
+    "n_chunks": 160,
+    "logit_per_rank_prior": 0.31854096677737587,
+    "logit_per_rank_prior_sigma": 0.29855275464878733,
+    "logit_per_rank_prior_median": 0.21150375690540407,
+    "difficulty_l2_target_signed_mean_pwa_unit": -9.22334502385935,
+    "difficulty_l2_target_signed_median_pwa_unit": -6.133608950256718,
+    "beta_diff_pwa_unit_std": 8.673403809559737
+  },
+  "analysis_b_cv_ridge": {
+    "lambda_grid": [
+      30.0,
+      60.0,
+      100.0,
+      150.0,
+      200.0,
+      300.0,
+      500.0,
+      1000.0
+    ],
+    "per_attempt_nll": {
+      "30.0": 0.49160112892138447,
+      "60.0": 0.4830123658548912,
+      "100.0": 0.47956214519476836,
+      "150.0": 0.478337324311809,
+      "200.0": 0.4781428700891294,
+      "300.0": 0.4786060811095568,
+      "500.0": 0.4799970410861592,
+      "1000.0": 0.48240414494977313
+    },
+    "ridge_lambda_cv": 200.0
+  },
+  "analysis_c_eb_consistency": {
+    "ridge_lambda_eb_pooled": 766.43587802627,
+    "ridge_lambda_eb_median_per_dim": 890.3603993547022,
+    "pooled_std_beta_k": 0.03612119309214941,
+    "median_per_dim_std_beta_k": 0.03351329135652898,
+    "chunks_fit": 160
+  }
+}

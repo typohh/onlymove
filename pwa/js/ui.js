@@ -1,6 +1,12 @@
 // js/ui.js
 
 import { state, setDeferredInstallPrompt } from './state.js';
+import {
+    supportsNotifications,
+    notificationPermission,
+    getCurrentSubscription,
+    enableNotifications,
+} from './notifications.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
 
 /**
@@ -68,40 +74,77 @@ const showIosInstallModal = () => {
     document.body.appendChild(overlay);
 };
 
+// State-machine cache for button4. refreshNotifState() refills it async;
+// updateInstallButton paints from this snapshot synchronously.
+let notifState = { installed: false, permission: 'default', subscribed: false };
+
+export async function refreshNotifState() {
+    notifState.installed = isInstalled();
+    notifState.permission = notificationPermission();
+    notifState.subscribed = supportsNotifications() ? !!(await getCurrentSubscription()) : false;
+}
+
 /**
- * Handles a click on the Install button.
- * - If a deferred install prompt exists (Chrome/Android), triggers it.
- * - Otherwise shows an iOS instructions modal.
+ * Single click handler for button4 in solving/linked mode. Advances through
+ * Install → Notify → Reminders, using cached notifState to decide which
+ * action to take. After each step, refreshes the cache and repaints.
  */
 export const handleInstallClick = async () => {
-    if (isInstalled()) return;
-
-    if (state.deferredInstallPrompt) {
-        const prompt = state.deferredInstallPrompt;
-        prompt.prompt();
-        const { outcome } = await prompt.userChoice;
-        console.log(`User response to install prompt: ${outcome}`);
-        setDeferredInstallPrompt(null);
-        // Refresh button state
+    if (!notifState.installed) {
+        if (state.deferredInstallPrompt) {
+            const prompt = state.deferredInstallPrompt;
+            prompt.prompt();
+            const { outcome } = await prompt.userChoice;
+            console.log(`User response to install prompt: ${outcome}`);
+            setDeferredInstallPrompt(null);
+        } else {
+            // No native prompt (Safari/iOS, or Chrome before the event fires).
+            showIosInstallModal();
+        }
+        await refreshNotifState();
         updateInstallButton();
-    } else {
-        showIosInstallModal();
+        return;
     }
+
+    // Installed. The next gesture either subscribes to notifications or
+    // (when already subscribed / blocked) is a no-op — the button is
+    // visually disabled in those terminal states.
+    if (notifState.permission === 'denied') return;
+    if (notifState.permission === 'granted' && notifState.subscribed) return;
+
+    try {
+        await enableNotifications();
+    } catch (err) {
+        console.error('enableNotifications failed:', err);
+    }
+    await refreshNotifState();
+    updateInstallButton();
 };
 
 /**
- * Updates the install button (button4) text and disabled state in solving/linked mode.
+ * Paints button4 from the cached notifState. Single source of truth for the
+ * label and disabled state across Install / Notify / Reminders / Blocked.
  */
 const updateInstallButton = () => {
     const btn = document.getElementById('button4');
     btn.style.display = 'inline-block';
-    if (isInstalled()) {
-        btn.textContent = getTerm('installed');
-        btn.classList.add('disabled');
-    } else {
+    btn.classList.remove('disabled');
+
+    if (!notifState.installed) {
         btn.textContent = getTerm('install');
-        btn.classList.remove('disabled');
+        return;
     }
+    if (notifState.permission === 'denied') {
+        btn.textContent = getTerm('remindersBlocked');
+        btn.classList.add('disabled');
+        return;
+    }
+    if (notifState.permission === 'granted' && notifState.subscribed) {
+        btn.textContent = getTerm('reminders');
+        btn.classList.add('disabled');
+        return;
+    }
+    btn.textContent = getTerm('notify');
 };
 
 export function updateAllUI() {
@@ -165,7 +208,8 @@ const updateSolvingModeUI = () => {
         prevTsumegoLink.textContent = getTerm('review');
 
         // Enable review button if there is a problem to review in the history
-        if (state.problemHistory.length > 1 && state.problemHistory[1].sgf) {
+        // and we are not in the middle of a post-solve load.
+        if (state.problemHistory.length > 1 && state.problemHistory[1].sgf && state.acceptClicks) {
             prevTsumegoLink.classList.remove('disabled');
         } else {
             prevTsumegoLink.classList.add('disabled');

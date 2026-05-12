@@ -7,6 +7,7 @@ import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
 import { MODEL_INPUT_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
+import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 
 async function simpleHash(str) {
     const encoder = new TextEncoder();
@@ -101,8 +102,14 @@ async function selectProblem() {
         }
     }
 
-    // Select a problem using weighted random sampling based on quality
-    const problem = weightedRandomSelect(candidateProblems, p => p.quality);
+    // Weight by quality, modulated by alignment with the user's weakness vector.
+    // weaknessScore returns 0 until the per-component model has trained, so
+    // the cold-start path here matches the prior pure-quality selection.
+    const problem = weightedRandomSelect(candidateProblems, p => {
+        const q = Math.max(0, p.quality || 0);
+        const w = weaknessScore(p);
+        return q * Math.exp(WEAKNESS_TEMPERATURE * w);
+    });
     return { ...problem, isRepeat: false };
 }
 
@@ -202,61 +209,47 @@ function loadNextZip() {
     }
 }
 
-export async function loadTsumego(isUpdate) {
+// One pass through select → fetch SGF → install. Throws on any failure so the
+// outer retry loop can mark the offending candidate unavailable and try again.
+async function loadOneTsumego() {
+    let selectedProblem = null;
+    let rawSgf = null;
+    let reorientedSgf = null;
+    let chosenOrientation = null;
     try {
-        
-        setAcceptClicks(false);
-
-        if (!isUpdate && state.problemHistory.length > 0) {
-            // On initial load, just load the last problem from history
-            loadSgf(state.problemHistory[0].sgf);
-            setCurrentSolvingStartTime(Date.now());
-            resetAccumulatedSolvingTime();
-            setAcceptClicks(true);
-            return;
-        }
-
         await loadZipMetadata();
 
-        let selectedProblem = await selectProblem(); // Await the result
-        if (selectedProblem) {
-        }
-
+        selectedProblem = await selectProblem();
         if (!selectedProblem) {
             const closestZip = findClosestUnloadedZip();
-            if (closestZip) {
-                await loadZipProblems(closestZip.filename);
-                selectedProblem = await selectProblem(); // Await the result
-                if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
-            } else {
-                throw new Error("No zip files found in metadata.");
-            }
+            if (!closestZip) throw new Error("No zip files found in metadata.");
+            await loadZipProblems(closestZip.filename);
+            selectedProblem = await selectProblem();
+            if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
         }
-
-        
 
         let sgfContent = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
         if (!sgfContent || !sgfContent.trim()) {
             throw new Error('Invalid or empty SGF');
         }
-        
+        // Stash for the catch-block diagnostics — when the kifu fails to play
+        // back, the actual SGF (with reorientation) is the only useful clue.
+        rawSgf = sgfContent;
+
         const isRepeat = selectedProblem.isRepeat;
         const orientationParam = isRepeat ? null : 0;
         const reoriented = reorientSgf(sgfContent, orientationParam);
         const sgf = reoriented.sgf;
         const orientation = reoriented.orientation;
+        reorientedSgf = sgf;
+        chosenOrientation = orientation;
 
         const history = state.problemHistory;
-        
-        // Remove all entries with the same filename
         const filename = selectedProblem.filename;
         const indicesToRemove = [];
         for (let i = 0; i < history.length; i++) {
-            if (history[i].filename === filename) {
-                indicesToRemove.push(i);
-            }
+            if (history[i].filename === filename) indicesToRemove.push(i);
         }
-        // Remove in reverse order to maintain indices
         for (let i = indicesToRemove.length - 1; i >= 0; i--) {
             history.splice(indicesToRemove[i], 1);
         }
@@ -267,14 +260,12 @@ export async function loadTsumego(isUpdate) {
             linked: false,
             rating: selectedProblem.rating,
             quality: selectedProblem.quality || 0,
+            embedding: selectedProblem.embedding,
             isRepeat: selectedProblem.isRepeat || false,
             orientation: orientation
         });
 
-        if (history.length > 2) {
-            history.length = 2;
-        }
-        
+        if (history.length > 2) history.length = 2;
         updateProblemHistory(history);
 
         try {
@@ -282,19 +273,103 @@ export async function loadTsumego(isUpdate) {
         } catch (error) {
             throw new Error('Invalid SGF: ' + error.message);
         }
-        
-        setAcceptClicks(true);
+
         setCurrentSolvingStartTime(Date.now());
         resetAccumulatedSolvingTime();
         updateAllUI();
-
     } catch (error) {
-        console.error(`Error loading tsumego:`, error);
-        displayOverlay('Error loading problem.', 3000);
+        // Tag the offending candidate so the retry loop can blacklist it,
+        // and attach the SGF (raw + reoriented) so the debug log shows what
+        // we actually fed into the kifu reader when it choked.
+        if (selectedProblem && selectedProblem.filename) {
+            error.failedProblemId = selectedProblem.filename.replace(/\.sgf$/, '');
+        }
+        if (rawSgf !== null) error.rawSgf = rawSgf;
+        if (reorientedSgf !== null) error.reorientedSgf = reorientedSgf;
+        if (chosenOrientation !== null) error.chosenOrientation = chosenOrientation;
+        throw error;
     }
 }
 
-export async function loadTsumegoById(tsumegoId, orientation = null) {
+const MAX_LOAD_ATTEMPTS = 5;
+const RELOAD_COOLDOWN_MS = 30000;
+
+export async function loadTsumego(isUpdate) {
+    setAcceptClicks(false);
+
+    if (!isUpdate && state.problemHistory.length > 0) {
+        // On initial load, just load the last problem from history.
+        try {
+            loadSgf(state.problemHistory[0].sgf);
+            setCurrentSolvingStartTime(Date.now());
+            resetAccumulatedSolvingTime();
+            setAcceptClicks(true);
+            return;
+        } catch (error) {
+            console.error('Error loading cached tsumego, falling through to new selection:', error);
+            try { Sentry.captureException(error); } catch (_) {}
+            // Fall through to a fresh selection.
+        }
+    }
+
+    let lastError = null;
+    for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+        try {
+            await loadOneTsumego();
+            setAcceptClicks(true);
+            // loadOneTsumego already called updateAllUI(), but acceptClicks was
+            // still false then — repaint so button1's disabled state matches.
+            updateAllUI();
+            return;
+        } catch (error) {
+            lastError = error;
+            console.error(`Tsumego load attempt ${attempt + 1}/${MAX_LOAD_ATTEMPTS} failed:`, error);
+            if (error.rawSgf) {
+                console.error(`  raw SGF: ${error.rawSgf}`);
+            }
+            if (error.reorientedSgf) {
+                console.error(`  reoriented SGF (orientation=${error.chosenOrientation}): ${error.reorientedSgf}`);
+            }
+            try {
+                Sentry.captureException(error, {
+                    extra: {
+                        attempt: attempt + 1,
+                        failedProblemId: error.failedProblemId,
+                        boardSize: state.boardSize,
+                        rawSgf: error.rawSgf,
+                        reorientedSgf: error.reorientedSgf,
+                        chosenOrientation: error.chosenOrientation,
+                    },
+                });
+            } catch (_) {}
+            // Blacklist the failed candidate for this session so selectProblem
+            // picks a different one on the next iteration.
+            if (error.failedProblemId) {
+                state.unavailableProblemIds.add(error.failedProblemId);
+            }
+        }
+    }
+
+    // All retries exhausted. Restore clicks so the user is never frozen, then
+    // try one cooled-down reload — fresh metadata may unblock us. If we already
+    // reloaded recently, give up gracefully with a visible error.
+    setAcceptClicks(true);
+    console.error(`Tsumego load failed after ${MAX_LOAD_ATTEMPTS} attempts; last error:`, lastError);
+    const lastReload = parseInt(localStorage.getItem('lastReloadTime') || '0', 10);
+    const recentlyReloaded = Date.now() - lastReload < RELOAD_COOLDOWN_MS;
+    if (state.userHasInteracted && !recentlyReloaded) {
+        try {
+            Sentry.captureMessage('Reloading after repeated tsumego load failures', { level: 'warning' });
+        } catch (_) {}
+        localStorage.setItem('lastReloadTime', String(Date.now()));
+        displayOverlay('Error loading problem. Reloading…', 1500);
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        displayOverlay('Error loading problem. Try refreshing the page.', 5000);
+    }
+}
+
+export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall = false } = {}) {
     try {
         if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf` &&
            (orientation === null || state.problemHistory[0].orientation === orientation)) {
@@ -337,6 +412,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null) {
         const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
         const problemRank = problem ? problem.rating : 0;
         const problemQuality = problem ? problem.quality : 0;
+        const problemEmbedding = problem ? problem.embedding : undefined;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
         
@@ -349,10 +425,11 @@ export async function loadTsumegoById(tsumegoId, orientation = null) {
         const newProblem = {
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
-            linked: true,
+            linked: !asRecall,
             rating: problemRank,
             quality: problemQuality,
-            isRepeat: false,
+            embedding: problemEmbedding,
+            isRepeat: asRecall,
             orientation: actualOrientation
         };
 
@@ -372,7 +449,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null) {
 
         updateProblemHistory(history);
 
-        setAppMode(APP_MODES.LINKED);
+        setAppMode(asRecall ? APP_MODES.SOLVING : APP_MODES.LINKED);
 
         loadSgf(sgfContent);
         

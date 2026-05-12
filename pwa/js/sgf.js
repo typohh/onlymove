@@ -46,13 +46,13 @@ export function isCorrectMove(moveNode, allChildren) {
 
 /**
  * Transforms coordinates based on the given transformation.
- * @param {number} x - Original x coordinate (0-8).
- * @param {number} y - Original y coordinate (0-8).
+ * @param {number} x - Original x coordinate (0-based).
+ * @param {number} y - Original y coordinate (0-based).
  * @param {number} transformation - Type of transformation (0-7).
+ * @param {number} size - Board edge length (9, 13, 19, …).
  * @returns {object} - Transformed {x, y}.
  */
-function transformCoordinates(x, y, transformation) {
-    const size = 9; // Assuming 9x9 board
+function transformCoordinates(x, y, transformation, size) {
     switch (transformation) {
         case 0: // rotate0
             return { x, y };
@@ -75,24 +75,20 @@ function transformCoordinates(x, y, transformation) {
     }
 }
 
-/**
- * Recursively transforms all move coordinates in the kifu tree.
- * @param {object} node - Current node in the kifu tree.
- * @param {string} transformation - Type of transformation.
- */
-function transformKifuTree(node, transformation) {
+function transformKifuTree(node, transformation, size) {
     if (node.move) {
-        const transformed = transformCoordinates(node.move.x, node.move.y, transformation);
+        const transformed = transformCoordinates(node.move.x, node.move.y, transformation, size);
         node.move.x = transformed.x;
         node.move.y = transformed.y;
     }
     if (node.children) {
-        node.children.forEach(child => transformKifuTree(child, transformation));
+        node.children.forEach(child => transformKifuTree(child, transformation, size));
     }
 }
 
 /**
  * Reorients the SGF by applying a transformation.
+ * Board size is read from the parsed kifu so this works for 9x9 and 13x13 alike.
  * @param {string} sgf - Original SGF string.
  * @param {number|null} forcedOrientation - Optional orientation index (0-7). If null, random is used.
  * @returns {object} - Object containing { sgf: string, orientation: number }.
@@ -106,9 +102,8 @@ export function reorientSgf(sgf, forcedOrientation = null) {
     }
 
     const kifu = WGo.Kifu.fromSgf(sgf);
-    transformKifuTree(kifu.root, transformation);
+    transformKifuTree(kifu.root, transformation, kifu.size);
 
-    // Assuming WGo.Kifu has toSgf method
     return {
         sgf: kifu.toSgf(),
         orientation: transformation

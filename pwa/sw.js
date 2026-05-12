@@ -63,6 +63,43 @@ self.addEventListener('activate', event => {
   })());
 });
 
+self.addEventListener('push', event => {
+    let payload = {};
+    if (event.data) {
+        try {
+            payload = event.data.json();
+        } catch {
+            payload = { title: 'Time to review', body: event.data.text() };
+        }
+    }
+    const title = payload.title || 'Time to review';
+    const options = {
+        body: payload.body || '',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'recall-batch',          // one stacked notification, not many
+        renotify: true,
+        data: { url: payload.url || '/', ids: payload.ids || [] },
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+    event.waitUntil((async () => {
+        const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        // If an existing tab is open, focus it and navigate; otherwise open a new one.
+        for (const client of allClients) {
+            if ('focus' in client) {
+                try { await client.navigate(targetUrl); } catch {}
+                return client.focus();
+            }
+        }
+        if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })());
+});
+
 self.addEventListener('fetch', event => {
     const { request } = event;
 

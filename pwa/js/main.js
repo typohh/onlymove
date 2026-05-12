@@ -1,5 +1,10 @@
 // js/main.js
 import * as Sentry from "@sentry/browser";
+import { initDebugLog } from './debug-log.js';
+
+// Capture console messages early so the hidden viewer (5 taps on the title)
+// has the full session log, including any errors during init.
+initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES } from './state.js';
 
@@ -12,8 +17,9 @@ try {
     console.error("Sentry initialization failed:", error);
 }
 
-import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick } from './ui.js';
-import { showDetailedStats } from './model.js';
+import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
+import { showDetailedStats, getRecallCandidates } from './model.js';
+import { maybeUploadSchedule } from './notifications.js';
 import { loadSgf, redraw, initializeBoard, getBoardImageBlob } from './board.js';
 import { getTerm } from './i18n.js';
 
@@ -60,6 +66,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 
         const title = document.createElement('div');
         title.id = 'ios-install-title';
+        title.id = 'ios-install-title';
         title.textContent = getTerm('boardSizePickerTitle');
 
         const buttonRow = document.createElement('div');
@@ -98,6 +105,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
+import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { APP_MODES } from './constants.js';
 
@@ -180,10 +188,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateAllUI();
             }
         } else if (state.appMode === APP_MODES.SOLVING) {
+            // acceptClicks is false during the post-solve transition (fadeOverlay
+            // → loadTsumego). Without this guard, a fast Previous-click races
+            // the in-flight history.unshift + loadSgf and lands the user in
+            // ANALYZING mode on top of the next problem.
+            if (!state.acceptClicks) return;
             if (!e.target.classList.contains('disabled')) {
                 enterAnalysisMode();
             }
         } else if (state.appMode === APP_MODES.ANALYZING) {
+            if (!state.acceptClicks) return;
             if (state.reviewStartTime !== null) {
                 const reviewTime = Date.now() - state.reviewStartTime;
                 const answerHistory = [...state.answerHistory];
@@ -608,6 +622,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     migrateAnswerHistory();
 
+    // Fire-and-forget backfill: fills `embedding` on legacy answerHistory
+    // entries from already-deployed zips, so returning users don't need to
+    // solve 20+ new problems before the weakness model has any data.
+    backfillMissingEmbeddings();
+
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const tsumegoId = urlParams.get('id');
@@ -666,9 +685,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 await loadTsumego(false); // In both refresh cases, we just load what's at history[0]
             }
-            // Case 3: Default - new linked problem
+            // Case 3: Default - new linked problem. If this problem is in
+            // the user's current recall window, route it as a recall solve
+            // instead — randomize orientation so the user can't just
+            // recognize the visual pattern. An explicit ?o=N URL parameter
+            // still wins (the share-link contract).
             else {
-                await loadTsumegoById(tsumegoId, orientation);
+                const explicitOrientation = orientationParam !== null;
+                const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
+                const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;
+                await loadTsumegoById(tsumegoId, effectiveOrientation, { asRecall: isRecall });
             }
         } else {
             // No ID in URL
@@ -687,6 +713,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     refreshSizeToggleLabel();
     updateAllUI();
+
+    // Initialize button4 state from the SW subscription status (async — first
+    // paint above uses the default cache which renders Install; this repaints
+    // once we know the real (installed, permission, subscribed) tuple).
+    refreshNotifState().then(updateAllUI);
+    // Push the current recall schedule to the Worker so the notification
+    // cron has up-to-date enter/exit timestamps. No-op for users who haven't
+    // opted in.
+    maybeUploadSchedule();
 
 
 

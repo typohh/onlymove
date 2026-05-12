@@ -1,0 +1,274 @@
+{
+  "version": 2,
+  "_doc": "Human-curated semantic labels per PCA component. Each side independently \u2014 set to null when no clear pattern. Use auxiliary/inspect_extreme_problems.py to review.",
+  "components": {
+    "0": {
+      "positive": "prevent opponent from splitting eyespace",
+      "negative": null,
+      "auto_mapped_from": 0,
+      "auto_mapped_cos": 1.0
+    },
+    "1": {
+      "positive": "split own eyespace in two",
+      "negative": null,
+      "auto_mapped_from": 1,
+      "auto_mapped_cos": 1.0
+    },
+    "2": {
+      "positive": "throwin to prevent two eyes",
+      "negative": null,
+      "auto_mapped_from": 2,
+      "auto_mapped_cos": 1.0
+    },
+    "3": {
+      "positive": "ko threat from inside",
+      "negative": null,
+      "auto_mapped_from": 3,
+      "auto_mapped_cos": 1.0
+    },
+    "4": {
+      "positive": "take half point ko",
+      "negative": null,
+      "auto_mapped_from": 4,
+      "auto_mapped_cos": 1.0
+    },
+    "5": {
+      "positive": "capture stones in corner in response to atari",
+      "negative": null,
+      "auto_mapped_from": 5,
+      "auto_mapped_cos": 1.0
+    },
+    "6": {
+      "positive": "fill ko",
+      "negative": null
+    },
+    "7": {
+      "positive": "take librety creating ko shape",
+      "negative": null
+    },
+    "8": {
+      "positive": "take ko to kill",
+      "negative": null
+    },
+    "9": {
+      "positive": "play 1-1 to capture 1 stones",
+      "negative": null
+    },
+    "10": {
+      "positive": "connect on first line",
+      "negative": null
+    },
+    "11": {
+      "positive": "play center of big eye to prevent two eyes",
+      "negative": null
+    },
+    "12": {
+      "positive": "take ko to gain 1 liberty when own group in atari",
+      "negative": null
+    },
+    "13": {
+      "positive": "extend single stone that is in atari",
+      "negative": null
+    },
+    "14": {
+      "positive": "both are in atari on second line, capture the critical stone",
+      "negative": null
+    },
+    "15": {
+      "positive": "connect stones short on liberties solidly",
+      "negative": null
+    },
+    "16": {
+      "positive": "prevent second eye",
+      "negative": null
+    },
+    "17": {
+      "positive": "extend cutting stones that are in atari",
+      "negative": null
+    },
+    "18": {
+      "positive": "take ko to make dead shape",
+      "negative": null
+    },
+    "19": {
+      "positive": "connect two groups without immediate liberty issues",
+      "negative": null
+    },
+    "20": {
+      "positive": "capture a stone to gain a liberty",
+      "negative": null
+    },
+    "21": {
+      "positive": "prevent opponent from connecting on the first line",
+      "negative": null
+    },
+    "22": {
+      "positive": "remove ko threats",
+      "negative": null
+    },
+    "23": {
+      "positive": "connect under on the 2nd line",
+      "negative": null
+    },
+    "24": {
+      "positive": "capture multiple stones",
+      "negative": null
+    },
+    "25": {
+      "positive": "fuseki fight starts, take liberty",
+      "negative": null
+    },
+    "26": {
+      "positive": "save stones by connect or capture",
+      "negative": null
+    },
+    "27": {
+      "positive": "atari",
+      "negative": null
+    },
+    "28": {
+      "positive": "kill big group",
+      "negative": null
+    },
+    "29": {
+      "positive": "play on the first line to make the second eye",
+      "negative": null
+    },
+    "30": {
+      "positive": "play form inside during semeai",
+      "negative": null
+    },
+    "31": {
+      "positive": "atari single stone on the second line towards the edge",
+      "negative": null
+    },
+    "32": {
+      "positive": "cut",
+      "negative": null
+    },
+    "33": {
+      "positive": "solidly connect a hane",
+      "negative": null
+    },
+    "34": {
+      "positive": "push trough to introduce a cut",
+      "negative": null
+    },
+    "35": {
+      "positive": "connect back after wedge encounters atari",
+      "negative": null
+    },
+    "36": {
+      "positive": "1 point reverse sente",
+      "negative": null
+    },
+    "37": {
+      "positive": "take a liberty with 2-2",
+      "negative": null
+    },
+    "38": {
+      "positive": "capture race, make eye or add liberty",
+      "negative": null
+    },
+    "39": {
+      "positive": "1 point sente yose",
+      "negative": null
+    },
+    "40": {
+      "positive": "first line move for a magic liberty",
+      "negative": null
+    },
+    "41": {
+      "positive": "2nd line double sente yose",
+      "negative": null
+    },
+    "42": {
+      "positive": "play inside",
+      "negative": null
+    },
+    "43": {
+      "positive": "connect and cut with single move",
+      "negative": null
+    },
+    "44": {
+      "positive": "connect to protect shape",
+      "negative": null
+    },
+    "45": {
+      "positive": "remove aji",
+      "negative": null
+    },
+    "46": {
+      "positive": "take ko to gain a liberty",
+      "negative": null
+    },
+    "47": {
+      "positive": "atari 2nd line stone towards the edge",
+      "negative": null
+    },
+    "48": {
+      "positive": "fix",
+      "negative": null
+    },
+    "49": {
+      "positive": "atari cutting group while still can",
+      "negative": null
+    },
+    "50": {
+      "positive": "connect under",
+      "negative": null
+    },
+    "51": {
+      "positive": "connect stones",
+      "negative": null
+    },
+    "52": {
+      "positive": "play double threat",
+      "negative": null
+    },
+    "53": {
+      "positive": "backoff",
+      "negative": null
+    },
+    "54": {
+      "positive": "attack",
+      "negative": null
+    },
+    "55": {
+      "positive": "back off loosely",
+      "negative": null
+    },
+    "56": {
+      "positive": "save cutting stones",
+      "negative": null
+    },
+    "57": {
+      "positive": "simple yose",
+      "negative": null
+    },
+    "58": {
+      "positive": "cut for aji",
+      "negative": null
+    },
+    "59": {
+      "positive": "make life",
+      "negative": null
+    },
+    "60": {
+      "positive": "capture something",
+      "negative": null
+    },
+    "61": {
+      "positive": "capture something",
+      "negative": null
+    },
+    "62": {
+      "positive": "capture something",
+      "negative": null
+    },
+    "63": {
+      "positive": "connect and block",
+      "negative": null
+    }
+  }
+}

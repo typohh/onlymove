@@ -166,6 +166,113 @@ export function getRecallCandidates(options = {}) {
     return recallCandidates;
 }
 
+// Inverts the logistic recall model to predict the unix-ms timestamps at
+// which each candidate problem will cross P=0.80 (recall window opens) and
+// P=0.60 (recall window closes). Mirrors the eligibility filters of
+// getRecallCandidates and applies the same min/max-hour clipping to the
+// recall coefficient. Reads modelParams/answerHistory/userRank directly so
+// callers can request a size other than the currently active one.
+//
+// Output rows are bounded:
+//   - exit_at must be in the future (we never ping about a window already past)
+//   - enter_at must be within a 30-day horizon (avoids accumulating stale
+//     schedule rows for problems that won't be due for months; the schedule
+//     will get re-uploaded after subsequent attempts anyway).
+export function buildRecallSchedule(size) {
+    const readPerSizeKey = (key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed?.[String(size)] ?? null;
+        } catch {
+            return null;
+        }
+    };
+
+    const params = readPerSizeKey('modelParams');
+    if (!Array.isArray(params) || params.length === 0) return [];
+    const answerHistory = readPerSizeKey('answerHistory');
+    if (!Array.isArray(answerHistory) || answerHistory.length === 0) return [];
+    const userRank = readPerSizeKey('userRank');
+    if (typeof userRank !== 'number') return [];
+
+    const clippedParams = [...params];
+    const N = clippedParams[MODEL_INDICES.IS_NOVEL];
+    const R = clippedParams[MODEL_INDICES.RECALL_FORMULA];
+    const min_hours = 18;
+    const max_hours = 168;
+    const min_ratio = Math.log(1 + min_hours / 24);
+    const max_ratio = Math.log(1 + max_hours / 24);
+    if (Math.abs(R) < 1e-9) return [];
+    const current_ratio = N / R;
+    if (current_ratio < min_ratio) {
+        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / min_ratio;
+    } else if (current_ratio > max_ratio) {
+        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
+    }
+
+    const betaRecall = clippedParams[MODEL_INDICES.RECALL_FORMULA];
+    if (!isFinite(betaRecall) || betaRecall >= 0) return [];
+
+    const recentHistory = answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
+    const allReviewTimes = recentHistory
+        .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
+        .filter(t => t > 0);
+    allReviewTimes.sort((a, b) => a - b);
+
+    const lastAnswers = {};
+    for (const answer of recentHistory) lastAnswers[answer.problemId] = answer;
+
+    const now = Date.now();
+    const DAY_MS = 24 * 3600 * 1000;
+    const HORIZON_MS = 30 * DAY_MS;
+    const result = [];
+
+    for (const problemId in lastAnswers) {
+        const lastAnswer = lastAnswers[problemId];
+        if (lastAnswer.ignored) continue;
+        if (lastAnswer.problemRating === undefined || lastAnswer.problemRating >= userRank) continue;
+        if (lastAnswer.successSinceFailure === undefined) continue;
+        if (!lastAnswer.date) continue;
+
+        const reviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
+        const reviewPercentile = calculatePercentile(allReviewTimes, reviewTime);
+
+        const base = clippedParams[MODEL_INDICES.INTERCEPT]
+                   + clippedParams[MODEL_INDICES.TIME_SOLVING] * 0.5
+                   + clippedParams[MODEL_INDICES.REVIEW_TIME] * reviewPercentile
+                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRating;
+
+        const r = lastAnswer.successSinceFailure || 0;
+        const factor = Math.pow(2, r);
+
+        const daysFor = (p) => {
+            const logitTarget = Math.log(p / (1 - p));
+            const recallFeature = (logitTarget - base) / betaRecall;
+            return (Math.exp(recallFeature) - 1) * factor;
+        };
+
+        const tEnterDays = daysFor(0.80);
+        const tExitDays = daysFor(0.60);
+        if (!isFinite(tEnterDays) || !isFinite(tExitDays)) continue;
+        if (tExitDays <= tEnterDays) continue;
+
+        const enterAt = lastAnswer.date + tEnterDays * DAY_MS;
+        const exitAt = lastAnswer.date + tExitDays * DAY_MS;
+
+        if (exitAt <= now) continue;
+        if (enterAt > now + HORIZON_MS) continue;
+
+        result.push({
+            problemId,
+            enterAt: Math.round(enterAt),
+            exitAt: Math.round(exitAt),
+        });
+    }
+    return result;
+}
+
 // ------------------------------------------------------------------------------------------------
 // --- Moved from user-stats.js -------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -187,17 +294,28 @@ const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.RECALL_FORMULA]: -1,
 };
 
-export function probToRank(start, end) {
-    const epsilon = 1e-9;
-    start = Math.max(epsilon, Math.min(1 - epsilon, start));
-    end = Math.max(epsilon, Math.min(1 - epsilon, end));
-    const logOddsStart = Math.log(start / (1 - start));
-    const logOddsEnd = Math.log(end / (1 - end));
-    return (1 / 0.28) * (logOddsEnd - logOddsStart);
-}
+// Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
+// of a correct answer by roughly this much. Treated as a Gaussian prior whose
+// posterior is updated by the user's own fitted PROBLEM_DIFFICULTY slope.
+const LOGIT_PER_RANK_PRIOR = 0.28;
+const LOGIT_PER_RANK_PRIOR_SIGMA = 0.1;
 
-export function logitsToRank(startLogit, endLogit) {
-    return (1 / 0.28) * (endLogit - startLogit);
+// Precision-weighted blend of the prior and the user's own fitted slope from
+// `state.statsResults`. Falls back to the prior when no usable model fit is
+// available. Floored to keep downstream divisions well-conditioned.
+export function getLogitPerRank(statsResults) {
+    const priorPrecision = 1 / (LOGIT_PER_RANK_PRIOR_SIGMA * LOGIT_PER_RANK_PRIOR_SIGMA);
+    const pd = statsResults && statsResults.results
+        ? statsResults.results.find(r => r.varIndex === MODEL_INDICES.PROBLEM_DIFFICULTY)
+        : null;
+    if (!pd || !isFinite(pd.coeff) || !isFinite(pd.se) || pd.se <= 0) {
+        return LOGIT_PER_RANK_PRIOR;
+    }
+    const userSlope = Math.abs(pd.coeff);
+    const userPrecision = 1 / (pd.se * pd.se);
+    const blended = (priorPrecision * LOGIT_PER_RANK_PRIOR + userPrecision * userSlope)
+        / (priorPrecision + userPrecision);
+    return Math.max(0.05, blended);
 }
 
 let isCalculatingStats = false;
@@ -397,6 +515,7 @@ export async function showDetailedStats() {
     try {
         const { results, varCovarMatrix } = state.statsResults;
         const finalParams = state.modelParams;
+        const logitPerRank = getLogitPerRank(state.statsResults);
         let resultText = '';
 
         // Block 1: Observations
@@ -454,23 +573,91 @@ export async function showDetailedStats() {
         const ignoredProblemCount = state.answerHistory.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
 
-        // Separator
-        resultText += '\n';
-
-        // Block 3: OLS Model Coefficients
-        resultText += getTerm('statsModelCoefficients');
-        resultText += `\nINTERCEPT ${finalParams[MODEL_INDICES.INTERCEPT].toFixed(2)}`;
-        for (const result of results) {
-            const { coeff, se, varIndex } = result;
-            const varName = Object.keys(MODEL_INDICES).find(key => MODEL_INDICES[key] === varIndex);
-            resultText += `\n${varName}: ${coeff.toFixed(2)} ± ${se.toFixed(2)}`;
+        // Difficulty sensitivity as a natural-language percent deviation:
+        // |β_difficulty / logitPerRank| − 1 is the fractional gap between the
+        // user's success-vs-rank slope and the prior-blended baseline. Lives
+        // here (not in the model block) because it's a personal stat about
+        // the user, not a model-output effect.
+        const pdResult = results.find(r => r.varIndex === MODEL_INDICES.PROBLEM_DIFFICULTY);
+        if (pdResult) {
+            const ratio = Math.abs(pdResult.coeff) / logitPerRank;
+            const pct = (ratio - 1) * 100;
+            const direction = pct >= 0 ? 'more' : 'less';
+            resultText += `You are ${Math.abs(pct).toFixed(0)}% ${direction} sensitive to problem difficulty than typical.\n`;
         }
 
-        alert(resultText);
+        // P(weakness on PC k) = P(beta_k < 0 | data) = Phi(-beta_k / se_k),
+        // with se_k from the Laplace approx in weakness.js. Convention:
+        // positive PC end is what labels.json names; beta_k < 0 means the
+        // user does worse on problems with positive component k, i.e. a
+        // weakness on that named axis.
+        const PROB_THRESHOLD = 0.65;
+        const weaknessParams = state.weaknessParams;
+        const weaknessSe = state.weaknessSe;
+        resultText += `\nLikely weaknesses\n`;
+        if (weaknessParams && weaknessParams.length > 2 &&
+            weaknessSe && weaknessSe.length === weaknessParams.length) {
+            const betas = weaknessParams.slice(2);
+            const ses = weaknessSe.slice(2);
+            const K = betas.length;
+            const labelMap = state.embeddingLabels || {};
+            const labelFor = (k) => {
+                const entry = labelMap[String(k)];
+                return (entry && entry.positive) || `style #${k}`;
+            };
+            const ranked = [];
+            for (let k = 0; k < K; k++) {
+                const b = betas[k], se = ses[k];
+                if (!Number.isFinite(b) || !(se > 0)) continue;
+                const p = 0.5 * (1 + math.erf((-b / se) / Math.sqrt(2)));
+                if (p >= PROB_THRESHOLD) ranked.push({ k, p });
+            }
+            ranked.sort((a, b) => b.p - a.p);
+            if (ranked.length === 0) {
+                resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)`;
+            } else {
+                for (const o of ranked) {
+                    resultText += `\n  ${(o.p * 100).toFixed(0)}%  ${labelFor(o.k)}`;
+                }
+            }
+        } else {
+            resultText += `(not enough data yet)`;
+        }
+
+        showSelectableTextModal(resultText);
 
     } catch (error) {
         console.error('Failed to generate stats text:', error);
         Sentry.captureException(error);
         alert(getTerm('statsFailed'));
     }
+}
+
+function showSelectableTextModal(text) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'stats-modal-backdrop';
+
+    const card = document.createElement('div');
+    card.className = 'stats-modal-card';
+
+    const pre = document.createElement('pre');
+    pre.className = 'stats-modal-pre';
+    pre.textContent = text;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'stats-modal-close';
+    closeBtn.textContent = 'Close';
+
+    const close = () => {
+        document.removeEventListener('keydown', onKey);
+        backdrop.remove();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    closeBtn.onclick = close;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.addEventListener('keydown', onKey);
+
+    card.append(pre, closeBtn);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
 }
