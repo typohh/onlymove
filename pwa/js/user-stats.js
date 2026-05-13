@@ -28,7 +28,30 @@ const getRankInfo = (rating) => {
     return { rankIndex, progress };
 }
 
-export function updateUserStats(isCorrect) {
+// Match (by problemId + creation date) the just-recorded answer entry and
+// fold a picked-move embedding into it after the network fetch resolves.
+// Idempotent — no-op if the entry already has one. Skipped if the entry has
+// been pruned away by the time the fetch lands (the user may have moved on
+// far enough that the trainer no longer cares).
+function patchPickedEmbedding(problemId, attemptDate, embedding) {
+    if (!Array.isArray(embedding) || embedding.length === 0) return;
+    const history = state.answerHistory;
+    for (let i = history.length - 1; i >= 0; i--) {
+        const a = history[i];
+        if (a.problemId === problemId && a.date === attemptDate) {
+            if (a.pickedEmbedding) return;
+            a.pickedEmbedding = embedding.map(v => Math.round(v * 100) / 100);
+            updateAnswerHistory(history);
+            return;
+        }
+    }
+}
+
+export function updateUserStats(isCorrect, {
+    pickedCellIndex = null,
+    pickedEmbedding = null,
+    pickedEmbeddingPromise = null,
+} = {}) {
     const history = state.problemHistory;
     const currentProblem = history[0];
 
@@ -77,8 +100,25 @@ export function updateUserStats(isCorrect) {
         // regularized weakness regression.
         answer.embedding = currentProblem.embedding.map(v => Math.round(v * 100) / 100);
     }
+    if (typeof pickedCellIndex === 'number' && pickedCellIndex >= 0) {
+        // Record the SGF variation index the user picked so embedding-backfill
+        // can look up the cell embedding later, even if the live fetch fails
+        // or hasn't returned by the time the answer is logged.
+        answer.pickedCellIndex = pickedCellIndex;
+    }
+    if (Array.isArray(pickedEmbedding)) {
+        answer.pickedEmbedding = pickedEmbedding.map(v => Math.round(v * 100) / 100);
+    }
 
     updateAnswerHistory([...state.answerHistory, answer]);
+
+    // Defer-patch from the in-flight fetch. Never blocks the caller — if the
+    // fetch fails or the entry gets evicted later, the next app-load backfill
+    // will pick this up using `pickedCellIndex`.
+    if (pickedEmbeddingPromise && !answer.pickedEmbedding) {
+        pickedEmbeddingPromise.then(emb => patchPickedEmbedding(problemId, answer.date, emb))
+            .catch(_err => { /* swallowed; backfill handles retry */ });
+    }
     setCurrentSolvingStartTime(null);
 
     const oldRank = state.userRank;

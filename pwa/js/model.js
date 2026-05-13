@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';
+import { quadrantProbs } from './bivariate-normal.js';
 
 // ------------------------------------------------------------------------------------------------
 // --- Moved from problem-loader.js ---------------------------------------------------------------
@@ -586,42 +587,71 @@ export async function showDetailedStats() {
             resultText += `You are ${Math.abs(pct).toFixed(0)}% ${direction} sensitive to problem difficulty than typical.\n`;
         }
 
-        // P(weakness on PC k) = P(beta_k < 0 | data) = Phi(-beta_k / se_k),
-        // with se_k from the Laplace approx in weakness.js. Convention:
-        // positive PC end is what labels.json names; beta_k < 0 means the
-        // user does worse on problems with positive component k, i.e. a
-        // weakness on that named axis.
-        const PROB_THRESHOLD = 0.65;
+        // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
+        // turned into sign-quadrant probabilities via bivariate-normal.js.
+        // Three issues we surface, mutually exclusive at the point estimate
+        // level (but their posterior masses overlap at the threshold):
+        //   "too often"        β_c > 0, β_p < 0  → user mis-applies motif k
+        //   "not often enough" β_c < 0, β_p > 0  → user under-applies motif k
+        //   "bad at"           β_c < 0, β_p < 0  → user struggles with motif k overall
+        // Each axis can surface 0..3 issues depending on which probabilities
+        // clear the threshold.
+        const PROB_THRESHOLD = 0.50;
         const weaknessParams = state.weaknessParams;
         const weaknessSe = state.weaknessSe;
-        resultText += `\nLikely weaknesses\n`;
-        if (weaknessParams && weaknessParams.length > 2 &&
-            weaknessSe && weaknessSe.length === weaknessParams.length) {
-            const betas = weaknessParams.slice(2);
-            const ses = weaknessSe.slice(2);
-            const K = betas.length;
-            const labelMap = state.embeddingLabels || {};
-            const labelFor = (k) => {
-                const entry = labelMap[String(k)];
-                return (entry && entry.positive) || `style #${k}`;
-            };
-            const ranked = [];
+        const weaknessAxisCov = state.weaknessAxisCov;
+        const labelMap = state.embeddingLabels || {};
+        const labelFor = (k) => {
+            const entry = labelMap[String(k)];
+            return (entry && entry.positive) || `style #${k}`;
+        };
+
+        // Header layout for the three categories. Order is the same as the
+        // current single-header convention but split into three sections.
+        const SECTIONS = [
+            { key: 'tooMuch',    header: 'Too often' },
+            { key: 'notEnough',  header: 'Not often enough' },
+            { key: 'badAt',      header: 'Bad at' },
+        ];
+
+        const haveModel = (
+            Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
+            Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
+            Array.isArray(weaknessAxisCov)
+        );
+
+        if (!haveModel) {
+            // Fall back to a single line under the new layout.
+            resultText += `\nLikely issues\n(not enough data yet)`;
+        } else {
+            const K = (weaknessParams.length - 2) / 2;
+            // Per-axis: gather posterior quadrant probabilities once.
+            const perAxis = [];
             for (let k = 0; k < K; k++) {
-                const b = betas[k], se = ses[k];
-                if (!Number.isFinite(b) || !(se > 0)) continue;
-                const p = 0.5 * (1 + math.erf((-b / se) / Math.sqrt(2)));
-                if (p >= PROB_THRESHOLD) ranked.push({ k, p });
+                const mu_c = weaknessParams[2 + k];
+                const mu_p = weaknessParams[2 + K + k];
+                const var_c = weaknessSe[2 + k] * weaknessSe[2 + k];
+                const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
+                const cov = weaknessAxisCov[k] || 0;
+                if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
+                if (!(var_c > 0) || !(var_p > 0)) continue;
+                perAxis.push({ k, probs: quadrantProbs(mu_c, mu_p, var_c, var_p, cov) });
             }
-            ranked.sort((a, b) => b.p - a.p);
-            if (ranked.length === 0) {
-                resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)`;
-            } else {
-                for (const o of ranked) {
-                    resultText += `\n  ${(o.p * 100).toFixed(0)}%  ${labelFor(o.k)}`;
+
+            for (const section of SECTIONS) {
+                resultText += `\n${section.header}\n`;
+                const ranked = perAxis
+                    .map(o => ({ k: o.k, p: o.probs[section.key] }))
+                    .filter(o => o.p >= PROB_THRESHOLD)
+                    .sort((a, b) => b.p - a.p);
+                if (ranked.length === 0) {
+                    resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)\n`;
+                } else {
+                    for (const o of ranked) {
+                        resultText += `  ${(o.p * 100).toFixed(0)}%  ${labelFor(o.k)}\n`;
+                    }
                 }
             }
-        } else {
-            resultText += `(not enough data yet)`;
         }
 
         showSelectableTextModal(resultText);

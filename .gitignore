@@ -50,6 +50,11 @@ models/
 # regenerable via pipeline/extract_activations.py. Not for version control.
 activations/
 
+# Pre-projected per-cell K-dim embeddings (~1.3 GB at K=64). Written by
+# pipeline/build_embedding.py after the PCA fit; consumed by
+# pipeline/package_for_pwa.py. Reproducible from activations/ + pca.npz.
+embeddings/joint/per_cell/
+
 # Vast.ai orchestration
 orchestration_state.json
 .env

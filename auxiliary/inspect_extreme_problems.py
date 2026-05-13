@@ -1,20 +1,26 @@
-"""Print URLs to a locally-running PWA dev server for the top-N high and
-bottom-N low problems on a given PCA component, for visual inspection.
+"""Inspect the top-N highest-scoring problems on a given embedding component.
 
-Reads from embeddings/joint/per_problem.csv when available (the new joint
-model spans both board sizes); falls back to embeddings/<size>/per_problem.csv
-for the legacy per-size pipeline.
+Only the positive side is shown: the default pipeline uses FastICA with the
+skew contrast and sign-canonicalizes axes so the positive tail concentrates
+the motif and the negative tail is Gaussian baseline (see
+pipeline/build_embedding.py `_skew_contrast`). Negative-side problems have no
+coherent theme by construction, so the LOW section that older versions of
+this script printed was misleading.
 
-Run the PWA via `cd pwa && npm run dev`, then open the URLs printed below.
-The PWA's lookup table auto-resolves board size from the tsumego_id.
+Reads from embeddings/joint/per_problem.csv when available (the joint model
+spans both board sizes); falls back to embeddings/<size>/per_problem.csv for
+the legacy per-size pipeline.
 
-Alternative: --html generates a self-contained static HTML page with two
-grids (top positive, top negative) of inline-SVG board diagrams marking
-the correct first move. Use --open to launch it in the default browser.
+Default mode is HTML: a self-contained static page with `--rows` intensity
+bands. Row 0 targets max(col); row k targets max(col) · (rows-k)/rows. With
+rows=5 the bottom row sits around 1/5 of the extreme — useful for watching
+the visual theme decay from peak toward baseline. Use --open to launch the
+page, or --no-html to print PWA dev-server URLs instead.
 
 Usage:
-  python -m auxiliary.inspect_extreme_problems [--pc N] [--n 10] [--size 9|13|all]
-  python -m auxiliary.inspect_extreme_problems --pc 3 --html --open
+  python -m auxiliary.inspect_extreme_problems [--pc N] [--rows 5] [--cols 5]
+  python -m auxiliary.inspect_extreme_problems --pc 3 --open
+  python -m auxiliary.inspect_extreme_problems --pc 3 --no-html
 """
 
 import argparse
@@ -213,9 +219,49 @@ def _build_card(row, score_col, lookup):
     )
 
 
-def _build_html(pc, source, high_df, low_df, score_col, cols, lookup):
-    high_cards = "".join(_build_card(r, score_col, lookup) for _, r in high_df.iterrows())
-    low_cards = "".join(_build_card(r, score_col, lookup) for _, r in low_df.iterrows())
+def _pick_intensity_bands(df, col, rows, cols):
+    """Return `rows` (target_score, picks_df) tuples for HTML rendering.
+
+    Row k targets `max(col) * (rows - k) / rows` and grabs the `cols`
+    problems with score closest to that target. Already-chosen problems
+    are excluded so rows don't repeat each other on dense bands.
+
+    Only the positive side; see module docstring for why.
+    """
+    extreme = float(df[col].max())
+    chosen = set()
+    bands = []
+    for k in range(rows):
+        target = extreme * (rows - k) / rows
+        remaining = df[~df["tsumego_id"].isin(chosen)].copy()
+        if remaining.empty:
+            bands.append((target, remaining))
+            continue
+        remaining["_dist"] = (remaining[col] - target).abs()
+        picks = remaining.nsmallest(cols, "_dist").copy()
+        chosen.update(picks["tsumego_id"].tolist())
+        # Within a row, sort by score descending so the eye scans
+        # peak→baseline left-to-right.
+        picks = picks.sort_values(col, ascending=False).drop(columns="_dist")
+        bands.append((target, picks))
+    return bands
+
+
+def _build_html(pc, source, high_bands, score_col, cols, lookup):
+    def render_band(target, row_df):
+        if row_df.empty:
+            cards = '<div class="card missing">no problems left in this band</div>'
+        else:
+            cards = "".join(_build_card(r, score_col, lookup) for _, r in row_df.iterrows())
+        return (
+            f'<div class="band">'
+            f'<div class="band-label">target {target:+.3f}</div>'
+            f'<div class="grid">{cards}</div>'
+            f'</div>'
+        )
+
+    high_html = "".join(render_band(t, d) for t, d in high_bands)
+    n_rows = max(len(high_bands), 1)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -226,6 +272,11 @@ def _build_html(pc, source, high_df, low_df, score_col, cols, lookup):
   h1 {{ margin-bottom: 0.25rem; }}
   h2 {{ margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.25rem; }}
   .grid {{ display: grid; grid-template-columns: repeat({cols}, 1fr); gap: 1rem; }}
+  .band {{ margin: 0.75rem 0 1.25rem; }}
+  .band-label {{
+    font-size: 0.8rem; color: #555; margin-bottom: 0.35rem;
+    font-family: ui-monospace, monospace;
+  }}
   .card {{ background: white; border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem; text-align: center; }}
   .card svg {{ width: 100%; height: auto; display: block; }}
   .meta {{ font-size: 0.8rem; margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.1rem; }}
@@ -242,14 +293,13 @@ def _build_html(pc, source, high_df, low_df, score_col, cols, lookup):
 </style>
 </head>
 <body>
-<h1>PC{pc} extremes</h1>
+<h1>PC{pc} positive tail</h1>
 <div class="legend">
   Source: {source} &middot; Red ring <span class="marker"></span> = correct first move
+  &middot; Rows step from peak (top) toward ~1/{n_rows} of the extreme (bottom).
+  Negative tail not shown — baseline by construction under skew-ICA.
 </div>
-<h2>Top {len(high_df)} HIGH (most positive on PC{pc})</h2>
-<div class="grid">{high_cards}</div>
-<h2>Top {len(low_df)} LOW (most negative on PC{pc})</h2>
-<div class="grid">{low_cards}</div>
+{high_html}
 </body>
 </html>
 """
@@ -258,14 +308,16 @@ def _build_html(pc, source, high_df, low_df, score_col, cols, lookup):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pc", type=int, default=0, help="Component index (default 0)")
-    parser.add_argument("--n", type=int, default=10, help="N high + N low (default 10)")
+    parser.add_argument("--n", type=int, default=10,
+                        help="N top-scoring problems in --no-html mode (default 10)")
     parser.add_argument("--host", default="http://localhost:8787",
-                        help="PWA dev server origin")
+                        help="PWA dev server origin (only used with --no-html)")
     parser.add_argument("--size", default="all",
                         help="9, 13, or 'all' (default). 'all' picks across both sizes.")
-    parser.add_argument("--html", action="store_true",
-                        help="Render a static HTML grid instead of printing URLs.")
-    parser.add_argument("--rows", type=int, default=3, help="HTML grid rows (default 3)")
+    parser.add_argument("--html", action=argparse.BooleanOptionalAction, default=True,
+                        help="Render static HTML (default). --no-html prints PWA URLs instead.")
+    parser.add_argument("--rows", type=int, default=5,
+                        help="HTML intensity bands; row k targets extreme · (rows-k)/rows (default 5)")
     parser.add_argument("--cols", type=int, default=5, help="HTML grid columns (default 5)")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/pc<N>_extremes.html)")
@@ -298,17 +350,14 @@ def main():
         max_k = len([c for c in df.columns if c.startswith("embed_")]) - 1
         raise SystemExit(f"No column {col} in {csv_path} (max component index = {max_k})")
 
-    n = args.rows * args.cols if args.html else args.n
-    df_sorted = df.sort_values(col, ascending=False)
-    high = df_sorted.head(n)
-    low = df_sorted.tail(n).iloc[::-1]
-
     if args.html:
         lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
         if not os.path.exists(lookup_path):
             raise SystemExit(f"missing {lookup_path}; run pipeline.package_for_pwa first")
         lookup = _load_lookup(lookup_path)
-        html = _build_html(args.pc, f"{source}, size {args.size}", high, low, col, args.cols, lookup)
+        high_bands = _pick_intensity_bands(df, col, args.rows, args.cols)
+        html = _build_html(args.pc, f"{source}, size {args.size}",
+                           high_bands, col, args.cols, lookup)
         out_path = args.out or os.path.join("/tmp", f"pc{args.pc}_extremes.html")
         with open(out_path, "w") as f:
             f.write(html)
@@ -318,6 +367,10 @@ def main():
             webbrowser.open(f"file://{os.path.abspath(out_path)}")
         return
 
+    n = args.n
+    df_sorted = df.sort_values(col, ascending=False)
+    high = df_sorted.head(n)
+
     base = f"{args.host}/?id="
     has_size = "size" in df.columns
 
@@ -325,11 +378,8 @@ def main():
         size_tag = f" [{int(row['size'])}x{int(row['size'])}]" if has_size else ""
         return f"  {row[col]:>+7.3f}{size_tag}  {base}{row['tsumego_id']}"
 
-    print(f"\nPC{args.pc} (source: {source}, scope: {args.size}): top {n} HIGH\n")
+    print(f"\nPC{args.pc} (source: {source}, scope: {args.size}): top {n} positive tail\n")
     for _, row in high.iterrows():
-        print(fmt(row))
-    print(f"\nPC{args.pc} (source: {source}, scope: {args.size}): top {n} LOW\n")
-    for _, row in low.iterrows():
         print(fmt(row))
 
 

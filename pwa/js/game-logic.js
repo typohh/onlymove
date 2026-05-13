@@ -11,6 +11,7 @@ import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
+import { fetchPickedEmbedding } from './picked-embedding.js';
 
 const median = (values) => {
     if (!values.length) return 0;
@@ -38,6 +39,24 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     });
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
+    // Fire the picked-move embedding fetch in the background. We never block
+    // on it — the answer is recorded immediately with just the cell index,
+    // and updateUserStats attaches a defer-patch handler. Embedding-backfill
+    // also re-fetches missing pickedEmbeddings on the next app load, so a
+    // failed/slow live fetch is recoverable.
+    const currentProblem = state.problemHistory[0];
+    const tsumegoId = currentProblem?.filename?.replace(/\.sgf$/, '');
+    const zipFilename = currentProblem?.zipFilename;
+    let pickedEmbeddingPromise = null;
+    if (tsumegoId && zipFilename && state.appMode === APP_MODES.SOLVING) {
+        pickedEmbeddingPromise = fetchPickedEmbedding({
+            tsumegoId,
+            cellIndex: moveIndex,
+            zipFilename,
+            boardSize: state.boardSize,
+        });
+    }
+
     playMoveByIndex(moveIndex);
     playStoneSound();
     await delay(1000);
@@ -46,7 +65,10 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     playStoneSound();
 
     sendReport(false);
-    const stats = updateUserStats(false);
+    const stats = updateUserStats(false, {
+        pickedCellIndex: moveIndex,
+        pickedEmbeddingPromise,
+    });
 
     // Calculate overlay duration and message based on time spent
     const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);

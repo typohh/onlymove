@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
+import { state, zipCache, embeddingsIndexCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -181,6 +181,21 @@ export async function loadZipProblems(zipFilename) {
     state.loadedZips[zipFilename] = problems;
     state.allProblems.push(...problems);
     zipCache.set(zipFilename, zip);
+
+    // Pull the per-cell embedding offset table out of the zip. Older zips
+    // (pre-sidecar) won't have it — that's fine; picked-embedding lookups
+    // will see no entry and return null, which is what we want.
+    const indexFile = zip.file('embeddings_index.json');
+    if (indexFile) {
+        try {
+            const payload = JSON.parse(await indexFile.async('text'));
+            if (payload && payload.problems) {
+                embeddingsIndexCache.set(zipFilename, payload);
+            }
+        } catch (e) {
+            console.warn(`embeddings_index.json parse failed for ${zipFilename}:`, e);
+        }
+    }
 }
 
 function findClosestUnloadedZip() {
@@ -262,7 +277,9 @@ async function loadOneTsumego() {
             quality: selectedProblem.quality || 0,
             embedding: selectedProblem.embedding,
             isRepeat: selectedProblem.isRepeat || false,
-            orientation: orientation
+            orientation: orientation,
+            // Retained so picked-embedding can locate the sidecar .embeddings.bin.
+            zipFilename: selectedProblem.zipFilename
         });
 
         if (history.length > 2) history.length = 2;
@@ -430,7 +447,9 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
             quality: problemQuality,
             embedding: problemEmbedding,
             isRepeat: asRecall,
-            orientation: actualOrientation
+            orientation: actualOrientation,
+            // Retained so picked-embedding can locate the sidecar .embeddings.bin.
+            zipFilename: zipFilename
         };
 
         // If current problem is linked, replace it instead of shifting

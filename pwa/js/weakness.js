@@ -1,24 +1,35 @@
 // js/weakness.js
 //
-// Per-component weakness/strength tracking and scoring.
+// Augmented per-component weakness/strength tracking and scoring.
 //
 // Trains a logistic regression on the user's answer history for a given size:
-//   P(correct) = sigmoid(intercept + gamma * rating + sum_k beta_k * embedding_k)
+//   P(correct) = sigmoid(α + γ·rating
+//                          + Σ_k β_correct[k] · correct_emb[k]
+//                          + Σ_k β_picked[k]  · picked_emb[k])
 //
-// beta_k > 0 means "user does relatively better on high-component-k problems"
-// (a strength). beta_k < 0 means a weakness in that direction. The recommender
-// scores a candidate by sum_k (-beta_k) * embedding_k(candidate) — bigger =
-// more aligned with the user's weaknesses, more aligned away from strengths.
+// β_correct[k] captures the effect of the *problem's* loading on axis k
+// (treating the correct move's embedding as a property of the position).
+// β_picked[k] captures the effect of the user's *picked* move along the
+// same axis — independent of whether the picked move equals the correct
+// move. For correct attempts, picked_emb = correct_emb by definition, so
+// those rows inform β_correct + β_picked jointly. Wrong attempts with a
+// picked-move embedding from the sidecar (or backfilled later) let the
+// model disambiguate the two.
 //
-// The model is ridge-regularized: beta is shrunk toward 0, so before there's
-// enough signal it produces near-uniform scores. Cold start is handled by
-// MIN_TRAINING_ATTEMPTS — below that, no model trains and the scorer returns 0.
+// Recommendation scoring of a candidate problem uses β_correct + β_picked
+// applied to the candidate's correct-move embedding — algebraically what
+// you'd get by assuming "user will pick correctly" on the unseen problem.
+// Equivalently this matches the diff-form's β_c' coefficient.
+//
+// Model ridge-regularized: β shrunk toward 0, so before there's enough
+// signal the scorer returns 0 (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
 
 import * as Sentry from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, getWeaknessParamsForSize,
     setWeaknessParamsForSize, setWeaknessAdamForSize, setWeaknessSeForSize,
+    setWeaknessAxisCovForSize,
 } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 
@@ -75,12 +86,27 @@ export async function trainWeaknessForSize(size) {
             return;
         }
 
-        const numParams = 2 + K;
+        // Augmented features: [1, rating, correct_emb_0..K-1, picked_emb_0..K-1].
+        // For correct attempts picked = correct (definition); for wrong attempts
+        // we use the sidecar-fetched pickedEmbedding when available, falling
+        // back to correct_emb if not. The fallback rows only inform the SUM
+        // (β_correct + β_picked) — the model gracefully degrades to a
+        // diff-form mean estimate when no picked data exists.
+        const numParams = 2 + 2 * K;
         const existingParams = getWeaknessParamsForSize(size);
         let params = (Array.isArray(existingParams) && existingParams.length === numParams)
             ? [...existingParams]
             : new Array(numParams).fill(0);
         let adam = { m: new Array(numParams).fill(0), v: new Array(numParams).fill(0), t: 0 };
+
+        // Precompute the picked vector per row to avoid re-deriving in the
+        // hot training loop.
+        const pickedFor = history.map(a => {
+            if (Array.isArray(a.pickedEmbedding) && a.pickedEmbedding.length === K) {
+                return a.pickedEmbedding;
+            }
+            return a.embedding;  // fallback: row only informs β_correct + β_picked
+        });
 
         const beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
         const N = history.length;
@@ -94,8 +120,11 @@ export async function trainWeaknessForSize(size) {
 
             for (let i = 0; i < N; i++) {
                 const a = history[i];
+                const corr = a.embedding;
+                const pick = pickedFor[i];
                 let z = params[0] + params[1] * a.problemRating;
-                for (let k = 0; k < K; k++) z += params[2 + k] * a.embedding[k];
+                for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
+                for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
 
                 const p = sigmoid(z);
                 const clipped = Math.max(1e-15, Math.min(1 - 1e-15, p));
@@ -104,17 +133,16 @@ export async function trainWeaknessForSize(size) {
                 const err = p - y;
                 grad[0] += err;
                 grad[1] += err * a.problemRating;
-                for (let k = 0; k < K; k++) grad[2 + k] += err * a.embedding[k];
+                for (let k = 0; k < K; k++) grad[2 + k] += err * corr[k];
+                for (let k = 0; k < K; k++) grad[2 + K + k] += err * pick[k];
             }
 
             let l2 = 0;
-            for (let k = 0; k < K; k++) l2 += params[2 + k] * params[2 + k];
-            // Mean-normalized NLL + L2 also divided by N. Equivalent to the
-            // standard MAP objective (sum_NLL + (RIDGE_LAMBDA/2) * ||beta||^2)
-            // up to a global 1/N factor, so the prior precision on each beta_k
-            // is RIDGE_LAMBDA regardless of history size — matching what
-            // calibrate_priors.py optimized. Without the /N on the L2 term,
-            // effective prior precision scales with N and over-shrinks.
+            // Ridge over all β coefficients (correct and picked alike), not
+            // the intercept or rating. Same RIDGE_LAMBDA on every β; the
+            // calibrate_priors.py output already targets per-axis precision
+            // and we honor that uniformly across the two coefficient blocks.
+            for (let j = 2; j < numParams; j++) l2 += params[j] * params[j];
             loss = loss / N + (RIDGE_LAMBDA / (2 * N)) * l2;
 
             for (let j = 0; j < numParams; j++) {
@@ -137,29 +165,40 @@ export async function trainWeaknessForSize(size) {
             setWeaknessParamsForSize(size, null);
             setWeaknessAdamForSize(size, null);
             setWeaknessSeForSize(size, null);
+            setWeaknessAxisCovForSize(size, null);
             return;
         }
         setWeaknessParamsForSize(size, params);
         setWeaknessAdamForSize(size, adam);
 
-        // Laplace-approx posterior std per coefficient. Hessian at the MAP is
-        // H = X' diag(p(1-p)) X + diag(lam_vec); posterior cov ~= H^-1.
-        // Consumed by model.js to display P(weakness) = Phi(-beta_k / se_k).
+        // Laplace-approx posterior cov. H = X' diag(p(1-p)) X + diag(lam_vec);
+        // posterior cov ≈ H^-1. We pull out the per-axis 2x2 block on
+        // (β_correct[k], β_picked[k]) so the stats panel can compute sign-
+        // quadrant probabilities via bivariate-normal.js. Storing the full
+        // (2 + 2K)x(2 + 2K) matrix would blow localStorage at K=64; the
+        // diagonal (weaknessSe) + per-axis off-diagonals (weaknessAxisCov) is
+        // sufficient for the UI use case.
         try {
-            const X = history.map(a => {
+            const X = history.map((a, i) => {
                 const row = new Array(numParams);
                 row[0] = 1;
                 row[1] = a.problemRating;
-                for (let k = 0; k < K; k++) row[2 + k] = a.embedding[k];
+                const corr = a.embedding;
+                const pick = pickedFor[i];
+                for (let k = 0; k < K; k++) row[2 + k] = corr[k];
+                for (let k = 0; k < K; k++) row[2 + K + k] = pick[k];
                 return row;
             });
-            const pHat = history.map(a => {
+            const pHat = history.map((a, i) => {
+                const corr = a.embedding;
+                const pick = pickedFor[i];
                 let z = params[0] + params[1] * a.problemRating;
-                for (let k = 0; k < K; k++) z += params[2 + k] * a.embedding[k];
+                for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
+                for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
                 return sigmoid(z);
             });
             const lamVec = new Array(numParams).fill(1e-6);  // tiny guard on intercept/rating
-            for (let k = 0; k < K; k++) lamVec[2 + k] = RIDGE_LAMBDA;
+            for (let j = 2; j < numParams; j++) lamVec[j] = RIDGE_LAMBDA;
             const W = math.diag(pHat.map(p => p * (1 - p)));
             const Xm = math.matrix(X);
             const fisher = math.multiply(math.transpose(Xm), W, Xm);
@@ -172,9 +211,21 @@ export async function trainWeaknessForSize(size) {
             } else {
                 setWeaknessSeForSize(size, null);
             }
+
+            // Off-diagonal cov[β_c[k], β_p[k]] per axis. cov is a math.js
+            // Matrix; .get([i, j]) is the cheap path. Stored as flat length-K
+            // array — only the cross terms inside each axis k.
+            const covArr = cov.toArray();
+            const axisCov = new Array(K);
+            for (let k = 0; k < K; k++) {
+                const v = covArr[2 + k][2 + K + k];
+                axisCov[k] = Number.isFinite(v) ? v : 0;
+            }
+            setWeaknessAxisCovForSize(size, axisCov);
         } catch (err) {
-            console.warn(`weakness[${size}]: SE computation failed`, err);
+            console.warn(`weakness[${size}]: SE/cov computation failed`, err);
             setWeaknessSeForSize(size, null);
+            setWeaknessAxisCovForSize(size, null);
         }
     } catch (err) {
         console.error(`weakness[${size}] training failed`, err);
@@ -186,13 +237,22 @@ export async function trainWeaknessForSize(size) {
 
 // Returns alignment with user's weakness directions for a candidate problem.
 // Positive = mine for this; negative = user is strong here. 0 if no model.
+//
+// Under the augmented model we score with β_correct + β_picked applied to
+// the candidate's correct-move embedding. Mathematically this is what the
+// model predicts under the "user plays correctly" assumption (picked = correct
+// for the unseen candidate). Equivalently equal to the diff-form's β_c'.
 export function weaknessScore(problem) {
     const params = state.weaknessParams;  // active size
-    if (!params) return 0;
-    const K = params.length - 2;
+    if (!params || params.length < 4) return 0;
+    const K = (params.length - 2) / 2;
+    if (!Number.isInteger(K) || K <= 0) return 0;
     if (!problem.embedding || problem.embedding.length !== K) return 0;
     let score = 0;
-    for (let k = 0; k < K; k++) score += -params[2 + k] * problem.embedding[k];
+    for (let k = 0; k < K; k++) {
+        const betaEff = params[2 + k] + params[2 + K + k];
+        score += -betaEff * problem.embedding[k];
+    }
     return score;
 }
 
@@ -213,9 +273,13 @@ export function weaknessScore(problem) {
 // evaluate (which can happen on a fresh session before zips load).
 export function computeExpectedRecommenderPenalty() {
     const params = state.weaknessParams;
-    if (!params || params.length < 3) return null;
-    const K = params.length - 2;
-    const betas = params.slice(2);
+    if (!params || params.length < 4) return null;
+    const K = (params.length - 2) / 2;
+    if (!Number.isInteger(K) || K <= 0) return null;
+    // Effective scoring coefficient: β_correct[k] + β_picked[k]. Same logic
+    // as weaknessScore — what the recommender actually weighs candidates by.
+    const betas = new Array(K);
+    for (let k = 0; k < K; k++) betas[k] = params[2 + k] + params[2 + K + k];
 
     // Prefer the in-memory candidate pool — that's what the recommender
     // actually picks from. On initial loads this is empty (loadTsumego

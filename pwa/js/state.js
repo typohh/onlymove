@@ -23,6 +23,7 @@ const DEFAULT_BOARD_SIZE = 9;
         'weaknessParams',
         'weaknessAdam',
         'weaknessSe',
+        'weaknessAxisCov',
     ];
 
     for (const key of perSizeKeys) {
@@ -130,6 +131,11 @@ const perSize = {
     weaknessParams: readPerSize('weaknessParams'),
     weaknessAdam: readPerSize('weaknessAdam'),
     weaknessSe: readPerSize('weaknessSe'),
+    // Per-axis cov(β_correct[k], β_picked[k]) for the augmented model.
+    // Flat array of K floats. Combined with weaknessSe (for the diagonals)
+    // and weaknessParams, this is the minimum state needed to compute
+    // sign-quadrant probabilities per axis without retraining.
+    weaknessAxisCov: readPerSize('weaknessAxisCov'),
 };
 
 // Per-size session state — not persisted, but bucketed so it doesn't bleed
@@ -202,6 +208,12 @@ export const state = {
     // embedding-backfill.js after fetching any size's embedding_meta.json.
     // Used by the stats panel to name top weakness PCs. Not persisted.
     embeddingLabels: null,
+
+    // Joint embedding meta consumed by the per-cell sidecar reader (K,
+    // bytes_per_cell, dtype). Populated by embedding-backfill.js from the
+    // same fetch that gives us embeddingLabels — same file, joint meta.
+    // Null until that fetch has run; readers must short-circuit on null.
+    embeddingMeta: null,
 
     // --- Per-size state (read/write proxies onto the active size's bucket). ---
     get boardSize() { return _boardSize; },
@@ -300,6 +312,14 @@ export const state = {
         writePerSize('weaknessSe', perSize.weaknessSe);
     },
 
+    get weaknessAxisCov() {
+        return perSize.weaknessAxisCov[_boardSize] ?? null;
+    },
+    set weaknessAxisCov(v) {
+        perSize.weaknessAxisCov[_boardSize] = v;
+        writePerSize('weaknessAxisCov', perSize.weaknessAxisCov);
+    },
+
     get unavailableProblemIds() { return getOrCreateSessionSet('unavailableProblemIds'); },
 
     get accumulatedSolvingTime() {
@@ -319,6 +339,12 @@ export const state = {
 
 // Cache for loaded zip files. Cleared on size switch.
 export const zipCache = new Map();
+
+// Per-shard embeddings_index payloads (the JSON file shipped inside each
+// zip alongside metadata.json). Keyed by the same zipFilename as zipCache.
+// Shape: { problems: { tsumego_id: { offset, n_cells } } }. Read by the
+// per-cell sidecar fetcher in picked-embedding.js. Cleared on size switch.
+export const embeddingsIndexCache = new Map();
 
 // --- Mutators ---
 
@@ -414,6 +440,11 @@ export function setWeaknessSeForSize(size, se) {
     writePerSize('weaknessSe', perSize.weaknessSe);
 }
 
+export function setWeaknessAxisCovForSize(size, cov) {
+    perSize.weaknessAxisCov[size] = cov;
+    writePerSize('weaknessAxisCov', perSize.weaknessAxisCov);
+}
+
 export function setReviewStartTime(time) {
     state.reviewStartTime = time;
 }
@@ -459,6 +490,7 @@ export function setBoardSize(size) {
     state.loadedZips = {};
     state.allProblems = [];
     zipCache.clear();
+    embeddingsIndexCache.clear();
 }
 
 export { SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE };

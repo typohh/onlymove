@@ -4,42 +4,128 @@ import json
 import os
 import sys
 import zipfile
+
+import numpy as np
 import pandas as pd
+import sgfmill.sgf
 
 # --- Path Setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-import numpy as np
-from utils.configurations import BOARD_SIZE
+from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_queries import get_all_ranks, get_rank_str
+from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 
 
-def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="pwa"):
-    """Sorts, groups, and packages tsumegos into zip files based on their rating.
+# Per-cell embedding sidecar parameters. Keep these in sync with whatever the
+# PWA-side decoder expects in pwa/tsumegos/embedding_meta.json.
+EMBEDDING_DTYPE = np.float16
+EMBEDDING_DTYPE_NAME = "float16"
+EMBEDDING_BYTES_PER_FLOAT = 2
+
+GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matches KataGo / GTP convention
+
+
+def gtp_to_xy(gtp_coord):
+    if gtp_coord.lower() == "pass":
+        return None
+    col_letter = gtp_coord[0].upper()
+    x = GTP_COLS.index(col_letter)
+    y = int(gtp_coord[1:]) - 1
+    return x, y
+
+
+def project_cells_for_problem(per_cell_path, sgf_path):
+    """Load pre-projected per-cell embeddings for one tsumego and reorder to
+    SGF variation document order. Returns (fp16 (n_cells, K) array, n_cells),
+    or (None, 0) on missing/corrupt input.
+
+    Reads embeddings/joint/per_cell/<size>/<tid>.npz, written upstream by
+    build_embedding.write_per_cell_projections. The file already contains the
+    K-dim projections in extraction order — packaging just reorders rows by
+    the (x, y) → variation_index map. No PCA matmul, no raw 6912-dim
+    activation read; ~7.5 KB read per problem at K=64, n_cells≈60.
+
+    The PWA does a parallel walk over the SGF's root variations to compute a
+    picked-move's cell index; layouts must agree, so reordering is keyed off
+    the (x, y) → row map saved alongside the projected embeddings.
+    """
+    if not os.path.exists(per_cell_path):
+        return None, 0
+
+    try:
+        with np.load(per_cell_path) as data:
+            embeddings = np.asarray(data["embeddings"])  # (n_cells, K) fp16
+            xys = np.asarray(data["xys"])                # (n_cells, 2)
+    except Exception as e:
+        print(f"  [warn] corrupt per_cell {per_cell_path}: {type(e).__name__}; "
+              f"skipping per-cell sidecar for this problem", flush=True)
+        return None, 0
+
+    with open(sgf_path, "rb") as f:
+        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
+    size = game.get_size()
+    _, variation_nodes = parse_tsumego_sgf(game)
+
+    xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
+
+    ordered_rows = []
+    for node in variation_nodes:
+        _, mb = node.get_raw_move()
+        xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
+        if xy is None:
+            continue  # pass: not embedded
+        row = xy_to_row.get(xy)
+        if row is None:
+            continue  # rare: SGF has a cell the extraction didn't
+        ordered_rows.append(embeddings[row])
+
+    if not ordered_rows:
+        return None, 0
+
+    return np.stack(ordered_rows, axis=0).astype(EMBEDDING_DTYPE), len(ordered_rows)
+
+
+def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="pwa",
+                    per_cell_dir=None):
+    """Sorts, groups, and packages tsumegos into zip files based on rating.
 
     Output layout:
         {output_dir}/tsumegos/{board_size}/{hash}.zip
+        {output_dir}/tsumegos/{board_size}/{hash}.embeddings.bin   (if per_cell_dir)
         {output_dir}/tsumegos/{board_size}/metadata.json
         {output_dir}/lookup.txt   (merged across sizes; rows: "id zipHash size")
+
+    When per_cell_dir is supplied (pre-projected per-problem .npz files written
+    by build_embedding.write_per_cell_projections), each shard also gets:
+      - a sibling .embeddings.bin with fp16 per-cell K-dim vectors concatenated
+        in SGF variation order, one tsumego after another;
+      - embeddings_index.json inside the zip listing {tid: {offset, n_cells}}.
+    Without that arg, no sidecar is written — useful for "just rezip the
+    SGFs" runs.
     """
 
     metadata.sort(key=lambda x: x["rating"])
-    group_count = int(len(metadata)**0.5)
+    group_count = int(len(metadata) ** 0.5)
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
 
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
     if os.path.exists(zip_dir):
         for f in os.listdir(zip_dir):
-            if f.endswith(".zip") or f == "metadata.json":
+            if (f.endswith(".zip") or f.endswith(".embeddings.bin")
+                    or f == "metadata.json"):
                 os.remove(os.path.join(zip_dir, f))
     else:
         os.makedirs(zip_dir)
 
+    embed_cells_enabled = per_cell_dir is not None and os.path.isdir(per_cell_dir)
+
     zip_metadata = []
     new_lookup_entries = []  # entries for the size we are (re)building now
+    n_with_cells = n_without_cells = 0
     for group in range(group_count):
         group_items = [item for item in metadata if item["group"] == group]
         if not group_items:
@@ -48,6 +134,24 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
         min_rating = min(item["rating"] for item in group_items)
         max_rating = max(item["rating"] for item in group_items)
 
+        # Build the per-shard per-cell embedding sidecar + index ahead of the
+        # zip so we can drop embeddings_index.json inside the same zip below.
+        bin_buffer = bytearray()
+        embeddings_index = {}
+        if embed_cells_enabled:
+            for item in group_items:
+                tid = item["filename"].split(".")[0]
+                per_cell_path = os.path.join(per_cell_dir, tid + ".npz")
+                sgf_path = os.path.join(tsumegos_dir, item["filename"])
+                cells, n_cells = project_cells_for_problem(per_cell_path, sgf_path)
+                if cells is None:
+                    n_without_cells += 1
+                    continue
+                offset = len(bin_buffer)
+                bin_buffer.extend(cells.tobytes())  # fp16 little-endian
+                embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
+                n_with_cells += 1
+
         zip_content = io.BytesIO()
         with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
             for item in group_items:
@@ -55,8 +159,18 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
                 with open(file_path, 'rb') as f:
                     temp_zip.writestr(item["filename"], f.read())
 
-            group_metadata_content = [{k: v for k, v in item.items() if k != "group"} for item in group_items]
-            temp_zip.writestr("metadata.json", json.dumps(group_metadata_content, indent=2))
+            group_metadata_content = [
+                {k: v for k, v in item.items() if k != "group"}
+                for item in group_items
+            ]
+            temp_zip.writestr("metadata.json",
+                              json.dumps(group_metadata_content, indent=2))
+
+            if embed_cells_enabled:
+                temp_zip.writestr(
+                    "embeddings_index.json",
+                    json.dumps({"problems": embeddings_index}),
+                )
 
         zip_content.seek(0)
         zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:8]
@@ -66,11 +180,25 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
         with open(zip_path, 'wb') as f:
             f.write(zip_content.getvalue())
 
-        zip_metadata.append({"filename": zip_filename, "min_rating": min_rating, "max_rating": max_rating})
+        if embed_cells_enabled and bin_buffer:
+            bin_filename = f"{zip_hash}.embeddings.bin"
+            bin_path = os.path.join(zip_dir, bin_filename)
+            with open(bin_path, 'wb') as f:
+                f.write(bytes(bin_buffer))
+
+        zip_metadata.append({
+            "filename": zip_filename,
+            "min_rating": min_rating,
+            "max_rating": max_rating,
+        })
 
         for item in group_items:
             tsumego_id = item["filename"].split('.')[0]
             new_lookup_entries.append((tsumego_id, zip_hash, board_size))
+
+    if embed_cells_enabled:
+        print(f"  per-cell embeddings: {n_with_cells} problems shipped, "
+              f"{n_without_cells} skipped (no .npz / no rating / no SGF match)")
 
     # Per-size metadata.json sits inside the size subdirectory.
     metadata_path = os.path.join(zip_dir, "metadata.json")
@@ -208,102 +336,83 @@ def load_embeddings(board_size):
     return embedding_map, embedding_meta
 
 
-if __name__ == "__main__":
+def process_size(board_size, output_dir):
+    """Run the full per-size packaging — ratings load, exponential rank
+    mapping, metadata assembly, zip + per-cell sidecar emission. Returns the
+    joint embedding_meta dict (or None) so the multi-size loop can write a
+    single shared embedding_meta.json at the end."""
+    print(f"\n========== Packaging board size {board_size} ==========")
 
-    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
-    RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings", str(BOARD_SIZE))
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
+    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
+    RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings", str(board_size))
+    PER_CELL_DIR = os.path.join(
+        PROJECT_ROOT, "embeddings", "joint", "per_cell", str(board_size))
 
-    # 1. Get the ratings map (tsumego_id -> rating).
-    tsumego_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv"))
+    if not os.path.isdir(TSUMEGOS_DIR):
+        print(f"  no tsumegos dir at {TSUMEGOS_DIR}; skipping")
+        return None
+    ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
+    if not os.path.exists(ratings_csv):
+        print(f"  no ratings at {ratings_csv}; skipping")
+        return None
 
-    # Store raw ratings before scaling
+    # 1. Ratings map (raw + normalized PWA scale).
+    tsumego_ratings_df = pd.read_csv(ratings_csv)
     tsumego_ratings_df['raw_rating'] = tsumego_ratings_df['rating']
+    tsumego_ratings_df = tsumego_ratings_df.sort_values(
+        by='rating', ascending=True).reset_index(drop=True)
 
-    # Apply order..
-    tsumego_ratings_df = tsumego_ratings_df.sort_values(by='rating', ascending=True).reset_index(drop=True)
-
-    total = len(tsumego_ratings_df)
-    # Read bot ratings
     bot_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
-    # --- Exponential Mapping Implementation ---
-    # 1. Get Anchor Ratings
-    # 8k is index 12 in 0-based 20k-9d scale. Center of bin is 12.5.
-    # 3k is index 17 in 0-based 20k-9d scale. Center of bin is 17.5.
+    # Exponential mapping anchored on humanv0_8k and humanv0_3k bots.
+    # 8k is index 12 (center 12.5) and 3k is index 17 (center 17.5) on the
+    # 0-based 20k..9d scale.
     bot_8k_rating = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k']['rating'].values[0]
     bot_3k_rating = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k']['rating'].values[0]
-    
-    x1 = 12.5  # 8k index
-    x2 = 17.5  # 3k index
-    y1 = bot_8k_rating
-    y2 = bot_3k_rating
-    k = 0.12   # Variance Decay Constant
-
-    # 2. Derive Constants A and C
-    # System:
-    # y1 = A * e^(k * x1) + C
-    # y2 = A * e^(k * x2) + C
-    # y2 - y1 = A * (e^(k * x2) - e^(k * x1))
-    
+    x1, x2 = 12.5, 17.5
+    y1, y2 = bot_8k_rating, bot_3k_rating
+    k = 0.12  # variance decay constant
     A = (y2 - y1) / (np.exp(k * x2) - np.exp(k * x1))
     C = y1 - A * np.exp(k * x1)
+    print(f"  exponential mapping: A={A:.6f}, C={C:.6f}")
 
-    print(f"Exponential Mapping Constants: A={A:.6f}, C={C:.6f}")
-
-    # 3. Apply Inverse Function: Rating -> Rank Index (x)
-    # y = A * e^(k * x) + C  =>  (y - C) / A = e^(k * x)  =>  ln((y - C) / A) / k = x
-    def rating_to_rank_index(r):
-        # Safety check for log domain
-        val = (r - C) / A
-        if val <= 0:
-            return 0.0 # Should be covered by clamping, but safe guard against math errors
-        return np.log(val) / k
-
-    # Vectorized application
-    # Note: If A is negative (which it shouldn't be for standard rating scales where rating increases with skill), 
-    # we need to be careful. In this system, rating increases with skill, so y2 > y1 and exp(kx2) > exp(kx1), so A > 0.
-    
-    # Calculate x (rank index)
-    # We use a lambda but we need to handle potential domain errors if ratings are extremely low.
-    # However, since we clamp afterwards, we can just clip the input to log.
-    
+    # Rating -> rank index -> [0, 1] PWA scale, clamped.
     tsumego_ratings_df['rank_index'] = (tsumego_ratings_df['rating'] - C) / A
-    # Clip to small positive to avoid log(<=0)
     tsumego_ratings_df['rank_index'] = tsumego_ratings_df['rank_index'].clip(lower=1e-9)
     tsumego_ratings_df['rank_index'] = np.log(tsumego_ratings_df['rank_index']) / k
-
-    # 4. Normalize to [0, 1] PWA scale
-    # PWA scale is 0..1 representing roughly 20k to 9d (indices 0 to 28)
     tsumego_ratings_df['pwa_rating'] = tsumego_ratings_df['rank_index'] / 29.0
-    
-    # 5. Clamp to valid range [0, 1]
     tsumego_ratings_df['rating'] = tsumego_ratings_df['pwa_rating'].clip(0.0, 1.0)
-    
-    # Drop temp columns
     tsumego_ratings_df.drop(columns=['rank_index', 'pwa_rating'], inplace=True)
 
+    tsumego_ratings_map = dict(zip(
+        tsumego_ratings_df['tsumego_id'],
+        zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating']),
+    ))
+    raw_rating_map = dict(zip(
+        tsumego_ratings_df['tsumego_id'],
+        tsumego_ratings_df['raw_rating'].astype(float),
+    ))
 
+    # raw_rating_map is no longer needed for packaging — projection happens
+    # upstream in build_embedding.write_per_cell_projections. Kept the
+    # raw-rating extraction above only for the ratings_map metadata.json field.
+    del raw_rating_map
 
-    tsumego_ratings_map = dict(zip(tsumego_ratings_df['tsumego_id'], zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating'])))
-
-    # 2. Get the quality map (tsumego_id -> quality).
+    # 2. Quality map (normalized to [0, 1]).
     tsumego_quality_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_quality_final.csv"))
-    # Normalize qualities to 0-1
-    min_quality = tsumego_quality_df['quality'].min()
-    max_quality = tsumego_quality_df['quality'].max()
-    tsumego_quality_df['quality'] = (tsumego_quality_df['quality'] - min_quality) / (max_quality - min_quality)
-    # tsumego_quality_df['quality'] = 1 - tsumego_quality_df['quality'] # test out how low quality tsumegos compare
-    tsumego_quality_map = dict(zip(tsumego_quality_df['tsumego_id'], tsumego_quality_df['quality']))
+    min_q = tsumego_quality_df['quality'].min()
+    max_q = tsumego_quality_df['quality'].max()
+    tsumego_quality_df['quality'] = (tsumego_quality_df['quality'] - min_q) / (max_q - min_q)
+    tsumego_quality_map = dict(zip(
+        tsumego_quality_df['tsumego_id'], tsumego_quality_df['quality']))
 
-    # 3. Build the final metadata list by matching files with their ratings and quality.
-    print(f"Found {len(tsumego_ratings_map)} rating values in {os.path.join(RATINGS_DIR, 'tsumego_ratings_final.csv')}")
-    print(f"Found {len(tsumego_quality_map)} quality values in {os.path.join(RATINGS_DIR, 'tsumego_quality_final.csv')}")
-    print("\n--- Loading embeddings (if available) ---")
-    embedding_map, embedding_meta = load_embeddings(BOARD_SIZE)
+    print(f"  ratings: {len(tsumego_ratings_map)}, qualities: {len(tsumego_quality_map)}")
+    print(f"  loading joint embeddings (correct-cell field for metadata.json) ...")
+    embedding_map, embedding_meta = load_embeddings(board_size)
 
+    # 3. Final per-problem metadata.
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
-    print(f"Found {len(sgf_files)} SGF files in '{TSUMEGOS_DIR}'.")
+    print(f"  found {len(sgf_files)} SGFs in {TSUMEGOS_DIR}")
     skipped_count = 0
     embedding_missing = 0
     for filename in sgf_files:
@@ -311,7 +420,12 @@ if __name__ == "__main__":
         if tsumego_id in tsumego_ratings_map:
             rating, raw_rating = tsumego_ratings_map[tsumego_id]
             quality = tsumego_quality_map.get(tsumego_id, 0.0)
-            item = {"filename": filename, "rating": rating, "raw_rating": raw_rating, "quality": quality}
+            item = {
+                "filename": filename,
+                "rating": rating,
+                "raw_rating": raw_rating,
+                "quality": quality,
+            }
             if embedding_map is not None:
                 emb = embedding_map.get(tsumego_id)
                 if emb is None:
@@ -322,34 +436,52 @@ if __name__ == "__main__":
         else:
             skipped_count += 1
 
-    print(f"\nSuccessfully created metadata for {len(all_metadata)} tsumegos.")
-    if skipped_count > 0:
-        print(f"Skipped {skipped_count} SGF files with no matching rating.")
+    print(f"  metadata built for {len(all_metadata)} tsumegos "
+          f"(skipped {skipped_count} without ratings)")
     if embedding_map is not None:
         n_with = sum(1 for m in all_metadata if "embedding" in m)
-        print(f"Embeddings: {n_with}/{len(all_metadata)} entries have one "
-              f"(missing for {embedding_missing}).")
+        print(f"  correct-cell embeddings on metadata.json: {n_with}/{len(all_metadata)} "
+              f"(missing for {embedding_missing})")
 
-    # 3. Create the zip packages and main metadata file.
-    print("\n--- Creating Tsumego Packages ---")
-    create_packages(all_metadata, BOARD_SIZE, TSUMEGOS_DIR, OUTPUT_DIR)
-    size_dir = os.path.join(OUTPUT_DIR, 'tsumegos', str(BOARD_SIZE))
-    print(f"Created packages in '{size_dir}'")
-    print(f"Created per-size metadata file at '{os.path.join(size_dir, 'metadata.json')}'")
-    print(f"Updated global lookup at '{os.path.join(OUTPUT_DIR, 'lookup.txt')}'")
+    per_cell_arg = PER_CELL_DIR if os.path.isdir(PER_CELL_DIR) else None
+    if per_cell_arg is None:
+        print(f"  no per_cell/ at {PER_CELL_DIR} — skipping sidecar for this size "
+              f"(run build_embedding to generate)")
 
-    if embedding_meta is not None:
-        # embedding_meta is joint across board sizes (PCA + ICA fit jointly),
-        # so it lives at pwa/tsumegos/embedding_meta.json rather than under
-        # each size's directory. Re-running for a second size overwrites with
-        # identical content, which is fine.
-        embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
-        with open(embedding_meta_path, 'w', encoding='utf-8') as f:
-            json.dump(embedding_meta, f, indent=2)
-        print(f"Created joint embedding metadata at '{embedding_meta_path}' "
-              f"(K={embedding_meta['K']})")
+    print(f"  building shards ...")
+    create_packages(
+        all_metadata, board_size, TSUMEGOS_DIR, output_dir,
+        per_cell_dir=per_cell_arg,
+    )
+    size_dir = os.path.join(output_dir, 'tsumegos', str(board_size))
+    print(f"  packages -> {size_dir}")
 
-    print("\nProcessing complete.")
-
-    # 4. Print the final distribution report.
     print_rating_distribution(all_metadata)
+    return embedding_meta
+
+
+if __name__ == "__main__":
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
+
+    joint_embedding_meta = None
+    for size in ALL_BOARD_SIZES:
+        meta = process_size(size, OUTPUT_DIR)
+        if meta is not None:
+            joint_embedding_meta = meta  # joint across sizes; last write wins
+
+    # Single shared embedding_meta.json (joint PCA across sizes).
+    if joint_embedding_meta is not None:
+        K = joint_embedding_meta.get("K") or 0
+        # bytes_per_cell + dtype let the PWA decode the .embeddings.bin without
+        # guessing. These are constant across the corpus and across sizes.
+        joint_embedding_meta["dtype"] = EMBEDDING_DTYPE_NAME
+        joint_embedding_meta["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
+        embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
+        os.makedirs(os.path.dirname(embedding_meta_path), exist_ok=True)
+        with open(embedding_meta_path, 'w', encoding='utf-8') as f:
+            json.dump(joint_embedding_meta, f, indent=2)
+        print(f"\nWrote joint embedding metadata at {embedding_meta_path} "
+              f"(K={K}, dtype={EMBEDDING_DTYPE_NAME}, "
+              f"bytes_per_cell={joint_embedding_meta['bytes_per_cell']})")
+
+    print("\nAll sizes done.")

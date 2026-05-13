@@ -24,6 +24,7 @@ import {
 } from './state.js';
 import { trainWeaknessForSize } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -40,9 +41,11 @@ const STALE_FLAG_KEYS = (size) => [
 ];
 
 export async function backfillMissingEmbeddings() {
-    // Joint metadata (version + labels) is shared across sizes because the
-    // PCA + ICA fit is joint. Fetch once, then iterate sizes for the
-    // per-size wipe/refill logic.
+    // Joint metadata (version + labels + sidecar layout) is shared across
+    // sizes because the PCA + ICA fit is joint. Fetch once, then iterate
+    // sizes for the per-size wipe/refill logic. The same fetch populates
+    // state.embeddingMeta with the K/dtype/bytes_per_cell tuple used by
+    // picked-embedding.js to decode per-cell .embeddings.bin sidecars.
     let serverVersion = 'unknown';
     try {
         const r = await fetch(`tsumegos/embedding_meta.json?v=${APP_VERSION}`);
@@ -53,6 +56,16 @@ export async function backfillMissingEmbeddings() {
             }
             if (meta && meta.labels && meta.labels.components) {
                 state.embeddingLabels = meta.labels.components;
+            }
+            if (meta && typeof meta.K === 'number') {
+                state.embeddingMeta = {
+                    K: meta.K,
+                    dtype: typeof meta.dtype === 'string' ? meta.dtype : 'float16',
+                    bytes_per_cell: typeof meta.bytes_per_cell === 'number'
+                        ? meta.bytes_per_cell
+                        : meta.K * 2,  // sensible fp16 default
+                    embedding_version: serverVersion,
+                };
             }
         }
     } catch (_) { /* fall through to 'unknown' */ }
@@ -104,21 +117,33 @@ async function backfillForSize(size, serverVersion) {
         const needIds = new Set();
         for (let i = startIdx; i < history.length; i++) {
             const a = history[i];
-            if (!a.embedding && a.problemId) needIds.add(a.problemId);
+            // Pull a shard if either embedding (correct or picked) is missing —
+            // we visit each shard once and fill whatever we can.
+            const needsCorrect = !a.embedding;
+            const needsPicked = (
+                a.correct === false &&
+                typeof a.pickedCellIndex === 'number' &&
+                !a.pickedEmbedding
+            );
+            if (a.problemId && (needsCorrect || needsPicked)) needIds.add(a.problemId);
         }
         // Also strip stray embeddings from entries older than the window —
         // they may have been written by an earlier version that backfilled
-        // everything.
+        // everything. Includes pickedEmbedding + pickedCellIndex so the trim
+        // is symmetric with the correct-move backfill.
         let strippedOld = 0;
         for (let i = 0; i < startIdx; i++) {
-            if (history[i] && history[i].embedding !== undefined) {
-                delete history[i].embedding;
-                strippedOld++;
-            }
+            const a = history[i];
+            if (!a) continue;
+            let touched = false;
+            if (a.embedding !== undefined) { delete a.embedding; touched = true; }
+            if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
+            if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
+            if (touched) strippedOld++;
         }
         if (strippedOld > 0) {
             setAnswerHistoryForSize(size, history);
-            console.log(`embedding-backfill[${size}]: stripped embedding from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
+            console.log(`embedding-backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
         }
         if (needIds.size === 0) {
             localStorage.setItem(VERSION_KEY(size), serverVersion);
@@ -155,6 +180,7 @@ async function backfillForSize(size, serverVersion) {
         }
 
         let totalFilled = 0;
+        let totalFilledPicked = 0;
         for (const [zipHash, _ids] of zipToIds) {
             const zipFilename = zipFilenameByHash.get(zipHash);
             if (!zipFilename) continue;
@@ -183,18 +209,56 @@ async function backfillForSize(size, serverVersion) {
                         totalFilled++;
                     }
                 }
+
+                // Picked-move backfill: same shard, Range-fetched per-cell
+                // sidecar. Skipped silently for shards that don't ship one
+                // (older builds) or when there are no eligible attempts.
+                const idxFile = zip.file('embeddings_index.json');
+                if (idxFile) {
+                    let indexPayload = null;
+                    try { indexPayload = JSON.parse(await idxFile.async('text')); }
+                    catch (e) {
+                        console.warn(`embedding-backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                    }
+                    if (indexPayload && indexPayload.problems) {
+                        // Sequential per-entry on purpose: Range requests are
+                        // cheap (~256B), and a sequential loop within a shard
+                        // keeps the simultaneous-request count predictable —
+                        // Cloudflare's free-plan rate limits are forgiving but
+                        // not unlimited.
+                        for (let i = startIdx; i < history.length; i++) {
+                            const a = history[i];
+                            if (a.correct !== false) continue;
+                            if (typeof a.pickedCellIndex !== 'number') continue;
+                            if (a.pickedEmbedding) continue;
+                            const indexEntry = indexPayload.problems[a.problemId];
+                            if (!indexEntry) continue;
+                            const emb = await fetchPickedEmbeddingWithIndexEntry({
+                                tsumegoId: a.problemId,
+                                cellIndex: a.pickedCellIndex,
+                                zipFilename,
+                                boardSize: size,
+                                indexEntry,
+                            });
+                            if (Array.isArray(emb)) {
+                                a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
+                                totalFilledPicked++;
+                            }
+                        }
+                    }
+                }
             } catch (err) {
                 console.warn(`embedding-backfill[${size}]: failed for ${zipFilename}:`, err);
                 continue;
             }
         }
 
-        if (totalFilled > 0) {
+        if (totalFilled > 0 || totalFilledPicked > 0) {
             setAnswerHistoryForSize(size, history);
-            console.log(`embedding-backfill[${size}]: filled ${totalFilled} entries`);
+            console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked}`);
         }
         localStorage.setItem(VERSION_KEY(size), serverVersion);
-        return totalFilled;
+        return totalFilled + totalFilledPicked;
     } catch (err) {
         console.error(`embedding-backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}

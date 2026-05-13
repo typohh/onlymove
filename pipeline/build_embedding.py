@@ -25,6 +25,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -40,12 +42,22 @@ SIZES = [9, 13]
 def _load_correct_vec(act_dir: str, tid: str, by_ext: dict) -> np.ndarray:
     """Return the correct-move 6912-float vector for a single problem,
     handling both the new .npz (all-legal-cells, with correct_idx) and the
-    legacy .npy (correct-cell-only) layouts.
+    legacy .npy (correct-cell-only) layouts. On a corrupt .npz, falls back
+    to .npy if present — silently for fitting, since the correct cell is
+    the only vector we need here regardless of format.
     """
     if tid in by_ext.get("npz", {}):
-        path = os.path.join(act_dir, by_ext["npz"][tid])
-        with np.load(path) as s:
-            return s["candidates"][int(s["correct_idx"])]
+        npz_path = os.path.join(act_dir, by_ext["npz"][tid])
+        try:
+            with np.load(npz_path) as s:
+                return s["candidates"][int(s["correct_idx"])]
+        except Exception as e:
+            if tid not in by_ext.get("npy", {}):
+                raise RuntimeError(
+                    f"corrupt .npz at {npz_path} and no .npy fallback ({e})"
+                )
+            print(f"  [warn] corrupt npz {npz_path}: {type(e).__name__}; "
+                  f"falling back to .npy", flush=True)
     path = os.path.join(act_dir, by_ext["npy"][tid])
     return np.load(path)
 
@@ -272,6 +284,170 @@ def write_or_remap_labels(
     )
     print(f"  remapped labels: {n_carried}/{n_old_nonempty} old labels survived "
           f"(cosine threshold {cosine_threshold})")
+
+
+def project_to_embedding(activations, rating, size_is_13, pca_arc):
+    """Project raw 6912-dim trunk activations to the K-dim joint embedding.
+
+    Inverse-application of the fit pipeline in main(): drop dead channels,
+    z-score per feature, residualize on (rating, size_is_13), recenter, PCA,
+    standardize by component_stds, then optionally rotate by the stored ICA
+    unmixing matrix. The same vector passed through fit and through this
+    function should round-trip (modulo fp16/fp64 noise).
+
+    Parameters
+    ----------
+    activations : np.ndarray
+        Either (D,) for a single cell or (N, D) for N cells of one problem.
+        D must match the full pre-mask dimension (6912 for b18 × 18 blocks).
+        Accepted dtypes: anything castable to float64 (fp16 / fp32 / fp64).
+    rating, size_is_13 : float
+        Shared scalars for the problem these cells belong to. The fit OLS
+        used rating in its native (raw) scale and size_is_13 ∈ {0, 1}.
+    pca_arc : np.lib.npyio.NpzFile
+        Already-opened embeddings/joint/pca.npz (allow_pickle=False).
+
+    Returns
+    -------
+    np.ndarray
+        (K,) or (N, K) float32, with shape matching the input's leading dim.
+    """
+    kept = pca_arc["kept_feature_mask"].astype(bool)
+    feature_means = pca_arc["feature_means"].astype(np.float64)
+    feature_stds = pca_arc["feature_stds"].astype(np.float64)
+    rating_slope = pca_arc["rating_slope"].astype(np.float64)
+    size_slope = pca_arc["size_slope"].astype(np.float64)
+    ols_intercept = pca_arc["ols_intercept"].astype(np.float64)
+    pca_components = pca_arc["pca_components"].astype(np.float64)
+    pca_mean = pca_arc["pca_mean"].astype(np.float64)
+    component_stds = pca_arc["component_stds"].astype(np.float64)
+    component_stds = np.where(component_stds < 1e-9, 1.0, component_stds)
+
+    V = np.asarray(activations, dtype=np.float64)
+    single = (V.ndim == 1)
+    if single:
+        V = V[None, :]
+    V_kept = V[:, kept]                                       # (N, D_kept)
+    Z = (V_kept - feature_means) / feature_stds               # (N, D_kept)
+    # Rating + size offsets are constant across cells of one problem.
+    offset = rating_slope * rating + size_slope * size_is_13 + ols_intercept
+    R = Z - offset                                            # (N, D_kept)
+    centered = R - pca_mean
+    pca_scores = (centered @ pca_components.T) / component_stds  # (N, K)
+
+    if "ica_unmixing" in pca_arc.files:
+        ica_unmixing = pca_arc["ica_unmixing"].astype(np.float64)
+        ica_stds = pca_arc["ica_stds"].astype(np.float64)
+        ica_stds = np.where(ica_stds < 1e-9, 1.0, ica_stds)
+        out = (pca_scores @ ica_unmixing.T) / ica_stds       # (N, K)
+    else:
+        out = pca_scores
+
+    out = out.astype(np.float32)
+    return out[0] if single else out
+
+
+# --- Per-cell projection: a post-fit pass that projects every problem's full
+# (n_cells, 6912) activation block through the freshly-fit PCA/ICA and saves
+# the resulting (n_cells, K) fp16 array. This makes package_for_pwa cheap —
+# no PCA matmul or raw-activation reads at packaging time, just a small
+# pre-projected file per problem.
+#
+# Parallelized via ProcessPoolExecutor. Each worker loads pca.npz once and
+# then processes its share of problems. Embarrassingly parallel — no shared
+# mutable state, modest per-task memory.
+
+_PCA_ARC_WORKER = None
+
+
+def _init_per_cell_worker(pca_path):
+    """ProcessPoolExecutor initializer: open pca.npz once per worker."""
+    global _PCA_ARC_WORKER
+    _PCA_ARC_WORKER = np.load(pca_path, allow_pickle=False)
+
+
+def _project_one_for_per_cell(task):
+    """Worker function: read one problem's .npz, project all cells, save
+    pre-projected (n_cells, K) fp16 + xys to the per_cell output dir.
+    Returns (tid, status_str) for logging."""
+    size, tid, raw_rating, in_dir, out_dir = task
+    npz_path = os.path.join(in_dir, tid + ".npz")
+    if not os.path.exists(npz_path):
+        return tid, "missing_npz"
+    try:
+        with np.load(npz_path) as data:
+            candidates = np.asarray(data["candidates"])  # (n_cells, 6912) fp16
+            xys = np.asarray(data["xys"])                # (n_cells, 2)
+    except Exception as e:
+        return tid, f"load_failed:{type(e).__name__}"
+
+    size_is_13 = 1.0 if size == 13 else 0.0
+    try:
+        projected = project_to_embedding(candidates, raw_rating, size_is_13,
+                                         _PCA_ARC_WORKER)
+    except Exception as e:
+        return tid, f"project_failed:{type(e).__name__}"
+
+    out_path = os.path.join(out_dir, tid + ".npz")
+    np.savez_compressed(
+        out_path,
+        embeddings=projected.astype(np.float16),
+        xys=xys.astype(np.int32),
+    )
+    return tid, "ok"
+
+
+def write_per_cell_projections(parts, pca_path, n_workers=8):
+    """Project every problem's full cell stack through the saved PCA and write
+    embeddings/joint/per_cell/<size>/<tid>.npz with the K-dim embeddings.
+
+    `parts` is the list of (size, ids, X, ratings) tuples already loaded by
+    main() for the PCA fit — same ids and ratings, no re-walk of the .npz files
+    needed at scheduling time. Workers re-open each .npz to read the full
+    (n_cells, 6912) array (which load_size dropped after slicing the correct
+    row), then project.
+    """
+    out_root = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_cell")
+    os.makedirs(out_root, exist_ok=True)
+
+    tasks = []
+    for size, ids, _X, ratings in parts:
+        in_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+        out_dir = os.path.join(out_root, str(size))
+        os.makedirs(out_dir, exist_ok=True)
+        for tid, rating in zip(ids, ratings):
+            tasks.append((size, tid, float(rating), in_dir, out_dir))
+
+    if not tasks:
+        print("  per_cell projection: no tasks", flush=True)
+        return
+
+    print(f"\nProjecting per-cell embeddings: {len(tasks)} problems → "
+          f"{out_root}/<size>/<tid>.npz", flush=True)
+    print(f"  parallel workers: {n_workers}", flush=True)
+    t0 = time.time()
+    n_ok = n_skip = n_err = 0
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+        initializer=_init_per_cell_worker,
+        initargs=(pca_path,),
+    ) as ex:
+        for i, (tid, status) in enumerate(
+                ex.map(_project_one_for_per_cell, tasks, chunksize=200)):
+            if status == "ok":
+                n_ok += 1
+            elif status == "missing_npz":
+                n_skip += 1
+            else:
+                n_err += 1
+                if n_err <= 10:
+                    print(f"  [err] {tid}: {status}", flush=True)
+            done = i + 1
+            if done % 20000 == 0 or done == len(tasks):
+                rate = done / max(time.time() - t0, 1e-6)
+                print(f"  {done}/{len(tasks)}  ({rate:.0f}/s)", flush=True)
+    print(f"Per-cell projection done: {n_ok} ok, {n_skip} skipped, "
+          f"{n_err} errored  ({time.time() - t0:.0f}s total)", flush=True)
 
 
 def main():
@@ -502,6 +678,14 @@ def main():
     print(f"  embedding_version: {embedding_version}")
 
     np.savez(os.path.join(out_dir, "pca.npz"), **save_kwargs)
+
+    # Project every problem's full cell stack through the freshly-saved PCA
+    # and write the (n_cells, K) fp16 result as embeddings/joint/per_cell/
+    # <size>/<tid>.npz. Done here (with the activations already cached on disk
+    # and workers operating in parallel) so package_for_pwa just blits the
+    # pre-projected bytes into shard sidecars — no PCA matmul or 6912-dim
+    # activation reads at packaging time.
+    write_per_cell_projections(parts, pca_path=os.path.join(out_dir, "pca.npz"))
 
     df = pd.DataFrame(scores, columns=[f"embed_{i}" for i in range(K)])
     df.insert(0, "tsumego_id", all_ids)
