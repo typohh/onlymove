@@ -88,15 +88,37 @@ self.addEventListener('notificationclick', event => {
     event.notification.close();
     const targetUrl = (event.notification.data && event.notification.data.url) || '/';
     event.waitUntil((async () => {
-        const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-        // If an existing tab is open, focus it and navigate; otherwise open a new one.
+        let allClients = [];
+        try {
+            allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        } catch {}
+
+        // Try each existing window in turn. Per the WindowClient spec
+        // `navigate()` returns the (possibly new) post-navigation client and
+        // can invalidate the original ref — using the returned one avoids
+        // "focus on stale client" rejections that happen on Android when the
+        // PWA is backgrounded. Per-client try/catch so a single flaky client
+        // doesn't sink the whole handler before openWindow gets a chance.
         for (const client of allClients) {
-            if ('focus' in client) {
-                try { await client.navigate(targetUrl); } catch {}
-                return client.focus();
-            }
+            try {
+                let target = client;
+                if ('navigate' in client) {
+                    const navigated = await client.navigate(targetUrl).catch(() => null);
+                    if (navigated) target = navigated;
+                }
+                if ('focus' in target) {
+                    await target.focus();
+                    return;
+                }
+            } catch {}
         }
-        if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+
+        // No existing window we could focus — open a new one. On installed
+        // Android PWAs this respects the manifest scope + launch_handler so
+        // it relaunches the standalone window rather than a browser tab.
+        if (self.clients.openWindow) {
+            try { await self.clients.openWindow(targetUrl); } catch {}
+        }
     })());
 });
 

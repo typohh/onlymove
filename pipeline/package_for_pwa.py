@@ -236,6 +236,21 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
             f.write(f"{tsumego_id} {zip_id} {size_int}\n")
 
 
+def compute_ratings_hash(metadata):
+    """Stable content hash over (tsumego_id, rating) pairs for one size.
+
+    The PWA reads this from embedding_meta.json (ratings_version[size]) and
+    refreshes answerHistory.problemRating values from per-shard metadata.json
+    whenever the hash changes. Rounded to 6 decimals so floating-point noise
+    doesn't trigger spurious backfills."""
+    pairs = sorted(
+        (item["filename"].split(".")[0], round(float(item["rating"]), 6))
+        for item in metadata
+    )
+    payload = json.dumps(pairs, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def print_rating_distribution(metadata):
     """Prints the final distribution of problems by rating."""
     if not metadata:
@@ -338,9 +353,10 @@ def load_embeddings(board_size):
 
 def process_size(board_size, output_dir):
     """Run the full per-size packaging — ratings load, exponential rank
-    mapping, metadata assembly, zip + per-cell sidecar emission. Returns the
-    joint embedding_meta dict (or None) so the multi-size loop can write a
-    single shared embedding_meta.json at the end."""
+    mapping, metadata assembly, zip + per-cell sidecar emission. Returns
+    (embedding_meta, ratings_hash); either element may be None if the
+    corresponding artifact wasn't available. The multi-size loop aggregates
+    both into the single shared embedding_meta.json at the end."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
@@ -350,11 +366,11 @@ def process_size(board_size, output_dir):
 
     if not os.path.isdir(TSUMEGOS_DIR):
         print(f"  no tsumegos dir at {TSUMEGOS_DIR}; skipping")
-        return None
+        return None, None
     ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
     if not os.path.exists(ratings_csv):
         print(f"  no ratings at {ratings_csv}; skipping")
-        return None
+        return None, None
 
     # 1. Ratings map (raw + normalized PWA scale).
     tsumego_ratings_df = pd.read_csv(ratings_csv)
@@ -457,31 +473,40 @@ def process_size(board_size, output_dir):
     print(f"  packages -> {size_dir}")
 
     print_rating_distribution(all_metadata)
-    return embedding_meta
+    ratings_hash = compute_ratings_hash(all_metadata)
+    print(f"  ratings_version[{board_size}]={ratings_hash}")
+    return embedding_meta, ratings_hash
 
 
 if __name__ == "__main__":
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
 
     joint_embedding_meta = None
+    ratings_versions = {}
     for size in ALL_BOARD_SIZES:
-        meta = process_size(size, OUTPUT_DIR)
+        meta, ratings_hash = process_size(size, OUTPUT_DIR)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
+        if ratings_hash is not None:
+            ratings_versions[str(size)] = ratings_hash
 
-    # Single shared embedding_meta.json (joint PCA across sizes).
-    if joint_embedding_meta is not None:
-        K = joint_embedding_meta.get("K") or 0
-        # bytes_per_cell + dtype let the PWA decode the .embeddings.bin without
-        # guessing. These are constant across the corpus and across sizes.
-        joint_embedding_meta["dtype"] = EMBEDDING_DTYPE_NAME
-        joint_embedding_meta["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
+    # Single shared embedding_meta.json. Carries both joint embedding info and
+    # per-size ratings_version (content hash) so the PWA can independently
+    # detect embedding refits vs rating refreshes.
+    if joint_embedding_meta is not None or ratings_versions:
+        meta_out = joint_embedding_meta if joint_embedding_meta is not None else {}
+        K = meta_out.get("K") or 0
+        meta_out["dtype"] = EMBEDDING_DTYPE_NAME
+        meta_out["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
+        if ratings_versions:
+            meta_out["ratings_version"] = ratings_versions
         embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
         os.makedirs(os.path.dirname(embedding_meta_path), exist_ok=True)
         with open(embedding_meta_path, 'w', encoding='utf-8') as f:
-            json.dump(joint_embedding_meta, f, indent=2)
+            json.dump(meta_out, f, indent=2)
         print(f"\nWrote joint embedding metadata at {embedding_meta_path} "
               f"(K={K}, dtype={EMBEDDING_DTYPE_NAME}, "
-              f"bytes_per_cell={joint_embedding_meta['bytes_per_cell']})")
+              f"bytes_per_cell={meta_out['bytes_per_cell']}, "
+              f"ratings_version={ratings_versions or 'none'})")
 
     print("\nAll sizes done.")

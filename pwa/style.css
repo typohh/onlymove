@@ -323,10 +323,61 @@ body {
     gap: 1.5vmin;
 }
 
-.stats-modal-pre {
-    margin: 0;
+.stats-modal-body {
     overflow: auto;
     max-height: 70vh;
+}
+
+.stats-chart {
+    display: flex;
+    flex-direction: column;
+    margin-top: 1em;
+    margin-right: 1em;
+}
+
+.stats-chart-title {
+    margin-bottom: 0.5em;
+}
+
+.stats-chart-plot-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4em;
+}
+
+.stats-chart-yaxis {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.stats-chart-yaxis .y-spacer {
+    visibility: hidden;
+}
+
+.stats-chart-yaxis .y-tick {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
+    white-space: nowrap;
+}
+
+.stats-chart-svg-wrap {
+    flex: 1;
+    min-width: 0;
+}
+
+.stats-chart-svg-wrap svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.stats-chart-xaxis {
+    text-align: right;
+}
+
+.stats-modal-pre {
+    margin: 0;
     font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;

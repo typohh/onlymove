@@ -160,11 +160,9 @@ async function handleSchedule(request, env) {
 
   const now = Date.now();
   const statements = [];
-  const keptIds = [];
 
   for (const row of data.schedule) {
     if (!row?.problemId || typeof row.enterAt !== 'number' || typeof row.exitAt !== 'number') continue;
-    keptIds.push(row.problemId);
     statements.push(env.DB.prepare(
       `INSERT INTO recall_schedule (user_id, problem_id, enter_at, exit_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, ?5)
@@ -181,17 +179,14 @@ async function handleSchedule(request, env) {
 
   // Replace-all semantics: anything previously scheduled for this user but
   // absent from the new upload gets deleted. ON CONFLICT above preserves the
-  // notified flags for surviving rows.
-  if (keptIds.length === 0) {
-    statements.push(env.DB.prepare(
-      'DELETE FROM recall_schedule WHERE user_id = ?'
-    ).bind(data.userId));
-  } else {
-    const placeholders = keptIds.map(() => '?').join(',');
-    statements.push(env.DB.prepare(
-      `DELETE FROM recall_schedule WHERE user_id = ? AND problem_id NOT IN (${placeholders})`
-    ).bind(data.userId, ...keptIds));
-  }
+  // notified flags for surviving rows. We identify "untouched" rows by their
+  // updated_at watermark — every row in this upload was just stamped with
+  // `now`, so anything still carrying an earlier timestamp wasn't in the
+  // payload. A NOT IN (?,?,…) version would hit D1's 100-bound-params cap
+  // per statement once a user's schedule exceeds ~100 problems.
+  statements.push(env.DB.prepare(
+    'DELETE FROM recall_schedule WHERE user_id = ? AND updated_at < ?'
+  ).bind(data.userId, now));
 
   if (statements.length > 0) await env.DB.batch(statements);
   return jsonResponse({ ok: true });
@@ -214,6 +209,20 @@ async function runRecallNotifications(env) {
      WHERE (s.enter_notified_at IS NULL AND s.enter_at <= ?1)
         OR (s.exit_notified_at  IS NULL AND s.exit_at - ?2 <= ?1 AND s.exit_at > ?1)`
   ).bind(now, TWO_HOURS_MS).all();
+
+  // Full per-user backlog of problems currently inside the review window,
+  // regardless of whether each individual row has already been notified.
+  // Used to render "N problems ready to review" rather than the
+  // delta-since-last-cron-tick — the user wants to see their total pending
+  // load, not just what newly entered in the last hour.
+  const backlog = await env.DB.prepare(
+    `SELECT user_id, COUNT(*) AS n
+     FROM recall_schedule
+     WHERE enter_at <= ?1 AND exit_at > ?1
+     GROUP BY user_id`
+  ).bind(now).all();
+  const backlogByUser = new Map();
+  for (const row of (backlog.results || [])) backlogByUser.set(row.user_id, row.n);
 
   const byUser = new Map();
   for (const row of (due.results || [])) {
@@ -247,7 +256,7 @@ async function runRecallNotifications(env) {
     if (u.lastNotifiedAt && (now - u.lastNotifiedAt) < MIN_NOTIFY_INTERVAL_MS) continue;
     if (u.enteredIds.length === 0 && u.exitingIds.length === 0) continue;
 
-    const message = buildNotificationMessage(u.enteredIds, u.exitingIds);
+    const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlogByUser.get(userId) || 0);
     const subscription = {
       endpoint: u.endpoint,
       expirationTime: null,
@@ -300,20 +309,22 @@ async function runRecallNotifications(env) {
     .bind(now - SEVEN_DAYS_MS).run();
 }
 
-function buildNotificationMessage(enteredIds, exitingIds) {
+function buildNotificationMessage(enteredIds, exitingIds, backlog) {
   const n = enteredIds.length;
   const m = exitingIds.length;
+  // Backlog should already include both newly-entered and not-yet-exited
+  // problems, but max() guards against a backlog read that raced with the
+  // delta read (e.g. a problem entered between the two queries).
+  const total = Math.max(backlog || 0, n + m);
 
-  let title, body;
+  const title = total === 1 ? '1 problem ready to review' : `${total} problems ready to review`;
+  let body;
   if (n > 0 && m > 0) {
-    title = 'Time to review';
     body = `${n} new, ${m} expiring soon`;
-  } else if (n > 0) {
-    title = n === 1 ? '1 problem ready to review' : `${n} problems ready to review`;
-    body = 'Tap to open';
+  } else if (m > 0) {
+    body = m === 1 ? '1 expiring soon' : `${m} expiring soon`;
   } else {
-    title = m === 1 ? '1 problem expiring' : `${m} problems expiring`;
-    body = 'Review before you forget';
+    body = 'Tap to open';
   }
 
   // Deep-link to a single problem when there's only one; otherwise drop the

@@ -33,10 +33,25 @@ export function owensT(h, a) {
     // Closed-form anchor: T(0, a) = atan(a)/(2π). Avoids the trivial integral.
     if (absH < 1e-14) return sign * Math.atan(absA) / (2 * Math.PI);
 
-    // N=128 even subdivisions of [0, absA]; integrand never spikes inside, so
-    // a fixed-step composite Simpson's rule is the simplest accurate option.
+    // Asymptotic anchor for large |a|: T(h, ∞) = ½·Φ(-|h|). Without this we'd
+    // try to Simpson-integrate over [0, |a|] with dx = |a|/128, which
+    // catastrophically undersamples the integrand's support (concentrated
+    // around x ~ 1/|h|) once |a| ≳ 10/|h|. That fires in practice whenever
+    // ρ → ±1 — exactly the regime the augmented weakness posterior sits in
+    // when β_correct and β_picked are near-singular for lack of disambiguating
+    // picked-move data.
+    if (absA * absH > 10) {
+        return sign * 0.5 * (1 - 0.5 * (1 + math.erf(absH / Math.SQRT2)));
+    }
+
+    // Cap the Simpson interval at 40 so dx stays sane for small |h| where the
+    // support extends to x ~ 1/|h| but absA can still be far past it (the
+    // tail integrand is bounded by 1/(1+x²) so the truncated remainder
+    // contributes ≤ atan(∞)/(2π) - atan(40)/(2π) < 0.004 to T, fine for the
+    // 0.5–0.7 thresholds the UI uses).
+    const effectiveA = Math.min(absA, 40);
     const N = 128;
-    const dx = absA / N;
+    const dx = effectiveA / N;
     let sum = 0;
     for (let i = 0; i <= N; i++) {
         const x = i * dx;
@@ -80,13 +95,16 @@ export function biNormCdf(a, b, rho) {
     const q_a = a !== 0 ? (b / a - rho) / sq : (b > 0 ? HUGE : -HUGE);
     const q_b = b !== 0 ? (a / b - rho) / sq : (a > 0 ? HUGE : -HUGE);
 
-    // δ correction: 1/2 when (a, b) sit in opposite half-planes through 0,
-    // 0 when in the same half-plane. Owen 1956 eq. 3.3.
+    // δ correction term (Owen 1956 eq. 3.3): the Φ₂ formula subtracts
+    // δ(h,k)/2 where δ = 1 when (a, b) sit in opposite half-planes through
+    // 0 (or one is on the axis with a+b < 0), else 0. Previously this was
+    // mistakenly set to 0.5 and multiplied by 0.5 again, halving the
+    // correction and inflating phi_ab by ~0.25 whenever a*b < 0.
     let delta;
     if (a * b > 0 || (a * b === 0 && a + b >= 0)) {
         delta = 0;
     } else {
-        delta = 0.5;
+        delta = 1;
     }
 
     const result = 0.5 * (normCdf(a) + normCdf(b))

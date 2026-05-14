@@ -2,7 +2,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 
@@ -608,10 +608,18 @@ export async function showDetailedStats() {
 
         // Header layout for the three categories. Order is the same as the
         // current single-header convention but split into three sections.
+        // `offDiagonal: true` axes need a posterior with cov(β_c, β_p) ≥ 0;
+        // anti-correlated posteriors (which is what we see when most rows
+        // have picked = correct fallback) can land high probability mass in
+        // BOTH off-diagonal quadrants simultaneously without the data
+        // actually telling us anything actionable about over- vs
+        // under-application. The "bad at" quadrant doesn't need the gate
+        // because its sign-pattern (both negative) is identifiable from the
+        // β_c + β_p sum that the diagonal data already constrains.
         const SECTIONS = [
-            { key: 'tooMuch',    header: 'Too often' },
-            { key: 'notEnough',  header: 'Not often enough' },
-            { key: 'badAt',      header: 'Bad at' },
+            { key: 'tooMuch',    header: 'Too often',         offDiagonal: true },
+            { key: 'notEnough',  header: 'Not often enough',  offDiagonal: true },
+            { key: 'badAt',      header: 'Bad at',            offDiagonal: false },
         ];
 
         const haveModel = (
@@ -635,12 +643,13 @@ export async function showDetailedStats() {
                 const cov = weaknessAxisCov[k] || 0;
                 if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
                 if (!(var_c > 0) || !(var_p > 0)) continue;
-                perAxis.push({ k, probs: quadrantProbs(mu_c, mu_p, var_c, var_p, cov) });
+                perAxis.push({ k, cov, probs: quadrantProbs(mu_c, mu_p, var_c, var_p, cov) });
             }
 
             for (const section of SECTIONS) {
                 resultText += `\n${section.header}\n`;
                 const ranked = perAxis
+                    .filter(o => !section.offDiagonal || o.cov >= 0)
                     .map(o => ({ k: o.k, p: o.probs[section.key] }))
                     .filter(o => o.p >= PROB_THRESHOLD)
                     .sort((a, b) => b.p - a.p);
@@ -654,7 +663,7 @@ export async function showDetailedStats() {
             }
         }
 
-        showSelectableTextModal(resultText);
+        showSelectableTextModal(resultText, buildRatingHistoryChart());
 
     } catch (error) {
         console.error('Failed to generate stats text:', error);
@@ -663,7 +672,7 @@ export async function showDetailedStats() {
     }
 }
 
-function showSelectableTextModal(text) {
+function showSelectableTextModal(text, extraElement = null) {
     const backdrop = document.createElement('div');
     backdrop.className = 'stats-modal-backdrop';
 
@@ -687,7 +696,154 @@ function showSelectableTextModal(text) {
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.addEventListener('keydown', onKey);
 
-    card.append(pre, closeBtn);
+    const body = document.createElement('div');
+    body.className = 'stats-modal-body';
+    body.append(pre);
+    if (extraElement) body.append(extraElement);
+
+    card.append(body, closeBtn);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
+}
+
+function rankLabelFromIndex(rankIndex) {
+    const i = Math.max(0, Math.min(TOTAL_RANKS - 1, rankIndex));
+    return i < 20 ? `${20 - i}k` : `${i - 19}d`;
+}
+
+function buildRatingHistoryChart() {
+    const entries = state.answerHistory
+        .filter(a => typeof a.problemRating === 'number' && typeof a.date === 'number'
+                     && !a.isRepeat && !a.linked)
+        .map(a => ({ date: a.date, rankValue: a.problemRating * TOTAL_RANKS, correct: !!a.correct }));
+    if (entries.length < 2) return null;
+
+    // Drop the lowest-rated 5% (capped at 50) when picking the y-range, so a
+    // handful of very-easy outliers don't squash the visible part of the chart.
+    // The dropped points still render but fall below the viewBox and SVG's
+    // default overflow clipping hides them.
+    const sortedRanks = entries.map(e => e.rankValue).slice().sort((a, b) => a - b);
+    const dropCount = Math.min(50, Math.floor(sortedRanks.length * 0.20));
+    const trimmedMin = sortedRanks[dropCount];
+    const maxRank = sortedRanks[sortedRanks.length - 1];
+    let yHigh = Math.ceil(maxRank);
+    let yLow = Math.floor(trimmedMin) - (Number.isInteger(trimmedMin) ? 1 : 0);
+    yLow = Math.max(0, yLow);
+    yHigh = Math.min(TOTAL_RANKS - 1, yHigh);
+    if (yHigh <= yLow) yHigh = yLow + 1;
+
+    const t0 = entries[0].date;
+    const t1 = entries[entries.length - 1].date;
+    const tSpan = Math.max(1, t1 - t0);
+
+    const container = document.createElement('div');
+    container.className = 'stats-chart';
+
+    const title = document.createElement('div');
+    title.className = 'stats-chart-title';
+    title.textContent = `Problem ranks since ${new Date(t0).toISOString().slice(0, 10)}`;
+    container.append(title);
+
+    const plotRow = document.createElement('div');
+    plotRow.className = 'stats-chart-plot-row';
+
+    // Grid line + label at every integer rank in the trimmed range. Labels
+    // that would visually overlap their neighbor get hidden after layout
+    // (see ResizeObserver below).
+    const gridRanks = [];
+    for (let r = yLow; r <= yHigh; r++) gridRanks.push(r);
+    const labelRanks = gridRanks;
+
+    // Y-axis labels live in HTML so they inherit the surrounding pre font
+    // (13px monospace) exactly. The hidden spacer sizes the column to the
+    // widest tick label.
+    const yaxis = document.createElement('div');
+    yaxis.className = 'stats-chart-yaxis';
+    const spacer = document.createElement('span');
+    spacer.className = 'y-spacer';
+    spacer.textContent = '20k';
+    yaxis.append(spacer);
+    const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
+    for (const r of labelRanks) {
+        const tick = document.createElement('div');
+        tick.className = 'y-tick';
+        tick.style.top = `${topPct(r)}%`;
+        tick.textContent = rankLabelFromIndex(r);
+        yaxis.append(tick);
+    }
+
+    const svgWrap = document.createElement('div');
+    svgWrap.className = 'stats-chart-svg-wrap';
+
+    // SVG holds only the grid + dots. 1:1 aspect via square viewBox.
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const W = 400, H = 400;
+    const xOf = t => ((t - t0) / tSpan) * W;
+    const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role', 'img');
+
+    const gridStroke = 'rgba(128,128,128,0.35)';
+    for (const r of gridRanks) {
+        const y = yOf(r);
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', 0);
+        line.setAttribute('x2', W);
+        line.setAttribute('y1', y);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', gridStroke);
+        line.setAttribute('stroke-width', '0.5');
+        line.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(line);
+    }
+
+    // Per-attempt scatter: green=correct, red=wrong.
+    for (const e of entries) {
+        const dot = document.createElementNS(SVG_NS, 'circle');
+        dot.setAttribute('cx', xOf(e.date).toFixed(1));
+        dot.setAttribute('cy', yOf(e.rankValue).toFixed(1));
+        dot.setAttribute('r', '1.6');
+        dot.setAttribute('fill', e.correct ? 'rgba(80,180,80,0.7)' : 'rgba(220,80,80,0.7)');
+        svg.appendChild(dot);
+    }
+
+    svgWrap.append(svg);
+
+    const xaxis = document.createElement('div');
+    xaxis.className = 'stats-chart-xaxis';
+    xaxis.textContent = new Date(t1).toISOString().slice(0, 10);
+    svgWrap.append(xaxis);
+
+    plotRow.append(yaxis, svgWrap);
+    container.append(plotRow);
+
+    // After the chart hits the DOM and gets a real height, greedy-hide any
+    // y-axis labels that would physically overlap a previously-shown one.
+    // Re-runs on resize so density adapts to viewport.
+    const updateLabelVisibility = () => {
+        const h = svg.getBoundingClientRect().height;
+        if (h === 0) return;
+        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
+        let lastShownPx = -Infinity;
+        for (const el of tickEls) {
+            const topPx = (parseFloat(el.style.top) / 100) * h;
+            if (topPx - lastShownPx >= minSepPx) {
+                el.style.visibility = '';
+                lastShownPx = topPx;
+            } else {
+                el.style.visibility = 'hidden';
+            }
+        }
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(updateLabelVisibility).observe(svg);
+    } else {
+        queueMicrotask(updateLabelVisibility);
+    }
+
+    return container;
 }

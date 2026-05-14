@@ -1,19 +1,26 @@
 // js/embedding-backfill.js
 //
-// Retroactively fills the `embedding` field on legacy answerHistory entries
-// (recorded before the per-component recommender shipped, or before the most
-// recent PCA refit). Lets long-time users get the weakness model trained
-// immediately instead of waiting 20+ new attempts.
+// Retroactively patches per-shard fields on answerHistory entries. Two
+// independent jobs share one shard walk:
 //
-// Runs for every supported size (not just the active one) so a size switch
-// doesn't require an extra reload to re-trigger backfill. Each size has its
-// own flag in localStorage to avoid redundant work.
+//   1. Embedding fill (last MODEL_INPUT_HISTORY_LENGTH entries only)
+//      Triggered by `embedding_version` change in embedding_meta.json.
+//      Wipes any stale embeddings, then fills `embedding` + optional
+//      `pickedEmbedding` for entries inside the keep window. Older
+//      entries get their embedding fields stripped to keep localStorage
+//      bounded.
 //
-// Invalidation is automatic: the server publishes an `embedding_version`
-// content-hash in tsumegos/<size>/embedding_meta.json (computed in
-// pipeline/build_embedding.py from the model state). The PWA compares it to
-// the version stored in localStorage; on mismatch, old embeddings are wiped
-// and refilled. No manual version bump needed when re-fitting the PCA.
+//   2. Rating refresh (all history entries, no keep-window cap)
+//      Triggered by per-size `ratings_version` change. Walks every shard
+//      that contains a referenced problem and rewrites
+//      `answerHistory[*].problemRating` to the current shard value. The
+//      chart, weakness training, and recall logic all read this field,
+//      so a stale rating shows up everywhere.
+//
+// Both versions are tracked separately in localStorage (one key each per
+// size) so a rating-only refresh doesn't wipe the embedding model and
+// vice-versa. The walk runs for every supported size on every app load;
+// each size short-circuits when both versions match.
 
 import * as Sentry from "@sentry/browser";
 import {
@@ -31,6 +38,7 @@ import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 
 const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
+const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
 // Old per-version flag keys; cleared on first run after the upgrade so they
 // don't linger in users' localStorage. The new scheme stores a content-hash
 // version string under VERSION_KEY instead.
@@ -41,18 +49,22 @@ const STALE_FLAG_KEYS = (size) => [
 ];
 
 export async function backfillMissingEmbeddings() {
-    // Joint metadata (version + labels + sidecar layout) is shared across
-    // sizes because the PCA + ICA fit is joint. Fetch once, then iterate
-    // sizes for the per-size wipe/refill logic. The same fetch populates
-    // state.embeddingMeta with the K/dtype/bytes_per_cell tuple used by
-    // picked-embedding.js to decode per-cell .embeddings.bin sidecars.
+    // Joint metadata (embedding version + labels + sidecar layout + per-size
+    // ratings_version) is shared across sizes. Fetch once, then iterate sizes
+    // for per-size wipe/refill. Also populates state.embeddingMeta with the
+    // K/dtype/bytes_per_cell tuple used by picked-embedding.js to decode
+    // per-cell .embeddings.bin sidecars.
     let serverVersion = 'unknown';
+    let ratingsVersionsBySize = {};
     try {
         const r = await fetch(`tsumegos/embedding_meta.json?v=${APP_VERSION}`);
         if (r.ok) {
             const meta = await r.json();
             if (meta && typeof meta.embedding_version === 'string') {
                 serverVersion = meta.embedding_version;
+            }
+            if (meta && meta.ratings_version && typeof meta.ratings_version === 'object') {
+                ratingsVersionsBySize = meta.ratings_version;
             }
             if (meta && meta.labels && meta.labels.components) {
                 state.embeddingLabels = meta.labels.components;
@@ -72,7 +84,11 @@ export async function backfillMissingEmbeddings() {
 
     const sizesFilled = [];
     for (const size of SUPPORTED_BOARD_SIZES) {
-        const filled = await backfillForSize(size, serverVersion);
+        // ratings_version is keyed by string in the JSON; tolerate either.
+        const ratingsVersion = ratingsVersionsBySize[size]
+            ?? ratingsVersionsBySize[String(size)]
+            ?? null;
+        const filled = await backfillForSize(size, serverVersion, ratingsVersion);
         if (filled > 0) sizesFilled.push(size);
     }
     // Train each size that got freshly populated, so the recommender is
@@ -82,71 +98,92 @@ export async function backfillMissingEmbeddings() {
     }
 }
 
-async function backfillForSize(size, serverVersion) {
-    const storedVersion = localStorage.getItem(VERSION_KEY(size));
-    if (storedVersion === serverVersion) return 0;
+async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
+    const storedEmbeddingVersion = localStorage.getItem(VERSION_KEY(size));
+    const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
+    const embeddingsChanged = storedEmbeddingVersion !== serverEmbeddingVersion;
+    const ratingsChanged = serverRatingsVersion !== null
+        && storedRatingsVersion !== serverRatingsVersion;
+    if (!embeddingsChanged && !ratingsChanged) return 0;
+
+    const persistVersions = () => {
+        if (embeddingsChanged) localStorage.setItem(VERSION_KEY(size), serverEmbeddingVersion);
+        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY(size), serverRatingsVersion);
+    };
 
     try {
         const history = getAnswerHistoryForSize(size);
 
-        // Wipe any stale embeddings + the model trained on them. Idempotent
-        // when the user is fresh.
-        let cleared = 0;
-        for (const a of history) {
-            if (a.embedding) {
-                delete a.embedding;
-                cleared++;
+        // Embedding wipe — only when embedding_version changed. Rating-only
+        // refreshes keep the trained model intact.
+        if (embeddingsChanged) {
+            let cleared = 0;
+            for (const a of history) {
+                if (a.embedding) {
+                    delete a.embedding;
+                    cleared++;
+                }
             }
+            if (cleared > 0) {
+                setWeaknessParamsForSize(size, null);
+                setWeaknessAdamForSize(size, null);
+                setAnswerHistoryForSize(size, history);
+                console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedEmbeddingVersion || 'first run'} -> ${serverEmbeddingVersion})`);
+            }
+            for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
         }
-        if (cleared > 0) {
-            setWeaknessParamsForSize(size, null);
-            setWeaknessAdamForSize(size, null);
-            setAnswerHistoryForSize(size, history);
-            console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedVersion || 'first run'} -> ${serverVersion})`);
-        }
-        for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
 
         if (!history || history.length === 0) {
-            localStorage.setItem(VERSION_KEY(size), serverVersion);
+            persistVersions();
             return 0;
         }
 
-        // Restrict backfill to the last N entries; older history doesn't
-        // need embeddings for training and storing them blows localStorage.
+        // Two needs sets feed one shard walk:
+        //   - Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields
+        //   - Rating needs:    every entry (no cap; the chart shows full history)
         const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
-        const needIds = new Set();
-        for (let i = startIdx; i < history.length; i++) {
-            const a = history[i];
-            // Pull a shard if either embedding (correct or picked) is missing —
-            // we visit each shard once and fill whatever we can.
-            const needsCorrect = !a.embedding;
-            const needsPicked = (
-                a.correct === false &&
-                typeof a.pickedCellIndex === 'number' &&
-                !a.pickedEmbedding
-            );
-            if (a.problemId && (needsCorrect || needsPicked)) needIds.add(a.problemId);
+        const needIdsForEmbed = new Set();
+        const needIdsForRatings = new Set();
+        if (embeddingsChanged) {
+            for (let i = startIdx; i < history.length; i++) {
+                const a = history[i];
+                const needsCorrect = !a.embedding;
+                const needsPicked = (
+                    a.correct === false &&
+                    typeof a.pickedCellIndex === 'number' &&
+                    !a.pickedEmbedding
+                );
+                if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
+            }
         }
-        // Also strip stray embeddings from entries older than the window —
-        // they may have been written by an earlier version that backfilled
-        // everything. Includes pickedEmbedding + pickedCellIndex so the trim
-        // is symmetric with the correct-move backfill.
-        let strippedOld = 0;
-        for (let i = 0; i < startIdx; i++) {
-            const a = history[i];
-            if (!a) continue;
-            let touched = false;
-            if (a.embedding !== undefined) { delete a.embedding; touched = true; }
-            if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
-            if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
-            if (touched) strippedOld++;
+        if (ratingsChanged) {
+            for (let i = 0; i < history.length; i++) {
+                if (history[i].problemId) needIdsForRatings.add(history[i].problemId);
+            }
         }
-        if (strippedOld > 0) {
-            setAnswerHistoryForSize(size, history);
-            console.log(`embedding-backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
+
+        // Strip stray embeddings from entries older than the keep window —
+        // only on embedding refits (this is a wipe, not a refill).
+        if (embeddingsChanged) {
+            let strippedOld = 0;
+            for (let i = 0; i < startIdx; i++) {
+                const a = history[i];
+                if (!a) continue;
+                let touched = false;
+                if (a.embedding !== undefined) { delete a.embedding; touched = true; }
+                if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
+                if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
+                if (touched) strippedOld++;
+            }
+            if (strippedOld > 0) {
+                setAnswerHistoryForSize(size, history);
+                console.log(`embedding-backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
+            }
         }
-        if (needIds.size === 0) {
-            localStorage.setItem(VERSION_KEY(size), serverVersion);
+
+        const allNeedIds = new Set([...needIdsForEmbed, ...needIdsForRatings]);
+        if (allNeedIds.size === 0) {
+            persistVersions();
             return 0;
         }
 
@@ -172,7 +209,7 @@ async function backfillForSize(size, serverVersion) {
         }
 
         const zipToIds = new Map();
-        for (const id of needIds) {
+        for (const id of allNeedIds) {
             const zipHash = lookupMap.get(id);
             if (!zipHash) continue;
             if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
@@ -181,6 +218,7 @@ async function backfillForSize(size, serverVersion) {
 
         let totalFilled = 0;
         let totalFilledPicked = 0;
+        let totalRatingsUpdated = 0;
         for (const [zipHash, _ids] of zipToIds) {
             const zipFilename = zipFilenameByHash.get(zipHash);
             if (!zipFilename) continue;
@@ -193,56 +231,76 @@ async function backfillForSize(size, serverVersion) {
                 if (!metaFile) continue;
                 const items = JSON.parse(await metaFile.async('text'));
                 const embeddingByProblem = new Map();
+                const ratingByProblem = new Map();
                 for (const item of items) {
+                    const tid = item.filename.replace(/\.sgf$/, '');
                     if (Array.isArray(item.embedding)) {
                         // Quantize to 2 decimals to keep localStorage small.
-                        embeddingByProblem.set(
-                            item.filename.replace(/\.sgf$/, ''),
-                            item.embedding.map(v => Math.round(v * 100) / 100),
-                        );
+                        embeddingByProblem.set(tid, item.embedding.map(v => Math.round(v * 100) / 100));
                     }
-                }
-                for (let i = startIdx; i < history.length; i++) {
-                    const a = history[i];
-                    if (!a.embedding && embeddingByProblem.has(a.problemId)) {
-                        a.embedding = embeddingByProblem.get(a.problemId);
-                        totalFilled++;
+                    if (typeof item.rating === 'number') {
+                        ratingByProblem.set(tid, item.rating);
                     }
                 }
 
-                // Picked-move backfill: same shard, Range-fetched per-cell
-                // sidecar. Skipped silently for shards that don't ship one
-                // (older builds) or when there are no eligible attempts.
-                const idxFile = zip.file('embeddings_index.json');
-                if (idxFile) {
-                    let indexPayload = null;
-                    try { indexPayload = JSON.parse(await idxFile.async('text')); }
-                    catch (e) {
-                        console.warn(`embedding-backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                // Ratings: rewrite across the full history. Cheap (just a map
+                // lookup per entry) and the chart needs old entries updated.
+                if (ratingsChanged) {
+                    for (let i = 0; i < history.length; i++) {
+                        const a = history[i];
+                        if (!a.problemId) continue;
+                        if (!ratingByProblem.has(a.problemId)) continue;
+                        const newRating = ratingByProblem.get(a.problemId);
+                        if (a.problemRating !== newRating) {
+                            a.problemRating = newRating;
+                            totalRatingsUpdated++;
+                        }
                     }
-                    if (indexPayload && indexPayload.problems) {
-                        // Sequential per-entry on purpose: Range requests are
-                        // cheap (~256B), and a sequential loop within a shard
-                        // keeps the simultaneous-request count predictable —
-                        // Cloudflare's free-plan rate limits are forgiving but
-                        // not unlimited.
-                        for (let i = startIdx; i < history.length; i++) {
-                            const a = history[i];
-                            if (a.correct !== false) continue;
-                            if (typeof a.pickedCellIndex !== 'number') continue;
-                            if (a.pickedEmbedding) continue;
-                            const indexEntry = indexPayload.problems[a.problemId];
-                            if (!indexEntry) continue;
-                            const emb = await fetchPickedEmbeddingWithIndexEntry({
-                                tsumegoId: a.problemId,
-                                cellIndex: a.pickedCellIndex,
-                                zipFilename,
-                                boardSize: size,
-                                indexEntry,
-                            });
-                            if (Array.isArray(emb)) {
-                                a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
-                                totalFilledPicked++;
+                }
+
+                if (embeddingsChanged) {
+                    for (let i = startIdx; i < history.length; i++) {
+                        const a = history[i];
+                        if (!a.embedding && embeddingByProblem.has(a.problemId)) {
+                            a.embedding = embeddingByProblem.get(a.problemId);
+                            totalFilled++;
+                        }
+                    }
+
+                    // Picked-move backfill: same shard, Range-fetched per-cell
+                    // sidecar. Skipped silently for shards that don't ship one
+                    // (older builds) or when there are no eligible attempts.
+                    const idxFile = zip.file('embeddings_index.json');
+                    if (idxFile) {
+                        let indexPayload = null;
+                        try { indexPayload = JSON.parse(await idxFile.async('text')); }
+                        catch (e) {
+                            console.warn(`embedding-backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                        }
+                        if (indexPayload && indexPayload.problems) {
+                            // Sequential per-entry on purpose: Range requests are
+                            // cheap (~256B), and a sequential loop within a shard
+                            // keeps the simultaneous-request count predictable —
+                            // Cloudflare's free-plan rate limits are forgiving but
+                            // not unlimited.
+                            for (let i = startIdx; i < history.length; i++) {
+                                const a = history[i];
+                                if (a.correct !== false) continue;
+                                if (typeof a.pickedCellIndex !== 'number') continue;
+                                if (a.pickedEmbedding) continue;
+                                const indexEntry = indexPayload.problems[a.problemId];
+                                if (!indexEntry) continue;
+                                const emb = await fetchPickedEmbeddingWithIndexEntry({
+                                    tsumegoId: a.problemId,
+                                    cellIndex: a.pickedCellIndex,
+                                    zipFilename,
+                                    boardSize: size,
+                                    indexEntry,
+                                });
+                                if (Array.isArray(emb)) {
+                                    a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
+                                    totalFilledPicked++;
+                                }
                             }
                         }
                     }
@@ -253,12 +311,12 @@ async function backfillForSize(size, serverVersion) {
             }
         }
 
-        if (totalFilled > 0 || totalFilledPicked > 0) {
+        if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
             setAnswerHistoryForSize(size, history);
-            console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked}`);
+            console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
-        localStorage.setItem(VERSION_KEY(size), serverVersion);
-        return totalFilled + totalFilledPicked;
+        persistVersions();
+        return totalFilled + totalFilledPicked + totalRatingsUpdated;
     } catch (err) {
         console.error(`embedding-backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}

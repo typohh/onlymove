@@ -116,6 +116,11 @@ let pendingUpload = false;
 // Worker. Idempotent — replace-all semantics on the server side, so calling
 // this twice in quick succession is fine. Fails silently because losing one
 // upload just delays the next notification by one tick.
+//
+// Skips the POST when the schedule is empty: the worker treats an empty
+// array as "delete every row for this user", so a transient empty result
+// (e.g. recent slice happens to contain only high-streak successes) would
+// wipe a previously-good schedule and silently disable reminders.
 export async function uploadSchedule() {
     if (pendingUpload) return;
     pendingUpload = true;
@@ -126,6 +131,7 @@ export async function uploadSchedule() {
                 schedule.push(row);
             }
         }
+        if (schedule.length === 0) return;
         await fetch('/schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -5,7 +5,7 @@ import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
 import { reorientSgf } from './sgf.js';
-import { MODEL_INPUT_HISTORY_LENGTH, APP_MODES } from './constants.js';
+import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 
@@ -76,7 +76,7 @@ async function selectProblem() {
     }
 
     // Default selection logic (fallback)
-    const recentAnswers = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+    const recentAnswers = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
     const historyFilenames = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
     let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
 
