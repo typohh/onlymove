@@ -5,6 +5,7 @@ import { state, setStatsResults, setModelParams, setAdamState } from './state.js
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
+import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 
 // ------------------------------------------------------------------------------------------------
 // --- Moved from problem-loader.js ---------------------------------------------------------------
@@ -587,6 +588,30 @@ export async function showDetailedStats() {
             resultText += `You are ${Math.abs(pct).toFixed(0)}% ${direction} sensitive to problem difficulty than typical.\n`;
         }
 
+        // Two-component rank decomposition (R = skill S + form M). Gives a
+        // long-term-trend number and a session-to-session swing number that
+        // can't be read off the single-line smoother in the chart. See
+        // rank-decomposition.js for the model and the backfitting approach.
+        const decomp = computeRankDecomposition(state.answerHistory);
+        if (decomp) {
+            const { summary } = decomp;
+            if (summary.currentSkill !== null) {
+                const skillLabel = rankLabelFromIndex(Math.round(summary.currentSkill));
+                const seStr = Number.isFinite(summary.currentSkillSE)
+                    ? ` (±${summary.currentSkillSE.toFixed(1)} ranks)`
+                    : '';
+                resultText += `Long-term skill estimate: ${skillLabel}${seStr}.\n`;
+            }
+            if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
+                const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
+                const sign = summary.longTermDrift >= 0 ? '+' : '−';
+                resultText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
+            }
+            if (summary.sigmaM !== null) {
+                resultText += `Session-to-session performance varies by ±${summary.sigmaM.toFixed(2)} ranks (RMS, detection floor ±${summary.sigmaMDetectionFloor.toFixed(2)}).\n`;
+            }
+        }
+
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
         // turned into sign-quadrant probabilities via bivariate-normal.js.
         // Three issues we surface, mutually exclusive at the point estimate
@@ -718,30 +743,51 @@ function buildRatingHistoryChart() {
         .map(a => ({ date: a.date, rankValue: a.problemRating * TOTAL_RANKS, correct: !!a.correct }));
     if (entries.length < 2) return null;
 
-    // Drop the lowest-rated 5% (capped at 50) when picking the y-range, so a
-    // handful of very-easy outliers don't squash the visible part of the chart.
-    // The dropped points still render but fall below the viewBox and SVG's
-    // default overflow clipping hides them.
+    // Two-component rank decomposition: see rank-decomposition.js. We evaluate
+    // Ŝ(t), M̂(t) and their kernel-Kish SEs on a regular t-grid so the line
+    // and band shape across activity gaps reflect the model — not interpolated
+    // segments between sparse attempt timestamps.
+    const t0 = entries[0].date;
+    const t1 = entries[entries.length - 1].date;
+    const tSpan = Math.max(1, t1 - t0);
+    const decomp = computeRankDecomposition(state.answerHistory);
+    const GRID_POINTS = 300;
+    const Z = 1.96;
+    let gridEvals = [];
+    if (decomp) {
+        for (let i = 0; i < GRID_POINTS; i++) {
+            const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
+            const e = evaluateAt(decomp, t);
+            if (e) gridEvals.push({ t, S: e.S, seS: e.seS });
+        }
+    }
+
+    // Drop the lowest-rated 5% (capped at 50) when picking the y-range from
+    // the scatter, so a handful of very-easy outliers don't squash the visible
+    // part of the chart. Skill band always pushes outward.
     const sortedRanks = entries.map(e => e.rankValue).slice().sort((a, b) => a - b);
     const dropCount = Math.min(50, Math.floor(sortedRanks.length * 0.20));
     const trimmedMin = sortedRanks[dropCount];
     const maxRank = sortedRanks[sortedRanks.length - 1];
-    let yHigh = Math.ceil(maxRank);
-    let yLow = Math.floor(trimmedMin) - (Number.isInteger(trimmedMin) ? 1 : 0);
+    let bandMin = Infinity, bandMax = -Infinity;
+    for (const e of gridEvals) {
+        bandMin = Math.min(bandMin, e.S - Z * e.seS);
+        bandMax = Math.max(bandMax, e.S + Z * e.seS);
+    }
+    if (!Number.isFinite(bandMin)) { bandMin = trimmedMin; bandMax = maxRank; }
+    let yHigh = Math.ceil(Math.max(maxRank, bandMax));
+    let yLow = Math.floor(Math.min(trimmedMin, bandMin));
+    if (Number.isInteger(Math.min(trimmedMin, bandMin))) yLow -= 1;
     yLow = Math.max(0, yLow);
     yHigh = Math.min(TOTAL_RANKS - 1, yHigh);
     if (yHigh <= yLow) yHigh = yLow + 1;
-
-    const t0 = entries[0].date;
-    const t1 = entries[entries.length - 1].date;
-    const tSpan = Math.max(1, t1 - t0);
 
     const container = document.createElement('div');
     container.className = 'stats-chart';
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = `Problem ranks since ${new Date(t0).toISOString().slice(0, 10)}`;
+    title.textContent = `Skill since ${new Date(t0).toISOString().slice(0, 10)}`;
     container.append(title);
 
     const plotRow = document.createElement('div');
@@ -799,7 +845,32 @@ function buildRatingHistoryChart() {
         svg.appendChild(line);
     }
 
-    // Per-attempt scatter: green=correct, red=wrong.
+    // Skill band drawn first so scatter and skill line stay readable on top.
+    // Form is not rendered: at typical user-data densities the hour-scale
+    // form curve and its band degenerate to a wide constant band that doesn't
+    // tell you anything the variance summary line above doesn't already.
+    const SKILL_FILL  = 'rgba(59,130,246,0.22)';
+    const SKILL_STROKE = '#2563eb';
+
+    if (gridEvals.length >= 2) {
+        let up = '', dn = '';
+        for (let i = 0; i < gridEvals.length; i++) {
+            const e = gridEvals[i];
+            const x = xOf(e.t).toFixed(1);
+            const yU = yOf(e.S + Z * e.seS).toFixed(1);
+            const yL = yOf(e.S - Z * e.seS).toFixed(1);
+            up += (i === 0 ? 'M' : 'L') + `${x} ${yU} `;
+            dn = `L${x} ${yL} ` + dn;
+        }
+        const skillBand = document.createElementNS(SVG_NS, 'path');
+        skillBand.setAttribute('d', up + dn + 'Z');
+        skillBand.setAttribute('fill', SKILL_FILL);
+        skillBand.setAttribute('stroke', 'none');
+        svg.appendChild(skillBand);
+    }
+
+    // Per-attempt scatter: green=correct, red=wrong. On top of band so raw
+    // data stays readable; under the skill line so the line remains visible.
     for (const e of entries) {
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', xOf(e.date).toFixed(1));
@@ -807,6 +878,20 @@ function buildRatingHistoryChart() {
         dot.setAttribute('r', '1.6');
         dot.setAttribute('fill', e.correct ? 'rgba(80,180,80,0.7)' : 'rgba(220,80,80,0.7)');
         svg.appendChild(dot);
+    }
+
+    if (gridEvals.length >= 2) {
+        const skillPts = gridEvals
+            .map(e => `${xOf(e.t).toFixed(1)},${yOf(e.S).toFixed(1)}`)
+            .join(' ');
+        const skillLine = document.createElementNS(SVG_NS, 'polyline');
+        skillLine.setAttribute('points', skillPts);
+        skillLine.setAttribute('fill', 'none');
+        skillLine.setAttribute('stroke', SKILL_STROKE);
+        skillLine.setAttribute('stroke-width', '1.5');
+        skillLine.setAttribute('stroke-linejoin', 'round');
+        skillLine.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(skillLine);
     }
 
     svgWrap.append(svg);
