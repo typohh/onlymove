@@ -1,9 +1,11 @@
 import { buildPushPayload } from '@block65/webcrypto-web-push';
+import { APP_VERSION } from './version.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Expose-Headers': 'X-App-Version',
 };
 
 const TWO_HOURS_MS = 2 * 3600 * 1000;
@@ -76,52 +78,45 @@ function jsonResponse(body, status = 200) {
 }
 
 async function handleReport(request, env) {
+  // Every response carries the deployed Worker version so the client can
+  // detect a stale bundle and trigger a quiescent reload (see
+  // js/state.js maybeReload).
+  const reportHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Expose-Headers': 'X-App-Version',
+    'X-App-Version': APP_VERSION,
+  };
   try {
     const data = await request.json();
 
     if (!data.userId || !data.problem || typeof data.success !== 'boolean') {
-      return new Response('Invalid request body', {
-        status: 400,
-        headers: { 'Access-Control-Allow-Origin': '*' },
-      });
+      return new Response('Invalid request body', { status: 400, headers: reportHeaders });
     }
 
     // Older clients didn't send size; default to 9 to match the historical corpus.
     const size = (data.size === 9 || data.size === 13) ? data.size : 9;
 
+    // New per-attempt fields; older clients (pre-rollout) won't send them, so
+    // every column is nullable except is_repeat which defaults to 0.
+    const move = typeof data.move === 'string' ? data.move : null;
+    const timeUsed = Number.isFinite(data.timeUsed) ? Math.round(data.timeUsed) : null;
+    const reviewTime = Number.isFinite(data.reviewTime) ? Math.round(data.reviewTime) : null;
+    const isRepeat = data.isRepeat ? 1 : 0;
+
     if (!env.DB) {
-      return new Response('Database not configured', {
-        status: 500,
-        headers: { 'Access-Control-Allow-Origin': '*' },
-      });
+      return new Response('Database not configured', { status: 500, headers: reportHeaders });
     }
 
-    try {
-      await env.DB.prepare(
-        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size) VALUES (?, ?, ?, ?, ?)'
-      )
-        .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString(), size)
-        .run();
+    await env.DB.prepare(
+      'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+      .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString(), size, move, timeUsed, reviewTime, isRepeat)
+      .run();
 
-      return new Response('Report saved', {
-        status: 201,
-        headers: { 'Access-Control-Allow-Origin': '*' },
-      });
-    } catch (insertError) {
-      if (insertError.message && insertError.message.includes('UNIQUE constraint failed')) {
-        return new Response('Report already exists', {
-          status: 409,
-          headers: { 'Access-Control-Allow-Origin': '*' },
-        });
-      }
-      throw insertError;
-    }
+    return new Response('Report saved', { status: 201, headers: reportHeaders });
   } catch (error) {
     console.error('Error handling report:', error);
-    return new Response('Internal server error', {
-      status: 500,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-    });
+    return new Response('Internal server error', { status: 500, headers: reportHeaders });
   }
 }
 

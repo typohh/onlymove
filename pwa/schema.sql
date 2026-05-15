@@ -5,11 +5,28 @@ CREATE TABLE IF NOT EXISTS tsumego_reports (
     success BOOLEAN NOT NULL,
     created_at TEXT NOT NULL,
     size INTEGER NOT NULL DEFAULT 9,
-    UNIQUE(user_id, problem)
+    move TEXT,
+    time_used INTEGER,
+    review_time INTEGER,
+    is_repeat INTEGER NOT NULL DEFAULT 0
 );
+
+-- One row per attempt (including repeats). There is no UNIQUE constraint on
+-- (user_id, problem) anymore — the client is expected to send a report for
+-- every solving attempt, and is_repeat flags whether the user had seen the
+-- problem before. created_at is the per-attempt timestamp.
 
 -- For an existing deployment, run once against the live D1:
 --   ALTER TABLE tsumego_reports ADD COLUMN size INTEGER NOT NULL DEFAULT 9;
+--   ALTER TABLE tsumego_reports ADD COLUMN move TEXT;
+--   ALTER TABLE tsumego_reports ADD COLUMN time_used INTEGER;
+--   ALTER TABLE tsumego_reports ADD COLUMN review_time INTEGER;
+--   ALTER TABLE tsumego_reports ADD COLUMN is_repeat INTEGER NOT NULL DEFAULT 0;
+-- Dropping the legacy UNIQUE(user_id, problem) index in SQLite requires
+-- rebuilding the table; the simplest path is:
+--   DROP INDEX IF EXISTS sqlite_autoindex_tsumego_reports_1;
+-- (D1 names auto-indexes this way; verify with `PRAGMA index_list('tsumego_reports')`
+--  before dropping.)
 -- (Not idempotent in SQLite, so it's not part of the schema script itself.)
 
 -- One push subscription per user (single-device assumption — see CLAUDE.md /

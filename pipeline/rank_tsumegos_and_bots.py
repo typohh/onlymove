@@ -73,24 +73,33 @@ def load_data(data_dir):
 
     # --- 2. Load User Data from database.sql ---
     # database.sql is the global D1 dump at attempts/database.sql (cross-size).
-    # The D1 schema doesn't yet have a size column, so all existing rows are 9x9.
-    # Until the schema is partitioned by size, only load user data for 9x9.
+    # The schema has (id, user_id, problem, success, created_at, size, move,
+    # time_used, review_time, is_repeat). Only user_id/problem/success/created_at
+    # and size are needed here; per-attempt move/time fields are ignored (we
+    # also tolerate legacy rows where size and the per-attempt columns are
+    # absent — treat missing size as 9).
     sql_file = os.path.join(PROJECT_ROOT, 'attempts', 'database.sql')
     user_attempts = []
-    if BOARD_SIZE != 9:
-        print(f"Skipping user data load: BOARD_SIZE={BOARD_SIZE}, D1 schema has no size column yet.")
-    elif not os.path.exists(sql_file):
+    if not os.path.exists(sql_file):
         print(f"Skipping user data load: {sql_file} not found.")
     else:
         print(f"Loading user data from {sql_file}...")
-        # Updated regex to capture timestamp: VALUES(..., 'timestamp');
-        insert_pattern = re.compile(r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\(\d+,'([^']+)','([^']+)',([01]),'([^']+)'\);")
+        insert_pattern = re.compile(
+            r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\("
+            r"\d+,'([^']+)','([^']+)',([01]),'([^']+)'"  # id, user_id, problem, success, created_at
+            r"(?:,(\d+))?"                                 # optional size
+            r"(?:,[^)]*)?"                                 # optional trailing per-attempt columns
+            r"\);"
+        )
 
         with open(sql_file, 'r') as f:
             for line in tqdm(f, desc="Parsing SQL"):
                 match = insert_pattern.match(line)
                 if match:
-                    user_id, tsumego_id, success, timestamp_str = match.groups()
+                    user_id, tsumego_id, success, timestamp_str, size_str = match.groups()
+                    row_size = int(size_str) if size_str is not None else 9
+                    if row_size != BOARD_SIZE:
+                        continue
 
                     # Parse timestamp
                     # Format example: '2025-08-20T23:04:55.761Z'

@@ -20,9 +20,32 @@ const median = (values) => {
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-const handleCorrectAnswer = () => {
+// Standard Go column letters skip 'I' (so A..H, J..T). Row number is 1-based
+// from the bottom; WGo's y=0 is at the top, so row = boardSize - y.
+const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
+const toBoardNotation = (x, y, size) => {
+    if (x < 0 || y < 0 || x >= size || y >= size || x >= COL_LETTERS.length) return null;
+    return COL_LETTERS[x] + (size - y);
+};
+
+const buildReportPayload = (success, x, y) => {
+    const currentProblem = state.problemHistory[0];
+    const timeUsed = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
+    const problemId = currentProblem?.filename?.replace(/\.sgf$/, '') ?? null;
+    const prevs = problemId ? state.answerHistory.filter(a => a.problemId === problemId) : [];
+    const reviewTime = prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
+    return {
+        success,
+        move: toBoardNotation(x, y, state.boardSize),
+        timeUsed,
+        reviewTime,
+        isRepeat: !!currentProblem?.isRepeat,
+    };
+};
+
+const handleCorrectAnswer = (x, y) => {
     setAppMode(APP_MODES.SOLVING);
-    sendReport(true);
+    sendReport(buildReportPayload(true, x, y));
     const stats = updateUserStats(true);
 
     fadeOverlay(1000, () => {
@@ -30,7 +53,7 @@ const handleCorrectAnswer = () => {
     }, stats);
 }
 
-async function _handleIncorrectMoveSequence(moveIndex) {
+async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     Sentry.addBreadcrumb({
         category: 'flow',
         message: '_handleIncorrectMoveSequence started',
@@ -64,7 +87,7 @@ async function _handleIncorrectMoveSequence(moveIndex) {
     playNextMove();
     playStoneSound();
 
-    sendReport(false);
+    sendReport(buildReportPayload(false, x, y));
     const stats = updateUserStats(false, {
         pickedCellIndex: moveIndex,
         pickedEmbeddingPromise,
@@ -161,8 +184,8 @@ export function handleBoardClick(x, y) {
     if (isCorrectMove(moveNode, children)) {
         playMoveByIndex(moveIndex);
         playStoneSound();
-        handleCorrectAnswer();
+        handleCorrectAnswer(x, y);
     } else {
-        _handleIncorrectMoveSequence(moveIndex);
+        _handleIncorrectMoveSequence(moveIndex, x, y);
     }
 }

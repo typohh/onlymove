@@ -192,6 +192,12 @@ export const state = {
     deferredInstallPrompt: null,
     userHasInteracted: false,
 
+    // Set when /report responds with an X-App-Version that differs from the
+    // build-time APP_VERSION. The next time the app is quiescent (not in
+    // analysis/review, no animation in flight) maybeReload() picks this up
+    // and refreshes the page to pull the new bundle. See setAcceptClicks.
+    reloadPending: false,
+
     initialAnalysisNode: null,
     ghostMove: null,
     analysisHintMove: null,
@@ -363,6 +369,33 @@ export function setKifuReader(kifuReader) {
 
 export function setAcceptClicks(canAccept) {
     state.acceptClicks = canAccept;
+    // After loadTsumego in the wrong-answer path, setAcceptClicks(true) fires
+    // before the awaited enterAnalysisMode() flips appMode to ANALYZING. A
+    // synchronous reload here would briefly see "SOLVING + acceptClicks" and
+    // refresh right when the user is about to enter review. Deferring to a
+    // macrotask lets that continuation run first, so the recheck inside
+    // maybeReload sees ANALYZING and skips.
+    if (canAccept && state.reloadPending) {
+        setTimeout(maybeReload, 0);
+    }
+}
+
+export function setReloadPending(pending) {
+    state.reloadPending = pending;
+}
+
+let reloadInFlight = false;
+async function maybeReload() {
+    if (reloadInFlight) return;
+    if (!state.reloadPending) return;
+    if (state.appMode === APP_MODES.ANALYZING) return;
+    if (!state.acceptClicks) return;
+    reloadInFlight = true;
+    try {
+        const reg = await navigator.serviceWorker?.getRegistration?.();
+        await reg?.update?.();
+    } catch (_) {}
+    location.reload();
 }
 
 export function setDeferredInstallPrompt(prompt) {

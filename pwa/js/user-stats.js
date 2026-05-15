@@ -1,21 +1,34 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { maybeUploadSchedule } from './notifications.js';
 
-export async function sendReport(success) {
+export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     try {
         const problemFilename = state.problemHistory[0].filename;
         const problemId = problemFilename.replace(/\.[^/.]+$/, "");
-        await fetch('/report', {
+        const res = await fetch('/report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: state.userId, problem: problemId, success: success, size: state.boardSize })
+            body: JSON.stringify({
+                userId: state.userId,
+                problem: problemId,
+                success,
+                size: state.boardSize,
+                move,
+                timeUsed,
+                reviewTime,
+                isRepeat,
+            })
         });
+        const serverVersion = res.headers.get('X-App-Version');
+        if (serverVersion && serverVersion !== APP_VERSION) {
+            setReloadPending(true);
+        }
     } catch (error) {
         console.error('Failed to send report:', error);
     }

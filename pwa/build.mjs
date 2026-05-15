@@ -13,6 +13,16 @@ async function main() {
     const version = isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
     console.log(`✅ Version: ${version}${isDirty ? ' (dirty tree)' : ''}`);
 
+    // Stamp the same version into a generated file the Worker imports. The
+    // client gets APP_VERSION via the esbuild `define` below; the Worker
+    // can't share that path because wrangler bundles src/index.js
+    // separately, so we write a sibling module it can import directly.
+    await fs.writeFile(
+        path.join('src', 'version.js'),
+        `export const APP_VERSION = '${version}';\n`,
+    );
+    console.log("✅ Worker version module written.");
+
     await fs.rm(DIST_DIR, { recursive: true, force: true });
     await fs.mkdir(DIST_DIR);
 
