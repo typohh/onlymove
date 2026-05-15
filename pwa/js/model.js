@@ -616,11 +616,17 @@ export async function showDetailedStats() {
         // turned into sign-quadrant probabilities via bivariate-normal.js.
         // Three issues we surface, mutually exclusive at the point estimate
         // level (but their posterior masses overlap at the threshold):
-        //   "too often"        β_c > 0, β_p < 0  → user mis-applies motif k
-        //   "not often enough" β_c < 0, β_p > 0  → user under-applies motif k
-        //   "bad at"           β_c < 0, β_p < 0  → user struggles with motif k overall
-        // Each axis can surface 0..3 issues depending on which probabilities
-        // clear the threshold.
+        //   tooMuch    β_c > 0, β_p < 0  → user mis-applies motif k
+        //   notEnough  β_c < 0, β_p > 0  → user under-applies motif k
+        //   badAt      β_c < 0, β_p < 0  → user struggles with motif k overall
+        // `offDiagonal: true` quadrants need cov(β_c, β_p) ≥ 0 — anti-correlated
+        // posteriors (what we see when most rows have picked = correct fallback)
+        // can land high mass in BOTH off-diagonal quadrants simultaneously
+        // without the data actually distinguishing over- vs under-application.
+        // The badAt quadrant doesn't need the gate because its sign-pattern
+        // (both negative) is identifiable from the β_c + β_p sum.
+        // Output: one flat list of natural-language sentences sorted by
+        // descending posterior probability across all three quadrants.
         const PROB_THRESHOLD = 0.50;
         const weaknessParams = state.weaknessParams;
         const weaknessSe = state.weaknessSe;
@@ -630,21 +636,10 @@ export async function showDetailedStats() {
             const entry = labelMap[String(k)];
             return (entry && entry.positive) || `style #${k}`;
         };
-
-        // Header layout for the three categories. Order is the same as the
-        // current single-header convention but split into three sections.
-        // `offDiagonal: true` axes need a posterior with cov(β_c, β_p) ≥ 0;
-        // anti-correlated posteriors (which is what we see when most rows
-        // have picked = correct fallback) can land high probability mass in
-        // BOTH off-diagonal quadrants simultaneously without the data
-        // actually telling us anything actionable about over- vs
-        // under-application. The "bad at" quadrant doesn't need the gate
-        // because its sign-pattern (both negative) is identifiable from the
-        // β_c + β_p sum that the diagonal data already constrains.
-        const SECTIONS = [
-            { key: 'tooMuch',    header: 'Too often',         offDiagonal: true },
-            { key: 'notEnough',  header: 'Not often enough',  offDiagonal: true },
-            { key: 'badAt',      header: 'Bad at',            offDiagonal: false },
+        const QUADRANTS = [
+            { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => `You ${l} when you shouldn't.` },
+            { key: 'notEnough', offDiagonal: true,  phrase: (l) => `You don't ${l} often enough.` },
+            { key: 'badAt',     offDiagonal: false, phrase: (l) => `You inconsistently ${l}.` },
         ];
 
         const haveModel = (
@@ -653,13 +648,12 @@ export async function showDetailedStats() {
             Array.isArray(weaknessAxisCov)
         );
 
+        resultText += `\nLikely issues\n`;
         if (!haveModel) {
-            // Fall back to a single line under the new layout.
-            resultText += `\nLikely issues\n(not enough data yet)`;
+            resultText += `(not enough data yet)\n`;
         } else {
             const K = (weaknessParams.length - 2) / 2;
-            // Per-axis: gather posterior quadrant probabilities once.
-            const perAxis = [];
+            const issues = [];
             for (let k = 0; k < K; k++) {
                 const mu_c = weaknessParams[2 + k];
                 const mu_p = weaknessParams[2 + K + k];
@@ -668,22 +662,19 @@ export async function showDetailedStats() {
                 const cov = weaknessAxisCov[k] || 0;
                 if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
                 if (!(var_c > 0) || !(var_p > 0)) continue;
-                perAxis.push({ k, cov, probs: quadrantProbs(mu_c, mu_p, var_c, var_p, cov) });
+                const probs = quadrantProbs(mu_c, mu_p, var_c, var_p, cov);
+                for (const q of QUADRANTS) {
+                    if (q.offDiagonal && cov < 0) continue;
+                    const p = probs[q.key];
+                    if (p >= PROB_THRESHOLD) issues.push({ p, sentence: q.phrase(labelFor(k)) });
+                }
             }
-
-            for (const section of SECTIONS) {
-                resultText += `\n${section.header}\n`;
-                const ranked = perAxis
-                    .filter(o => !section.offDiagonal || o.cov >= 0)
-                    .map(o => ({ k: o.k, p: o.probs[section.key] }))
-                    .filter(o => o.p >= PROB_THRESHOLD)
-                    .sort((a, b) => b.p - a.p);
-                if (ranked.length === 0) {
-                    resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)\n`;
-                } else {
-                    for (const o of ranked) {
-                        resultText += `  ${(o.p * 100).toFixed(0)}%  ${labelFor(o.k)}\n`;
-                    }
+            issues.sort((a, b) => b.p - a.p);
+            if (issues.length === 0) {
+                resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)\n`;
+            } else {
+                for (const o of issues) {
+                    resultText += `  ${(o.p * 100).toFixed(0)}%  ${o.sentence}\n`;
                 }
             }
         }
