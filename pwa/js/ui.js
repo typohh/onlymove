@@ -216,9 +216,15 @@ const updateSolvingModeUI = () => {
         }
     }
 
-    // Update "About" link (button2)
+    // Update "About" link (button2). Use a real anchor with target=_blank
+    // rather than window.open() from the click handler — installed PWAs
+    // (standalone display mode) silently block popup-style window.open even
+    // from a user gesture, while native target=_blank anchors are honored.
     const aboutLink = document.getElementById('button2');
     aboutLink.textContent = getTerm('about');
+    aboutLink.setAttribute('href', 'about.html');
+    aboutLink.setAttribute('target', '_blank');
+    aboutLink.setAttribute('rel', 'noopener');
     aboutLink.classList.remove('disabled'); // Ensure enabled in solving mode
 
     // Update "Share" link (button3)
@@ -259,9 +265,13 @@ const updateAnalysisModeUI = () => {
     exitLink.textContent = getTerm('exit');
     exitLink.classList.remove('disabled'); // Always enabled in analysis mode
 
-    // Update "Undo" link (button2)
+    // Update "Undo" link (button2). Strip the about-mode href/target so this
+    // click is handled in JS only and doesn't navigate away to about.html.
     const undoLink = document.getElementById('button2');
     undoLink.textContent = getTerm('undo');
+    undoLink.setAttribute('href', '#');
+    undoLink.removeAttribute('target');
+    undoLink.removeAttribute('rel');
     if (state.kifuReader && state.kifuReader.node.parent && state.kifuReader.node !== state.initialAnalysisNode) {
         undoLink.classList.remove('disabled');
     } else {

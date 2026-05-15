@@ -218,14 +218,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Handle button2 click - behavior depends on current mode
+    // Handle button2 click - behavior depends on current mode.
+    // In solving mode the anchor's href="about.html" target="_blank" handles
+    // navigation natively (see ui.js); we deliberately don't preventDefault
+    // because installed PWAs block window.open popups but honor native
+    // target=_blank links. Only intercept in analysis mode for undo.
     document.getElementById('button2').addEventListener('click', (e) => {
-        e.preventDefault();
-        if (state.appMode === APP_MODES.SOLVING) {
-            // In solving mode, button2 is "About"
-            window.open('about.html', '_blank');
-        } else if (state.appMode === APP_MODES.ANALYZING) {
-            // In analysis mode, button2 is "Undo"
+        if (state.appMode === APP_MODES.ANALYZING) {
+            e.preventDefault();
             undoLastMove();
         }
     });
