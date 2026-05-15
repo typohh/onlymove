@@ -6,7 +6,7 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { getScoreFromComment } from './sgf.js';
+import { getScoreFromComment, getWinrateFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 
 
@@ -157,7 +157,10 @@ async function requestAndDisplayAnalysis() {
         //   - Black to play: show only the best move (the move the user is being asked
         //     to find).
         //   - White to play: waterfall —
-        //       1. SGF moves whose subtree reaches a pass → show all of them.
+        //       1. SGF moves whose subtree reaches a pass → among those, show the move
+        //          with the highest winrate and the move with the highest score, both
+        //          from white's perspective (i.e. lowest stored values, since
+        //          bots/analysis.cfg reports from black). One or two ghost stones.
         //       2. Otherwise, any SGF move at all → show only the best SGF move.
         //       3. Otherwise (only API additions exist) → show the best API move.
         //     Pipeline-baked variations terminate with a pass once solved, so a subtree
@@ -166,7 +169,7 @@ async function requestAndDisplayAnalysis() {
         // The API-cache check still uses *all* %/ children so we don't re-query the
         // API for a position we've already evaluated this session.
         const allEvaluatedCandidates = [];
-        const sgfMovesLeadingToEnd = [];
+        const sgfChildrenLeadingToEnd = [];
         let bestChild = null;        // first %/ child of any origin (best overall)
         let bestSgfChild = null;     // first %/ child that isn't an API addition
         for (const child of children) {
@@ -174,7 +177,7 @@ async function requestAndDisplayAnalysis() {
             allEvaluatedCandidates.push({ x: child.move.x, y: child.move.y });
             const isApi = child._origin === 'api';
             if (!isApi && subtreeReachesPass(child)) {
-                sgfMovesLeadingToEnd.push({ x: child.move.x, y: child.move.y });
+                sgfChildrenLeadingToEnd.push(child);
             }
             if (!bestChild) bestChild = child;
             if (!bestSgfChild && !isApi) bestSgfChild = child;
@@ -188,9 +191,40 @@ async function requestAndDisplayAnalysis() {
             if (isBlackToPlay) {
                 displayChild = bestChild;
                 candidatesToShow = [{ x: bestChild.move.x, y: bestChild.move.y }];
-            } else if (sgfMovesLeadingToEnd.length > 0) {
-                displayChild = bestSgfChild || bestChild;
-                candidatesToShow = sgfMovesLeadingToEnd;
+            } else if (sgfChildrenLeadingToEnd.length > 0) {
+                // Comments are reported with reportAnalysisWinratesAs = BLACK, so
+                // white's best = lowest winrate / lowest score among the candidates.
+                let bestWinrateChild = null;
+                let bestWinrate = Infinity;
+                let bestScoreChild = null;
+                let bestScore = Infinity;
+                for (const child of sgfChildrenLeadingToEnd) {
+                    const wr = getWinrateFromComment(child.comment);
+                    if (wr !== null && wr < bestWinrate) {
+                        bestWinrate = wr;
+                        bestWinrateChild = child;
+                    }
+                    const sc = getScoreFromComment(child.comment);
+                    if (sc !== null && sc < bestScore) {
+                        bestScore = sc;
+                        bestScoreChild = child;
+                    }
+                }
+                const picks = [];
+                const seen = new Set();
+                for (const child of [bestWinrateChild, bestScoreChild]) {
+                    if (!child) continue;
+                    const key = `${child.move.x},${child.move.y}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    picks.push(child);
+                }
+                if (picks.length === 0) {
+                    // Fall back to the SGF order when neither metric was parseable.
+                    picks.push(sgfChildrenLeadingToEnd[0]);
+                }
+                displayChild = picks[0];
+                candidatesToShow = picks.map(c => ({ x: c.move.x, y: c.move.y }));
             } else if (bestSgfChild) {
                 displayChild = bestSgfChild;
                 candidatesToShow = [{ x: bestSgfChild.move.x, y: bestSgfChild.move.y }];

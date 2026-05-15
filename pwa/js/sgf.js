@@ -19,6 +19,24 @@ export function getScoreFromComment(comment) {
 }
 
 /**
+ * Parses the winrate from an SGF comment. Always Black's perspective
+ * (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK).
+ * @param {string} comment - The comment string.
+ * @returns {number|null} - Black-perspective winrate in [0, 100], or null if absent.
+ */
+export function getWinrateFromComment(comment) {
+  if (!comment) {
+    return null;
+  }
+  // Extracts winrate like "86.4" from "86.4%/3.1"
+  const match = comment.match(/([\d.]+)%\//);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return null;
+}
+
+/**
  * Finds the best move from a list of child nodes (assumes first child is best if it has winrate/score comment).
  * @param {Array} children - Array of SGF nodes.
  * @returns {object|null} - The best move node, or null if not found.
