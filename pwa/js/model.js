@@ -818,10 +818,14 @@ function formatSignalStrength(quadrant, ec, ep) {
 // a 95%-certain one would surface the same attempts, even though the latter
 // should be backed by stronger per-attempt evidence.
 //
-// Per-attempt strength is the joint min over the two axes, so a strong-ep,
-// weak-ec attempt doesn't beat a balanced one. Embeddings are unit-variance
-// per component (skew-ICA standardized), so z-scale thresholds are directly
-// interpretable as σ above/below baseline.
+// After the gate, per-attempt evidence strength is the sum of the two relevant
+// signed σ contributions — monotone in either axis so a 5σ-on-one + threshold-
+// on-the-other attempt ranks above one that just clears the threshold on both.
+// (The earlier `min` tied any two attempts at the weaker axis regardless of
+// the other one, which made the ordering look arbitrary on the panel.)
+// Embeddings are unit-variance per component (skew-ICA standardized), so
+// z-scale thresholds and sums are directly interpretable as σ above/below
+// baseline.
 function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0) {
     const t = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
     const byId = new Map();
@@ -839,13 +843,13 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold
         let score;
         if (quadrant === 'tooMuch') {
             if (!(ep > t) || !(-ec > t)) continue;
-            score = Math.min(ep, -ec);
+            score = ep + (-ec);
         } else if (quadrant === 'notEnough') {
             if (!(ec > t) || !(-ep > t)) continue;
-            score = Math.min(ec, -ep);
+            score = ec + (-ep);
         } else {  // badAt
             if (!(ec > t) || !(ep > t)) continue;
-            score = Math.min(ec, ep);
+            score = ec + ep;
         }
         const prev = byId.get(a.problemId);
         if (!prev || score > prev.score) {
