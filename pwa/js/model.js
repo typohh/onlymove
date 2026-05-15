@@ -613,79 +613,225 @@ export async function showDetailedStats() {
         }
 
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
-        // turned into sign-quadrant probabilities via bivariate-normal.js.
-        // Three issues we surface, mutually exclusive at the point estimate
-        // level (but their posterior masses overlap at the threshold):
-        //   tooMuch    β_c > 0, β_p < 0  → user mis-applies motif k
-        //   notEnough  β_c < 0, β_p > 0  → user under-applies motif k
-        //   badAt      β_c < 0, β_p < 0  → user struggles with motif k overall
-        // `offDiagonal: true` quadrants need cov(β_c, β_p) ≥ 0 — anti-correlated
-        // posteriors (what we see when most rows have picked = correct fallback)
-        // can land high mass in BOTH off-diagonal quadrants simultaneously
-        // without the data actually distinguishing over- vs under-application.
-        // The badAt quadrant doesn't need the gate because its sign-pattern
-        // (both negative) is identifiable from the β_c + β_p sum.
-        // Output: one flat list of natural-language sentences sorted by
-        // descending posterior probability across all three quadrants.
-        const PROB_THRESHOLD = 0.50;
-        const weaknessParams = state.weaknessParams;
-        const weaknessSe = state.weaknessSe;
-        const weaknessAxisCov = state.weaknessAxisCov;
-        const labelMap = state.embeddingLabels || {};
-        const labelFor = (k) => {
-            const entry = labelMap[String(k)];
-            return (entry && entry.positive) || `style #${k}`;
-        };
-        const QUADRANTS = [
-            { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => `You ${l} when you shouldn't.` },
-            { key: 'notEnough', offDiagonal: true,  phrase: (l) => `You don't ${l} often enough.` },
-            { key: 'badAt',     offDiagonal: false, phrase: (l) => `You inconsistently ${l}.` },
-        ];
-
-        const haveModel = (
-            Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
-            Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
-            Array.isArray(weaknessAxisCov)
-        );
-
-        resultText += `\nLikely issues\n`;
-        if (!haveModel) {
-            resultText += `(not enough data yet)\n`;
-        } else {
-            const K = (weaknessParams.length - 2) / 2;
-            const issues = [];
-            for (let k = 0; k < K; k++) {
-                const mu_c = weaknessParams[2 + k];
-                const mu_p = weaknessParams[2 + K + k];
-                const var_c = weaknessSe[2 + k] * weaknessSe[2 + k];
-                const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
-                const cov = weaknessAxisCov[k] || 0;
-                if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
-                if (!(var_c > 0) || !(var_p > 0)) continue;
-                const probs = quadrantProbs(mu_c, mu_p, var_c, var_p, cov);
-                for (const q of QUADRANTS) {
-                    if (q.offDiagonal && cov < 0) continue;
-                    const p = probs[q.key];
-                    if (p >= PROB_THRESHOLD) issues.push({ p, sentence: q.phrase(labelFor(k)) });
-                }
-            }
-            issues.sort((a, b) => b.p - a.p);
-            if (issues.length === 0) {
-                resultText += `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)\n`;
-            } else {
-                for (const o of issues) {
-                    resultText += `  ${(o.p * 100).toFixed(0)}%  ${o.sentence}\n`;
-                }
-            }
-        }
-
-        showSelectableTextModal(resultText, buildRatingHistoryChart());
+        // turned into sign-quadrant probabilities via bivariate-normal.js and
+        // rendered as a DOM block (instead of inlined into resultText) so each
+        // issue can carry an interactive `examples` toggle to past mistakes.
+        const issuesElement = buildLikelyIssuesElement();
+        const chartElement = buildRatingHistoryChart();
+        const extras = document.createElement('div');
+        if (issuesElement) extras.appendChild(issuesElement);
+        if (chartElement) extras.appendChild(chartElement);
+        showSelectableTextModal(resultText, extras);
 
     } catch (error) {
         console.error('Failed to generate stats text:', error);
         Sentry.captureException(error);
         alert(getTerm('statsFailed'));
     }
+}
+
+// Builds the "Likely issues" DOM block consumed by showDetailedStats. Each
+// surfaced (axis k, quadrant) issue is one row with a toggle that lazily
+// fetches matching past mistakes from answerHistory. Quadrants mirror the
+// augmented model's sign analysis on (β_correct[k], β_picked[k]):
+//   tooMuch    β_c > 0, β_p < 0  → user mis-applies motif k
+//   notEnough  β_c < 0, β_p > 0  → user under-applies motif k
+//   badAt      β_c < 0, β_p < 0  → user struggles with motif k overall
+// `offDiagonal: true` quadrants need cov(β_c, β_p) ≥ 0 — anti-correlated
+// posteriors (typical when most rows have picked = correct fallback) can land
+// high mass in BOTH off-diagonal quadrants simultaneously without the data
+// actually distinguishing over- vs under-application. badAt skips the gate
+// because its both-negative sign-pattern is identifiable from β_c + β_p.
+function buildLikelyIssuesElement() {
+    const PROB_THRESHOLD = 0.50;
+    const weaknessParams = state.weaknessParams;
+    const weaknessSe = state.weaknessSe;
+    const weaknessAxisCov = state.weaknessAxisCov;
+    const labelMap = state.embeddingLabels || {};
+    const labelFor = (k) => {
+        const entry = labelMap[String(k)];
+        return (entry && entry.positive) || `style #${k}`;
+    };
+    const QUADRANTS = [
+        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => `You ${l} when you shouldn't.` },
+        { key: 'notEnough', offDiagonal: true,  phrase: (l) => `You don't ${l} often enough.` },
+        { key: 'badAt',     offDiagonal: false, phrase: (l) => `You inconsistently ${l}.` },
+    ];
+
+    const root = document.createElement('div');
+    root.className = 'stats-issues';
+
+    const heading = document.createElement('div');
+    heading.className = 'stats-issues-heading';
+    heading.textContent = 'Likely issues';
+    root.appendChild(heading);
+
+    const haveModel = (
+        Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
+        Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
+        Array.isArray(weaknessAxisCov)
+    );
+    if (!haveModel) {
+        const empty = document.createElement('div');
+        empty.className = 'stats-issues-empty';
+        empty.textContent = '(not enough data yet)';
+        root.appendChild(empty);
+        return root;
+    }
+
+    const K = (weaknessParams.length - 2) / 2;
+    const issues = [];
+    for (let k = 0; k < K; k++) {
+        const mu_c = weaknessParams[2 + k];
+        const mu_p = weaknessParams[2 + K + k];
+        const var_c = weaknessSe[2 + k] * weaknessSe[2 + k];
+        const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
+        const cov = weaknessAxisCov[k] || 0;
+        if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
+        if (!(var_c > 0) || !(var_p > 0)) continue;
+        const probs = quadrantProbs(mu_c, mu_p, var_c, var_p, cov);
+        for (const q of QUADRANTS) {
+            if (q.offDiagonal && cov < 0) continue;
+            const p = probs[q.key];
+            if (p >= PROB_THRESHOLD) {
+                issues.push({ k, quadrant: q.key, p, sentence: q.phrase(labelFor(k)) });
+            }
+        }
+    }
+    issues.sort((a, b) => b.p - a.p);
+
+    if (issues.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'stats-issues-empty';
+        empty.textContent = `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)`;
+        root.appendChild(empty);
+        return root;
+    }
+
+    // Problems currently in the user's recall window — withhold their links so
+    // a glance at the examples panel can't be used to ace an imminent recall.
+    const recallSet = new Set(getRecallCandidates().map(c => c.problemId));
+
+    for (const issue of issues) {
+        root.appendChild(buildIssueRow(issue, recallSet));
+    }
+    return root;
+}
+
+// Renders one (axis k, quadrant) row: sentence + probability + an "examples"
+// toggle that expands a list of links to past attempts matching the issue.
+function buildIssueRow(issue, recallSet) {
+    const row = document.createElement('div');
+    row.className = 'stats-issue';
+
+    const head = document.createElement('div');
+    head.className = 'stats-issue-head';
+
+    const prob = document.createElement('span');
+    prob.className = 'stats-issue-prob';
+    prob.textContent = `${(issue.p * 100).toFixed(0)}%`;
+
+    const text = document.createElement('span');
+    text.className = 'stats-issue-text';
+    text.textContent = issue.sentence;
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'stats-issue-examples-toggle';
+    toggle.textContent = 'examples';
+
+    head.append(prob, text, toggle);
+    row.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'stats-issue-examples-list';
+    list.hidden = true;
+    row.appendChild(list);
+
+    let populated = false;
+    toggle.addEventListener('click', () => {
+        if (!populated) {
+            populateExamplesList(list, issue, recallSet);
+            populated = true;
+        }
+        list.hidden = !list.hidden;
+        toggle.textContent = list.hidden ? 'examples' : 'hide';
+    });
+    return row;
+}
+
+function populateExamplesList(list, issue, recallSet) {
+    const examples = findExamplesForIssue(state.answerHistory, issue.k, issue.quadrant, recallSet);
+    if (examples.length === 0) {
+        const none = document.createElement('div');
+        none.className = 'stats-issue-examples-empty';
+        none.textContent = '(no past examples available)';
+        list.appendChild(none);
+        return;
+    }
+    const MAX_EXAMPLES = 10;
+    const shown = examples.slice(0, MAX_EXAMPLES);
+    const now = Date.now();
+    for (const ex of shown) {
+        const link = document.createElement('a');
+        link.className = 'stats-issue-example-link';
+        link.href = `?id=${encodeURIComponent(ex.problemId)}&o=0`;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = `${ex.problemId} · ${formatTimeAgo(now - ex.date)}`;
+        list.appendChild(link);
+    }
+    if (examples.length > shown.length) {
+        const more = document.createElement('div');
+        more.className = 'stats-issue-examples-empty';
+        more.textContent = `(+${examples.length - shown.length} more)`;
+        list.appendChild(more);
+    }
+}
+
+// Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
+// issue. Excludes attempts on problems currently in the recall window and
+// dedupes by problemId, keeping the highest-scoring attempt per problem so a
+// single oft-missed problem doesn't crowd out other examples.
+function findExamplesForIssue(answerHistory, k, quadrant, excludedIds) {
+    const byId = new Map();
+    for (const a of answerHistory) {
+        if (!a || a.correct) continue;
+        if (a.ignored) continue;
+        if (!a.problemId) continue;
+        if (excludedIds && excludedIds.has(a.problemId)) continue;
+        if (!Array.isArray(a.embedding) || a.embedding.length <= k) continue;
+        if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length <= k) continue;
+        const ec = a.embedding[k];
+        const ep = a.pickedEmbedding[k];
+        if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
+        let score;
+        if (quadrant === 'tooMuch') score = ep - ec;
+        else if (quadrant === 'notEnough') score = ec - ep;
+        else score = ec;
+        if (!(score > 0)) continue;
+        const prev = byId.get(a.problemId);
+        if (!prev || score > prev.score) {
+            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score });
+        }
+    }
+    return Array.from(byId.values()).sort((a, b) => b.score - a.score);
+}
+
+function formatTimeAgo(deltaMs) {
+    if (!Number.isFinite(deltaMs) || deltaMs < 0) return '';
+    const sec = Math.floor(deltaMs / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    if (day < 30) return `${day}d ago`;
+    const mo = Math.floor(day / 30);
+    if (mo < 12) return `${mo}mo ago`;
+    const yr = Math.floor(day / 365);
+    return `${yr}y ago`;
 }
 
 function showSelectableTextModal(text, extraElement = null) {
