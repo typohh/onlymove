@@ -761,7 +761,10 @@ function buildIssueRow(issue, recallSet) {
 }
 
 function populateExamplesList(list, issue, recallSet) {
-    const examples = findExamplesForIssue(state.answerHistory, issue.k, issue.quadrant, recallSet);
+    // Threshold per-axis evidence strength to match the issue's posterior
+    // confidence — see findExamplesForIssue for the rationale.
+    const threshold = probit(issue.p);
+    const examples = findExamplesForIssue(state.answerHistory, issue.k, issue.quadrant, recallSet, threshold);
     if (examples.length === 0) {
         const none = document.createElement('div');
         none.className = 'stats-issue-examples-empty';
@@ -790,10 +793,24 @@ function populateExamplesList(list, issue, recallSet) {
 }
 
 // Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
-// issue. Excludes attempts on problems currently in the recall window and
-// dedupes by problemId, keeping the highest-scoring attempt per problem so a
-// single oft-missed problem doesn't crowd out other examples.
-function findExamplesForIssue(answerHistory, k, quadrant, excludedIds) {
+// issue. Each quadrant requires BOTH axes to land on the side the quadrant's
+// joint sign demands — a one-sided gate would include attempts that only
+// support one axis, which is misleading for the both-negative `badAt` case
+// (and for the off-diagonals it lets same-sign-ordered attempts slip through).
+//
+// The minimum |ec|, |ep| per attempt scales with the issue's posterior
+// probability via `threshold = probit(p)` — so a 90%-confident issue needs
+// ~1.28σ-strong evidence per axis, while a 50%-confident issue collapses to
+// the pure sign constraint. Without this scaling, a 51%-borderline issue and
+// a 95%-certain one would surface the same attempts, even though the latter
+// should be backed by stronger per-attempt evidence.
+//
+// Per-attempt strength is the joint min over the two axes, so a strong-ep,
+// weak-ec attempt doesn't beat a balanced one. Embeddings are unit-variance
+// per component (skew-ICA standardized), so z-scale thresholds are directly
+// interpretable as σ above/below baseline.
+function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0) {
+    const t = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
     const byId = new Map();
     for (const a of answerHistory) {
         if (!a || a.correct) continue;
@@ -806,16 +823,37 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds) {
         const ep = a.pickedEmbedding[k];
         if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
         let score;
-        if (quadrant === 'tooMuch') score = ep - ec;
-        else if (quadrant === 'notEnough') score = ec - ep;
-        else score = ec;
-        if (!(score > 0)) continue;
+        if (quadrant === 'tooMuch') {
+            if (!(ep > t) || !(-ec > t)) continue;
+            score = Math.min(ep, -ec);
+        } else if (quadrant === 'notEnough') {
+            if (!(ec > t) || !(-ep > t)) continue;
+            score = Math.min(ec, -ep);
+        } else {  // badAt
+            if (!(ec > t) || !(ep > t)) continue;
+            score = Math.min(ec, ep);
+        }
         const prev = byId.get(a.problemId);
         if (!prev || score > prev.score) {
             byId.set(a.problemId, { problemId: a.problemId, date: a.date, score });
         }
     }
     return Array.from(byId.values()).sort((a, b) => b.score - a.score);
+}
+
+// Inverse standard-normal CDF via bisection over `math.erf`. ~50 iterations
+// converges to ≪ 1e-9; cheap once per issue at panel-open time. Returns 0 for
+// p ≤ 0.5 since callers only ever pass posterior probabilities in [0.5, 1).
+function probit(p) {
+    if (!(p > 0.5)) return 0;
+    if (p >= 1) return Infinity;
+    let lo = 0, hi = 8;
+    for (let i = 0; i < 50; i++) {
+        const mid = (lo + hi) / 2;
+        const cdf = 0.5 * (1 + math.erf(mid / Math.SQRT2));
+        if (cdf < p) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
 }
 
 function formatTimeAgo(deltaMs) {
