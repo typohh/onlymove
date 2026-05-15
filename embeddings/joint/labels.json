@@ -363,19 +363,19 @@
       "auto_mapped_cos": 0.9999
     },
     "60": {
-      "positive": "capture something",
+      "positive": "capture stones",
       "negative": null,
       "auto_mapped_from": 60,
       "auto_mapped_cos": 0.9997
     },
     "61": {
-      "positive": "capture something",
+      "positive": "cut of opponents stones",
       "negative": null,
       "auto_mapped_from": 61,
       "auto_mapped_cos": 1.0
     },
     "62": {
-      "positive": "capture something",
+      "positive": "reading",
       "negative": null,
       "auto_mapped_from": 62,
       "auto_mapped_cos": 1.0
