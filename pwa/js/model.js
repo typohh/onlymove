@@ -774,14 +774,13 @@ function populateExamplesList(list, issue, recallSet) {
     }
     const MAX_EXAMPLES = 10;
     const shown = examples.slice(0, MAX_EXAMPLES);
-    const now = Date.now();
     for (const ex of shown) {
         const link = document.createElement('a');
         link.className = 'stats-issue-example-link';
         link.href = `?id=${encodeURIComponent(ex.problemId)}&o=0`;
         link.target = '_blank';
         link.rel = 'noopener';
-        link.textContent = `${ex.problemId} · ${formatTimeAgo(now - ex.date)}`;
+        link.textContent = `${ex.problemId} · ${formatSignalStrength(issue.quadrant, ex.ec, ex.ep)}`;
         list.appendChild(link);
     }
     if (examples.length > shown.length) {
@@ -790,6 +789,20 @@ function populateExamplesList(list, issue, recallSet) {
         more.textContent = `(+${examples.length - shown.length} more)`;
         list.appendChild(more);
     }
+}
+
+// Compact per-quadrant signal-strength readout. Embeddings are unit-variance
+// z-scores along each axis, so values are reported in σ — sign included
+// because each quadrant's evidence shape involves a specific signed pattern.
+function formatSignalStrength(quadrant, ec, ep) {
+    const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}σ`;
+    // List the more-emphasized axis first per quadrant:
+    //   tooMuch: motif in pick (positive ep) is the foreground signal
+    //   notEnough: motif in correct (positive ec) is the foreground signal
+    //   badAt: both are foreground; surface ec first to match the labelling
+    if (quadrant === 'tooMuch') return `picked ${fmt(ep)} · correct ${fmt(ec)}`;
+    if (quadrant === 'notEnough') return `correct ${fmt(ec)} · picked ${fmt(ep)}`;
+    return `correct ${fmt(ec)} · picked ${fmt(ep)}`;
 }
 
 // Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
@@ -814,6 +827,7 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold
     const byId = new Map();
     for (const a of answerHistory) {
         if (!a || a.correct) continue;
+        if (a.isRepeat) continue;  // mirror weakness.js training filter — repeats are excluded there
         if (a.ignored) continue;
         if (!a.problemId) continue;
         if (excludedIds && excludedIds.has(a.problemId)) continue;
@@ -835,7 +849,7 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold
         }
         const prev = byId.get(a.problemId);
         if (!prev || score > prev.score) {
-            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score });
+            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score, ec, ep });
         }
     }
     return Array.from(byId.values()).sort((a, b) => b.score - a.score);
@@ -854,22 +868,6 @@ function probit(p) {
         if (cdf < p) lo = mid; else hi = mid;
     }
     return (lo + hi) / 2;
-}
-
-function formatTimeAgo(deltaMs) {
-    if (!Number.isFinite(deltaMs) || deltaMs < 0) return '';
-    const sec = Math.floor(deltaMs / 1000);
-    if (sec < 60) return 'just now';
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return `${hr}h ago`;
-    const day = Math.floor(hr / 24);
-    if (day < 30) return `${day}d ago`;
-    const mo = Math.floor(day / 30);
-    if (mo < 12) return `${mo}mo ago`;
-    const yr = Math.floor(day / 365);
-    return `${yr}y ago`;
 }
 
 function showSelectableTextModal(text, extraElement = null) {
