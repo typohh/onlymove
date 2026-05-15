@@ -171,6 +171,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
+        // Stats-panel example links carry close_on_next=1 (see model.js's
+        // populateExamplesList). Tapping button1 in that spawned window
+        // closes it instead of continuing the session, so paging through
+        // examples on an installed PWA doesn't accumulate Android instances.
+        const closeOnNext = new URLSearchParams(window.location.search).get('close_on_next') === '1';
+        if (closeOnNext) {
+            window.close();
+            return;
+        }
         if (state.appMode === APP_MODES.LINKED) {
             // In view mode, button1 exits back to the challenge tsumego
             if (state.nextTsumego) {

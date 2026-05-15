@@ -777,9 +777,18 @@ function populateExamplesList(list, issue, recallSet) {
     for (const ex of shown) {
         const link = document.createElement('a');
         link.className = 'stats-issue-example-link';
-        link.href = `?id=${encodeURIComponent(ex.problemId)}&o=0`;
+        link.href = `?id=${encodeURIComponent(ex.problemId)}&o=0&close_on_next=1`;
         link.target = '_blank';
         link.rel = 'noopener';
+        // Primary-click goes through window.open() so the spawned tab is
+        // script-opened — window.close() in the spawned window is only
+        // permitted when the opener was a script. Modifier-click and
+        // middle-click fall through to the native target=_blank behavior.
+        link.addEventListener('click', (e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            window.open(link.href, '_blank', 'noopener');
+        });
         link.textContent = `${ex.problemId} · ${formatSignalStrength(issue.quadrant, ex.ec, ex.ep)}`;
         list.appendChild(link);
     }
