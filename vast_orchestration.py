@@ -25,10 +25,14 @@ REMOTE_DIR = "/workspace/onlymove"
 STATE_FILE = "orchestration_state.json"
 
 # Pipeline steps allowed on the remote. Maps short name → python -m module path.
+# `calibrate19` and `calibrate_handicap` are auxiliary diagnostics, not
+# main-pipeline steps, but they fit the same provision-upload-run-sync flow.
 PIPELINE_STEPS = {
     "tune": "pipeline.tune_engine",
     "generate": "pipeline.generate_tsumegos",
     "benchmark": "pipeline.benchmark_bots",
+    "calibrate19": "auxiliary.calibrate_ranks_19x19",
+    "calibrate_handicap": "auxiliary.calibrate_handicap_ranks",
 }
 
 # Files uploaded from the local repo. We ship the CUDA katago build to the
@@ -45,7 +49,7 @@ SETUP_ONLY_UPLOAD_FILES = [
     "bots/analysis.cfg",
 ]
 REMOTE_KATAGO_PATH = "bots/katago_cuda"
-LOCAL_UPLOAD_DIRS = ["pipeline", "utils"]
+LOCAL_UPLOAD_DIRS = ["pipeline", "utils", "auxiliary"]
 
 # Network weights — fetched on the remote (faster than uploading hundreds of MB).
 # URLs mirror those in utils/models.py.
@@ -65,19 +69,28 @@ MODEL_DOWNLOADS = {
 }
 
 # Output dirs to rsync back. Each contains per-size subdirs (e.g. tsumegos/13/).
-REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
+# calibration_19x19_sgf and calibration_handicap_sgf are the SGF dumps from
+# the calibrate19 / calibrate_handicap steps.
+REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts",
+                      "calibration_19x19_sgf", "calibration_handicap_sgf"]
 
 # Per-step input dirs pushed TO the remote before launching a step. These are
 # state dirs the step reads to resume incrementally. For benchmark, attempts/
 # holds prior bot results — uploading them lets test_bot skip already-processed
 # tsumegos and append only new entries (it already merges existing+new on write).
+# For calibrate_handicap, the rank fit and pair-selection priorities are
+# seeded from the existing SGF corpus; without these, the remote starts cold
+# and wastes games re-learning the kyu / dan gaps.
 STEP_INPUT_DIRS = {
     "benchmark": ["attempts"],
+    "calibrate_handicap": ["calibration_handicap_sgf"],
 }
 
-# Minimal pip deps for the two remote steps. The full requirements.txt brings
-# torch/scipy/sklearn for rank+package, which we never run remotely.
-REMOTE_PIP_PACKAGES = ["sgfmill>=1.1.1", "numpy>=1.21.0"]
+# Minimal pip deps for the remote steps. The full requirements.txt brings
+# torch/sklearn for rank+package, which we never run remotely. scipy is
+# needed only by calibrate_handicap (logistic MLE refit) but is cheap to
+# install, so we add it unconditionally rather than branching by step.
+REMOTE_PIP_PACKAGES = ["sgfmill>=1.1.1", "numpy>=1.21.0", "scipy>=1.10.0"]
 
 # tmux session and log files use the prefix; multi-instance generate runs use
 # {prefix}_{i} so they don't collide.
@@ -673,7 +686,7 @@ def cmd_setup(target):
 
 def _is_step_running(base_ssh):
     res = subprocess.run(
-        base_ssh + ["pgrep -f '[p]ython3.*pipeline\\.' >/dev/null 2>&1 "
+        base_ssh + ["pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1 "
                     "&& echo RUNNING || echo IDLE"],
         capture_output=True, text=True, timeout=15,
     )
@@ -774,15 +787,15 @@ def cmd_stop(target):
     stop_cmd = (
         f"for s in $(tmux ls 2>/dev/null | grep '^{TMUX_SESSION_PREFIX}_' "
         f"| cut -d: -f1); do tmux kill-session -t \"$s\" 2>/dev/null; done; "
-        f"pkill -f '[p]ython3.*pipeline\\.' 2>/dev/null; "
+        f"pkill -f '[p]ython3.* -u -m' 2>/dev/null; "
         f"for i in $(seq 1 30); do "
-        f"  pgrep -f '[p]ython3.*pipeline\\.' >/dev/null 2>&1 || break; "
+        f"  pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1 || break; "
         f"  sleep 1; "
         f"done; "
-        f"pkill -9 -f '[p]ython3.*pipeline\\.' 2>/dev/null; "
+        f"pkill -9 -f '[p]ython3.* -u -m' 2>/dev/null; "
         f"pkill -9 -f '[k]atago analysis' 2>/dev/null; "
         f"sleep 1; "
-        f"if pgrep -f '[p]ython3.*pipeline\\.' >/dev/null 2>&1; then "
+        f"if pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1; then "
         f"  echo STILL_RUNNING; exit 1; "
         f"fi; "
         f"rm -f {REMOTE_DIR}/running_step {REMOTE_DIR}/running_started; "
@@ -951,7 +964,7 @@ def _probe_instance(inst, state):
     base_ssh, _ = get_ssh_cmds(host, port)
 
     gather_cmd = (
-        f"pgrep -f '[p]ython3.*pipeline\\.' >/dev/null 2>&1 && echo running || echo idle; "
+        f"pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1 && echo running || echo idle; "
         f"echo '|||'; "
         f"cat {REMOTE_DIR}/running_step 2>/dev/null || echo '-'"
     )
