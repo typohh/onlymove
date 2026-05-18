@@ -2,16 +2,21 @@
 //
 // Periodic rank-declaration prompt: once a user has a non-trivial answer
 // history, ask which server-rated rank they currently hold so we can later
-// calibrate the internal rating scale against external scales. Shown at most
-// once every two months; dismissing counts as a "show" (the cooldown starts
-// the moment the dialog renders, regardless of how the user closes it).
+// calibrate the internal rating scale against external scales. Re-prompts
+// monthly. The cooldown is committed ONLY when the user actually interacts
+// with the dialog (submit or explicit dismiss). If the dialog gets blown
+// away by a reload, an SW takeover, or a tab close, the next stable session
+// brings it back.
 
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES } from './constants.js';
 
-const STORAGE_KEY = 'rankSurveyShownAt';
-const COOLDOWN_MS = 60 * 24 * 3600 * 1000; // ~2 months
+// v2: the v1 key was committed-on-render, so users hit by the version-update
+// race got their cooldown burned without ever seeing the dialog. Bumping the
+// key gives them a fresh chance.
+const STORAGE_KEY = 'rankSurveyShownAt_v2';
+const COOLDOWN_MS = 30 * 24 * 3600 * 1000; // ~1 month
 const MIN_ANSWERS = 100;
 
 const SERVERS = ['OGS', 'KGS', 'Fox', 'Tygem', 'WBaduk', 'IGS', 'GoQuest', 'EGF', 'AGA'];
@@ -28,10 +33,23 @@ function totalAnswerCount() {
 }
 
 let dialogOpen = false;
+// Counts setAcceptClicks(true) ticks since module load. The first tick is the
+// initial board paint, when a queued maybeReload (X-App-Version mismatch) or
+// an SW controllerchange would yank the page out from under any modal. We
+// wait for tick ≥ 2 so any /report-driven version check has had a chance to
+// land and either trigger the reload or clear.
+let tickCount = 0;
 
 export function maybeShowRankSurvey() {
+    tickCount++;
     if (dialogOpen) return;
     if (state.appMode === APP_MODES.ANALYZING) return;
+    // A pending reload is about to throw the dialog away — and worse, since
+    // the cooldown is only set on user interaction, a "rendered but killed"
+    // dialog would still come back next session. Save the user the flicker
+    // and just skip until the reload settles.
+    if (state.reloadPending) return;
+    if (tickCount < 2) return;
     const lastShown = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
     if (Number.isFinite(lastShown) && Date.now() - lastShown < COOLDOWN_MS) return;
     if (totalAnswerCount() < MIN_ANSWERS) return;
@@ -41,9 +59,10 @@ export function maybeShowRankSurvey() {
 function showRankSurvey() {
     if (dialogOpen) return;
     dialogOpen = true;
-    // Lock in the cooldown the moment the dialog renders, so any kind of
-    // dismissal (close, navigate away, refresh) still counts as "shown".
-    localStorage.setItem(STORAGE_KEY, String(Date.now()));
+    // NB: the cooldown is committed in the submit/dismiss handlers below, not
+    // here. If the page reloads while the dialog is open the user gets to see
+    // it again next session — the cooldown should reflect user choice, not
+    // render time.
 
     const overlay = document.createElement('div');
     overlay.id = 'ios-install-overlay';
@@ -132,20 +151,25 @@ function showRankSurvey() {
     submitBtn.textContent = getTerm('rankSurveySubmit');
     styleBtn(submitBtn);
 
-    const close = () => {
+    // Commit the cooldown only here, on actual user click. If the user never
+    // interacts (page reload, tab close, SW takeover), the dialog comes back
+    // next stable session.
+    const closeWithCooldown = () => {
+        localStorage.setItem(STORAGE_KEY, String(Date.now()));
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
         dialogOpen = false;
     };
 
-    dismissBtn.addEventListener('click', close);
+    dismissBtn.addEventListener('click', closeWithCooldown);
     submitBtn.addEventListener('click', () => {
         const ranks = {};
         for (const server of SERVERS) {
             const v = selects[server].value;
             if (v) ranks[server] = v;
         }
-        // Fire and forget. The cooldown is already set, so a network failure
-        // just means we lose this submission — acceptable at current scale.
+        // Fire and forget. Cooldown is committed below regardless — a dropped
+        // network submission is the user's choice to lose, not a reason to
+        // re-prompt every session until it goes through.
         if (Object.keys(ranks).length > 0) {
             fetch('/rank-survey', {
                 method: 'POST',
@@ -153,7 +177,7 @@ function showRankSurvey() {
                 body: JSON.stringify({ userId: state.userId, ranks }),
             }).catch(err => console.warn('Rank survey upload failed:', err));
         }
-        close();
+        closeWithCooldown();
     });
 
     buttonRow.appendChild(dismissBtn);
