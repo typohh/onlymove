@@ -918,8 +918,7 @@ function showSelectableTextModal(text, extraElement = null) {
 }
 
 function rankLabelFromIndex(rankIndex) {
-    const i = Math.max(0, Math.min(TOTAL_RANKS - 1, rankIndex));
-    return i < 20 ? `${20 - i}k` : `${i - 19}d`;
+    return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
 }
 
 function buildRatingHistoryChart() {
@@ -964,8 +963,6 @@ function buildRatingHistoryChart() {
     let yHigh = Math.ceil(Math.max(maxRank, bandMax));
     let yLow = Math.floor(Math.min(trimmedMin, bandMin));
     if (Number.isInteger(Math.min(trimmedMin, bandMin))) yLow -= 1;
-    yLow = Math.max(0, yLow);
-    yHigh = Math.min(TOTAL_RANKS - 1, yHigh);
     if (yHigh <= yLow) yHigh = yLow + 1;
 
     const container = document.createElement('div');

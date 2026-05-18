@@ -253,7 +253,10 @@ export function getTerm(key) {
 }
 
 export function getDescriptiveRank(numericRank) {
-  const rankIndex = Math.min(Math.floor(numericRank * TOTAL_RANKS), TOTAL_RANKS - 1);
+  // Ratings can extend beyond [0, 1] (problems harder than 9d or weaker
+  // than 20k on the handi-stone scale). The kyu/dan formula keeps working
+  // for any integer index: rankIndex = -1 -> "21 kyu", 29 -> "10 dan", etc.
+  const rankIndex = Math.floor(numericRank * TOTAL_RANKS);
   const kyuTerm = getTerm('kyu');
   const danTerm = getTerm('dan');
   return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;

@@ -106,16 +106,67 @@ def h_eff_eff(h, r_mid, h_eff_arr, alpha):
 
 H_LEVELS = list(range(10))  # 0..9
 
-# Calibration bots. 3k is the anchor (rank = 0); the rest are fit. The
-# full range 20k..9d gives the chain enough overlap that within-9-stones
-# pair selection still connects every bot to its neighbours.
-BOT_LABELS = (
-    [f"{n}k" for n in range(20, 0, -1)]   # 20k..1k
-    + [f"{n}d" for n in range(1, 10)]     # 1d..9d
-)
+# Calibration bots. Mirrored from calibrate_ranks_19x19.OPPONENTS so both
+# scripts share one bot pool — handi-cal needs handicap games per bot,
+# 19x19-cal needs even games per bot, and combining the two requires
+# overlap. Three sampling modes (`opp_type`):
+#   "rank"        humanv0 humanSLProfile at `opp_param` (a rank string), temp 1.0
+#   "human_temp"  humanv0 humanSLProfile rank_9d, temperature = opp_param
+#   "spec_temp"   strong-net policy (no humanSLProfile), temperature = opp_param
+#
+# `rank_prior` is the Gaussian-prior centre AND cold-start init for each bot
+# (anchor at 3k = 0). Named bots use the latest calibrate_handicap_ranks
+# point estimate (not the −17..+11 nominal ladder) — refits compound rather
+# than re-learning from scratch. Temperature variants are seeded from
+# calibrate_ranks_19x19 smoothed elo above humanv0_9d (2282), converted to
+# handi-stones at ~222 elo/stone (the rate observed in the +6..+8 corrected
+# band). The temperature priors are acknowledged extrapolations past +8.55
+# corrected; the joint fit drives them once games arrive.
+BOT_CONFIGS = [
+    # (label,           opp_type,    opp_param,    rank_prior)
+    ("20k",             "rank",      "rank_20k",   -14.55),
+    ("19k",             "rank",      "rank_19k",   -14.12),
+    ("18k",             "rank",      "rank_18k",   -13.00),
+    ("17k",             "rank",      "rank_17k",   -13.03),
+    ("16k",             "rank",      "rank_16k",   -12.17),
+    ("15k",             "rank",      "rank_15k",   -12.02),
+    ("14k",             "rank",      "rank_14k",   -10.89),
+    ("13k",             "rank",      "rank_13k",   -10.54),
+    ("12k",             "rank",      "rank_12k",    -9.67),
+    ("11k",             "rank",      "rank_11k",    -8.92),
+    ("10k",             "rank",      "rank_10k",    -8.45),
+    ( "9k",             "rank",      "rank_9k",     -7.69),
+    ( "8k",             "rank",      "rank_8k",     -6.13),
+    ( "7k",             "rank",      "rank_7k",     -5.08),
+    ( "6k",             "rank",      "rank_6k",     -4.11),
+    ( "5k",             "rank",      "rank_5k",     -2.84),
+    ( "4k",             "rank",      "rank_4k",     -1.30),
+    ( "3k",             "rank",      "rank_3k",      0.00),  # anchor
+    ( "2k",             "rank",      "rank_2k",     +1.29),
+    ( "1k",             "rank",      "rank_1k",     +2.46),
+    ( "1d",             "rank",      "rank_1d",     +3.70),
+    ( "2d",             "rank",      "rank_2d",     +5.00),
+    ( "3d",             "rank",      "rank_3d",     +5.87),
+    ( "4d",             "rank",      "rank_4d",     +6.76),
+    ( "5d",             "rank",      "rank_5d",     +7.28),
+    ( "6d",             "rank",      "rank_6d",     +7.61),
+    ( "7d",             "rank",      "rank_7d",     +7.81),
+    ( "8d",             "rank",      "rank_8d",     +7.96),
+    ( "9d",             "rank",      "rank_9d",     +8.55),
+    ("human9d_t0.8",    "human_temp", 0.8,          +8.99),
+    ("human9d_t0.6",    "human_temp", 0.6,          +9.46),
+    ("spec_t1.0",       "spec_temp",  1.0,          +9.97),
+    ("spec_t0.8",       "spec_temp",  0.8,         +10.53),
+    ("spec_t0.6",       "spec_temp",  0.6,         +11.13),
+    ("spec_t0.4",       "spec_temp",  0.4,         +11.77),
+    ("spec_t0.1",       "spec_temp",  0.1,         +12.45),
+]
+BOT_LABELS = [c[0] for c in BOT_CONFIGS]
+BOT_TYPE = {c[0]: c[1] for c in BOT_CONFIGS}
+BOT_PARAM = {c[0]: c[2] for c in BOT_CONFIGS}
+RANK_PRIOR = {c[0]: float(c[3]) for c in BOT_CONFIGS}
 ANCHOR_BOT = "3k"
 ANCHOR_IDX = BOT_LABELS.index(ANCHOR_BOT)
-KATAGO_PROFILE = {label: f"rank_{label}" for label in BOT_LABELS}
 
 # 19x19 standard handicap stone placements (GTP coords, I skipped).
 # h=1 places no stone — standard handicap 1 is just reduced komi with B
@@ -325,35 +376,68 @@ class KataGoController:
         return entry["result"]
 
     def get_move(self, initial_stones, moves, komi, bot_label, rng):
-        """Sample one move from humanv0 conditioned on bot_label's rank."""
-        resp = self.query(initial_stones, moves, komi, {
-            "includePolicy": True,
-            "maxVisits": 1,
-            "overrideSettings": {
-                "humanSLProfile": KATAGO_PROFILE[bot_label],
-                "ignorePreRootHistory": False,
-                "rootNumSymmetriesToSample": 1,
-            },
-        })
-        if "error" in resp:
-            return "pass"
+        """Sample one move for `bot_label`. Routes by BOT_TYPE — same three
+        sampling modes as calibrate_ranks_19x19.get_move, so handi-cal and
+        19x19-cal share their bot pool and behave identically per-move.
 
+        rootPolicyTemperature isn't honoured for humanPolicy by the analysis
+        engine, so temperature scaling for non-1.0 temps is done manually in
+        log-prob space (`log p / temp`, re-normalised)."""
+        opp_type = BOT_TYPE[bot_label]
+        opp_param = BOT_PARAM[bot_label]
         N = BOARD_SIZE
         pass_idx = N * N
 
-        # Pass-detection: if strong policy puts argmax on pass, the position is
-        # finished — respect it regardless of humanPolicy.
-        strong = resp.get("policy", [])
-        if strong and int(np.argmax(strong)) == pass_idx:
-            return "pass"
+        if opp_type in ("rank", "human_temp"):
+            rank = opp_param if opp_type == "rank" else "rank_9d"
+            resp = self.query(initial_stones, moves, komi, {
+                "includePolicy": True,
+                "maxVisits": 1,
+                "overrideSettings": {
+                    "humanSLProfile": rank,
+                    "ignorePreRootHistory": False,
+                    "rootNumSymmetriesToSample": 1,
+                },
+            })
+            if "error" in resp:
+                return "pass"
 
-        policy = resp.get("humanPolicy")
-        if not policy:
-            return "pass"
-        if int(np.argmax(policy)) == pass_idx:
-            return "pass"
+            # Pass-detection: if strong policy puts argmax on pass, the
+            # position is finished — respect it regardless of humanPolicy.
+            strong = resp.get("policy", [])
+            if strong and int(np.argmax(strong)) == pass_idx:
+                return "pass"
 
-        probs = np.maximum(np.array(policy, dtype=np.float64), 0.0)
+            policy = resp.get("humanPolicy")
+            if not policy:
+                return "pass"
+            if int(np.argmax(policy)) == pass_idx:
+                return "pass"
+
+            probs = np.maximum(np.array(policy, dtype=np.float64), 0.0)
+            temp = opp_param if opp_type == "human_temp" else 1.0
+        else:  # spec_temp — strong policy, no humanSLProfile
+            resp = self.query(initial_stones, moves, komi, {
+                "includePolicy": True,
+                "maxVisits": 1,
+            })
+            if "error" in resp:
+                return "pass"
+            policy = resp.get("policy", [])
+            if not policy:
+                return "pass"
+            if int(np.argmax(policy)) == pass_idx:
+                return "pass"
+            probs = np.maximum(np.array(policy, dtype=np.float64), 0.0)
+            temp = opp_param
+
+        if temp != 1.0 and temp > 0:
+            probs = np.maximum(probs, 1e-30)
+            log_p = np.log(probs)
+            log_p /= temp
+            log_p -= log_p.max()
+            probs = np.exp(log_p)
+
         s = probs.sum()
         if s <= 0:
             return "pass"
@@ -459,13 +543,13 @@ def fit_ranks(games, init_ranks=None, init_c=1.0, init_h_eff=None,
     n_free = len(bots_free)
     idx = {b: i for i, b in enumerate(bots_free)}
 
-    # Nominal positions are anchor-relative: 3k -> 0, 4k -> -1, 2k -> +1,
-    # ..., 20k -> -17, 9d -> +11. Used both as initial guess and as a weak
-    # Gaussian prior pulling each rank toward its label-implied position.
-    # The prior decays with data; it only matters when a bot is sparsely
-    # connected to the rest of the chain.
-    nominal_for = {b: float(BOT_LABELS.index(b) - ANCHOR_IDX)
-                   for b in BOT_LABELS}
+    # Per-bot prior mean: best-estimate handi-stones from RANK_PRIOR (named
+    # bots seeded from prior calibration runs, temperature variants from
+    # 19x19-cal elo / elo-per-stone). Used both as cold-start init and as the
+    # centre of the Gaussian prior. Same sigma_rank for all bots; the prior
+    # decays with data and only matters when a bot is sparsely connected to
+    # the rest of the chain.
+    nominal_for = {b: RANK_PRIOR[b] for b in BOT_LABELS}
     heff_linear_arr = np.array([h_eff_linear(h) for h in range(10)])
 
     def empty_return():
@@ -743,16 +827,19 @@ def print_report(games, ranks, c, std_err, h_eff_arr, h_eff_se,
         row = f"  {h}  " + "  ".join(f"{v:>+8.2f}" for v in vals)
         print(row)
 
-    # Rank table
-    print(f"\n{'Bot':<6} {'Rank':>8} {'Nominal':>9} {'Drift':>8} {'± SE':>8}")
-    print("-" * 44)
+    # Rank table. "Prior" is the per-bot rank_prior from BOT_CONFIGS (named
+    # bots: prior calibration estimate; temperature variants: 19x19-cal-derived
+    # seed). Drift = current fit − prior; high |drift| means data is moving
+    # the bot away from its seed.
+    print(f"\n{'Bot':<14} {'Rank':>8} {'Prior':>8} {'Drift':>8} {'± SE':>8}")
+    print("-" * 52)
     for b in BOT_LABELS:
-        nominal = float(BOT_LABELS.index(b) - ANCHOR_IDX)
-        drift = ranks[b] - nominal
+        prior = RANK_PRIOR[b]
+        drift = ranks[b] - prior
         se = std_err.get(b, float("nan"))
         se_str = f"{se:.2f}" if not math.isnan(se) and math.isfinite(se) else "  -"
         marker = "  (anchor)" if b == ANCHOR_BOT else ""
-        print(f"{b:<6} {ranks[b]:>+8.2f} {nominal:>+9.2f} {drift:>+8.2f} "
+        print(f"{b:<14} {ranks[b]:>+8.2f} {prior:>+8.2f} {drift:>+8.2f} "
               f"{se_str:>8}{marker}")
 
     # Multi-hop sanity check: for each triple, compare direct gap from MLE
@@ -909,7 +996,7 @@ def main():
     try:
         resp = kc.query([], [], EVEN_KOMI, {
             "maxVisits": 1, "includePolicy": True,
-            "overrideSettings": {"humanSLProfile": KATAGO_PROFILE[ANCHOR_BOT]},
+            "overrideSettings": {"humanSLProfile": BOT_PARAM[ANCHOR_BOT]},
         })
         if "humanPolicy" not in resp:
             print("ERROR: humanPolicy missing from response. "

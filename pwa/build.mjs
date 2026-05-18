@@ -9,7 +9,10 @@ async function main() {
     console.log("🚀 Starting production build...");
 
     const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
-    const isDirty = execSync('git status --porcelain').toString().trim().length > 0;
+    // maxBuffer bumped because `package_for_pwa` regenerates thousands of
+    // embedding/zip files; default 1 MB buffer overflows on a fresh package.
+    const isDirty = execSync('git status --porcelain',
+        { maxBuffer: 64 * 1024 * 1024 }).toString().trim().length > 0;
     const version = isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
     console.log(`✅ Version: ${version}${isDirty ? ' (dirty tree)' : ''}`);
 

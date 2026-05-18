@@ -30,13 +30,62 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA, FastICA
+from sklearn.decomposition import FastICA, IncrementalPCA
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 SIZES = [9, 13]
+
+
+def _chunked_mean_std(X, chunk_rows):
+    """One-pass per-feature mean and std without (N, D) temporaries.
+
+    np.std materializes (X - mean) as a same-shape float64 buffer internally
+    when dtype=float64; on the joint matrix that's ~8 GB for nothing. This
+    streams float64 sum and sum-of-squares accumulators over chunks instead,
+    so peak transient memory is just one chunk_rows × D × 8 buffer.
+    """
+    N, D = X.shape
+    sum_ = np.zeros(D, dtype=np.float64)
+    sum_sq = np.zeros(D, dtype=np.float64)
+    for s in range(0, N, chunk_rows):
+        e = min(s + chunk_rows, N)
+        chunk64 = X[s:e].astype(np.float64)
+        sum_ += chunk64.sum(axis=0)
+        sum_sq += (chunk64 * chunk64).sum(axis=0)
+    mean = sum_ / N
+    var = np.maximum(sum_sq / N - mean ** 2, 0.0)
+    return mean, np.sqrt(var)
+
+
+def _chunked_design_T_X(X_design, X, chunk_rows):
+    """Compute X_design.T @ X (shape (P, D)) without a (N, D) temp.
+
+    X_design (N, P) and X (N, D) are float32 here; the matmul is dispatched to
+    sgemm per chunk and accumulated.
+    """
+    P = X_design.shape[1]
+    D = X.shape[1]
+    out = np.zeros((P, D), dtype=np.float32)
+    N = X.shape[0]
+    for s in range(0, N, chunk_rows):
+        e = min(s + chunk_rows, N)
+        out += X_design[s:e].T @ X[s:e]
+    return out
+
+
+def _chunked_residualize(X, X_design, coefs, chunk_rows):
+    """In-place X[s:e] -= X_design[s:e] @ coefs across chunks.
+
+    The eager form X -= X_design @ coefs allocates a single (N, D) float32
+    temp (~4 GB on the joint matrix); chunking reduces it to chunk_rows × D.
+    """
+    N = X.shape[0]
+    for s in range(0, N, chunk_rows):
+        e = min(s + chunk_rows, N)
+        X[s:e] -= X_design[s:e] @ coefs
 
 
 def _load_correct_vec(act_dir: str, tid: str, by_ext: dict) -> np.ndarray:
@@ -476,6 +525,11 @@ def main():
                         help="FastICA max iterations.")
     parser.add_argument("--ica-tol", type=float, default=1e-4,
                         help="FastICA convergence tolerance.")
+    parser.add_argument("--chunk-rows", type=int, default=8192,
+                        help="Rows per chunk for streaming ops (mean/std, OLS, "
+                             "residualize, IncrementalPCA). Smaller = lower "
+                             "peak RAM, marginally slower. 8192 rows × 6912 "
+                             "features × 4 bytes ≈ 220 MB per chunk.")
     args = parser.parse_args()
 
     out_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
@@ -533,39 +587,85 @@ def main():
         all_sizes.append(np.full(len(ids), size, dtype=np.int32))
         Xs.append(X)
         rs.append(ratings)
-    X = np.vstack(Xs).astype(np.float64)
+    # Stack into a single float32 matrix and immediately release the per-size
+    # chunks (both Xs and the X refs held in `parts`). Staying in float32 here
+    # halves the data-matrix footprint vs float64 — randomized SVD does not
+    # need float64 and OLS on (rating, size_is_13, intercept) is well-conditioned
+    # at this N.
+    X = np.vstack(Xs)
+    del Xs
+    parts = [(size, ids, None, r) for size, ids, _, r in parts]
     sizes_col = np.concatenate(all_sizes)
     ratings = np.concatenate(rs)
     print(f"\n  joint matrix: {X.shape[0]} problems × {X.shape[1]} features")
     unique_counts = dict(zip(*[a.tolist() for a in np.unique(sizes_col, return_counts=True)]))
     print(f"  size composition: {unique_counts}")
 
+    chunk_rows = max(1024, int(args.chunk_rows))
+    print(f"\n  streaming chunk size: {chunk_rows} rows", flush=True)
+
     print("\nZ-scoring per feature...", flush=True)
-    feature_means = X.mean(axis=0)
-    feature_stds = X.std(axis=0)
+    # Streaming mean/std avoids np.std's (N, D) float64 temp (~8 GB).
+    fm64, fs64 = _chunked_mean_std(X, chunk_rows)
+    feature_means = fm64.astype(np.float32)
+    feature_stds = fs64.astype(np.float32)
     keep_feat = feature_stds >= args.std_floor
     n_dead = int((~keep_feat).sum())
     print(f"  dropping {n_dead}/{len(keep_feat)} dead channels (std < {args.std_floor})")
     feature_means = feature_means[keep_feat]
     feature_stds = feature_stds[keep_feat]
-    X = X[:, keep_feat]
-    Z = (X - feature_means) / feature_stds
+    if n_dead > 0:
+        # Fancy-indexing column mask copies the kept slab into a fresh (N, D_kept)
+        # buffer; the old X is GC'd once reassigned. Brief ~2× transient.
+        X = X[:, keep_feat]
+    # In-place broadcast subtract / divide; no temp.
+    for s in range(0, X.shape[0], chunk_rows):
+        e = min(s + chunk_rows, X.shape[0])
+        X[s:e] -= feature_means
+        X[s:e] /= feature_stds
 
     print("Residualizing rating + size_is_13 jointly per feature (vectorized OLS)...",
           flush=True)
-    size_is_13 = (sizes_col == 13).astype(np.float64)
-    X_design = np.column_stack([ratings, size_is_13, np.ones_like(ratings)])  # (N, 3)
-    XtX = X_design.T @ X_design
-    XtX_inv = np.linalg.inv(XtX)
-    coefs = XtX_inv @ (X_design.T @ Z)  # (3, D)
-    R = Z - X_design @ coefs
-    print(f"  residual feature norms: mean={R.std(axis=0).mean():.3f} "
-          f"min={R.std(axis=0).min():.3f} max={R.std(axis=0).max():.3f}")
+    size_is_13 = (sizes_col == 13).astype(np.float32)
+    X_design = np.column_stack([
+        ratings.astype(np.float32), size_is_13,
+        np.ones_like(ratings, dtype=np.float32),
+    ])  # (N, 3) float32
+    XtX_inv = np.linalg.inv((X_design.T @ X_design).astype(np.float64)).astype(np.float32)
+    coefs = XtX_inv @ _chunked_design_T_X(X_design, X, chunk_rows)  # (3, D) float32
+    _chunked_residualize(X, X_design, coefs, chunk_rows)
+    _, residual_std = _chunked_mean_std(X, chunk_rows)
+    print(f"  residual feature norms: mean={residual_std.mean():.3f} "
+          f"min={residual_std.min():.3f} max={residual_std.max():.3f}")
 
     K = args.n_components
-    print(f"\nFitting PCA n_components={K} (svd_solver=randomized)...", flush=True)
-    pca = PCA(n_components=K, svd_solver="randomized", random_state=args.seed)
-    raw_scores = pca.fit_transform(R)
+    N = X.shape[0]
+    print(f"\nFitting IncrementalPCA n_components={K} batch_size={chunk_rows}...",
+          flush=True)
+    # IncrementalPCA accumulates an incremental SVD over fixed-size batches —
+    # peak transient memory is one batch's worth instead of the (N, D) copies
+    # randomized PCA materializes internally. copy=False lets it mean-center
+    # each batch in place (we discard X right after transforming).
+    ipca = IncrementalPCA(n_components=K, copy=False, batch_size=chunk_rows)
+    for s in range(0, N, chunk_rows):
+        e = min(s + chunk_rows, N)
+        ipca.partial_fit(X[s:e])
+
+    raw_scores = np.empty((N, K), dtype=np.float32)
+    pca_mean_f32 = ipca.mean_.astype(np.float32)
+    components_T_f32 = ipca.components_.astype(np.float32).T  # (D, K)
+    for s in range(0, N, chunk_rows):
+        e = min(s + chunk_rows, N)
+        # Manual mean-center + project keeps the per-chunk temp at chunk_rows × D
+        # and avoids sklearn's transform() allocating a same-size copy.
+        chunk = X[s:e] - pca_mean_f32
+        raw_scores[s:e] = chunk @ components_T_f32
+    del X, components_T_f32
+
+    # Shim onto the rest of the pipeline (which expects sklearn PCA attribute
+    # names). IncrementalPCA exposes the same attributes; alias to keep edits
+    # contained.
+    pca = ipca
     component_stds = np.sqrt(pca.explained_variance_).astype(np.float64)
     component_stds[component_stds < 1e-9] = 1.0
     scores = (raw_scores / component_stds).astype(np.float32)

@@ -6,385 +6,327 @@
       "positive": "prevent opponent from splitting eyespace",
       "negative": null,
       "auto_mapped_from": 0,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.975
     },
     "1": {
       "positive": "split your own eyespace in two",
       "negative": null,
       "auto_mapped_from": 1,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9557
     },
     "2": {
       "positive": "play a throw-in",
       "negative": null,
       "auto_mapped_from": 2,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9391
     },
     "3": {
+      "positive": null,
+      "negative": null
+    },
+    "4": {
       "positive": "play ko threats",
       "negative": null,
       "auto_mapped_from": 3,
-      "auto_mapped_cos": 1.0
-    },
-    "4": {
-      "positive": "capture stones in response to atari",
-      "negative": null,
-      "auto_mapped_from": 4,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9717
     },
     "5": {
-      "positive": "play endgame ko",
-      "negative": null,
-      "auto_mapped_from": 5,
-      "auto_mapped_cos": 1.0
-    },
-    "6": {
       "positive": "fill ko",
       "negative": null,
       "auto_mapped_from": 6,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9535
+    },
+    "6": {
+      "positive": "play endgame ko",
+      "negative": null,
+      "auto_mapped_from": 5,
+      "auto_mapped_cos": 0.8838
     },
     "7": {
-      "positive": "take a liberty",
-      "negative": null,
-      "auto_mapped_from": 7,
-      "auto_mapped_cos": 1.0
-    },
-    "8": {
       "positive": "take ko to kill",
       "negative": null,
       "auto_mapped_from": 8,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9317
+    },
+    "8": {
+      "positive": "take a liberty",
+      "negative": null,
+      "auto_mapped_from": 7,
+      "auto_mapped_cos": 0.9155
     },
     "9": {
-      "positive": "play 1-1 to capture a stone",
-      "negative": null,
-      "auto_mapped_from": 9,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "10": {
       "positive": "connect on the first line",
       "negative": null,
       "auto_mapped_from": 10,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9432
     },
     "11": {
-      "positive": "play center of big eye to prevent two eyes",
-      "negative": null,
-      "auto_mapped_from": 11,
-      "auto_mapped_cos": 1.0
-    },
-    "12": {
       "positive": "take ko to gain a liberty when your group is in atari",
       "negative": null,
       "auto_mapped_from": 12,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.8701
+    },
+    "12": {
+      "positive": "play center of big eye to prevent two eyes",
+      "negative": null,
+      "auto_mapped_from": 11,
+      "auto_mapped_cos": 0.9028
     },
     "13": {
+      "positive": null,
+      "negative": null
+    },
+    "14": {
       "positive": "extend a single stone in atari",
       "negative": null,
       "auto_mapped_from": 13,
-      "auto_mapped_cos": 1.0
-    },
-    "14": {
-      "positive": "capture the critical stone when both groups are in atari on the second line",
-      "negative": null,
-      "auto_mapped_from": 14,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.887
     },
     "15": {
+      "positive": null,
+      "negative": null
+    },
+    "16": {
       "positive": "connect stones short on liberties solidly",
       "negative": null,
       "auto_mapped_from": 15,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.8779
     },
-    "16": {
+    "17": {
       "positive": "prevent a second eye",
       "negative": null,
       "auto_mapped_from": 16,
-      "auto_mapped_cos": 1.0
-    },
-    "17": {
-      "positive": "extend cutting stones in atari",
-      "negative": null,
-      "auto_mapped_from": 17,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9636
     },
     "18": {
-      "positive": "take ko to make dead shape",
-      "negative": null,
-      "auto_mapped_from": 18,
-      "auto_mapped_cos": 1.0
-    },
-    "19": {
       "positive": "connect two groups without immediate liberty issues",
       "negative": null,
       "auto_mapped_from": 19,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9726
+    },
+    "19": {
+      "positive": "extend cutting stones in atari",
+      "negative": null,
+      "auto_mapped_from": 17,
+      "auto_mapped_cos": 0.9164
     },
     "20": {
-      "positive": "capture a stone to gain a liberty",
-      "negative": null,
-      "auto_mapped_from": 20,
-      "auto_mapped_cos": 1.0
-    },
-    "21": {
-      "positive": "prevent opponent from connecting on the first line",
-      "negative": null,
-      "auto_mapped_from": 21,
-      "auto_mapped_cos": 1.0
-    },
-    "22": {
-      "positive": "remove ko threats",
-      "negative": null,
-      "auto_mapped_from": 22,
-      "auto_mapped_cos": 1.0
-    },
-    "23": {
       "positive": "connect under on the 2nd line",
       "negative": null,
       "auto_mapped_from": 23,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9517
     },
-    "24": {
-      "positive": "capture multiple stones",
-      "negative": null,
-      "auto_mapped_from": 24,
-      "auto_mapped_cos": 0.9999
-    },
-    "25": {
-      "positive": "take a liberty when a fuseki fight starts",
-      "negative": null,
-      "auto_mapped_from": 25,
-      "auto_mapped_cos": 1.0
-    },
-    "26": {
-      "positive": "save stones by connecting or capturing",
-      "negative": null,
-      "auto_mapped_from": 26,
-      "auto_mapped_cos": 1.0
-    },
-    "27": {
-      "positive": "play atari",
-      "negative": null,
-      "auto_mapped_from": 27,
-      "auto_mapped_cos": 1.0
-    },
-    "28": {
-      "positive": "kill a big group",
-      "negative": null,
-      "auto_mapped_from": 28,
-      "auto_mapped_cos": 1.0
-    },
-    "29": {
-      "positive": "play on the first line to make the second eye",
-      "negative": null,
-      "auto_mapped_from": 29,
-      "auto_mapped_cos": 1.0
-    },
-    "30": {
+    "21": {
       "positive": "play from inside during semeai",
       "negative": null,
       "auto_mapped_from": 30,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.8638
     },
-    "31": {
-      "positive": "atari single stone on the second line towards the edge",
+    "22": {
+      "positive": "prevent opponent from connecting on the first line",
       "negative": null,
-      "auto_mapped_from": 31,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_from": 21,
+      "auto_mapped_cos": 0.9027
     },
-    "32": {
+    "23": {
+      "positive": "play on the first line to make the second eye",
+      "negative": null,
+      "auto_mapped_from": 29,
+      "auto_mapped_cos": 0.9062
+    },
+    "24": {
+      "positive": null,
+      "negative": null
+    },
+    "25": {
+      "positive": "save stones by connecting or capturing",
+      "negative": null,
+      "auto_mapped_from": 26,
+      "auto_mapped_cos": 0.8938
+    },
+    "26": {
+      "positive": null,
+      "negative": null
+    },
+    "27": {
+      "positive": null,
+      "negative": null
+    },
+    "28": {
+      "positive": "remove ko threats",
+      "negative": null,
+      "auto_mapped_from": 22,
+      "auto_mapped_cos": 0.8869
+    },
+    "29": {
       "positive": "cut",
       "negative": null,
       "auto_mapped_from": 32,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.8772
     },
-    "33": {
-      "positive": "solidly connect a hane",
+    "30": {
+      "positive": "kill a big group",
       "negative": null,
-      "auto_mapped_from": 33,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_from": 28,
+      "auto_mapped_cos": 0.8964
     },
-    "34": {
-      "positive": "push through to introduce a cut",
-      "negative": null,
-      "auto_mapped_from": 34,
-      "auto_mapped_cos": 1.0
-    },
-    "35": {
+    "31": {
       "positive": "connect back after wedge encounters atari",
       "negative": null,
       "auto_mapped_from": 35,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.9151
     },
-    "36": {
-      "positive": "play a 1-point reverse sente",
+    "32": {
+      "positive": "solidly connect a hane",
       "negative": null,
-      "auto_mapped_from": 36,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_from": 33,
+      "auto_mapped_cos": 0.9055
     },
-    "37": {
-      "positive": "take a liberty with 2-2",
-      "negative": null,
-      "auto_mapped_from": 37,
-      "auto_mapped_cos": 1.0
+    "33": {
+      "positive": null,
+      "negative": null
     },
-    "38": {
-      "positive": "make an eye or add a liberty in a capture race",
-      "negative": null,
-      "auto_mapped_from": 38,
-      "auto_mapped_cos": 1.0
-    },
-    "39": {
-      "positive": "play a 1-point sente endgame",
-      "negative": null,
-      "auto_mapped_from": 39,
-      "auto_mapped_cos": 1.0
-    },
-    "40": {
+    "34": {
       "positive": "play a first-line move for a magic liberty",
       "negative": null,
       "auto_mapped_from": 40,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.8706
     },
-    "41": {
-      "positive": "play a 2nd-line double-sente endgame",
+    "35": {
+      "positive": "play a 1-point reverse sente",
       "negative": null,
-      "auto_mapped_from": 41,
-      "auto_mapped_cos": 0.9999
+      "auto_mapped_from": 36,
+      "auto_mapped_cos": 0.9278
     },
-    "42": {
+    "36": {
+      "positive": "push through to introduce a cut",
+      "negative": null,
+      "auto_mapped_from": 34,
+      "auto_mapped_cos": 0.8855
+    },
+    "37": {
+      "positive": "play a 1-point sente endgame",
+      "negative": null,
+      "auto_mapped_from": 39,
+      "auto_mapped_cos": 0.8887
+    },
+    "38": {
+      "positive": null,
+      "negative": null
+    },
+    "39": {
+      "positive": null,
+      "negative": null
+    },
+    "40": {
       "positive": "play inside",
       "negative": null,
       "auto_mapped_from": 42,
-      "auto_mapped_cos": 1.0
+      "auto_mapped_cos": 0.875
     },
-    "43": {
-      "positive": "connect and cut with a single move",
-      "negative": null,
-      "auto_mapped_from": 43,
-      "auto_mapped_cos": 1.0
-    },
-    "44": {
-      "positive": "connect to protect shape",
-      "negative": null,
-      "auto_mapped_from": 44,
-      "auto_mapped_cos": 1.0
-    },
-    "45": {
-      "positive": "remove aji",
-      "negative": null,
-      "auto_mapped_from": 45,
-      "auto_mapped_cos": 1.0
-    },
-    "46": {
-      "positive": "take ko to gain a liberty",
-      "negative": null,
-      "auto_mapped_from": 46,
-      "auto_mapped_cos": 0.9999
-    },
-    "47": {
+    "41": {
       "positive": "atari 2nd line stone towards the edge",
       "negative": null,
       "auto_mapped_from": 47,
-      "auto_mapped_cos": 0.9999
+      "auto_mapped_cos": 0.8741
+    },
+    "42": {
+      "positive": "connect and cut with a single move",
+      "negative": null,
+      "auto_mapped_from": 43,
+      "auto_mapped_cos": 0.9423
+    },
+    "43": {
+      "positive": "connect to protect shape",
+      "negative": null,
+      "auto_mapped_from": 44,
+      "auto_mapped_cos": 0.907
+    },
+    "44": {
+      "positive": null,
+      "negative": null
+    },
+    "45": {
+      "positive": null,
+      "negative": null
+    },
+    "46": {
+      "positive": null,
+      "negative": null
+    },
+    "47": {
+      "positive": null,
+      "negative": null
     },
     "48": {
+      "positive": null,
+      "negative": null
+    },
+    "49": {
       "positive": "play a defensive fix",
       "negative": null,
       "auto_mapped_from": 48,
-      "auto_mapped_cos": 1.0
-    },
-    "49": {
-      "positive": "atari the cutting group while you still can",
-      "negative": null,
-      "auto_mapped_from": 49,
-      "auto_mapped_cos": 0.9999
+      "auto_mapped_cos": 0.9294
     },
     "50": {
-      "positive": "connect under",
-      "negative": null,
-      "auto_mapped_from": 50,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "51": {
-      "positive": "connect stones",
-      "negative": null,
-      "auto_mapped_from": 51,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "52": {
-      "positive": "make miai",
-      "negative": null,
-      "auto_mapped_from": 52,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "53": {
-      "positive": "back off",
-      "negative": null,
-      "auto_mapped_from": 53,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "54": {
-      "positive": "attack",
-      "negative": null,
-      "auto_mapped_from": 54,
-      "auto_mapped_cos": 0.9998
+      "positive": null,
+      "negative": null
     },
     "55": {
-      "positive": "back off loosely",
-      "negative": null,
-      "auto_mapped_from": 55,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "56": {
-      "positive": "save cutting stones",
-      "negative": null,
-      "auto_mapped_from": 56,
-      "auto_mapped_cos": 0.9999
+      "positive": null,
+      "negative": null
     },
     "57": {
-      "positive": "play a simple endgame move",
-      "negative": null,
-      "auto_mapped_from": 57,
-      "auto_mapped_cos": 0.9997
+      "positive": null,
+      "negative": null
     },
     "58": {
-      "positive": "cut for aji",
-      "negative": null,
-      "auto_mapped_from": 58,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "59": {
-      "positive": "make life",
-      "negative": null,
-      "auto_mapped_from": 59,
-      "auto_mapped_cos": 0.9999
+      "positive": null,
+      "negative": null
     },
     "60": {
-      "positive": "capture stones",
-      "negative": null,
-      "auto_mapped_from": 60,
-      "auto_mapped_cos": 0.9997
+      "positive": null,
+      "negative": null
     },
     "61": {
-      "positive": "cut opponent's stones",
-      "negative": null,
-      "auto_mapped_from": 61,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "62": {
-      "positive": "read carefully",
-      "negative": null,
-      "auto_mapped_from": 62,
-      "auto_mapped_cos": 1.0
+      "positive": null,
+      "negative": null
     },
     "63": {
-      "positive": "connect and block",
-      "negative": null,
-      "auto_mapped_from": 63,
-      "auto_mapped_cos": 0.9999
+      "positive": null,
+      "negative": null
     }
   }
 }

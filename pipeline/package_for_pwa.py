@@ -8,6 +8,7 @@ import zipfile
 import numpy as np
 import pandas as pd
 import sgfmill.sgf
+from scipy.optimize import curve_fit
 
 # --- Path Setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,7 +16,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.configurations import ALL_BOARD_SIZES
-from utils.katago_queries import get_all_ranks, get_rank_str
+from utils.katago_queries import get_all_ranks
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 
 
@@ -24,6 +25,83 @@ from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 EMBEDDING_DTYPE = np.float16
 EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
+
+# Rating-to-rank mapping. Each problem's raw rating r (natural-log-odds skill,
+# from pipeline.rank_tsumegos_and_bots) is mapped to a true-handicap-stones
+# axis via r = A·exp(k·x_handi) + C, then linearly to the PWA's 0..1 axis
+# where x = -17 (true 20k) -> 0 and x = +11 (true 9d) -> 1. The PWA axis is
+# thus linear in handicap stones, which is the underlying definition of rank.
+#
+# The rating model in rank_tsumegos_and_bots is scale-invariant under joint
+# additive shifts of (bot ratings, problem ratings), so the absolute level
+# of r drifts every time the model is refit on a new corpus. We therefore
+# can't hardcode (A, k, C) — they need to be re-fit at packaging time from
+# the *current* bot_ratings_final.csv against a stable handicap-stone
+# anchor. BOT_HANDI_RANK below is that anchor: the bots' 19x19 handicap-
+# stone strength from auxiliary/calibrate_handicap_ranks.py --report-only,
+# which is independent of the tsumego corpus and stable across rating
+# refits. Per-bot SE in the handi calibration is ~0.2-0.6 stones; refresh
+# the table if calibration_handicap_sgf/ grows substantially.
+BOT_HANDI_RANK = {
+    "20k": -14.59, "19k": -14.15, "18k": -13.00, "17k": -13.01,
+    "16k": -12.21, "15k": -12.06, "14k": -10.86, "13k": -10.54,
+    "12k": -9.66,  "11k": -8.85,  "10k":  -8.39, "9k":   -7.63,
+    "8k":   -6.07, "7k":   -5.11, "6k":   -4.02, "5k":   -2.77,
+    "4k":   -1.19, "3k":    0.00, "2k":   +1.36, "1k":   +2.54,
+    "1d":   +3.76, "2d":   +5.12, "3d":   +5.93, "4d":   +6.85,
+    "5d":   +7.24, "6d":   +7.63, "7d":   +7.69, "8d":   +8.01,
+    "9d":   +8.56,
+}
+PWA_X0 = -17.0   # true-handi-stones at PWA axis 0 (nominal 20k)
+PWA_X1 = +11.0   # true-handi-stones at PWA axis 1 (nominal 9d)
+PWA_SPAN = PWA_X1 - PWA_X0
+# Margin above the fit's asymptote C; keeps ln((r - C)/A) well-conditioned
+# for the rare ultra-easy problem that ends up within an r-hair of C. At
+# 0.1, neither current corpus actually clamps; raise (e.g. to 0.2) if a
+# future regenerated corpus starts producing problems with r ≤ C + 0.1.
+RATING_FLOOR_MARGIN = 0.1
+
+
+def fit_rating_curve(ratings_dir):
+    """Fit r = A·exp(k·x_handi) + C against the current humanv0 bot ratings.
+
+    Reads ratings_dir/bot_ratings_final.csv, joins each humanv0 bot (no
+    temperature variant) against BOT_HANDI_RANK, and least-squares-fits the
+    three-parameter exponential. Returns (A, k, C). The fit is the anchor
+    between the freely-drifting tsumego rating scale and the stable
+    handicap-stone scale, and must be recomputed every time the rating
+    model is refit (i.e. every packaging run)."""
+    bot_ratings_df = pd.read_csv(os.path.join(ratings_dir, "bot_ratings_final.csv"))
+    xs, ys = [], []
+    for _, row in bot_ratings_df.iterrows():
+        name = row["bot_id"]
+        if not name.startswith("b18c384nbt-humanv0_"):
+            continue
+        label = name[len("b18c384nbt-humanv0_"):]
+        if "_t" in label:  # temperature variants share a base bot's name suffix
+            continue
+        if label not in BOT_HANDI_RANK:
+            continue
+        xs.append(BOT_HANDI_RANK[label])
+        ys.append(float(row["rating"]))
+
+    if len(xs) < 5:
+        raise RuntimeError(
+            f"not enough humanv0 bots matched to BOT_HANDI_RANK at {ratings_dir} "
+            f"({len(xs)} found); check bot_id naming")
+
+    xs, ys = np.array(xs), np.array(ys)
+    # Initial guess scaled to the data range; curve_fit's default Levenberg-
+    # Marquardt walks home from here in <50 iters on either corpus.
+    y_range = ys.max() - ys.min()
+    x_range = xs.max() - xs.min()
+    p0 = [y_range / 2.0, float(np.log(2.0)) / x_range, ys.min() - y_range / 2.0]
+    (A, k, C), _ = curve_fit(
+        lambda x, A, k, C: A * np.exp(k * x) + C, xs, ys,
+        p0=p0, maxfev=10000,
+    )
+    rmse = float(np.sqrt(np.mean((ys - (A * np.exp(k * xs) + C)) ** 2)))
+    return float(A), float(k), float(C), rmse
 
 GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matches KataGo / GTP convention
 
@@ -252,38 +330,38 @@ def compute_ratings_hash(metadata):
 
 
 def print_rating_distribution(metadata):
-    """Prints the final distribution of problems by rating."""
+    """Prints the final distribution of problems by named rank.
+
+    Ratings can extend beyond [0, 1] because the rating-to-rank curve doesn't
+    clamp. Bucket index i = floor(rating * num_ranks); i in [0, num_ranks-1]
+    covers 20k..9d, i < 0 covers ranks weaker than 20k (21k, 22k, ...), and
+    i >= num_ranks covers ranks stronger than 9d (10d, 11d, ...).
+    """
     if not metadata:
         print("No metadata to generate distribution from.")
         return
 
-    rating_distribution = sorted([item['rating'] for item in metadata])
-
-    print("\n--- Final Rating Distribution ---")
-    print("\n--- Final Rating Distribution ---")
-    
-    total_problems = len(rating_distribution)
     num_ranks = len(get_all_ranks())
-    
-    for i, rank in enumerate(get_all_ranks()):
-        min_r = i / num_ranks
-        max_r = (i + 1) / num_ranks
-        
-        # Handle floating point issues at boundaries slightly? 
-        # Actually standard half-open [min, max) is fine, except for the very last one which should include 1.0
-        if i == num_ranks - 1:
-             count = sum(1 for x in rating_distribution if min_r <= x <= max_r + 1e-9)
-             qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rating'] <= max_r + 1e-9]
-             raw_ratings_in_range = [item['raw_rating'] for item in metadata if min_r <= item['rating'] <= max_r + 1e-9]
-        else:
-             count = sum(1 for x in rating_distribution if min_r <= x < max_r)
-             qualities_in_range = [item['quality'] for item in metadata if min_r <= item['rating'] < max_r]
-             raw_ratings_in_range = [item['raw_rating'] for item in metadata if min_r <= item['rating'] < max_r]
+    total_problems = len(metadata)
 
+    buckets = {}
+    for item in metadata:
+        i = int(np.floor(item['rating'] * num_ranks))
+        buckets.setdefault(i, []).append(item)
+
+    if not buckets:
+        return
+
+    print("\n--- Final Rating Distribution ---")
+    for i in range(min(buckets), max(buckets) + 1):
+        items = buckets.get(i, [])
+        count = len(items)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
-        avg_quality = sum(qualities_in_range) / len(qualities_in_range) if qualities_in_range else 0.0
-        avg_raw_rating = sum(raw_ratings_in_range) / len(raw_ratings_in_range) if raw_ratings_in_range else 0.0
-        print(f"{get_rank_str(rank):>4s}: {count:>5d} problems ({percentage:5.1f}%, avg quality: {avg_quality:.3f}, avg rating: {avg_raw_rating:.3f})")
+        avg_quality = sum(x['quality'] for x in items) / count if items else 0.0
+        avg_raw_rating = sum(x['raw_rating'] for x in items) / count if items else 0.0
+        label = f"{20 - i}k" if i < 20 else f"{i - 19}d"
+        print(f"{label:>4s}: {count:>5d} problems ({percentage:5.1f}%, "
+              f"avg quality: {avg_quality:.3f}, avg rating: {avg_raw_rating:.3f})")
 
 
 def load_embeddings(board_size):
@@ -378,26 +456,34 @@ def process_size(board_size, output_dir):
     tsumego_ratings_df = tsumego_ratings_df.sort_values(
         by='rating', ascending=True).reset_index(drop=True)
 
+    # --- TEMPORARY: pre-rewrite curve revived as a stop-gap -----------------
+    # The handi-anchored fit (fit_rating_curve, BOT_HANDI_RANK, PWA_X0/PWA_X1
+    # above) infra stays in place for the proper mapping — but until the
+    # calibrate_handicap_ranks run delivers anchors past +8.55 corrected
+    # stones, that curve under-curves the dan range and inflates every user's
+    # displayed rank (a 4d player landed at ~14d). This block reverts to the
+    # pre-rewrite k=0.12, two-anchor (8k, 3k named bots), rank-index PWA
+    # mapping that was on the site before the curvature change — empirically
+    # produces sensible per-user displays even though it's known to be wrong
+    # in shape (named-rank-index, not corrected handi). Replace this block
+    # with the handi-anchored mapping once the new bot anchors land.
     bot_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
-    # Exponential mapping anchored on humanv0_8k and humanv0_3k bots.
-    # 8k is index 12 (center 12.5) and 3k is index 17 (center 17.5) on the
-    # 0-based 20k..9d scale.
-    bot_8k_rating = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k']['rating'].values[0]
-    bot_3k_rating = bot_ratings_df[bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k']['rating'].values[0]
-    x1, x2 = 12.5, 17.5
+    bot_8k_rating = float(bot_ratings_df.loc[
+        bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k', 'rating'].values[0])
+    bot_3k_rating = float(bot_ratings_df.loc[
+        bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k', 'rating'].values[0])
+    x1, x2 = 12.5, 17.5  # named-rank indices: 8k = 12.5, 3k = 17.5 on 0..28
     y1, y2 = bot_8k_rating, bot_3k_rating
-    k = 0.12  # variance decay constant
-    A = (y2 - y1) / (np.exp(k * x2) - np.exp(k * x1))
-    C = y1 - A * np.exp(k * x1)
-    print(f"  exponential mapping: A={A:.6f}, C={C:.6f}")
+    k_tmp = 0.12
+    A_tmp = (y2 - y1) / (np.exp(k_tmp * x2) - np.exp(k_tmp * x1))
+    C_tmp = y1 - A_tmp * np.exp(k_tmp * x1)
+    print(f"  [TEMP] r = {A_tmp:.4f}*exp({k_tmp}*x_index) + {C_tmp:.4f}  "
+          f"(stop-gap; revert when new handi anchors land)")
 
-    # Rating -> rank index -> [0, 1] PWA scale, clamped.
-    tsumego_ratings_df['rank_index'] = (tsumego_ratings_df['rating'] - C) / A
-    tsumego_ratings_df['rank_index'] = tsumego_ratings_df['rank_index'].clip(lower=1e-9)
-    tsumego_ratings_df['rank_index'] = np.log(tsumego_ratings_df['rank_index']) / k
-    tsumego_ratings_df['pwa_rating'] = tsumego_ratings_df['rank_index'] / 29.0
-    tsumego_ratings_df['rating'] = tsumego_ratings_df['pwa_rating'].clip(0.0, 1.0)
-    tsumego_ratings_df.drop(columns=['rank_index', 'pwa_rating'], inplace=True)
+    r_floored = tsumego_ratings_df['rating'].clip(lower=C_tmp + RATING_FLOOR_MARGIN)
+    rank_index = np.log((r_floored - C_tmp) / A_tmp) / k_tmp
+    tsumego_ratings_df['rating'] = rank_index / 29.0
+    # --- end TEMPORARY -------------------------------------------------------
 
     tsumego_ratings_map = dict(zip(
         tsumego_ratings_df['tsumego_id'],
