@@ -6,7 +6,9 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook } from './state.js';
+import { maybeShowRankSurvey } from './rank-survey.js';
+registerAcceptClicksHook(maybeShowRankSurvey);
 
 try {
     // Initialize Sentry

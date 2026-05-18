@@ -57,7 +57,12 @@ const localization = {
     preparingImage: '正在准备图片…',
     shareFailed: '分享失败',
     imageCaptureFailed: '图片捕获失败',
-    boardSizePickerTitle: '选择棋盘大小'
+    boardSizePickerTitle: '选择棋盘大小',
+    rankSurveyTitle: '您目前活跃的段位有哪些？',
+    rankSurveyHint: '在您下棋的任何服务器或组织中选择您当前的段位。可以全部留空。',
+    rankSurveyNone: '无',
+    rankSurveySubmit: '提交',
+    rankSurveyDismiss: '稍后再说'
   },
   ja: {
     kyu: '級',
@@ -113,7 +118,12 @@ const localization = {
     preparingImage: '画像を準備中…',
     shareFailed: '共有に失敗しました',
     imageCaptureFailed: '画像のキャプチャに失敗しました',
-    boardSizePickerTitle: '盤の大きさを選んでください'
+    boardSizePickerTitle: '盤の大きさを選んでください',
+    rankSurveyTitle: '現在の棋力（段位・級位）を教えてください（複数可）',
+    rankSurveyHint: '対局している各サーバーや団体での現在の段位／級位を選択してください。空欄のままでも構いません。',
+    rankSurveyNone: 'なし',
+    rankSurveySubmit: '送信',
+    rankSurveyDismiss: '後で'
   },
   ko: {
     kyu: '급',
@@ -169,7 +179,12 @@ const localization = {
     preparingImage: '이미지를 준비하는 중…',
     shareFailed: '공유 실패',
     imageCaptureFailed: '이미지 캡처 실패',
-    boardSizePickerTitle: '바둑판 크기를 선택하세요'
+    boardSizePickerTitle: '바둑판 크기를 선택하세요',
+    rankSurveyTitle: '현재 활동 중인 급수/단위를 모두 알려주세요',
+    rankSurveyHint: '두는 서버나 단체별로 현재 급수/단위를 선택해 주세요. 모두 비워두어도 됩니다.',
+    rankSurveyNone: '없음',
+    rankSurveySubmit: '제출',
+    rankSurveyDismiss: '나중에'
   },
   en: {
     kyu: 'kyu',
@@ -229,7 +244,12 @@ const localization = {
     preparingImage: 'Preparing image…',
     shareFailed: 'Failed to share',
     imageCaptureFailed: 'Failed to capture image',
-    boardSizePickerTitle: 'Pick a board size'
+    boardSizePickerTitle: 'Pick a board size',
+    rankSurveyTitle: "What are your current active ranks?",
+    rankSurveyHint: 'Pick your current rank on any server or organization where you play. Leave any as None if you don’t play there.',
+    rankSurveyNone: 'None',
+    rankSurveySubmit: 'Submit',
+    rankSurveyDismiss: 'Not now'
   }
 };
 

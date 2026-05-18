@@ -367,6 +367,13 @@ export function setKifuReader(kifuReader) {
     state.game = kifuReader ? kifuReader.game : null;
 }
 
+// Hooks fired on setAcceptClicks(true) — registered from main.js so state.js
+// doesn't import UI modules directly.
+const acceptClicksHooks = [];
+export function registerAcceptClicksHook(fn) {
+    acceptClicksHooks.push(fn);
+}
+
 export function setAcceptClicks(canAccept) {
     state.acceptClicks = canAccept;
     // After loadTsumego in the wrong-answer path, setAcceptClicks(true) fires
@@ -377,6 +384,9 @@ export function setAcceptClicks(canAccept) {
     // maybeReload sees ANALYZING and skips.
     if (canAccept && state.reloadPending) {
         setTimeout(maybeReload, 0);
+    }
+    if (canAccept) {
+        for (const fn of acceptClicksHooks) setTimeout(fn, 0);
     }
 }
 

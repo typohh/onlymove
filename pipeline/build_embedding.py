@@ -273,7 +273,7 @@ def write_or_remap_labels(
     K: int,
     prior_components=None,
     prior_mask=None,
-    cosine_threshold: float = 0.85,
+    cosine_threshold: float = 0.8,
 ):
     """Write or update labels.json across a PCA refit.
 

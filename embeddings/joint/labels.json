@@ -21,7 +21,7 @@
       "auto_mapped_cos": 0.9391
     },
     "3": {
-      "positive": null,
+      "positive": "capture stones in response to atari",
       "negative": null
     },
     "4": {
@@ -55,7 +55,7 @@
       "auto_mapped_cos": 0.9155
     },
     "9": {
-      "positive": null,
+      "positive": "take ko to make dead shape",
       "negative": null
     },
     "10": {
@@ -77,7 +77,7 @@
       "auto_mapped_cos": 0.9028
     },
     "13": {
-      "positive": null,
+      "positive": "capture multiple stones",
       "negative": null
     },
     "14": {
@@ -87,7 +87,7 @@
       "auto_mapped_cos": 0.887
     },
     "15": {
-      "positive": null,
+      "positive": "capture the critical stone when both groups are in atari on the second line",
       "negative": null
     },
     "16": {
@@ -139,7 +139,7 @@
       "auto_mapped_cos": 0.9062
     },
     "24": {
-      "positive": null,
+      "positive": "cut with atari",
       "negative": null
     },
     "25": {
@@ -149,11 +149,11 @@
       "auto_mapped_cos": 0.8938
     },
     "26": {
-      "positive": null,
+      "positive": "take a liberty when a fuseki fight starts",
       "negative": null
     },
     "27": {
-      "positive": null,
+      "positive": "capture a stone to gain a liberty",
       "negative": null
     },
     "28": {
@@ -187,7 +187,7 @@
       "auto_mapped_cos": 0.9055
     },
     "33": {
-      "positive": null,
+      "positive": "atari single stone on the second line towards the edge",
       "negative": null
     },
     "34": {
@@ -215,11 +215,11 @@
       "auto_mapped_cos": 0.8887
     },
     "38": {
-      "positive": null,
+      "positive": "play a 2nd-line double-sente endgame",
       "negative": null
     },
     "39": {
-      "positive": null,
+      "positive": "atari the cutting group while you still can",
       "negative": null
     },
     "40": {
@@ -247,23 +247,23 @@
       "auto_mapped_cos": 0.907
     },
     "44": {
-      "positive": null,
+      "positive": "solid connection",
       "negative": null
     },
     "45": {
-      "positive": null,
+      "positive": "prevent semedori",
       "negative": null
     },
     "46": {
-      "positive": null,
+      "positive": "throwin ko",
       "negative": null
     },
     "47": {
-      "positive": null,
+      "positive": "connect under",
       "negative": null
     },
     "48": {
-      "positive": null,
+      "positive": "play a simple endgame move",
       "negative": null
     },
     "49": {
@@ -273,59 +273,59 @@
       "auto_mapped_cos": 0.9294
     },
     "50": {
-      "positive": null,
+      "positive": "take ko to gain a liberty",
       "negative": null
     },
     "51": {
-      "positive": null,
+      "positive": "atari",
       "negative": null
     },
     "52": {
-      "positive": null,
+      "positive": "capture stones",
       "negative": null
     },
     "53": {
-      "positive": null,
+      "positive": "atari before fix",
       "negative": null
     },
     "54": {
-      "positive": null,
+      "positive": "save cutting stones",
       "negative": null
     },
     "55": {
-      "positive": null,
+      "positive": "back off loosely",
       "negative": null
     },
     "56": {
-      "positive": null,
+      "positive": "make miai",
       "negative": null
     },
     "57": {
-      "positive": null,
+      "positive": "cut for aji",
       "negative": null
     },
     "58": {
-      "positive": null,
+      "positive": "make eyeshape",
       "negative": null
     },
     "59": {
-      "positive": null,
+      "positive": "defend territory",
       "negative": null
     },
     "60": {
-      "positive": null,
+      "positive": "read carefully",
       "negative": null
     },
     "61": {
-      "positive": null,
+      "positive": "sente endgame",
       "negative": null
     },
     "62": {
-      "positive": null,
+      "positive": "defend territory with attack",
       "negative": null
     },
     "63": {
-      "positive": null,
+      "positive": "cut and connect",
       "negative": null
     }
   }

@@ -61,3 +61,16 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_enter
     ON recall_schedule(enter_at) WHERE enter_notified_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_recall_due_exit
     ON recall_schedule(exit_at)  WHERE exit_notified_at  IS NULL;
+
+-- One row per (user, server) rank declaration. The client surveys the user
+-- every ~2 months once they have a meaningful answer history; each submission
+-- inserts one row per non-empty server selection. Older rows stay so we can
+-- track rank drift over time.
+CREATE TABLE IF NOT EXISTS rank_surveys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    server TEXT NOT NULL,
+    rank TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rank_surveys_user ON rank_surveys(user_id);
