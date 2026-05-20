@@ -249,7 +249,10 @@ const localization = {
     rankSurveyHint: 'Pick your current rank on any server or organization where you play. Leave any as None if you don’t play there.',
     rankSurveyNone: 'None',
     rankSurveySubmit: 'Submit',
-    rankSurveyDismiss: 'Not now'
+    rankSurveyDismiss: 'Not now',
+    rankTranslationTitle: 'Your rank on other servers',
+    rankTranslationEmpty: 'No server estimate for this rank yet.',
+    rankTranslationClose: 'Close'
   }
 };
 

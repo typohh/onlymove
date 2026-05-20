@@ -1,9 +1,11 @@
+import argparse
 import hashlib
 import io
 import json
 import os
 import sys
 import zipfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -18,6 +20,7 @@ if PROJECT_ROOT not in sys.path:
 from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_queries import get_all_ranks
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
+from auxiliary.fit_statistics_shapes import CubicRatingCurve
 
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the
@@ -60,6 +63,42 @@ PWA_SPAN = PWA_X1 - PWA_X0
 # 0.1, neither current corpus actually clamps; raise (e.g. to 0.2) if a
 # future regenerated corpus starts producing problems with r ≤ C + 0.1.
 RATING_FLOOR_MARGIN = 0.1
+
+
+# Per-board rating→internal(EGF)-rank curves fitted by pipeline.fit_rank_curves
+# (EGF survey declarations as data, the cubic only as a shape prior). When this
+# file is present it is the source of truth for the displayed rank, so the rank
+# the PWA shows and pwa/tsumegos/rank_map.json agree by construction. When it is
+# absent we fall back to the bare cubic prior (see process_size).
+RATING_RANK_MAP_PATH = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
+_RATING_RANK_MAP = None
+
+
+def _load_rating_rank_map():
+    global _RATING_RANK_MAP
+    if _RATING_RANK_MAP is None:
+        if os.path.exists(RATING_RANK_MAP_PATH):
+            with open(RATING_RANK_MAP_PATH, "r", encoding="utf-8") as f:
+                _RATING_RANK_MAP = json.load(f)
+        else:
+            _RATING_RANK_MAP = {}
+    return _RATING_RANK_MAP
+
+
+def _rating_to_rank_index(ratings, knot_ratings, knot_rank_indices):
+    """Map raw ratings → 0..28 rank_index by linear interp over the fitted
+    curve's knots, extrapolating past either end with the end slope."""
+    xs = np.asarray(knot_ratings, dtype=float)
+    ys = np.asarray(knot_rank_indices, dtype=float)
+    r = np.asarray(ratings, dtype=float)
+    out = np.interp(r, xs, ys)  # clamps beyond the ends; fix up below
+    lo = r < xs[0]
+    hi = r > xs[-1]
+    if lo.any():
+        out[lo] = ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (r[lo] - xs[0])
+    if hi.any():
+        out[hi] = ys[-1] + (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) * (r[hi] - xs[-1])
+    return out
 
 
 def fit_rating_curve(ratings_dir):
@@ -115,20 +154,26 @@ def gtp_to_xy(gtp_coord):
     return x, y
 
 
-def project_cells_for_problem(per_cell_path, sgf_path):
-    """Load pre-projected per-cell embeddings for one tsumego and reorder to
-    SGF variation document order. Returns (fp16 (n_cells, K) array, n_cells),
-    or (None, 0) on missing/corrupt input.
+def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
+    """Load pre-projected per-cell embeddings for one tsumego in the order the
+    PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells), or
+    (None, 0) on missing/corrupt/empty input.
 
     Reads embeddings/joint/per_cell/<size>/<tid>.npz, written upstream by
-    build_embedding.write_per_cell_projections. The file already contains the
-    K-dim projections in extraction order — packaging just reorders rows by
-    the (x, y) → variation_index map. No PCA matmul, no raw 6912-dim
-    activation read; ~7.5 KB read per problem at K=64, n_cells≈60.
+    build_embedding.write_per_cell_projections. Those rows are in *extraction
+    order*, which is board-scan order (sorted by (y, x)) — NOT the order the PWA
+    uses. The PWA recovers a picked move's cell index via
+    children.indexOf(moveNode), i.e. SGF root-variation document order, then
+    Range-fetches that slice of the .embeddings.bin. So the bin MUST be written
+    in SGF-variation order; otherwise every picked-move lookup reads the wrong
+    cell's embedding. The reorder below is therefore load-bearing.
 
-    The PWA does a parallel walk over the SGF's root variations to compute a
-    picked-move's cell index; layouts must agree, so reordering is keyed off
-    the (x, y) → row map saved alongside the projected embeddings.
+    reorder_by_sgf=True (default) re-parses the SGF and reorders rows by the
+    (x, y) → variation_index map. The sgfmill parse dominates packaging time
+    (~60× the npz read), so it's the hot path — parallelize the caller, don't
+    skip this. reorder_by_sgf=False ships the npz rows as-is and is ONLY correct
+    if the .npz has been pre-reordered into SGF-variation order upstream; on the
+    current build_embedding output (board-scan order) it produces a corrupt bin.
     """
     if not os.path.exists(per_cell_path):
         return None, 0
@@ -141,6 +186,11 @@ def project_cells_for_problem(per_cell_path, sgf_path):
         print(f"  [warn] corrupt per_cell {per_cell_path}: {type(e).__name__}; "
               f"skipping per-cell sidecar for this problem", flush=True)
         return None, 0
+
+    if not reorder_by_sgf:
+        if embeddings.shape[0] == 0:
+            return None, 0
+        return embeddings.astype(EMBEDDING_DTYPE), int(embeddings.shape[0])
 
     with open(sgf_path, "rb") as f:
         game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
@@ -166,8 +216,96 @@ def project_cells_for_problem(per_cell_path, sgf_path):
     return np.stack(ordered_rows, axis=0).astype(EMBEDDING_DTYPE), len(ordered_rows)
 
 
+# Fixed DOS-epoch timestamp for every zip entry. zipfile.writestr stamps each
+# member with the current wall-clock time by default, which makes the zip bytes
+# (and thus the content hash used as the shard filename + referenced in
+# lookup.txt) change on every run even when nothing changed — forcing the PWA to
+# re-download every shard. Pinning the timestamp makes archives reproducible:
+# identical content -> identical bytes -> stable filename -> no spurious refetch.
+ZIP_ENTRY_DATE_TIME = (1980, 1, 1, 0, 0, 0)  # 1980 is the zip-format minimum
+
+
+def _zip_writestr(zf, name, data):
+    """writestr with a pinned timestamp and explicit DEFLATE, so byte output is
+    a deterministic function of (name, data) alone. A bare ZipInfo defaults to
+    STORED, so we set compress_type; external_attr matches zipfile's own
+    file-from-arcname default (0o600) to avoid any other run-to-run drift."""
+    info = zipfile.ZipInfo(filename=name, date_time=ZIP_ENTRY_DATE_TIME)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o600 << 16
+    zf.writestr(info, data)
+
+
+def _build_group_shard(task):
+    """Worker: build one shard's zip bytes (+ per-cell bin) entirely in memory.
+
+    Each group is independent — its zip, hash, and embedding bin depend only on
+    its own items — so this is the unit of parallelism. The parent process owns
+    all disk writes; this returns the bytes plus the metadata it needs. Lives at
+    module scope so ProcessPoolExecutor can pickle it.
+    """
+    (group_index, group_items, tsumegos_dir, per_cell_dir,
+     embed_cells_enabled, reorder_by_sgf) = task
+
+    min_rating = min(item["rating"] for item in group_items)
+    max_rating = max(item["rating"] for item in group_items)
+
+    # Build the per-shard per-cell embedding sidecar + index ahead of the
+    # zip so we can drop embeddings_index.json inside the same zip below.
+    bin_buffer = bytearray()
+    embeddings_index = {}
+    n_with_cells = n_without_cells = 0
+    if embed_cells_enabled:
+        for item in group_items:
+            tid = item["filename"].split(".")[0]
+            per_cell_path = os.path.join(per_cell_dir, tid + ".npz")
+            sgf_path = os.path.join(tsumegos_dir, item["filename"])
+            cells, n_cells = project_cells_for_problem(
+                per_cell_path, sgf_path, reorder_by_sgf=reorder_by_sgf)
+            if cells is None:
+                n_without_cells += 1
+                continue
+            offset = len(bin_buffer)
+            bin_buffer.extend(cells.tobytes())  # fp16 little-endian
+            embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
+            n_with_cells += 1
+
+    zip_content = io.BytesIO()
+    with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
+        for item in group_items:
+            file_path = os.path.join(tsumegos_dir, item["filename"])
+            with open(file_path, 'rb') as f:
+                _zip_writestr(temp_zip, item["filename"], f.read())
+
+        group_metadata_content = [
+            {k: v for k, v in item.items() if k != "group"}
+            for item in group_items
+        ]
+        _zip_writestr(temp_zip, "metadata.json",
+                      json.dumps(group_metadata_content, indent=2))
+
+        if embed_cells_enabled:
+            _zip_writestr(temp_zip, "embeddings_index.json",
+                          json.dumps({"problems": embeddings_index}))
+
+    zip_bytes = zip_content.getvalue()
+    zip_hash = hashlib.sha256(zip_bytes).hexdigest()[:8]
+
+    return {
+        "group_index": group_index,
+        "zip_hash": zip_hash,
+        "zip_bytes": zip_bytes,
+        "bin_bytes": bytes(bin_buffer) if (embed_cells_enabled and bin_buffer) else None,
+        "min_rating": min_rating,
+        "max_rating": max_rating,
+        "tsumego_ids": [item["filename"].split(".")[0] for item in group_items],
+        "n_with_cells": n_with_cells,
+        "n_without_cells": n_without_cells,
+    }
+
+
 def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="pwa",
-                    per_cell_dir=None):
+                    per_cell_dir=None, reorder_by_sgf=True, n_workers=None):
     """Sorts, groups, and packages tsumegos into zip files based on rating.
 
     Output layout:
@@ -183,6 +321,10 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
       - embeddings_index.json inside the zip listing {tid: {offset, n_cells}}.
     Without that arg, no sidecar is written — useful for "just rezip the
     SGFs" runs.
+
+    Shards are built in parallel across n_workers processes (default
+    os.cpu_count()); the parent serializes only the disk writes. reorder_by_sgf
+    is forwarded to project_cells_for_problem (see there).
     """
 
     metadata.sort(key=lambda x: x["rating"])
@@ -201,78 +343,55 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
 
     embed_cells_enabled = per_cell_dir is not None and os.path.isdir(per_cell_dir)
 
-    zip_metadata = []
+    grouped = {}
+    for item in metadata:
+        grouped.setdefault(item["group"], []).append(item)
+    tasks = [
+        (gi, items, tsumegos_dir, per_cell_dir, embed_cells_enabled, reorder_by_sgf)
+        for gi, items in sorted(grouped.items())
+    ]
+
+    if n_workers is None:
+        n_workers = os.cpu_count() or 1
+    n_workers = max(1, min(n_workers, len(tasks))) if tasks else 1
+
+    zip_metadata = []  # (group_index, entry) — sorted to group order before write
     new_lookup_entries = []  # entries for the size we are (re)building now
     n_with_cells = n_without_cells = 0
-    for group in range(group_count):
-        group_items = [item for item in metadata if item["group"] == group]
-        if not group_items:
-            continue
 
-        min_rating = min(item["rating"] for item in group_items)
-        max_rating = max(item["rating"] for item in group_items)
-
-        # Build the per-shard per-cell embedding sidecar + index ahead of the
-        # zip so we can drop embeddings_index.json inside the same zip below.
-        bin_buffer = bytearray()
-        embeddings_index = {}
-        if embed_cells_enabled:
-            for item in group_items:
-                tid = item["filename"].split(".")[0]
-                per_cell_path = os.path.join(per_cell_dir, tid + ".npz")
-                sgf_path = os.path.join(tsumegos_dir, item["filename"])
-                cells, n_cells = project_cells_for_problem(per_cell_path, sgf_path)
-                if cells is None:
-                    n_without_cells += 1
-                    continue
-                offset = len(bin_buffer)
-                bin_buffer.extend(cells.tobytes())  # fp16 little-endian
-                embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
-                n_with_cells += 1
-
-        zip_content = io.BytesIO()
-        with zipfile.ZipFile(zip_content, 'w', zipfile.ZIP_DEFLATED) as temp_zip:
-            for item in group_items:
-                file_path = os.path.join(tsumegos_dir, item["filename"])
-                with open(file_path, 'rb') as f:
-                    temp_zip.writestr(item["filename"], f.read())
-
-            group_metadata_content = [
-                {k: v for k, v in item.items() if k != "group"}
-                for item in group_items
-            ]
-            temp_zip.writestr("metadata.json",
-                              json.dumps(group_metadata_content, indent=2))
-
-            if embed_cells_enabled:
-                temp_zip.writestr(
-                    "embeddings_index.json",
-                    json.dumps({"problems": embeddings_index}),
-                )
-
-        zip_content.seek(0)
-        zip_hash = hashlib.sha256(zip_content.getvalue()).hexdigest()[:8]
-        zip_filename = f"{zip_hash}.zip"
-        zip_path = os.path.join(zip_dir, zip_filename)
-
-        with open(zip_path, 'wb') as f:
-            f.write(zip_content.getvalue())
-
-        if embed_cells_enabled and bin_buffer:
-            bin_filename = f"{zip_hash}.embeddings.bin"
-            bin_path = os.path.join(zip_dir, bin_filename)
-            with open(bin_path, 'wb') as f:
-                f.write(bytes(bin_buffer))
-
-        zip_metadata.append({
+    def handle_result(res):
+        nonlocal n_with_cells, n_without_cells
+        zip_filename = f"{res['zip_hash']}.zip"
+        with open(os.path.join(zip_dir, zip_filename), 'wb') as f:
+            f.write(res["zip_bytes"])
+        if res["bin_bytes"] is not None:
+            bin_filename = f"{res['zip_hash']}.embeddings.bin"
+            with open(os.path.join(zip_dir, bin_filename), 'wb') as f:
+                f.write(res["bin_bytes"])
+        zip_metadata.append((res["group_index"], {
             "filename": zip_filename,
-            "min_rating": min_rating,
-            "max_rating": max_rating,
-        })
+            "min_rating": res["min_rating"],
+            "max_rating": res["max_rating"],
+        }))
+        for tsumego_id in res["tsumego_ids"]:
+            new_lookup_entries.append((tsumego_id, res["zip_hash"], board_size))
+        n_with_cells += res["n_with_cells"]
+        n_without_cells += res["n_without_cells"]
 
-        for item in group_items:
-            tsumego_id = item["filename"].split('.')[0]
-            new_lookup_entries.append((tsumego_id, zip_hash, board_size))
+    if n_workers == 1:
+        for task in tasks:
+            handle_result(_build_group_shard(task))
+    else:
+        # as_completed (not map): write each shard as soon as its worker
+        # finishes so we never hold more than ~n_workers shards' bytes in the
+        # parent at once. Group order is restored by sorting zip_metadata below.
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_build_group_shard, task) for task in tasks]
+            for fut in as_completed(futures):
+                handle_result(fut.result())
+
+    zip_metadata.sort(key=lambda x: x[0])
+    zip_metadata = [entry for _, entry in zip_metadata]
 
     if embed_cells_enabled:
         print(f"  per-cell embeddings: {n_with_cells} problems shipped, "
@@ -429,12 +548,14 @@ def load_embeddings(board_size):
     return embedding_map, embedding_meta
 
 
-def process_size(board_size, output_dir):
+def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None):
     """Run the full per-size packaging — ratings load, exponential rank
     mapping, metadata assembly, zip + per-cell sidecar emission. Returns
     (embedding_meta, ratings_hash); either element may be None if the
     corresponding artifact wasn't available. The multi-size loop aggregates
-    both into the single shared embedding_meta.json at the end."""
+    both into the single shared embedding_meta.json at the end.
+
+    reorder_by_sgf and n_workers are forwarded to create_packages."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
@@ -456,34 +577,33 @@ def process_size(board_size, output_dir):
     tsumego_ratings_df = tsumego_ratings_df.sort_values(
         by='rating', ascending=True).reset_index(drop=True)
 
-    # --- TEMPORARY: pre-rewrite curve revived as a stop-gap -----------------
-    # The handi-anchored fit (fit_rating_curve, BOT_HANDI_RANK, PWA_X0/PWA_X1
-    # above) infra stays in place for the proper mapping — but until the
-    # calibrate_handicap_ranks run delivers anchors past +8.55 corrected
-    # stones, that curve under-curves the dan range and inflates every user's
-    # displayed rank (a 4d player landed at ~14d). This block reverts to the
-    # pre-rewrite k=0.12, two-anchor (8k, 3k named bots), rank-index PWA
-    # mapping that was on the site before the curvature change — empirically
-    # produces sensible per-user displays even though it's known to be wrong
-    # in shape (named-rank-index, not corrected handi). Replace this block
-    # with the handi-anchored mapping once the new bot anchors land.
-    bot_ratings_df = pd.read_csv(os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
-    bot_8k_rating = float(bot_ratings_df.loc[
-        bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k', 'rating'].values[0])
-    bot_3k_rating = float(bot_ratings_df.loc[
-        bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k', 'rating'].values[0])
-    x1, x2 = 12.5, 17.5  # named-rank indices: 8k = 12.5, 3k = 17.5 on 0..28
-    y1, y2 = bot_8k_rating, bot_3k_rating
-    k_tmp = 0.12
-    A_tmp = (y2 - y1) / (np.exp(k_tmp * x2) - np.exp(k_tmp * x1))
-    C_tmp = y1 - A_tmp * np.exp(k_tmp * x1)
-    print(f"  [TEMP] r = {A_tmp:.4f}*exp({k_tmp}*x_index) + {C_tmp:.4f}  "
-          f"(stop-gap; revert when new handi anchors land)")
-
-    r_floored = tsumego_ratings_df['rating'].clip(lower=C_tmp + RATING_FLOOR_MARGIN)
-    rank_index = np.log((r_floored - C_tmp) / A_tmp) / k_tmp
+    # Rating → rank mapping. Source of truth is the per-board curve fitted by
+    # pipeline.fit_rank_curves from EGF survey declarations (internal rank = EGF
+    # rank), so the displayed rank and the server rank-translation map
+    # (pwa/tsumegos/rank_map.json) agree by construction. If that file is absent
+    # we fall back to the bare statistics.txt cubic prior (the same curve
+    # fit_rank_curves uses as its prior). rank_index is the 0..28 named axis
+    # (20k=0, 1k=19, 9d=28); /29 keeps the existing 0..1 scale so
+    # print_rating_distribution and the PWA's label logic are unchanged.
+    raw = tsumego_ratings_df['rating'].to_numpy()
+    rrm = _load_rating_rank_map().get(str(board_size))
+    if rrm is not None:
+        rank_index = _rating_to_rank_index(
+            raw, rrm["ratings"], rrm["rank_indices"])
+        print(f"  rating→rank via fitted EGF-anchored curve "
+              f"({RATING_RANK_MAP_PATH})")
+    else:
+        bot_ratings_df = pd.read_csv(
+            os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
+        bot_8k_rating = float(bot_ratings_df.loc[
+            bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k', 'rating'].values[0])
+        bot_3k_rating = float(bot_ratings_df.loc[
+            bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k', 'rating'].values[0])
+        cubic_curve = CubicRatingCurve(bot_8k_rating, bot_3k_rating)
+        rank_index = cubic_curve.inverse(raw)
+        print(f"  rating→rank via statistics.txt cubic prior — no fitted curve "
+              f"at {RATING_RANK_MAP_PATH} (run pipeline.fit_rank_curves)")
     tsumego_ratings_df['rating'] = rank_index / 29.0
-    # --- end TEMPORARY -------------------------------------------------------
 
     tsumego_ratings_map = dict(zip(
         tsumego_ratings_df['tsumego_id'],
@@ -553,7 +673,8 @@ def process_size(board_size, output_dir):
     print(f"  building shards ...")
     create_packages(
         all_metadata, board_size, TSUMEGOS_DIR, output_dir,
-        per_cell_dir=per_cell_arg,
+        per_cell_dir=per_cell_arg, reorder_by_sgf=reorder_by_sgf,
+        n_workers=n_workers,
     )
     size_dir = os.path.join(output_dir, 'tsumegos', str(board_size))
     print(f"  packages -> {size_dir}")
@@ -565,12 +686,26 @@ def process_size(board_size, output_dir):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Package rated tsumegos for the PWA.")
+    parser.add_argument(
+        "--no-sgf-reorder", dest="reorder_by_sgf", action="store_false",
+        help="ship per-cell embeddings in raw npz (board-scan) order instead of "
+             "reordering to SGF-variation order. ONLY correct if the .npz files "
+             "have been pre-reordered upstream; on current build_embedding "
+             "output this produces a corrupt picked-move sidecar. Default off.")
+    parser.add_argument(
+        "--workers", type=int, default=None,
+        help="parallel shard-builder processes (default: os.cpu_count())")
+    args = parser.parse_args()
+
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
 
     joint_embedding_meta = None
     ratings_versions = {}
     for size in ALL_BOARD_SIZES:
-        meta, ratings_hash = process_size(size, OUTPUT_DIR)
+        meta, ratings_hash = process_size(
+            size, OUTPUT_DIR,
+            reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
         if ratings_hash is not None:

@@ -177,6 +177,8 @@ const updateSolvingModeUI = () => {
         text1Elements.forEach(element => {
             element.classList.remove('progress-bar-wrapper');
             element.style.removeProperty('--progress');
+            element.style.cursor = '';
+            element.removeAttribute('title');
         });
     } else {
         // Normal display with user rank information
@@ -192,6 +194,9 @@ const updateSolvingModeUI = () => {
         text1Elements.forEach(element => {
             element.classList.add('progress-bar-wrapper');
             element.style.setProperty('--progress', `${progress}%`);
+            // Tappable: opens the server rank-translation modal (main.js).
+            element.style.cursor = 'pointer';
+            element.title = getTerm('rankTranslationTitle');
         });
 
 

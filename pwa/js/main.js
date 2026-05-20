@@ -8,6 +8,7 @@ initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook } from './state.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
+import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
 
 try {
@@ -167,6 +168,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     document.getElementById('board-size-toggle').addEventListener('click', handleSizeToggle);
     document.getElementById('board-size-toggle-h').addEventListener('click', handleSizeToggle);
+
+    // Tapping the rank display shows how it translates to ranks on other
+    // servers (showRankTranslation no-ops outside solving mode). The elements
+    // are persistent, so this listener is registered once here rather than on
+    // every updateUI repaint.
+    ['text1', 'text1-h'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => showRankTranslation());
+    });
 
 
 

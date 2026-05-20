@@ -75,9 +75,12 @@ def load_data(data_dir):
     # database.sql is the global D1 dump at attempts/database.sql (cross-size).
     # The schema has (id, user_id, problem, success, created_at, size, move,
     # time_used, review_time, is_repeat). Only user_id/problem/success/created_at
-    # and size are needed here; per-attempt move/time fields are ignored (we
-    # also tolerate legacy rows where size and the per-attempt columns are
-    # absent — treat missing size as 9).
+    # and size are needed here; per-attempt move/time fields are ignored.
+    # Repeat attempts (is_repeat=1) are skipped: the user has already seen the
+    # problem, so they are easier and would inflate the skill estimate.
+    # Newer `wrangler d1 export` dumps prefix each INSERT with the column list
+    # (`("id",...) VALUES(...)`); the regex tolerates that and legacy rows where
+    # size and the per-attempt columns are absent (treat missing size as 9).
     sql_file = os.path.join(PROJECT_ROOT, 'attempts', 'database.sql')
     user_attempts = []
     if not os.path.exists(sql_file):
@@ -85,10 +88,12 @@ def load_data(data_dir):
     else:
         print(f"Loading user data from {sql_file}...")
         insert_pattern = re.compile(
-            r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\("
+            r"INSERT INTO [\"`]?tsumego_reports[\"`]?"
+            r"(?:\s*\([^)]*\))?"                          # optional column list (newer D1 dumps)
+            r"\s*VALUES\s*\("
             r"\d+,'([^']+)','([^']+)',([01]),'([^']+)'"  # id, user_id, problem, success, created_at
-            r"(?:,(\d+))?"                                 # optional size
-            r"(?:,[^)]*)?"                                 # optional trailing per-attempt columns
+            r"(?:,(\d+|NULL))?"                          # optional size
+            r"(.*?)"                                     # optional move/time_used/review_time/is_repeat tail
             r"\);"
         )
 
@@ -96,8 +101,16 @@ def load_data(data_dir):
             for line in tqdm(f, desc="Parsing SQL"):
                 match = insert_pattern.match(line)
                 if match:
-                    user_id, tsumego_id, success, timestamp_str, size_str = match.groups()
-                    row_size = int(size_str) if size_str is not None else 9
+                    user_id, tsumego_id, success, timestamp_str, size_str, tail = match.groups()
+
+                    # Drop repeat attempts. When the per-attempt columns are
+                    # present, is_repeat is the last value (after size: move,
+                    # time_used, review_time, is_repeat).
+                    tail_fields = [f for f in tail.split(',') if f != '']
+                    if len(tail_fields) >= 4 and tail_fields[-1] == '1':
+                        continue
+
+                    row_size = int(size_str) if size_str not in (None, 'NULL') else 9
                     if row_size != BOARD_SIZE:
                         continue
 
@@ -139,8 +152,10 @@ def load_data(data_dir):
         user_df = pd.DataFrame(user_attempts)
         # user_df['user_id'] = user_df['user_id'].str[:8]  # REMOVED: Truncation handled during profile generation
 
-        # The schema has a UNIQUE(user_id, problem) constraint, so groupby().mean() is redundant.
-        # We just rename 'success' to 'success_rate' for consistency with the bot data format.
+        # There is no UNIQUE(user_id, problem) constraint, but we drop repeat
+        # attempts (is_repeat=1) above, so each (user, problem) keeps only its
+        # first attempt. We just rename 'success' to 'success_rate' for
+        # consistency with the bot data format.
         user_df.rename(columns={'success': 'success_rate'}, inplace=True)
         user_success_rates = user_df
 

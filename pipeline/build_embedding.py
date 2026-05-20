@@ -438,7 +438,10 @@ def _project_one_for_per_cell(task):
         return tid, f"project_failed:{type(e).__name__}"
 
     out_path = os.path.join(out_dir, tid + ".npz")
-    np.savez_compressed(
+    # Uncompressed (STORED): the payload is ~94% fp16 embedding data, which is
+    # high-entropy and only deflates ~8%. Not worth the inflate cost paid on
+    # every load during packaging (package_for_pwa reads all ~20k per run).
+    np.savez(
         out_path,
         embeddings=projected.astype(np.float16),
         xys=xys.astype(np.int32),
