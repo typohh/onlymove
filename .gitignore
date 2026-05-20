@@ -34,6 +34,10 @@ wheels/
 # raw SGFs in tsumegos/ + embeddings + ratings. The expensive-to-regenerate
 # inputs stay in the repo; the packaged outputs do not.
 /pwa/tsumegos/
+# lookup.txt is another package_for_pwa output (tsumego_id -> zipHash -> size),
+# copied into the gitignored dist/ at build time. Useless without the (ignored)
+# zips it indexes, so it's regenerated, not tracked.
+/pwa/lookup.txt
 
 # IDEs and OS
 .idea/
