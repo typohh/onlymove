@@ -730,4 +730,20 @@ if __name__ == "__main__":
               f"bytes_per_cell={meta_out['bytes_per_cell']}, "
               f"ratings_version={ratings_versions or 'none'})")
 
+    # Ship the rating→rank map (M) so the client can convert the raw ratings it
+    # also receives into ranks itself — the displayed rank is then computed in
+    # rating space and mapped with the same survey-calibrated M that labels the
+    # problems, closing the rank loop. (Source: pipeline.fit_rank_curves.)
+    if os.path.exists(RATING_RANK_MAP_PATH):
+        dst = os.path.join(OUTPUT_DIR, 'tsumegos', 'rating_to_rank.json')
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(RATING_RANK_MAP_PATH, 'r', encoding='utf-8') as fsrc:
+            payload = fsrc.read()
+        with open(dst, 'w', encoding='utf-8') as fdst:
+            fdst.write(payload)
+        print(f"Copied rating→rank map → {dst}")
+    else:
+        print(f"\n[warn] {RATING_RANK_MAP_PATH} missing — client will fall back to "
+              f"rank-space skill (run pipeline.fit_rank_curves first)")
+
     print("\nAll sizes done.")

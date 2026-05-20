@@ -109,6 +109,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 }
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
+import { loadRatingRankMap } from './rank-decomposition.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { APP_MODES } from './constants.js';
 
@@ -647,6 +648,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // entries from already-deployed zips, so returning users don't need to
     // solve 20+ new problems before the weakness model has any data.
     backfillMissingEmbeddings();
+
+    // Cache M (rating→rank) so the stats decomposition can map rating-space
+    // skill to rank. Fire-and-forget; the stats page is opened well after init.
+    loadRatingRankMap();
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);

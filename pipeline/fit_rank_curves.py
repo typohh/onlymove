@@ -4,19 +4,25 @@ Model (our singular rank scale is the hub / common unit):
 
     server rank  ──one coupling per server──▶  OUR RANK  ◀──cubic, per board──  rating θ
 
-  * OUR RANK IS EGF RANK. rating θ → our rank is fit per board with the same
-    cumulative-link machinery used for the server couplings below, but in
-    RATING space: the cubic (auxiliary.fit_statistics_shapes, pinned to that
-    board's humanv0_8k/3k bots) is only the SHAPE PRIOR — its per-rank rating
-    deltas are the baseline spacings — while the EGF survey declarations are
-    the data and λ pulls the curve toward the cubic where EGF data is thin.
-    package_for_pwa consumes these per-board curves (ratings/rating_to_rank.json)
-    to display ranks, so the displayed rank and this map agree by construction.
+  * OUR RANK IS EGF RANK. rating → our rank is fit per board entirely in
+    RATING space, using only the shipped black-box ratings (never the rating-
+    derivation internals). Each user's rating = the problem RATING at which they
+    clear CALIBRATION_P (80%), estimated by a logistic over their (raw_rating,
+    correct) attempts (fit_user_rating) — the SAME quantity the client computes.
+    M (rating→rank) is then a cumulative-link fit anchored on the EGF declarers'
+    (80%-clear rating, declared rank), with the cubic
+    (auxiliary.fit_statistics_shapes, pinned to that board's humanv0_8k/3k bots)
+    only as a weak SHAPE PRIOR (--rating-lambda) so the survey can bend the dan
+    range off the nominal-anchored cubic. package_for_pwa ships these per-board
+    curves (ratings/rating_to_rank.json) AND the raw ratings, and the client
+    converts rating→rank with the same M — so the displayed rank, the problem
+    ranks, and this map all agree by construction (the rank loop closes).
   * server rank → our rank is ONE coupling per (non-EGF) server, board-
-    independent. We convert every surveyed user's per-board θ to our(EGF)-rank
-    via the right per-board curve, then pool all (our_rank, declared_server_rank)
-    pairs across both boards and fit a per-server proportional-odds
-    cumulative-link model in our-rank space. EGF itself is the hub: identity.
+    independent. We convert every surveyed user's per-board 80%-clear rating to
+    our(EGF)-rank via the right per-board curve, then pool all (our_rank,
+    declared_server_rank) pairs across both boards and fit a per-server
+    proportional-odds cumulative-link model in our-rank space. EGF is the hub:
+    identity.
 
         P(declared ≤ g | our_rank) = expit(τ_{s,g} − our_rank)
 
@@ -51,8 +57,18 @@ import sys
 from collections import defaultdict
 
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import expit
+
+# Slope of the success curve in RATING units (logit per rating unit). The
+# survey user's rating is "the problem rating where they clear CALIBRATION_P",
+# estimated by a logistic with this slope; the client (rank-decomposition.js)
+# MUST use the same principle and a matching slope, or the loop reopens. Value
+# is calibrated to the current rating scale (bots span ~1.5 rating over ~16
+# ranks ⇒ ~0.1 rating/rank; with ~0.28 logit/rank that's ~2.8 logit/rating).
+LOGIT_PER_RATING = 2.5
+CALIBRATION_P = 0.8  # matches the client / momentum: rank = where you clear 80%
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -63,7 +79,6 @@ from auxiliary.compare_rank_surveys import (  # noqa: E402
     SQL_PATH_DEFAULT,
     STOPGAP_X_3K,
     STOPGAP_X_8K,
-    fit_theta,
     latest_per_user_server,
     load_attempts_for_users,
     load_problem_params,
@@ -135,6 +150,47 @@ def rating_to_internal_rank(theta, thresholds):
     xs = [thresholds[g] for g in gs]   # ascending ratings
     ys = [g - 0.5 for g in gs]         # internal-rank scalars at those boundaries
     return _interp_extrap(float(theta), xs, ys)
+
+
+def load_raw_ratings(size):
+    """{tsumego_id: raw rating} from ratings/<size>/tsumego_ratings_final.csv —
+    the same black-box scalar the PWA ships and the client estimates against."""
+    path = os.path.join(PROJECT_ROOT, "ratings", str(size),
+                        "tsumego_ratings_final.csv")
+    if not os.path.exists(path):
+        return {}
+    df = pd.read_csv(path)
+    return dict(zip(df["tsumego_id"], df["rating"].astype(float)))
+
+
+def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1):
+    """The user's rating = the problem RATING at which they clear `target` (80%).
+
+    MLE of R in  P(correct) = σ(LOGIT_PER_RATING·(R − raw_rating) + logit(target))
+    over the user's (raw_rating, correct) attempts. This is the in-loop estimator
+    — it never touches the rating-derivation internals, only the shipped ratings —
+    and it is the SAME quantity the client computes; M is then anchored on it.
+
+    Returns (R, n_joined) or (None, 0)."""
+    rows = [(raw_ratings[t], s) for t, s in attempts if t in raw_ratings]
+    if len(rows) < min_n:
+        return None, 0
+    rr = np.array([r for r, _ in rows], dtype=float)
+    sc = np.array([s for _, s in rows], dtype=float)
+    off = float(np.log(target / (1 - target)))
+    R = float(rr.mean())
+    for _ in range(80):
+        z = np.clip(LOGIT_PER_RATING * (R - rr) + off, -40.0, 40.0)
+        p = 1.0 / (1.0 + np.exp(-z))
+        score = float(np.sum(LOGIT_PER_RATING * (sc - p)))
+        info = float(np.sum(LOGIT_PER_RATING ** 2 * p * (1 - p)))
+        if info < 1e-9:
+            break
+        step = max(-1.0, min(1.0, score / info))
+        R += step
+        if abs(step) < 1e-6:
+            break
+    return float(R), len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -312,13 +368,17 @@ def main():
                              "this rank scalar (9 = 9d) so strong-end "
                              "translation is defined")
     parser.add_argument("--lambda", type=float, default=10.0, dest="lam",
-                        help="Strength of the cubic-shape prior: L2 weight on "
-                             "the per-rank log-deviations from uniform spacing. "
-                             "Large (≳30) ⇒ servers pinned to the cubic shape "
-                             "(offset only); small (≲3) ⇒ free per-server bend "
-                             "that overfits sparse data. The default keeps the "
-                             "real bend on data-rich servers while leaving "
-                             "sparse ones at a clean offset")
+                        help="Cubic-shape prior strength for the SERVER couplings "
+                             "(internal rank → server rank): L2 weight on the "
+                             "per-rank log-deviations from uniform spacing. Kept "
+                             "strong so sparse servers stay at a clean offset.")
+    parser.add_argument("--rating-lambda", type=float, default=1.0, dest="rating_lam",
+                        help="Cubic-shape prior strength for the per-board "
+                             "rating→rank fit. Weaker than --lambda so the EGF "
+                             "survey can bend the dan range off the (nominal-"
+                             "anchored) cubic where it over-rates; ≈1 lets the "
+                             "declarations correct the curve, higher pins it to "
+                             "the cubic (dan over-rating returns).")
     parser.add_argument(
         "--map-out",
         default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rank_map.json"),
@@ -345,33 +405,35 @@ def main():
     attempts_by_user_size = load_attempts_for_users(
         args.sql, set(surveys["user_id"].unique()))
 
-    params_by_size = {}
+    raw_ratings_by_size = {}
     cubic_by_size = {}
     for size in sizes:
-        params, _theta_arr, _scalar_arr, stopgap = load_problem_params(size)
-        if params is None:
-            print(f"  size {size}: skipped (missing rating files)")
+        _params, _theta_arr, _scalar_arr, stopgap = load_problem_params(size)
+        raw_ratings = load_raw_ratings(size)
+        if not raw_ratings:
+            print(f"  size {size}: skipped (missing tsumego_ratings_final.csv)")
             continue
-        params_by_size[size] = params
+        raw_ratings_by_size[size] = raw_ratings
         curve = _cubic_curve(stopgap)
         if curve is not None:
             cubic_by_size[size] = curve
-        print(f"  size {size}: {len(params)} problem params, "
+        print(f"  size {size}: {len(raw_ratings)} problem ratings, "
               f"cubic {'ready' if curve is not None else 'MISSING'}")
 
-    print("\nFitting θ per (user, size) ...")
-    user_theta = defaultdict(dict)  # user_id -> {size: raw rating θ}
+    print(f"\nEstimating each user's {int(CALIBRATION_P*100)}%-clear rating per "
+          f"(user, size) in rating space ...")
+    user_rating = defaultdict(dict)  # user_id -> {size: 80%-clear rating}
     for uid in sorted(surveys["user_id"].unique()):
         prefix = uid[:8]
-        for size, params in params_by_size.items():
+        for size, raw_ratings in raw_ratings_by_size.items():
             if cubic_by_size.get(size) is None:
                 continue
             attempts = attempts_by_user_size.get((prefix, size), [])
             if len(attempts) < args.min_attempts:
                 continue
-            theta, n = fit_theta(attempts, params)
-            if theta is not None and n >= args.min_attempts:
-                user_theta[uid][size] = theta
+            r, n = fit_user_rating(attempts, raw_ratings, min_n=args.min_attempts)
+            if r is not None and n >= args.min_attempts:
+                user_rating[uid][size] = r
 
     # ---- Stage A: per-board rating → internal rank, where INTERNAL RANK IS
     # EGF RANK. Same cumulative-link as the server couplings below, but in
@@ -383,7 +445,7 @@ def main():
     egf_surveys = surveys[surveys["server"] == "EGF"]
     rating_rank_fits = {}  # size -> {egf_g: τ_rating}
     print(f"\nFitting rating → internal(EGF) rank per board "
-          f"(cubic-shape prior λ = {args.lam}):")
+          f"(cubic-shape prior λ = {args.rating_lam}):")
     for size in sizes:
         curve = cubic_by_size.get(size)
         if curve is None:
@@ -391,15 +453,15 @@ def main():
         obs = []
         for _, row in egf_surveys.iterrows():
             g = row["rank_scalar"]
-            th = user_theta.get(row["user_id"], {}).get(size)
-            if th is not None and g is not None and np.isfinite(g):
-                obs.append((th, float(g)))
+            r = user_rating.get(row["user_id"], {}).get(size)
+            if r is not None and g is not None and np.isfinite(g):
+                obs.append((r, float(g)))
         if len(obs) < args.min_server_samples:
             print(f"  size {size}: only {len(obs)} EGF declarations with θ — "
                   f"falling back to the raw cubic for this board")
             continue
         init_alpha, baseline = cubic_prior_for_rating_fit(curve, egf_lo, egf_hi)
-        result = fit_cumulative_link(obs, egf_lo, egf_hi, args.lam,
+        result = fit_cumulative_link(obs, egf_lo, egf_hi, args.rating_lam,
                                      baseline_spacings=baseline,
                                      init_alpha=init_alpha)
         if result is None:
@@ -410,16 +472,16 @@ def main():
         print(f"  size {size}: {len(obs)} EGF declarations, NLL {nll:.2f}, "
               f"shape-dev {dev:.3f}")
 
-    def theta_to_internal_rank(theta, size):
+    def to_internal_rank(rating, size):
         thr = rating_rank_fits.get(size)
         if thr is not None:
-            return rating_to_internal_rank(theta, thr)
-        return theta_to_our_rank(theta, cubic_by_size[size])  # cubic fallback
+            return rating_to_internal_rank(rating, thr)
+        return theta_to_our_rank(rating, cubic_by_size[size])  # cubic fallback
 
     user_our_rank = defaultdict(dict)  # user_id -> {size: internal(EGF)-rank scalar}
-    for uid, by_size in user_theta.items():
-        for size, theta in by_size.items():
-            user_our_rank[uid][size] = theta_to_internal_rank(theta, size)
+    for uid, by_size in user_rating.items():
+        for size, rating in by_size.items():
+            user_our_rank[uid][size] = to_internal_rank(rating, size)
     both = sum(1 for r in user_our_rank.values() if len(r) == 2)
     print(f"  internal(EGF) rank for {len(user_our_rank)} users "
           f"({both} have both sizes)")

@@ -274,6 +274,10 @@ async function loadOneTsumego() {
             sgf: sgf,
             linked: false,
             rating: selectedProblem.rating,
+            // Raw black-box rating (rank-independent). The stats decomposition
+            // works in this space and converts to rank with M; serving/UI keep
+            // using `rating` (the pre-mapped rank).
+            rawRating: selectedProblem.raw_rating,
             quality: selectedProblem.quality || 0,
             embedding: selectedProblem.embedding,
             isRepeat: selectedProblem.isRepeat || false,

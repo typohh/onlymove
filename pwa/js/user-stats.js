@@ -97,6 +97,8 @@ export function updateUserStats(isCorrect, {
     const answer = {
         problemId,
         problemRating: currentProblem.rating,
+        // Raw rating (rank-independent) for the rating-space skill decomposition.
+        problemRawRating: currentProblem.rawRating,
         problemQuality: currentProblem.quality || 0,
         timeTaken,
         reviewTime: 0,
