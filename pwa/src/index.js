@@ -14,6 +14,13 @@ const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 // cron, multiple problems may become due back-to-back; this caps each user at
 // roughly four pushes per day in the worst case.
 const MIN_NOTIFY_INTERVAL_MS = 6 * 3600 * 1000;
+// Suppress recall reminders for users who were active since the previous cron
+// tick. The client re-uploads the schedule on app load and after every solved
+// attempt (stamping recall_schedule.updated_at = now), so a recent updated_at
+// means they're already practicing — a "ready to review" push would be noise.
+// We don't mark anything notified, so the reminder simply defers to the next
+// tick once they've gone idle. Matches the hourly cron in wrangler.toml.
+const ACTIVE_SUPPRESS_MS = 1 * 3600 * 1000;
 
 export default {
   async fetch(request, env, ctx) {
@@ -232,7 +239,7 @@ async function runRecallNotifications(env) {
 
   const due = await env.DB.prepare(
     `SELECT s.user_id, s.problem_id, s.enter_at, s.exit_at,
-            s.enter_notified_at, s.exit_notified_at,
+            s.enter_notified_at, s.exit_notified_at, s.updated_at,
             p.endpoint, p.p256dh, p.auth, p.last_notified_at
      FROM recall_schedule s
      JOIN push_subscriptions p ON p.user_id = s.user_id
@@ -263,11 +270,15 @@ async function runRecallNotifications(env) {
         p256dh: row.p256dh,
         auth: row.auth,
         lastNotifiedAt: row.last_notified_at,
+        lastActiveAt: 0,
         enteredIds: [],
         exitingIds: [],
       };
       byUser.set(row.user_id, u);
     }
+    // After any /schedule upload all of a user's surviving rows share the same
+    // updated_at, but take the max defensively in case a read races an upload.
+    u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0);
     if (row.enter_notified_at === null && row.enter_at <= now) {
       u.enteredIds.push(row.problem_id);
     }
@@ -284,6 +295,9 @@ async function runRecallNotifications(env) {
 
   for (const [userId, u] of byUser) {
     if (u.lastNotifiedAt && (now - u.lastNotifiedAt) < MIN_NOTIFY_INTERVAL_MS) continue;
+    // Active since the previous tick — they're already in the app, so defer the
+    // reminder to a later tick rather than nagging mid-session.
+    if (u.lastActiveAt && (now - u.lastActiveAt) < ACTIVE_SUPPRESS_MS) continue;
     if (u.enteredIds.length === 0 && u.exitingIds.length === 0) continue;
 
     const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlogByUser.get(userId) || 0);
