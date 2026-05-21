@@ -16,7 +16,7 @@ import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { APP_MODES } from './constants.js';
 
-const MIN_Z = 2.0;        // include a motif only if its component score >= 2 std
+const MIN_Z = 3.0;        // include a motif only if its component score >= 3 std
 const MAX_MOTIFS = 3;
 
 // Recomputed per problem in populateMotifBubble(); gates visibility in
