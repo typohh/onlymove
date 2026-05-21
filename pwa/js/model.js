@@ -1032,7 +1032,28 @@ function buildRatingHistoryChart() {
         svg.appendChild(line);
     }
 
-    // Two nested bands, drawn before scatter and line so raw data stays on top.
+    // Per-attempt scatter: green=correct, red=wrong. Drawn UNDER the bands and
+    // skill line so the curve and its CIs always read on top — at high volume
+    // (count is typically ~200, up to ~10k) the dots stay faint density texture
+    // instead of an opaque slab. Two overplotting guards keyed to count: cap the
+    // rendered dots (uniform stride over the time-ordered history), and scale
+    // per-dot opacity so the total ink stays roughly constant as count grows.
+    const SCATTER_CAP = 1500;
+    const stride = Math.ceil(entries.length / SCATTER_CAP);
+    const shownDots = stride > 1 ? entries.filter((_, i) => i % stride === 0) : entries;
+    const dotR = shownDots.length > 600 ? '1.2' : '1.6';
+    const dotAlpha = Math.max(0.05, Math.min(0.6, 50 / shownDots.length)).toFixed(3);
+    for (const e of shownDots) {
+        const dot = document.createElementNS(SVG_NS, 'circle');
+        dot.setAttribute('cx', xOf(e.date).toFixed(1));
+        dot.setAttribute('cy', yOf(e.rankValue).toFixed(1));
+        dot.setAttribute('r', dotR);
+        dot.setAttribute('fill', e.correct ? '#50b450' : '#dc5050');
+        dot.setAttribute('fill-opacity', dotAlpha);
+        svg.appendChild(dot);
+    }
+
+    // Two nested bands, drawn after the scatter so the curve + CIs sit on top.
     // Outer (lighter) = prediction interval: skill ± where a session's form
     // actually lands. Inner (darker) = measurement uncertainty on skill. The
     // gap between them is the genuine session-to-session swing σ_M(t).
@@ -1062,17 +1083,6 @@ function buildRatingHistoryChart() {
             band.setAttribute('stroke', 'none');
             svg.appendChild(band);
         }
-    }
-
-    // Per-attempt scatter: green=correct, red=wrong. On top of band so raw
-    // data stays readable; under the skill line so the line remains visible.
-    for (const e of entries) {
-        const dot = document.createElementNS(SVG_NS, 'circle');
-        dot.setAttribute('cx', xOf(e.date).toFixed(1));
-        dot.setAttribute('cy', yOf(e.rankValue).toFixed(1));
-        dot.setAttribute('r', '1.6');
-        dot.setAttribute('fill', e.correct ? 'rgba(80,180,80,0.7)' : 'rgba(220,80,80,0.7)');
-        svg.appendChild(dot);
     }
 
     if (gridEvals.length >= 2) {
