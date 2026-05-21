@@ -948,10 +948,14 @@ function buildRatingHistoryChart() {
         }
     }
 
-    // Focus the y-range on the user's rank — the skill curve and its prediction
-    // band — not on the spread of problem difficulties. Problem ranks scatter
-    // far wider than the user's skill, so anchoring on them squashes the part of
-    // the chart that matters. Dots outside the band are clipped by the SVG.
+    // Y-range: anchor on the skill curve + its prediction band, then widen to
+    // also keep the bulk of the scatter in frame. The band alone isn't enough —
+    // with lots of data the measurement band collapses to a thin ribbon far
+    // narrower than the spread of attempted problem ranks, so a band-only window
+    // clips essentially every dot out of view. Union the band with a robust
+    // percentile range of the dots (5th–95th, so a few extreme problems don't
+    // blow out the scale): the band stays fully in frame and the scatter is
+    // visible. Dots beyond the 5/95 tails are still clipped by the SVG.
     let bandMin = Infinity, bandMax = -Infinity;
     for (const e of gridEvals) {
         const h = outerHalf(e);
@@ -964,7 +968,13 @@ function buildRatingHistoryChart() {
         bandMin = sortedRanks[0];
         bandMax = sortedRanks[sortedRanks.length - 1];
     }
-    const Y_PAD = 1; // one rank of breathing room above/below the band
+    {
+        const sorted = entries.map(e => e.rankValue).sort((a, b) => a - b);
+        const q = p => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
+        bandMin = Math.min(bandMin, q(0.05));
+        bandMax = Math.max(bandMax, q(0.95));
+    }
+    const Y_PAD = 1; // one rank of breathing room above/below
     let yHigh = Math.ceil(bandMax + Y_PAD);
     let yLow = Math.floor(bandMin - Y_PAD);
     if (yHigh <= yLow) yHigh = yLow + 1;
