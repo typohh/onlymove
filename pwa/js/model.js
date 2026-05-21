@@ -606,8 +606,10 @@ export async function showDetailedStats() {
                 const sign = summary.longTermDrift >= 0 ? '+' : '−';
                 resultText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
             }
-            if (summary.sigmaM !== null) {
-                resultText += `Session-to-session performance varies by ±${summary.sigmaM.toFixed(2)} ranks (RMS, detection floor ±${summary.sigmaMDetectionFloor.toFixed(2)}).\n`;
+            if (typeof summary.sigmaM === 'number') {
+                resultText += summary.sigmaM >= 0.1
+                    ? `Session-to-session performance varies by ±${summary.sigmaM.toFixed(2)} ranks.\n`
+                    : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
             }
         }
 
@@ -927,22 +929,28 @@ function buildRatingHistoryChart() {
         .map(a => ({ date: a.date, rankValue: a.problemRank * TOTAL_RANKS, correct: !!a.correct }));
     if (entries.length < 2) return null;
 
-    // Two-component rank decomposition: see rank-decomposition.js. We evaluate
-    // Ŝ(t), M̂(t) and their kernel-Kish SEs on a regular t-grid so the line
-    // and band shape across activity gaps reflect the model — not interpolated
-    // segments between sparse attempt timestamps.
+    // Two-kernel rank decomposition: see rank-decomposition.js. We evaluate the
+    // skill smoother Ŝ(t), its measurement SE seS(t), and the time-varying
+    // performance swing σ_M(t) continuously on a regular t-grid (the kernels are
+    // exact functions of t — no bucketing, no interpolation between sparse
+    // attempt timestamps), so line and bands shape correctly across gaps.
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
     const decomp = computeRankDecomposition(state.answerHistory);
     const GRID_POINTS = 300;
     const Z = 1.96;
+    // Half-widths in rank space: inner band = measurement uncertainty (how well
+    // we know your skill); outer band = a prediction interval (where a given
+    // session's performance lands), measurement and swing added in quadrature.
+    const innerHalf = e => Z * e.seS;
+    const outerHalf = e => Z * Math.hypot(e.seS, e.sigmaM);
     let gridEvals = [];
     if (decomp) {
         for (let i = 0; i < GRID_POINTS; i++) {
             const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
             const e = evaluateAt(decomp, t);
-            if (e) gridEvals.push({ t, S: e.S, seS: e.seS });
+            if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaM: e.sigmaM });
         }
     }
 
@@ -955,8 +963,9 @@ function buildRatingHistoryChart() {
     const maxRank = sortedRanks[sortedRanks.length - 1];
     let bandMin = Infinity, bandMax = -Infinity;
     for (const e of gridEvals) {
-        bandMin = Math.min(bandMin, e.S - Z * e.seS);
-        bandMax = Math.max(bandMax, e.S + Z * e.seS);
+        const h = outerHalf(e);
+        bandMin = Math.min(bandMin, e.S - h);
+        bandMax = Math.max(bandMax, e.S + h);
     }
     if (!Number.isFinite(bandMin)) { bandMin = trimmedMin; bandMax = maxRank; }
     let yHigh = Math.ceil(Math.max(maxRank, bandMax));
@@ -1027,28 +1036,36 @@ function buildRatingHistoryChart() {
         svg.appendChild(line);
     }
 
-    // Skill band drawn first so scatter and skill line stay readable on top.
-    // Form is not rendered: at typical user-data densities the hour-scale
-    // form curve and its band degenerate to a wide constant band that doesn't
-    // tell you anything the variance summary line above doesn't already.
-    const SKILL_FILL  = 'rgba(59,130,246,0.22)';
+    // Two nested bands, drawn before scatter and line so raw data stays on top.
+    // Outer (lighter) = prediction interval: skill ± where a session's form
+    // actually lands. Inner (darker) = measurement uncertainty on skill. The
+    // gap between them is the genuine session-to-session swing σ_M(t).
+    const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
+    const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
 
-    if (gridEvals.length >= 2) {
+    const bandPath = (halfOf) => {
         let up = '', dn = '';
         for (let i = 0; i < gridEvals.length; i++) {
             const e = gridEvals[i];
+            const h = halfOf(e);
             const x = xOf(e.t).toFixed(1);
-            const yU = yOf(e.S + Z * e.seS).toFixed(1);
-            const yL = yOf(e.S - Z * e.seS).toFixed(1);
+            const yU = yOf(e.S + h).toFixed(1);
+            const yL = yOf(e.S - h).toFixed(1);
             up += (i === 0 ? 'M' : 'L') + `${x} ${yU} `;
             dn = `L${x} ${yL} ` + dn;
         }
-        const skillBand = document.createElementNS(SVG_NS, 'path');
-        skillBand.setAttribute('d', up + dn + 'Z');
-        skillBand.setAttribute('fill', SKILL_FILL);
-        skillBand.setAttribute('stroke', 'none');
-        svg.appendChild(skillBand);
+        return up + dn + 'Z';
+    };
+
+    if (gridEvals.length >= 2) {
+        for (const [halfOf, fill] of [[outerHalf, SKILL_FILL_OUTER], [innerHalf, SKILL_FILL_INNER]]) {
+            const band = document.createElementNS(SVG_NS, 'path');
+            band.setAttribute('d', bandPath(halfOf));
+            band.setAttribute('fill', fill);
+            band.setAttribute('stroke', 'none');
+            svg.appendChild(band);
+        }
     }
 
     // Per-attempt scatter: green=correct, red=wrong. On top of band so raw
