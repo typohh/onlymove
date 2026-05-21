@@ -10,8 +10,9 @@ Outputs (single shared model — embeddings/joint/):
   per_problem.csv         — tsumego_id, size, embed_0..K-1
   explained_variance.csv  — component, var_ratio, cumulative
   extreme_problems.json   — per component, top-K and bottom-K problems (across sizes)
-  labels.json             — manually-curated human labels per PC per side
-                            (preserved across re-runs; new K's get null entries)
+  labels.json             — manually-curated human motif label per PC (positive
+                            side only; skew-ICA negative tail is baseline).
+                            Preserved across re-runs; new K's get null entries.
 
 Per-feature residualization controls for both rating and a 9-vs-13 board-size
 indicator before PCA, so the PCA's variance budget isn't spent on either.
@@ -179,14 +180,16 @@ def remap_labels_by_cosine(
     """Carry labeled components forward from a previous PCA fit to the current one.
 
     Each old labeled PC is matched to the new PC with maximum |cosine similarity|
-    in the full feature space. Above `threshold`, the label is copied. Negative
-    cosine flips the sign of the axis, so positive/negative label sides swap.
-    Per-side translation dicts (`positive_i18n`/`negative_i18n`) ride with their
-    label and swap on the same flip.
+    in the full feature space. Above `threshold`, the label is copied — but only
+    when the signed cosine is positive. Under skew-ICA each axis is
+    sign-canonicalized so its motif sits on the positive tail; a negative-cosine
+    match therefore points at a different motif, so the label is dropped (set to
+    null) rather than carried over. The `positive_i18n` translation dict rides
+    with its label.
 
-    Returns a fresh `components` dict {str(k): {"positive": ..., "negative": ...,
-    optional "positive_i18n"/"negative_i18n", "auto_mapped_from": int,
-    "auto_mapped_cos": float}} with all K_new entries.
+    Returns a fresh `components` dict {str(k): {"positive": ...,
+    optional "positive_i18n", "auto_mapped_from": int, "auto_mapped_cos": float}}
+    with all K_new entries.
     """
     K_old = old_components.shape[0]
     K_new = new_components.shape[0]
@@ -204,13 +207,13 @@ def remap_labels_by_cosine(
 
     old_components_dict = old_labels.get("components", {}) if old_labels else {}
 
-    # For each old PC that has a non-null label on either side, find the best
-    # new PC and (if confident) carry the label across.
-    proposals = []  # (old_k, new_k, signed_cos, |cos|, sign)
+    # For each old PC that has a non-null label, find the best new PC and
+    # (if confident) carry the label across.
+    proposals = []  # (old_k, new_k, signed_cos)
     for k_str, entry in old_components_dict.items():
         if not entry:
             continue
-        if entry.get("positive") is None and entry.get("negative") is None:
+        if entry.get("positive") is None:
             continue
         k_old = int(k_str)
         if k_old >= K_old:
@@ -231,24 +234,18 @@ def remap_labels_by_cosine(
 
     new_components_dict = {}
     for k_new in range(K_new):
-        slot = {"positive": None, "negative": None}
+        slot = {"positive": None}
         if k_new in by_new:
             k_old, c = by_new[k_new]
             old_entry = old_components_dict.get(str(k_old), {})
-            pos = old_entry.get("positive")
-            neg = old_entry.get("negative")
-            # Per-side translation dicts ride with their label across the refit.
-            pos_i18n = old_entry.get("positive_i18n")
-            neg_i18n = old_entry.get("negative_i18n")
-            if c < 0:
-                pos, neg = neg, pos  # axis flipped — swap sides
-                pos_i18n, neg_i18n = neg_i18n, pos_i18n
-            slot["positive"] = pos
-            slot["negative"] = neg
-            if pos_i18n is not None:
-                slot["positive_i18n"] = pos_i18n
-            if neg_i18n is not None:
-                slot["negative_i18n"] = neg_i18n
+            # Only carry the label when the axes align (positive cosine). A
+            # negative-cosine match points at a different motif under skew-ICA,
+            # so leave the slot null.
+            if c > 0:
+                slot["positive"] = old_entry.get("positive")
+                pos_i18n = old_entry.get("positive_i18n")
+                if pos_i18n is not None:
+                    slot["positive_i18n"] = pos_i18n
             slot["auto_mapped_from"] = k_old
             slot["auto_mapped_cos"] = round(c, 4)
         new_components_dict[str(k_new)] = slot
@@ -263,16 +260,17 @@ def _skew_contrast(x):
     the FastICA update simplifies (the E[g'(w·X)]·w term has zero expectation
     on whitened, mean-zero input). The recovered components are structurally
     one-sided — positive tail concentrates the rare motif, negative tail is
-    Gaussian-like baseline — so labels are unambiguous (don't label negative).
+    Gaussian-like baseline — so only the positive side is ever labeled.
     """
     return x ** 2, (2.0 * x).mean(axis=-1)
 
 
 _LABELS_DOC = (
-    "Human-curated semantic labels per PCA component. Each side independently — "
-    "set to null when no clear pattern. Auto-remapped across PCA refits via "
-    "cosine similarity in the original feature space; auto_mapped_cos records "
-    "the match strength."
+    "Human-curated semantic motif label per PCA component (skew-ICA: positive "
+    "tail = motif, negative tail = baseline, so only the positive side is "
+    "labeled). Set to null when no clear pattern. Auto-remapped across PCA "
+    "refits via cosine similarity in the original feature space; auto_mapped_cos "
+    "records the match strength."
 )
 
 
@@ -297,7 +295,7 @@ def write_or_remap_labels(
         labels = {
             "version": 2,
             "_doc": _LABELS_DOC,
-            "components": {str(k): {"positive": None, "negative": None} for k in range(K)},
+            "components": {str(k): {"positive": None} for k in range(K)},
         }
         with open(labels_path, "w") as f:
             json.dump(labels, f, indent=2)
@@ -313,7 +311,7 @@ def write_or_remap_labels(
             "version": old_labels.get("version", 2),
             "_doc": old_labels.get("_doc", _LABELS_DOC),
             "components": {
-                str(k): old_dict.get(str(k), {"positive": None, "negative": None})
+                str(k): old_dict.get(str(k), {"positive": None})
                 for k in range(K)
             },
         }
@@ -336,11 +334,11 @@ def write_or_remap_labels(
 
     n_carried = sum(
         1 for v in remapped.values()
-        if v.get("positive") is not None or v.get("negative") is not None
+        if v.get("positive") is not None
     )
     n_old_nonempty = sum(
         1 for v in (old_labels.get("components", {}) or {}).values()
-        if v and (v.get("positive") is not None or v.get("negative") is not None)
+        if v and v.get("positive") is not None
     )
     print(f"  remapped labels: {n_carried}/{n_old_nonempty} old labels survived "
           f"(cosine threshold {cosine_threshold})")
@@ -745,8 +743,8 @@ def main():
               f"{primary_name} range: {np.abs(primary).min():.3f}.."
               f"{np.abs(primary).max():.3f}")
         if args.ica_fun == "skew":
-            print("  (negative tails are baseline by construction — do not "
-                  "label the 'negative' side unless |score| ≫ skew expectation)")
+            print("  (negative tails are baseline by construction — only the "
+                  "positive tail carries a motif, so labels are positive-only)")
 
     # Persist model state (everything needed to project a new problem).
     save_kwargs = dict(

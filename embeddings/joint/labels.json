@@ -1,21 +1,19 @@
 {
   "version": 2,
-  "_doc": "Human-curated semantic labels per PCA component. Each side independently — set to null when no clear pattern. Use auxiliary/inspect_extreme_problems.py to review.",
+  "_doc": "Human-curated semantic motif label per PCA component (skew-ICA: positive tail = motif, negative tail = baseline, so only the positive side is labeled). Set to null when no clear pattern. Use auxiliary/inspect_extreme_problems.py to review.",
   "components": {
     "0": {
-      "positive": "prevent opponent from splitting eyespace",
-      "negative": null,
+      "positive": "prevent two eyes by playing inside",
       "auto_mapped_from": 0,
       "auto_mapped_cos": 0.975,
       "positive_i18n": {
-        "zh": "阻止对方分割眼位",
-        "ja": "相手に眼形を分断させない",
-        "ko": "상대의 궁도 분단 막기"
+        "zh": "点入防止对方做两眼",
+        "ja": "中に打って二眼を防ぐ",
+        "ko": "안에 두어 두 눈 막기"
       }
     },
     "1": {
       "positive": "split your own eyespace in two",
-      "negative": null,
       "auto_mapped_from": 1,
       "auto_mapped_cos": 0.9557,
       "positive_i18n": {
@@ -26,7 +24,6 @@
     },
     "2": {
       "positive": "play a throw-in",
-      "negative": null,
       "auto_mapped_from": 2,
       "auto_mapped_cos": 0.9391,
       "positive_i18n": {
@@ -36,17 +33,15 @@
       }
     },
     "3": {
-      "positive": "capture stones in response to atari",
-      "negative": null,
+      "positive": "capture stones to gain liberties",
       "positive_i18n": {
-        "zh": "被打吃时提子",
-        "ja": "アタリに対して石を取る",
-        "ko": "단수에 대응해 따내기"
+        "zh": "提子获得气",
+        "ja": "石を取って手数を稼ぐ",
+        "ko": "돌을 따내 활로 늘리기"
       }
     },
     "4": {
-      "positive": "play ko threats",
-      "negative": null,
+      "positive": "play a ko threat",
       "auto_mapped_from": 3,
       "auto_mapped_cos": 0.9717,
       "positive_i18n": {
@@ -57,7 +52,6 @@
     },
     "5": {
       "positive": "fill ko",
-      "negative": null,
       "auto_mapped_from": 6,
       "auto_mapped_cos": 0.9535,
       "positive_i18n": {
@@ -68,7 +62,6 @@
     },
     "6": {
       "positive": "play endgame ko",
-      "negative": null,
       "auto_mapped_from": 5,
       "auto_mapped_cos": 0.8838,
       "positive_i18n": {
@@ -79,7 +72,6 @@
     },
     "7": {
       "positive": "take ko to kill",
-      "negative": null,
       "auto_mapped_from": 8,
       "auto_mapped_cos": 0.9317,
       "positive_i18n": {
@@ -90,7 +82,6 @@
     },
     "8": {
       "positive": "take a liberty",
-      "negative": null,
       "auto_mapped_from": 7,
       "auto_mapped_cos": 0.9155,
       "positive_i18n": {
@@ -101,7 +92,6 @@
     },
     "9": {
       "positive": "take ko to make dead shape",
-      "negative": null,
       "positive_i18n": {
         "zh": "提劫造成死形",
         "ja": "コウに取って死形にする",
@@ -110,7 +100,6 @@
     },
     "10": {
       "positive": "connect on the first line",
-      "negative": null,
       "auto_mapped_from": 10,
       "auto_mapped_cos": 0.9432,
       "positive_i18n": {
@@ -121,7 +110,6 @@
     },
     "11": {
       "positive": "take ko to gain a liberty when your group is in atari",
-      "negative": null,
       "auto_mapped_from": 12,
       "auto_mapped_cos": 0.8701,
       "positive_i18n": {
@@ -132,7 +120,6 @@
     },
     "12": {
       "positive": "play center of big eye to prevent two eyes",
-      "negative": null,
       "auto_mapped_from": 11,
       "auto_mapped_cos": 0.9028,
       "positive_i18n": {
@@ -142,17 +129,15 @@
       }
     },
     "13": {
-      "positive": "capture multiple stones",
-      "negative": null,
+      "positive": "capture a group",
       "positive_i18n": {
-        "zh": "吃掉多颗子",
-        "ja": "数子を取る",
-        "ko": "여러 점 따내기"
+        "zh": "吃掉一块棋",
+        "ja": "一団を取る",
+        "ko": "한 무리 따내기"
       }
     },
     "14": {
       "positive": "extend a single stone in atari",
-      "negative": null,
       "auto_mapped_from": 13,
       "auto_mapped_cos": 0.887,
       "positive_i18n": {
@@ -163,7 +148,6 @@
     },
     "15": {
       "positive": "capture the critical stone when both groups are in atari on the second line",
-      "negative": null,
       "positive_i18n": {
         "zh": "双方在二路互相打吃时提掉关键子",
         "ja": "双方が二線でアタリの時に要石を取る",
@@ -172,7 +156,6 @@
     },
     "16": {
       "positive": "connect stones short on liberties solidly",
-      "negative": null,
       "auto_mapped_from": 15,
       "auto_mapped_cos": 0.8779,
       "positive_i18n": {
@@ -183,7 +166,6 @@
     },
     "17": {
       "positive": "prevent a second eye",
-      "negative": null,
       "auto_mapped_from": 16,
       "auto_mapped_cos": 0.9636,
       "positive_i18n": {
@@ -193,30 +175,27 @@
       }
     },
     "18": {
-      "positive": "connect two groups without immediate liberty issues",
-      "negative": null,
+      "positive": "connect tail",
       "auto_mapped_from": 19,
       "auto_mapped_cos": 0.9726,
       "positive_i18n": {
-        "zh": "无紧气之忧地连接两块棋",
-        "ja": "ダメの心配なく二群を繋ぐ",
-        "ko": "급한 수 문제 없이 두 무리 잇기"
+        "zh": "接回尾部的棋子",
+        "ja": "シッポを繋ぐ",
+        "ko": "꼬리 잇기"
       }
     },
     "19": {
-      "positive": "extend cutting stones in atari",
-      "negative": null,
+      "positive": "save cutting stones",
       "auto_mapped_from": 17,
       "auto_mapped_cos": 0.9164,
       "positive_i18n": {
-        "zh": "将被打吃的切断子长出",
-        "ja": "アタリの切り石を伸びる",
-        "ko": "단수된 끊는 돌 뻗기"
+        "zh": "救出断开的棋子",
+        "ja": "切り石を助ける",
+        "ko": "끊는 돌 살리기"
       }
     },
     "20": {
       "positive": "connect under on the 2nd line",
-      "negative": null,
       "auto_mapped_from": 23,
       "auto_mapped_cos": 0.9517,
       "positive_i18n": {
@@ -226,30 +205,27 @@
       }
     },
     "21": {
-      "positive": "play from inside during semeai",
-      "negative": null,
+      "positive": "play from weak group in semeai",
       "auto_mapped_from": 30,
       "auto_mapped_cos": 0.8638,
       "positive_i18n": {
-        "zh": "对杀时从内部入手",
-        "ja": "攻め合いで内側から打つ",
-        "ko": "수상전에서 안쪽에서 두기"
+        "zh": "对杀时从弱方入手",
+        "ja": "攻め合いで弱い方から打つ",
+        "ko": "수상전에서 약한 쪽에서 두기"
       }
     },
     "22": {
-      "positive": "prevent opponent from connecting on the first line",
-      "negative": null,
+      "positive": "block on the first line",
       "auto_mapped_from": 21,
       "auto_mapped_cos": 0.9027,
       "positive_i18n": {
-        "zh": "阻止对方一路连接",
-        "ja": "相手の一線での連絡を防ぐ",
-        "ko": "상대의 1선 연결 막기"
+        "zh": "一路挡",
+        "ja": "一線で押さえる",
+        "ko": "1선에서 막기"
       }
     },
     "23": {
       "positive": "play on the first line to make the second eye",
-      "negative": null,
       "auto_mapped_from": 29,
       "auto_mapped_cos": 0.9062,
       "positive_i18n": {
@@ -260,7 +236,6 @@
     },
     "24": {
       "positive": "cut with atari",
-      "negative": null,
       "positive_i18n": {
         "zh": "边打吃边切断",
         "ja": "アタリで切る",
@@ -269,7 +244,6 @@
     },
     "25": {
       "positive": "save stones by connecting or capturing",
-      "negative": null,
       "auto_mapped_from": 26,
       "auto_mapped_cos": 0.8938,
       "positive_i18n": {
@@ -280,7 +254,6 @@
     },
     "26": {
       "positive": "take a liberty when a fuseki fight starts",
-      "negative": null,
       "positive_i18n": {
         "zh": "布局战斗开始时收气",
         "ja": "布石の競り合いでダメを詰める",
@@ -289,7 +262,6 @@
     },
     "27": {
       "positive": "capture a stone to gain a liberty",
-      "negative": null,
       "positive_i18n": {
         "zh": "提子获得一气",
         "ja": "石を取って一手稼ぐ",
@@ -298,7 +270,6 @@
     },
     "28": {
       "positive": "remove ko threats",
-      "negative": null,
       "auto_mapped_from": 22,
       "auto_mapped_cos": 0.8869,
       "positive_i18n": {
@@ -309,7 +280,6 @@
     },
     "29": {
       "positive": "cut",
-      "negative": null,
       "auto_mapped_from": 32,
       "auto_mapped_cos": 0.8772,
       "positive_i18n": {
@@ -320,7 +290,6 @@
     },
     "30": {
       "positive": "kill a big group",
-      "negative": null,
       "auto_mapped_from": 28,
       "auto_mapped_cos": 0.8964,
       "positive_i18n": {
@@ -331,7 +300,6 @@
     },
     "31": {
       "positive": "connect back after wedge encounters atari",
-      "negative": null,
       "auto_mapped_from": 35,
       "auto_mapped_cos": 0.9151,
       "positive_i18n": {
@@ -342,7 +310,6 @@
     },
     "32": {
       "positive": "solidly connect a hane",
-      "negative": null,
       "auto_mapped_from": 33,
       "auto_mapped_cos": 0.9055,
       "positive_i18n": {
@@ -353,7 +320,6 @@
     },
     "33": {
       "positive": "atari single stone on the second line towards the edge",
-      "negative": null,
       "positive_i18n": {
         "zh": "二路朝边上打吃单子",
         "ja": "二線で一子を辺に向かってアタリ",
@@ -362,7 +328,6 @@
     },
     "34": {
       "positive": "play a first-line move for a magic liberty",
-      "negative": null,
       "auto_mapped_from": 40,
       "auto_mapped_cos": 0.8706,
       "positive_i18n": {
@@ -373,7 +338,6 @@
     },
     "35": {
       "positive": "play a 1-point reverse sente",
-      "negative": null,
       "auto_mapped_from": 36,
       "auto_mapped_cos": 0.9278,
       "positive_i18n": {
@@ -384,7 +348,6 @@
     },
     "36": {
       "positive": "push through to introduce a cut",
-      "negative": null,
       "auto_mapped_from": 34,
       "auto_mapped_cos": 0.8855,
       "positive_i18n": {
@@ -395,7 +358,6 @@
     },
     "37": {
       "positive": "play a 1-point sente endgame",
-      "negative": null,
       "auto_mapped_from": 39,
       "auto_mapped_cos": 0.8887,
       "positive_i18n": {
@@ -405,17 +367,15 @@
       }
     },
     "38": {
-      "positive": "play a 2nd-line double-sente endgame",
-      "negative": null,
+      "positive": "block on the second line",
       "positive_i18n": {
-        "zh": "走二路双先官子",
-        "ja": "二線の両先手ヨセを打つ",
-        "ko": "2선의 양선수 끝내기"
+        "zh": "二路挡",
+        "ja": "二線で押さえる",
+        "ko": "2선에서 막기"
       }
     },
     "39": {
       "positive": "atari the cutting group while you still can",
-      "negative": null,
       "positive_i18n": {
         "zh": "趁早打吃断开的一方",
         "ja": "切った石を打てるうちにアタリする",
@@ -424,7 +384,6 @@
     },
     "40": {
       "positive": "play inside",
-      "negative": null,
       "auto_mapped_from": 42,
       "auto_mapped_cos": 0.875,
       "positive_i18n": {
@@ -435,7 +394,6 @@
     },
     "41": {
       "positive": "atari 2nd line stone towards the edge",
-      "negative": null,
       "auto_mapped_from": 47,
       "auto_mapped_cos": 0.8741,
       "positive_i18n": {
@@ -446,7 +404,6 @@
     },
     "42": {
       "positive": "connect and cut with a single move",
-      "negative": null,
       "auto_mapped_from": 43,
       "auto_mapped_cos": 0.9423,
       "positive_i18n": {
@@ -457,7 +414,6 @@
     },
     "43": {
       "positive": "connect to protect shape",
-      "negative": null,
       "auto_mapped_from": 44,
       "auto_mapped_cos": 0.907,
       "positive_i18n": {
@@ -468,7 +424,6 @@
     },
     "44": {
       "positive": "solid connection",
-      "negative": null,
       "positive_i18n": {
         "zh": "实连",
         "ja": "固く継ぐ",
@@ -477,7 +432,6 @@
     },
     "45": {
       "positive": "prevent semedori",
-      "negative": null,
       "positive_i18n": {
         "zh": "防止对杀中的提还",
         "ja": "セメドリを防ぐ",
@@ -486,7 +440,6 @@
     },
     "46": {
       "positive": "throwin ko",
-      "negative": null,
       "positive_i18n": {
         "zh": "扑入打劫",
         "ja": "放り込んでコウにする",
@@ -495,7 +448,6 @@
     },
     "47": {
       "positive": "connect under",
-      "negative": null,
       "positive_i18n": {
         "zh": "渡过",
         "ja": "渡る",
@@ -504,7 +456,6 @@
     },
     "48": {
       "positive": "play a simple endgame move",
-      "negative": null,
       "positive_i18n": {
         "zh": "走简单官子",
         "ja": "単純なヨセを打つ",
@@ -513,7 +464,6 @@
     },
     "49": {
       "positive": "play a defensive fix",
-      "negative": null,
       "auto_mapped_from": 48,
       "auto_mapped_cos": 0.9294,
       "positive_i18n": {
@@ -524,7 +474,6 @@
     },
     "50": {
       "positive": "take ko to gain a liberty",
-      "negative": null,
       "positive_i18n": {
         "zh": "提劫长一气",
         "ja": "コウに取って手数を稼ぐ",
@@ -533,7 +482,6 @@
     },
     "51": {
       "positive": "atari",
-      "negative": null,
       "positive_i18n": {
         "zh": "打吃",
         "ja": "アタリ",
@@ -542,7 +490,6 @@
     },
     "52": {
       "positive": "capture stones",
-      "negative": null,
       "positive_i18n": {
         "zh": "提子",
         "ja": "石を取る",
@@ -551,7 +498,6 @@
     },
     "53": {
       "positive": "atari before fix",
-      "negative": null,
       "positive_i18n": {
         "zh": "先打吃后补棋",
         "ja": "継ぐ前にアタリを利かす",
@@ -560,7 +506,6 @@
     },
     "54": {
       "positive": "save cutting stones",
-      "negative": null,
       "positive_i18n": {
         "zh": "救出断开的棋子",
         "ja": "切り石を助ける",
@@ -569,7 +514,6 @@
     },
     "55": {
       "positive": "back off loosely",
-      "negative": null,
       "positive_i18n": {
         "zh": "松缓地退让",
         "ja": "緩く引く",
@@ -578,7 +522,6 @@
     },
     "56": {
       "positive": "make miai",
-      "negative": null,
       "positive_i18n": {
         "zh": "做成见合",
         "ja": "見合いにする",
@@ -587,7 +530,6 @@
     },
     "57": {
       "positive": "cut for aji",
-      "negative": null,
       "positive_i18n": {
         "zh": "切断利用味道",
         "ja": "味を求めて切る",
@@ -596,7 +538,6 @@
     },
     "58": {
       "positive": "make eyeshape",
-      "negative": null,
       "positive_i18n": {
         "zh": "做出眼形",
         "ja": "眼形を作る",
@@ -605,7 +546,6 @@
     },
     "59": {
       "positive": "defend territory",
-      "negative": null,
       "positive_i18n": {
         "zh": "守住实地",
         "ja": "地を守る",
@@ -614,7 +554,6 @@
     },
     "60": {
       "positive": "read carefully",
-      "negative": null,
       "positive_i18n": {
         "zh": "仔细读棋",
         "ja": "慎重に読む",
@@ -623,7 +562,6 @@
     },
     "61": {
       "positive": "sente endgame",
-      "negative": null,
       "positive_i18n": {
         "zh": "先手官子",
         "ja": "先手ヨセ",
@@ -632,7 +570,6 @@
     },
     "62": {
       "positive": "defend territory with attack",
-      "negative": null,
       "positive_i18n": {
         "zh": "借攻击守住实地",
         "ja": "攻めながら地を守る",
@@ -641,7 +578,6 @@
     },
     "63": {
       "positive": "cut and connect",
-      "negative": null,
       "positive_i18n": {
         "zh": "切断并连接",
         "ja": "切って繋ぐ",
