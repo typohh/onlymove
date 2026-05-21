@@ -111,6 +111,7 @@ import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, l
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap } from './rank-decomposition.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
+import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading } from './overlays.js';
 import { APP_MODES } from './constants.js';
 
@@ -172,6 +173,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     document.getElementById('board-size-toggle').addEventListener('click', handleSizeToggle);
     document.getElementById('board-size-toggle-h').addEventListener('click', handleSizeToggle);
+
+    // Review-mode motif bubble: wire its edge tab (slide over board / back).
+    initMotifBubble();
 
     // Tapping the rank display shows how it translates to ranks on other
     // servers (showRankTranslation no-ops outside solving mode). The elements

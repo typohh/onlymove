@@ -38,6 +38,13 @@
         <a href="#" id="button4" class="btn"></a>
       </div>
     </div>
+
+    <!-- Review-mode motif bubble. position:fixed overlay — never a flex child,
+         so it can never resize or shift the board (see style.css). -->
+    <div id="motif-bubble" class="motif-bubble motif-bubble-hidden" aria-hidden="true">
+      <div id="motif-bubble-content" class="motif-bubble-content"></div>
+      <button id="motif-bubble-tab" class="motif-bubble-tab" type="button" aria-label="motif"></button>
+    </div>
   </div>
 
   <script type="text/javascript">

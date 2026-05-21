@@ -181,9 +181,12 @@ def remap_labels_by_cosine(
     Each old labeled PC is matched to the new PC with maximum |cosine similarity|
     in the full feature space. Above `threshold`, the label is copied. Negative
     cosine flips the sign of the axis, so positive/negative label sides swap.
+    Per-side translation dicts (`positive_i18n`/`negative_i18n`) ride with their
+    label and swap on the same flip.
 
     Returns a fresh `components` dict {str(k): {"positive": ..., "negative": ...,
-    "auto_mapped_from": int, "auto_mapped_cos": float}} with all K_new entries.
+    optional "positive_i18n"/"negative_i18n", "auto_mapped_from": int,
+    "auto_mapped_cos": float}} with all K_new entries.
     """
     K_old = old_components.shape[0]
     K_new = new_components.shape[0]
@@ -234,10 +237,18 @@ def remap_labels_by_cosine(
             old_entry = old_components_dict.get(str(k_old), {})
             pos = old_entry.get("positive")
             neg = old_entry.get("negative")
+            # Per-side translation dicts ride with their label across the refit.
+            pos_i18n = old_entry.get("positive_i18n")
+            neg_i18n = old_entry.get("negative_i18n")
             if c < 0:
                 pos, neg = neg, pos  # axis flipped — swap sides
+                pos_i18n, neg_i18n = neg_i18n, pos_i18n
             slot["positive"] = pos
             slot["negative"] = neg
+            if pos_i18n is not None:
+                slot["positive_i18n"] = pos_i18n
+            if neg_i18n is not None:
+                slot["negative_i18n"] = neg_i18n
             slot["auto_mapped_from"] = k_old
             slot["auto_mapped_cos"] = round(c, 4)
         new_components_dict[str(k_new)] = slot

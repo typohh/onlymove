@@ -19,6 +19,7 @@ const localization = {
     tsumegoMode: '挑战模式',
     recallMode: '回忆模式',
     reviewMode: '复习模式',
+    motifTitle: '此手的要点',
     viewMode: '查看模式',
     rushingMessage: '您只用了{seconds}秒就回答了。您过去的结果表明，这样仓促行事有{confidence}%的概率导致更多错误。',
     insufficientReviewMessage: '重复错误！您只花了{seconds}秒复习这个问题。您过去的结果表明，花更多时间复习有{confidence}%的概率让您下次更好地记住它。',
@@ -80,6 +81,7 @@ const localization = {
     tsumegoMode: 'チャレンジモード',
     recallMode: 'リコールモード',
     reviewMode: '復習モード',
+    motifTitle: 'この手の急所',
     viewMode: '閲覧モード',
     rushingMessage: 'あなたはわずか{seconds}秒で回答しました。過去の結果から、このように急ぐと{confidence}%の確率でミスが増えることが示唆されます。',
     insufficientReviewMessage: '繰り返しのミス！この問題の復習に{seconds}秒しか費やしていません。過去の結果から、復習にもっと時間をかけることで、{confidence}%の確率でより良く記憶できることが示唆されます。',
@@ -141,6 +143,7 @@ const localization = {
     tsumegoMode: '챌린지 모드',
     recallMode: '리콜 모드',
     reviewMode: '복습 모드',
+    motifTitle: '이 수의 핵심',
     viewMode: '보기 모드',
     rushingMessage: '단 {seconds}초 만에 답변하셨습니다. 과거 결과에 따르면, 이렇게 서두르면 {confidence}%의 확률로 더 많은 실수로 이어질 수 있습니다.',
     insufficientReviewMessage: '반복된 실수입니다! 이 문제를 복습하는 데 {seconds}초만 사용하셨습니다. 과거 결과에 따르면, 복습에 더 많은 시간을 투자하면 {confidence}%의 확률로 더 잘 기억할 수 있습니다.',
@@ -202,6 +205,7 @@ const localization = {
     tsumegoMode: 'Challenge mode',
     recallMode: 'Recall mode',
     reviewMode: 'Review mode',
+    motifTitle: 'Why this move',
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',
     insufficientReviewMessage: 'Repeat mistake! You have spent only {seconds} seconds reviewing this problem. Your past results suggest there is a {confidence}% probability you will remember it better with more time spent reviewing.',
@@ -257,18 +261,35 @@ const localization = {
   }
 };
 
-export function getTerm(key) {
+/**
+ * Resolves the active UI language to one of the supported codes
+ * ('zh' | 'ja' | 'ko' | 'en'). Single source of truth used by both getTerm
+ * and any caller that needs the raw code (e.g. motif-label lookups in
+ * embedding_meta.json's positive_i18n maps).
+ */
+export function getLang() {
   const lang = navigator.language || 'en';
-  let langDb;
-  if (lang.startsWith('zh')) {
-    langDb = localization.zh;
-  } else if (lang.startsWith('ja')) {
-    langDb = localization.ja;
-  } else if (lang.startsWith('ko')) {
-    langDb = localization.ko;
-  } else {
-    langDb = localization.en;
-  }
+  if (lang.startsWith('zh')) return 'zh';
+  if (lang.startsWith('ja')) return 'ja';
+  if (lang.startsWith('ko')) return 'ko';
+  return 'en';
+}
+
+/**
+ * Localized motif label for a labels.components entry. Falls back to the
+ * canonical English `positive` string when no translation exists for the
+ * active language. Used by the review-mode motif bubble and the stats page.
+ */
+export function localizedMotif(component) {
+  if (!component) return null;
+  const lang = getLang();
+  return (component.positive_i18n && component.positive_i18n[lang])
+    || component.positive
+    || null;
+}
+
+export function getTerm(key) {
+  const langDb = localization[getLang()];
 
   if (langDb && key in langDb) {
     return langDb[key];

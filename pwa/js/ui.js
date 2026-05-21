@@ -17,6 +17,7 @@ const isInstalled = () =>
     window.navigator.standalone === true;
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { getCurrentNode } from './board.js';
+import { syncMotifBubble } from './motif-bubble.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -155,6 +156,9 @@ export function updateAllUI() {
     } else if (state.appMode === APP_MODES.ANALYZING) {
         updateAnalysisModeUI();
     }
+    // Visibility derives from current state (mode + whether we're at the
+    // initial analysis node), so refresh it on every UI update.
+    syncMotifBubble();
 }
 
 const updateSolvingModeUI = () => {

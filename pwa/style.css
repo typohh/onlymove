@@ -249,6 +249,173 @@ body {
 
 }
 
+/* --- Review-mode motif bubble ---------------------------------------------
+   An overlay (position:fixed), deliberately NOT part of #main-container's
+   flex flow, so it can never resize or shift the board. Parked at the screen
+   edge nearest the board (below the buttons in portrait, left of the board in
+   landscape). The edge "tab" carries a wide arrow; clicking it slides the
+   bubble over the board and back. Show/hide and slide are driven by JS toggling
+   `.motif-bubble-hidden` and `.over-board`. */
+.motif-bubble {
+    position: fixed;
+    z-index: 6;                 /* above board (z 2) and controls (z 1) */
+    display: flex;
+    box-sizing: border-box;
+    background-color: #333;
+    color: #eee;
+    border: 0.2vmin solid #555;
+    border-radius: var(--radius);
+    box-shadow: 0 1vmin 3vmin rgba(0, 0, 0, 0.45);
+    font-size: calc(0.03 * min(0.84 * 100vh, 100vw));
+    overflow: hidden;
+    transition: transform 0.28s ease;
+}
+
+.motif-bubble-hidden {
+    display: none;
+}
+
+.motif-bubble-content {
+    flex: 1 1 auto;
+    padding: 1.5vmin 2vmin;
+    overflow: auto;
+    min-height: 0;
+    min-width: 0;
+}
+
+.motif-bubble-title {
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+    margin-bottom: 0.9vmin;
+}
+
+.motif-bubble-list {
+    margin: 0;
+    padding-left: 3.2vmin;
+}
+
+.motif-bubble-list li {
+    margin: 0.4vmin 0;
+    line-height: 1.25;
+}
+
+.motif-bubble-tab {
+    flex: 0 0 auto;
+    background-color: #444;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-family: inherit;
+}
+
+.motif-bubble-tab:hover {
+    background-color: #555;
+    color: #fff;
+}
+
+.motif-bubble-tab::after {
+    content: '\25B8';           /* ▸ base, rotated per layout/state below */
+    font-size: 3vmin;
+    line-height: 1;
+    transition: transform 0.28s ease;
+}
+
+/* Portrait / squarish: park directly below the buttons, tab on top, slide up.
+
+   The column is vertically centred and the title/button heights are
+   font-dependent, so the buttons' bottom edge isn't a CSS constant the way the
+   board's edges are in landscape. JS measures it (refreshMotifBubbleMetrics in
+   motif-bubble.js) and feeds the parked top + the lift-to-screen-centre via the
+   --mb-park-top / --mb-lift custom properties. The bubble grows downward and
+   spills off the bottom of the screen by whatever doesn't fit — only the tab
+   need stay reachable; clicking it lifts the bubble to screen centre (on top of
+   the board). The fallbacks keep it sane for the frame before JS runs. */
+@media (max-aspect-ratio: 125/100) {
+    .motif-bubble {
+        flex-direction: column-reverse;   /* tab above content */
+        left: 1vmin;
+        right: 1vmin;
+        bottom: auto;
+        top: var(--mb-park-top, 62vh);
+        transform: translateY(0);
+    }
+    .motif-bubble.over-board {
+        transform: translateY(var(--mb-lift, -42vh));   /* lift to screen centre */
+    }
+    .motif-bubble-tab {
+        width: 100%;
+        min-height: 6vmin;
+    }
+    .motif-bubble-tab::after {
+        transform: rotate(-90deg);        /* parked: point up at the board */
+    }
+    .motif-bubble.over-board .motif-bubble-tab::after {
+        transform: rotate(90deg);         /* over board: point back down */
+    }
+}
+
+/* Landscape: park against the board's LEFT edge (board-relative, not
+   screen-relative), tab on the right, slide right onto the board.
+
+   The board is 100vh wide and the centered board+controls(25vmin) group puts the
+   board's left edge at (50vw - 62.5vh). We anchor the bubble's right edge there
+   (minus a small gap) so the bubble grows leftward and spills off the screen by
+   whatever its width exceeds the gutter — that's the point: on narrow landscape
+   only the tab pokes out, and clicking it pulls the bubble to screen centre.
+   --mb-w / --mb-gap drive both the parked anchor and the slide distance. */
+@media (min-aspect-ratio: 125/100) {
+    .motif-bubble {
+        --mb-w: 40vh;
+        --mb-gap: 1vh;
+        flex-direction: row;              /* tab to the right of content */
+        left: auto;
+        right: calc(50vw + 62.5vh + var(--mb-gap));
+        top: 50%;
+        transform: translateY(-50%);
+        width: var(--mb-w);
+        max-height: 80vh;
+    }
+    .motif-bubble.over-board {
+        /* Slide right so the bubble's centre lands at screen centre (50vw),
+           which sits on top of the board. */
+        transform: translateY(-50%) translateX(calc(62.5vh + var(--mb-gap) + var(--mb-w) / 2));
+    }
+    .motif-bubble-tab {
+        align-self: stretch;
+        min-width: 6vmin;
+    }
+    .motif-bubble-tab::after {
+        transform: rotate(0deg);          /* parked: point right at the board */
+    }
+    .motif-bubble.over-board .motif-bubble-tab::after {
+        transform: rotate(180deg);        /* over board: point back left */
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    .motif-bubble {
+        background-color: #f0f0f0;
+        color: #000;
+        border-color: #ccc;
+    }
+    .motif-bubble-title {
+        color: #000;
+    }
+    .motif-bubble-tab {
+        background-color: #e0e0e0;
+        color: #333;
+    }
+    .motif-bubble-tab:hover {
+        background-color: #d0d0d0;
+        color: #000;
+    }
+}
+
 /* --- iOS Install Modal --- */
 #ios-install-overlay {
     position: fixed;

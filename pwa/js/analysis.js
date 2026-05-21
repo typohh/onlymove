@@ -8,6 +8,7 @@ import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
 import { getScoreFromComment, getWinrateFromComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
+import { populateMotifBubble } from './motif-bubble.js';
 
 
 // Iterative DFS — true if the subtree rooted at `node` contains a pass move.
@@ -61,6 +62,9 @@ export function enterAnalysisMode() {
         setTimeout(() => {
             setInitialAnalysisNode(getCurrentNode());
             updateAllUI();
+            // Surface the correct move's motifs for this problem (index 1 is the
+            // problem under review, same entry whose SGF was loaded above).
+            populateMotifBubble(state.problemHistory[1]);
             requestAndDisplayAnalysis();
             resolve();
         }, 0);

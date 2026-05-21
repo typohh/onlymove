@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
-import { getTerm } from './i18n.js';
+import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { showLoading, hideLoading } from './overlays.js';
@@ -645,7 +645,7 @@ function buildLikelyIssuesElement() {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k) => {
         const entry = labelMap[String(k)];
-        return (entry && entry.positive) || `style #${k}`;
+        return localizedMotif(entry) || `style #${k}`;
     };
     const QUADRANTS = [
         { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => `You ${l} when you shouldn't.` },
