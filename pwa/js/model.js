@@ -1037,12 +1037,14 @@ function buildRatingHistoryChart() {
     // (count is typically ~200, up to ~10k) the dots stay faint density texture
     // instead of an opaque slab. Two overplotting guards keyed to count: cap the
     // rendered dots (uniform stride over the time-ordered history), and scale
-    // per-dot opacity so the total ink stays roughly constant as count grows.
+    // per-dot opacity down as count grows. The 0.15 floor matters: dots sit
+    // beneath the translucent bands, so anything fainter is swallowed by the
+    // band tint near the curve (where the dots concentrate) and vanishes.
     const SCATTER_CAP = 1500;
     const stride = Math.ceil(entries.length / SCATTER_CAP);
     const shownDots = stride > 1 ? entries.filter((_, i) => i % stride === 0) : entries;
-    const dotR = shownDots.length > 600 ? '1.2' : '1.6';
-    const dotAlpha = Math.max(0.05, Math.min(0.6, 50 / shownDots.length)).toFixed(3);
+    const dotR = shownDots.length > 600 ? '1.4' : '1.6';
+    const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / shownDots.length)).toFixed(3);
     for (const e of shownDots) {
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', xOf(e.date).toFixed(1));
