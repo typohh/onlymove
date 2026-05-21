@@ -948,14 +948,10 @@ function buildRatingHistoryChart() {
         }
     }
 
-    // Y-range: anchor on the skill curve + its prediction band, then widen to
-    // also keep the bulk of the scatter in frame. The band alone isn't enough —
-    // with lots of data the measurement band collapses to a thin ribbon far
-    // narrower than the spread of attempted problem ranks, so a band-only window
-    // clips essentially every dot out of view. Union the band with a robust
-    // percentile range of the dots (5th–95th, so a few extreme problems don't
-    // blow out the scale): the band stays fully in frame and the scatter is
-    // visible. Dots beyond the 5/95 tails are still clipped by the SVG.
+    // Focus the y-range on the user's rank — the skill curve and its prediction
+    // band — not on the spread of problem difficulties. Problem ranks scatter
+    // far wider than the user's skill, so anchoring on them squashes the part of
+    // the chart that matters. Dots outside this window are dropped (see scatter).
     let bandMin = Infinity, bandMax = -Infinity;
     for (const e of gridEvals) {
         const h = outerHalf(e);
@@ -968,15 +964,12 @@ function buildRatingHistoryChart() {
         bandMin = sortedRanks[0];
         bandMax = sortedRanks[sortedRanks.length - 1];
     }
-    {
-        const sorted = entries.map(e => e.rankValue).sort((a, b) => a - b);
-        const q = p => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
-        bandMin = Math.min(bandMin, q(0.05));
-        bandMax = Math.max(bandMax, q(0.95));
-    }
-    const Y_PAD = 1; // one rank of breathing room above/below
-    let yHigh = Math.ceil(bandMax + Y_PAD);
-    let yLow = Math.floor(bandMin - Y_PAD);
+    // Window exactly one rank beyond the outer CI band — no rounding out to
+    // integers (that slop nearly doubled the padding). Grid lines below still
+    // land on the integer ranks that fall inside this range.
+    const Y_PAD = 1; // exactly one rank beyond the outer CI band
+    let yHigh = bandMax + Y_PAD;
+    let yLow = bandMin - Y_PAD;
     if (yHigh <= yLow) yHigh = yLow + 1;
 
     const container = document.createElement('div');
@@ -994,7 +987,7 @@ function buildRatingHistoryChart() {
     // that would visually overlap their neighbor get hidden after layout
     // (see ResizeObserver below).
     const gridRanks = [];
-    for (let r = yLow; r <= yHigh; r++) gridRanks.push(r);
+    for (let r = Math.ceil(yLow); r <= Math.floor(yHigh); r++) gridRanks.push(r);
     const labelRanks = gridRanks;
 
     // Y-axis labels live in HTML so they inherit the surrounding pre font
@@ -1045,16 +1038,20 @@ function buildRatingHistoryChart() {
     // Per-attempt scatter: green=correct, red=wrong. Drawn UNDER the bands and
     // skill line so the curve and its CIs always read on top — at high volume
     // (count is typically ~200, up to ~10k) the dots stay faint density texture
-    // instead of an opaque slab. Two overplotting guards keyed to count: cap the
-    // rendered dots (uniform stride over the time-ordered history), and scale
-    // per-dot opacity down as count grows. The 0.15 floor matters: dots sit
-    // beneath the translucent bands, so anything fainter is swallowed by the
-    // band tint near the curve (where the dots concentrate) and vanishes.
+    // instead of an opaque slab. The narrow y-window clips most dots — problem
+    // ranks scatter far wider than the band — so key the overplotting guards to
+    // the count of dots that actually fall INSIDE the window, not the raw total.
+    // (Keying off the total drove opacity to the floor while only a handful of
+    // dots were visible, so they vanished.) Two guards: cap the rendered dots
+    // (uniform stride), and scale per-dot opacity down as the visible count
+    // grows. The 0.15 floor matters: dots sit beneath the translucent bands, so
+    // anything fainter is swallowed by the band tint near the curve.
+    const visibleDots = entries.filter(e => e.rankValue >= yLow && e.rankValue <= yHigh);
     const SCATTER_CAP = 1500;
-    const stride = Math.ceil(entries.length / SCATTER_CAP);
-    const shownDots = stride > 1 ? entries.filter((_, i) => i % stride === 0) : entries;
+    const stride = Math.max(1, Math.ceil(visibleDots.length / SCATTER_CAP));
+    const shownDots = stride > 1 ? visibleDots.filter((_, i) => i % stride === 0) : visibleDots;
     const dotR = shownDots.length > 600 ? '1.4' : '1.6';
-    const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / shownDots.length)).toFixed(3);
+    const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / Math.max(1, shownDots.length))).toFixed(3);
     for (const e of shownDots) {
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', xOf(e.date).toFixed(1));
