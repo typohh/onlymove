@@ -38,7 +38,9 @@ export async function showRankTranslation() {
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
     const map = await loadRankMap();
-    const key = rankIndexToKey(Math.floor(rating * TOTAL_RANKS));
+    const rankValue = rating * TOTAL_RANKS;
+    const rankIndex = Math.floor(rankValue);
+    const key = rankIndexToKey(rankIndex);
     const servers = (map && map[key]) || null;
 
     const overlay = document.createElement('div');
@@ -46,17 +48,23 @@ export async function showRankTranslation() {
     const modal = document.createElement('div');
     modal.id = 'ios-install-modal';
 
+    // Our own rank as "<rank>, <progress>% towards <next rank>", shown above the
+    // other-server translation. Progress is the fractional position within the
+    // current rank band; the next rank is one step stronger (higher index).
+    const progress = document.createElement('div');
+    progress.style.textAlign = 'center';
+    progress.style.marginBottom = '1vmin';
+    progress.style.fontWeight = 'bold';
+    progress.textContent = getTerm('rankProgressFormat')
+        .replace('{rank}', key)
+        .replace('{percent}', Math.round((rankValue - rankIndex) * 100))
+        .replace('{nextRank}', rankIndexToKey(rankIndex + 1));
+    modal.appendChild(progress);
+
     const title = document.createElement('div');
     title.id = 'ios-install-title';
     title.textContent = getTerm('rankTranslationTitle');
     modal.appendChild(title);
-
-    const sub = document.createElement('div');
-    sub.style.textAlign = 'center';
-    sub.style.marginBottom = '1vmin';
-    sub.style.opacity = '0.85';
-    sub.textContent = key;
-    modal.appendChild(sub);
 
     if (servers && Object.keys(servers).length > 0) {
         const grid = document.createElement('div');

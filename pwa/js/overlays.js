@@ -158,15 +158,47 @@ export function fadeOverlay(duration, callback, stats = null) {
         });
     });
 
-    // Halfway through, swap content
-    setTimeout(() => {
-        if (callback) callback();
-    }, 500);
+    // Halfway through the fade-in, run the callback (which loads the next
+    // problem). If it returns a promise, hold the overlay until that work
+    // finishes — the white screen must never lift onto a board that isn't ready.
+    const swapped = new Promise(resolve => setTimeout(resolve, 500))
+        .then(() => (callback ? callback() : undefined));
+    // ...but stay up at least `duration` so the transition never flickers when
+    // the load is instant (cached problem).
+    const minDisplay = new Promise(resolve => setTimeout(resolve, duration));
 
-    // At the end, fade out (0.5s) and remove
-    setTimeout(() => {
+    Promise.all([swapped, minDisplay]).catch(() => {}).then(() => {
         overlay.style.transition = 'opacity 0.5s ease-in-out';
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 500);
-    }, 1000);
+    });
+}
+
+// Generic loading spinner shown while the app waits on async work (startup file
+// loads, the stats compute, etc.). Reference-counted so overlapping callers
+// don't tear down each other's spinner — the overlay lifts only when the last
+// showLoading() has been matched by a hideLoading().
+let _loadingCount = 0;
+let _loadingEl = null;
+
+export function showLoading() {
+    _loadingCount++;
+    if (_loadingEl) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'loading-overlay';
+    const spinner = document.createElement('div');
+    spinner.className = 'loading-spinner';
+    overlay.appendChild(spinner);
+    document.body.appendChild(overlay);
+    _loadingEl = overlay;
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+}
+
+export function hideLoading() {
+    _loadingCount = Math.max(0, _loadingCount - 1);
+    if (_loadingCount > 0 || !_loadingEl) return;
+    const overlay = _loadingEl;
+    _loadingEl = null;
+    overlay.classList.remove('visible');
+    setTimeout(() => overlay.remove(), 200);
 }

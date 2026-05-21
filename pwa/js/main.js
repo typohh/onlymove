@@ -111,6 +111,7 @@ import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, l
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap } from './rank-decomposition.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
+import { showLoading, hideLoading } from './overlays.js';
 import { APP_MODES } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -156,6 +157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Linked mode exits on size switch: the linked challenge belongs to
         // the previous size's problem space.
         setAppMode(APP_MODES.SOLVING);
+        showLoading();
         try {
             await loadTsumego(false);
         } catch (err) {
@@ -166,6 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         refreshSizeToggleLabel();
         updateAllUI();
+        hideLoading();
     };
     document.getElementById('board-size-toggle').addEventListener('click', handleSizeToggle);
     document.getElementById('board-size-toggle-h').addEventListener('click', handleSizeToggle);
@@ -701,6 +704,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         localStorage.setItem('boardSize', String(chosen));
     }
 
+    // Spinner over the initial problem load (fetching/parsing the zip archive)
+    // so cold loads don't sit on a blank board. Lifted after the first paint.
+    showLoading();
     try {
         if (tsumegoId && tsumegoId.length > 0) {
             const history = state.problemHistory;
@@ -747,6 +753,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     refreshSizeToggleLabel();
     updateAllUI();
+    hideLoading();
 
     // Initialize button4 state from the SW subscription status (async — first
     // paint above uses the default cache which renders Install; this repaints

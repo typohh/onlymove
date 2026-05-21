@@ -252,7 +252,8 @@ const localization = {
     rankSurveyDismiss: 'Not now',
     rankTranslationTitle: 'Your rank on other servers',
     rankTranslationEmpty: 'No server estimate for this rank yet.',
-    rankTranslationClose: 'Close'
+    rankTranslationClose: 'Close',
+    rankProgressFormat: '{rank}, {percent}% progress towards {nextRank}'
   }
 };
 

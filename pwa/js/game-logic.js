@@ -48,8 +48,10 @@ const handleCorrectAnswer = (x, y) => {
     sendReport(buildReportPayload(true, x, y));
     const stats = updateUserStats(true);
 
+    // Return the load promise so fadeOverlay holds the white screen up until
+    // the next problem is actually loaded (never lifting onto an empty board).
     fadeOverlay(1000, () => {
-        loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
+        return loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
     }, stats);
 }
 

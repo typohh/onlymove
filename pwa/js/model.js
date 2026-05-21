@@ -6,6 +6,7 @@ import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH, TOTAL_RANK
 import { getTerm } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
+import { showLoading, hideLoading } from './overlays.js';
 
 // ------------------------------------------------------------------------------------------------
 // --- Moved from problem-loader.js ---------------------------------------------------------------
@@ -500,23 +501,27 @@ export async function showDetailedStats() {
         return;
     }
 
-    if (!state.statsResults) {
-        const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
-        const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
-        const trainingData = prepareTrainingData(history, validHistory);
-        const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
-        setStatsResults(finalResults);
-    }
-
-    if (!state.statsResults) {
-        alert(getTerm('statsFailed'));
-        return;
-    }
-
+    showLoading();
+    // Yield a paint so the spinner is actually visible before the synchronous
+    // decomposition + chart build (computeRankDecomposition, buildRatingHistory-
+    // Chart, …) take over the main thread.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
+        if (!state.statsResults) {
+            const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+            const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+            const trainingData = prepareTrainingData(history, validHistory);
+            const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
+            setStatsResults(finalResults);
+        }
+
+        if (!state.statsResults) {
+            alert(getTerm('statsFailed'));
+            return;
+        }
+
         const { results, varCovarMatrix } = state.statsResults;
         const finalParams = state.modelParams;
-        const logitPerRank = getLogitPerRank(state.statsResults);
         let resultText = '';
 
         // Block 1: Observations
@@ -574,19 +579,6 @@ export async function showDetailedStats() {
         const ignoredProblemCount = state.answerHistory.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
 
-        // Difficulty sensitivity as a natural-language percent deviation:
-        // |β_difficulty / logitPerRank| − 1 is the fractional gap between the
-        // user's success-vs-rank slope and the prior-blended baseline. Lives
-        // here (not in the model block) because it's a personal stat about
-        // the user, not a model-output effect.
-        const pdResult = results.find(r => r.varIndex === MODEL_INDICES.PROBLEM_DIFFICULTY);
-        if (pdResult) {
-            const ratio = Math.abs(pdResult.coeff) / logitPerRank;
-            const pct = (ratio - 1) * 100;
-            const direction = pct >= 0 ? 'more' : 'less';
-            resultText += `You are ${Math.abs(pct).toFixed(0)}% ${direction} sensitive to problem difficulty than typical.\n`;
-        }
-
         // Two-component rank decomposition (R = skill S + form M). Gives a
         // long-term-trend number and a session-to-session swing number that
         // can't be read off the single-line smoother in the chart. See
@@ -628,6 +620,8 @@ export async function showDetailedStats() {
         console.error('Failed to generate stats text:', error);
         Sentry.captureException(error);
         alert(getTerm('statsFailed'));
+    } finally {
+        hideLoading();
     }
 }
 
@@ -954,23 +948,25 @@ function buildRatingHistoryChart() {
         }
     }
 
-    // Drop the lowest-rated 5% (capped at 50) when picking the y-range from
-    // the scatter, so a handful of very-easy outliers don't squash the visible
-    // part of the chart. Skill band always pushes outward.
-    const sortedRanks = entries.map(e => e.rankValue).slice().sort((a, b) => a - b);
-    const dropCount = Math.min(50, Math.floor(sortedRanks.length * 0.20));
-    const trimmedMin = sortedRanks[dropCount];
-    const maxRank = sortedRanks[sortedRanks.length - 1];
+    // Focus the y-range on the user's rank — the skill curve and its prediction
+    // band — not on the spread of problem difficulties. Problem ranks scatter
+    // far wider than the user's skill, so anchoring on them squashes the part of
+    // the chart that matters. Dots outside the band are clipped by the SVG.
     let bandMin = Infinity, bandMax = -Infinity;
     for (const e of gridEvals) {
         const h = outerHalf(e);
         bandMin = Math.min(bandMin, e.S - h);
         bandMax = Math.max(bandMax, e.S + h);
     }
-    if (!Number.isFinite(bandMin)) { bandMin = trimmedMin; bandMax = maxRank; }
-    let yHigh = Math.ceil(Math.max(maxRank, bandMax));
-    let yLow = Math.floor(Math.min(trimmedMin, bandMin));
-    if (Number.isInteger(Math.min(trimmedMin, bandMin))) yLow -= 1;
+    if (!Number.isFinite(bandMin)) {
+        // No decomposition (too little data) — fall back to the scatter range.
+        const sortedRanks = entries.map(e => e.rankValue).slice().sort((a, b) => a - b);
+        bandMin = sortedRanks[0];
+        bandMax = sortedRanks[sortedRanks.length - 1];
+    }
+    const Y_PAD = 1; // one rank of breathing room above/below the band
+    let yHigh = Math.ceil(bandMax + Y_PAD);
+    let yLow = Math.floor(bandMin - Y_PAD);
     if (yHigh <= yLow) yHigh = yLow + 1;
 
     const container = document.createElement('div');
