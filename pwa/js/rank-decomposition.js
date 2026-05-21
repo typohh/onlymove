@@ -18,9 +18,10 @@
 //   3. Map S, M and their SEs to rank with M (delta-method for the SEs) so the
 //      summary and chart stay in rank units.
 //
-// If rating_to_rank.json hasn't loaded, we degrade to the old rank-space mode
-// (x = problemRating·29, identity map). loadRatingRankMap() should be called on
-// app init so M is cached before the stats page is opened.
+// M (rating_to_rank.json) is required: package_for_pwa ships only raw ratings,
+// so the client can't rank anything without it. main.js awaits loadRatingRankMap()
+// at init and aborts if it fails; computeRankDecomposition returns null if the
+// curve for the active size is missing.
 
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
@@ -37,14 +38,12 @@ const KERNEL_TRUNC_SIGMA = 4;
 const CALIBRATION_P = 0.8;
 const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
 
-// Success-curve slope. Rating space is the real path; rank space is the
-// fallback. LOGIT_PER_RATING must match pipeline/fit_rank_curves.LOGIT_PER_RATING.
+// Success-curve slope, in rating space (the only space now — M is required).
+// Must match pipeline/fit_rank_curves.LOGIT_PER_RATING.
 const LOGIT_PER_RATING = 2.5;
-const LOGIT_PER_RANK = 0.28;
 
-// Form (session swing) prior σ_M, in the working units of each mode (~1 rank).
+// Form (session swing) prior σ_M, in rating units (~1 rank near the user).
 const SIGMA_M_PRIOR_RATING = 0.4;
-const SIGMA_M_PRIOR_RANK = 1.0;
 
 const X_CLAMP_LO = -40;
 const X_CLAMP_HI = 60;
@@ -86,6 +85,27 @@ function Mslope(rating, c) {
     return (applyM(rating + h, c) - applyM(rating - h, c)) / (2 * h);
 }
 function Minv(rankIndex, c) { return interpExtrap(rankIndex, c.rank_indices, c.ratings); }
+
+// Raw rating → normalized 0..1 rank for `size` (rank_index / TOTAL_RANKS, the
+// scale getDescriptiveRank and the recall/weakness models use). Returns null
+// when M isn't loaded; the whole client converts ratings to ranks through this,
+// so package_for_pwa never has to.
+export function normalizedRankForSize(rawRating, size) {
+    const c = curveForSize(size);
+    if (!c || typeof rawRating !== 'number') return null;
+    return applyM(rawRating, c) / TOTAL_RANKS;
+}
+
+export function isRatingRankMapLoaded() {
+    return _ratingRankMap != null;
+}
+
+// Stable per-size signature of the loaded curve. Stored ranks are invalidated
+// when this changes (a fit_rank_curves re-fit that didn't also change ratings).
+export function ratingRankCurveVersion(size) {
+    const c = curveForSize(size);
+    return c ? JSON.stringify([c.ratings, c.rank_indices]) : null;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -180,23 +200,19 @@ function fitSession(att, skillInit, slope) {
     return { R, sigma2: 1 / Math.max(info, 1e-9) };
 }
 
-// Flatten answerHistory to sorted [{t, x, correct}] in the working coordinate.
-// c present ⇒ rating space (x = raw rating); else ⇒ rank space (x = rank index).
-function flattenAttempts(answerHistory, c) {
+// Flatten answerHistory to sorted [{t, x, correct}] in rating space (x = raw
+// rating). `problemRating` is the raw rating; pre-migration entries that still
+// carry a separate `problemRawRating` (raw) prefer it.
+function flattenAttempts(answerHistory) {
     return answerHistory
         .filter(a => typeof a.problemRating === 'number'
                      && typeof a.date === 'number'
                      && !a.isRepeat
                      && !a.linked)
         .map(a => {
-            let x;
-            if (c) {
-                x = (typeof a.problemRawRating === 'number')
-                    ? a.problemRawRating
-                    : Minv(a.problemRating * TOTAL_RANKS, c);   // legacy fallback
-            } else {
-                x = a.problemRating * TOTAL_RANKS;
-            }
+            const x = (typeof a.problemRawRating === 'number')
+                ? a.problemRawRating
+                : a.problemRating;
             return { t: a.date, x, correct: a.correct ? 1 : 0 };
         })
         .sort((a, b) => a.t - b.t);
@@ -218,13 +234,15 @@ function bucketize(attempts) {
 
 export function computeRankDecomposition(answerHistory, _options = {}) {
     const c = curveForSize(state.boardSize);
-    const slope = c ? LOGIT_PER_RATING : LOGIT_PER_RANK;
-    const smPrior = c ? SIGMA_M_PRIOR_RATING : SIGMA_M_PRIOR_RANK;
-    // working coordinate → rank, and the local derivative for delta-method SEs.
-    const toRank = c ? (x => applyM(x, c)) : (x => x);
-    const dRank = c ? (x => Math.abs(Mslope(x, c))) : (() => 1);
+    if (!c) return null;   // no M ⇒ no rating→rank; the app shouldn't reach here.
+    const slope = LOGIT_PER_RATING;
+    const smPrior = SIGMA_M_PRIOR_RATING;
+    // working coordinate (raw rating) → rank, plus the local derivative for the
+    // delta-method SEs.
+    const toRank = x => applyM(x, c);
+    const dRank = x => Math.abs(Mslope(x, c));
 
-    const attempts = flattenAttempts(answerHistory, c);
+    const attempts = flattenAttempts(answerHistory);
     if (attempts.length < 20) return null;
     const buckets = bucketize(attempts);
     const N = buckets.length;
@@ -282,7 +300,7 @@ export function computeRankDecomposition(answerHistory, _options = {}) {
     }
     if (lastIdx < 0) lastIdx = N - 1;
     const gLast = (lastIdx >= 0 && Number.isFinite(S[lastIdx]))
-        ? dRank(c ? Minv(S[lastIdx], c) : S[lastIdx]) : 1;
+        ? dRank(Minv(S[lastIdx], c)) : 1;
     const sigmaM = Math.sqrt(sigmaM2) * gLast;
     const sigmaMDetectionFloor = Math.sqrt(Math.max(0, 1.645 * seSigmaM2_null)) * gLast;
 

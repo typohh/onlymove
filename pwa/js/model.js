@@ -64,7 +64,7 @@ function getFeaturesForPrediction(lastAnswer, { allReviewTimes, now }) {
     const reviewTimeFeature = calculatePercentile(allReviewTimes, candidateReviewTime);
     features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
 
-    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRating;
+    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRank;
     features[MODEL_INDICES.IS_NOVEL] = 0; // This is a recall problem
 
     const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
@@ -80,7 +80,7 @@ function getFeaturesForTraining(p, i, { percentileTime, percentileReview, validH
     features[MODEL_INDICES.INTERCEPT] = 1;
     features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
     features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
-    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRating;
+    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRank;
 
     if (!p.isRepeat) {
         features[MODEL_INDICES.IS_NOVEL] = 1;
@@ -145,7 +145,7 @@ export function getRecallCandidates(options = {}) {
         if (lastAnswer.ignored) continue; // Exclude ignored problems
         if (state.unavailableProblemIds.has(problemId)) continue; // Exclude problems that failed to load this session
 
-        let condition = lastAnswer.problemRating < state.userRank && lastAnswer.successSinceFailure !== undefined;
+        let condition = lastAnswer.problemRank < state.userRank && lastAnswer.successSinceFailure !== undefined;
         if (requireLastAnswerIncorrect) {
             condition = condition && !lastAnswer.correct;
         }
@@ -159,7 +159,6 @@ export function getRecallCandidates(options = {}) {
                 recallCandidates.push({
                     problemId,
                     recallRate: probability,
-                    rating: lastAnswer.problemRating
                 });
             }
         }
@@ -234,7 +233,7 @@ export function buildRecallSchedule(size) {
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
         if (lastAnswer.ignored) continue;
-        if (lastAnswer.problemRating === undefined || lastAnswer.problemRating >= userRank) continue;
+        if (lastAnswer.problemRank === undefined || lastAnswer.problemRank >= userRank) continue;
         if (lastAnswer.successSinceFailure === undefined) continue;
         if (!lastAnswer.date) continue;
 
@@ -244,7 +243,7 @@ export function buildRecallSchedule(size) {
         const base = clippedParams[MODEL_INDICES.INTERCEPT]
                    + clippedParams[MODEL_INDICES.TIME_SOLVING] * 0.5
                    + clippedParams[MODEL_INDICES.REVIEW_TIME] * reviewPercentile
-                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRating;
+                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRank;
 
         const r = lastAnswer.successSinceFailure || 0;
         const factor = Math.pow(2, r);
@@ -327,7 +326,7 @@ export async function calculateAndStoreStatsResults() {
     isCalculatingStats = true;
 
     try {
-        const validHistory = state.answerHistory.filter(p => p.problemRating !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
         if (validHistory.length < 10) {
             setStatsResults(null);
             return;
@@ -502,7 +501,7 @@ export async function showDetailedStats() {
     }
 
     if (!state.statsResults) {
-        const validHistory = state.answerHistory.filter(p => p.problemRating !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
         const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
         const trainingData = prepareTrainingData(history, validHistory);
         const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
@@ -923,9 +922,9 @@ function rankLabelFromIndex(rankIndex) {
 
 function buildRatingHistoryChart() {
     const entries = state.answerHistory
-        .filter(a => typeof a.problemRating === 'number' && typeof a.date === 'number'
+        .filter(a => typeof a.problemRank === 'number' && typeof a.date === 'number'
                      && !a.isRepeat && !a.linked)
-        .map(a => ({ date: a.date, rankValue: a.problemRating * TOTAL_RANKS, correct: !!a.correct }));
+        .map(a => ({ date: a.date, rankValue: a.problemRank * TOTAL_RANKS, correct: !!a.correct }));
     if (entries.length < 2) return null;
 
     // Two-component rank decomposition: see rank-decomposition.js. We evaluate

@@ -250,8 +250,8 @@ const updateAnalysisModeUI = () => {
     if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
         // At starting position, show rank
         const problem = state.problemHistory[1];
-        if (problem && problem.rating !== undefined) {
-            const rank = getDescriptiveRank(problem.rating);
+        if (problem && problem.rank !== undefined) {
+            const rank = getDescriptiveRank(problem.rank);
             text1Elements.forEach(element => element.textContent = rank);
         } else {
             text1Elements.forEach(element => element.textContent = '');
@@ -359,8 +359,8 @@ export function updateAnalysisUI(score, bestMove) {
         if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
             // At starting position, show rank
             const problem = state.problemHistory[1];
-            if (problem && problem.rating !== undefined) {
-                const rank = getDescriptiveRank(problem.rating);
+            if (problem && problem.rank !== undefined) {
+                const rank = getDescriptiveRank(problem.rank);
                 document.getElementById('text1').textContent = rank;
                 document.getElementById('text1-h').textContent = rank;
             }

@@ -8,6 +8,7 @@ import { reorientSgf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
+import { normalizedRankForSize } from './rank-decomposition.js';
 
 async function simpleHash(str) {
     const encoder = new TextEncoder();
@@ -84,7 +85,7 @@ async function selectProblem() {
         return null;
     }
 
-    availableProblems.sort((a, b) => Math.abs(a.rating - state.userRank) - Math.abs(b.rating - state.userRank));
+    availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
     const candidateProblems = availableProblems.slice(0, 50);
 
     // Check if we need to start background loading
@@ -94,8 +95,8 @@ async function selectProblem() {
         const closestZip = findClosestUnloadedZip();
         if (closestZip) {
             const userRank = state.userRank;
-            const candidateDiff = Math.abs(candidateProblems[49].rating - userRank);
-            const zipDiff = Math.min(Math.abs(userRank - closestZip.min_rating), Math.abs(userRank - closestZip.max_rating));
+            const candidateDiff = Math.abs(candidateProblems[49].rank - userRank);
+            const zipDiff = Math.min(Math.abs(userRank - closestZip.minRank), Math.abs(userRank - closestZip.maxRank));
             if (zipDiff < candidateDiff) {
                 backgroundLoadCloserZip();
             }
@@ -125,7 +126,15 @@ async function fetchSgfFromZip(filename, zipFilename) {
 export async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
         const response = await fetch(`tsumegos/${state.boardSize}/metadata.json?v=${APP_VERSION}`);
-        state.zipMetadata = await response.json();
+        const zips = await response.json();
+        // Shard min/max_rating are raw ratings; derive their rank bounds with M
+        // so selection (which works in rank space against state.userRank) can use
+        // them. M is monotone, so min/max map to min/max.
+        for (const z of zips) {
+            z.minRank = normalizedRankForSize(z.min_rating, state.boardSize);
+            z.maxRank = normalizedRankForSize(z.max_rating, state.boardSize);
+        }
+        state.zipMetadata = zips;
         const metadataStr = JSON.stringify(state.zipMetadata);
         console.log('Metadata hash:', await simpleHash(metadataStr));
     }
@@ -176,7 +185,11 @@ export async function loadZipProblems(zipFilename) {
     if (!metadataFile) throw new Error(`metadata.json not found in ${zipFilename}`);
 
     const metadataContent = await metadataFile.async('text');
-    const problems = JSON.parse(metadataContent).map(p => ({ ...p, zipFilename }));
+    // `p.rating` is the raw black-box rating shipped by package_for_pwa; derive
+    // the normalized 0..1 rank here with M (the client owns rating→rank).
+    const problems = JSON.parse(metadataContent).map(p => ({
+        ...p, zipFilename, rank: normalizedRankForSize(p.rating, state.boardSize),
+    }));
 
     state.loadedZips[zipFilename] = problems;
     state.allProblems.push(...problems);
@@ -201,7 +214,7 @@ export async function loadZipProblems(zipFilename) {
 function findClosestUnloadedZip() {
     const unloadedZips = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
     return unloadedZips.reduce((closest, zip) => {
-        const diff = Math.min(Math.abs(state.userRank - zip.min_rating), Math.abs(state.userRank - zip.max_rating));
+        const diff = Math.min(Math.abs(state.userRank - zip.minRank), Math.abs(state.userRank - zip.maxRank));
         return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
     }, { zip: null, minDiff: Infinity }).zip;
 }
@@ -273,11 +286,11 @@ async function loadOneTsumego() {
             filename: selectedProblem.filename,
             sgf: sgf,
             linked: false,
+            // `rating` is the raw black-box rating; `rank` is its normalized
+            // 0..1 rank under the current curve M (derived at ingest). The stats
+            // decomposition works in rating space; serving/UI use `rank`.
             rating: selectedProblem.rating,
-            // Raw black-box rating (rank-independent). The stats decomposition
-            // works in this space and converts to rank with M; serving/UI keep
-            // using `rating` (the pre-mapped rank).
-            rawRating: selectedProblem.raw_rating,
+            rank: selectedProblem.rank,
             quality: selectedProblem.quality || 0,
             embedding: selectedProblem.embedding,
             isRepeat: selectedProblem.isRepeat || false,
@@ -431,7 +444,8 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
         await loadZipProblems(zipFilename);
 
         const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
-        const problemRank = problem ? problem.rating : 0;
+        const problemRating = problem ? problem.rating : 0;
+        const problemRankValue = problem ? problem.rank : 0;
         const problemQuality = problem ? problem.quality : 0;
         const problemEmbedding = problem ? problem.embedding : undefined;
 
@@ -447,7 +461,8 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
             linked: !asRecall,
-            rating: problemRank,
+            rating: problemRating,
+            rank: problemRankValue,
             quality: problemQuality,
             embedding: problemEmbedding,
             isRepeat: asRecall,

@@ -1,48 +1,49 @@
-"""Fit a board-independent server↔rank coupling from rank_surveys.
+"""Jointly fit, from rank_surveys, the per-board rating→rank curve AND the
+per-server rank couplings — one model, internal(EGF) rank as the shared scale.
 
-Model (our singular rank scale is the hub / common unit):
+Model (internal rank = EGF rank is the hub / common unit):
 
-    server rank  ──one coupling per server──▶  OUR RANK  ◀──cubic, per board──  rating θ
+    rating θ ──per board, m_s──▶ INTERNAL(EGF) RANK ──per server──▶ server rank
 
-  * OUR RANK IS EGF RANK. rating → our rank is fit per board entirely in
-    RATING space, using only the shipped black-box ratings (never the rating-
-    derivation internals). Each user's rating = the problem RATING at which they
-    clear CALIBRATION_P (80%), estimated by a logistic over their (raw_rating,
-    correct) attempts (fit_user_rating) — the SAME quantity the client computes.
-    M (rating→rank) is then a cumulative-link fit anchored on the EGF declarers'
-    (80%-clear rating, declared rank), with the cubic
+  Both arrows are estimated TOGETHER over every declaration (fit_joint).
+
+  * INTERNAL RANK IS EGF RANK. Each user's rating = the problem RATING at which
+    they clear CALIBRATION_P (80%), from a logistic over their (raw_rating,
+    correct) attempts (fit_user_rating) — the SAME quantity the client computes,
+    using only the shipped black-box ratings (never the derivation internals).
+    The per-board map m_s(rating) → internal rank is a monotone piecewise-linear
+    curve defined by EGF rating-thresholds, with the cubic
     (auxiliary.fit_statistics_shapes, pinned to that board's humanv0_8k/3k bots)
-    only as a weak SHAPE PRIOR (--rating-lambda) so the survey can bend the dan
-    range off the nominal-anchored cubic. package_for_pwa ships these per-board
+    as a SHAPE PRIOR (--rating-lambda). package_for_pwa ships these per-board
     curves (ratings/rating_to_rank.json) AND the raw ratings, and the client
-    converts rating→rank with the same M — so the displayed rank, the problem
-    ranks, and this map all agree by construction (the rank loop closes).
-  * server rank → our rank is ONE coupling per (non-EGF) server, board-
-    independent. We convert every surveyed user's per-board 80%-clear rating to
-    our(EGF)-rank via the right per-board curve, then pool all (our_rank,
-    declared_server_rank) pairs across both boards and fit a per-server
-    proportional-odds cumulative-link model in our-rank space. EGF is the hub:
-    identity.
+    converts rating→rank with the same curve — so the displayed rank, the
+    problem ranks, and this map all agree by construction (the rank loop closes).
+  * Each non-EGF server has thresholds in internal-rank units:
 
-        P(declared ≤ g | our_rank) = expit(τ_{s,g} − our_rank)
+        P(declared ≤ g | internal_rank x) = expit(τ_{server,g} − x)
 
-    The thresholds τ live in our-rank units. The prior baseline is UNIFORM
-    spacing (1 server rank = 1 our rank) — which in this cubic-linearized
-    our-rank space IS the cubic shape — so each server keeps the cubic shape by
-    default and the per-rank deviations log_e (regularized toward 0 with weight
-    λ) only let it bend where the data demands. Survey data is sparse and noisy
-    (≈3–34 declarations/server, several ranks of scatter), so λ is set strong:
-    sparse servers collapse to a pure offset α (cubic shape, shifted), and only
-    data-rich servers pick up a per-rank bend. The offset α is unregularized.
+    with a uniform-spacing shape prior (--lambda; sparse servers collapse to a
+    pure offset α, the offset itself unregularized). EGF feeds the rating-curve
+    DIRECTLY, never through a server offset, so it stays the identity hub; every
+    other server's declaration is evidence about BOTH its own offset AND the
+    shape of m_s where that declaration lands.
 
-A user with both boards contributes their 9×9 our-rank AND 13×13 our-rank as
-two pooled observations of the same declaration — both are on the one our-rank
-scale, so this just adds data.
+  Why joint, not two stages: previously m_s was fit on EGF declarers alone
+  (essentially all dan), then FROZEN, and the server couplings fit on top. The
+  kyu range of m_s was then uncalibrated cubic extrapolation that over-rated
+  weak players; those inflated internal ranks dragged the dan thresholds through
+  the pooled coupling fit and floated EGF to the top of the map (shown as the
+  most lenient server — the opposite of reality). Fitting both directions at
+  once lets the abundant non-EGF kyu declarations pin the kyu end of m_s, so
+  neither range is traded off against the other.
+
+A both-boards user contributes a declaration on each board; both observations
+enter the joint objective on the one internal-rank scale.
 
 Output: pwa/tsumegos/rank_map.json = {our_rank_label: {server: server_rank}},
-board-independent (the per-board difference lives in rating→our-rank, i.e. the
-user's displayed rank, not in the translation). Re-run pipeline.fetch_database
-first to refresh attempts/database.sql.
+board-independent (the per-board difference lives in rating→internal-rank, i.e.
+the user's displayed rank, not in the translation). Re-run
+pipeline.fetch_database first to refresh attempts/database.sql.
 
 Usage:
   ./.venv/bin/python3 -m pipeline.fit_rank_curves
@@ -119,37 +120,20 @@ def _cubic_curve(stopgap_curve):
     return _CUBIC_CURVE_CACHE[key]
 
 
-def theta_to_our_rank(theta, curve):
-    """rating θ → our-rank scalar (1k=0, 1d=1, 20k=−19, 9d=9) via this board's
-    cubic. rank_index = cubic⁻¹(θ); our-rank scalar = rank_index − 19. Used only
-    as the fallback when a board has too little EGF data to fit rating→EGF."""
-    return float(curve.inverse(np.array([theta]))[0]) - 19.0
-
-
 def cubic_prior_for_rating_fit(curve, g_min, g_max):
-    """(init_alpha, baseline_spacings) that puts fit_cumulative_link in RATING
-    space with the cubic as the shape prior. Threshold g sits at the rating the
-    cubic assigns to the boundary just below rank g — our-rank scalar g−0.5, i.e.
-    rank_index (g−0.5)+19. baseline_spacings are the cubic's rating deltas
-    between consecutive thresholds; init_alpha is the cubic rating at the first
-    threshold. With log_e=0 this reproduces the cubic shape exactly, so λ pulls
-    the fitted curve toward the cubic."""
+    """(init_alpha, baseline_spacings) that anchors the joint fit's rating→EGF-
+    rank curve in RATING space with the cubic as the shape prior. Threshold g
+    sits at the rating the cubic assigns to the boundary just below rank g —
+    our-rank scalar g−0.5, i.e. rank_index (g−0.5)+19. baseline_spacings are the
+    cubic's rating deltas between consecutive thresholds; init_alpha is the cubic
+    rating at the first threshold. With log_e=0 this reproduces the cubic shape
+    exactly, so λ pulls the fitted curve toward the cubic."""
     gs = list(range(g_min + 1, g_max + 1))           # the K threshold ranks
     boundary_ri = np.array([(g - 0.5) + 19.0 for g in gs])
     prior_rating = np.asarray(curve.forward(boundary_ri), dtype=float)
     init_alpha = float(prior_rating[0])
     baseline = np.diff(prior_rating) if len(prior_rating) > 1 else np.array([])
     return init_alpha, baseline
-
-
-def rating_to_internal_rank(theta, thresholds):
-    """Invert fitted rating-space thresholds to an internal(EGF)-rank scalar.
-    thresholds {g: rating at the boundary just below rank g}. That boundary sits
-    at internal-rank scalar g−0.5; linearly interp/extrapolate in rating."""
-    gs = sorted(thresholds)
-    xs = [thresholds[g] for g in gs]   # ascending ratings
-    ys = [g - 0.5 for g in gs]         # internal-rank scalars at those boundaries
-    return _interp_extrap(float(theta), xs, ys)
 
 
 def load_raw_ratings(size):
@@ -194,101 +178,203 @@ def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1):
 
 
 # ---------------------------------------------------------------------------
-# Per-server cumulative-link fit in our-rank space.
+# Joint fit: rating → internal(EGF) rank (per board) AND internal rank →
+# server rank (per server), estimated TOGETHER over all declarations.
 #
-# Ability = our_rank (continuous), category = declared server rank. Thresholds
-# τ_g live in our-rank units. The baseline is UNIFORM spacing (1 our-rank per
-# server-rank) — which in this cubic-linearized our-rank space IS the cubic
-# shape — so the per-rank deviations log_e measure how the server bends away
-# from the cubic. They're L2-regularized toward 0 with weight lambda_dev: a
-# strong prior keeps a server pinned to the cubic shape (sparse servers
-# collapse to a pure offset α), and only relaxes into per-rank shape where the
-# data genuinely supports it. The offset α is unregularized.
+# Latent ability = internal rank = EGF rank. Per board s the curve
+# m_s(rating) → internal rank is a monotone piecewise-linear map defined by EGF
+# rating-thresholds a_{s,g} (rating at the boundary just below EGF rank g), with
+# the cubic as a shape prior (λ_rating). Each non-EGF server gets thresholds
+# b_{server,h} in internal-rank units (uniform-spacing shape prior, λ). The
+# likelihood couples them:
+#
+#   EGF declaration    (board s, rating r, declared g):
+#       P(declared ≤ g | r) = expit(a_{s,g} − r)
+#   server declaration (board s, rating r, server, declared h):
+#       x = m_s(r) = interp(r; a_{s,·} → g−0.5)
+#       P(declared ≤ h | r) = expit(b_{server,h} − x)
+#
+# Because every server term runs through m_s, a kyu OGS/Fox declaration is now
+# evidence about the SHAPE of the rating→rank curve at the kyu end — not just
+# the server's offset. EGF anchors the absolute internal-rank scale (it feeds
+# a_{s,·} directly, never through a server offset), so EGF stays the hub /
+# identity; the other servers pin the parts of the curve EGF never reaches.
+# Contrast the old pipeline: there a_{s,·} was fit on EGF alone, FROZEN, then
+# server offsets were fit on top — so kyu-heavy non-EGF cohorts (whose internal
+# ranks were extrapolated cubic) could never correct the axis, and their
+# inflated internal ranks dragged the dan thresholds, floating EGF to the top.
 # ---------------------------------------------------------------------------
 
-def fit_cumulative_link(observations, g_min, g_max, lambda_dev,
-                        baseline_spacings=None, init_alpha=None):
-    """One proportional-odds (cumulative-link) fit.
+def ordinal_nll_vec(tau, x, k):
+    """Vectorized cumulative-link negative log-likelihood.
 
-      P(declared ≤ g | x) = expit(τ_g − x)
-      spacings_g  = baseline_spacings_g · exp(log_e_g)
-      τ_{g_min+1} = α
-      τ_g         = α + Σ_{g'≤g} spacings_{g'}
+      P(declared = category k | x), thresholds τ (length K, ascending):
+        k = 0      : expit(τ_0 − x)
+        0 < k < K  : expit(τ_k − x) − expit(τ_{k−1} − x)
+        k = K      : 1 − expit(τ_{K−1} − x)
 
-    observations : list of (x, declared_g_scalar) tuples, where x is the
-        continuous ability axis the thresholds live on.
-    g_min, g_max : integer declared-rank range to fit thresholds over
-    lambda_dev   : L2 weight on Σ log_e_g² (strength of the shape prior)
-    baseline_spacings : prior gap between consecutive thresholds (length K-1).
-        None ⇒ uniform spacing of 1. In cubic-linearized our-rank space uniform
-        IS the cubic shape (server couplings). For the rating→rank direction the
-        axis is rating (not rank-linear), so pass the cubic's per-rank rating
-        deltas to make the cubic the shape prior there.
-    init_alpha   : prior/init for the first threshold. None ⇒ g_min.
+    tau : (K,) thresholds in x units.  x : (n,) abilities.  k : (n,) ints in
+    [0, K] (category = declared rank − range minimum)."""
+    K = tau.shape[0]
+    upper = np.where(k < K, expit(tau[np.minimum(k, K - 1)] - x), 1.0)
+    lower = np.where(k > 0, expit(tau[np.maximum(k - 1, 0)] - x), 0.0)
+    p = np.clip(upper - lower, 1e-12, 1.0)
+    return -float(np.sum(np.log(p)))
 
-    Returns ({declared_g: τ_g}, nll, deviation) with τ in x units, or None if
-    infeasible."""
-    N_ranks = g_max - g_min + 1
-    K = N_ranks - 1
-    if K < 1 or len(observations) < 3:
-        return None
-    if baseline_spacings is None:
-        baseline_spacings = np.ones(K - 1) if K > 1 else np.array([])
-    else:
-        baseline_spacings = np.asarray(baseline_spacings, dtype=float)
 
-    our_ranks = np.array([t for t, _ in observations], dtype=float)
-    rank_indices = np.array(
-        [max(0, min(N_ranks - 1, int(round(g)) - g_min))
-         for _, g in observations], dtype=int)
+def interp_extrap_vec(x, xs, ys):
+    """np.interp with linear extrapolation past both ends (vectorized).
+    xs strictly ascending, len ≥ 2; x an array."""
+    y = np.interp(x, xs, ys)
+    sl0 = (ys[1] - ys[0]) / (xs[1] - xs[0])
+    sl1 = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+    y = np.where(x < xs[0], ys[0] + sl0 * (x - xs[0]), y)
+    y = np.where(x > xs[-1], ys[-1] + sl1 * (x - xs[-1]), y)
+    return y
+
+
+def _unpack_thresholds(block, baseline):
+    """[α, log_e...] + baseline spacings → ascending thresholds (length
+    len(baseline)+1).  τ_0 = α; τ_j = α + Σ_{≤j} baseline·exp(log_e)."""
+    alpha = block[0]
+    if len(baseline) == 0:
+        return np.array([alpha])
+    spacings = baseline * np.exp(block[1:])
+    return np.concatenate([[alpha], alpha + np.cumsum(spacings)])
+
+
+def fit_joint(decls, cubic_by_size, sizes, egf_lo, egf_hi,
+              rating_lam, lam, rank_padding, extend_to, min_server_samples):
+    """Jointly fit per-board rating→internal(EGF)-rank curves and per-server
+    internal-rank→server-rank couplings over all `decls`.
+
+    decls : iterable of (size, server, rating, g_scalar).
+    Returns (rating_rank_fits, server_fits) where
+      rating_rank_fits : {size: {egf_g: rating at boundary below g}}
+      server_fits      : {server: ({declared_g: τ_internal}, nll, dev)}
+    Each board needs ≥1 EGF declaration to anchor its absolute scale; boards
+    without one keep the pure cubic curve (and any server declarations on that
+    board contribute via the cubic-fixed internal rank)."""
+    boards = [s for s in sizes if cubic_by_size.get(s) is not None]
+    N_egf = egf_hi - egf_lo + 1
+    egf_thr_ranks = list(range(egf_lo + 1, egf_hi + 1))   # K = N_egf-1 ranks
+    ys_by_board = {s: np.array([g - 0.5 for g in egf_thr_ranks], dtype=float)
+                   for s in boards}
+
+    # --- bucket declarations ---
+    egf_data = {s: {"x": [], "k": []} for s in boards}
+    server_rows = defaultdict(list)   # server -> [(size, rating, g_int)]
+    for size, server, rating, g in decls:
+        if size not in boards:
+            continue
+        gi = int(round(g))
+        if server == "EGF":
+            egf_data[size]["x"].append(rating)
+            egf_data[size]["k"].append(max(0, min(N_egf - 1, gi - egf_lo)))
+        else:
+            server_rows[server].append((size, rating, gi))
+    for s in boards:
+        egf_data[s]["x"] = np.asarray(egf_data[s]["x"], dtype=float)
+        egf_data[s]["k"] = np.asarray(egf_data[s]["k"], dtype=int)
+
+    # Boards with their own EGF data fit a_{s,·}; the rest stay on the cubic.
+    fit_boards = [s for s in boards if len(egf_data[s]["x"]) > 0]
+    cubic_a = {}   # board -> fixed cubic thresholds (ratings) for non-fit boards
+    for s in boards:
+        if s not in fit_boards:
+            ia, base = cubic_prior_for_rating_fit(cubic_by_size[s], egf_lo, egf_hi)
+            cubic_a[s] = _unpack_thresholds(
+                np.concatenate([[ia], np.zeros(len(base))]), base)
+
+    # --- per-server blocks (internal-rank thresholds) ---
+    server_blocks = {}
+    for server, rows in server_rows.items():
+        if len(rows) < min_server_samples:
+            continue
+        declared = [g for _, _, g in rows]
+        g_min = min(declared) - rank_padding
+        g_max = max(max(declared) + rank_padding, extend_to)
+        K = g_max - g_min
+        if K < 1:
+            continue
+        N = g_max - g_min + 1
+        by_board = defaultdict(lambda: {"rating": [], "k": []})
+        for size, rating, g in rows:
+            by_board[size]["rating"].append(rating)
+            by_board[size]["k"].append(max(0, min(N - 1, g - g_min)))
+        for s in by_board:
+            by_board[s]["rating"] = np.asarray(by_board[s]["rating"], dtype=float)
+            by_board[s]["k"] = np.asarray(by_board[s]["k"], dtype=int)
+        server_blocks[server] = {
+            "g_min": g_min, "g_max": g_max, "K": K,
+            "baseline": np.ones(K - 1) if K > 1 else np.array([]),
+            "by_board": dict(by_board)}
+
+    # --- parameter layout: EGF rating-thresholds, then per-server thresholds ---
+    layout = []   # (kind, key, start, n, baseline)
+    x0 = []
+    idx = 0
+    for s in fit_boards:
+        ia, base = cubic_prior_for_rating_fit(cubic_by_size[s], egf_lo, egf_hi)
+        base = np.asarray(base, dtype=float)
+        n = len(base) + 1
+        layout.append(("egf", s, idx, n, base))
+        x0.append(ia)
+        x0.extend([0.0] * len(base))
+        idx += n
+    for server, blk in server_blocks.items():
+        n = len(blk["baseline"]) + 1
+        layout.append(("srv", server, idx, n, blk["baseline"]))
+        x0.append(float(blk["g_min"]))
+        x0.extend([0.0] * len(blk["baseline"]))
+        idx += n
+    x0 = np.asarray(x0, dtype=float)
 
     def unpack(params):
-        alpha = params[0]
-        if K == 1:
-            return np.array([alpha])
-        log_e = params[1:]
-        spacings = baseline_spacings * np.exp(log_e)
-        return np.concatenate([[alpha], alpha + np.cumsum(spacings)])
-
-    def neg_log_likelihood(tau):
-        ps = np.empty(len(our_ranks))
-        for i in range(len(our_ranks)):
-            x = our_ranks[i]
-            k = rank_indices[i]
-            if k == 0:
-                ps[i] = expit(tau[0] - x)
-            elif k == N_ranks - 1:
-                ps[i] = 1.0 - expit(tau[K - 1] - x)
-            else:
-                ps[i] = expit(tau[k] - x) - expit(tau[k - 1] - x)
-        ps = np.clip(ps, 1e-12, 1.0)
-        return -float(np.sum(np.log(ps)))
-
-    def deviation(params):
-        if K <= 1:
-            return 0.0
-        return float(np.sum(params[1:] ** 2))
+        a = dict(cubic_a)   # board -> rating thresholds
+        b = {}              # server -> internal-rank thresholds
+        logs = {}           # (kind, key) -> log deviations
+        for kind, key, st, n, base in layout:
+            thr = _unpack_thresholds(params[st:st + n], base)
+            logs[(kind, key)] = params[st + 1:st + n]
+            (a if kind == "egf" else b)[key] = thr
+        return a, b, logs
 
     def objective(params):
-        return (neg_log_likelihood(unpack(params))
-                + lambda_dev * deviation(params))
+        a, b, logs = unpack(params)
+        nll = 0.0
+        for s in fit_boards:
+            d = egf_data[s]
+            if len(d["x"]):
+                nll += ordinal_nll_vec(a[s], d["x"], d["k"])
+        for server, blk in server_blocks.items():
+            for s, dd in blk["by_board"].items():
+                x_int = interp_extrap_vec(dd["rating"], a[s], ys_by_board[s])
+                nll += ordinal_nll_vec(b[server], x_int, dd["k"])
+        pen = 0.0
+        for (kind, key), lg in logs.items():
+            pen += (rating_lam if kind == "egf" else lam) * float(np.sum(lg ** 2))
+        return nll + pen
 
-    if init_alpha is None:
-        init_alpha = float(g_min)
-    x0 = (np.concatenate([[init_alpha], np.zeros(K - 1)]) if K > 1
-          else np.array([init_alpha]))
-    try:
-        res = minimize(objective, x0, method="L-BFGS-B",
-                       options={"maxiter": 2000})
-    except Exception:
-        return None
-    if not np.isfinite(res.fun):
-        return None
+    res = minimize(objective, x0, method="L-BFGS-B",
+                   options={"maxiter": 10000})
+    a, b, logs = unpack(res.x)
 
-    tau = unpack(res.x)
-    return ({g_min + k + 1: float(tau[k]) for k in range(K)},
-            float(neg_log_likelihood(tau)),
-            float(deviation(res.x)))
+    rating_rank_fits = {s: {g: float(a[s][i])
+                            for i, g in enumerate(egf_thr_ranks)}
+                        for s in fit_boards}
+    server_fits = {}
+    for server, blk in server_blocks.items():
+        thr = b[server]
+        gs = list(range(blk["g_min"] + 1, blk["g_max"] + 1))
+        thresholds = {gs[i]: float(thr[i]) for i in range(len(gs))}
+        nll = 0.0
+        for s, dd in blk["by_board"].items():
+            x_int = interp_extrap_vec(dd["rating"], a[s], ys_by_board[s])
+            nll += ordinal_nll_vec(thr, x_int, dd["k"])
+        dev = float(np.sum(logs[("srv", server)] ** 2))
+        server_fits[server] = (thresholds, nll, dev)
+    return rating_rank_fits, server_fits
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +472,11 @@ def main():
              "rank → equivalent rank per server) here. Empty string skips it.")
     parser.add_argument(
         "--rating-map-out",
-        default=os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json"),
-        help="Write the per-board rating→internal(EGF)-rank curves here for "
-             "package_for_pwa to consume. Empty string skips it.")
+        default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json"),
+        help="Write the per-board rating→internal(EGF)-rank curves straight to "
+             "the PWA's served path. The client fetches this and converts every "
+             "problem's raw rating to a rank itself — package_for_pwa ships only "
+             "raw ratings and never touches ranks. Empty string skips it.")
     args = parser.parse_args()
 
     sizes = [int(s) for s in args.sizes.split(",") if s.strip()]
@@ -435,92 +523,51 @@ def main():
             if r is not None and n >= args.min_attempts:
                 user_rating[uid][size] = r
 
-    # ---- Stage A: per-board rating → internal rank, where INTERNAL RANK IS
-    # EGF RANK. Same cumulative-link as the server couplings below, but in
-    # RATING space with the cubic as the shape prior (cubic per-rank rating
-    # deltas as baseline spacings); the EGF survey declarations are the data and
-    # λ pulls the curve toward the cubic where EGF data is thin. Fit over a wide
-    # fixed rank band so the curve is defined across the whole display range.
+    # ---- Joint fit: rating → internal(EGF) rank per board AND internal rank →
+    # server rank per server, estimated TOGETHER (see fit_joint). EGF anchors
+    # the internal-rank scale; every other server's declarations also bend the
+    # rating→rank curve where they land — so a kyu-heavy cohort can no longer
+    # be stamped with an extrapolated-cubic internal rank that drags the dan
+    # thresholds (the failure mode of the old frozen-Stage-A pipeline).
     egf_lo, egf_hi = -20, 10  # 21k..10d
-    egf_surveys = surveys[surveys["server"] == "EGF"]
-    rating_rank_fits = {}  # size -> {egf_g: τ_rating}
-    print(f"\nFitting rating → internal(EGF) rank per board "
-          f"(cubic-shape prior λ = {args.rating_lam}):")
-    for size in sizes:
-        curve = cubic_by_size.get(size)
-        if curve is None:
-            continue
-        obs = []
-        for _, row in egf_surveys.iterrows():
-            g = row["rank_scalar"]
-            r = user_rating.get(row["user_id"], {}).get(size)
-            if r is not None and g is not None and np.isfinite(g):
-                obs.append((r, float(g)))
-        if len(obs) < args.min_server_samples:
-            print(f"  size {size}: only {len(obs)} EGF declarations with θ — "
-                  f"falling back to the raw cubic for this board")
-            continue
-        init_alpha, baseline = cubic_prior_for_rating_fit(curve, egf_lo, egf_hi)
-        result = fit_cumulative_link(obs, egf_lo, egf_hi, args.rating_lam,
-                                     baseline_spacings=baseline,
-                                     init_alpha=init_alpha)
-        if result is None:
-            print(f"  size {size}: rating→rank fit failed — raw cubic fallback")
-            continue
-        thresholds, nll, dev = result
-        rating_rank_fits[size] = thresholds
-        print(f"  size {size}: {len(obs)} EGF declarations, NLL {nll:.2f}, "
-              f"shape-dev {dev:.3f}")
 
-    def to_internal_rank(rating, size):
-        thr = rating_rank_fits.get(size)
-        if thr is not None:
-            return rating_to_internal_rank(rating, thr)
-        return theta_to_our_rank(rating, cubic_by_size[size])  # cubic fallback
-
-    user_our_rank = defaultdict(dict)  # user_id -> {size: internal(EGF)-rank scalar}
-    for uid, by_size in user_rating.items():
-        for size, rating in by_size.items():
-            user_our_rank[uid][size] = to_internal_rank(rating, size)
-    both = sum(1 for r in user_our_rank.values() if len(r) == 2)
-    print(f"  internal(EGF) rank for {len(user_our_rank)} users "
-          f"({both} have both sizes)")
-
-    # Pool (internal_rank, declared_server_rank) across every user × board. A
-    # both-boards user contributes their 9×9 AND 13×13 internal rank — both on
-    # the one EGF scale, so this just adds evidence for the same declaration.
-    # EGF itself is the hub (identity), so it gets no coupling fit.
-    by_server = defaultdict(list)
-    per_board_counts = defaultdict(lambda: defaultdict(int))  # server -> size -> n
+    decls = []  # (size, server, rating, declared_scalar)
     for _, row in surveys.iterrows():
         uid, server, g = row["user_id"], row["server"], row["rank_scalar"]
-        if server == "EGF" or g is None or not np.isfinite(g):
+        if g is None or not np.isfinite(g):
             continue
-        for size, our_rank in user_our_rank.get(uid, {}).items():
-            by_server[server].append((our_rank, float(g)))
-            per_board_counts[server][size] += 1
+        for size, rating in user_rating.get(uid, {}).items():
+            decls.append((size, server, rating, float(g)))
 
-    print(f"\nFitting one cumulative-link per server in internal(EGF)-rank space "
-          f"(cubic-shape prior λ = {args.lam}, ≥{args.min_server_samples} "
-          f"pooled samples, rank padding = ±{args.rank_padding}):")
+    n_egf = sum(1 for _sz, srv, _, _ in decls if srv == "EGF")
+    print(f"\nJoint fit over {len(decls)} (declaration × board) observations "
+          f"[{n_egf} EGF anchoring the scale; rating→rank prior λ = "
+          f"{args.rating_lam}, server prior λ = {args.lam}, "
+          f"≥{args.min_server_samples} samples, padding = ±{args.rank_padding}]")
 
-    fits = {}  # server -> (thresholds, nll, dev)
-    skipped = []
-    for server in SERVERS:
-        obs = by_server.get(server, [])
-        if len(obs) < args.min_server_samples:
-            if obs:
-                skipped.append((server, len(obs)))
+    rating_rank_fits, fits = fit_joint(
+        decls, cubic_by_size, sizes, egf_lo, egf_hi,
+        rating_lam=args.rating_lam, lam=args.lam,
+        rank_padding=args.rank_padding, extend_to=args.extend_to,
+        min_server_samples=args.min_server_samples)
+
+    for size in sorted(rating_rank_fits):
+        n = sum(1 for sz, srv, _, _ in decls if srv == "EGF" and sz == size)
+        print(f"  size {size}: rating→internal-rank curve fit "
+              f"({n} EGF declarations anchoring it)")
+
+    # Declaration counts for the per-server report below (one per board, so a
+    # both-boards user counts twice — both feed the joint fit).
+    by_server = defaultdict(list)              # server -> [declared scalar]
+    per_board_counts = defaultdict(lambda: defaultdict(int))  # server -> size -> n
+    for size, server, _rating, g in decls:
+        if server == "EGF":
             continue
-        declared = [int(round(g)) for _, g in obs]
-        g_min = min(declared) - args.rank_padding
-        g_max = max(max(declared) + args.rank_padding, args.extend_to)
-        result = fit_cumulative_link(obs, g_min, g_max, args.lam)
-        if result is None:
-            print(f"  {server:<8}: fit failed")
-            continue
-        fits[server] = result
+        by_server[server].append(int(round(g)))
+        per_board_counts[server][size] += 1
 
+    skipped = sorted((srv, len(gs)) for srv, gs in by_server.items()
+                     if srv not in fits and gs)
     if skipped:
         print("\nSkipped (below sample threshold):")
         for server, n in skipped:
@@ -540,8 +587,8 @@ def main():
               f"NLL {nll:.2f}, shape-dev {dev:.3f}")
         print(f"{'=' * 60}")
         counts = defaultdict(int)
-        for _, g in by_server[server]:
-            counts[int(round(g))] += 1
+        for g in by_server[server]:
+            counts[g] += 1
         print(f"  {'declared':>9}  {'n':>4}  {'τ (our-rank)':>13}")
         print("  " + "-" * 32)
         for g in sorted(thresholds):

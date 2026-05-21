@@ -644,14 +644,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     migrateAnswerHistory();
 
-    // Fire-and-forget backfill: fills `embedding` on legacy answerHistory
-    // entries from already-deployed zips, so returning users don't need to
-    // solve 20+ new problems before the weakness model has any data.
-    backfillMissingEmbeddings();
+    // M (rating→rank) is REQUIRED: package_for_pwa ships only raw ratings, so
+    // the client cannot rank a single problem (selection, UI, recall) without
+    // it. Block init on it and bail loudly — there is no sane fallback.
+    const ratingRankMap = await loadRatingRankMap();
+    if (!ratingRankMap) {
+        const msg = 'Failed to load rating_to_rank.json (rating→rank map M); cannot continue.';
+        try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
+        throw new Error(msg);
+    }
 
-    // Cache M (rating→rank) so the stats decomposition can map rating-space
-    // skill to rank. Fire-and-forget; the stats page is opened well after init.
-    loadRatingRankMap();
+    // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
+    // (raw) + problemRank on legacy answerHistory entries from already-deployed
+    // zips and the now-cached curve, so returning users don't need to solve 20+
+    // new problems before the weakness model has data. Curve must be cached
+    // first (above) so the rank refresh can run.
+    backfillMissingEmbeddings();
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);

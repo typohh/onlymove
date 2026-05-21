@@ -32,6 +32,7 @@ import {
 import { trainWeaknessForSize } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
+import { normalizedRankForSize, ratingRankCurveVersion } from './rank-decomposition.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -39,6 +40,7 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 
 const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
 const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
+const RANK_CURVE_VERSION_KEY = (size) => `rankCurveVersion_${size}`;
 // Old per-version flag keys; cleared on first run after the upgrade so they
 // don't linger in users' localStorage. The new scheme stores a content-hash
 // version string under VERSION_KEY instead.
@@ -101,14 +103,20 @@ export async function backfillMissingEmbeddings() {
 async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
     const storedEmbeddingVersion = localStorage.getItem(VERSION_KEY(size));
     const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
+    const curveVersion = ratingRankCurveVersion(size);
+    const storedCurveVersion = localStorage.getItem(RANK_CURVE_VERSION_KEY(size));
     const embeddingsChanged = storedEmbeddingVersion !== serverEmbeddingVersion;
     const ratingsChanged = serverRatingsVersion !== null
         && storedRatingsVersion !== serverRatingsVersion;
-    if (!embeddingsChanged && !ratingsChanged) return 0;
+    // problemRank is derived from the raw rating through M, so a curve re-fit
+    // that left ratings untouched still shifts every stored rank.
+    const curveChanged = curveVersion !== null && storedCurveVersion !== curveVersion;
+    if (!embeddingsChanged && !ratingsChanged && !curveChanged) return 0;
 
     const persistVersions = () => {
         if (embeddingsChanged) localStorage.setItem(VERSION_KEY(size), serverEmbeddingVersion);
         if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY(size), serverRatingsVersion);
+        if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY(size), curveVersion);
     };
 
     try {
@@ -136,6 +144,26 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         if (!history || history.length === 0) {
             persistVersions();
             return 0;
+        }
+
+        // Curve-only refit: ranks shift but raw ratings don't, so no shard
+        // fetch is needed — recompute problemRank straight from the stored raw
+        // problemRating. When ratings also changed, the shard walk below
+        // refreshes both, so skip this to avoid a double pass.
+        let curveRankUpdated = 0;
+        if (curveChanged && !ratingsChanged) {
+            for (const a of history) {
+                if (typeof a.problemRating !== 'number') continue;
+                const newRank = normalizedRankForSize(a.problemRating, size);
+                if (newRank !== null && a.problemRank !== newRank) {
+                    a.problemRank = newRank;
+                    curveRankUpdated++;
+                }
+            }
+            if (curveRankUpdated > 0) {
+                setAnswerHistoryForSize(size, history);
+                console.log(`embedding-backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
+            }
         }
 
         // Two needs sets feed one shard walk:
@@ -184,7 +212,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         const allNeedIds = new Set([...needIdsForEmbed, ...needIdsForRatings]);
         if (allNeedIds.size === 0) {
             persistVersions();
-            return 0;
+            return curveRankUpdated;
         }
 
         // Read lookup.txt and pick rows matching this size.
@@ -255,6 +283,12 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                             a.problemRating = newRating;
                             totalRatingsUpdated++;
                         }
+                        // Refresh the derived rank, and migrate legacy entries:
+                        // problemRating now holds the raw value, so the separate
+                        // problemRawRating field is redundant.
+                        const newRank = normalizedRankForSize(newRating, size);
+                        if (newRank !== null && a.problemRank !== newRank) a.problemRank = newRank;
+                        if (a.problemRawRating !== undefined) delete a.problemRawRating;
                     }
                 }
 
@@ -316,7 +350,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
         persistVersions();
-        return totalFilled + totalFilledPicked + totalRatingsUpdated;
+        return totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated;
     } catch (err) {
         console.error(`embedding-backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}

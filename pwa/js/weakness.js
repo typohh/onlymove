@@ -75,7 +75,7 @@ export async function trainWeaknessForSize(size) {
         const history = allHistory
             .filter(a => !a.isRepeat &&
                          a.embedding && Array.isArray(a.embedding) &&
-                         typeof a.problemRating === 'number' &&
+                         typeof a.problemRank === 'number' &&
                          typeof a.correct === 'boolean')
             .slice(-MODEL_INPUT_HISTORY_LENGTH);
         if (history.length < MIN_TRAINING_ATTEMPTS) return;
@@ -122,7 +122,7 @@ export async function trainWeaknessForSize(size) {
                 const a = history[i];
                 const corr = a.embedding;
                 const pick = pickedFor[i];
-                let z = params[0] + params[1] * a.problemRating;
+                let z = params[0] + params[1] * a.problemRank;
                 for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
                 for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
 
@@ -132,7 +132,7 @@ export async function trainWeaknessForSize(size) {
                 loss += -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
                 const err = p - y;
                 grad[0] += err;
-                grad[1] += err * a.problemRating;
+                grad[1] += err * a.problemRank;
                 for (let k = 0; k < K; k++) grad[2 + k] += err * corr[k];
                 for (let k = 0; k < K; k++) grad[2 + K + k] += err * pick[k];
             }
@@ -182,7 +182,7 @@ export async function trainWeaknessForSize(size) {
             const X = history.map((a, i) => {
                 const row = new Array(numParams);
                 row[0] = 1;
-                row[1] = a.problemRating;
+                row[1] = a.problemRank;
                 const corr = a.embedding;
                 const pick = pickedFor[i];
                 for (let k = 0; k < K; k++) row[2 + k] = corr[k];
@@ -192,7 +192,7 @@ export async function trainWeaknessForSize(size) {
             const pHat = history.map((a, i) => {
                 const corr = a.embedding;
                 const pick = pickedFor[i];
-                let z = params[0] + params[1] * a.problemRating;
+                let z = params[0] + params[1] * a.problemRank;
                 for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
                 for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
                 return sigmoid(z);

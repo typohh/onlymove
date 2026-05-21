@@ -18,9 +18,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.configurations import ALL_BOARD_SIZES
-from utils.katago_queries import get_all_ranks
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
-from auxiliary.fit_statistics_shapes import CubicRatingCurve
 
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the
@@ -65,40 +63,10 @@ PWA_SPAN = PWA_X1 - PWA_X0
 RATING_FLOOR_MARGIN = 0.1
 
 
-# Per-board rating→internal(EGF)-rank curves fitted by pipeline.fit_rank_curves
-# (EGF survey declarations as data, the cubic only as a shape prior). When this
-# file is present it is the source of truth for the displayed rank, so the rank
-# the PWA shows and pwa/tsumegos/rank_map.json agree by construction. When it is
-# absent we fall back to the bare cubic prior (see process_size).
-RATING_RANK_MAP_PATH = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
-_RATING_RANK_MAP = None
-
-
-def _load_rating_rank_map():
-    global _RATING_RANK_MAP
-    if _RATING_RANK_MAP is None:
-        if os.path.exists(RATING_RANK_MAP_PATH):
-            with open(RATING_RANK_MAP_PATH, "r", encoding="utf-8") as f:
-                _RATING_RANK_MAP = json.load(f)
-        else:
-            _RATING_RANK_MAP = {}
-    return _RATING_RANK_MAP
-
-
-def _rating_to_rank_index(ratings, knot_ratings, knot_rank_indices):
-    """Map raw ratings → 0..28 rank_index by linear interp over the fitted
-    curve's knots, extrapolating past either end with the end slope."""
-    xs = np.asarray(knot_ratings, dtype=float)
-    ys = np.asarray(knot_rank_indices, dtype=float)
-    r = np.asarray(ratings, dtype=float)
-    out = np.interp(r, xs, ys)  # clamps beyond the ends; fix up below
-    lo = r < xs[0]
-    hi = r > xs[-1]
-    if lo.any():
-        out[lo] = ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (r[lo] - xs[0])
-    if hi.any():
-        out[hi] = ys[-1] + (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) * (r[hi] - xs[-1])
-    return out
+# package_for_pwa is rank-agnostic: it ships one raw black-box rating per
+# problem and never converts to ranks. The rating→rank curve (M) is fitted and
+# written straight to pwa/tsumegos/rating_to_rank.json by pipeline.fit_rank_curves;
+# the client fetches it and does all rating→rank conversion itself.
 
 
 def fit_rating_curve(ratings_dir):
@@ -449,38 +417,33 @@ def compute_ratings_hash(metadata):
 
 
 def print_rating_distribution(metadata):
-    """Prints the final distribution of problems by named rank.
-
-    Ratings can extend beyond [0, 1] because the rating-to-rank curve doesn't
-    clamp. Bucket index i = floor(rating * num_ranks); i in [0, num_ranks-1]
-    covers 20k..9d, i < 0 covers ranks weaker than 20k (21k, 22k, ...), and
-    i >= num_ranks covers ranks stronger than 9d (10d, 11d, ...).
-    """
+    """Prints the final distribution of problems by raw rating (0.5-wide bins).
+    package_for_pwa is rank-agnostic, so this diagnostic stays in rating units —
+    the client maps ratings to ranks with the fitted curve."""
     if not metadata:
         print("No metadata to generate distribution from.")
         return
 
-    num_ranks = len(get_all_ranks())
     total_problems = len(metadata)
-
+    BIN = 0.5
     buckets = {}
     for item in metadata:
-        i = int(np.floor(item['rating'] * num_ranks))
+        i = int(np.floor(item['rating'] / BIN))
         buckets.setdefault(i, []).append(item)
 
     if not buckets:
         return
 
-    print("\n--- Final Rating Distribution ---")
+    print("\n--- Final Rating Distribution (raw rating, 0.5-wide bins) ---")
     for i in range(min(buckets), max(buckets) + 1):
         items = buckets.get(i, [])
         count = len(items)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
         avg_quality = sum(x['quality'] for x in items) / count if items else 0.0
-        avg_raw_rating = sum(x['raw_rating'] for x in items) / count if items else 0.0
-        label = f"{20 - i}k" if i < 20 else f"{i - 19}d"
-        print(f"{label:>4s}: {count:>5d} problems ({percentage:5.1f}%, "
-              f"avg quality: {avg_quality:.3f}, avg rating: {avg_raw_rating:.3f})")
+        avg_rating = sum(x['rating'] for x in items) / count if items else 0.0
+        label = f"[{i * BIN:+.1f},{(i + 1) * BIN:+.1f})"
+        print(f"{label:>14s}: {count:>5d} problems ({percentage:5.1f}%, "
+              f"avg quality: {avg_quality:.3f}, avg rating: {avg_rating:.3f})")
 
 
 def load_embeddings(board_size):
@@ -571,53 +534,17 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None):
         print(f"  no ratings at {ratings_csv}; skipping")
         return None, None
 
-    # 1. Ratings map (raw + normalized PWA scale).
+    # 1. Ratings map: one raw black-box rating per problem. package_for_pwa is
+    # rank-agnostic — the client converts each rating to a rank with the
+    # survey-calibrated curve fit_rank_curves writes to
+    # pwa/tsumegos/rating_to_rank.json (no rank_index, no /29 here).
     tsumego_ratings_df = pd.read_csv(ratings_csv)
-    tsumego_ratings_df['raw_rating'] = tsumego_ratings_df['rating']
     tsumego_ratings_df = tsumego_ratings_df.sort_values(
         by='rating', ascending=True).reset_index(drop=True)
-
-    # Rating → rank mapping. Source of truth is the per-board curve fitted by
-    # pipeline.fit_rank_curves from EGF survey declarations (internal rank = EGF
-    # rank), so the displayed rank and the server rank-translation map
-    # (pwa/tsumegos/rank_map.json) agree by construction. If that file is absent
-    # we fall back to the bare statistics.txt cubic prior (the same curve
-    # fit_rank_curves uses as its prior). rank_index is the 0..28 named axis
-    # (20k=0, 1k=19, 9d=28); /29 keeps the existing 0..1 scale so
-    # print_rating_distribution and the PWA's label logic are unchanged.
-    raw = tsumego_ratings_df['rating'].to_numpy()
-    rrm = _load_rating_rank_map().get(str(board_size))
-    if rrm is not None:
-        rank_index = _rating_to_rank_index(
-            raw, rrm["ratings"], rrm["rank_indices"])
-        print(f"  rating→rank via fitted EGF-anchored curve "
-              f"({RATING_RANK_MAP_PATH})")
-    else:
-        bot_ratings_df = pd.read_csv(
-            os.path.join(RATINGS_DIR, "bot_ratings_final.csv"))
-        bot_8k_rating = float(bot_ratings_df.loc[
-            bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_8k', 'rating'].values[0])
-        bot_3k_rating = float(bot_ratings_df.loc[
-            bot_ratings_df['bot_id'] == 'b18c384nbt-humanv0_3k', 'rating'].values[0])
-        cubic_curve = CubicRatingCurve(bot_8k_rating, bot_3k_rating)
-        rank_index = cubic_curve.inverse(raw)
-        print(f"  rating→rank via statistics.txt cubic prior — no fitted curve "
-              f"at {RATING_RANK_MAP_PATH} (run pipeline.fit_rank_curves)")
-    tsumego_ratings_df['rating'] = rank_index / 29.0
-
     tsumego_ratings_map = dict(zip(
         tsumego_ratings_df['tsumego_id'],
-        zip(tsumego_ratings_df['rating'], tsumego_ratings_df['raw_rating']),
+        tsumego_ratings_df['rating'].astype(float),
     ))
-    raw_rating_map = dict(zip(
-        tsumego_ratings_df['tsumego_id'],
-        tsumego_ratings_df['raw_rating'].astype(float),
-    ))
-
-    # raw_rating_map is no longer needed for packaging — projection happens
-    # upstream in build_embedding.write_per_cell_projections. Kept the
-    # raw-rating extraction above only for the ratings_map metadata.json field.
-    del raw_rating_map
 
     # 2. Quality map (normalized to [0, 1]).
     tsumego_quality_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_quality_final.csv"))
@@ -640,12 +567,11 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None):
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
-            rating, raw_rating = tsumego_ratings_map[tsumego_id]
+            rating = tsumego_ratings_map[tsumego_id]
             quality = tsumego_quality_map.get(tsumego_id, 0.0)
             item = {
                 "filename": filename,
                 "rating": rating,
-                "raw_rating": raw_rating,
                 "quality": quality,
             }
             if embedding_map is not None:
@@ -730,20 +656,8 @@ if __name__ == "__main__":
               f"bytes_per_cell={meta_out['bytes_per_cell']}, "
               f"ratings_version={ratings_versions or 'none'})")
 
-    # Ship the rating→rank map (M) so the client can convert the raw ratings it
-    # also receives into ranks itself — the displayed rank is then computed in
-    # rating space and mapped with the same survey-calibrated M that labels the
-    # problems, closing the rank loop. (Source: pipeline.fit_rank_curves.)
-    if os.path.exists(RATING_RANK_MAP_PATH):
-        dst = os.path.join(OUTPUT_DIR, 'tsumegos', 'rating_to_rank.json')
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with open(RATING_RANK_MAP_PATH, 'r', encoding='utf-8') as fsrc:
-            payload = fsrc.read()
-        with open(dst, 'w', encoding='utf-8') as fdst:
-            fdst.write(payload)
-        print(f"Copied rating→rank map → {dst}")
-    else:
-        print(f"\n[warn] {RATING_RANK_MAP_PATH} missing — client will fall back to "
-              f"rank-space skill (run pipeline.fit_rank_curves first)")
+    # The rating→rank map (M) is written straight to
+    # pwa/tsumegos/rating_to_rank.json by pipeline.fit_rank_curves; packaging is
+    # rank-agnostic and never reads or copies it.
 
     print("\nAll sizes done.")
