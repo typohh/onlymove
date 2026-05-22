@@ -654,12 +654,8 @@ export async function showDetailedStats() {
             const logitPerRank = getLogitPerRank(state.statsResults);
             const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
             const seRanks = sizeResult.se / logitPerRank;
-            if (Math.abs(ranksDiff) >= seRanks) {
-                const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
-                resultText += `You are ${Math.abs(ranksDiff).toFixed(1)} ranks ${dir} on 13x13 than on 9x9 (±${seRanks.toFixed(1)}).\n`;
-            } else {
-                resultText += `9x9 and 13x13 skill look about equal so far (within ±${seRanks.toFixed(1)} ranks).\n`;
-            }
+            const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
+            resultText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
         }
 
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
