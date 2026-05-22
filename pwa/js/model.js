@@ -1183,12 +1183,20 @@ function buildRatingHistoryChart(history = state.answerHistory) {
 
     svgWrap.append(svg);
 
+    // y-axis + SVG share one row whose height is exactly the SVG height, so the
+    // y-tick percentages (positioned against the y-axis column) line up with the
+    // grid lines. The x-axis date sits BELOW this row, not inside the SVG column
+    // — folding it in there stretched the y-axis column past the SVG and pushed
+    // every label down.
+    const plotMain = document.createElement('div');
+    plotMain.className = 'stats-chart-plot-main';
+    plotMain.append(yaxis, svgWrap);
+
     const xaxis = document.createElement('div');
     xaxis.className = 'stats-chart-xaxis';
     xaxis.textContent = new Date(t1).toISOString().slice(0, 10);
-    svgWrap.append(xaxis);
 
-    plotRow.append(yaxis, svgWrap);
+    plotRow.append(plotMain, xaxis);
     container.append(plotRow);
 
     // Legend below the plot. One entry per visual element; swatch shapes match

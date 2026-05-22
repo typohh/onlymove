@@ -508,6 +508,11 @@ body {
 
 .stats-chart-plot-row {
     display: flex;
+    flex-direction: column;
+}
+
+.stats-chart-plot-main {
+    display: flex;
     align-items: stretch;
     gap: 0.4em;
 }
