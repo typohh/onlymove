@@ -856,11 +856,9 @@ function formatSignalStrength(quadrant, ec, ep) {
     const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}σ`;
     // List the more-emphasized axis first per quadrant:
     //   tooMuch: motif in pick (positive ep) is the foreground signal
-    //   notEnough: motif in correct (positive ec) is the foreground signal
-    //   badAt: both are foreground; surface ec first to match the labelling
-    if (quadrant === 'tooMuch') return `picked ${fmt(ep)} · correct ${fmt(ec)}`;
-    if (quadrant === 'notEnough') return `correct ${fmt(ec)} · picked ${fmt(ep)}`;
-    return `correct ${fmt(ec)} · picked ${fmt(ep)}`;
+    //   notEnough/badAt: motif in correct (positive ec) is the foreground signal
+    if (quadrant === 'tooMuch') return `${fmt(ep)} vs ${fmt(ec)}`;
+    return `${fmt(ec)} vs ${fmt(ep)}`;
 }
 
 // Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
