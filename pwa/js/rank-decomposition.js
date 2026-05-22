@@ -5,19 +5,21 @@
 //   σ_M(t)  — fast "form" swing: the genuine session-to-session performance
 //             variance, separated from measurement noise.
 //
-// We estimate skill in RATING space and convert to rank with M only at the end.
-// Rationale (the rank loop): the survey calibrates M (rating→rank) so that a
-// user's 80%-clear *rating* maps to their reported rank, and the same M labels
-// the problems. So the displayed skill must also be computed in rating space —
-// "the rating at which you clear CALIBRATION_P" — and then mapped with M. A
-// fixed-slope logistic in *rank* space is biased (the slope isn't constant per
-// rank once M is nonlinear), which is what made a 4d read as 6d. So:
+// We work directly in INTERNAL-RANK space, pooling across board sizes. The
+// internal rank (EGF-anchored, board-independent) is the one common skill axis
+// shared by 9x9 and 13x13, so a single merged skill curve is well-defined only
+// there. Each attempt is mapped through ITS OWN size's M before pooling:
+//   - x = applyM(rawRating, sizeCurve)            (internal rank index)
+//   - slope = LOGIT_PER_RATING / |M'(rawRating)|  (logit per internal rank)
+// The per-attempt slope preserves the calibration that estimating in raw-rating
+// space used to give: the success curve has constant slope in rating space, so
+// in rank space the slope must vary with the local steepness of M. With it, a
+// 4d still reads as a 4d. Then:
 //
-//   1. Per attempt, work in rating space: x = its raw rating (problemRawRating;
-//      legacy entries fall back to M⁻¹(problemRating·29)).
+//   1. Per attempt: x (internal rank) and its own slope, from its size's curve.
 //   2. S(t) = wide-kernel (τ_S) pooled logistic over x at the 80% target — your
-//      rating over time, evaluated exactly at any t. seS(t) is its measurement
-//      SE (how precisely we know skill — shrinks with data).
+//      internal rank over time, evaluated exactly at any t. seS(t) is its
+//      measurement SE (how precisely we know skill — shrinks with data).
 //   3. A narrow kernel (τ_M, ~session scale) tracks form+skill; the residual
 //      r(t) = S_narrow(t) − S_wide(t) ~ N(0, σ_M² + v) carries the session swing
 //      PLUS the narrow estimator's own noise v. The time-varying performance
@@ -30,14 +32,14 @@
 //      whole-history swing so one isolated session can't spike the band. The
 //      summary reports the global ML σ_M, or — when it's ~0 — a 95% profile-
 //      likelihood upper bound ("under ±X, not detected").
-//   4. Map S, seS and σ_M to rank with M (delta-method) so the chart's inner
-//      band (S ± z·seS, measurement) and outer band (S ± z·√(seS²+σ_M²),
-//      where a session lands) stay in rank units.
+//   4. S, seS and σ_M are already in rank units (the working coordinate IS
+//      internal rank), so the chart's inner band (S ± z·seS, measurement) and
+//      outer band (S ± z·√(seS²+σ_M²), where a session lands) need no remap.
 //
 // M (rating_to_rank.json) is required: package_for_pwa ships only raw ratings,
 // so the client can't rank anything without it. main.js awaits loadRatingRankMap()
-// at init and aborts if it fails; computeRankDecomposition returns null if the
-// curve for the active size is missing.
+// at init and aborts if it fails. Attempts whose size curve is missing are
+// dropped; computeRankDecomposition returns null if too few survive.
 
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
@@ -54,12 +56,22 @@ const KERNEL_TRUNC_SIGMA = 4;
 const CALIBRATION_P = 0.8;
 const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
 
-// Success-curve slope, in rating space (the only space now — M is required).
-// Must match pipeline/fit_rank_curves.LOGIT_PER_RATING.
+// Success-curve slope in rating space. Must match
+// pipeline/fit_rank_curves.LOGIT_PER_RATING. Per attempt we convert it to a
+// logit-per-internal-rank slope by dividing by the local steepness of M.
 const LOGIT_PER_RATING = 2.5;
 
-const X_CLAMP_LO = -40;
-const X_CLAMP_HI = 60;
+// Representative logit-per-internal-rank used when M's local slope is unusable
+// (degenerate curve segment, or a legacy entry with only problemRank stored).
+const LOGIT_PER_RANK_FALLBACK = 0.28;
+// Guard the converted per-attempt slope against pathological M' values.
+const SLOPE_LO = 0.05, SLOPE_HI = 2.0;
+const MSLOPE_FLOOR = 1e-3;
+
+// Working coordinate is the internal rank index (~0..29, with extrapolation
+// past either end for very weak/strong users).
+const X_CLAMP_LO = -15;
+const X_CLAMP_HI = 45;
 
 const MIN_ATTEMPTS = 20;        // below this, no decomposition
 const WIDE_GRID_POINTS = 120;   // coarse skill grid for residual interpolation
@@ -151,10 +163,11 @@ function lowerBound(attempts, lo) {
     return a;
 }
 
-// Kernel-weighted pooled logistic MLE for the working coordinate (rating, or
-// rank in fallback) at time t0: P(correct)=σ(slope·(R−x)+logit(0.8)).
+// Kernel-weighted pooled logistic MLE for the internal-rank skill R at time t0:
+// P(correct)=σ(slope_j·(R−x_j)+logit(0.8)), where each attempt j carries its own
+// slope (logit per internal rank, set in flattenAttempts from its size's M').
 // Returns { R, se, effN }; attempts MUST be sorted by t.
-function poolLogistic(attempts, t0, tau, slope) {
+function poolLogistic(attempts, t0, tau) {
     const win = KERNEL_TRUNC_SIGMA * tau;
     const lo = lowerBound(attempts, t0 - win);
     const hi = lowerBound(attempts, t0 + win + 1);
@@ -175,6 +188,7 @@ function poolLogistic(attempts, t0, tau, slope) {
         for (let j = lo; j < hi; j++) {
             const w = gaussianWeight((attempts[j].t - t0) / tau);
             if (w <= 0) continue;
+            const slope = attempts[j].slope;
             const p = sigmoid(slope * (R - attempts[j].x) + LOGIT_CALIBRATION);
             score += w * slope * (attempts[j].correct - p);
             info += w * slope * slope * p * (1 - p);
@@ -187,11 +201,12 @@ function poolLogistic(attempts, t0, tau, slope) {
         if (Math.abs(step) < 1e-6) break;
     }
 
-    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = slope²·p(1−p).
+    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = slope_j²·p(1−p).
     let A = 0, B = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
+        const slope = attempts[j].slope;
         const p = sigmoid(slope * (R - attempts[j].x) + LOGIT_CALIBRATION);
         const v = slope * slope * p * (1 - p);
         A += w * v; B += w * w * v;
@@ -200,21 +215,40 @@ function poolLogistic(attempts, t0, tau, slope) {
     return { R, se, effN };
 }
 
-// Flatten answerHistory to sorted [{t, x, correct}] in rating space (x = raw
-// rating). `problemRating` is the raw rating; pre-migration entries that still
-// carry a separate `problemRawRating` (raw) prefer it.
+function clampSlope(s) {
+    if (!Number.isFinite(s) || s <= 0) return LOGIT_PER_RANK_FALLBACK;
+    return Math.min(SLOPE_HI, Math.max(SLOPE_LO, s));
+}
+
+// Flatten answerHistory to sorted [{t, x, slope, correct}] in INTERNAL-RANK
+// space. Each attempt is mapped through ITS OWN size's curve (merged entries
+// carry `size`; otherwise the active size is assumed): x is the internal rank
+// index applyM(rawRating), slope is the logit-per-internal-rank at that rating.
+// `problemRating` holds the raw rating (legacy entries may carry a separate
+// `problemRawRating`). Attempts whose size curve is missing fall back to the
+// stored problemRank with a representative slope, or are dropped.
 function flattenAttempts(answerHistory) {
     return answerHistory
-        .filter(a => typeof a.problemRating === 'number'
-                     && typeof a.date === 'number'
-                     && !a.isRepeat
-                     && !a.linked)
+        .filter(a => typeof a.date === 'number' && !a.isRepeat && !a.linked)
         .map(a => {
-            const x = (typeof a.problemRawRating === 'number')
+            const size = a.size ?? state.boardSize;
+            const c = curveForSize(size);
+            const raw = (typeof a.problemRawRating === 'number')
                 ? a.problemRawRating
                 : a.problemRating;
-            return { t: a.date, x, correct: a.correct ? 1 : 0 };
+            let x, slope;
+            if (c && typeof raw === 'number') {
+                x = applyM(raw, c);
+                slope = clampSlope(LOGIT_PER_RATING / Math.max(Math.abs(Mslope(raw, c)), MSLOPE_FLOOR));
+            } else if (typeof a.problemRank === 'number') {
+                x = a.problemRank * TOTAL_RANKS;
+                slope = LOGIT_PER_RANK_FALLBACK;
+            } else {
+                return null;
+            }
+            return { t: a.date, x, slope, correct: a.correct ? 1 : 0 };
         })
+        .filter(Boolean)
         .sort((a, b) => a.t - b.t);
 }
 
@@ -223,14 +257,14 @@ function flattenAttempts(answerHistory) {
 // line evaluates the kernel exactly (see evaluateAt). The 30-day kernel is
 // locally linear over the grid spacing, so interpolation here is exact to well
 // under a rank.
-function buildWideGrid(attempts, slope, points) {
+function buildWideGrid(attempts, points) {
     const t0 = attempts[0].t;
     const t1 = attempts[attempts.length - 1].t;
     const span = Math.max(1, t1 - t0);
     const grid = [];
     for (let i = 0; i < points; i++) {
         const t = t0 + span * (i / (points - 1));
-        const w = poolLogistic(attempts, t, TAU_S_MS, slope);
+        const w = poolLogistic(attempts, t, TAU_S_MS);
         grid.push({ t, R: w.R, se: w.se, effN: w.effN });
     }
     return grid;
@@ -249,16 +283,16 @@ function interpGrid(grid, t, key) {
 }
 
 // Form residual at each attempt time: r = narrow-kernel skill − wide-kernel
-// skill (rating space), with v = the narrow estimator's measurement variance
-// and w = its effective sample size (reliability weight for the σ_M² fit). Each
-// residual also gets `m`, its within-session multiplicity (≈ how many residuals
-// belong to the same sitting): residuals from one session are near-duplicates,
-// so dividing by m lets us count INDEPENDENT sessions, not attempts, downstream.
-function buildResidualTrack(attempts, wideGrid, slope) {
+// skill (internal-rank space), with v = the narrow estimator's measurement
+// variance and w = its effective sample size (reliability weight for the σ_M²
+// fit). Each residual also gets `m`, its within-session multiplicity (≈ how many
+// residuals belong to the same sitting): residuals from one session are near-
+// duplicates, so dividing by m lets us count INDEPENDENT sessions downstream.
+function buildResidualTrack(attempts, wideGrid) {
     const resid = [];
     for (let j = 0; j < attempts.length; j++) {
         const tj = attempts[j].t;
-        const nj = poolLogistic(attempts, tj, TAU_M_MS, slope);
+        const nj = poolLogistic(attempts, tj, TAU_M_MS);
         if (!Number.isFinite(nj.R)) continue;
         const Rw = interpGrid(wideGrid, tj, 'R');
         if (!Number.isFinite(Rw)) continue;
@@ -351,24 +385,23 @@ function globalPerformanceSigma(resid) {
 }
 
 export function computeRankDecomposition(answerHistory) {
-    const c = curveForSize(state.boardSize);
-    if (!c) return null;   // no M ⇒ no rating→rank; the app shouldn't reach here.
-    const slope = LOGIT_PER_RATING;
-
+    // No single active curve: flattenAttempts maps each attempt through its own
+    // size's M, so a merged 9x9+13x13 history pools on the internal-rank axis.
+    // Attempts whose size curve is missing are dropped there.
     const attempts = flattenAttempts(answerHistory);
     if (attempts.length < MIN_ATTEMPTS) return null;
 
     // Coarse wide track (for residual interpolation only) + per-attempt form
     // residuals. The decomp carries enough to evaluate S, seS and σ_M(t)
     // continuously at any t via evaluateAt — no bucket grid.
-    const wideGrid = buildWideGrid(attempts, slope, WIDE_GRID_POINTS);
-    const resid = buildResidualTrack(attempts, wideGrid, slope);
+    const wideGrid = buildWideGrid(attempts, WIDE_GRID_POINTS);
+    const resid = buildResidualTrack(attempts, wideGrid);
 
     // Global σ_M (point + 95% upper bound) — also the shrinkage target the
     // time-varying band pulls toward, so it must be on the decomp before any
-    // evaluateAt call.
+    // evaluateAt call. Already in internal-rank units (the working coordinate).
     const gp = globalPerformanceSigma(resid);
-    const decomp = { attempts, resid, c, slope, sigma2Global: gp.sigma2 };
+    const decomp = { attempts, resid, sigma2Global: gp.sigma2 };
 
     // "Supported" range: grid points whose skill estimate pools ≥ SUPPORT_EFFN
     // effective attempts. Current skill and long-term drift read its endpoints.
@@ -385,14 +418,11 @@ export function computeRankDecomposition(answerHistory) {
     const haveSpan = firstT !== null && lastT > firstT;
     const sFirst = haveSpan ? evaluateAt(decomp, firstT) : null;
 
-    // Map the global σ_M to rank at the current skill for the summary line.
-    const g = cur ? Math.abs(Mslope(cur.ratingR, c)) : 1;
-
     decomp.summary = {
         currentSkill: cur && Number.isFinite(cur.S) ? cur.S : null,
         currentSkillSE: cur ? cur.seS : Infinity,
-        sigmaM: Math.sqrt(gp.sigma2) * g,
-        sigmaMUpper: Math.sqrt(gp.upper2) * g,
+        sigmaM: Math.sqrt(gp.sigma2),
+        sigmaMUpper: Math.sqrt(gp.upper2),
         longTermDrift: (sFirst && cur) ? cur.S - sFirst.S : null,
         longTermSpanMs: haveSpan ? lastT - firstT : null,
     };
@@ -401,20 +431,20 @@ export function computeRankDecomposition(answerHistory) {
 
 // Continuous evaluation at arbitrary t (no buckets). The wide kernel is
 // evaluated exactly here, so the rendered skill line and inner band are exact;
-// σ_M(t) comes from the local performance-variance estimate. All mapped to
-// rank space with M (delta-method via g). Returns null if t has no support.
+// σ_M(t) comes from the local performance-variance estimate. The working
+// coordinate IS the internal rank, so S/seS/σ_M need no remap. Returns null if
+// t has no support.
 export function evaluateAt(decomp, t) {
     if (!decomp) return null;
-    const { attempts, resid, c, slope } = decomp;
-    const sk = poolLogistic(attempts, t, TAU_S_MS, slope);   // exact wide skill
+    const { attempts, resid } = decomp;
+    const sk = poolLogistic(attempts, t, TAU_S_MS);          // exact wide skill
     if (!Number.isFinite(sk.R)) return null;
-    const g = Math.abs(Mslope(sk.R, c));                     // d(rank)/d(rating)
     const pv = localPerformanceVar(resid, t, decomp.sigma2Global || 0);
     return {
-        S: applyM(sk.R, c),                  // skill, rank space
-        seS: sk.se * g,                      // measurement SE, rank space
-        sigmaM: Math.sqrt(pv.var) * g,       // performance swing, rank space
+        S: sk.R,                  // skill, internal-rank index
+        seS: sk.se,               // measurement SE, rank units
+        sigmaM: Math.sqrt(pv.var),// performance swing, rank units
         effNS: sk.effN,
-        ratingR: sk.R,
+        ratingR: sk.R,            // retained for callers; same value now
     };
 }

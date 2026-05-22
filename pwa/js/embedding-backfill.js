@@ -26,10 +26,9 @@ import * as Sentry from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
-    setWeaknessParamsForSize, setWeaknessAdamForSize,
     SUPPORTED_BOARD_SIZES,
 } from './state.js';
-import { trainWeaknessForSize } from './weakness.js';
+import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { normalizedRankForSize, ratingRankCurveVersion } from './rank-decomposition.js';
@@ -93,10 +92,10 @@ export async function backfillMissingEmbeddings() {
         const filled = await backfillForSize(size, serverVersion, ratingsVersion);
         if (filled > 0) sizesFilled.push(size);
     }
-    // Train each size that got freshly populated, so the recommender is
-    // calibrated for whichever size the user lands on.
-    for (const size of sizesFilled) {
-        setTimeout(() => trainWeaknessForSize(size), 0);
+    // One shared weakness model trained on the union of both histories — retrain
+    // once if any size's embeddings/ratings were refreshed.
+    if (sizesFilled.length > 0) {
+        setTimeout(() => trainWeakness(), 0);
     }
 }
 
@@ -133,8 +132,12 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 }
             }
             if (cleared > 0) {
-                setWeaknessParamsForSize(size, null);
-                setWeaknessAdamForSize(size, null);
+                // Wipe the single shared weakness model — it was trained on this
+                // size's now-stale embeddings (jointly with the other size's).
+                state.weaknessParams = null;
+                state.weaknessAdam = null;
+                state.weaknessSe = null;
+                state.weaknessAxisCov = null;
                 setAnswerHistoryForSize(size, history);
                 console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedEmbeddingVersion || 'first run'} -> ${serverEmbeddingVersion})`);
             }

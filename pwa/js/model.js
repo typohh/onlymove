@@ -1,7 +1,7 @@
 // js/model.js
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, setModelParams, setAdamState } from './state.js';
+import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
@@ -67,12 +67,15 @@ function getFeaturesForPrediction(lastAnswer, { allReviewTimes, now }) {
 
     features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRank;
     features[MODEL_INDICES.IS_NOVEL] = 0; // This is a recall problem
+    // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
+    // entries carry `size`; active-play entries don't, so assume the active size.
+    features[MODEL_INDICES.SIZE_IS_13] = (lastAnswer.size ?? state.boardSize) === 13 ? 1 : 0;
 
     const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
     const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
     const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
     features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
-    
+
     return features;
 }
 
@@ -82,6 +85,8 @@ function getFeaturesForTraining(p, i, { percentileTime, percentileReview, validH
     features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
     features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
     features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRank;
+    // 9x9 baseline; 13x13 offset. p.size is set by getMergedAnswerHistory.
+    features[MODEL_INDICES.SIZE_IS_13] = (p.size ?? state.boardSize) === 13 ? 1 : 0;
 
     if (!p.isRepeat) {
         features[MODEL_INDICES.IS_NOVEL] = 1;
@@ -100,14 +105,19 @@ export function getRecallCandidates(options = {}) {
     const {
         lowerProbabilityBound = 0.60,
         upperProbabilityBound = 0.80,
-        requireLastAnswerIncorrect = false
+        requireLastAnswerIncorrect = false,
+        // Default to the active size's history (play path: a recall pick can
+        // only be re-shown in its own size). The stats panel passes the merged
+        // history so its counts span both sizes.
+        history = state.answerHistory,
     } = options;
 
     const now = Date.now();
     const recallCandidates = [];
 
-    if (!state.modelParams || state.modelParams.length === 0) {
-        return []; // Model not ready
+    const numParams = Object.keys(MODEL_INDICES).length;
+    if (!state.modelParams || state.modelParams.length !== numParams) {
+        return []; // Model not ready (or a stale shorter model awaiting retrain)
     }
     const finalParams = state.modelParams;
 
@@ -128,7 +138,7 @@ export function getRecallCandidates(options = {}) {
         clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
     }
 
-    const recentHistory = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
+    const recentHistory = history.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
 
     const allReviewTimes = recentHistory
         .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
@@ -181,6 +191,13 @@ export function getRecallCandidates(options = {}) {
 //     schedule rows for problems that won't be due for months; the schedule
 //     will get re-uploaded after subsequent attempts anyway).
 export function buildRecallSchedule(size) {
+    // The recall model and rank are shared (single keys); only the answer
+    // history is per-size — a recall reminder must point at a problem in `size`.
+    const readSharedKey = (key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch { return null; }
+    };
     const readPerSizeKey = (key) => {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
@@ -192,11 +209,11 @@ export function buildRecallSchedule(size) {
         }
     };
 
-    const params = readPerSizeKey('modelParams');
-    if (!Array.isArray(params) || params.length === 0) return [];
+    const params = readSharedKey('modelParams');
+    if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return [];
     const answerHistory = readPerSizeKey('answerHistory');
     if (!Array.isArray(answerHistory) || answerHistory.length === 0) return [];
-    const userRank = readPerSizeKey('userRank');
+    const userRank = readSharedKey('userRank');
     if (typeof userRank !== 'number') return [];
 
     const clippedParams = [...params];
@@ -244,7 +261,8 @@ export function buildRecallSchedule(size) {
         const base = clippedParams[MODEL_INDICES.INTERCEPT]
                    + clippedParams[MODEL_INDICES.TIME_SOLVING] * 0.5
                    + clippedParams[MODEL_INDICES.REVIEW_TIME] * reviewPercentile
-                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRank;
+                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRank
+                   + clippedParams[MODEL_INDICES.SIZE_IS_13] * (size === 13 ? 1 : 0);
 
         const r = lastAnswer.successSinceFailure || 0;
         const factor = Math.pow(2, r);
@@ -286,6 +304,10 @@ export const MODEL_INDICES = {
     PROBLEM_DIFFICULTY: 3,
     IS_NOVEL: 4,
     RECALL_FORMULA: 5,
+    // 9x9 is the baseline (feature 0); this carries the 13x13 success offset at
+    // equal internal-rank difficulty. Its coefficient → ranks is the stats
+    // panel's "stronger/weaker on 13x13" readout.
+    SIZE_IS_13: 6,
 };
 
 const L2_REGULARIZATION_TARGETS = {
@@ -294,6 +316,8 @@ const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.PROBLEM_DIFFICULTY]: -10,
     [MODEL_INDICES.IS_NOVEL]: -1,
     [MODEL_INDICES.RECALL_FORMULA]: -1,
+    // Shrink toward 0 = "no skill difference between sizes" until data says so.
+    [MODEL_INDICES.SIZE_IS_13]: 0,
 };
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
@@ -327,7 +351,10 @@ export async function calculateAndStoreStatsResults() {
     isCalculatingStats = true;
 
     try {
-        const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        // Shared recall model: trained on the union of both sizes' histories.
+        // Every feature it reads (problemRank, time/review percentiles, the
+        // recall-formula term) is board-independent, so pooling is on one scale.
+        const validHistory = getMergedAnswerHistory().filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
         if (validHistory.length < 10) {
             setStatsResults(null);
             return;
@@ -491,8 +518,11 @@ function calculateResultsAndStdErrors(finalParams, trainingData) {
 
 
 export async function showDetailedStats() {
-    if (state.answerHistory.length < 10) {
-        alert(getTerm('statsNotEnough').replace('{count}', state.answerHistory.length));
+    // The stats panel merges both board sizes: one rank, one recall model, one
+    // weakness model. Build the union once and thread it through every block.
+    const merged = getMergedAnswerHistory();
+    if (merged.length < 10) {
+        alert(getTerm('statsNotEnough').replace('{count}', merged.length));
         return;
     }
 
@@ -508,7 +538,7 @@ export async function showDetailedStats() {
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
         if (!state.statsResults) {
-            const validHistory = state.answerHistory.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+            const validHistory = merged.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
             const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
             const trainingData = prepareTrainingData(history, validHistory);
             const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
@@ -554,12 +584,14 @@ export async function showDetailedStats() {
                 const allRepeats = getRecallCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
-                    requireLastAnswerIncorrect: false
+                    requireLastAnswerIncorrect: false,
+                    history: merged,
                 }).length;
                 const firstTimeFailures = getRecallCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
-                    requireLastAnswerIncorrect: true
+                    requireLastAnswerIncorrect: true,
+                    history: merged,
                 }).length;
                 const firsttimeFailureTime = t_eq_days * 24;
 
@@ -568,30 +600,34 @@ export async function showDetailedStats() {
             }
         }
 
-        const novelProblemCount = new Set(state.answerHistory.filter(p => !p.isRepeat).map(p => p.problemId)).size;
+        const novelProblemCount = new Set(merged.filter(p => !p.isRepeat).map(p => p.problemId)).size;
         resultText += getTerm('statsNovelProblems').replace('{count}', novelProblemCount) + '\n';
 
         const slippedProblemCount = getRecallCandidates({
             lowerProbabilityBound: 0,
             upperProbabilityBound: 0.6,
-            requireLastAnswerIncorrect: false
+            requireLastAnswerIncorrect: false,
+            history: merged,
         }).length;
-        const ignoredProblemCount = state.answerHistory.filter(p => p.ignored).length;
+        const ignoredProblemCount = merged.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
 
         // Two-component rank decomposition (R = skill S + form M). Gives a
         // long-term-trend number and a session-to-session swing number that
         // can't be read off the single-line smoother in the chart. See
         // rank-decomposition.js for the model and the backfitting approach.
-        const decomp = computeRankDecomposition(state.answerHistory);
+        const decomp = computeRankDecomposition(merged);
         if (decomp) {
             const { summary } = decomp;
             if (summary.currentSkill !== null) {
-                const skillLabel = rankLabelFromIndex(Math.round(summary.currentSkill));
+                const lower = Math.floor(summary.currentSkill);
+                const pct = Math.round((summary.currentSkill - lower) * 100);
+                const curLabel = rankLabelFromIndex(lower);
+                const nextLabel = rankLabelFromIndex(lower + 1);
                 const seStr = Number.isFinite(summary.currentSkillSE)
-                    ? ` (±${summary.currentSkillSE.toFixed(1)} ranks)`
+                    ? `, (±${summary.currentSkillSE.toFixed(1)} ranks)`
                     : '';
-                resultText += `Long-term skill estimate: ${skillLabel}${seStr}.\n`;
+                resultText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
             }
             if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
                 const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
@@ -605,12 +641,33 @@ export async function showDetailedStats() {
             }
         }
 
+        // Relative 13x13 skill. The recall model's SIZE_IS_13 coefficient is the
+        // logit offset for 13x13 at equal internal-rank difficulty (9x9 is the
+        // baseline), so coeff / logit-per-rank is the skill gap in ranks. Only
+        // shown once both sizes have enough non-repeat data to identify it.
+        const MIN_SIZE_COMPARISON = 20;
+        const count9 = merged.filter(p => !p.isRepeat && p.size === 9 && p.problemRank !== undefined).length;
+        const count13 = merged.filter(p => !p.isRepeat && p.size === 13 && p.problemRank !== undefined).length;
+        const sizeResult = results.find(r => r.varIndex === MODEL_INDICES.SIZE_IS_13);
+        if (sizeResult && count9 >= MIN_SIZE_COMPARISON && count13 >= MIN_SIZE_COMPARISON
+            && Number.isFinite(sizeResult.coeff) && Number.isFinite(sizeResult.se) && sizeResult.se > 0) {
+            const logitPerRank = getLogitPerRank(state.statsResults);
+            const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
+            const seRanks = sizeResult.se / logitPerRank;
+            if (Math.abs(ranksDiff) >= seRanks) {
+                const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
+                resultText += `You are ${Math.abs(ranksDiff).toFixed(1)} ranks ${dir} on 13x13 than on 9x9 (±${seRanks.toFixed(1)}).\n`;
+            } else {
+                resultText += `9x9 and 13x13 skill look about equal so far (within ±${seRanks.toFixed(1)} ranks).\n`;
+            }
+        }
+
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
         // turned into sign-quadrant probabilities via bivariate-normal.js and
         // rendered as a DOM block (instead of inlined into resultText) so each
         // issue can carry an interactive `examples` toggle to past mistakes.
-        const issuesElement = buildLikelyIssuesElement();
-        const chartElement = buildRatingHistoryChart();
+        const issuesElement = buildLikelyIssuesElement(merged);
+        const chartElement = buildRatingHistoryChart(merged);
         const extras = document.createElement('div');
         if (issuesElement) extras.appendChild(issuesElement);
         if (chartElement) extras.appendChild(chartElement);
@@ -637,7 +694,7 @@ export async function showDetailedStats() {
 // high mass in BOTH off-diagonal quadrants simultaneously without the data
 // actually distinguishing over- vs under-application. badAt skips the gate
 // because its both-negative sign-pattern is identifiable from β_c + β_p.
-function buildLikelyIssuesElement() {
+function buildLikelyIssuesElement(history = state.answerHistory) {
     const PROB_THRESHOLD = 0.50;
     const weaknessParams = state.weaknessParams;
     const weaknessSe = state.weaknessSe;
@@ -705,17 +762,17 @@ function buildLikelyIssuesElement() {
 
     // Problems currently in the user's recall window — withhold their links so
     // a glance at the examples panel can't be used to ace an imminent recall.
-    const recallSet = new Set(getRecallCandidates().map(c => c.problemId));
+    const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
 
     for (const issue of issues) {
-        root.appendChild(buildIssueRow(issue, recallSet));
+        root.appendChild(buildIssueRow(issue, recallSet, history));
     }
     return root;
 }
 
 // Renders one (axis k, quadrant) row: sentence + probability + an "examples"
 // toggle that expands a list of links to past attempts matching the issue.
-function buildIssueRow(issue, recallSet) {
+function buildIssueRow(issue, recallSet, history = state.answerHistory) {
     const row = document.createElement('div');
     row.className = 'stats-issue';
 
@@ -746,7 +803,7 @@ function buildIssueRow(issue, recallSet) {
     let populated = false;
     toggle.addEventListener('click', () => {
         if (!populated) {
-            populateExamplesList(list, issue, recallSet);
+            populateExamplesList(list, issue, recallSet, history);
             populated = true;
         }
         list.hidden = !list.hidden;
@@ -755,11 +812,11 @@ function buildIssueRow(issue, recallSet) {
     return row;
 }
 
-function populateExamplesList(list, issue, recallSet) {
+function populateExamplesList(list, issue, recallSet, history = state.answerHistory) {
     // Threshold per-axis evidence strength to match the issue's posterior
     // confidence — see findExamplesForIssue for the rationale.
     const threshold = probit(issue.p);
-    const examples = findExamplesForIssue(state.answerHistory, issue.k, issue.quadrant, recallSet, threshold);
+    const examples = findExamplesForIssue(history, issue.k, issue.quadrant, recallSet, threshold);
     if (examples.length === 0) {
         const none = document.createElement('div');
         none.className = 'stats-issue-examples-empty';
@@ -784,7 +841,8 @@ function populateExamplesList(list, issue, recallSet) {
             e.preventDefault();
             window.open(link.href, '_blank', 'noopener');
         });
-        link.textContent = `${ex.problemId} · ${formatSignalStrength(issue.quadrant, ex.ec, ex.ep)}`;
+        const sizeLabel = (ex.size === 9 || ex.size === 13) ? `${ex.size}x${ex.size} · ` : '';
+        link.textContent = `${ex.problemId} · ${sizeLabel}${formatSignalStrength(issue.quadrant, ex.ec, ex.ep)}`;
         list.appendChild(link);
     }
     if (examples.length > shown.length) {
@@ -857,7 +915,7 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold
         }
         const prev = byId.get(a.problemId);
         if (!prev || score > prev.score) {
-            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score, ec, ep });
+            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score, ec, ep, size: a.size });
         }
     }
     return Array.from(byId.values()).sort((a, b) => b.score - a.score);
@@ -916,8 +974,8 @@ function rankLabelFromIndex(rankIndex) {
     return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
 }
 
-function buildRatingHistoryChart() {
-    const entries = state.answerHistory
+function buildRatingHistoryChart(history = state.answerHistory) {
+    const entries = history
         .filter(a => typeof a.problemRank === 'number' && typeof a.date === 'number'
                      && !a.isRepeat && !a.linked)
         .map(a => ({ date: a.date, rankValue: a.problemRank * TOTAL_RANKS, correct: !!a.correct }));
@@ -931,7 +989,7 @@ function buildRatingHistoryChart() {
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
-    const decomp = computeRankDecomposition(state.answerHistory);
+    const decomp = computeRankDecomposition(history);
     const GRID_POINTS = 300;
     const Z = 1.96;
     // Half-widths in rank space: inner band = measurement uncertainty (how well

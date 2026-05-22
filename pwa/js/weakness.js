@@ -25,12 +25,7 @@
 // signal the scorer returns 0 (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
 
 import * as Sentry from "@sentry/browser";
-import {
-    state,
-    getAnswerHistoryForSize, getWeaknessParamsForSize,
-    setWeaknessParamsForSize, setWeaknessAdamForSize, setWeaknessSeForSize,
-    setWeaknessAxisCovForSize,
-} from './state.js';
+import { state, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 
 // Recommender temperature for weight = quality * exp(T * weaknessScore).
@@ -50,7 +45,7 @@ const MAX_TRAINING_TIME_MS = 1000;
 const LEARNING_RATE = 0.05;
 const LOSS_CONVERGENCE = 1e-6;
 
-const trainingInProgress = new Set();
+let trainingInProgress = false;
 
 function sigmoid(z) {
     if (z >= 0) {
@@ -60,18 +55,15 @@ function sigmoid(z) {
     return e / (1 + e);
 }
 
-// Train for the currently-active size (called after each attempt).
+// Train the single shared weakness model on the union of both sizes' answer
+// histories. Every per-problem feature it reads (problemRank, the joint-ICA
+// embedding axes) is board-independent, so pooling is on one common scale.
+// Called after each attempt and once after backfill.
 export async function trainWeakness() {
-    return trainWeaknessForSize(state.boardSize);
-}
-
-// Train for an arbitrary size (called from backfill so non-active sizes
-// also get a calibrated model on app load).
-export async function trainWeaknessForSize(size) {
-    if (trainingInProgress.has(size)) return;
-    trainingInProgress.add(size);
+    if (trainingInProgress) return;
+    trainingInProgress = true;
     try {
-        const allHistory = getAnswerHistoryForSize(size);
+        const allHistory = getMergedAnswerHistory();
         const history = allHistory
             .filter(a => !a.isRepeat &&
                          a.embedding && Array.isArray(a.embedding) &&
@@ -82,7 +74,7 @@ export async function trainWeaknessForSize(size) {
 
         const K = history[0].embedding.length;
         if (history.some(a => a.embedding.length !== K)) {
-            console.warn(`weakness[${size}]: inconsistent embedding lengths; skipping`);
+            console.warn(`weakness: inconsistent embedding lengths; skipping`);
             return;
         }
 
@@ -93,7 +85,7 @@ export async function trainWeaknessForSize(size) {
         // (β_correct + β_picked) — the model gracefully degrades to a
         // diff-form mean estimate when no picked data exists.
         const numParams = 2 + 2 * K;
-        const existingParams = getWeaknessParamsForSize(size);
+        const existingParams = state.weaknessParams;
         let params = (Array.isArray(existingParams) && existingParams.length === numParams)
             ? [...existingParams]
             : new Array(numParams).fill(0);
@@ -161,15 +153,15 @@ export async function trainWeaknessForSize(size) {
         }
 
         if (!params.every(p => Number.isFinite(p))) {
-            console.warn(`weakness[${size}]: non-finite params; resetting`);
-            setWeaknessParamsForSize(size, null);
-            setWeaknessAdamForSize(size, null);
-            setWeaknessSeForSize(size, null);
-            setWeaknessAxisCovForSize(size, null);
+            console.warn(`weakness: non-finite params; resetting`);
+            state.weaknessParams = null;
+            state.weaknessAdam = null;
+            state.weaknessSe = null;
+            state.weaknessAxisCov = null;
             return;
         }
-        setWeaknessParamsForSize(size, params);
-        setWeaknessAdamForSize(size, adam);
+        state.weaknessParams = params;
+        state.weaknessAdam = adam;
 
         // Laplace-approx posterior cov. H = X' diag(p(1-p)) X + diag(lam_vec);
         // posterior cov ≈ H^-1. We pull out the per-axis 2x2 block on
@@ -207,9 +199,9 @@ export async function trainWeaknessForSize(size) {
             const diag = math.diag(cov).toArray();
             const se = diag.map(v => Math.sqrt(Math.max(v, 1e-12)));
             if (se.every(s => Number.isFinite(s))) {
-                setWeaknessSeForSize(size, se);
+                state.weaknessSe = se;
             } else {
-                setWeaknessSeForSize(size, null);
+                state.weaknessSe = null;
             }
 
             // Off-diagonal cov[β_c[k], β_p[k]] per axis. cov is a math.js
@@ -221,17 +213,17 @@ export async function trainWeaknessForSize(size) {
                 const v = covArr[2 + k][2 + K + k];
                 axisCov[k] = Number.isFinite(v) ? v : 0;
             }
-            setWeaknessAxisCovForSize(size, axisCov);
+            state.weaknessAxisCov = axisCov;
         } catch (err) {
-            console.warn(`weakness[${size}]: SE/cov computation failed`, err);
-            setWeaknessSeForSize(size, null);
-            setWeaknessAxisCovForSize(size, null);
+            console.warn(`weakness: SE/cov computation failed`, err);
+            state.weaknessSe = null;
+            state.weaknessAxisCov = null;
         }
     } catch (err) {
-        console.error(`weakness[${size}] training failed`, err);
+        console.error(`weakness training failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
     } finally {
-        trainingInProgress.delete(size);
+        trainingInProgress = false;
     }
 }
 
@@ -243,7 +235,7 @@ export async function trainWeaknessForSize(size) {
 // model predicts under the "user plays correctly" assumption (picked = correct
 // for the unseen candidate). Equivalently equal to the diff-form's β_c'.
 export function weaknessScore(problem) {
-    const params = state.weaknessParams;  // active size
+    const params = state.weaknessParams;  // shared across sizes
     if (!params || params.length < 4) return 0;
     const K = (params.length - 2) / 2;
     if (!Number.isInteger(K) || K <= 0) return 0;

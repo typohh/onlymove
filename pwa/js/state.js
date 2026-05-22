@@ -57,6 +57,49 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.setItem('boardSizeMigrated_v1', 'true');
 })();
 
+// --- Cross-size merge: rank, momentum, and the learned models are now shared ---
+// The two board sizes share one rank (displayed everywhere, used to pick
+// problems) and one each of the recall + weakness models (trained on the union
+// of both histories — every per-problem feature they read is board-independent).
+// This migration collapses the per-size buckets v1 created back into single
+// values: rank = max of the two (a strong 9x9 player should immediately see
+// hard 13x13 problems), momentum follows the higher-ranked size, and the model
+// buckets are dropped so the shared models retrain from scratch on next load.
+// answerHistory / problemHistory / nextTsumego stay per-size.
+(function mergeSharedAcrossSizes_v2() {
+    if (localStorage.getItem('sharedAcrossSizesMigrated_v2')) return;
+
+    const readBucket = (key) => {
+        const raw = localStorage.getItem(key);
+        if (raw === null) return {};
+        try {
+            const parsed = JSON.parse(raw);
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch { return {}; }
+    };
+
+    const rankBucket = readBucket('userRank');
+    let maxRank = 0, maxRankSize = null;
+    for (const [sz, v] of Object.entries(rankBucket)) {
+        if (typeof v === 'number' && v > maxRank) { maxRank = v; maxRankSize = sz; }
+    }
+    localStorage.setItem('userRank', JSON.stringify(maxRank));
+
+    const momentumBucket = readBucket('momentum');
+    const momentum = (maxRankSize !== null && typeof momentumBucket[maxRankSize] === 'number')
+        ? momentumBucket[maxRankSize]
+        : 30;
+    localStorage.setItem('momentum', JSON.stringify(momentum));
+
+    // Models retrain from scratch — drop the per-size buckets entirely.
+    for (const key of ['modelParams', 'adamState', 'weaknessParams',
+                       'weaknessAdam', 'weaknessSe', 'weaknessAxisCov']) {
+        localStorage.removeItem(key);
+    }
+
+    localStorage.setItem('sharedAcrossSizesMigrated_v2', 'true');
+})();
+
 // --- Board size + per-size backing buckets ---
 
 function readPerSize(key, fallback) {
@@ -121,21 +164,45 @@ function writePerSize(key, obj) {
 }
 
 const perSize = {
-    userRank: readPerSize('userRank'),
     problemHistory: readPerSize('problemHistory'),
     answerHistory: readPerSize('answerHistory'),
     nextTsumego: readPerSize('nextTsumego'),
-    momentum: readPerSize('momentum'),
-    modelParams: readPerSize('modelParams'),
-    adamState: readPerSize('adamState'),
-    weaknessParams: readPerSize('weaknessParams'),
-    weaknessAdam: readPerSize('weaknessAdam'),
-    weaknessSe: readPerSize('weaknessSe'),
+};
+
+// --- Shared-across-sizes state (single values, not bucketed). ---
+// rank + momentum are one control loop over a single shared rank; the recall
+// (modelParams/adamState) and weakness (weaknessParams/Adam/Se/AxisCov) models
+// train on the union of both sizes' histories. See mergeSharedAcrossSizes_v2.
+function readShared(key, fallback) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed === null ? fallback : parsed;
+    } catch { return fallback; }
+}
+
+function writeShared(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+        console.error(`localStorage write failed for shared key ${key}`, e);
+    }
+}
+
+const shared = {
+    userRank: readShared('userRank', null),
+    momentum: readShared('momentum', null),
+    modelParams: readShared('modelParams', null),
+    adamState: readShared('adamState', null),
+    weaknessParams: readShared('weaknessParams', null),
+    weaknessAdam: readShared('weaknessAdam', null),
+    weaknessSe: readShared('weaknessSe', null),
     // Per-axis cov(β_correct[k], β_picked[k]) for the augmented model.
     // Flat array of K floats. Combined with weaknessSe (for the diagonals)
     // and weaknessParams, this is the minimum state needed to compute
     // sign-quadrant probabilities per axis without retraining.
-    weaknessAxisCov: readPerSize('weaknessAxisCov'),
+    weaknessAxisCov: readShared('weaknessAxisCov', null),
 };
 
 // Per-size session state — not persisted, but bucketed so it doesn't bleed
@@ -231,12 +298,11 @@ export const state = {
     },
 
     get userRank() {
-        const v = perSize.userRank[_boardSize];
-        return typeof v === 'number' ? v : DEFAULT_USER_RANK;
+        return typeof shared.userRank === 'number' ? shared.userRank : DEFAULT_USER_RANK;
     },
     set userRank(v) {
-        perSize.userRank[_boardSize] = v;
-        writePerSize('userRank', perSize.userRank);
+        shared.userRank = v;
+        writeShared('userRank', v);
     },
 
     get problemHistory() {
@@ -270,60 +336,59 @@ export const state = {
     },
 
     get momentum() {
-        const v = perSize.momentum[_boardSize];
-        return typeof v === 'number' ? v : DEFAULT_MOMENTUM;
+        return typeof shared.momentum === 'number' ? shared.momentum : DEFAULT_MOMENTUM;
     },
     set momentum(v) {
-        perSize.momentum[_boardSize] = v;
-        writePerSize('momentum', perSize.momentum);
+        shared.momentum = v;
+        writeShared('momentum', v);
     },
 
     get modelParams() {
-        return perSize.modelParams[_boardSize] ?? null;
+        return shared.modelParams ?? null;
     },
     set modelParams(v) {
-        perSize.modelParams[_boardSize] = v;
-        writePerSize('modelParams', perSize.modelParams);
+        shared.modelParams = v;
+        writeShared('modelParams', v);
     },
 
     get adamState() {
-        return perSize.adamState[_boardSize] ?? null;
+        return shared.adamState ?? null;
     },
     set adamState(v) {
-        perSize.adamState[_boardSize] = v;
-        writePerSize('adamState', perSize.adamState);
+        shared.adamState = v;
+        writeShared('adamState', v);
     },
 
     get weaknessParams() {
-        return perSize.weaknessParams[_boardSize] ?? null;
+        return shared.weaknessParams ?? null;
     },
     set weaknessParams(v) {
-        perSize.weaknessParams[_boardSize] = v;
-        writePerSize('weaknessParams', perSize.weaknessParams);
+        shared.weaknessParams = v;
+        writeShared('weaknessParams', v);
     },
 
     get weaknessAdam() {
-        return perSize.weaknessAdam[_boardSize] ?? null;
+        return shared.weaknessAdam ?? null;
     },
     set weaknessAdam(v) {
-        perSize.weaknessAdam[_boardSize] = v;
-        writePerSize('weaknessAdam', perSize.weaknessAdam);
+        shared.weaknessAdam = v;
+        writeShared('weaknessAdam', v);
     },
 
     get weaknessSe() {
-        return perSize.weaknessSe[_boardSize] ?? null;
+        return shared.weaknessSe ?? null;
     },
     set weaknessSe(v) {
-        perSize.weaknessSe[_boardSize] = v;
-        writePerSize('weaknessSe', perSize.weaknessSe);
+        shared.weaknessSe = v;
+        writeShared('weaknessSe', v);
     },
 
     get weaknessAxisCov() {
-        return perSize.weaknessAxisCov[_boardSize] ?? null;
+        return shared.weaknessAxisCov ?? null;
     },
     set weaknessAxisCov(v) {
-        perSize.weaknessAxisCov[_boardSize] = v;
-        writePerSize('weaknessAxisCov', perSize.weaknessAxisCov);
+        shared.weaknessAxisCov = v;
+        writeShared('weaknessAxisCov', v);
     },
 
     get unavailableProblemIds() { return getOrCreateSessionSet('unavailableProblemIds'); },
@@ -464,28 +529,19 @@ export function setAnswerHistoryForSize(size, history) {
     writePerSize('answerHistory', perSize.answerHistory);
 }
 
-export function getWeaknessParamsForSize(size) {
-    return perSize.weaknessParams[size] ?? null;
-}
-
-export function setWeaknessParamsForSize(size, params) {
-    perSize.weaknessParams[size] = params;
-    writePerSize('weaknessParams', perSize.weaknessParams);
-}
-
-export function setWeaknessAdamForSize(size, adam) {
-    perSize.weaknessAdam[size] = adam;
-    writePerSize('weaknessAdam', perSize.weaknessAdam);
-}
-
-export function setWeaknessSeForSize(size, se) {
-    perSize.weaknessSe[size] = se;
-    writePerSize('weaknessSe', perSize.weaknessSe);
-}
-
-export function setWeaknessAxisCovForSize(size, cov) {
-    perSize.weaknessAxisCov[size] = cov;
-    writePerSize('weaknessAxisCov', perSize.weaknessAxisCov);
+// Read-only union of every size's answerHistory, each entry tagged with its
+// `size` and sorted by date. The shared recall + weakness models train on this,
+// and the stats panel renders from it. Entries are shallow copies, so callers
+// must not expect mutations to persist — use the per-size setters for that.
+export function getMergedAnswerHistory() {
+    const merged = [];
+    for (const size of SUPPORTED_BOARD_SIZES) {
+        const arr = perSize.answerHistory[size];
+        if (!Array.isArray(arr)) continue;
+        for (const a of arr) merged.push({ ...a, size });
+    }
+    merged.sort((x, y) => (x.date || 0) - (y.date || 0));
+    return merged;
 }
 
 export function setReviewStartTime(time) {
