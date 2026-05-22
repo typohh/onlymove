@@ -636,7 +636,7 @@ export async function showDetailedStats() {
             }
             if (typeof summary.sigmaM === 'number') {
                 resultText += summary.sigmaM >= 0.1
-                    ? `Session-to-session performance varies by ±${summary.sigmaM.toFixed(2)} ranks.\n`
+                    ? `Session-to-session performance: good days +${summary.sigmaUp.toFixed(2)}, bad days −${summary.sigmaDown.toFixed(2)} ranks.\n`
                     : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
             }
         }
@@ -993,16 +993,19 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const GRID_POINTS = 300;
     const Z = 1.96;
     // Half-widths in rank space: inner band = measurement uncertainty (how well
-    // we know your skill); outer band = a prediction interval (where a given
-    // session's performance lands), measurement and swing added in quadrature.
+    // we know your skill), symmetric. Outer band = a prediction interval (where a
+    // given session's performance lands); the form swing is directional, so the
+    // outer band is ASYMMETRIC — good-day reach above, bad-day dip below — each
+    // added to the measurement SE in quadrature.
     const innerHalf = e => Z * e.seS;
-    const outerHalf = e => Z * Math.hypot(e.seS, e.sigmaM);
+    const outerUp = e => Z * Math.hypot(e.seS, e.sigmaUp);
+    const outerDown = e => Z * Math.hypot(e.seS, e.sigmaDown);
     let gridEvals = [];
     if (decomp) {
         for (let i = 0; i < GRID_POINTS; i++) {
             const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
             const e = evaluateAt(decomp, t);
-            if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaM: e.sigmaM });
+            if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaUp: e.sigmaUp, sigmaDown: e.sigmaDown });
         }
     }
 
@@ -1012,9 +1015,8 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     // the chart that matters. Dots outside this window are dropped (see scatter).
     let bandMin = Infinity, bandMax = -Infinity;
     for (const e of gridEvals) {
-        const h = outerHalf(e);
-        bandMin = Math.min(bandMin, e.S - h);
-        bandMax = Math.max(bandMax, e.S + h);
+        bandMin = Math.min(bandMin, e.S - outerDown(e));
+        bandMax = Math.max(bandMax, e.S + outerUp(e));
     }
     if (!Number.isFinite(bandMin)) {
         // No decomposition (too little data) — fall back to the scatter range.
@@ -1035,18 +1037,28 @@ function buildRatingHistoryChart(history = state.answerHistory) {
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = `Skill since ${new Date(t0).toISOString().slice(0, 10)}`;
+    title.textContent = `Rank since ${new Date(t0).toISOString().slice(0, 10)}`;
     container.append(title);
 
     const plotRow = document.createElement('div');
     plotRow.className = 'stats-chart-plot-row';
 
-    // Grid line + label at every integer rank in the trimmed range. Labels
-    // that would visually overlap their neighbor get hidden after layout
-    // (see ResizeObserver below).
+    // Grid lines mark the rank CUTOFFS (integer rank boundaries); the label for
+    // a rank sits BETWEEN its two bounding lines, so it reads as "this band is
+    // rank X" — a range — rather than a value pinned to one line. Labels that
+    // would visually overlap their neighbor get hidden after layout (see
+    // ResizeObserver below).
     const gridRanks = [];
     for (let r = Math.ceil(yLow); r <= Math.floor(yHigh); r++) gridRanks.push(r);
-    const labelRanks = gridRanks;
+    // One label per rank band, centered at r+0.5 (between cutoff lines r and
+    // r+1). Values in [r, r+1) carry rank rankLabelFromIndex(r). Bands clipped
+    // at a chart edge keep the same midpoint and just get clipped off.
+    const labelTicks = [];
+    for (let r = Math.floor(yLow); r <= Math.ceil(yHigh); r++) {
+        const mid = r + 0.5;
+        if (mid < yLow || mid > yHigh) continue;
+        labelTicks.push({ pos: mid, text: rankLabelFromIndex(r) });
+    }
 
     // Y-axis labels live in HTML so they inherit the surrounding pre font
     // (13px monospace) exactly. The hidden spacer sizes the column to the
@@ -1058,11 +1070,11 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     spacer.textContent = '20k';
     yaxis.append(spacer);
     const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
-    for (const r of labelRanks) {
+    for (const t of labelTicks) {
         const tick = document.createElement('div');
         tick.className = 'y-tick';
-        tick.style.top = `${topPct(r)}%`;
-        tick.textContent = rankLabelFromIndex(r);
+        tick.style.top = `${topPct(t.pos)}%`;
+        tick.textContent = t.text;
         yaxis.append(tick);
     }
 
@@ -1110,12 +1122,13 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const shownDots = stride > 1 ? visibleDots.filter((_, i) => i % stride === 0) : visibleDots;
     const dotR = shownDots.length > 600 ? '1.4' : '1.6';
     const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / Math.max(1, shownDots.length))).toFixed(3);
+    const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
     for (const e of shownDots) {
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', xOf(e.date).toFixed(1));
         dot.setAttribute('cy', yOf(e.rankValue).toFixed(1));
         dot.setAttribute('r', dotR);
-        dot.setAttribute('fill', e.correct ? '#50b450' : '#dc5050');
+        dot.setAttribute('fill', e.correct ? DOT_CORRECT : DOT_WRONG);
         dot.setAttribute('fill-opacity', dotAlpha);
         svg.appendChild(dot);
     }
@@ -1128,24 +1141,26 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
 
-    const bandPath = (halfOf) => {
-        let up = '', dn = '';
+    // Separate upper/lower half-widths so the outer band can be asymmetric. The
+    // top edge runs left→right at S + upHalf, the bottom edge runs right→left at
+    // S − downHalf, closing the ring. The inner band passes innerHalf for both.
+    const bandPath = (upHalf, downHalf) => {
+        let d = '';
         for (let i = 0; i < gridEvals.length; i++) {
             const e = gridEvals[i];
-            const h = halfOf(e);
-            const x = xOf(e.t).toFixed(1);
-            const yU = yOf(e.S + h).toFixed(1);
-            const yL = yOf(e.S - h).toFixed(1);
-            up += (i === 0 ? 'M' : 'L') + `${x} ${yU} `;
-            dn = `L${x} ${yL} ` + dn;
+            d += (i === 0 ? 'M' : 'L') + `${xOf(e.t).toFixed(1)} ${yOf(e.S + upHalf(e)).toFixed(1)} `;
         }
-        return up + dn + 'Z';
+        for (let i = gridEvals.length - 1; i >= 0; i--) {
+            const e = gridEvals[i];
+            d += `L${xOf(e.t).toFixed(1)} ${yOf(e.S - downHalf(e)).toFixed(1)} `;
+        }
+        return d + 'Z';
     };
 
     if (gridEvals.length >= 2) {
-        for (const [halfOf, fill] of [[outerHalf, SKILL_FILL_OUTER], [innerHalf, SKILL_FILL_INNER]]) {
+        for (const [uh, dh, fill] of [[outerUp, outerDown, SKILL_FILL_OUTER], [innerHalf, innerHalf, SKILL_FILL_INNER]]) {
             const band = document.createElementNS(SVG_NS, 'path');
-            band.setAttribute('d', bandPath(halfOf));
+            band.setAttribute('d', bandPath(uh, dh));
             band.setAttribute('fill', fill);
             band.setAttribute('stroke', 'none');
             svg.appendChild(band);
@@ -1175,6 +1190,33 @@ function buildRatingHistoryChart(history = state.answerHistory) {
 
     plotRow.append(yaxis, svgWrap);
     container.append(plotRow);
+
+    // Legend below the plot. One entry per visual element; swatch shapes match
+    // how each is drawn (dot / line / filled band). Only list the skill curve
+    // and its bands when the decomposition actually produced them.
+    const legend = document.createElement('div');
+    legend.className = 'stats-chart-legend';
+    const legendItems = [
+        { kind: 'dot', color: DOT_CORRECT, text: 'Correct' },
+        { kind: 'dot', color: DOT_WRONG, text: 'Wrong' },
+    ];
+    if (gridEvals.length >= 2) {
+        legendItems.push(
+            { kind: 'line', color: SKILL_STROKE, text: 'Rank' },
+            { kind: 'band', color: SKILL_FILL_INNER, text: '95% confidence' },
+            { kind: 'band', color: SKILL_FILL_OUTER, text: 'Daily variance' },
+        );
+    }
+    for (const item of legendItems) {
+        const el = document.createElement('span');
+        el.className = `legend-item legend-${item.kind}`;
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch';
+        swatch.style.background = item.color;
+        el.append(swatch, document.createTextNode(item.text));
+        legend.append(el);
+    }
+    container.append(legend);
 
     // After the chart hits the DOM and gets a real height, greedy-hide any
     // y-axis labels that would physically overlap a previously-shown one.

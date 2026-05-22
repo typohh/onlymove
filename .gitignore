@@ -59,6 +59,11 @@ activations/
 # pipeline/package_for_pwa.py. Reproducible from activations/ + pca.npz.
 embeddings/joint/per_cell/
 
+# D1 attempts dump: a large (~45 MB) snapshot pulled from production by
+# pipeline.fetch_database. Regenerable on demand and changes constantly, so it's
+# not version-controlled (the benchmark attempts under attempts/<size>/ are).
+/attempts/database.sql
+
 # Vast.ai orchestration
 orchestration_state.json
 .env

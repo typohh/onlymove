@@ -26,15 +26,22 @@
 //      variance σ_M²(t) is a variance-components ML over a τ_V window (NOT
 //      method-of-moments r²−v: v is wildly heteroscedastic — all-correct/all-
 //      wrong sessions have v→∞ — and ML's 1/(σ_M²+v)² weight downweights those,
-//      where r²−v would be poisoned by them). The local σ_M²(t) is then shrunk
-//      toward the global ML σ_M² by the effective number of independent sessions
-//      in the window (Σ k/m, empirical Bayes): sparse windows fall back to the
-//      whole-history swing so one isolated session can't spike the band. The
-//      summary reports the global ML σ_M, or — when it's ~0 — a 95% profile-
-//      likelihood upper bound ("under ±X, not detected").
-//   4. S, seS and σ_M are already in rank units (the working coordinate IS
+//      where r²−v would be poisoned by them). The swing is fit SEPARATELY by
+//      direction: σ_up² from residuals above long-term skill (good days), σ_down²
+//      from those below (bad days), so form can be lopsided. The split is clean
+//      because the half of N(0,σ²+v) on one side of 0 carries the SAME
+//      σ²-dependent log-likelihood as the full normal (the truncation mass is
+//      exactly ½, independent of σ²), so the same ML estimator runs per side.
+//      Each side's local σ²(t) is shrunk toward its own global ML by the
+//      effective number of independent sessions in the window (Σ k/m, empirical
+//      Bayes): sparse windows fall back to the whole-history swing so one
+//      isolated session can't spike the band. The summary reports global σ_up /
+//      σ_down, or — when the pooled swing is ~0 — a 95% profile-likelihood upper
+//      bound ("under ±X, not detected").
+//   4. S, seS, σ_up, σ_down are already in rank units (the working coordinate IS
 //      internal rank), so the chart's inner band (S ± z·seS, measurement) and
-//      outer band (S ± z·√(seS²+σ_M²), where a session lands) need no remap.
+//      outer band (up: S + z·√(seS²+σ_up²), down: S − z·√(seS²+σ_down²), where a
+//      session lands) need no remap.
 //
 // M (rating_to_rank.json) is required: package_for_pwa ships only raw ratings,
 // so the client can't rank anything without it. main.js awaits loadRatingRankMap()
@@ -285,9 +292,11 @@ function interpGrid(grid, t, key) {
 // Form residual at each attempt time: r = narrow-kernel skill − wide-kernel
 // skill (internal-rank space), with v = the narrow estimator's measurement
 // variance and w = its effective sample size (reliability weight for the σ_M²
-// fit). Each residual also gets `m`, its within-session multiplicity (≈ how many
-// residuals belong to the same sitting): residuals from one session are near-
-// duplicates, so dividing by m lets us count INDEPENDENT sessions downstream.
+// fit). The sign of r is kept (`up`) so the swing can be fit separately above
+// (r ≥ 0, good days) and below (r < 0, bad days) long-term skill. Each residual
+// also gets `m`, its within-session multiplicity (≈ how many residuals belong to
+// the same sitting): residuals from one session are near-duplicates, so dividing
+// by m lets us count INDEPENDENT sessions downstream.
 function buildResidualTrack(attempts, wideGrid) {
     const resid = [];
     for (let j = 0; j < attempts.length; j++) {
@@ -297,7 +306,7 @@ function buildResidualTrack(attempts, wideGrid) {
         const Rw = interpGrid(wideGrid, tj, 'R');
         if (!Number.isFinite(Rw)) continue;
         const r = nj.R - Rw;
-        resid.push({ t: tj, r2: r * r, v: nj.se * nj.se, w: nj.effN });
+        resid.push({ t: tj, r2: r * r, up: r >= 0, v: nj.se * nj.se, w: nj.effN });
     }
     for (let i = 0; i < resid.length; i++) {
         let m = 0;
@@ -317,6 +326,10 @@ function buildResidualTrack(attempts, wideGrid) {
 // wildly heteroscedastic — an all-correct/all-wrong session can't pin your level
 // (v → huge), and the ML weight 1/(σ_M²+v)² downweights exactly those, instead
 // of the method-of-moments r²−v which they poison. `rows` carries {r2, v, wgt}.
+// Reused unchanged for the one-sided (good-day / bad-day) fits: the half of
+// N(0,σ²+v) on one side of 0 has the identical σ²-dependent log-likelihood (its
+// truncation mass is exactly ½, independent of σ²), so feeding it only the rows
+// of one sign yields that side's ML σ².
 function mlSigma2(rows) {
     let s2 = 0;
     for (let it = 0; it < 60; it++) {
@@ -334,41 +347,55 @@ function mlSigma2(rows) {
     return s2;
 }
 
-// Time-varying performance variance at t (rating²): kernel-localized
-// variance-components ML, shrunk toward the global σ². Each residual is weighted
-// by k (τ_V time kernel) ÷ m (de-duplicate within-session near-copies) so the
-// window counts INDEPENDENT sessions, and v downweights uninformative ones.
-// Empirical-Bayes shrinkage by effective sessions (nSess = Σ k/m) pulls sparse
-// windows toward sigma2Global — so a lone isolated session can't spike the band,
-// and the band never claims more local swing than the data supports.
-function localPerformanceVar(resid, t, sigma2Global) {
-    const rows = [];
-    let nSess = 0;
+// Time-varying performance variance at t (rating²), split by direction:
+// kernel-localized variance-components ML per side, each shrunk toward its own
+// global σ². Each residual is weighted by k (τ_V time kernel) ÷ m (de-duplicate
+// within-session near-copies) so the window counts INDEPENDENT sessions, and v
+// downweights uninformative ones. Empirical-Bayes shrinkage by effective
+// sessions (nSess = Σ k/m) pulls sparse windows toward the side's global σ² — so
+// a lone isolated session can't spike the band, and the band never claims more
+// local swing than the data supports. Splitting halves the sessions per side, so
+// the shrinkage matters more here (good) — sparse one-sided windows lean on the
+// whole-history good-/bad-day swing rather than on a couple of residuals.
+function localPerformanceVar(resid, t, g2Up, g2Down) {
+    const rowsUp = [], rowsDown = [];
+    let nUp = 0, nDown = 0;
     for (const d of resid) {
         if (!Number.isFinite(d.v)) continue;     // uninformative session: no signal
         const k = gaussianWeight((d.t - t) / TAU_V_MS);
         if (k <= 0) continue;
         const wgt = k / d.m;
-        rows.push({ r2: d.r2, v: d.v, wgt });
-        nSess += wgt;
+        if (d.up) { rowsUp.push({ r2: d.r2, v: d.v, wgt }); nUp += wgt; }
+        else      { rowsDown.push({ r2: d.r2, v: d.v, wgt }); nDown += wgt; }
     }
-    if (!rows.length) return { var: sigma2Global, nSess: 0 };
-    const local = mlSigma2(rows);
-    const w = nSess / (nSess + SIGMA_PRIOR_SESSIONS);
-    return { var: w * local + (1 - w) * sigma2Global, nSess };
+    const fit = (rows, n, glob) => {
+        if (!rows.length) return glob;
+        const w = n / (n + SIGMA_PRIOR_SESSIONS);
+        return w * mlSigma2(rows) + (1 - w) * glob;
+    };
+    return {
+        varUp: fit(rowsUp, nUp, g2Up),
+        varDown: fit(rowsDown, nDown, g2Down),
+        nSess: nUp + nDown,
+    };
 }
 
 // Global (whole-history) σ_M² point estimate + its 95% profile-likelihood upper
-// bound (rating²). Weighted by 1/m so each session counts once. Used for the
-// summary line: when the point estimate is ~0 we report the upper bound ("swing
-// is under ±X, not detected") instead of a misleading ±0.00.
+// bound (rating²), plus the per-direction globals σ_up² / σ_down² (shrinkage
+// targets for the local band, fit with the same half-normal ML — see mlSigma2).
+// Weighted by 1/m so each session counts once. The pooled (both-sign) sigma2 +
+// upper2 drive the summary's detection test: when the pooled point estimate is
+// ~0 we report the upper bound ("swing is under ±X, not detected") instead of a
+// misleading ±0.00.
 function globalPerformanceSigma(resid) {
-    const rows = [];
+    const rows = [], up = [], down = [];
     for (const d of resid) {
         if (!Number.isFinite(d.v)) continue;
-        rows.push({ r2: d.r2, v: d.v, wgt: 1 / d.m });
+        const row = { r2: d.r2, v: d.v, wgt: 1 / d.m };
+        rows.push(row);
+        (d.up ? up : down).push(row);
     }
-    if (rows.length < 2) return { sigma2: 0, upper2: 0 };
+    if (rows.length < 2) return { sigma2: 0, upper2: 0, sigma2Up: 0, sigma2Down: 0 };
     const s2 = mlSigma2(rows);
     const LL = x => rows.reduce((a, d) => {
         const vv = x + d.v;
@@ -381,7 +408,13 @@ function globalPerformanceSigma(resid) {
         const mid = 0.5 * (lo + hi);
         if (LL(mid) > target) lo = mid; else hi = mid;
     }
-    return { sigma2: s2, upper2: 0.5 * (lo + hi) };
+    return {
+        sigma2: s2,
+        upper2: 0.5 * (lo + hi),
+        // A side with no residuals falls back to the pooled estimate.
+        sigma2Up: up.length ? mlSigma2(up) : s2,
+        sigma2Down: down.length ? mlSigma2(down) : s2,
+    };
 }
 
 export function computeRankDecomposition(answerHistory) {
@@ -401,7 +434,7 @@ export function computeRankDecomposition(answerHistory) {
     // time-varying band pulls toward, so it must be on the decomp before any
     // evaluateAt call. Already in internal-rank units (the working coordinate).
     const gp = globalPerformanceSigma(resid);
-    const decomp = { attempts, resid, sigma2Global: gp.sigma2 };
+    const decomp = { attempts, resid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
 
     // "Supported" range: grid points whose skill estimate pools ≥ SUPPORT_EFFN
     // effective attempts. Current skill and long-term drift read its endpoints.
@@ -421,8 +454,10 @@ export function computeRankDecomposition(answerHistory) {
     decomp.summary = {
         currentSkill: cur && Number.isFinite(cur.S) ? cur.S : null,
         currentSkillSE: cur ? cur.seS : Infinity,
-        sigmaM: Math.sqrt(gp.sigma2),
+        sigmaM: Math.sqrt(gp.sigma2),         // pooled swing — drives detection test
         sigmaMUpper: Math.sqrt(gp.upper2),
+        sigmaUp: Math.sqrt(gp.sigma2Up),      // good-day overperformance (ranks)
+        sigmaDown: Math.sqrt(gp.sigma2Down),  // bad-day underperformance (ranks)
         longTermDrift: (sFirst && cur) ? cur.S - sFirst.S : null,
         longTermSpanMs: haveSpan ? lastT - firstT : null,
     };
@@ -439,12 +474,12 @@ export function evaluateAt(decomp, t) {
     const { attempts, resid } = decomp;
     const sk = poolLogistic(attempts, t, TAU_S_MS);          // exact wide skill
     if (!Number.isFinite(sk.R)) return null;
-    const pv = localPerformanceVar(resid, t, decomp.sigma2Global || 0);
+    const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
     return {
-        S: sk.R,                  // skill, internal-rank index
-        seS: sk.se,               // measurement SE, rank units
-        sigmaM: Math.sqrt(pv.var),// performance swing, rank units
+        S: sk.R,                      // skill, internal-rank index
+        seS: sk.se,                   // measurement SE, rank units
+        sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
+        sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
         effNS: sk.effN,
-        ratingR: sk.R,            // retained for callers; same value now
     };
 }

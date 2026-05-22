@@ -543,6 +543,47 @@ body {
     text-align: right;
 }
 
+.stats-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35em 0.9em;
+    margin-top: 0.6em;
+    font-size: 0.85em;
+}
+
+.stats-chart-legend .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    white-space: nowrap;
+}
+
+.stats-chart-legend .legend-swatch {
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.stats-chart-legend .legend-dot .legend-swatch {
+    width: 0.55em;
+    height: 0.55em;
+    border-radius: 50%;
+}
+
+.stats-chart-legend .legend-line .legend-swatch {
+    width: 1.1em;
+    height: 0.18em;
+    border-radius: 1px;
+}
+
+.stats-chart-legend .legend-band .legend-swatch {
+    width: 1.1em;
+    height: 0.7em;
+    border-radius: 2px;
+    /* Band fills are very translucent over the dark modal (as on the chart);
+       a faint outline (the chart's grid-line color) makes the swatch findable. */
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+}
+
 .stats-modal-pre {
     margin: 0;
     font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
