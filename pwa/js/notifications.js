@@ -26,6 +26,22 @@ export async function getCurrentSubscription() {
     }
 }
 
+// Dismisses any recall reminder the service worker is still displaying. Called
+// when the user attempts to solve a problem: by then the reminder has done its
+// job (it brought them back, or they're here anyway), so leaving it stacked in
+// the tray is just noise. Fire-and-forget and silent — a failed clear is
+// cosmetic. Closes every notification owned by this registration; they all
+// share the 'recall-batch' tag today, but closing all is future-proof and
+// avoids a needless tag filter.
+export async function clearShownNotifications() {
+    if (!supportsNotifications()) return;
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        const notes = await reg.getNotifications();
+        for (const note of notes) note.close();
+    } catch {}
+}
+
 async function fetchVapidPublicKey() {
     if (cachedVapidPublicKey) return cachedVapidPublicKey;
     const res = await fetch('/push/vapid-public-key');
