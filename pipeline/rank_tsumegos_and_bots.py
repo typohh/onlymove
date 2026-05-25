@@ -42,8 +42,13 @@ np.random.seed(43)
 
 
 # --- Data Loading ---
-def load_data(data_dir):
-    """Loads and preprocesses tsumego attempt data from text files and database.sql."""
+def load_data(data_dir, include_users=True):
+    """Loads and preprocesses tsumego attempt data from text files and database.sql.
+
+    With include_users=False the database.sql user attempts are skipped entirely,
+    so the IRF is fit on bot (+ humanv0 model) data only — used to evaluate how
+    well bot-derived difficulty predicts real users out-of-sample.
+    """
     print("Loading and preprocessing data...")
 
     # --- Temporary storage for raw data ---
@@ -83,7 +88,9 @@ def load_data(data_dir):
     # size and the per-attempt columns are absent (treat missing size as 9).
     sql_file = os.path.join(PROJECT_ROOT, 'attempts', 'database.sql')
     user_attempts = []
-    if not os.path.exists(sql_file):
+    if not include_users:
+        print("Skipping user data load: include_users=False (bot-only fit).")
+    elif not os.path.exists(sql_file):
         print(f"Skipping user data load: {sql_file} not found.")
     else:
         print(f"Loading user data from {sql_file}...")
@@ -653,9 +660,18 @@ def rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names):
 if __name__ == '__main__':
     # "cd pwa && npx wrangler d1 export DB --remote --output=../attempts/database.sql"
 
+    import argparse
+    parser = argparse.ArgumentParser(description="Fit the mixture-of-sigmoids rating model.")
+    parser.add_argument("--no-users", action="store_true",
+                        help="Fit on bot data only (skip database.sql user attempts and "
+                             "the q-factor optimization). Use to evaluate bot-derived "
+                             "difficulty against real users out-of-sample.")
+    cli_args = parser.parse_args()
+
     # Step 1: Load all data from files.
     # Will raise ValueError if no data is found.
-    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts, raw_user_attempts = load_data(DATA_DIRECTORY)
+    df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf, attempt_counts, raw_user_attempts = load_data(
+        DATA_DIRECTORY, include_users=not cli_args.no_users)
 
     # Step 2: Train the model and save the learned parameters.
     rank_tsumegos_and_bots(df_full, bot_map, tsumego_map, all_tsumego_names_with_sgf)
