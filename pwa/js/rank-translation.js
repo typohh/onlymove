@@ -3,11 +3,15 @@
 // Tap your rank → see the equivalent rank on each surveyed go server.
 //
 // The mapping (pwa/tsumegos/rank_map.json) is produced by
-// pipeline.fit_rank_curves. Our singular rank scale is the hub: it is coupled
-// to each server by one board-independent fit, and to the per-board ratings by
-// the cubic. So the translation is keyed only on the rank label — the
-// per-board difference already lives in the user's displayed rank itself.
-// Keyed {ourRankLabel: {server: serverRank}}.
+// pipeline.fit_rank_curves as per-server interpolation knots
+// {server: {our, server}} in rank-scalar units (1k=0, 1d=1; no zero gap). Our
+// singular rank scale is the hub: it is coupled to each server by one
+// board-independent fit, and to the per-board ratings by the cubic. So the
+// translation depends only on our rank — the per-board difference already lives
+// in the user's displayed rank itself. We interpolate the user's CONTINUOUS
+// internal rank through each server's knots and round only for display, so a
+// weak 3d and a strong 3d can translate to different server ranks. EGF is the
+// identity hub.
 
 import { state } from './state.js';
 import { getTerm } from './i18n.js';
@@ -25,9 +29,51 @@ function loadRankMap() {
 }
 
 // The same integer index getDescriptiveRank uses (floor(rating · 29)), in the
-// rank_map's key format (kyu/dan with a k/d suffix, not localized).
+// kyu/dan label format (k/d suffix, not localized).
 function rankIndexToKey(rankIndex) {
     return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
+}
+
+// internal-rank index → rank scalar (1k=0 convention): rank_index = scalar + 19.
+const RANK_INDEX_OFFSET = 19;
+// Clamp translated server ranks to the real rank range (30k..9d) so extreme
+// extrapolation can't print impossible labels like "15 dan" (matches the
+// our_lo/our_hi clamp the fit used to apply server-side).
+const RANK_SCALAR_LO = -29, RANK_SCALAR_HI = 9;
+
+// Linear interp with end-slope extrapolation; xs strictly ascending, len ≥ 2.
+function interpExtrap(x, xs, ys) {
+    const n = xs.length;
+    if (x <= xs[0]) return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0]);
+    if (x >= xs[n - 1]) return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1]);
+    let a = 0, b = n - 1;
+    while (b - a > 1) { const m = (a + b) >> 1; if (xs[m] <= x) a = m; else b = m; }
+    return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a]);
+}
+
+// Rank scalar → nearest kyu/dan label (1k=0, 1d=1; no zero gap).
+function scalarToRankLabel(v) {
+    const k = Math.round(v);
+    return k <= 0 ? `${1 - k}k` : `${k}d`;
+}
+
+// {server: label} by interpolating the CONTINUOUS internal-rank scalar
+// `ourScalar` through each server's knots, then clamping + rounding — so a weak
+// vs strong same-band player can land on different server ranks. EGF is the
+// identity hub, so it shows the user's own displayed rank (`egfLabel`) verbatim,
+// keeping the table consistent with the header rather than re-rounding identity.
+function serverRanksFor(map, ourScalar, egfLabel) {
+    if (!map) return null;
+    const out = {};
+    for (const [server, c] of Object.entries(map)) {
+        if (server === 'EGF') { out.EGF = egfLabel; continue; }
+        if (!c || !Array.isArray(c.our) || !Array.isArray(c.server)
+            || c.our.length < 2) continue;
+        let s = interpExtrap(ourScalar, c.our, c.server);
+        s = Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
+        out[server] = scalarToRankLabel(s);
+    }
+    return out;
 }
 
 export async function showRankTranslation() {
@@ -38,10 +84,12 @@ export async function showRankTranslation() {
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
     const map = await loadRankMap();
-    const rankValue = rating * TOTAL_RANKS;
-    const rankIndex = Math.floor(rankValue);
+    const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
+    const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
     const key = rankIndexToKey(rankIndex);
-    const servers = (map && map[key]) || null;
+    // Translate the CONTINUOUS internal rank (not the floored band) through each
+    // server's knots, so a weak vs strong same-rank player can map differently.
+    const servers = serverRanksFor(map, rankValue - RANK_INDEX_OFFSET, key);
 
     const overlay = document.createElement('div');
     overlay.id = 'ios-install-overlay';

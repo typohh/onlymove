@@ -40,10 +40,14 @@ Model (internal rank = EGF rank is the hub / common unit):
 A both-boards user contributes a declaration on each board; both observations
 enter the joint objective on the one internal-rank scale.
 
-Output: pwa/tsumegos/rank_map.json = {our_rank_label: {server: server_rank}},
-board-independent (the per-board difference lives in rating→internal-rank, i.e.
-the user's displayed rank, not in the translation). Re-run
-pipeline.fetch_database first to refresh attempts/database.sql.
+Output: pwa/tsumegos/rank_map.json = {server: {our, server}} — per-server
+interpolation knots (our = internal/EGF-rank scalar at each server-rank
+boundary; server = the server-rank scalar there). Board-independent (the
+per-board difference lives in rating→internal-rank, i.e. the user's displayed
+rank, not in the translation). The client interpolates its CONTINUOUS internal
+rank through these knots and rounds only for display, so a weak 3d and a strong
+3d can translate to different server ranks. Re-run pipeline.fetch_database first
+to refresh attempts/database.sql.
 
 Usage:
   ./.venv/bin/python3 -m pipeline.fit_rank_curves
@@ -378,53 +382,41 @@ def fit_joint(decls, cubic_by_size, sizes, egf_lo, egf_hi,
 
 
 # ---------------------------------------------------------------------------
-# Board-independent server rank-translation map.
+# Board-independent server rank-translation curves.
 # ---------------------------------------------------------------------------
 
-def _interp_extrap(x, xs, ys):
-    """np.interp with linear extrapolation past both ends using the end slope.
-    xs strictly ascending, len ≥ 2."""
-    if x <= xs[0]:
-        slope = (ys[1] - ys[0]) / (xs[1] - xs[0])
-        return ys[0] + slope * (x - xs[0])
-    if x >= xs[-1]:
-        slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
-        return ys[-1] + slope * (x - xs[-1])
-    return float(np.interp(x, xs, ys))
+def build_server_curves(fits, our_lo=-29, our_hi=9):
+    """Per-server interpolation knots: our (internal=EGF) rank → that server's
+    rank, both in scalar units (1k=0, 1d=1; no zero gap).
 
+    Board-independent. For each fitted server we ship the thresholds directly as
+    knots — `our` = the internal-rank scalar at each server-rank boundary (τ_g,
+    ascending), `server` = the server scalar there (g−0.5). The client
+    interpolates its CONTINUOUS internal rank through these knots (linear, with
+    end-slope extrapolation) and rounds only for the displayed label, so a weak
+    3d and a strong 3d can translate to different server ranks — the old
+    integer-keyed map collapsed them. The client clamps to the real rank range,
+    so the surveyed band needn't be padded here.
 
-def build_rank_map(fits, our_lo=-29, our_hi=9):
-    """Map our rank → equivalent declared rank on each fitted server.
+    EGF is the identity hub (internal rank IS EGF rank): it gets a straight
+    identity line spanning [our_lo, our_hi]. Emitted in SERVERS order so the PWA
+    renders the translation table in a stable order.
 
-    Board-independent: keyed only by our-rank label (30k..9d). Each server's
-    thresholds τ_g are in our-rank units; we invert them (our-rank at the
-    boundary below g is τ_g; the server scalar there is g−0.5), linearly
-    extrapolate past the surveyed band, and clamp to the real rank range so
-    extreme extrapolation can't print impossible labels like "15 dan".
-
-    Returns {our_rank_label: {server: server_rank_label}}."""
-    server_xy = {}
-    for server, (thresholds, _, _) in fits.items():
+    Returns {server: {"our": [...], "server": [...]}}."""
+    out = {}
+    for server in SERVERS:
+        if server == "EGF":
+            out["EGF"] = {"our": [float(our_lo), float(our_hi)],
+                          "server": [float(our_lo), float(our_hi)]}
+            continue
+        if server not in fits:
+            continue
+        thresholds = fits[server][0]
         if len(thresholds) < 2:
             continue
         gs = sorted(thresholds)
-        server_xy[server] = ([thresholds[g] for g in gs],
-                             [g - 0.5 for g in gs])
-    out = {}
-    for s in range(our_lo, our_hi + 1):
-        row = {}
-        for server in SERVERS:
-            if server == "EGF":
-                # Internal rank IS EGF rank, so EGF is identity by definition.
-                row[server] = scalar_to_rank(s)
-                continue
-            if server not in server_xy:
-                continue
-            xs, ys = server_xy[server]
-            srv = max(our_lo, min(our_hi,
-                                  int(round(_interp_extrap(float(s), xs, ys)))))
-            row[server] = scalar_to_rank(srv)
-        out[scalar_to_rank(s)] = row
+        out[server] = {"our": [float(thresholds[g]) for g in gs],
+                       "server": [float(g - 0.5) for g in gs]}
     return out
 
 
@@ -468,8 +460,10 @@ def main():
     parser.add_argument(
         "--map-out",
         default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rank_map.json"),
-        help="Write the board-independent server rank-translation map (our "
-             "rank → equivalent rank per server) here. Empty string skips it.")
+        help="Write the board-independent server rank-translation curves "
+             "(per-server knots mapping our internal rank → that server's rank; "
+             "the client interpolates its continuous rank through them). Empty "
+             "string skips it.")
     parser.add_argument(
         "--rating-map-out",
         default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json"),
@@ -557,14 +551,20 @@ def main():
               f"({n} EGF declarations anchoring it)")
 
     # Declaration counts for the per-server report below (one per board, so a
-    # both-boards user counts twice — both feed the joint fit).
+    # both-boards user counts twice — both feed the joint fit). EGF is kept in
+    # its own structure: it isn't a coupled server (its declarations anchor each
+    # board's rating→rank curve directly, so it's absent from `fits`), but we
+    # still report its per-rank counts as the identity hub.
     by_server = defaultdict(list)              # server -> [declared scalar]
     per_board_counts = defaultdict(lambda: defaultdict(int))  # server -> size -> n
+    egf_board_counts = defaultdict(lambda: defaultdict(int))  # size -> rank -> n
     for size, server, _rating, g in decls:
+        gi = int(round(g))
         if server == "EGF":
-            continue
-        by_server[server].append(int(round(g)))
-        per_board_counts[server][size] += 1
+            egf_board_counts[size][gi] += 1
+        else:
+            by_server[server].append(gi)
+            per_board_counts[server][size] += 1
 
     skipped = sorted((srv, len(gs)) for srv, gs in by_server.items()
                      if srv not in fits and gs)
@@ -577,6 +577,35 @@ def main():
     # Σ log_e_g² — how far this server bends off the cubic shape (0 = exactly
     # the cubic, offset only).
     for server in SERVERS:
+        if server == "EGF":
+            # The identity hub: EGF rank IS internal rank, so there's no τ
+            # coupling to show — the fitted quantity is the per-board RATING at
+            # each EGF-rank boundary (rating_rank_fits). Print its declaration
+            # counts so its calibration weight is visible like the others'.
+            pooled = defaultdict(int)
+            for sz in egf_board_counts:
+                for g, n in egf_board_counts[sz].items():
+                    pooled[g] += n
+            if not pooled:
+                continue
+            board_bits = ", ".join(
+                f"n{sz}={sum(egf_board_counts[sz].values())}" for sz in sizes)
+            print(f"\n{'=' * 60}")
+            print(f"EGF  —  {sum(pooled.values())} obs ({board_bits}), "
+                  f"identity hub")
+            print(f"{'=' * 60}")
+            rating_cols = "  ".join(f"{'rating@' + str(sz):>9}" for sz in sizes)
+            print(f"  {'declared':>9}  {'n':>4}  {rating_cols}")
+            print("  " + "-" * (15 + 11 * len(sizes)))
+            for g in sorted(pooled):
+                cells = [f"{rating_rank_fits[sz][g]:>+9.3f}"
+                         if g in rating_rank_fits.get(sz, {}) else f"{'—':>9}"
+                         for sz in sizes]
+                print(f"  {scalar_to_rank(g):>9}  {pooled[g]:>4d}  "
+                      + "  ".join(cells))
+            print("  rating@N = fitted board-N rating at that EGF-rank boundary "
+                  "(EGF rank = internal rank, identity).")
+            continue
         if server not in fits:
             continue
         thresholds, nll, dev = fits[server]
@@ -600,13 +629,13 @@ def main():
     print("            i.e. a pure offset; larger ⇒ data pulled a per-rank bend).")
 
     if args.map_out:
-        rank_map = build_rank_map(fits)
-        n_servers = len(next(iter(rank_map.values()))) if rank_map else 0
+        server_curves = build_server_curves(fits)
         os.makedirs(os.path.dirname(args.map_out), exist_ok=True)
         with open(args.map_out, "w", encoding="utf-8") as f:
-            json.dump(rank_map, f, indent=2)
-        print(f"\nWrote board-independent rank map → {args.map_out}")
-        print(f"  {len(rank_map)} our-ranks × {n_servers} servers")
+            json.dump(server_curves, f, indent=2)
+        print(f"\nWrote server rank-translation curves → {args.map_out}")
+        print(f"  {len(server_curves)} servers "
+              f"(continuous internal-rank → server-rank knots)")
 
     # Per-board rating→internal(EGF)-rank curves for package_for_pwa. Each
     # threshold g sits at rank_index (g−0.5)+19, so a problem's raw rating
