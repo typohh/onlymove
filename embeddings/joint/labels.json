@@ -3,7 +3,7 @@
   "_doc": "Human-curated semantic motif label per PCA component (skew-ICA: positive tail = motif, negative tail = baseline, so only the positive side is labeled). Set to null when no clear pattern. Use auxiliary/inspect_extreme_problems.py to review.",
   "components": {
     "0": {
-      "positive": "prevent two eyes by playing inside",
+      "positive": "break eyeshape from inside",
       "auto_mapped_from": 0,
       "auto_mapped_cos": 0.975,
       "positive_i18n": {
@@ -299,7 +299,7 @@
       }
     },
     "31": {
-      "positive": "connect back after wedge encounters atari",
+      "positive": "connect tigers mouth",
       "auto_mapped_from": 35,
       "auto_mapped_cos": 0.9151,
       "positive_i18n": {
@@ -327,7 +327,7 @@
       }
     },
     "34": {
-      "positive": "play a first-line move for a magic liberty",
+      "positive": "play a magic liberty",
       "auto_mapped_from": 40,
       "auto_mapped_cos": 0.8706,
       "positive_i18n": {
@@ -337,7 +337,7 @@
       }
     },
     "35": {
-      "positive": "play a 1-point reverse sente",
+      "positive": "play a reverse sente",
       "auto_mapped_from": 36,
       "auto_mapped_cos": 0.9278,
       "positive_i18n": {

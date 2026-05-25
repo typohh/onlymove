@@ -67,3 +67,10 @@ embeddings/joint/per_cell/
 # Vast.ai orchestration
 orchestration_state.json
 .env
+
+# Generated inspection/analysis artifacts (regenerable from the auxiliary/*.py
+# tools): the combined PC gallery, plotted figures, and the labeler's feature
+# cache. The source scripts are tracked; their outputs are not.
+/all_pcs.html
+auxiliary/*.png
+auxiliary/labeler/cache/
