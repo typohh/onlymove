@@ -13,29 +13,41 @@
   <!-- New main container for Flexbox layout -->
   <div id="main-container">
     <div id="title-container">
-      <a href="#" id="board-size-toggle" class="board-size-toggle" role="button" tabindex="0"></a>
       <div id="title" class="info-text">Title</div>
       <div id="captures-container" class="captures-container">
         <div id="capture-score" class="capture-score" role="button" tabindex="0">0.0</div>
       </div>
       <div id="text1" class="info-text">Rank</div>
+      <a href="#" id="menu-toggle" class="menu-toggle" role="button" tabindex="0" aria-label="Menu">☰</a>
     </div>
-    
+
     <div id="board-container"></div>
 
     <!-- New wrapper for control panels -->
     <div id="controls-wrapper">
       <div id="info-container">
-        <a href="#" id="board-size-toggle-h" class="board-size-toggle horizontal-only" role="button" tabindex="0"></a>
         <div id="title-h" class="info-text horizontal-only">Title</div>
         <div id="captures-container-h" class="captures-container horizontal-only">
           <div id="capture-score-h" class="capture-score" role="button" tabindex="0">0.0</div>
         </div>
         <div id="text1-h" class="info-text horizontal-only">Rank</div>
+        <a href="#" id="menu-toggle-h" class="menu-toggle horizontal-only" role="button" tabindex="0" aria-label="Menu">☰</a>
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>
         <a href="#" id="button3" class="btn"></a>
         <a href="#" id="button4" class="btn"></a>
+      </div>
+    </div>
+
+    <!-- Hamburger-driven menu (board size, About, Stats, Share, Ignore).
+         Items shown context-dependently from ui.js. -->
+    <div id="menu-overlay" class="menu-overlay menu-overlay-hidden">
+      <div id="menu-panel">
+        <a href="#" id="menu-board-size" class="menu-item btn" role="button" tabindex="0"></a>
+        <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener"></a>
+        <a href="#" id="menu-stats" class="menu-item btn" role="button" tabindex="0"></a>
+        <a href="#" id="menu-share" class="menu-item btn" role="button" tabindex="0"></a>
+        <a href="#" id="menu-ignore" class="menu-item btn" role="button" tabindex="0"></a>
       </div>
     </div>
 

@@ -1,6 +1,6 @@
 // js/ui.js
 
-import { state, setDeferredInstallPrompt } from './state.js';
+import { state, setDeferredInstallPrompt, SUPPORTED_BOARD_SIZES } from './state.js';
 import {
     supportsNotifications,
     notificationPermission,
@@ -208,6 +208,7 @@ const updateSolvingModeUI = () => {
 
     // Update button1 (Review/Exit)
     const prevTsumegoLink = document.getElementById('button1');
+    prevTsumegoLink.style.display = '';
     if (state.appMode === APP_MODES.LINKED) {
         // In view mode, button1 exits back to challenge mode
         prevTsumegoLink.textContent = getTerm('exit');
@@ -225,22 +226,15 @@ const updateSolvingModeUI = () => {
         }
     }
 
-    // Update "About" link (button2). Use a real anchor with target=_blank
-    // rather than window.open() from the click handler — installed PWAs
-    // (standalone display mode) silently block popup-style window.open even
-    // from a user gesture, while native target=_blank anchors are honored.
-    const aboutLink = document.getElementById('button2');
-    aboutLink.textContent = getTerm('about');
-    aboutLink.setAttribute('href', 'about.html');
-    aboutLink.setAttribute('target', '_blank');
-    aboutLink.setAttribute('rel', 'noopener');
-    aboutLink.classList.remove('disabled'); // Ensure enabled in solving mode
-
-    // Update "Share" link (button3)
-    document.getElementById('button3').textContent = getTerm('stats');
+    // About (button2) and Stats (button3) live in the hamburger menu now;
+    // their DOM nodes stay so the menu items can dispatch clicks through them.
+    document.getElementById('button2').style.display = 'none';
+    document.getElementById('button3').style.display = 'none';
 
     // Show button4 as Install button
     updateInstallButton();
+
+    updateMenuItems();
 }
 
 const updateAnalysisModeUI = () => {
@@ -271,12 +265,14 @@ const updateAnalysisModeUI = () => {
 
     // Update "Exit" link (button1)
     const exitLink = document.getElementById('button1');
+    exitLink.style.display = '';
     exitLink.textContent = getTerm('exit');
     exitLink.classList.remove('disabled'); // Always enabled in analysis mode
 
     // Update "Undo" link (button2). Strip the about-mode href/target so this
     // click is handled in JS only and doesn't navigate away to about.html.
     const undoLink = document.getElementById('button2');
+    undoLink.style.display = '';
     undoLink.textContent = getTerm('undo');
     undoLink.setAttribute('href', '#');
     undoLink.removeAttribute('target');
@@ -287,32 +283,65 @@ const updateAnalysisModeUI = () => {
         undoLink.classList.add('disabled');
     }
 
-    // Update "Share" link (button3)
-    document.getElementById('button3').textContent = getTerm('share');
+    // Share (button3) and Ignore (button4) live in the hamburger menu now;
+    // their DOM nodes stay so the menu items can dispatch clicks through them.
+    document.getElementById('button3').style.display = 'none';
+    document.getElementById('button4').style.display = 'none';
 
-    // Show and configure button4 ('Ignore')
-    const ignoreButton = document.getElementById('button4');
-    const problem = state.problemHistory[1];
+    updateMenuItems();
+}
 
-    if (problem) {
-        ignoreButton.style.display = 'inline-block';
-        ignoreButton.textContent = getTerm('ignore');
+const updateMenuItems = () => {
+    const sizeItem = document.getElementById('menu-board-size');
+    const aboutItem = document.getElementById('menu-about');
+    const statsItem = document.getElementById('menu-stats');
+    const shareItem = document.getElementById('menu-share');
+    const ignoreItem = document.getElementById('menu-ignore');
 
-        const lastAnswer = state.answerHistory[state.answerHistory.length - 1];
-        const wasFailure = lastAnswer && lastAnswer.problemId === problem.filename.replace('.sgf', '') && !lastAnswer.correct;
-        const isRepeat = problem.isRepeat;
+    // Board-size toggle: always available, label is "Switch to <other>".
+    const otherSize = SUPPORTED_BOARD_SIZES.find((s) => s !== state.boardSize) ?? state.boardSize;
+    sizeItem.textContent = getTerm('switchTo').replace('{size}', `${otherSize}x${otherSize}`);
+    sizeItem.style.display = '';
 
-        // Linked (URL-shared) problems keep the button in place but greyed out,
-        // so the row never collapses to 3 widened buttons.
-        if (!problem.linked && (isRepeat || wasFailure)) {
-            ignoreButton.classList.remove('disabled');
+    if (state.appMode === APP_MODES.ANALYZING) {
+        aboutItem.style.display = 'none';
+        statsItem.style.display = 'none';
+
+        shareItem.style.display = '';
+        shareItem.textContent = getTerm('share');
+        shareItem.classList.remove('disabled');
+
+        // Ignore: enabled only when there's a current problem and it's a
+        // retry/recall (matches the analysis-mode ignore-button rule).
+        ignoreItem.style.display = '';
+        ignoreItem.textContent = getTerm('ignore');
+        const problem = state.problemHistory[1];
+        if (problem) {
+            const lastAnswer = state.answerHistory[state.answerHistory.length - 1];
+            const wasFailure = lastAnswer && lastAnswer.problemId === problem.filename.replace('.sgf', '') && !lastAnswer.correct;
+            const isRepeat = problem.isRepeat;
+            if (!problem.linked && (isRepeat || wasFailure)) {
+                ignoreItem.classList.remove('disabled');
+            } else {
+                ignoreItem.classList.add('disabled');
+            }
         } else {
-            ignoreButton.classList.add('disabled');
+            ignoreItem.classList.add('disabled');
         }
     } else {
-        ignoreButton.style.display = 'none';
+        // SOLVING / LINKED
+        aboutItem.style.display = '';
+        aboutItem.textContent = getTerm('about');
+        aboutItem.classList.remove('disabled');
+
+        statsItem.style.display = '';
+        statsItem.textContent = getTerm('stats');
+        statsItem.classList.remove('disabled');
+
+        shareItem.style.display = 'none';
+        ignoreItem.style.display = 'none';
     }
-}
+};
 
 import { displayOverlay, fadeOverlay } from './overlays.js';
 

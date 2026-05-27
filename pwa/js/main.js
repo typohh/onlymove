@@ -142,16 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateBoardSize();
     });
 
-    const refreshSizeToggleLabel = () => {
-        const label = `${state.boardSize}x${state.boardSize}`;
-        for (const id of ['board-size-toggle', 'board-size-toggle-h']) {
-            const el = document.getElementById(id);
-            if (el) el.textContent = label;
-        }
-    };
-
-    const handleSizeToggle = async (e) => {
-        e.preventDefault();
+    const handleSizeToggle = async () => {
         const next = await showBoardSizePicker({ dismissable: true });
         if (next === null || next === state.boardSize) return;
         setBoardSize(next);
@@ -167,12 +158,49 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
             setAppMode(APP_MODES.LINKED);
         }
-        refreshSizeToggleLabel();
         updateAllUI();
         hideLoading();
     };
-    document.getElementById('board-size-toggle').addEventListener('click', handleSizeToggle);
-    document.getElementById('board-size-toggle-h').addEventListener('click', handleSizeToggle);
+
+    // Hamburger menu: open on click of either (portrait/landscape) trigger,
+    // close on backdrop click. Menu items themselves close it before dispatching.
+    const menuOverlay = document.getElementById('menu-overlay');
+    const openMenu = (e) => {
+        if (e) e.preventDefault();
+        menuOverlay.classList.remove('menu-overlay-hidden');
+    };
+    const closeMenu = () => menuOverlay.classList.add('menu-overlay-hidden');
+    document.getElementById('menu-toggle').addEventListener('click', openMenu);
+    document.getElementById('menu-toggle-h').addEventListener('click', openMenu);
+    menuOverlay.addEventListener('click', (e) => {
+        if (e.target === menuOverlay) closeMenu();
+    });
+
+    document.getElementById('menu-board-size').addEventListener('click', (e) => {
+        e.preventDefault();
+        closeMenu();
+        handleSizeToggle();
+    });
+    // menu-about is a real anchor (target=_blank); let the browser navigate.
+    document.getElementById('menu-about').addEventListener('click', () => {
+        closeMenu();
+    });
+    document.getElementById('menu-stats').addEventListener('click', (e) => {
+        e.preventDefault();
+        closeMenu();
+        showDetailedStats();
+    });
+    document.getElementById('menu-share').addEventListener('click', (e) => {
+        e.preventDefault();
+        closeMenu();
+        performShare();
+    });
+    document.getElementById('menu-ignore').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (e.currentTarget.classList.contains('disabled')) return;
+        closeMenu();
+        performIgnore();
+    });
 
     // Review-mode motif bubble: wire its edge tab (slide over board / back).
     initMotifBubble();
@@ -259,15 +287,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Handle button3 click - share functionality
+    // Share is reachable from the analysis-mode hamburger menu. Pulled out
+    // as a named function (rather than inlined on a button handler) so the
+    // menu item can call it without dispatching through a hidden button.
     let isSharing = false;
-    document.getElementById('button3').addEventListener('click', (e) => {
-        e.preventDefault();
-        if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
-            showDetailedStats();
-            return;
-        }
-        // analyzing
+    const performShare = () => {
         if (isSharing) return;
         if (!state.problemHistory[1]) {
             console.error('No current problem to share');
@@ -442,7 +466,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             shareLink().finally(releaseGuard);
         }
-    });
+    };
 
     // Handle capture score click
     document.getElementById('capture-score').addEventListener('click', (e) => {
@@ -454,45 +478,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         showCaptureDetails();
     });
 
-    // Handle button4 click - Install (solving/linked), Ignore (analyzing)
+    // Handle button4 click - Install (solving/linked). Ignore lives in the
+    // hamburger menu now; button4 has no analyzing-mode role.
     document.getElementById('button4').addEventListener('click', (e) => {
         e.preventDefault();
         if (e.target.classList.contains('disabled')) return;
-
         if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
             handleInstallClick();
-        } else if (state.appMode === APP_MODES.ANALYZING) {
-            if (confirm(getTerm('ignoreConfirm'))) {
-                const problem = state.problemHistory[1];
-                if (!problem) return;
-
-                const problemId = problem.filename.replace('.sgf', '');
-                const answerHistory = [...state.answerHistory];
-                const lastAnswer = answerHistory[answerHistory.length - 1];
-
-                if (lastAnswer && lastAnswer.problemId === problemId) {
-                    lastAnswer.ignored = true;
-                    updateAnswerHistory(answerHistory);
-                } else {
-                    Sentry.captureMessage("Ignore button: last answer does not match problem.", {
-                        extra: {
-                            lastAnswer,
-                            problemId
-                        }
-                    });
-                }
-
-                // Exit analysis mode and load next problem
-                if (state.nextTsumego) {
-                    setAppMode(APP_MODES.LINKED);
-                } else {
-                    setAppMode(APP_MODES.SOLVING);
-                }
-                loadTsumego(false);
-                updateAllUI();
-            }
         }
     });
+
+    // Ignore is reachable from the analysis-mode hamburger menu.
+    const performIgnore = () => {
+        if (!confirm(getTerm('ignoreConfirm'))) return;
+        const problem = state.problemHistory[1];
+        if (!problem) return;
+
+        const problemId = problem.filename.replace('.sgf', '');
+        const answerHistory = [...state.answerHistory];
+        const lastAnswer = answerHistory[answerHistory.length - 1];
+
+        if (lastAnswer && lastAnswer.problemId === problemId) {
+            lastAnswer.ignored = true;
+            updateAnswerHistory(answerHistory);
+        } else {
+            Sentry.captureMessage("Ignore button: last answer does not match problem.", {
+                extra: {
+                    lastAnswer,
+                    problemId
+                }
+            });
+        }
+
+        // Exit analysis mode and load next problem
+        if (state.nextTsumego) {
+            setAppMode(APP_MODES.LINKED);
+        } else {
+            setAppMode(APP_MODES.SOLVING);
+        }
+        loadTsumego(false);
+        updateAllUI();
+    };
 
     // The board-size migration in state.js has already wrapped any pre-existing
     // answerHistory under the 9 bucket. These legacy migrations therefore read
@@ -698,10 +724,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (!tsumegoId && pathSize === null && !localStorage.getItem('boardSize')) {
-        // Render an empty board (and refresh the size pill) behind the picker
-        // so the dialog overlays a real-looking board instead of empty void.
+        // Render an empty board behind the picker so the dialog overlays a
+        // real-looking board instead of empty void.
         initializeBoard(state.boardSize);
-        refreshSizeToggleLabel();
         const chosen = await showBoardSizePicker();
         setBoardSize(chosen);
         // Same reason as above — force-persist when chosen equals the default.
@@ -755,7 +780,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     cleanUrl();
 
     document.getElementById('title').textContent = getTerm('tsumegoMode');
-    refreshSizeToggleLabel();
     updateAllUI();
     hideLoading();
 
