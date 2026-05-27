@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "build": "node build.mjs",
-    "dev": "npm run build && wrangler dev",
+    "watch": "node build.mjs --watch",
+    "dev": "node build.mjs --watch --with-wrangler",
     "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {

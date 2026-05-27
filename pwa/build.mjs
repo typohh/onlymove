@@ -1,137 +1,230 @@
 import esbuild from 'esbuild';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 
 const DIST_DIR = 'dist';
+const STATIC_ASSETS = [
+    'index.html',
+    'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
+    'apple-touch-icon.png',
+    'favicon.ico',
+    'icon-192.png',
+    'icon-512.png',
+    'horizontal.png',
+    'vertical.png',
+];
 
-async function main() {
-    console.log("🚀 Starting production build...");
+const args = process.argv.slice(2);
+const WATCH = args.includes('--watch');
+const WITH_WRANGLER = args.includes('--with-wrangler');
 
+// Clear dist contents in place — never rm the directory itself, because
+// wrangler's asset binding watches by directory handle and a swapped inode
+// would silently 404 every new file until restart.
+async function clearDistContents() {
+    await fs.mkdir(DIST_DIR, { recursive: true });
+    const entries = await fs.readdir(DIST_DIR);
+    await Promise.all(entries.map(e => fs.rm(path.join(DIST_DIR, e), { recursive: true, force: true })));
+}
+
+function computeVersion() {
     const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
     // maxBuffer bumped because `package_for_pwa` regenerates thousands of
     // embedding/zip files; default 1 MB buffer overflows on a fresh package.
     const isDirty = execSync('git status --porcelain',
         { maxBuffer: 64 * 1024 * 1024 }).toString().trim().length > 0;
-    const version = isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
-    console.log(`✅ Version: ${version}${isDirty ? ' (dirty tree)' : ''}`);
+    return isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
+}
 
-    // Stamp the same version into a generated file the Worker imports. The
-    // client gets APP_VERSION via the esbuild `define` below; the Worker
-    // can't share that path because wrangler bundles src/index.js
-    // separately, so we write a sibling module it can import directly.
+async function writeWorkerVersion(version) {
     await fs.writeFile(
         path.join('src', 'version.js'),
         `export const APP_VERSION = '${version}';\n`,
     );
-    console.log("✅ Worker version module written.");
+}
 
-    await fs.rm(DIST_DIR, { recursive: true, force: true });
-    await fs.mkdir(DIST_DIR);
-
-    // tsumegos is now a directory of size-keyed subdirs (e.g. tsumegos/9/,
-    // tsumegos/13/), each containing its own zips and metadata.json.
-    // fs.cp recursive picks up the whole tree.
-    const staticAssets = [
-        'index.html',
-        'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
-        'apple-touch-icon.png',
-        'favicon.ico',
-        'icon-192.png',
-        'icon-512.png',
-        'horizontal.png',
-        'vertical.png'
-    ];
-    for (const asset of staticAssets) {
+async function copyStaticAssets() {
+    for (const asset of STATIC_ASSETS) {
         const source = path.join(process.cwd(), asset);
         const destination = path.join(DIST_DIR, asset);
         try {
-            await fs.cp(source, destination, { recursive: true });
+            await fs.cp(source, destination, { recursive: true, force: true });
         } catch (error) {
             console.warn(`Could not copy '${asset}': ${error.message}`);
         }
     }
-    console.log("✅ Static assets copied.");
+}
 
-    const buildResult = await esbuild.build({
-        entryPoints: ['js/main.js', 'style.css'],
-        bundle: true,
-        minify: false,
-        format: 'esm',
-        outdir: `${DIST_DIR}/assets`,
-        entryNames: '[name].[hash]',
-        assetNames: '[name].[hash]',
-        loader: {
-            '.png': 'file', '.jpg': 'file', '.jpeg': 'file', '.gif': 'file', '.svg': 'file',
-            '.woff': 'file', '.woff2': 'file', '.ttf': 'file', '.eot': 'file',
-        },
-        metafile: true,
-        define: { 'APP_VERSION': `"${version}"` },
-        external: ['*.png'],
-    }).catch(() => process.exit(1));
-
-    console.log("✅ JavaScript and CSS bundled and hashed.");
-
-    const meta = buildResult.metafile.outputs;
+// Reads esbuild's metafile and patches dist/index.html and dist/about.html
+// with the current hashed asset paths and version. Called after every esbuild
+// build (initial and watch rebuilds) so the served HTML always references
+// the freshest hashes. Re-copies the HTML/SW source files before patching so
+// the regex always matches against the unpatched source placeholders.
+async function patchHtmlAfterBuild(metafile, version) {
     let newScriptPath = '';
     let newCssPath = '';
     let mainJsHash = '';
-
-    for (const outputPath in meta) {
-        const outputDetails = meta[outputPath];
-        if (outputDetails.entryPoint === 'js/main.js') {
+    for (const outputPath in metafile.outputs) {
+        const details = metafile.outputs[outputPath];
+        if (details.entryPoint === 'js/main.js') {
             newScriptPath = path.relative(DIST_DIR, outputPath).replace(/\\/g, '/');
-            // Extract hash from the filename (format: main.[hash].js)
-            const filename = path.basename(outputPath);
-            mainJsHash = filename.split('.')[1];
+            mainJsHash = path.basename(outputPath).split('.')[1];
         }
-        if (outputDetails.entryPoint === 'style.css') {
+        if (details.entryPoint === 'style.css') {
             newCssPath = path.relative(DIST_DIR, outputPath).replace(/\\/g, '/');
         }
     }
-
     if (!newScriptPath || !newCssPath) {
-        console.error("❌ Could not find hashed script or css path in esbuild metafile.");
-        process.exit(1);
+        throw new Error('Could not find hashed script or css path in esbuild metafile.');
+    }
+
+    for (const file of ['index.html', 'about.html', 'sw.js']) {
+        await fs.cp(path.join(process.cwd(), file), path.join(DIST_DIR, file), { force: true });
     }
 
     const htmlPath = path.join(DIST_DIR, 'index.html');
     let htmlContent = await fs.readFile(htmlPath, 'utf-8');
-
-    // This regex will find the script tag, ignoring extra attributes.
-    const scriptRegex = /<script[^>]*src\s*=\s*["']js\/main\.js["'][^>]*><\/script>/;
-    htmlContent = htmlContent.replace(scriptRegex, `<script src="${newScriptPath}" type="module"></script>`);
-    console.log(`✅ index.html updated with script: <script src="${newScriptPath}"></script>`);
-
-    // This regex will find your link tag, ignoring extra attributes like type="text/css".
-    const cssLinkRegex = /<link[^>]*href\s*=\s*["']style\.css["'][^>]*>/;
-    htmlContent = htmlContent.replace(cssLinkRegex, `<link rel="stylesheet" href="${newCssPath}">`);
-    console.log(`✅ index.html updated with stylesheet: <link rel="stylesheet" href="${newCssPath}">`);
-
+    htmlContent = htmlContent.replace(
+        /<script[^>]*src\s*=\s*["']js\/main\.js["'][^>]*><\/script>/,
+        `<script src="${newScriptPath}" type="module"></script>`,
+    );
+    htmlContent = htmlContent.replace(
+        /<link[^>]*href\s*=\s*["']style\.css["'][^>]*>/,
+        `<link rel="stylesheet" href="${newCssPath}">`,
+    );
     await fs.writeFile(htmlPath, htmlContent);
 
-    // Update about.html with version information
     const aboutPath = path.join(DIST_DIR, 'about.html');
     let aboutContent = await fs.readFile(aboutPath, 'utf-8');
-    
-    // Get current UTC date and time
-    const now = new Date();
-    const utcDate = now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
-    
-    // Update version information
+    const utcDate = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
     aboutContent = aboutContent.replace('<span id="version-date"></span>', `<span id="version-date">${utcDate}</span>`);
     aboutContent = aboutContent.replace('<span id="version-hash"></span>', `<span id="version-hash"> (${mainJsHash})</span>`);
-    
     await fs.writeFile(aboutPath, aboutContent);
-    console.log(`✅ about.html updated with version: ${utcDate} (${mainJsHash})`);
 
     const swPath = path.join(DIST_DIR, 'sw.js');
     let swContent = await fs.readFile(swPath, 'utf-8');
     swContent = swContent.replace(/'initial-version'/, `'${version}'`);
     await fs.writeFile(swPath, swContent);
-    console.log("✅ Service worker updated with new version.");
 
-    console.log("🎉 Build complete!");
+    return { newScriptPath, newCssPath, mainJsHash, utcDate };
 }
 
-main();
+const esbuildOptions = (version) => ({
+    entryPoints: ['js/main.js', 'style.css'],
+    bundle: true,
+    minify: false,
+    format: 'esm',
+    outdir: `${DIST_DIR}/assets`,
+    entryNames: '[name].[hash]',
+    assetNames: '[name].[hash]',
+    loader: {
+        '.png': 'file', '.jpg': 'file', '.jpeg': 'file', '.gif': 'file', '.svg': 'file',
+        '.woff': 'file', '.woff2': 'file', '.ttf': 'file', '.eot': 'file',
+    },
+    metafile: true,
+    define: { 'APP_VERSION': `"${version}"` },
+    external: ['*.png'],
+});
+
+async function oneShotBuild() {
+    console.log('🚀 Starting production build...');
+    const version = computeVersion();
+    console.log(`✅ Version: ${version}`);
+
+    await writeWorkerVersion(version);
+    await clearDistContents();
+    await copyStaticAssets();
+    console.log('✅ Static assets copied.');
+
+    const result = await esbuild.build(esbuildOptions(version));
+    console.log('✅ JavaScript and CSS bundled and hashed.');
+
+    const { newScriptPath, newCssPath, utcDate, mainJsHash } = await patchHtmlAfterBuild(result.metafile, version);
+    console.log(`✅ index.html → <script src="${newScriptPath}">`);
+    console.log(`✅ index.html → <link href="${newCssPath}">`);
+    console.log(`✅ about.html updated: ${utcDate} (${mainJsHash})`);
+    console.log('✅ Service worker version stamped.');
+    console.log('🎉 Build complete!');
+}
+
+async function watchBuild() {
+    console.log('🚀 Starting watch build...');
+    const version = computeVersion();
+    await writeWorkerVersion(version);
+    await clearDistContents();
+    await copyStaticAssets();
+    console.log('✅ Initial static copy + version done.');
+
+    // esbuild context with onEnd plugin — every successful rebuild repatches
+    // the HTML files so the served bundle stays in sync with the latest hash.
+    const ctx = await esbuild.context({
+        ...esbuildOptions(version),
+        plugins: [{
+            name: 'on-rebuild',
+            setup(build) {
+                build.onEnd(async (result) => {
+                    if (result.errors.length > 0) {
+                        console.error('❌ Build failed:', result.errors);
+                        return;
+                    }
+                    try {
+                        const { newScriptPath, newCssPath } = await patchHtmlAfterBuild(result.metafile, version);
+                        console.log(`✅ rebuilt → ${newScriptPath} / ${newCssPath}`);
+                    } catch (err) {
+                        console.error('❌ Post-build patch failed:', err);
+                    }
+                });
+            },
+        }],
+    });
+    await ctx.watch();
+    console.log('👀 Watching js/, style.css, and dependencies...');
+
+    // esbuild only watches the bundle's import graph. index.html and sw.js
+    // are static-copied, so watch them separately and trigger a recopy +
+    // repatch when they change. Coalesce bursts so a single editor save
+    // doesn't fire multiple rebuilds in quick succession.
+    let staticRebuildTimer = null;
+    const scheduleStaticRebuild = () => {
+        if (staticRebuildTimer) clearTimeout(staticRebuildTimer);
+        staticRebuildTimer = setTimeout(async () => {
+            staticRebuildTimer = null;
+            try {
+                await copyStaticAssets();
+                const result = await ctx.rebuild();
+                await patchHtmlAfterBuild(result.metafile, version);
+                console.log('✅ static file change → rebuilt');
+            } catch (err) {
+                console.error('❌ static-driven rebuild failed:', err);
+            }
+        }, 100);
+    };
+    for (const file of ['index.html', 'sw.js', 'about.html']) {
+        try {
+            fsSync.watch(file, () => scheduleStaticRebuild());
+        } catch (err) {
+            console.warn(`Could not watch '${file}': ${err.message}`);
+        }
+    }
+
+    if (WITH_WRANGLER) {
+        const wrangler = spawn('npx', ['wrangler', 'dev'], { stdio: 'inherit' });
+        const shutdown = (code) => {
+            try { wrangler.kill(); } catch {}
+            ctx.dispose().catch(() => {}).finally(() => process.exit(code ?? 0));
+        };
+        process.on('SIGINT', () => shutdown(0));
+        process.on('SIGTERM', () => shutdown(0));
+        wrangler.on('exit', (code) => shutdown(code ?? 0));
+    } else {
+        console.log('(watch mode active — Ctrl+C to stop)');
+    }
+}
+
+if (WATCH) {
+    await watchBuild();
+} else {
+    await oneShotBuild();
+}

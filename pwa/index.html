@@ -71,8 +71,15 @@
   <script type="text/javascript" src="lib/jszip.min.js"></script>
   <script type="module" src="js/main.js"></script>
   <script>
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
+    // Register Service Worker — skipped in local dev so wrangler rebuilds
+    // aren't masked by SW cache-first asset serving. Any SW left over from a
+    // previous dev session is actively unregistered to make the next refresh
+    // a pure network fetch.
+    const isLocalDev = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname);
+    if ('serviceWorker' in navigator && isLocalDev) {
+        navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+    }
+    if ('serviceWorker' in navigator && !isLocalDev) {
         // If the page already has a controller, any future controllerchange
         // means a new SW took over — reload once so the page picks up the
         // new hashed bundles before the old ones disappear from the server.
