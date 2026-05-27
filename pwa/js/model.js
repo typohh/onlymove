@@ -113,6 +113,9 @@ export function getRecallCandidates(options = {}) {
     } = options;
 
     const now = Date.now();
+    // User-controlled pause: while active, no problem can be picked as a
+    // recall (and URL-loaded recalls are routed as plain linked solves).
+    if (state.recallPausedUntil > now) return [];
     const recallCandidates = [];
 
     const numParams = Object.keys(MODEL_INDICES).length;

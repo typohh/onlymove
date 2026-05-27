@@ -293,6 +293,7 @@ const updateAnalysisModeUI = () => {
 
 const updateMenuItems = () => {
     const sizeItem = document.getElementById('menu-board-size');
+    const pauseItem = document.getElementById('menu-pause-recalls');
     const aboutItem = document.getElementById('menu-about');
     const statsItem = document.getElementById('menu-stats');
     const shareItem = document.getElementById('menu-share');
@@ -302,6 +303,12 @@ const updateMenuItems = () => {
     const otherSize = SUPPORTED_BOARD_SIZES.find((s) => s !== state.boardSize) ?? state.boardSize;
     sizeItem.textContent = getTerm('switchTo').replace('{size}', `${otherSize}x${otherSize}`);
     sizeItem.style.display = '';
+
+    // Pause/Resume recalls: always available. Label flips based on the live
+    // timestamp — an expired pause auto-flips back to "Pause recalls".
+    const recallsArePaused = state.recallPausedUntil > Date.now();
+    pauseItem.textContent = getTerm(recallsArePaused ? 'resumeRecalls' : 'pauseRecalls');
+    pauseItem.style.display = '';
 
     if (state.appMode === APP_MODES.ANALYZING) {
         aboutItem.style.display = 'none';

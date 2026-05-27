@@ -276,6 +276,23 @@ export const state = {
     statsResults: null,
     learningRate: parseFloat(localStorage.getItem('learningRate')) || 5,
 
+    // Unix-ms timestamp until which recalls are paused (no recall candidates
+    // are returned). 0 / NaN / past timestamps all mean "not paused". Shared
+    // across board sizes — the recall model itself is shared, so the pause is
+    // too. Read directly from localStorage on each access so an expired pause
+    // re-enables recalls without a reload.
+    get recallPausedUntil() {
+        const raw = parseInt(localStorage.getItem('recallPausedUntil'), 10);
+        return Number.isFinite(raw) ? raw : 0;
+    },
+    set recallPausedUntil(ts) {
+        if (ts && ts > Date.now()) {
+            localStorage.setItem('recallPausedUntil', String(ts));
+        } else {
+            localStorage.removeItem('recallPausedUntil');
+        }
+    },
+
     // In-memory cache of labels.components (joint across board sizes —
     // the PCA + ICA fit is joint, so labels are shared). Populated by
     // embedding-backfill.js after fetching any size's embedding_meta.json.

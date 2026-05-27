@@ -167,6 +167,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const menuOverlay = document.getElementById('menu-overlay');
     const openMenu = (e) => {
         if (e) e.preventDefault();
+        // Re-paint before showing so labels reflect live state (board size +
+        // pause label flip when the recall pause expires).
+        updateAllUI();
         menuOverlay.classList.remove('menu-overlay-hidden');
     };
     const closeMenu = () => menuOverlay.classList.add('menu-overlay-hidden');
@@ -180,6 +183,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         closeMenu();
         handleSizeToggle();
+    });
+    document.getElementById('menu-pause-recalls').addEventListener('click', (e) => {
+        e.preventDefault();
+        const RECALL_PAUSE_MS = 2 * 60 * 60 * 1000;  // 2 hours
+        if (state.recallPausedUntil > Date.now()) {
+            state.recallPausedUntil = 0;  // resume immediately
+        } else {
+            state.recallPausedUntil = Date.now() + RECALL_PAUSE_MS;
+        }
+        closeMenu();
+        updateAllUI();
     });
     // menu-about is a real anchor (target=_blank); let the browser navigate.
     document.getElementById('menu-about').addEventListener('click', () => {
