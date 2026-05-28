@@ -677,6 +677,7 @@ body {
 
 .stats-tabbar {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25em;
     border-bottom: 1px solid rgba(128, 128, 128, 0.35);
     flex: 0 0 auto;

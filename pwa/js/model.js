@@ -673,23 +673,18 @@ export async function showDetailedStats() {
         summaryPane.className = 'stats-modal-pre';
         summaryPane.textContent = resultText;
 
-        let chartsPane = null;
-        if (chartElement || timeUsageElement) {
-            chartsPane = document.createElement('div');
-            if (chartElement) chartsPane.appendChild(chartElement);
-            if (timeUsageElement) chartsPane.appendChild(timeUsageElement);
-        }
-
         // Community/server-wide stats (null if the endpoint isn't ready or the
         // fetch fails — the tab is then dropped).
         const serverPane = await buildServerStatsPane();
 
-        // Empty panes (no weaknesses surfaced, too little data for charts) are
-        // dropped by showStatsModal, so the tab simply doesn't appear.
+        // The two charts get their own pages. Empty panes (no weaknesses, too
+        // little data for a chart, server stats unavailable) are dropped by
+        // showStatsModal, so the corresponding tab simply doesn't appear.
         showStatsModal([
             { label: getTerm('statsTabSummary'), content: summaryPane },
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
-            { label: getTerm('statsTabCharts'), content: chartsPane },
+            { label: getTerm('statsTabRank'), content: chartElement },
+            { label: getTerm('statsTabTime'), content: timeUsageElement },
             { label: getTerm('statsTabCommunity'), content: serverPane },
         ]);
 
