@@ -11,8 +11,15 @@ Outputs (single shared model — embeddings/joint/):
   explained_variance.csv  — component, var_ratio, cumulative
   extreme_problems.json   — per component, top-K and bottom-K problems (across sizes)
   labels.json             — manually-curated human motif label per PC (positive
-                            side only; skew-ICA negative tail is baseline).
-                            Preserved across re-runs; new K's get null entries.
+                            side only; skew-ICA negative tail is baseline). v3:
+                            {bank, components} — labels are anchored (see below)
+                            so they survive refits without transitive drift.
+  label_anchors.npz       — frozen per-motif direction registry that labels.json's
+                            bank keys into; matched against on every refit.
+
+The FastICA rotation warm-starts from the prior fit's unmixing (mapped into the
+new PCA basis) so axes converge back to the same directions unless the data
+moved enough to relocate them — reproducible refits, minimal PWA cache churn.
 
 Per-feature residualization controls for both rating and a 9-vs-13 board-size
 indicator before PCA, so the PCA's variance budget isn't spent on either.
@@ -170,86 +177,74 @@ def _project_to_full_space(components: np.ndarray, mask: np.ndarray, full_d: int
     return out
 
 
-def remap_labels_by_cosine(
-    old_labels: dict,
-    old_components: np.ndarray, old_mask: np.ndarray,
-    new_components: np.ndarray, new_mask: np.ndarray,
-    full_d: int,
-    threshold: float,
-) -> dict:
-    """Carry labeled components forward from a previous PCA fit to the current one.
+def compute_ica_warm_start(prior_components, prior_mask,
+                           new_pca_components, new_mask,
+                           component_stds, full_d):
+    """Map the prior fit's IC directions into the new PCA-whitened basis to seed
+    FastICA, so it converges back to the same axes unless the data moved enough
+    to relocate them. Returns w_init (K, K) float64, or None when the prior is
+    shape-incompatible (different K or feature dim → random init).
 
-    Each old labeled PC is matched to the new PC with maximum |cosine similarity|
-    in the full feature space. Above `threshold`, the label is copied — but only
-    when the signed cosine is positive. Under skew-ICA each axis is
-    sign-canonicalized so its motif sits on the positive tail; a negative-cosine
-    match therefore points at a different motif, so the label is dropped (set to
-    null) rather than carried over. The `positive_i18n` translation dict rides
-    with its label.
-
-    Returns a fresh `components` dict {str(k): {"positive": ...,
-    optional "positive_i18n", "auto_mapped_from": int, "auto_mapped_cos": float}}
-    with all K_new entries.
+    The k-th old IC direction, expressed in the new whitened-score coordinates,
+    becomes the k-th initial unmixing row. For an old feature-space direction d
+    and new (orthonormal) PCA loadings P with whitening stds s, the new whitened
+    score is score_j = (x·P_j)/s_j, so
+        w_init[k, j] = (d_k · P_j) * s_j .
+    FastICA symmetric-decorrelates w_init, so absolute row scale washes out; we
+    still row-normalize for conditioning.
     """
-    K_old = old_components.shape[0]
-    K_new = new_components.shape[0]
+    K_old = prior_components.shape[0]
+    K_new = new_pca_components.shape[0]
+    if K_old != K_new:
+        return None
+    if prior_mask.shape[0] != full_d or new_mask.shape[0] != full_d:
+        return None
+    prior_full = _project_to_full_space(prior_components, prior_mask, full_d)   # (K, full_d)
+    new_full = _project_to_full_space(new_pca_components, new_mask, full_d)     # (K, full_d)
+    C = prior_full @ new_full.T                        # (K, K): old IC k onto new PCA j
+    w_init = C * np.asarray(component_stds)[None, :]   # into whitened-score coords
+    norms = np.linalg.norm(w_init, axis=1, keepdims=True)
+    norms[norms < 1e-12] = 1.0
+    return (w_init / norms).astype(np.float64)
 
-    old_full = _project_to_full_space(old_components, old_mask, full_d)
-    new_full = _project_to_full_space(new_components, new_mask, full_d)
-    # Loading vectors should already be unit-norm but renormalize defensively
-    # (zero-fill outside the kept set has no effect on dot products since the
-    # missing features were also zero in the original computation).
-    old_norms = np.linalg.norm(old_full, axis=1, keepdims=True)
-    new_norms = np.linalg.norm(new_full, axis=1, keepdims=True)
-    old_full = old_full / np.where(old_norms < 1e-12, 1.0, old_norms)
-    new_full = new_full / np.where(new_norms < 1e-12, 1.0, new_norms)
-    sim = old_full @ new_full.T  # (K_old, K_new), in [-1, 1]
 
-    old_components_dict = old_labels.get("components", {}) if old_labels else {}
+def _full_unit_dirs(components, mask, full_d):
+    """Project (K, D_kept) loadings to full feature space and unit-normalize rows."""
+    full = _project_to_full_space(components, mask, full_d)
+    norms = np.linalg.norm(full, axis=1, keepdims=True)
+    norms[norms < 1e-12] = 1.0
+    return full / norms
 
-    # For each old PC that has a non-null label, find the best new PC and
-    # (if confident) carry the label across.
-    proposals = []  # (old_k, new_k, signed_cos)
-    for k_str, entry in old_components_dict.items():
-        if not entry:
-            continue
-        if entry.get("positive") is None:
-            continue
-        k_old = int(k_str)
-        if k_old >= K_old:
-            continue
-        row = sim[k_old]
-        k_new = int(np.argmax(np.abs(row)))
-        c = float(row[k_new])
-        if abs(c) < threshold:
-            continue
-        proposals.append((k_old, k_new, c))
 
-    # If two old PCs claim the same new PC, keep the higher-confidence one.
-    by_new = {}
-    for k_old, k_new, c in proposals:
-        prev = by_new.get(k_new)
-        if prev is None or abs(c) > abs(prev[1]):
-            by_new[k_new] = (k_old, c)
+def _load_anchor_store(path):
+    """Return (directions list[(full_d,)], motif_ids list[str]); ([], []) if absent."""
+    if not os.path.exists(path):
+        return [], []
+    arc = np.load(path, allow_pickle=False)
+    dirs = [row for row in arc["directions"].astype(np.float64)]
+    ids = [str(x) for x in arc["motif_ids"]]
+    return dirs, ids
 
-    new_components_dict = {}
-    for k_new in range(K_new):
-        slot = {"positive": None}
-        if k_new in by_new:
-            k_old, c = by_new[k_new]
-            old_entry = old_components_dict.get(str(k_old), {})
-            # Only carry the label when the axes align (positive cosine). A
-            # negative-cosine match points at a different motif under skew-ICA,
-            # so leave the slot null.
-            if c > 0:
-                slot["positive"] = old_entry.get("positive")
-                pos_i18n = old_entry.get("positive_i18n")
-                if pos_i18n is not None:
-                    slot["positive_i18n"] = pos_i18n
-            slot["auto_mapped_from"] = k_old
-            slot["auto_mapped_cos"] = round(c, 4)
-        new_components_dict[str(k_new)] = slot
-    return new_components_dict
+
+def _save_anchor_store(path, directions, motif_ids):
+    """Persist the motif registry's frozen directions. Removes the file when the
+    registry is empty so retired motifs can't resurrect on the next run."""
+    if not motif_ids:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    np.savez(
+        path,
+        directions=np.asarray(directions, dtype=np.float32),
+        motif_ids=np.array([str(m) for m in motif_ids]),
+    )
+
+
+def _next_motif_ids(existing_ids, n):
+    """Generate n fresh 'mNNNN' ids that don't collide with existing_ids."""
+    nums = [int(m[1:]) for m in existing_ids if m.startswith("m") and m[1:].isdigit()]
+    start = (max(nums) + 1) if nums else 0
+    return [f"m{start + i:04d}" for i in range(n)]
 
 
 def _skew_contrast(x):
@@ -266,17 +261,23 @@ def _skew_contrast(x):
 
 
 _LABELS_DOC = (
-    "Human-curated semantic motif label per PCA component (skew-ICA: positive "
-    "tail = motif, negative tail = baseline, so only the positive side is "
-    "labeled). Set to null when no clear pattern. Auto-remapped across PCA "
-    "refits via cosine similarity in the original feature space; auto_mapped_cos "
-    "records the match strength."
+    "Human-curated semantic motif label per PCA/ICA component (skew-ICA: positive "
+    "tail = motif, negative tail = baseline, so only the positive side is labeled). "
+    "Set positive=null when no clear pattern. Labels are anchored: each motif owns "
+    "a frozen direction in label_anchors.npz keyed by motif_id, and every refit "
+    "matches the new axes to those anchors by cosine (never to the last refit), so "
+    "labels can't drift transitively across refits. 'bank' is the full motif "
+    "registry (may exceed K); 'components' is the current fit's axes keyed by PC "
+    "index (positive / positive_i18n are what ships). anchor_cos = match strength. "
+    "Edit a component's positive text to relabel; set it to null to retire the "
+    "motif. To assign a new label, fill positive on an unmatched component."
 )
 
 
-def write_or_remap_labels(
+def update_labels_and_bank(
     labels_path: str,
-    new_components: np.ndarray,
+    anchors_path: str,
+    new_components_for_labels: np.ndarray,
     new_mask: np.ndarray,
     full_d: int,
     K: int,
@@ -284,64 +285,125 @@ def write_or_remap_labels(
     prior_mask=None,
     cosine_threshold: float = 0.8,
 ):
-    """Write or update labels.json across a PCA refit.
+    """Refit-stable labeling via an anchored motif bank (see _LABELS_DOC).
 
-    - No existing file → fresh stub with K null entries.
-    - Existing file + prior loadings → cosine-similarity remap (sign-flipping as
-      needed), survivors transferred, others reset to null.
-    - Existing file but no prior loadings → preserve labels by index, extend to K.
+    Phase 1 banks the prior fit's human labels: their text is lifted into
+    bank[motif_id] and, the first time a motif is seen, its anchor direction is
+    frozen from the prior fit's loadings (later refits keep that direction,
+    refreshing only the text). Clearing a component (positive=null while its
+    motif_id persists and the motif is used nowhere else) retires the motif.
+
+    Phase 2 matches each new axis to the nearest *frozen* anchor by signed cosine
+    (>= threshold, greedy 1-1). Matching never compares to the last refit, so
+    labels can't drift transitively; the bank may hold more motifs than K (absent
+    ones persist for a later fit).
+
+    Writes labels.json v3 ({version, _doc, bank, components}, components keyed by
+    current PC index for downstream) plus the binary anchor store.
     """
-    if not os.path.exists(labels_path):
-        labels = {
-            "version": 2,
-            "_doc": _LABELS_DOC,
-            "components": {str(k): {"positive": None} for k in range(K)},
-        }
-        with open(labels_path, "w") as f:
-            json.dump(labels, f, indent=2)
-        print(f"  wrote stub labels.json (K={K}, all entries null)")
-        return
+    old_labels = {}
+    if os.path.exists(labels_path):
+        with open(labels_path, "r", encoding="utf-8") as f:
+            old_labels = json.load(f)
+    old_components = old_labels.get("components", {}) or {}
+    bank = dict(old_labels.get("bank", {}) or {})
 
-    with open(labels_path, "r") as f:
-        old_labels = json.load(f)
+    anchor_rows, anchor_ids = _load_anchor_store(anchors_path)
+    have = set(anchor_ids)
 
-    if prior_components is None or prior_mask is None:
-        old_dict = old_labels.get("components", {})
-        labels = {
-            "version": old_labels.get("version", 2),
-            "_doc": old_labels.get("_doc", _LABELS_DOC),
-            "components": {
-                str(k): old_dict.get(str(k), {"positive": None})
-                for k in range(K)
-            },
-        }
-        with open(labels_path, "w") as f:
-            json.dump(labels, f, indent=2)
-        print(f"  preserved labels by index (no prior loadings to align)")
-        return
+    # Active vs explicitly-cleared motif ids referenced by the prior components.
+    cleared, active = set(), set()
+    for entry in old_components.values():
+        mid = entry.get("motif_id") if entry else None
+        if not mid:
+            continue
+        (active if entry.get("positive") is not None else cleared).add(mid)
 
-    remapped = remap_labels_by_cosine(
-        old_labels, prior_components, prior_mask,
-        new_components, new_mask, full_d, cosine_threshold,
+    # --- Phase 1: bank the prior fit's human labels (text + frozen anchor). ---
+    can_bank = (
+        prior_components is not None and prior_mask is not None
+        and prior_mask.shape[0] == full_d
     )
+    if can_bank:
+        prior_dirs = _full_unit_dirs(prior_components, prior_mask, full_d)
+        pending = []  # (k_old, entry) for labeled prior components
+        for k_str, entry in old_components.items():
+            if not entry or entry.get("positive") is None:
+                continue
+            k_old = int(k_str)
+            if k_old < prior_dirs.shape[0]:
+                pending.append((k_old, entry))
+        fresh = _next_motif_ids(
+            list(have) + list(bank.keys()),
+            sum(1 for _, e in pending if not e.get("motif_id")),
+        )
+        fi = 0
+        for k_old, entry in pending:
+            mid = entry.get("motif_id")
+            if not mid:
+                mid = fresh[fi]
+                fi += 1
+            text = {"positive": entry.get("positive")}
+            if entry.get("positive_i18n") is not None:
+                text["positive_i18n"] = entry["positive_i18n"]
+            bank[mid] = text  # refresh (possibly hand-edited) text
+            if mid not in have:  # freeze the anchor direction only once
+                have.add(mid)
+                anchor_ids.append(mid)
+                anchor_rows.append(prior_dirs[k_old])
+
+    # Retire explicitly-cleared motifs (label removed, used nowhere else).
+    retire = cleared - active
+    if retire:
+        for mid in retire:
+            bank.pop(mid, None)
+        kept = [i for i, mid in enumerate(anchor_ids) if mid not in retire]
+        anchor_rows = [anchor_rows[i] for i in kept]
+        anchor_ids = [anchor_ids[i] for i in kept]
+
+    # --- Phase 2: match every new axis to the nearest frozen anchor. ---
+    new_dirs = _full_unit_dirs(new_components_for_labels, new_mask, full_d)  # (K, full_d)
+    components = {str(k): {"positive": None, "motif_id": None} for k in range(K)}
+    if anchor_ids:
+        sim = new_dirs @ np.asarray(anchor_rows).T  # (K, M) signed cosine
+        triples = []
+        for k in range(sim.shape[0]):
+            for m in range(sim.shape[1]):
+                c = float(sim[k, m])
+                if c >= cosine_threshold:  # positive + confident
+                    triples.append((c, k, m))
+        triples.sort(reverse=True)
+        used_axis, used_motif = set(), set()
+        for c, k, m in triples:
+            if k in used_axis or m in used_motif:
+                continue
+            used_axis.add(k)
+            used_motif.add(m)
+            mid = anchor_ids[m]
+            slot = {
+                "positive": bank.get(mid, {}).get("positive"),
+                "motif_id": mid,
+                "anchor_cos": round(c, 4),
+            }
+            i18n = bank.get(mid, {}).get("positive_i18n")
+            if i18n is not None:
+                slot["positive_i18n"] = i18n
+            components[str(k)] = slot
+
     labels = {
-        "version": 2,
-        "_doc": old_labels.get("_doc", _LABELS_DOC),
-        "components": remapped,
+        "version": 3,
+        "_doc": _LABELS_DOC,
+        "bank": bank,
+        "components": components,
     }
-    with open(labels_path, "w") as f:
-        json.dump(labels, f, indent=2)
+    with open(labels_path, "w", encoding="utf-8") as f:
+        json.dump(labels, f, ensure_ascii=False, indent=2)
+    _save_anchor_store(anchors_path, anchor_rows, anchor_ids)
 
-    n_carried = sum(
-        1 for v in remapped.values()
-        if v.get("positive") is not None
-    )
-    n_old_nonempty = sum(
-        1 for v in (old_labels.get("components", {}) or {}).values()
-        if v and v.get("positive") is not None
-    )
-    print(f"  remapped labels: {n_carried}/{n_old_nonempty} old labels survived "
-          f"(cosine threshold {cosine_threshold})")
+    n_matched = sum(1 for v in components.values() if v.get("positive") is not None)
+    print(f"  labels: {n_matched}/{K} axes matched to bank "
+          f"({len(anchor_ids)} anchors, {len(bank)} bank entries, "
+          f"cosine >= {cosine_threshold})")
 
 
 def project_to_embedding(activations, rating, size_is_13, pca_arc):
@@ -537,6 +599,11 @@ def main():
                         help="FastICA max iterations.")
     parser.add_argument("--ica-tol", type=float, default=1e-4,
                         help="FastICA convergence tolerance.")
+    parser.add_argument("--ica-warm-start", choices=["auto", "off"], default="auto",
+                        help="Seed FastICA from the prior fit's unmixing (remapped "
+                             "into the new PCA basis) so axes stay put across refits "
+                             "unless the data moved. 'auto' warm-starts when a "
+                             "shape-compatible prior exists; 'off' uses random init.")
     parser.add_argument("--chunk-rows", type=int, default=8192,
                         help="Rows per chunk for streaming ops (mean/std, OLS, "
                              "residualize, IncrementalPCA). Smaller = lower "
@@ -551,6 +618,7 @@ def main():
     # to remap labels across the PCA refit.
     pca_npz_path = os.path.join(out_dir, "pca.npz")
     labels_path = os.path.join(out_dir, "labels.json")
+    anchors_path = os.path.join(out_dir, "label_anchors.npz")
     prior_components = None
     prior_mask = None
     if os.path.exists(pca_npz_path):
@@ -698,6 +766,18 @@ def main():
         fun = _skew_contrast if args.ica_fun == "skew" else args.ica_fun
         print(f"\nFitting FastICA n_components={K} on whitened PCA scores "
               f"(fun={args.ica_fun!r}, whiten=False)...", flush=True)
+        # Warm-start from the prior fit's unmixing (mapped into the new PCA basis)
+        # so axes converge back to the same directions unless the data moved —
+        # reproducible refits + far less PWA cache churn. Random init otherwise.
+        w_init = None
+        if args.ica_warm_start == "auto" and prior_components is not None:
+            w_init = compute_ica_warm_start(
+                prior_components, prior_mask,
+                pca.components_, keep_feat, component_stds, len(keep_feat),
+            )
+            print("  warm-start: seeded FastICA from prior unmixing"
+                  if w_init is not None else
+                  "  warm-start: prior fit shape-incompatible; using random init")
         # n_components is intentionally omitted: with whiten=False sklearn
         # ignores it and uses the input dim, which is already K from PCA.
         ica = FastICA(
@@ -705,6 +785,7 @@ def main():
             fun=fun,
             max_iter=args.ica_max_iter,
             tol=args.ica_tol,
+            w_init=w_init,
             random_state=args.seed,
         )
         ica_raw = ica.fit_transform(scores.astype(np.float64))  # (N, K)
@@ -840,14 +921,15 @@ def main():
     full_d = len(keep_feat)  # full feature dim before dropping dead channels
     if args.rotation == "ica":
         # Gradient direction of each ICA score in residualized feature space.
-        # cosine remap normalizes rows internally, so the per-row magnitudes
+        # anchor matching normalizes rows internally, so the per-row magnitudes
         # introduced by the 1/sqrt(λ) whitening factor don't matter.
         new_components_for_labels = W_ica @ (pca.components_ / component_stds[:, None])
     else:
         new_components_for_labels = pca.components_
-    write_or_remap_labels(
+    update_labels_and_bank(
         labels_path,
-        new_components=new_components_for_labels,
+        anchors_path=anchors_path,
+        new_components_for_labels=new_components_for_labels,
         new_mask=keep_feat,
         full_d=full_d,
         K=K,
