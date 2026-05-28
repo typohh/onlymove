@@ -973,6 +973,26 @@ function rankLabelFromIndex(rankIndex) {
     return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
 }
 
+// Pick a viewBox height (for a fixed width W) so the chart's aspect ratio
+// approximates the modal's visible area. The SVG renders at width:100% /
+// height:auto with uniform scaling, so a W×H viewBox paints at
+// renderedW × renderedW·(H/W); matching H/W to (visible height)/(width) makes
+// the whole chart block (title + plot + legend) fit inside the scrollable
+// 70vh body without being taller than the viewport — visible whole on scroll.
+function chartViewBoxHeight(W) {
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const bodyVisibleH = 0.70 * vh;            // .stats-modal-body max-height: 70vh
+    const chrome = 120;                        // title + legend + x-axis + margins (px)
+    const plotH = Math.max(150, bodyVisibleH - chrome);
+    const cardPad = 0.06 * Math.min(vw, vh);   // .stats-modal-card padding: 3vmin each side
+    const yAxisCol = 42;                       // y-tick label column
+    const plotW = Math.max(220, 0.9 * vw - cardPad - yAxisCol);
+    // Clamp to a sane band: never taller than square, never an extreme letterbox.
+    const ratio = Math.max(0.42, Math.min(plotH / plotW, 1.0));
+    return Math.round(W * ratio);
+}
+
 function buildRatingHistoryChart(history = state.answerHistory) {
     const entries = history
         .filter(a => typeof a.problemRank === 'number' && typeof a.date === 'number'
@@ -1080,9 +1100,10 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
 
-    // SVG holds only the grid + dots. 1:1 aspect via square viewBox.
+    // SVG holds only the grid + dots. Aspect ratio tracks the visible modal
+    // area (see chartViewBoxHeight) so the chart fits whole when scrolled to.
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const W = 400, H = 400;
+    const W = 400, H = chartViewBoxHeight(W);
     const xOf = t => ((t - t0) / tSpan) * W;
     const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
 
@@ -1254,44 +1275,46 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     return container;
 }
 
-// Daily time spent solving and reviewing: a per-day mean with an empirical
-// confidence band. The band is a percentile bootstrap of the daily mean —
-// resampled from that day's actual attempts, NOT a normal-theory mean ± z·SE.
-// Solving/review times have a heavy right tail (a tab left idle inflates one
-// attempt by minutes), so a Gaussian interval would be wrongly symmetric and
-// too wide; the bootstrap widens only on days that really contain outliers.
-// For the same reason the y-window is clipped to a robust upper quantile of
-// the daily means — one idle day must not rescale and flatten the rest.
+// Daily time spent solving and reviewing, smoothed. A Gaussian-kernel smoother
+// over the ACTUAL attempt timestamps gives the trend line: a day with no
+// attempts contributes nothing and is carried by its neighbours rather than
+// pulled to zero, and stretches with no attempts within the kernel's reach
+// leave a GAP in the line (we never invent a zero where there is no data). The
+// confidence band is a multiplier (exponential-weight) bootstrap of the
+// kernel-weighted mean — empirical, not a normal-theory mean ± z·SE — so the
+// heavy idle-time right tail (a tab left open for minutes) widens it
+// asymmetrically rather than symmetrically. The y-window clips to a robust
+// quantile of the upper band so one idle spell can't flatten the rest.
 function buildTimeUsageChart(history = state.answerHistory) {
     const DAY_MS = 24 * 3600 * 1000;
-    // Local-midnight bucket key, positioned at that day's midpoint on the x-axis.
-    const dayMidpoint = (ts) => {
-        const d = new Date(ts);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() + DAY_MS / 2;
-    };
 
-    const bucketize = (valueOf) => {
-        const byDay = new Map();
+    const seriesAttempts = (valueOf) => {
+        const out = [];
         for (const a of history) {
             if (typeof a.date !== 'number') continue;
             const v = valueOf(a);
             if (v === null) continue;
-            const key = dayMidpoint(a.date);
-            (byDay.get(key) || byDay.set(key, []).get(key)).push(v);
+            out.push({ t: a.date, v });
         }
-        return byDay;
+        out.sort((p, q) => p.t - q.t);
+        return out;
     };
-
     // Solving time is logged on every attempt. Review time accrues only when the
-    // user actually reviews, so the review series counts attempts with positive
+    // user actually reviews, so the review series keeps attempts with positive
     // reviewTime — its distribution is "how long a review takes", not diluted to
     // near-zero by the many attempts that were never reviewed. Values in seconds.
-    const solvingByDay = bucketize(a => (typeof a.timeTaken === 'number' && a.timeTaken >= 0) ? a.timeTaken / 1000 : null);
-    const reviewByDay = bucketize(a => (typeof a.reviewTime === 'number' && a.reviewTime > 0) ? a.reviewTime / 1000 : null);
+    const solving = seriesAttempts(a => (typeof a.timeTaken === 'number' && a.timeTaken >= 0) ? a.timeTaken / 1000 : null);
+    const review = seriesAttempts(a => (typeof a.reviewTime === 'number' && a.reviewTime > 0) ? a.reviewTime / 1000 : null);
+
+    const all = [...solving, ...review];
+    if (all.length < 4) return null;
+    const t0 = Math.min(...all.map(p => p.t));
+    const t1 = Math.max(...all.map(p => p.t));
+    const tSpan = t1 - t0;
+    if (tSpan < 0.75 * DAY_MS) return null; // too short a span to read as a daily trend
 
     // Seeded PRNG (mulberry32) so the bootstrap band is stable across re-opens
-    // of the stats panel rather than flickering with each Math.random draw.
+    // rather than flickering with each Math.random draw.
     let seed = (0x9e3779b9 ^ history.length) >>> 0;
     const rand = () => {
         seed = (seed + 0x6D2B79F5) >>> 0;
@@ -1300,51 +1323,74 @@ function buildTimeUsageChart(history = state.answerHistory) {
         t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
-    const meanOf = arr => arr.reduce((s, x) => s + x, 0) / arr.length;
     const quantile = (sorted, p) => {
         if (sorted.length === 1) return sorted[0];
         const idx = p * (sorted.length - 1);
         const lo = Math.floor(idx), hi = Math.ceil(idx);
         return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
     };
-    const B = 800;
-    const daySummaries = (byDay) => {
-        const out = [];
-        for (const [t, vals] of byDay) {
-            const m = meanOf(vals);
-            let lo = m, hi = m;
-            if (vals.length > 1) {
-                const means = new Array(B);
-                for (let b = 0; b < B; b++) {
-                    let s = 0;
-                    for (let i = 0; i < vals.length; i++) s += vals[(rand() * vals.length) | 0];
-                    means[b] = s / vals.length;
-                }
-                means.sort((a, b) => a - b);
-                lo = quantile(means, 0.025);
-                hi = quantile(means, 0.975);
-            }
-            out.push({ t, mean: m, lo, hi });
-        }
-        out.sort((a, b) => a.t - b.t);
-        return out;
+    const lowerBound = (arr, target) => {
+        let lo = 0, hi = arr.length;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < target) lo = m + 1; else hi = m; }
+        return lo;
     };
 
-    const solving = daySummaries(solvingByDay);
-    const review = daySummaries(reviewByDay);
-    // A time series needs at least two days of one of the two measures.
-    if (solving.length < 2 && review.length < 2) return null;
+    // Kernel smoother + multiplier-bootstrap band on a regular t-grid. Returns
+    // an array of {t, mean, lo, hi}, or null at grid points with too little
+    // nearby data (those break the line). bw sets the smoothing scale — a few
+    // days — so the curve reads as a smoothed daily trend.
+    const G = 140, B = 300, ESS_MIN = 1.5, LMAX = 700;
+    const bw = Math.min(14 * DAY_MS, Math.max(2 * DAY_MS, tSpan / 50));
+    const smooth = (pts) => {
+        if (pts.length < 4) return null;
+        const ts = pts.map(p => p.t);
+        const grid = new Array(G);
+        for (let g = 0; g < G; g++) {
+            const t = t0 + tSpan * (g / (G - 1));
+            const i0 = lowerBound(ts, t - 3.5 * bw);
+            const i1 = lowerBound(ts, t + 3.5 * bw);
+            let idxs = [];
+            for (let i = i0; i < i1; i++) idxs.push(i);
+            if (idxs.length > LMAX) {
+                const stride = idxs.length / LMAX, thin = [];
+                for (let k = 0; k < LMAX; k++) thin.push(idxs[Math.floor(k * stride)]);
+                idxs = thin;
+            }
+            const ws = [], vs = [];
+            let W = 0, sumW2 = 0, Wv = 0;
+            for (const i of idxs) {
+                const d = (t - ts[i]) / bw;
+                const w = Math.exp(-0.5 * d * d);
+                W += w; sumW2 += w * w; Wv += w * pts[i].v;
+                ws.push(w); vs.push(pts[i].v);
+            }
+            const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
+            if (ess < ESS_MIN) { grid[g] = null; continue; }
+            const bmeans = new Array(B);
+            for (let b = 0; b < B; b++) {
+                let num = 0, den = 0;
+                for (let k = 0; k < ws.length; k++) {
+                    const ew = -Math.log(1 - rand()) * ws[k]; // Exp(1) × kernel weight
+                    num += ew * vs[k]; den += ew;
+                }
+                bmeans[b] = num / den;
+            }
+            bmeans.sort((x, y) => x - y);
+            grid[g] = { t, mean: Wv / W, lo: quantile(bmeans, 0.025), hi: quantile(bmeans, 0.975) };
+        }
+        return grid;
+    };
 
-    const allDays = [...solving, ...review];
-    const t0 = Math.min(...allDays.map(d => d.t));
-    const t1 = Math.max(...allDays.map(d => d.t));
-    const tSpan = Math.max(1, t1 - t0);
+    const sGrid = smooth(solving);
+    const rGrid = smooth(review);
+    if (!sGrid && !rGrid) return null;
 
-    // Robust ceiling: 95th percentile of daily means, with 8% headroom. Days
-    // above it clip at the top edge (overflow:hidden) — a visible spike that
-    // doesn't squash the readable bulk of the chart.
-    const meansSorted = allDays.map(d => d.mean).sort((a, b) => a - b);
-    const yHigh = Math.max(quantile(meansSorted, 0.95) * 1.08, 1);
+    // Robust ceiling from the upper-CI envelope so most of the band shows; the
+    // most extreme spell clips at the top edge (overflow:hidden).
+    const hiVals = [];
+    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(e.hi);
+    hiVals.sort((a, b) => a - b);
+    const yHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;
     const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
     const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
@@ -1379,7 +1425,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const W = 400, H = 400;
+    const W = 400, H = chartViewBoxHeight(W);
     const xOf = t => ((t - t0) / tSpan) * W;
     const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
 
@@ -1403,47 +1449,65 @@ function buildTimeUsageChart(history = state.answerHistory) {
     }
 
     const SERIES = [
-        { days: solving, line: '#2e9e5b', band: 'rgba(46,158,91,0.20)' },
-        { days: review, line: '#d98a2b', band: 'rgba(217,138,43,0.20)' },
+        { grid: sGrid, line: '#2e9e5b', band: 'rgba(46,158,91,0.20)' },
+        { grid: rGrid, line: '#d98a2b', band: 'rgba(217,138,43,0.20)' },
     ];
 
+    // Break each smoothed grid into runs of consecutive present points so the
+    // line and band stop across no-data gaps instead of bridging them.
+    const segments = (grid) => {
+        const runs = [];
+        let run = [];
+        for (const e of grid) {
+            if (e) run.push(e);
+            else { if (run.length) runs.push(run); run = []; }
+        }
+        if (run.length) runs.push(run);
+        return runs;
+    };
+
     // Bands first, then mean lines on top.
-    for (const { days, band } of SERIES) {
-        if (days.length < 2) continue;
-        let d = '';
-        for (let i = 0; i < days.length; i++) {
-            d += (i === 0 ? 'M' : 'L') + `${xOf(days[i].t).toFixed(1)} ${yOf(days[i].hi).toFixed(1)} `;
+    for (const { grid, band } of SERIES) {
+        if (!grid) continue;
+        for (const run of segments(grid)) {
+            if (run.length < 2) continue;
+            let d = '';
+            for (let i = 0; i < run.length; i++) {
+                d += (i === 0 ? 'M' : 'L') + `${xOf(run[i].t).toFixed(1)} ${yOf(run[i].hi).toFixed(1)} `;
+            }
+            for (let i = run.length - 1; i >= 0; i--) {
+                d += `L${xOf(run[i].t).toFixed(1)} ${yOf(run[i].lo).toFixed(1)} `;
+            }
+            const path = document.createElementNS(SVG_NS, 'path');
+            path.setAttribute('d', d + 'Z');
+            path.setAttribute('fill', band);
+            path.setAttribute('stroke', 'none');
+            svg.appendChild(path);
         }
-        for (let i = days.length - 1; i >= 0; i--) {
-            d += `L${xOf(days[i].t).toFixed(1)} ${yOf(days[i].lo).toFixed(1)} `;
-        }
-        const path = document.createElementNS(SVG_NS, 'path');
-        path.setAttribute('d', d + 'Z');
-        path.setAttribute('fill', band);
-        path.setAttribute('stroke', 'none');
-        svg.appendChild(path);
     }
 
-    for (const { days, line } of SERIES) {
-        if (days.length === 0) continue;
-        if (days.length === 1) {
-            const dot = document.createElementNS(SVG_NS, 'circle');
-            dot.setAttribute('cx', xOf(days[0].t).toFixed(1));
-            dot.setAttribute('cy', yOf(days[0].mean).toFixed(1));
-            dot.setAttribute('r', '2');
-            dot.setAttribute('fill', line);
-            svg.appendChild(dot);
-            continue;
+    for (const { grid, line } of SERIES) {
+        if (!grid) continue;
+        for (const run of segments(grid)) {
+            if (run.length === 1) {
+                const dot = document.createElementNS(SVG_NS, 'circle');
+                dot.setAttribute('cx', xOf(run[0].t).toFixed(1));
+                dot.setAttribute('cy', yOf(run[0].mean).toFixed(1));
+                dot.setAttribute('r', '2');
+                dot.setAttribute('fill', line);
+                svg.appendChild(dot);
+                continue;
+            }
+            const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mean).toFixed(1)}`).join(' ');
+            const poly = document.createElementNS(SVG_NS, 'polyline');
+            poly.setAttribute('points', pts);
+            poly.setAttribute('fill', 'none');
+            poly.setAttribute('stroke', line);
+            poly.setAttribute('stroke-width', '1.5');
+            poly.setAttribute('stroke-linejoin', 'round');
+            poly.setAttribute('vector-effect', 'non-scaling-stroke');
+            svg.appendChild(poly);
         }
-        const pts = days.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mean).toFixed(1)}`).join(' ');
-        const poly = document.createElementNS(SVG_NS, 'polyline');
-        poly.setAttribute('points', pts);
-        poly.setAttribute('fill', 'none');
-        poly.setAttribute('stroke', line);
-        poly.setAttribute('stroke-width', '1.5');
-        poly.setAttribute('stroke-linejoin', 'round');
-        poly.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(poly);
     }
 
     svgWrap.append(svg);
