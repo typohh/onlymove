@@ -1029,7 +1029,11 @@ async function buildServerStatsPane() {
     const attempts = data.totals.attempts || 0;
     const wins = data.totals.wins || 0;
     const rate = attempts ? Math.round(wins / attempts * 100) : 0;
-    let txt = `Active users: ${data.totals.users}\nAttempts: ${attempts} (${rate}% solved)\n`;
+    const dayCount = (data.daily && data.daily.length) ? data.daily.length : 0;
+    const attemptsPerDay = dayCount ? Math.round(attempts / dayCount) : 0;
+    let txt = `Active users: ${data.totals.users}\n`;
+    txt += `Attempts per day: ${attemptsPerDay}\n`;
+    txt += `Attempts: ${attempts} (${rate}% solved)\n`;
     for (const s of (data.bySize || [])) {
         txt += `  ${s.size}×${s.size}: ${s.attempts} attempts, ${s.users} users\n`;
     }
@@ -1041,8 +1045,11 @@ async function buildServerStatsPane() {
     if (data.daily && data.daily.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Attempts per day';
-        pane.append(h, makeBarList(data.daily.map(d => ({ label: d.day.slice(5), value: d.attempts }))));
+        h.textContent = 'Attempts per user per day';
+        pane.append(h, makeBarList(data.daily.map(d => ({
+            label: d.day.slice(5),
+            value: d.users ? Math.round(d.attempts / d.users * 10) / 10 : 0,
+        }))));
     }
 
     if (data.solveHist && data.solveHist.length) {
