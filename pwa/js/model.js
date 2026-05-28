@@ -964,14 +964,25 @@ async function buildServerStatsPane() {
     }
     if (!data || !data.totals || !(data.totals.attempts > 0)) return null;
 
-    const fmtSec = (s) => s >= 90 ? `${(s / 60).toFixed(1)}m` : `${Math.round(s)}s`;
-    // Median seconds from a 10s-bucket histogram ([{bucket, n}], bucket·10s).
-    const medianFromHist = (hist) => {
-        const total = (hist || []).reduce((acc, r) => acc + r.n, 0);
-        if (!total) return null;
-        let cum = 0;
-        for (const r of hist) { cum += r.n; if (cum >= total / 2) return r.bucket * 10 + 5; }
-        return null;
+    // Coarse display bins over the server's 10s-bucket histogram (bucket b spans
+    // [b·10, (b+1)·10)s; bucket 60 is the ≥600s cap). Returns [{label, value}].
+    const TIME_BINS = [
+        { lo: 0, hi: 1, label: '0–10s' },
+        { lo: 1, hi: 2, label: '10–20s' },
+        { lo: 2, hi: 3, label: '20–30s' },
+        { lo: 3, hi: 6, label: '30–60s' },
+        { lo: 6, hi: 12, label: '1–2m' },
+        { lo: 12, hi: 30, label: '2–5m' },
+        { lo: 30, hi: 60, label: '5–10m' },
+        { lo: 60, hi: Infinity, label: '10m+' },
+    ];
+    const binHist = (hist) => {
+        const rows = TIME_BINS.map(b => ({ label: b.label, value: 0 }));
+        for (const r of (hist || [])) {
+            const i = TIME_BINS.findIndex(b => r.bucket >= b.lo && r.bucket < b.hi);
+            if (i >= 0) rows[i].value += r.n;
+        }
+        return rows;
     };
     const ago = (iso) => {
         const ms = Date.now() - Date.parse(iso);
@@ -1021,10 +1032,6 @@ async function buildServerStatsPane() {
     for (const s of (data.bySize || [])) {
         txt += `  ${s.size}×${s.size}: ${s.attempts} attempts, ${s.users} users\n`;
     }
-    const sMed = medianFromHist(data.solveHist);
-    const rMed = medianFromHist(data.reviewHist);
-    if (sMed != null) txt += `Median solving time: ${fmtSec(sMed)}\n`;
-    if (rMed != null) txt += `Median review time: ${fmtSec(rMed)}\n`;
     const summary = document.createElement('pre');
     summary.className = 'stats-modal-pre';
     summary.textContent = txt.trimEnd();
@@ -1037,11 +1044,27 @@ async function buildServerStatsPane() {
         pane.append(h, makeBarList(data.daily.map(d => ({ label: d.day.slice(5), value: d.attempts }))));
     }
 
+    if (data.solveHist && data.solveHist.length) {
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = 'Solving time';
+        pane.append(h, makeBarList(binHist(data.solveHist)));
+    }
+
+    if (data.reviewHist && data.reviewHist.length) {
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = 'Review time';
+        pane.append(h, makeBarList(binHist(data.reviewHist)));
+    }
+
+    // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
+    // per user (multi-server declarations averaged), so render them as-is.
     if (data.ranks && data.ranks.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Declared ranks';
-        pane.append(h, makeBarList(data.ranks.slice(0, 15).map(r => ({ label: r.rank, value: r.n }))));
+        h.textContent = 'Ranks (EGF-equivalent)';
+        pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n }))));
     }
 
     return pane;

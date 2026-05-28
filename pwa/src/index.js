@@ -311,6 +311,26 @@ async function maybeComputeServerStats(env) {
   }
 }
 
+// Rank-scalar convention (matches rank_map.json / rank-translation.js):
+// 1k = 0, 1d = 1, no zero gap. "5k" → -4, "3d" → 3.
+function rankLabelToScalar(label) {
+  const m = /^(\d+)([kd])$/.exec(String(label || ''));
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return m[2] === 'k' ? 1 - n : n;
+}
+
+// Linear interpolation with end-slope extrapolation; xs strictly ascending.
+// Mirrors interpExtrap in js/rank-translation.js.
+function interpExtrap(x, xs, ys) {
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0]);
+  if (x >= xs[n - 1]) return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1]);
+  let a = 0, b = n - 1;
+  while (b - a > 1) { const m = (a + b) >> 1; if (xs[m] <= x) a = m; else b = m; }
+  return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a]);
+}
+
 // Aggregate the preceding 7 days into the cached JSON blob the PWA renders.
 // Everything is a cheap GROUP BY; time histograms cap at 600s (10s buckets) so
 // idle-tab outliers don't blow out the distribution.
@@ -345,14 +365,52 @@ async function computeServerStats(env) {
      GROUP BY bucket ORDER BY bucket`
   ).bind(since).all()).results || [];
 
-  // Latest declared rank per (user, server) → histogram by rank label. SQLite
-  // returns the bare `rank` from the MAX(created_at) row within each group.
-  const ranks = (await env.DB.prepare(
-    `SELECT rank, COUNT(*) AS n FROM (
+  // Declared-rank histogram on the EGF scale. We fold every server's declaration
+  // onto EGF via rank_map.json (EGF is the identity hub), then collapse each user
+  // to ONE value — the average of their latest-per-server declarations mapped to
+  // EGF — so a user who declared on several servers is counted once, not once per
+  // server. Result is a histogram by EGF rank, ordered weakest→strongest.
+  let rankMap = null;
+  try {
+    const res = await env.ASSETS.fetch(new Request('https://onlymove.net/tsumegos/rank_map.json'));
+    if (res.ok) rankMap = await res.json();
+  } catch (e) {
+    console.error('rank_map fetch failed:', e);
+  }
+
+  const declarations = (await env.DB.prepare(
+    `SELECT user_id, server, rank FROM (
         SELECT user_id, server, rank, MAX(created_at) AS mx
         FROM rank_surveys GROUP BY user_id, server
-     ) GROUP BY rank ORDER BY n DESC`
+     )`
   ).all()).results || [];
+
+  const perUser = new Map(); // user_id → { sum, count } of EGF-mapped scalars
+  for (const d of declarations) {
+    const s = rankLabelToScalar(d.rank);
+    if (s === null) continue;
+    let egf;
+    if (d.server === 'EGF') {
+      egf = s;
+    } else {
+      const c = rankMap && rankMap[d.server];
+      if (!c || !Array.isArray(c.our) || !Array.isArray(c.server) || c.our.length < 2) continue;
+      egf = interpExtrap(s, c.server, c.our);
+    }
+    const u = perUser.get(d.user_id) || { sum: 0, count: 0 };
+    u.sum += egf; u.count += 1;
+    perUser.set(d.user_id, u);
+  }
+
+  const rankHist = new Map(); // integer EGF scalar → user count
+  for (const { sum, count } of perUser.values()) {
+    if (!count) continue;
+    const v = Math.max(-29, Math.min(9, Math.round(sum / count)));
+    rankHist.set(v, (rankHist.get(v) || 0) + 1);
+  }
+  const ranks = [...rankHist.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([v, n]) => ({ rank: v <= 0 ? `${1 - v}k` : `${v}d`, n }));
 
   const data = {
     computedAt: new Date().toISOString(),
