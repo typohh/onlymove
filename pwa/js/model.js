@@ -668,11 +668,25 @@ export async function showDetailedStats() {
         const issuesElement = buildLikelyIssuesElement(merged);
         const chartElement = buildRatingHistoryChart(merged);
         const timeUsageElement = buildTimeUsageChart(merged);
-        const extras = document.createElement('div');
-        if (issuesElement) extras.appendChild(issuesElement);
-        if (chartElement) extras.appendChild(chartElement);
-        if (timeUsageElement) extras.appendChild(timeUsageElement);
-        showSelectableTextModal(resultText, extras);
+
+        const summaryPane = document.createElement('pre');
+        summaryPane.className = 'stats-modal-pre';
+        summaryPane.textContent = resultText;
+
+        let chartsPane = null;
+        if (chartElement || timeUsageElement) {
+            chartsPane = document.createElement('div');
+            if (chartElement) chartsPane.appendChild(chartElement);
+            if (timeUsageElement) chartsPane.appendChild(timeUsageElement);
+        }
+
+        // Empty panes (no weaknesses surfaced, too little data for charts) are
+        // dropped by showStatsModal, so the tab simply doesn't appear.
+        showStatsModal([
+            { label: getTerm('statsTabSummary'), content: summaryPane },
+            { label: getTerm('statsTabWeaknesses'), content: issuesElement },
+            { label: getTerm('statsTabCharts'), content: chartsPane },
+        ]);
 
     } catch (error) {
         console.error('Failed to generate stats text:', error);
@@ -935,16 +949,18 @@ function probit(p) {
     return (lo + hi) / 2;
 }
 
-function showSelectableTextModal(text, extraElement = null) {
+// Tabbed stats modal. `tabs` is [{ label, content }]; tabs whose content is
+// null/absent are dropped (so an empty Weaknesses or Charts page just doesn't
+// appear), and the tab bar is omitted when only one page remains.
+function showStatsModal(tabs) {
+    tabs = tabs.filter(t => t.content);
+    if (tabs.length === 0) return;
+
     const backdrop = document.createElement('div');
     backdrop.className = 'stats-modal-backdrop';
 
     const card = document.createElement('div');
     card.className = 'stats-modal-card';
-
-    const pre = document.createElement('pre');
-    pre.className = 'stats-modal-pre';
-    pre.textContent = text;
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'stats-modal-close';
@@ -961,12 +977,34 @@ function showSelectableTextModal(text, extraElement = null) {
 
     const body = document.createElement('div');
     body.className = 'stats-modal-body';
-    body.append(pre);
-    if (extraElement) body.append(extraElement);
 
-    card.append(body, closeBtn);
+    const buttons = [];
+    const select = (i) => {
+        buttons.forEach((b, j) => b.classList.toggle('active', j === i));
+        body.replaceChildren(tabs[i].content);
+        body.scrollTop = 0;
+    };
+
+    const cardChildren = [];
+    if (tabs.length > 1) {
+        const tabbar = document.createElement('div');
+        tabbar.className = 'stats-tabbar';
+        tabs.forEach((t, i) => {
+            const b = document.createElement('button');
+            b.className = 'stats-tab';
+            b.textContent = t.label;
+            b.onclick = () => select(i);
+            tabbar.append(b);
+            buttons.push(b);
+        });
+        cardChildren.push(tabbar);
+    }
+    cardChildren.push(body, closeBtn);
+    card.append(...cardChildren);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
+
+    select(0);
 }
 
 function rankLabelFromIndex(rankIndex) {

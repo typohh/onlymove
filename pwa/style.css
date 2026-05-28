@@ -669,6 +669,30 @@ body {
     cursor: pointer;
 }
 
+.stats-tabbar {
+    display: flex;
+    gap: 0.25em;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+    flex: 0 0 auto;
+}
+
+.stats-tab {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    padding: 0.4em 0.8em;
+    cursor: pointer;
+    opacity: 0.55;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.stats-tab.active {
+    opacity: 1;
+    border-bottom-color: currentColor;
+}
+
 .stats-issues {
     font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
     margin-top: 1em;
