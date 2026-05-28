@@ -1071,7 +1071,7 @@ async function buildServerStatsPane() {
     if (data.ranks && data.ranks.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Ranks (EGF-equivalent)';
+        h.textContent = 'Ranks';
         pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n }))));
     }
 
