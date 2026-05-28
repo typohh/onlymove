@@ -1,0 +1,5 @@
+- record to server when user creates a shared link, and when user opens a shared link, record where the link is from if available in http header, also record country, time, user id and problem id.
+- provide graphs on time usage (solving&reviewing) in stats
+- separate stats into multiple pages in the menu
+- include server wide stats, rank, activity, time usage, distributions, automatically updated every 24 hours based on preceding 7 days data.
+- fix bug, ghost stone sometimes is not reset when changing modes or something. ie a black ghostsotne sometimes appears ontop of a white stone, when swithing modes. it its a remainder from the previous game.
