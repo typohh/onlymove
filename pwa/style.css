@@ -107,8 +107,9 @@ body {
     cursor: pointer;
     font-weight: bold;
     font-size: 1.4em;
-    padding: 0.1vmin 1.2vmin;
-    border: 0.2vmin solid #555;
+    /* Vertical padding matches .info-text so the hamburger occupies the
+       same row height as the title / rank / captures cluster. */
+    padding: 1.5vmin 2vmin;
     border-radius: var(--radius);
     line-height: 1;
     flex: 0 0 auto;
@@ -119,7 +120,7 @@ body {
 
 .menu-toggle:hover {
     color: #fff;
-    border-color: #888;
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 /* --- MODES 1 & 2: PORTRAIT & SQUARISH LAYOUTS (Consolidated) --- */
@@ -904,7 +905,5 @@ body {
 @keyframes loading-spin {
     to { transform: rotate(360deg); }
 }
-
-
 
 
