@@ -287,7 +287,10 @@ async function handleServerStats(env) {
     const body = stale ? JSON.stringify(await computeServerStats(env)) : row.data;
     return new Response(body, {
       status: 200,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      // The worker already serves from a D1 cache and manages freshness (daily
+      // cron + version invalidation); an edge/browser HTTP cache on top would
+      // serve stale data and bypass that logic, so opt out of caching here.
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   } catch (err) {
     console.error('Error serving server stats:', err);

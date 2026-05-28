@@ -956,7 +956,8 @@ function probit(p) {
 async function buildServerStatsPane() {
     let data;
     try {
-        const res = await fetch('/server-stats');
+        // Version the URL so a deploy bypasses any stale edge-cached response.
+        const res = await fetch(`/server-stats?v=${APP_VERSION}`);
         if (!res.ok) return null;
         data = await res.json();
     } catch {
