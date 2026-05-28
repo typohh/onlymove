@@ -298,29 +298,37 @@ const updateMenuItems = () => {
     const statsItem = document.getElementById('menu-stats');
     const shareItem = document.getElementById('menu-share');
     const ignoreItem = document.getElementById('menu-ignore');
+    const reviewGroup = document.getElementById('menu-group-review');
 
-    // Board-size toggle: always available, label is "Switch to <other>".
+    // Category headers — static labels, set here so they follow the active language.
+    document.getElementById('menu-cat-practice').textContent = getTerm('menuCatPractice');
+    document.getElementById('menu-cat-review').textContent = getTerm('menuCatReview');
+    document.getElementById('menu-cat-more').textContent = getTerm('menuCatMore');
+
+    // Practice group — always available.
     const otherSize = SUPPORTED_BOARD_SIZES.find((s) => s !== state.boardSize) ?? state.boardSize;
     sizeItem.textContent = getTerm('switchTo').replace('{size}', `${otherSize}x${otherSize}`);
-    sizeItem.style.display = '';
-
-    // Pause/Resume recalls: always available. Label flips based on the live
-    // timestamp — an expired pause auto-flips back to "Pause recalls".
+    // Pause/Resume recalls label flips on the live timestamp — an expired pause
+    // auto-flips back to "Pause recalls".
     const recallsArePaused = state.recallPausedUntil > Date.now();
     pauseItem.textContent = getTerm(recallsArePaused ? 'resumeRecalls' : 'pauseRecalls');
-    pauseItem.style.display = '';
 
+    // More group — Stats and About are always available, in every mode.
+    statsItem.textContent = getTerm('stats');
+    statsItem.classList.remove('disabled');
+    aboutItem.textContent = getTerm('about');
+    aboutItem.classList.remove('disabled');
+
+    // Review group — Share/Ignore act on the problem under review, so the whole
+    // category only appears in analysis mode.
     if (state.appMode === APP_MODES.ANALYZING) {
-        aboutItem.style.display = 'none';
-        statsItem.style.display = 'none';
+        reviewGroup.style.display = '';
 
-        shareItem.style.display = '';
         shareItem.textContent = getTerm('share');
         shareItem.classList.remove('disabled');
 
         // Ignore: enabled only when there's a current problem and it's a
         // retry/recall (matches the analysis-mode ignore-button rule).
-        ignoreItem.style.display = '';
         ignoreItem.textContent = getTerm('ignore');
         const problem = state.problemHistory[1];
         if (problem) {
@@ -336,17 +344,7 @@ const updateMenuItems = () => {
             ignoreItem.classList.add('disabled');
         }
     } else {
-        // SOLVING / LINKED
-        aboutItem.style.display = '';
-        aboutItem.textContent = getTerm('about');
-        aboutItem.classList.remove('disabled');
-
-        statsItem.style.display = '';
-        statsItem.textContent = getTerm('stats');
-        statsItem.classList.remove('disabled');
-
-        shareItem.style.display = 'none';
-        ignoreItem.style.display = 'none';
+        reviewGroup.style.display = 'none';
     }
 };
 

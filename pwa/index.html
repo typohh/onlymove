@@ -39,16 +39,27 @@
       </div>
     </div>
 
-    <!-- Hamburger-driven menu (board size, About, Stats, Share, Ignore).
-         Items shown context-dependently from ui.js. -->
+    <!-- Hamburger-driven menu, grouped into categories. Category labels and
+         per-item / per-group visibility are set context-dependently in ui.js
+         (updateMenuItems): Practice + More are always shown; the Review group
+         only appears in analysis mode. -->
     <div id="menu-overlay" class="menu-overlay menu-overlay-hidden">
       <div id="menu-panel">
-        <a href="#" id="menu-board-size" class="menu-item btn" role="button" tabindex="0"></a>
-        <a href="#" id="menu-pause-recalls" class="menu-item btn" role="button" tabindex="0"></a>
-        <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener"></a>
-        <a href="#" id="menu-stats" class="menu-item btn" role="button" tabindex="0"></a>
-        <a href="#" id="menu-share" class="menu-item btn" role="button" tabindex="0"></a>
-        <a href="#" id="menu-ignore" class="menu-item btn" role="button" tabindex="0"></a>
+        <div class="menu-category">
+          <div class="menu-category-label" id="menu-cat-practice"></div>
+          <a href="#" id="menu-board-size" class="menu-item btn" role="button" tabindex="0"></a>
+          <a href="#" id="menu-pause-recalls" class="menu-item btn" role="button" tabindex="0"></a>
+        </div>
+        <div class="menu-category" id="menu-group-review">
+          <div class="menu-category-label" id="menu-cat-review"></div>
+          <a href="#" id="menu-share" class="menu-item btn" role="button" tabindex="0"></a>
+          <a href="#" id="menu-ignore" class="menu-item btn" role="button" tabindex="0"></a>
+        </div>
+        <div class="menu-category">
+          <div class="menu-category-label" id="menu-cat-more"></div>
+          <a href="#" id="menu-stats" class="menu-item btn" role="button" tabindex="0"></a>
+          <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener"></a>
+        </div>
       </div>
     </div>
 

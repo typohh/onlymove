@@ -506,6 +506,21 @@ body {
     display: inline-block;
 }
 
+.menu-category {
+    display: flex;
+    flex-direction: column;
+    gap: 1vmin;
+}
+
+.menu-category-label {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.5;
+    text-align: left;
+    padding: 0.5vmin 2.5vmin 0;
+}
+
 @media (prefers-color-scheme: light) {
     #menu-panel {
         background-color: #f0f0f0;
