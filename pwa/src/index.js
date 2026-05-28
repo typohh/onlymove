@@ -272,21 +272,20 @@ async function handleShareEvent(request, env) {
   }
 }
 
-// Serve the cached server-wide stats. Lazily computes on the first request if
-// nothing has been cached yet (so the panel appears without waiting for the
-// next cron tick); the cron keeps it fresh thereafter.
+// Serve the cached server-wide stats. Lazily (re)computes when nothing is
+// cached yet OR the cache was produced by an older code version (so a deploy
+// that changes the computation refreshes on the next read, not 24h later); the
+// cron keeps it fresh by age thereafter.
 async function handleServerStats(env) {
   try {
     if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
-    let row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
-    if (!row || !row.data) {
-      const data = await computeServerStats(env);
-      return new Response(JSON.stringify(data), {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+    const row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
+    let stale = true;
+    if (row && row.data) {
+      try { stale = JSON.parse(row.data).version !== APP_VERSION; } catch { stale = true; }
     }
-    return new Response(row.data, {
+    const body = stale ? JSON.stringify(await computeServerStats(env)) : row.data;
+    return new Response(body, {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
     });
@@ -296,14 +295,19 @@ async function handleServerStats(env) {
   }
 }
 
-// Recompute only when the cache is older than ~23h (the cron is hourly, so this
-// fires once a day with slack for tick jitter).
+// Recompute when the cache is older than ~23h (the cron is hourly, so this fires
+// once a day with slack for tick jitter) OR when it was produced by an older
+// code version (so a logic change is picked up on the next tick).
 async function maybeComputeServerStats(env) {
   if (!env.DB) return;
   try {
-    const row = await env.DB.prepare(`SELECT computed_at FROM server_stats WHERE key = 'latest'`).first();
+    const row = await env.DB.prepare(`SELECT data, computed_at FROM server_stats WHERE key = 'latest'`).first();
+    let staleVersion = true;
+    if (row && row.data) {
+      try { staleVersion = JSON.parse(row.data).version !== APP_VERSION; } catch { staleVersion = true; }
+    }
     const last = row?.computed_at ? Date.parse(row.computed_at) : 0;
-    if (Date.now() - last >= 23 * 3600 * 1000) {
+    if (staleVersion || Date.now() - last >= 23 * 3600 * 1000) {
       await computeServerStats(env);
     }
   } catch (err) {
@@ -413,6 +417,9 @@ async function computeServerStats(env) {
     .map(([v, n]) => ({ rank: v <= 0 ? `${1 - v}k` : `${v}d`, n }));
 
   const data = {
+    // Stamp the code version so a deploy that changes this computation
+    // invalidates the cache on the next read/cron, even within the 24h window.
+    version: APP_VERSION,
     computedAt: new Date().toISOString(),
     windowDays: 7,
     totals: totals || { attempts: 0, wins: 0, users: 0 },
