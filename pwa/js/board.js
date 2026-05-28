@@ -14,6 +14,12 @@ const isMobile = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 const handleBoardClick = (x, y) => {
     if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
+        // Honor the click-lock here too. The desktop branch delegates to
+        // handleTsumegoClick (which guards on acceptClicks), but the mobile
+        // first-tap sets state.ghostMove directly — so without this guard a tap
+        // during the locked post-solve transition (board still showing the old
+        // problem) registers a ghost that then bleeds onto the next problem.
+        if (!state.acceptClicks) return;
         if (isMobile()) {
             if (state.ghostMove) {
                 if (state.ghostMove.x === x && state.ghostMove.y === y) {
@@ -154,6 +160,11 @@ export function redraw() {
 }
 
 export function loadSgf(sgfContent) {
+    // A new board invalidates any pending mobile two-tap ghost stone from the
+    // previous problem; otherwise it survives the load and redraw() paints it
+    // (colored by the new game's turn) on top of whatever stone now sits there.
+    state.ghostMove = null;
+
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     const kifuReader = new WGo.KifuReader(kifu);
 
