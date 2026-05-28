@@ -74,3 +74,7 @@ orchestration_state.json
 /all_pcs.html
 auxiliary/*.png
 auxiliary/labeler/cache/
+# Joint rank-model placement dumps (~MBs each): regenerable from
+# auxiliary/joint_rank_model*.py. The small rank_map_v2*.json result files are
+# tracked; the bulky per-problem CSVs are not.
+auxiliary/joint_rank_placements*.csv
