@@ -53,6 +53,9 @@ export default {
     if (url.pathname === '/share-event' && request.method === 'POST') {
       return handleShareEvent(request, env);
     }
+    if (url.pathname === '/server-stats' && request.method === 'GET') {
+      return handleServerStats(env);
+    }
 
     // SPA fallback for navigations only. Static assets are served before
     // the worker; if no asset matches and the request looks like a page
@@ -80,6 +83,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runRecallNotifications(env));
+    ctx.waitUntil(maybeComputeServerStats(env));
   },
 };
 
@@ -266,6 +270,103 @@ async function handleShareEvent(request, env) {
     console.error('Error handling share event:', err);
     return jsonResponse({ error: 'Internal server error' }, 500);
   }
+}
+
+// Serve the cached server-wide stats. Lazily computes on the first request if
+// nothing has been cached yet (so the panel appears without waiting for the
+// next cron tick); the cron keeps it fresh thereafter.
+async function handleServerStats(env) {
+  try {
+    if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
+    let row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
+    if (!row || !row.data) {
+      const data = await computeServerStats(env);
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(row.data, {
+      status: 200,
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.error('Error serving server stats:', err);
+    return jsonResponse({ error: 'Internal server error' }, 500);
+  }
+}
+
+// Recompute only when the cache is older than ~23h (the cron is hourly, so this
+// fires once a day with slack for tick jitter).
+async function maybeComputeServerStats(env) {
+  if (!env.DB) return;
+  try {
+    const row = await env.DB.prepare(`SELECT computed_at FROM server_stats WHERE key = 'latest'`).first();
+    const last = row?.computed_at ? Date.parse(row.computed_at) : 0;
+    if (Date.now() - last >= 23 * 3600 * 1000) {
+      await computeServerStats(env);
+    }
+  } catch (err) {
+    console.error('Error computing server stats:', err);
+  }
+}
+
+// Aggregate the preceding 7 days into the cached JSON blob the PWA renders.
+// Everything is a cheap GROUP BY; time histograms cap at 600s (10s buckets) so
+// idle-tab outliers don't blow out the distribution.
+async function computeServerStats(env) {
+  const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+
+  const totals = await env.DB.prepare(
+    `SELECT COUNT(*) AS attempts, COALESCE(SUM(success), 0) AS wins, COUNT(DISTINCT user_id) AS users
+     FROM tsumego_reports WHERE created_at >= ?`
+  ).bind(since).first();
+
+  const daily = (await env.DB.prepare(
+    `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS attempts, COUNT(DISTINCT user_id) AS users
+     FROM tsumego_reports WHERE created_at >= ? GROUP BY day ORDER BY day`
+  ).bind(since).all()).results || [];
+
+  const bySize = (await env.DB.prepare(
+    `SELECT size, COUNT(*) AS attempts, COALESCE(SUM(success), 0) AS wins, COUNT(DISTINCT user_id) AS users
+     FROM tsumego_reports WHERE created_at >= ? GROUP BY size`
+  ).bind(since).all()).results || [];
+
+  // 10s buckets, capped at bucket 60 (=600s) so idle outliers fold into the top.
+  const solveHist = (await env.DB.prepare(
+    `SELECT MIN(time_used / 10000, 60) AS bucket, COUNT(*) AS n
+     FROM tsumego_reports WHERE created_at >= ? AND time_used IS NOT NULL AND time_used > 0
+     GROUP BY bucket ORDER BY bucket`
+  ).bind(since).all()).results || [];
+
+  const reviewHist = (await env.DB.prepare(
+    `SELECT MIN(review_time / 10000, 60) AS bucket, COUNT(*) AS n
+     FROM tsumego_reports WHERE created_at >= ? AND review_time IS NOT NULL AND review_time > 0
+     GROUP BY bucket ORDER BY bucket`
+  ).bind(since).all()).results || [];
+
+  // Latest declared rank per (user, server) → histogram by rank label. SQLite
+  // returns the bare `rank` from the MAX(created_at) row within each group.
+  const ranks = (await env.DB.prepare(
+    `SELECT rank, COUNT(*) AS n FROM (
+        SELECT user_id, server, rank, MAX(created_at) AS mx
+        FROM rank_surveys GROUP BY user_id, server
+     ) GROUP BY rank ORDER BY n DESC`
+  ).all()).results || [];
+
+  const data = {
+    computedAt: new Date().toISOString(),
+    windowDays: 7,
+    totals: totals || { attempts: 0, wins: 0, users: 0 },
+    daily, bySize, solveHist, reviewHist, ranks,
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO server_stats (key, data, computed_at) VALUES ('latest', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET data = excluded.data, computed_at = excluded.computed_at`
+  ).bind(JSON.stringify(data), data.computedAt).run();
+
+  return data;
 }
 
 async function runRecallNotifications(env) {

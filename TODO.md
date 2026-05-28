@@ -1,1 +1,0 @@
-- include server wide stats, rank, activity, time usage, distributions, automatically updated every 24 hours based on preceding 7 days data.

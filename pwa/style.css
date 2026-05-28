@@ -699,6 +699,52 @@ body {
     border-bottom-color: currentColor;
 }
 
+.server-stats {
+    font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+}
+
+.server-stats-heading {
+    margin: 1em 0 0.4em;
+    font-weight: bold;
+}
+
+.server-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.server-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.server-bar-label {
+    flex: 0 0 auto;
+    min-width: 3.5em;
+}
+
+.server-bar-track {
+    flex: 1;
+    height: 0.9em;
+    background: rgba(128, 128, 128, 0.2);
+    border-radius: 2px;
+}
+
+.server-bar-fill {
+    display: block;
+    height: 100%;
+    background: #2e9e5b;
+    border-radius: 2px;
+}
+
+.server-bar-value {
+    flex: 0 0 auto;
+    min-width: 2.5em;
+    text-align: right;
+}
+
 .stats-issues {
     font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
     margin-top: 1em;

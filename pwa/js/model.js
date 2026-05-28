@@ -680,12 +680,17 @@ export async function showDetailedStats() {
             if (timeUsageElement) chartsPane.appendChild(timeUsageElement);
         }
 
+        // Community/server-wide stats (null if the endpoint isn't ready or the
+        // fetch fails — the tab is then dropped).
+        const serverPane = await buildServerStatsPane();
+
         // Empty panes (no weaknesses surfaced, too little data for charts) are
         // dropped by showStatsModal, so the tab simply doesn't appear.
         showStatsModal([
             { label: getTerm('statsTabSummary'), content: summaryPane },
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
             { label: getTerm('statsTabCharts'), content: chartsPane },
+            { label: getTerm('statsTabCommunity'), content: serverPane },
         ]);
 
     } catch (error) {
@@ -947,6 +952,104 @@ function probit(p) {
         if (cdf < p) lo = mid; else hi = mid;
     }
     return (lo + hi) / 2;
+}
+
+// Community pane: server-wide stats over the preceding 7 days (computed by the
+// Worker cron, served from /server-stats). Returns null on any failure or when
+// there's no activity, so showStatsModal drops the tab. Internal labels are
+// English to match the chart legends; only the tab label is localized.
+async function buildServerStatsPane() {
+    let data;
+    try {
+        const res = await fetch('/server-stats');
+        if (!res.ok) return null;
+        data = await res.json();
+    } catch {
+        return null;
+    }
+    if (!data || !data.totals || !(data.totals.attempts > 0)) return null;
+
+    const fmtSec = (s) => s >= 90 ? `${(s / 60).toFixed(1)}m` : `${Math.round(s)}s`;
+    // Median seconds from a 10s-bucket histogram ([{bucket, n}], bucket·10s).
+    const medianFromHist = (hist) => {
+        const total = (hist || []).reduce((acc, r) => acc + r.n, 0);
+        if (!total) return null;
+        let cum = 0;
+        for (const r of hist) { cum += r.n; if (cum >= total / 2) return r.bucket * 10 + 5; }
+        return null;
+    };
+    const ago = (iso) => {
+        const ms = Date.now() - Date.parse(iso);
+        if (!Number.isFinite(ms) || ms < 0) return 'just now';
+        const h = ms / 3600000;
+        if (h < 1) return `${Math.round(ms / 60000)}m ago`;
+        if (h < 24) return `${Math.round(h)}h ago`;
+        return `${Math.round(h / 24)}d ago`;
+    };
+    const makeBarList = (rows) => {
+        const max = Math.max(1, ...rows.map(r => r.value));
+        const wrap = document.createElement('div');
+        wrap.className = 'server-bars';
+        for (const r of rows) {
+            const row = document.createElement('div');
+            row.className = 'server-bar-row';
+            const label = document.createElement('span');
+            label.className = 'server-bar-label';
+            label.textContent = r.label;
+            const track = document.createElement('span');
+            track.className = 'server-bar-track';
+            const fill = document.createElement('span');
+            fill.className = 'server-bar-fill';
+            fill.style.width = `${(r.value / max * 100).toFixed(1)}%`;
+            track.append(fill);
+            const val = document.createElement('span');
+            val.className = 'server-bar-value';
+            val.textContent = String(r.value);
+            row.append(label, track, val);
+            wrap.append(row);
+        }
+        return wrap;
+    };
+
+    const pane = document.createElement('div');
+    pane.className = 'server-stats';
+
+    const head = document.createElement('div');
+    head.className = 'stats-chart-title';
+    head.textContent = `Community · last ${data.windowDays} days (updated ${ago(data.computedAt)})`;
+    pane.append(head);
+
+    const attempts = data.totals.attempts || 0;
+    const wins = data.totals.wins || 0;
+    const rate = attempts ? Math.round(wins / attempts * 100) : 0;
+    let txt = `Active users: ${data.totals.users}\nAttempts: ${attempts} (${rate}% solved)\n`;
+    for (const s of (data.bySize || [])) {
+        txt += `  ${s.size}×${s.size}: ${s.attempts} attempts, ${s.users} users\n`;
+    }
+    const sMed = medianFromHist(data.solveHist);
+    const rMed = medianFromHist(data.reviewHist);
+    if (sMed != null) txt += `Median solving time: ${fmtSec(sMed)}\n`;
+    if (rMed != null) txt += `Median review time: ${fmtSec(rMed)}\n`;
+    const summary = document.createElement('pre');
+    summary.className = 'stats-modal-pre';
+    summary.textContent = txt.trimEnd();
+    pane.append(summary);
+
+    if (data.daily && data.daily.length) {
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = 'Attempts per day';
+        pane.append(h, makeBarList(data.daily.map(d => ({ label: d.day.slice(5), value: d.attempts }))));
+    }
+
+    if (data.ranks && data.ranks.length) {
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = 'Declared ranks';
+        pane.append(h, makeBarList(data.ranks.slice(0, 15).map(r => ({ label: r.rank, value: r.n }))));
+    }
+
+    return pane;
 }
 
 // Tabbed stats modal. `tabs` is [{ label, content }]; tabs whose content is

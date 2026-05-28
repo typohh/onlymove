@@ -92,3 +92,12 @@ CREATE TABLE IF NOT EXISTS share_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_share_events_problem ON share_events(problem_id);
+
+-- Cached server-wide stats, recomputed at most once per ~24h by the cron from
+-- the preceding 7 days of tsumego_reports + rank_surveys. Single logical row
+-- (key='latest'); `data` is the precomputed JSON the PWA renders verbatim.
+CREATE TABLE IF NOT EXISTS server_stats (
+    key         TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    computed_at TEXT NOT NULL
+);
