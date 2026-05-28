@@ -667,9 +667,11 @@ export async function showDetailedStats() {
         // issue can carry an interactive `examples` toggle to past mistakes.
         const issuesElement = buildLikelyIssuesElement(merged);
         const chartElement = buildRatingHistoryChart(merged);
+        const timeUsageElement = buildTimeUsageChart(merged);
         const extras = document.createElement('div');
         if (issuesElement) extras.appendChild(issuesElement);
         if (chartElement) extras.appendChild(chartElement);
+        if (timeUsageElement) extras.appendChild(timeUsageElement);
         showSelectableTextModal(resultText, extras);
 
     } catch (error) {
@@ -1226,6 +1228,255 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     // After the chart hits the DOM and gets a real height, greedy-hide any
     // y-axis labels that would physically overlap a previously-shown one.
     // Re-runs on resize so density adapts to viewport.
+    const updateLabelVisibility = () => {
+        const h = svg.getBoundingClientRect().height;
+        if (h === 0) return;
+        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
+        let lastShownPx = -Infinity;
+        for (const el of tickEls) {
+            const topPx = (parseFloat(el.style.top) / 100) * h;
+            if (topPx - lastShownPx >= minSepPx) {
+                el.style.visibility = '';
+                lastShownPx = topPx;
+            } else {
+                el.style.visibility = 'hidden';
+            }
+        }
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(updateLabelVisibility).observe(svg);
+    } else {
+        queueMicrotask(updateLabelVisibility);
+    }
+
+    return container;
+}
+
+// Daily time spent solving and reviewing: a per-day mean with an empirical
+// confidence band. The band is a percentile bootstrap of the daily mean —
+// resampled from that day's actual attempts, NOT a normal-theory mean ± z·SE.
+// Solving/review times have a heavy right tail (a tab left idle inflates one
+// attempt by minutes), so a Gaussian interval would be wrongly symmetric and
+// too wide; the bootstrap widens only on days that really contain outliers.
+// For the same reason the y-window is clipped to a robust upper quantile of
+// the daily means — one idle day must not rescale and flatten the rest.
+function buildTimeUsageChart(history = state.answerHistory) {
+    const DAY_MS = 24 * 3600 * 1000;
+    // Local-midnight bucket key, positioned at that day's midpoint on the x-axis.
+    const dayMidpoint = (ts) => {
+        const d = new Date(ts);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime() + DAY_MS / 2;
+    };
+
+    const bucketize = (valueOf) => {
+        const byDay = new Map();
+        for (const a of history) {
+            if (typeof a.date !== 'number') continue;
+            const v = valueOf(a);
+            if (v === null) continue;
+            const key = dayMidpoint(a.date);
+            (byDay.get(key) || byDay.set(key, []).get(key)).push(v);
+        }
+        return byDay;
+    };
+
+    // Solving time is logged on every attempt. Review time accrues only when the
+    // user actually reviews, so the review series counts attempts with positive
+    // reviewTime — its distribution is "how long a review takes", not diluted to
+    // near-zero by the many attempts that were never reviewed. Values in seconds.
+    const solvingByDay = bucketize(a => (typeof a.timeTaken === 'number' && a.timeTaken >= 0) ? a.timeTaken / 1000 : null);
+    const reviewByDay = bucketize(a => (typeof a.reviewTime === 'number' && a.reviewTime > 0) ? a.reviewTime / 1000 : null);
+
+    // Seeded PRNG (mulberry32) so the bootstrap band is stable across re-opens
+    // of the stats panel rather than flickering with each Math.random draw.
+    let seed = (0x9e3779b9 ^ history.length) >>> 0;
+    const rand = () => {
+        seed = (seed + 0x6D2B79F5) >>> 0;
+        let t = seed;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const meanOf = arr => arr.reduce((s, x) => s + x, 0) / arr.length;
+    const quantile = (sorted, p) => {
+        if (sorted.length === 1) return sorted[0];
+        const idx = p * (sorted.length - 1);
+        const lo = Math.floor(idx), hi = Math.ceil(idx);
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    };
+    const B = 800;
+    const daySummaries = (byDay) => {
+        const out = [];
+        for (const [t, vals] of byDay) {
+            const m = meanOf(vals);
+            let lo = m, hi = m;
+            if (vals.length > 1) {
+                const means = new Array(B);
+                for (let b = 0; b < B; b++) {
+                    let s = 0;
+                    for (let i = 0; i < vals.length; i++) s += vals[(rand() * vals.length) | 0];
+                    means[b] = s / vals.length;
+                }
+                means.sort((a, b) => a - b);
+                lo = quantile(means, 0.025);
+                hi = quantile(means, 0.975);
+            }
+            out.push({ t, mean: m, lo, hi });
+        }
+        out.sort((a, b) => a.t - b.t);
+        return out;
+    };
+
+    const solving = daySummaries(solvingByDay);
+    const review = daySummaries(reviewByDay);
+    // A time series needs at least two days of one of the two measures.
+    if (solving.length < 2 && review.length < 2) return null;
+
+    const allDays = [...solving, ...review];
+    const t0 = Math.min(...allDays.map(d => d.t));
+    const t1 = Math.max(...allDays.map(d => d.t));
+    const tSpan = Math.max(1, t1 - t0);
+
+    // Robust ceiling: 95th percentile of daily means, with 8% headroom. Days
+    // above it clip at the top edge (overflow:hidden) — a visible spike that
+    // doesn't squash the readable bulk of the chart.
+    const meansSorted = allDays.map(d => d.mean).sort((a, b) => a - b);
+    const yHigh = Math.max(quantile(meansSorted, 0.95) * 1.08, 1);
+    const yLow = 0;
+    const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
+    const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
+
+    const container = document.createElement('div');
+    container.className = 'stats-chart';
+
+    const title = document.createElement('div');
+    title.className = 'stats-chart-title';
+    title.textContent = `Time per problem since ${new Date(t0).toISOString().slice(0, 10)}`;
+    container.append(title);
+
+    const plotRow = document.createElement('div');
+    plotRow.className = 'stats-chart-plot-row';
+
+    const yaxis = document.createElement('div');
+    yaxis.className = 'stats-chart-yaxis';
+    const spacer = document.createElement('span');
+    spacer.className = 'y-spacer';
+    spacer.textContent = fmt(yHigh);
+    yaxis.append(spacer);
+    const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
+    for (let i = 0; i <= 4; i++) {
+        const v = yHigh * (i / 4);
+        const tick = document.createElement('div');
+        tick.className = 'y-tick';
+        tick.style.top = `${topPct(v)}%`;
+        tick.textContent = fmt(v);
+        yaxis.append(tick);
+    }
+
+    const svgWrap = document.createElement('div');
+    svgWrap.className = 'stats-chart-svg-wrap';
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const W = 400, H = 400;
+    const xOf = t => ((t - t0) / tSpan) * W;
+    const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role', 'img');
+    svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
+
+    // Horizontal grid at each y-tick.
+    for (let i = 0; i <= 4; i++) {
+        const y = yOf(yHigh * (i / 4));
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', 0);
+        line.setAttribute('x2', W);
+        line.setAttribute('y1', y);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', 'rgba(128,128,128,0.35)');
+        line.setAttribute('stroke-width', '0.5');
+        line.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(line);
+    }
+
+    const SERIES = [
+        { days: solving, line: '#2e9e5b', band: 'rgba(46,158,91,0.20)' },
+        { days: review, line: '#d98a2b', band: 'rgba(217,138,43,0.20)' },
+    ];
+
+    // Bands first, then mean lines on top.
+    for (const { days, band } of SERIES) {
+        if (days.length < 2) continue;
+        let d = '';
+        for (let i = 0; i < days.length; i++) {
+            d += (i === 0 ? 'M' : 'L') + `${xOf(days[i].t).toFixed(1)} ${yOf(days[i].hi).toFixed(1)} `;
+        }
+        for (let i = days.length - 1; i >= 0; i--) {
+            d += `L${xOf(days[i].t).toFixed(1)} ${yOf(days[i].lo).toFixed(1)} `;
+        }
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('d', d + 'Z');
+        path.setAttribute('fill', band);
+        path.setAttribute('stroke', 'none');
+        svg.appendChild(path);
+    }
+
+    for (const { days, line } of SERIES) {
+        if (days.length === 0) continue;
+        if (days.length === 1) {
+            const dot = document.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', xOf(days[0].t).toFixed(1));
+            dot.setAttribute('cy', yOf(days[0].mean).toFixed(1));
+            dot.setAttribute('r', '2');
+            dot.setAttribute('fill', line);
+            svg.appendChild(dot);
+            continue;
+        }
+        const pts = days.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mean).toFixed(1)}`).join(' ');
+        const poly = document.createElementNS(SVG_NS, 'polyline');
+        poly.setAttribute('points', pts);
+        poly.setAttribute('fill', 'none');
+        poly.setAttribute('stroke', line);
+        poly.setAttribute('stroke-width', '1.5');
+        poly.setAttribute('stroke-linejoin', 'round');
+        poly.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(poly);
+    }
+
+    svgWrap.append(svg);
+
+    const plotMain = document.createElement('div');
+    plotMain.className = 'stats-chart-plot-main';
+    plotMain.append(yaxis, svgWrap);
+
+    const xaxis = document.createElement('div');
+    xaxis.className = 'stats-chart-xaxis';
+    xaxis.textContent = new Date(t1).toISOString().slice(0, 10);
+
+    plotRow.append(plotMain, xaxis);
+    container.append(plotRow);
+
+    const legend = document.createElement('div');
+    legend.className = 'stats-chart-legend';
+    const legendItems = [
+        { kind: 'line', color: '#2e9e5b', text: 'Solving' },
+        { kind: 'line', color: '#d98a2b', text: 'Reviewing' },
+        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: '95% CI (bootstrap)' },
+    ];
+    for (const item of legendItems) {
+        const el = document.createElement('span');
+        el.className = `legend-item legend-${item.kind}`;
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch';
+        swatch.style.background = item.color;
+        el.append(swatch, document.createTextNode(item.text));
+        legend.append(el);
+    }
+    container.append(legend);
+
     const updateLabelVisibility = () => {
         const h = svg.getBoundingClientRect().height;
         if (h === 0) return;
