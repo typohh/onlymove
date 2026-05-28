@@ -11,6 +11,11 @@ CREATE TABLE IF NOT EXISTS tsumego_reports (
     is_repeat INTEGER NOT NULL DEFAULT 0
 );
 
+-- Range index for the server-stats 7-day window. Without it, every
+-- `WHERE created_at >= ?` is a full-table scan of all history (D1 bills rows
+-- read), which is what the community-stats aggregation hits each recompute.
+CREATE INDEX IF NOT EXISTS idx_tsumego_reports_created ON tsumego_reports(created_at);
+
 -- One row per attempt (including repeats). There is no UNIQUE constraint on
 -- (user_id, problem) anymore — the client is expected to send a report for
 -- every solving attempt, and is_repeat flags whether the user had seen the

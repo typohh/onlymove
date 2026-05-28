@@ -344,50 +344,70 @@ function interpExtrap(x, xs, ys) {
 async function computeServerStats(env) {
   const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
 
-  const totals = await env.DB.prepare(
-    `SELECT COUNT(*) AS attempts, COALESCE(SUM(success), 0) AS wins, COUNT(DISTINCT user_id) AS users
+  // ONE pass over the last 7 days, aggregated in JS. idx_tsumego_reports_created
+  // turns `created_at >= ?` into a range scan (reads only the window's rows, not
+  // the whole table), and sharing a single SELECT across every metric keeps D1
+  // rows-read to roughly one window's worth per recompute.
+  const rows = (await env.DB.prepare(
+    `SELECT user_id, success, size, time_used, review_time, substr(created_at, 1, 10) AS day
      FROM tsumego_reports WHERE created_at >= ?`
-  ).bind(since).first();
-
-  const daily = (await env.DB.prepare(
-    `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS attempts, COUNT(DISTINCT user_id) AS users
-     FROM tsumego_reports WHERE created_at >= ? GROUP BY day ORDER BY day`
   ).bind(since).all()).results || [];
 
-  // Per-user attempts-per-active-day, binned into a distribution: "how many
-  // users average ~5/day, ~10/day, …". One sample per user (their attempts ÷
-  // distinct active days over the window), so it counts users, not user-days.
-  const perUserActivity = (await env.DB.prepare(
-    `SELECT COUNT(*) AS attempts, COUNT(DISTINCT substr(created_at, 1, 10)) AS days
-     FROM tsumego_reports WHERE created_at >= ? GROUP BY user_id`
-  ).bind(since).all()).results || [];
+  const usersAll = new Set();
+  let attemptsAll = 0, winsAll = 0;
+  const byDay = new Map();     // day → { attempts, users:Set }
+  const bySizeMap = new Map(); // size → { attempts, wins, users:Set }
+  const solveB = new Map();    // 10s bucket → count
+  const reviewB = new Map();
+  const perUserActivity = new Map(); // user → { attempts, days:Set }
+
+  for (const r of rows) {
+    attemptsAll++;
+    if (r.success) winsAll++;
+    usersAll.add(r.user_id);
+
+    let d = byDay.get(r.day);
+    if (!d) { d = { attempts: 0, users: new Set() }; byDay.set(r.day, d); }
+    d.attempts++; d.users.add(r.user_id);
+
+    let s = bySizeMap.get(r.size);
+    if (!s) { s = { attempts: 0, wins: 0, users: new Set() }; bySizeMap.set(r.size, s); }
+    s.attempts++; if (r.success) s.wins++; s.users.add(r.user_id);
+
+    if (r.time_used != null && r.time_used > 0) {
+      const b = Math.min(Math.floor(r.time_used / 10000), 60);
+      solveB.set(b, (solveB.get(b) || 0) + 1);
+    }
+    if (r.review_time != null && r.review_time > 0) {
+      const b = Math.min(Math.floor(r.review_time / 10000), 60);
+      reviewB.set(b, (reviewB.get(b) || 0) + 1);
+    }
+
+    let u = perUserActivity.get(r.user_id);
+    if (!u) { u = { attempts: 0, days: new Set() }; perUserActivity.set(r.user_id, u); }
+    u.attempts++; u.days.add(r.day);
+  }
+
+  const totals = { attempts: attemptsAll, wins: winsAll, users: usersAll.size };
+  const daily = [...byDay.entries()]
+    .map(([day, v]) => ({ day, attempts: v.attempts, users: v.users.size }))
+    .sort((a, b) => (a.day < b.day ? -1 : 1));
+  const bySize = [...bySizeMap.entries()]
+    .map(([size, v]) => ({ size, attempts: v.attempts, wins: v.wins, users: v.users.size }));
+  const solveHist = [...solveB.entries()].map(([bucket, n]) => ({ bucket, n })).sort((a, b) => a.bucket - b.bucket);
+  const reviewHist = [...reviewB.entries()].map(([bucket, n]) => ({ bucket, n })).sort((a, b) => a.bucket - b.bucket);
+
+  // Per-user attempts-per-active-day, binned: "how many users average ~5/day,
+  // ~10/day, …". One sample per user (attempts ÷ distinct active days), so it
+  // counts users, not user-days.
   const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
   const PER_USER_LABELS = ['1–5', '5–10', '10–20', '20–40', '40–80', '80+'];
   const attemptsPerUserDist = PER_USER_LABELS.map(label => ({ label, value: 0 }));
-  for (const u of perUserActivity) {
-    if (!u.days) continue;
-    const rate = u.attempts / u.days;
+  for (const u of perUserActivity.values()) {
+    const rate = u.attempts / u.days.size;
     const i = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
     if (i >= 0) attemptsPerUserDist[i].value += 1;
   }
-
-  const bySize = (await env.DB.prepare(
-    `SELECT size, COUNT(*) AS attempts, COALESCE(SUM(success), 0) AS wins, COUNT(DISTINCT user_id) AS users
-     FROM tsumego_reports WHERE created_at >= ? GROUP BY size`
-  ).bind(since).all()).results || [];
-
-  // 10s buckets, capped at bucket 60 (=600s) so idle outliers fold into the top.
-  const solveHist = (await env.DB.prepare(
-    `SELECT MIN(time_used / 10000, 60) AS bucket, COUNT(*) AS n
-     FROM tsumego_reports WHERE created_at >= ? AND time_used IS NOT NULL AND time_used > 0
-     GROUP BY bucket ORDER BY bucket`
-  ).bind(since).all()).results || [];
-
-  const reviewHist = (await env.DB.prepare(
-    `SELECT MIN(review_time / 10000, 60) AS bucket, COUNT(*) AS n
-     FROM tsumego_reports WHERE created_at >= ? AND review_time IS NOT NULL AND review_time > 0
-     GROUP BY bucket ORDER BY bucket`
-  ).bind(since).all()).results || [];
 
   // Declared-rank histogram on the EGF scale. We fold every server's declaration
   // onto EGF via rank_map.json (EGF is the identity hub), then collapse each user
