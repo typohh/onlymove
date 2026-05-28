@@ -1042,14 +1042,13 @@ async function buildServerStatsPane() {
     summary.textContent = txt.trimEnd();
     pane.append(summary);
 
-    if (data.daily && data.daily.length) {
+    // Distribution of users by their attempts-per-active-day (binned server-side):
+    // how many users average ~5/day, ~10/day, etc. x = attempts/day bin, y = users.
+    if (data.attemptsPerUserDist && data.attemptsPerUserDist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Attempts per user per day';
-        pane.append(h, makeBarList(data.daily.map(d => ({
-            label: d.day.slice(5),
-            value: d.users ? Math.round(d.attempts / d.users * 10) / 10 : 0,
-        }))));
+        h.textContent = 'Users by attempts per day';
+        pane.append(h, makeBarList(data.attemptsPerUserDist.map(b => ({ label: b.label, value: b.value }))));
     }
 
     if (data.solveHist && data.solveHist.length) {

@@ -354,6 +354,23 @@ async function computeServerStats(env) {
      FROM tsumego_reports WHERE created_at >= ? GROUP BY day ORDER BY day`
   ).bind(since).all()).results || [];
 
+  // Per-user attempts-per-active-day, binned into a distribution: "how many
+  // users average ~5/day, ~10/day, …". One sample per user (their attempts ÷
+  // distinct active days over the window), so it counts users, not user-days.
+  const perUserActivity = (await env.DB.prepare(
+    `SELECT COUNT(*) AS attempts, COUNT(DISTINCT substr(created_at, 1, 10)) AS days
+     FROM tsumego_reports WHERE created_at >= ? GROUP BY user_id`
+  ).bind(since).all()).results || [];
+  const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
+  const PER_USER_LABELS = ['1–5', '5–10', '10–20', '20–40', '40–80', '80+'];
+  const attemptsPerUserDist = PER_USER_LABELS.map(label => ({ label, value: 0 }));
+  for (const u of perUserActivity) {
+    if (!u.days) continue;
+    const rate = u.attempts / u.days;
+    const i = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
+    if (i >= 0) attemptsPerUserDist[i].value += 1;
+  }
+
   const bySize = (await env.DB.prepare(
     `SELECT size, COUNT(*) AS attempts, COALESCE(SUM(success), 0) AS wins, COUNT(DISTINCT user_id) AS users
      FROM tsumego_reports WHERE created_at >= ? GROUP BY size`
@@ -426,7 +443,7 @@ async function computeServerStats(env) {
     computedAt: new Date().toISOString(),
     windowDays: 7,
     totals: totals || { attempts: 0, wins: 0, users: 0 },
-    daily, bySize, solveHist, reviewHist, ranks,
+    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, ranks,
   };
 
   await env.DB.prepare(
