@@ -595,6 +595,12 @@ body {
     white-space: nowrap;
 }
 
+/* Secondary (right-hand) count axis: labels hug the left edge of the column. */
+.stats-chart-yaxis-right .y-tick {
+    right: auto;
+    left: 0;
+}
+
 .stats-chart-svg-wrap {
     flex: 1;
     min-width: 0;

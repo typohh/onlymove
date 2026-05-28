@@ -1433,6 +1433,19 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
     const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
 
+    // Number of tsumegos attempted per calendar day, shown as faint bars on a
+    // secondary right axis. Counts are honest activity (no idle-time artifact),
+    // so the ceiling is just a high quantile with headroom; a binge day clips.
+    const countByDay = new Map();
+    for (const p of solving) {
+        const d = new Date(p.t); d.setHours(0, 0, 0, 0);
+        const key = d.getTime();
+        countByDay.set(key, (countByDay.get(key) || 0) + 1);
+    }
+    const countDays = [...countByDay.entries()].map(([k, c]) => ({ t: k + DAY_MS / 2, c })).sort((a, b) => a.t - b.t);
+    const countsSorted = countDays.map(d => d.c).sort((a, b) => a - b);
+    const cMax = Math.max(quantile(countsSorted, 0.95) * 1.15, 1);
+
     const container = document.createElement('div');
     container.className = 'stats-chart';
 
@@ -1460,6 +1473,22 @@ function buildTimeUsageChart(history = state.answerHistory) {
         yaxis.append(tick);
     }
 
+    // Secondary right axis for the daily problem count.
+    const yaxisRight = document.createElement('div');
+    yaxisRight.className = 'stats-chart-yaxis stats-chart-yaxis-right';
+    const spacerR = document.createElement('span');
+    spacerR.className = 'y-spacer';
+    spacerR.textContent = String(Math.round(cMax));
+    yaxisRight.append(spacerR);
+    for (let i = 0; i <= 3; i++) {
+        const v = cMax * (i / 3);
+        const tick = document.createElement('div');
+        tick.className = 'y-tick';
+        tick.style.top = `${(1 - v / cMax) * 100}%`;
+        tick.textContent = String(Math.round(v));
+        yaxisRight.append(tick);
+    }
+
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1471,6 +1500,21 @@ function buildTimeUsageChart(history = state.answerHistory) {
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.setAttribute('role', 'img');
     svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
+
+    // Daily problem-count bars (secondary right axis), drawn first so the grid,
+    // bands, and mean lines all sit on top.
+    const yOfCount = c => H - Math.min(c, cMax) / cMax * H;
+    const barW = Math.max(0.5, Math.min(16, (W / Math.max(1, tSpan / DAY_MS)) * 0.7));
+    for (const d of countDays) {
+        const by = yOfCount(d.c);
+        const rect = document.createElementNS(SVG_NS, 'rect');
+        rect.setAttribute('x', (xOf(d.t) - barW / 2).toFixed(1));
+        rect.setAttribute('y', by.toFixed(1));
+        rect.setAttribute('width', barW.toFixed(1));
+        rect.setAttribute('height', (H - by).toFixed(1));
+        rect.setAttribute('fill', 'rgba(120,140,180,0.30)');
+        svg.appendChild(rect);
+    }
 
     // Horizontal grid at each y-tick.
     for (let i = 0; i <= 4; i++) {
@@ -1552,7 +1596,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const plotMain = document.createElement('div');
     plotMain.className = 'stats-chart-plot-main';
-    plotMain.append(yaxis, svgWrap);
+    plotMain.append(yaxis, svgWrap, yaxisRight);
 
     const xaxis = document.createElement('div');
     xaxis.className = 'stats-chart-xaxis';
@@ -1567,6 +1611,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
         { kind: 'line', color: '#2e9e5b', text: 'Solving' },
         { kind: 'line', color: '#d98a2b', text: 'Reviewing' },
         { kind: 'band', color: 'rgba(128,128,128,0.30)', text: '95% CI (bootstrap)' },
+        { kind: 'band', color: 'rgba(120,140,180,0.55)', text: 'Problems/day' },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
