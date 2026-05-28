@@ -23,6 +23,7 @@ try {
 import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
 import { showDetailedStats, getRecallCandidates } from './model.js';
 import { maybeUploadSchedule } from './notifications.js';
+import { recordShareEvent } from './user-stats.js';
 import { loadSgf, redraw, initializeBoard, getBoardImageBlob } from './board.js';
 import { getTerm } from './i18n.js';
 
@@ -320,6 +321,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (typeof orientation === 'number' && orientation !== 0) {
             shareUrl += `&o=${orientation}`;
         }
+
+        // Record that a share link was generated (fire-and-forget analytics).
+        recordShareEvent({ type: 'create', problemId: tsumegoId });
 
         const showToast = (text, { isError = false, autoDismiss = true } = {}) => {
             const message = document.createElement('div');
@@ -774,6 +778,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // recognize the visual pattern. An explicit ?o=N URL parameter
             // still wins (the share-link contract).
             else {
+                // The user arrived via a shared link — record the open with the
+                // referrer (where the link was clicked from) for analytics.
+                recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
                 const explicitOrientation = orientationParam !== null;
                 const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
                 const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;

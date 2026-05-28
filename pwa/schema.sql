@@ -74,3 +74,21 @@ CREATE TABLE IF NOT EXISTS rank_surveys (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rank_surveys_user ON rank_surveys(user_id);
+
+-- One row per share-link event. event_type is 'create' (user generated a share
+-- link) or 'open' (someone arrived via a shared link). referrer is the client's
+-- document.referrer for opens — "where the link came from", derived from the
+-- navigation's Referer header — and null for creates. country is Cloudflare's
+-- edge geo-IP (request.cf.country), filled server-side. size / problem_id /
+-- user_id may be null for older clients.
+CREATE TABLE IF NOT EXISTS share_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    user_id TEXT,
+    problem_id TEXT,
+    size INTEGER,
+    country TEXT,
+    referrer TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_share_events_problem ON share_events(problem_id);

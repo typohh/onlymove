@@ -34,6 +34,28 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     }
 }
 
+// Fire-and-forget share-link analytics. `type` is 'create' (user generated a
+// link) or 'open' (arrived via a shared link). For opens we pass
+// document.referrer as `referrer` — the server records that plus the edge
+// geo-IP country. Never blocks the UI; failures are swallowed.
+export async function recordShareEvent({ type, problemId = null, referrer = null } = {}) {
+    try {
+        await fetch('/share-event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type,
+                userId: state.userId,
+                problemId,
+                size: state.boardSize,
+                referrer,
+            }),
+        });
+    } catch (error) {
+        console.error('Failed to record share event:', error);
+    }
+}
+
 const getRankInfo = (rating) => {
     const rankValue = rating * TOTAL_RANKS;
     const rankIndex = Math.floor(rankValue);
