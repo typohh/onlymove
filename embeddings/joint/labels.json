@@ -7,9 +7,9 @@
       "auto_mapped_from": 0,
       "auto_mapped_cos": 0.975,
       "positive_i18n": {
-        "zh": "点入防止对方做两眼",
-        "ja": "中に打って二眼を防ぐ",
-        "ko": "안에 두어 두 눈 막기"
+        "zh": "从内部破坏眼形",
+        "ja": "内側から眼形を破る",
+        "ko": "안쪽에서 모양 부수기"
       }
     },
     "1": {
@@ -137,7 +137,7 @@
       }
     },
     "14": {
-      "positive": "extend a single stone in atari",
+      "positive": "extend a single stone under threat",
       "auto_mapped_from": 13,
       "auto_mapped_cos": 0.887,
       "positive_i18n": {
@@ -303,19 +303,19 @@
       "auto_mapped_from": 35,
       "auto_mapped_cos": 0.9151,
       "positive_i18n": {
-        "zh": "挖入遭打吃后连回",
-        "ja": "ワリコミがアタリされた後に繋ぐ",
-        "ko": "끼운 돌이 단수되면 되잇기"
+        "zh": "虎口连接",
+        "ja": "虎口で繋ぐ",
+        "ko": "호구로 잇기"
       }
     },
     "32": {
-      "positive": "solidly connect a hane",
+      "positive": "solidly connect a weak shape",
       "auto_mapped_from": 33,
       "auto_mapped_cos": 0.9055,
       "positive_i18n": {
-        "zh": "扳后实连",
-        "ja": "ハネを固く繋ぐ",
-        "ko": "젖힌 뒤 단단히 잇기"
+        "zh": "把薄形牢牢连接",
+        "ja": "薄い形を固く繋ぐ",
+        "ko": "엷은 모양을 단단히 잇기"
       }
     },
     "33": {
@@ -331,9 +331,9 @@
       "auto_mapped_from": 40,
       "auto_mapped_cos": 0.8706,
       "positive_i18n": {
-        "zh": "一线妙手获得额外一气",
-        "ja": "一線の妙手で手数を稼ぐ",
-        "ko": "1선의 묘수로 수를 버는 한 수"
+        "zh": "妙手长气",
+        "ja": "妙手で手数を稼ぐ",
+        "ko": "묘수로 수 늘리기"
       }
     },
     "35": {
@@ -341,9 +341,9 @@
       "auto_mapped_from": 36,
       "auto_mapped_cos": 0.9278,
       "positive_i18n": {
-        "zh": "走一目逆先手官子",
-        "ja": "一目の逆ヨセを打つ",
-        "ko": "1집짜리 역끝내기"
+        "zh": "走逆先手",
+        "ja": "逆先手を打つ",
+        "ko": "역선수 두기"
       }
     },
     "36": {
