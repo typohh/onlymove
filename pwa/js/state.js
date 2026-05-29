@@ -108,15 +108,16 @@ const DEFAULT_BOARD_SIZE = 9;
 // unchanged the runtime length-guards can't detect the switch, so stored params
 // must be dropped explicitly and retrained from scratch on next load.
 //
-// v4: the stability form changed from S = c·e^z (over-disperses difficulty, and
-// LN_C was pinned to the floor by L2) to the bounded S = c·σ(z)·e^{β_r·r} with
-// LN_C unregularized. The v3 fit collapsed every repeat to the ~18h floor, so it
-// must be discarded too — bump the flag to re-wipe clients that already ran v3.
-(function resetRecallModelForRetention_v4() {
-    if (localStorage.getItem('recallRetentionModelMigrated_v4')) return;
+// v5: stability is now S = exp(LN_C)·odds(p/0.7)^κ·1.54^r — the cold-solve logit
+// z=logit(p) (difficulty+review+time) mapped LINEARLY with a population-fit slope
+// κ, growth ×1.54/success, and only the per-user base LN_C fit (shrunk to a
+// population prior). Replaces the bounded-σ form whose hard-side ln σ(z)≈z tail
+// collapsed hard problems to the 18h floor. Re-wipe so the new params train.
+(function resetRecallModelForRetention_v5() {
+    if (localStorage.getItem('recallRetentionModelMigrated_v5')) return;
     localStorage.removeItem('modelParams');
     localStorage.removeItem('adamState');
-    localStorage.setItem('recallRetentionModelMigrated_v4', 'true');
+    localStorage.setItem('recallRetentionModelMigrated_v5', 'true');
 })();
 
 // --- Board size + per-size backing buckets ---

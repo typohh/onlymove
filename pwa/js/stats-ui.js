@@ -85,7 +85,7 @@ export async function showDetailedStats() {
         if (varCovarMatrix) {
             const repeatRanks = merged.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
             const repRank = repeatRanks.length ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length : 0;
-            const firsttimeFailureTime = freshFailureReviewHours(finalParams, { problemRank: repRank, size: state.boardSize });
+            const firsttimeFailureTime = freshFailureReviewHours(finalParams, { problemRank: repRank, size: state.boardSize, userRank: state.userRank });
 
             if (firsttimeFailureTime !== null) {
                 const allRepeats = getRecallCandidates({

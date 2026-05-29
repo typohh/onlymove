@@ -53,46 +53,45 @@ export function calculatePercentile(sortedArr, target) {
 }
 
 // --- Retention/stability model ----------------------------------------------
-// Recall is an FSRS-style retention curve anchored at R(0)=1, NOT a logit on
-// population correctness (the old additive `base + βR·log(...)` form let a
-// problem's difficulty offset the curve downward so it could be "due" the
-// instant it was solved). A REPEAT encounter's memory stability S (days) is:
+// Recall is an FSRS-style retention curve anchored at R(0)=1. A REPEAT
+// encounter's memory stability S (days) reads the base model's cold-solve logit
+// z = logit(p) — which already integrates difficulty, review-time and
+// solving-time — and maps it to stability:
 //
-//   z   = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
-//         + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13   (the cold-solve logit)
-//   S   = c · σ(z) · exp(SUCCESS_SINCE_FAILURE·r),   c = exp(LN_C)
-//   R(t)= exp(-t_days / S)
+//   z    = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
+//          + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13      (= logit p)
+//   lnS  = LN_C + KAPPA·(z − Z0) + GROWTH·r
+//   R(t) = exp(-t_days / exp(lnS))
 //
-// so R(0)=1 always (no instant-due) and difficulty scales the time-constant
-// multiplicatively, exactly the FSRS picture. Crucially S uses σ(z) (BOUNDED in
-// (0,1)), NOT raw e^z: cold-solve difficulty must only mildly move stability
-// (σ spans ~[0.6,0.95] over eligible sub-rank problems, ≈1.5×), because a
-// problem you find a little harder to *solve cold* is not forgotten 10-20×
-// faster. Using e^z over-disperses S so the lower-z problems collapse to the
-// floor and cycle every ~18h while you still recall them perfectly — the bug
-// this form fixes. Geometric review growth comes from r (S ×e^{β_r} per
-// consecutive success, unbounded), a lapse resets r→0 (post-lapse reset), and
-// `c` (LN_C) is the free, data-driven base-stability level — it is NOT L2-
-// regularized (see trainUserModel) and is seeded to a sane base for cold start,
-// so it can't be pinned down to the floor by a prior.
+// i.e. S = exp(LN_C) · odds(p/0.7)^KAPPA · GROWTH_FACTOR^r. R(0)=1 (no instant-
+// due), and z enters LINEARLY (NOT through ln σ(z), whose `≈z` hard-side tail
+// collapsed hard problems to the floor). KAPPA, GROWTH and Z0 are POPULATION
+// constants fit across 88 users on recall-era, post-first-observed-failure
+// events (the only data where the elapsed gap is a true retention interval and
+// the success-count r is established): difficulty/skill drives stability with
+// slope KAPPA (LR≈148, decisive), each success multiplies S by GROWTH_FACTOR,
+// and Z0=logit(0.7) is the reference difficulty so LN_C is the base stability at
+// p=0.7. Only LN_C — the per-user base durability — is fit; it is L2-shrunk to
+// the population prior so it stays sane with little data and adapts with more.
 //
-// The SAME logit z feeds the NOVEL-encounter cold-solve head P = σ(z); that head
-// trains PROBLEM_DIFFICULTY / TIME_SOLVING / SIZE_IS_13 and backs the stats
-// readouts. REVIEW_TIME / SUCCESS_SINCE_FAILURE / LN_C are identified purely
-// from repeat rows. There is no IS_NOVEL indicator: the regime is carried by
-// which head a row enters (a 1-on-every-novel-row indicator is collinear with
-// the intercept).
+// The same logit z is the NOVEL cold-solve head P=σ(z); that head is trained on
+// correctness over ALL rows (so REVIEW_TIME, which is 0 on novel rows, is still
+// identified from repeats) and backs the stats readouts. The retention head
+// reads z but does NOT backprop into the logit params (z is owned by the
+// correctness head); it only fits LN_C. No IS_NOVEL indicator.
 const NEG_LN_080 = -Math.log(0.80); // 0.22314 — t/S at the 0.80 window-open
 const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
-// Stability floor/ceiling (days). The floor keeps a just-failed problem from
-// coming due sooner than ~18h (NEG_LN_080·MIN ≈ 18h window-open); the ceiling
-// guards against runaway intervals/overflow.
+// Stability floor/ceiling (days). Floor keeps a just-failed problem from coming
+// due sooner than ~18h; ceiling guards against runaway intervals/overflow.
 const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
 const MAX_STABILITY_DAYS = 365;
-// Cold-start base stability level: c = e^{LN_C}. Seeded so a fresh (untrained)
-// model schedules first repeats at a sane ~2-3 days rather than the floor; the
-// retention data then moves it per-user (LN_C is unregularized).
-const LN_C_INIT = Math.log(10);
+// Population constants (clean recall-era fit, n=5787 events / 88 users).
+const KAPPA = 4.22;               // stability's sensitivity to the cold-solve logit
+const GROWTH = Math.log(1.54);    // log stability growth per consecutive success (×1.54)
+const Z0 = Math.log(0.7 / 0.3);   // reference difficulty: LN_C is the base S at p=0.7
+// Per-user base log-stability prior c≈4.7d (≈25h first-repeat for a new user);
+// LN_C is L2-shrunk to this (via L2_REGULARIZATION_TARGETS) and moves with data.
+const LN_C_PRIOR = 1.55;
 // Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
 // overflow without flattening the gradient where the model still needs to learn.
 const LN_S_TRAIN_MIN = -5;
@@ -100,9 +99,8 @@ const LN_S_TRAIN_MAX = 8;
 
 function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
 
-// Shared cold-solve logit z over the logit features only (excludes the
-// retention-only LN_C / SUCCESS_SINCE_FAILURE). Reads MODEL_INDICES at call time
-// (it is defined later in the module).
+// Cold-solve logit z over the logit features only (excludes the retention-only
+// SUCCESS_SINCE_FAILURE / LN_C). Reads MODEL_INDICES at call time (defined below).
 function logitZ(features, params) {
     const M = MODEL_INDICES;
     return params[M.INTERCEPT] * features[M.INTERCEPT]
@@ -113,14 +111,23 @@ function logitZ(features, params) {
 }
 
 // Shared feature vector. `isRepeat` toggles the retention-only features
-// (LN_C, SUCCESS_SINCE_FAILURE carry signal only on repeats); for prediction
+// (SUCCESS_SINCE_FAILURE carries r; LN_C the per-user base). For prediction
 // `timePct` defaults to the neutral 0.5.
-function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0 }) {
+//
+// PROBLEM_DIFFICULTY is the RELATIVE difficulty problemRank − userRank (both
+// normalized 0..1), not the absolute rank: solve probability and retention
+// depend on how hard a problem is *for this user*. Feeding the delta makes that
+// explicit (and robust at cold start) rather than relying on the per-user
+// INTERCEPT to absorb userRank. `userRank` defaults to the active shared rank;
+// historical training rows approximate it with the current rank (not stored
+// per-attempt). When userRank is unknown (very early), falls back to absolute.
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0, userRank }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
+    const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : 0);
     f[MODEL_INDICES.INTERCEPT] = 1;
     f[MODEL_INDICES.TIME_SOLVING] = timePct;
     f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
-    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = problemRank ?? 0;
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = (problemRank ?? 0) - uRank;
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
     f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
@@ -131,13 +138,12 @@ function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0
     return f;
 }
 
-// Unclamped log-stability for a repeat feature row: lnS = LN_C + ln σ(z) + β_r·r.
+// Unclamped log-stability for a repeat feature row: lnS = LN_C + KAPPA·(z−Z0) + GROWTH·r.
 function lnStabilityForRepeat(features, params) {
     const M = MODEL_INDICES;
-    const p = Math.max(1e-6, Math.min(1 - 1e-6, sigmoid(logitZ(features, params))));
-    return params[M.LN_C] * features[M.LN_C]
-         + Math.log(p)
-         + params[M.SUCCESS_SINCE_FAILURE] * features[M.SUCCESS_SINCE_FAILURE];
+    return params[M.LN_C]
+         + KAPPA * (logitZ(features, params) - Z0)
+         + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
 }
 
 // Clamped stability (days) for scheduling/prediction.
@@ -150,9 +156,9 @@ function stabilityDaysForRepeat(features, params) {
 // Window-open delay (hours) for a just-failed (r=0, no prior review) repeat at a
 // representative difficulty — the stats panel's "a missed problem comes back in
 // ~X h" readout. Returns null when params aren't ready.
-export function freshFailureReviewHours(params, { problemRank = 0, size } = {}) {
+export function freshFailureReviewHours(params, { problemRank = 0, size, userRank } = {}) {
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
-    const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0 }), params);
+    const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0, userRank }), params);
     return NEG_LN_080 * S * 24;
 }
 
@@ -166,48 +172,45 @@ function featuresForTrainingRow(td, i) {
         problemRank: p.problemRank,
         size: p.size,
         r: p.successSinceFailure || 0,
+        userRank: state.userRank,   // current rank approximates the rank at attempt time
     });
 }
 
-// Per-row likelihood pieces under the dual-head model. Returns the predicted
-// probability, the loss, the scalar dLoss/dη (η = z for novel rows, lnS for
-// repeat rows), the score-direction vector v = dη/dparams, and the Bernoulli
-// Fisher weight. The training gradient for a row is dScalar·v and its Fisher
-// contribution is fisherW·v·vᵀ — one shared v for both.
+// Per-row loss + gradient under the two-head model. EVERY row contributes a
+// logistic (cold-solve correctness) term that trains the logit params; REPEAT
+// rows additionally contribute a retention term that trains LN_C only (z is read
+// but treated as constant — the correctness head owns it). `pLogistic` is
+// returned for the Fisher/SE computation. Gradient is the full param vector.
 function predictAndGrad(features, params, { isRepeat, elapsedDays, y }) {
     const M = MODEL_INDICES;
-    const n = features.length;
-    if (!isRepeat) {
-        const p = sigmoid(logitZ(features, params));
-        const clipped = Math.max(1e-15, Math.min(1 - 1e-15, p));
-        const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
-        // η = z, dη/dparams = features (retention-only entries are 0 here).
-        return { p, loss, dScalar: p - y, v: features, fisherW: p * (1 - p) };
+    const np = params.length;
+    const grad = new Array(np).fill(0);
+
+    // Logistic correctness head (all rows).
+    const z = logitZ(features, params);
+    const pL = sigmoid(z);
+    const pc = Math.max(1e-15, Math.min(1 - 1e-15, pL));
+    let loss = -y * Math.log(pc) - (1 - y) * Math.log(1 - pc);
+    const eL = pL - y;
+    grad[M.INTERCEPT] += eL * features[M.INTERCEPT];
+    grad[M.TIME_SOLVING] += eL * features[M.TIME_SOLVING];
+    grad[M.REVIEW_TIME] += eL * features[M.REVIEW_TIME];
+    grad[M.PROBLEM_DIFFICULTY] += eL * features[M.PROBLEM_DIFFICULTY];
+    grad[M.SIZE_IS_13] += eL * features[M.SIZE_IS_13];
+
+    // Retention head (repeat rows): fits LN_C only; z is stop-gradient.
+    if (isRepeat) {
+        let lnS = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
+        lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnS));
+        const S = Math.exp(lnS);
+        const u = elapsedDays / S;          // ≥ 0; u=0 ⇒ R=1 (just solved)
+        const R = Math.exp(-u);
+        const Rc = Math.max(1e-15, Math.min(1 - 1e-15, R));
+        loss += -y * Math.log(Rc) - (1 - y) * Math.log(1 - Rc);
+        const oneMinusR = Math.max(1 - R, 1e-9);
+        grad[M.LN_C] += (R - y) * u / oneMinusR;   // dlnS/dLN_C = 1
     }
-    const p = Math.max(1e-6, Math.min(1 - 1e-6, sigmoid(logitZ(features, params))));
-    let lnS = params[M.LN_C] * features[M.LN_C]
-            + Math.log(p)
-            + params[M.SUCCESS_SINCE_FAILURE] * features[M.SUCCESS_SINCE_FAILURE];
-    lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnS));
-    const S = Math.exp(lnS);
-    const u = elapsedDays / S;              // ≥ 0; u=0 ⇒ R=1 (just solved)
-    const R = Math.exp(-u);
-    const clipped = Math.max(1e-15, Math.min(1 - 1e-15, R));
-    const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
-    // dR/dlnS = R·u ⇒ dLoss/dlnS = (R-y)·u/(1-R); Fisher = (R·u)²/(R(1-R)).
-    const oneMinusR = Math.max(1 - R, 1e-9);
-    // v = dlnS/dparams: logit features chain through d(ln σ(z))/dz = (1-p);
-    // LN_C and SUCCESS_SINCE_FAILURE enter lnS linearly via their features.
-    const oneMinusP = 1 - p;
-    const v = new Array(n).fill(0);
-    v[M.INTERCEPT] = oneMinusP * features[M.INTERCEPT];
-    v[M.TIME_SOLVING] = oneMinusP * features[M.TIME_SOLVING];
-    v[M.REVIEW_TIME] = oneMinusP * features[M.REVIEW_TIME];
-    v[M.PROBLEM_DIFFICULTY] = oneMinusP * features[M.PROBLEM_DIFFICULTY];
-    v[M.SIZE_IS_13] = oneMinusP * features[M.SIZE_IS_13];
-    v[M.SUCCESS_SINCE_FAILURE] = features[M.SUCCESS_SINCE_FAILURE];
-    v[M.LN_C] = features[M.LN_C];
-    return { p: R, loss, dScalar: (R - y) * u / oneMinusR, v, fisherW: R * u * u / oneMinusR };
+    return { loss, grad, pLogistic: pL };
 }
 
 
@@ -268,6 +271,7 @@ export function getRecallCandidates(options = {}) {
             problemRank: lastAnswer.problemRank,
             size: lastAnswer.size,
             r: lastAnswer.successSinceFailure || 0,
+            userRank: state.userRank,
         }), params);
 
         const tDays = (now - lastAnswer.date) / DAY_MS;
@@ -354,6 +358,7 @@ export function buildRecallSchedule(size) {
             problemRank: lastAnswer.problemRank,
             size,
             r: lastAnswer.successSinceFailure || 0,
+            userRank,
         }), params);
         if (!isFinite(S)) continue;
 
@@ -388,24 +393,29 @@ export const MODEL_INDICES = {
     // internal-rank difficulty. Its coefficient → ranks is the stats panel's
     // "stronger/weaker on 13x13" readout.
     SIZE_IS_13: 4,
-    // Retention-only (zero on novel rows). Each consecutive success adds this to
-    // lnS, i.e. multiplies memory stability by e^{coeff} (FSRS geometric SInc).
+    // Feature slot only: holds the success-since-failure count r, consumed by the
+    // retention head as the fixed population growth GROWTH·r. It has no fitted
+    // coefficient (growth is a population constant, not per-user).
     SUCCESS_SINCE_FAILURE: 5,
-    // Retention-only, unregularized: ln of the base-stability scale c, so
-    // S = c·σ(z)·e^{SUCCESS_SINCE_FAILURE·r}. Only the repeat head sees it.
+    // Per-user base log-stability (S at p=0.7). The only retention parameter that
+    // is fit; L2-shrunk to LN_C_PRIOR (see trainUserModel).
     LN_C: 6,
 };
 
 const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
-    [MODEL_INDICES.PROBLEM_DIFFICULTY]: -10,
+    // Empirical in-band cold-solve slope (success barely falls across the served
+    // near-rank band); the old -10 made σ(z) think the user's problems were
+    // p≈0.07 and collapsed the recall curve.
+    [MODEL_INDICES.PROBLEM_DIFFICULTY]: -1.5,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
     [MODEL_INDICES.SIZE_IS_13]: 0,
-    // Prior: each consecutive success ~doubles stability (ln 2 ≈ 0.69).
-    [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: Math.log(2),
-    // LN_C is intentionally absent — it is unregularized (see trainUserModel) so
-    // the base-stability level tracks the user's true retention.
+    // SUCCESS_SINCE_FAILURE carries no fitted coefficient (growth is constant) —
+    // shrink its unused slot to 0.
+    [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: 0,
+    // Per-user base log-stability, shrunk to the population prior.
+    [MODEL_INDICES.LN_C]: LN_C_PRIOR,
 };
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
@@ -456,10 +466,10 @@ export async function calculateAndStoreStatsResults() {
         if (state.modelParams && state.modelParams.length === numParams) {
             params = [...state.modelParams];
         } else {
-            // Fresh start: seed the base-stability level so first repeats schedule
-            // at a sane interval instead of the floor while LN_C is still untrained.
+            // Fresh start: seed the base-stability level at the population prior
+            // so first repeats schedule sanely (~25h) while LN_C is untrained.
             params = Array(numParams).fill(0);
-            params[MODEL_INDICES.LN_C] = LN_C_INIT;
+            params[MODEL_INDICES.LN_C] = LN_C_PRIOR;
         }
 
         let adamState = (state.adamState && state.adamState.m.length === numParams)
@@ -567,16 +577,14 @@ async function trainUserModel(trainingData, modelState) {
         let currentLoss = 0;
 
         for (let i = 0; i < n; i++) {
-            const { loss, dScalar, v } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+            const { loss, grad } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
             currentLoss += weights[i] * loss;
-            const error = weights[i] * dScalar;
-            for (let j = 0; j < numFeatures; j++) gradient[j] += error * v[j];
+            for (let j = 0; j < numFeatures; j++) gradient[j] += weights[i] * grad[j];
         }
 
-        // INTERCEPT (logit level) and LN_C (free base-stability level) are not
-        // regularized — LN_C must be free to track the user's true retention,
-        // not pinned to a prior that would collapse S to the floor.
-        const isUnregularized = (j) => j === MODEL_INDICES.INTERCEPT || j === MODEL_INDICES.LN_C;
+        // INTERCEPT (logit level) is the only unregularized parameter; LN_C is
+        // shrunk to its population prior (LN_C_PRIOR) via L2 like the others.
+        const isUnregularized = (j) => j === MODEL_INDICES.INTERCEPT;
 
         let l2_penalty = 0;
         for (let j = 0; j < params.length; j++) {
@@ -609,22 +617,27 @@ async function trainUserModel(trainingData, modelState) {
 export function calculateResultsAndStdErrors(finalParams, trainingData) {
     const { elapsedDays, isRepeatArr, weights, y, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
 
+    const M = MODEL_INDICES;
+    const np = Object.keys(M).length;
     const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
 
-    // Fisher info I = Σ wᵢ·fisherWᵢ·vᵢ·vᵢᵀ, where vᵢ is the per-row score
-    // direction dη/dparams (= features for logistic novel rows, but chained
-    // through (1-p) on the logit features for retention repeat rows) and
-    // fisherW is the Bernoulli weight (p(1-p) novel, R·u²/(1-R) repeat).
-    const V = [], fisherWeights = [];
-    for (let i = 0; i < n; i++) {
-        const { v, fisherW } = predictAndGrad(X[i], finalParams, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
-        V.push(Array.from(v));
-        fisherWeights.push(weights[i] * fisherW);
-    }
-    const V_matrix = math.matrix(V);
-    const W = math.diag(fisherWeights);
-    const Vt = math.transpose(V_matrix);
-    const fisherInfo = math.add(math.multiply(Vt, W, V_matrix), math.diag(Array(V[0].length).fill(1e-6)));
+    // SE for the cold-solve logit coefficients (the only results the stats panel
+    // reads) come from the logistic head's Fisher info: I = Σ wᵢ·p(1-p)·xᵢ·xᵢᵀ
+    // over the LOGIT features only (SUCCESS_SINCE_FAILURE / LN_C don't enter the
+    // logistic, so their design columns are zeroed; the +1e-6 ridge keeps the
+    // matrix invertible and just yields large, unused SE for those slots).
+    const logitIdx = [M.INTERCEPT, M.TIME_SOLVING, M.REVIEW_TIME, M.PROBLEM_DIFFICULTY, M.SIZE_IS_13];
+    const D = X.map(xi => {
+        const row = new Array(np).fill(0);
+        for (const j of logitIdx) row[j] = xi[j];
+        return row;
+    });
+    const W = math.diag(X.map((xi, i) => {
+        const p = sigmoid(logitZ(xi, finalParams));
+        return weights[i] * p * (1 - p);
+    }));
+    const Dm = math.matrix(D);
+    const fisherInfo = math.add(math.multiply(math.transpose(Dm), W, Dm), math.diag(Array(np).fill(1e-6)));
     const varCovarMatrix = math.inv(fisherInfo);
     const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt).toArray();
 
