@@ -28,10 +28,12 @@ The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shippe
 ├── dist/                    # Build output (auto-generated, gitignored)
 ├── js/                      # Front-end source modules
 │   ├── main.js              # Entry point, event wiring, mode switching
+│   ├── migrations.js        # One-shot answerHistory-shape migrations (runMigrations)
 │   ├── game-logic.js        # Solving-mode click handling and correctness checks
 │   ├── analysis.js          # Analysis-mode logic
 │   ├── problem-loader.js    # Zip loading, candidate selection, recall fallback
-│   ├── model.js             # Per-user logistic-regression recall/stats model
+│   ├── model.js             # Per-user logistic-regression recall model + stats computation
+│   ├── stats-ui.js          # Detailed-stats modal: tabbed panes + SVG charts
 │   ├── user-stats.js        # Rank tracking and attempt reporting
 │   ├── board.js             # WGo.js abstraction layer
 │   ├── state.js             # Centralized state with setter functions
@@ -42,6 +44,8 @@ The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shippe
 │   ├── audio.js              # UI sounds
 │   ├── i18n.js              # Localization
 │   └── constants.js         # Shared constants (incl. APP_MODES)
+├── shared/
+│   └── rank-math.js         # Rank interp/label helpers shared by worker + client
 ├── src/
 │   └── index.js             # Cloudflare Worker entry: /report + SPA fallback
 ├── lib/                     # Bundled third-party libs (WGo.js, JSZip)
