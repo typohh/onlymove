@@ -13,7 +13,13 @@ registerAcceptClicksHook(maybeShowRankSurvey);
 
 try {
     // Initialize Sentry
-    Sentry.init({ dsn: 'https://50b747ee522c1bc41c8243563ce7adc1@o4510091105665024.ingest.de.sentry.io/4510091110187088' });
+    Sentry.init({
+        dsn: 'https://50b747ee522c1bc41c8243563ce7adc1@o4510091105665024.ingest.de.sentry.io/4510091110187088',
+        // Tag every event with the build version (the same git-hash string the
+        // Worker stamps on X-App-Version), so errors bucket by deploy. APP_VERSION
+        // is substituted at build time by esbuild's `define`.
+        release: APP_VERSION,
+    });
     window.Sentry = Sentry; // Make Sentry globally available
     Sentry.setUser({ id: state.userId });
 } catch (error) {
@@ -104,6 +110,64 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 
         modal.appendChild(title);
         modal.appendChild(buttonRow);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    });
+}
+
+/**
+ * Custom Yes/Cancel confirmation dialog. Replaces the native blocking
+ * `confirm()` (which is janky in an installed PWA and inconsistent with the
+ * app's other custom overlays). Resolves to true on confirm, false on
+ * cancel/backdrop. Reuses the shared #ios-install-overlay/#ios-install-modal
+ * styling.
+ */
+function showConfirm(message) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            overlay.remove();
+            resolve(result);
+        };
+
+        const overlay = document.createElement('div');
+        overlay.id = 'ios-install-overlay';
+
+        const modal = document.createElement('div');
+        modal.id = 'ios-install-modal';
+
+        const text = document.createElement('div');
+        text.id = 'ios-install-title';
+        text.textContent = message;
+        modal.appendChild(text);
+
+        const buttonRow = document.createElement('div');
+        buttonRow.style.display = 'flex';
+        buttonRow.style.gap = '1.5vmin';
+        buttonRow.style.justifyContent = 'center';
+        buttonRow.style.marginTop = '1vmin';
+
+        for (const [label, result] of [[getTerm('confirmNo'), false], [getTerm('confirmYes'), true]]) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = label;
+            // .btn stretches full-width in the landscape side panel; size to
+            // content here like the other dialog buttons.
+            btn.style.flex = '0 0 auto';
+            btn.style.width = 'auto';
+            btn.style.minWidth = '6em';
+            btn.style.borderRadius = 'var(--radius)';
+            btn.addEventListener('click', () => finish(result));
+            buttonRow.appendChild(btn);
+        }
+        modal.appendChild(buttonRow);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) finish(false);
+        });
+
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
     });
@@ -516,8 +580,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Ignore is reachable from the analysis-mode hamburger menu.
-    const performIgnore = () => {
-        if (!confirm(getTerm('ignoreConfirm'))) return;
+    const performIgnore = async () => {
+        if (!await showConfirm(getTerm('ignoreConfirm'))) return;
         const problem = state.problemHistory[1];
         if (!problem) return;
 
