@@ -813,6 +813,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // opted in.
     maybeUploadSchedule();
 
+    // Heartbeat: keep the server's schedule — and its updated_at watermark,
+    // which the cron uses to suppress reminders for active users — fresh during
+    // a long session without re-uploading on every attempt. uploadSchedule()
+    // self-throttles and skips when the (hourly-resolution) schedule is
+    // unchanged, so this writes at most ~twice an hour and only when something
+    // actually moved. Gated to a visible tab: a backgrounded tab shouldn't keep
+    // marking the user "active" (let suppression lapse so they can be reminded).
+    setInterval(() => {
+        if (document.visibilityState === 'visible') maybeUploadSchedule();
+    }, 30 * 60 * 1000);
+
 
 
     const resumeOverlay = document.getElementById('resume-overlay');
@@ -857,6 +868,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
             resumeOverlay.className = 'resume-overlay';
+            // The user is leaving — persist the freshest schedule now (keepalive
+            // lets it land through teardown). Skips if unchanged since the last
+            // upload; this is the main replacement for the per-attempt upload.
+            maybeUploadSchedule();
         } else if (document.visibilityState === 'visible') {
             resumeOverlay.className = 'resume-overlay-hidden';
             

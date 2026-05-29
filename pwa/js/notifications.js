@@ -106,8 +106,9 @@ export async function enableNotifications() {
     });
 
     // Push the current recall schedule right away so the cron has something
-    // to fire on without waiting for the next attempt.
-    uploadSchedule();
+    // to fire on without waiting for the next attempt. Force past the
+    // unchanged/throttle guards — the user just opted in, so persist now.
+    uploadSchedule({ force: true });
 
     return { ok: true, permission: 'granted' };
 }
@@ -127,6 +128,31 @@ export async function disableNotifications() {
 }
 
 let pendingUpload = false;
+// Session-scoped (in-memory, reset on reload) dedup state. Each upload does a
+// full replace-all on the server (N row-writes), so we avoid re-POSTing when
+// the schedule hasn't materially moved. On a fresh load the fingerprint is
+// null, so the first call always uploads — re-establishing the server's rows
+// and stamping a fresh updated_at ("active now") for that session.
+let lastUploadFingerprint = null;
+let lastUploadAt = 0;
+// Unchanged uploads are gated to at most once per this interval. Changed
+// schedules always upload. The gap lets the heartbeat (see main.js) refresh
+// the server's updated_at watermark on long idle-but-open sessions without
+// spamming writes; kept under the heartbeat interval so a 30-min heartbeat
+// always clears it.
+const UNCHANGED_UPLOAD_THROTTLE_MS = 20 * 60 * 1000;
+
+// Canonical, hourly-resolution fingerprint of a schedule. The recall cron runs
+// hourly, so sub-hour drift in enter/exit (from per-attempt model retrains) is
+// invisible to it — rounding to the hour lets us treat those as "unchanged"
+// and skip the write.
+function fingerprintSchedule(schedule) {
+    const HOUR_MS = 3600 * 1000;
+    return schedule
+        .map(r => `${r.problemId}:${Math.round(r.enterAt / HOUR_MS)}:${Math.round(r.exitAt / HOUR_MS)}`)
+        .sort()
+        .join('|');
+}
 
 // Computes the recall schedule across both board sizes and POSTs it to the
 // Worker. Idempotent — replace-all semantics on the server side, so calling
@@ -137,7 +163,14 @@ let pendingUpload = false;
 // array as "delete every row for this user", so a transient empty result
 // (e.g. recent slice happens to contain only high-streak successes) would
 // wipe a previously-good schedule and silently disable reminders.
-export async function uploadSchedule() {
+//
+// Also skips when the schedule is unchanged (hourly fingerprint) and a recent
+// upload already covers it — unless `force` is set or it's been long enough to
+// warrant refreshing updated_at. This is what keeps active-session write volume
+// down: an active user is suppressed by the cron anyway, so the schedule only
+// needs to reach the server fresh once they go idle (see the hidden-tab and
+// heartbeat triggers in main.js).
+export async function uploadSchedule({ force = false } = {}) {
     if (pendingUpload) return;
     pendingUpload = true;
     try {
@@ -148,11 +181,22 @@ export async function uploadSchedule() {
             }
         }
         if (schedule.length === 0) return;
+
+        const fingerprint = fingerprintSchedule(schedule);
+        const changed = fingerprint !== lastUploadFingerprint;
+        const sinceLast = Date.now() - lastUploadAt;
+        if (!force && !changed && sinceLast < UNCHANGED_UPLOAD_THROTTLE_MS) return;
+
         await fetch('/schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: state.userId, schedule }),
+            // Let the request outlive a page being hidden/torn down so the
+            // visibilitychange-time upload in main.js actually lands.
+            keepalive: true,
         });
+        lastUploadFingerprint = fingerprint;
+        lastUploadAt = Date.now();
     } catch (err) {
         console.warn('Schedule upload failed:', err);
     } finally {
@@ -162,9 +206,9 @@ export async function uploadSchedule() {
 
 // Uploads the schedule only if the user already has notifications enabled.
 // Avoids pinging the Worker for users who never opted in.
-export async function maybeUploadSchedule() {
+export async function maybeUploadSchedule(opts) {
     if (notificationPermission() !== 'granted') return;
     const sub = await getCurrentSubscription();
     if (!sub) return;
-    return uploadSchedule();
+    return uploadSchedule(opts);
 }

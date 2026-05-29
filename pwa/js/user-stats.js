@@ -5,7 +5,6 @@ import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
-import { maybeUploadSchedule } from './notifications.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     try {
@@ -195,10 +194,10 @@ export function updateUserStats(isCorrect, {
 
     setTimeout(calculateAndStoreStatsResults, 1000); // a bit crude, but animations should be completed in 1 second.
     setTimeout(trainWeakness, 1100);  // run shortly after the recall model so they don't compete for the main thread
-    // After the recall model retrains, push the updated schedule so the
-    // notification cron has fresh enter/exit timestamps. No-op for users
-    // who haven't enabled notifications.
-    setTimeout(maybeUploadSchedule, 1200);
+    // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
+    // active user is suppressed by the cron anyway, so per-attempt replace-all
+    // writes were pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
+    // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
     return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
 }
