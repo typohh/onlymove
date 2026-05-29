@@ -114,7 +114,12 @@ async function patchHtmlAfterBuild(metafile, version) {
 const esbuildOptions = (version) => ({
     entryPoints: ['js/main.js', 'style.css'],
     bundle: true,
-    minify: false,
+    // Minify the shipped bundle (mobile-first; the client bundle is ~1 MB
+    // unminified) but emit external source maps so Sentry stack traces and
+    // the in-app debug-log viewer still resolve to readable source. The .map
+    // files are copied to dist/assets and served as ordinary static assets.
+    minify: true,
+    sourcemap: true,
     format: 'esm',
     outdir: `${DIST_DIR}/assets`,
     entryNames: '[name].[hash]',
