@@ -366,6 +366,14 @@ async function computeServerStats(env) {
   const userSolve = new Map();   // user → number[] of time_used (ms)
   const userReview = new Map();  // user → Map<problem, { t, at }> last cumulative review_time
   const perUserActivity = new Map(); // user → { attempts, days:Set }
+  // Recall time: how soon a user comes back to a problem they FAILED. Collect
+  // each (user, problem)'s attempt timeline; below we measure the gap from a
+  // failure to the very next attempt on that problem (the "first recall after a
+  // failure"). Recalls following a SUCCESS are excluded — their interval is set
+  // by the spaced-repetition schedule (it lengthens with each success), so it
+  // isn't comparable across users; restricting to post-failure recalls
+  // standardizes the measure.
+  const userProblemSeq = new Map(); // user → Map<problem, [{ t, success }]>
 
   for (const r of rows) {
     attemptsAll++;
@@ -395,6 +403,15 @@ async function computeServerStats(env) {
     let u = perUserActivity.get(r.user_id);
     if (!u) { u = { attempts: 0, days: new Set() }; perUserActivity.set(r.user_id, u); }
     u.attempts++; u.days.add(r.day);
+
+    const ts = Date.parse(r.created_at);
+    if (Number.isFinite(ts)) {
+      let pm = userProblemSeq.get(r.user_id);
+      if (!pm) { pm = new Map(); userProblemSeq.set(r.user_id, pm); }
+      let seq = pm.get(r.problem);
+      if (!seq) { seq = []; pm.set(r.problem, seq); }
+      seq.push({ t: ts, success: !!r.success });
+    }
   }
 
   // Per-user median time → 10s bucket; the histogram then counts USERS per
@@ -419,6 +436,38 @@ async function computeServerStats(env) {
     if (med == null) continue;
     const b = timeBucket(med);
     reviewB.set(b, (reviewB.get(b) || 0) + 1);
+  }
+
+  // Recall time, one sample per user: the SHORTEST failure→next-attempt gap
+  // across all their problems. Pre-binned server-side (the spans run minutes to
+  // days, so the 10s solving/review buckets don't apply) and rendered with
+  // makeBarList like attemptsPerUserDist. Only gaps where the earlier attempt
+  // FAILED count (see userProblemSeq note); the 7-day window naturally bounds
+  // how long a gap we can observe, which is fine since we take the minimum.
+  const RECALL_BINS = [
+    { hi: 10 * 60e3, label: '<10m' },
+    { hi: 60 * 60e3, label: '10–60m' },
+    { hi: 6 * 3600e3, label: '1–6h' },
+    { hi: 24 * 3600e3, label: '6–24h' },
+    { hi: 3 * 86400e3, label: '1–3d' },
+    { hi: Infinity, label: '3d+' },
+  ];
+  const recallDist = RECALL_BINS.map(b => ({ label: b.label, value: 0 }));
+  for (const pm of userProblemSeq.values()) {
+    let userMin = Infinity;
+    for (const seq of pm.values()) {
+      if (seq.length < 2) continue;
+      seq.sort((a, b) => a.t - b.t);
+      for (let i = 1; i < seq.length; i++) {
+        if (seq[i - 1].success) continue;           // recall after a success — skip
+        const gap = seq[i].t - seq[i - 1].t;
+        if (gap > 0 && gap < userMin) userMin = gap;
+      }
+    }
+    if (userMin < Infinity) {
+      const bi = RECALL_BINS.findIndex(b => userMin < b.hi);
+      if (bi >= 0) recallDist[bi].value += 1;
+    }
   }
 
   const totals = { attempts: attemptsAll, wins: winsAll, users: usersAll.size };
@@ -496,7 +545,7 @@ async function computeServerStats(env) {
     computedAt: new Date().toISOString(),
     windowDays: 7,
     totals: totals || { attempts: 0, wins: 0, users: 0 },
-    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, ranks,
+    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks,
   };
 
   await env.DB.prepare(

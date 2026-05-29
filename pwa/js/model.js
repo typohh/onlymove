@@ -1034,6 +1034,15 @@ async function buildServerStatsPane() {
         pane.append(h, makeBarList(binHist(data.reviewHist)));
     }
 
+    // Recall time: per user, the shortest failure→next-attempt gap (pre-binned
+    // server-side). x = recall-time bin, y = users.
+    if (data.recallDist && data.recallDist.some(b => b.value)) {
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = 'Recall time (shortest per user)';
+        pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value }))));
+    }
+
     // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
     // per user (multi-server declarations averaged), so render them as-is.
     if (data.ranks && data.ranks.length) {
