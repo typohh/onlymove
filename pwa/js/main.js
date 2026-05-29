@@ -7,6 +7,7 @@ import { initDebugLog } from './debug-log.js';
 initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook } from './state.js';
+import { runMigrations } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
@@ -611,162 +612,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateAllUI();
     };
 
-    // The board-size migration in state.js has already wrapped any pre-existing
-    // answerHistory under the 9 bucket. These legacy migrations therefore read
-    // and write via state.answerHistory (the active size's view) rather than
-    // touching the raw localStorage value directly.
-    const migrateAccumulatedReview = () => {
-        if (localStorage.getItem('answerHistoryMigrated_v4_accumulatedReview')) {
-            return;
-        }
-        console.log('Running answer history migration for accumulatedReview...');
-
-        const answerHistory = state.answerHistory;
-        const answersByProblem = {};
-
-        for (const answer of answerHistory) {
-            if (!answersByProblem[answer.problemId]) {
-                answersByProblem[answer.problemId] = [];
-            }
-            answersByProblem[answer.problemId].push(answer);
-        }
-
-        for (const problemId in answersByProblem) {
-            answersByProblem[problemId].sort((a, b) => a.date - b.date);
-        }
-
-        const newHistory = [];
-        for (const answer of answerHistory) {
-            const problemAnswers = answersByProblem[answer.problemId];
-            const prevAnswers = problemAnswers.filter(a => a.date < answer.date);
-            const accumulatedReview = prevAnswers.reduce((sum, a) => sum + (a.reviewTime || 0), 0);
-
-            const newAnswer = { ...answer };
-            if (newAnswer.accumulatedReview === undefined) {
-                newAnswer.accumulatedReview = accumulatedReview;
-            }
-            newHistory.push(newAnswer);
-        }
-
-        updateAnswerHistory(newHistory);
-        localStorage.setItem('answerHistoryMigrated_v4_accumulatedReview', 'true');
-        console.log('Answer history migration for accumulatedReview complete.');
-    };
-
-    migrateAccumulatedReview();
-
-    const migrateFailedNovelSuccessSinceFailure = () => {
-        if (localStorage.getItem('answerHistoryMigrated_v5_failedNovelSsf')) {
-            return;
-        }
-        console.log('Running answer history migration for failed novel successSinceFailure...');
-
-        const answerHistory = [...state.answerHistory];
-        let changed = 0;
-        for (const answer of answerHistory) {
-            if (!answer.correct && answer.successSinceFailure === undefined) {
-                answer.successSinceFailure = 0;
-                changed++;
-            }
-        }
-
-        if (changed > 0) {
-            updateAnswerHistory(answerHistory);
-            console.log(`Patched ${changed} answers with missing successSinceFailure.`);
-        }
-        localStorage.setItem('answerHistoryMigrated_v5_failedNovelSsf', 'true');
-        console.log('Answer history migration for failed novel successSinceFailure complete.');
-    };
-
-    migrateFailedNovelSuccessSinceFailure();
-
-    const migrateProblemTypeToIsRepeat = () => {
-        if (localStorage.getItem('answerHistoryMigrated_v3_isRepeat')) {
-            return;
-        }
-        console.log('Running answer history migration for isRepeat...');
-
-        const answerHistory = state.answerHistory;
-        const newHistory = answerHistory.map(answer => {
-            if (answer.problemType !== undefined) {
-                answer.isRepeat = answer.problemType === 'repeat';
-                delete answer.problemType;
-            }
-            return answer;
-        });
-
-        updateAnswerHistory(newHistory);
-        localStorage.setItem('answerHistoryMigrated_v3_isRepeat', 'true');
-        console.log('Answer history migration for isRepeat complete.');
-    };
-
-    migrateProblemTypeToIsRepeat();
-
-    const migrateClearIgnoredFlag = () => {
-        if (localStorage.getItem('answerHistoryMigrated_v6_clearIgnored')) {
-            return;
-        }
-        console.log('Running answer history migration to clear confounded ignored flags...');
-
-        const answerHistory = [...state.answerHistory];
-        let cleared = 0;
-        for (const answer of answerHistory) {
-            if (answer.ignored !== undefined) {
-                delete answer.ignored;
-                cleared++;
-            }
-        }
-
-        if (cleared > 0) {
-            updateAnswerHistory(answerHistory);
-            console.log(`Cleared ignored flag from ${cleared} answers.`);
-        }
-        localStorage.setItem('answerHistoryMigrated_v6_clearIgnored', 'true');
-        console.log('Answer history migration for clearing ignored flags complete.');
-    };
-
-    migrateClearIgnoredFlag();
-
-    const migrateAnswerHistory = () => {
-        if (localStorage.getItem('answerHistoryMigrated_v2')) {
-            return;
-        }
-
-        console.log('Running answer history migration for successSinceFailure...');
-
-        const answerHistory = state.answerHistory;
-        const answersByProblem = {};
-
-        for (const answer of answerHistory) {
-            if (!answersByProblem[answer.problemId]) {
-                answersByProblem[answer.problemId] = [];
-            }
-            answersByProblem[answer.problemId].push(answer);
-        }
-
-        for (const problemId in answersByProblem) {
-            const problemAnswers = answersByProblem[problemId];
-            let successCounter = 0;
-            let hasFailed = false;
-
-            for (const answer of problemAnswers) {
-                if (!answer.correct) {
-                    hasFailed = true;
-                    successCounter = 0;
-                    answer.successSinceFailure = 0;
-                } else if (hasFailed) {
-                    successCounter++;
-                    answer.successSinceFailure = successCounter;
-                }
-            }
-        }
-
-        updateAnswerHistory(answerHistory);
-        localStorage.setItem('answerHistoryMigrated_v2', 'true');
-        console.log('Answer history migration complete.');
-    };
-
-    migrateAnswerHistory();
+    // Legacy answerHistory-shape migrations (see js/migrations.js). The
+    // board-size bucket migrations already ran at state.js import time, so
+    // these operate through state.answerHistory (the active size's view).
+    runMigrations();
 
     // M (rating→rank) is REQUIRED: package_for_pwa ships only raw ratings, so
     // the client cannot rank a single problem (selection, UI, recall) without
