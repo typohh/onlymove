@@ -560,7 +560,6 @@ export async function showDetailedStats() {
         // with the Rank chart, and only the review-queue counts stay on the
         // (now last) summary pane.
         let timingText = '';
-        let rankText = '';
         let resultText = '';
 
         // Timing observations → Time tab.
@@ -618,81 +617,42 @@ export async function showDetailedStats() {
         const ignoredProblemCount = merged.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
 
-        // Two-component rank decomposition (R = skill S + form M). Gives a
-        // long-term-trend number and a session-to-session swing number that
-        // can't be read off the single-line smoother in the chart. See
-        // rank-decomposition.js for the model and the backfitting approach.
-        const decomp = computeRankDecomposition(merged);
-        if (decomp) {
-            const { summary } = decomp;
-            if (summary.currentSkill !== null) {
-                const lower = Math.floor(summary.currentSkill);
-                const pct = Math.round((summary.currentSkill - lower) * 100);
-                const curLabel = rankLabelFromIndex(lower);
-                const nextLabel = rankLabelFromIndex(lower + 1);
-                const seStr = Number.isFinite(summary.currentSkillSE)
-                    ? `, (±${summary.currentSkillSE.toFixed(1)} ranks)`
-                    : '';
-                rankText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
-            }
-            if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
-                const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
-                const sign = summary.longTermDrift >= 0 ? '+' : '−';
-                rankText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
-            }
-            if (typeof summary.sigmaM === 'number') {
-                rankText += summary.sigmaM >= 0.1
-                    ? `Session-to-session performance: good days +${summary.sigmaUp.toFixed(2)}, bad days −${summary.sigmaDown.toFixed(2)} ranks.\n`
-                    : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
-            }
-        }
-
-        // Relative 13x13 skill. The recall model's SIZE_IS_13 coefficient is the
-        // logit offset for 13x13 at equal internal-rank difficulty (9x9 is the
-        // baseline), so coeff / logit-per-rank is the skill gap in ranks. Only
-        // shown once both sizes have enough non-repeat data to identify it.
-        const MIN_SIZE_COMPARISON = 20;
-        const count9 = merged.filter(p => !p.isRepeat && p.size === 9 && p.problemRank !== undefined).length;
-        const count13 = merged.filter(p => !p.isRepeat && p.size === 13 && p.problemRank !== undefined).length;
-        const sizeResult = results.find(r => r.varIndex === MODEL_INDICES.SIZE_IS_13);
-        if (sizeResult && count9 >= MIN_SIZE_COMPARISON && count13 >= MIN_SIZE_COMPARISON
-            && Number.isFinite(sizeResult.coeff) && Number.isFinite(sizeResult.se) && sizeResult.se > 0) {
-            const logitPerRank = getLogitPerRank(state.statsResults);
-            const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
-            const seRanks = sizeResult.se / logitPerRank;
-            const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
-            rankText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
-        }
-
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
         // turned into sign-quadrant probabilities via bivariate-normal.js and
         // rendered as a DOM block (instead of inlined into resultText) so each
         // issue can carry an interactive `examples` toggle to past mistakes.
         const issuesElement = buildLikelyIssuesElement(merged);
-        const chartElement = buildRatingHistoryChart(merged);
-        const timeUsageElement = buildTimeUsageChart(merged);
 
         const summaryPane = document.createElement('pre');
         summaryPane.className = 'stats-modal-pre';
         summaryPane.textContent = resultText;
 
-        // The timing probabilities and rank decomposition used to live on the
-        // summary pane; they now ride with their respective charts.
-        const rankPane = combineChartWithText(chartElement, rankText);
-        const timePane = combineChartWithText(timeUsageElement, timingText);
-
         // Community/server-wide stats (null if the endpoint isn't ready or the
         // fetch fails — the tab is then dropped).
         const serverPane = await buildServerStatsPane();
 
-        // Weaknesses is the default (first) page; the renamed summary pane is
+        // The Rank and Time charts are the heavy part (rank decomposition +
+        // kernel smoothing + bootstrap CI). Build them in the background AFTER
+        // the modal paints so the cheap tabs (Weaknesses default, Overview,
+        // Community) appear instantly; a spinner covers each chart tab until
+        // its build resolves. The timing probabilities and rank decomposition
+        // text used to live on the summary pane and now ride with their charts.
+        const rankLoader = () => deferredStatsBuild(() => {
+            const rankText = buildRankSummaryText(merged);
+            return combineChartWithText(buildRatingHistoryChart(merged), rankText);
+        });
+        const timeLoader = () => deferredStatsBuild(() => {
+            return combineChartWithText(buildTimeUsageChart(merged), timingText);
+        });
+
+        // Weaknesses is the default (first) page; the renamed Overview pane is
         // last. Empty panes (no weaknesses, too little data for a chart, server
-        // stats unavailable) are dropped by showStatsModal, so the
-        // corresponding tab simply doesn't appear.
+        // stats unavailable) are dropped by showStatsModal — for the deferred
+        // chart tabs that happens once their loader resolves null.
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
-            { label: getTerm('statsTabRank'), content: rankPane },
-            { label: getTerm('statsTabTime'), content: timePane },
+            { label: getTerm('statsTabRank'), loader: rankLoader },
+            { label: getTerm('statsTabTime'), loader: timeLoader },
             { label: getTerm('statsTabCommunity'), content: serverPane },
             { label: getTerm('statsTabSummary'), content: summaryPane },
         ]);
@@ -1089,6 +1049,75 @@ async function buildServerStatsPane() {
 // Tabbed stats modal. `tabs` is [{ label, content }]; tabs whose content is
 // null/absent are dropped (so an empty Weaknesses or Charts page just doesn't
 // appear), and the tab bar is omitted when only one page remains.
+// The rank decomposition text (long-term skill + drift + session swing) and
+// the relative 13x13 readout that used to sit on the summary pane. Built lazily
+// inside the Rank tab loader because computeRankDecomposition is heavy. Reads
+// state.statsResults (already computed by the time this runs).
+function buildRankSummaryText(history) {
+    let rankText = '';
+
+    // Two-component rank decomposition (R = skill S + form M). Gives a
+    // long-term-trend number and a session-to-session swing number that can't
+    // be read off the single-line smoother in the chart. See
+    // rank-decomposition.js for the model and the backfitting approach.
+    const decomp = computeRankDecomposition(history);
+    if (decomp) {
+        const { summary } = decomp;
+        if (summary.currentSkill !== null) {
+            const lower = Math.floor(summary.currentSkill);
+            const pct = Math.round((summary.currentSkill - lower) * 100);
+            const curLabel = rankLabelFromIndex(lower);
+            const nextLabel = rankLabelFromIndex(lower + 1);
+            const seStr = Number.isFinite(summary.currentSkillSE)
+                ? `, (±${summary.currentSkillSE.toFixed(1)} ranks)`
+                : '';
+            rankText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
+        }
+        if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
+            const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
+            const sign = summary.longTermDrift >= 0 ? '+' : '−';
+            rankText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
+        }
+        if (typeof summary.sigmaM === 'number') {
+            rankText += summary.sigmaM >= 0.1
+                ? `Session-to-session performance: good days +${summary.sigmaUp.toFixed(2)}, bad days −${summary.sigmaDown.toFixed(2)} ranks.\n`
+                : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
+        }
+    }
+
+    // Relative 13x13 skill. The recall model's SIZE_IS_13 coefficient is the
+    // logit offset for 13x13 at equal internal-rank difficulty (9x9 is the
+    // baseline), so coeff / logit-per-rank is the skill gap in ranks. Only
+    // shown once both sizes have enough non-repeat data to identify it.
+    const results = state.statsResults?.results || [];
+    const MIN_SIZE_COMPARISON = 20;
+    const count9 = history.filter(p => !p.isRepeat && p.size === 9 && p.problemRank !== undefined).length;
+    const count13 = history.filter(p => !p.isRepeat && p.size === 13 && p.problemRank !== undefined).length;
+    const sizeResult = results.find(r => r.varIndex === MODEL_INDICES.SIZE_IS_13);
+    if (sizeResult && count9 >= MIN_SIZE_COMPARISON && count13 >= MIN_SIZE_COMPARISON
+        && Number.isFinite(sizeResult.coeff) && Number.isFinite(sizeResult.se) && sizeResult.se > 0) {
+        const logitPerRank = getLogitPerRank(state.statsResults);
+        const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
+        const seRanks = sizeResult.se / logitPerRank;
+        const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
+        rankText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
+    }
+
+    return rankText;
+}
+
+// Run a synchronous (heavy) pane build after two animation frames, so whatever
+// is already on screen — the just-opened modal and its ready tabs — paints
+// first. Resolves with the built node (or null). Used to background-build the
+// Rank/Time charts; the in-tab spinner covers the gap.
+function deferredStatsBuild(buildFn) {
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            try { resolve(buildFn()); } catch (err) { reject(err); }
+        }));
+    });
+}
+
 // A tab pane that pairs a chart with the explanatory text that used to live on
 // the summary page (timing probabilities for Time, the rank decomposition for
 // Rank). Either piece may be missing: returns null only when both are, so an
@@ -1109,9 +1138,30 @@ function combineChartWithText(chartElement, text) {
     return wrap;
 }
 
+// A spinner node shown in the modal body while a deferred tab is still
+// building. Reuses the global .loading-spinner animation.
+function makeStatsLoadingNode() {
+    const wrap = document.createElement('div');
+    wrap.className = 'stats-tab-loading';
+    const spinner = document.createElement('div');
+    spinner.className = 'loading-spinner';
+    wrap.append(spinner);
+    return wrap;
+}
+
+// Each tab is either { label, content: node } (ready now) or
+// { label, loader: () => Promise<node|null> } (built in the background — a
+// spinner shows until it resolves; a null resolution drops the tab).
 function showStatsModal(tabs) {
-    tabs = tabs.filter(t => t.content);
-    if (tabs.length === 0) return;
+    const entries = tabs
+        .filter(t => t.loader || t.content)
+        .map(t => ({
+            label: t.label,
+            loader: t.loader || null,
+            node: t.content || null,
+            loading: !!t.loader && !t.content,
+        }));
+    if (entries.length === 0) return;
 
     const backdrop = document.createElement('div');
     backdrop.className = 'stats-modal-backdrop';
@@ -1132,36 +1182,64 @@ function showStatsModal(tabs) {
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.addEventListener('keydown', onKey);
 
+    const tabbar = document.createElement('div');
+    tabbar.className = 'stats-tabbar';
     const body = document.createElement('div');
     body.className = 'stats-modal-body';
 
-    const buttons = [];
-    const select = (i) => {
-        buttons.forEach((b, j) => b.classList.toggle('active', j === i));
-        body.replaceChildren(tabs[i].content);
+    let current = entries[0];
+
+    const renderBody = () => {
+        body.replaceChildren(current.node || makeStatsLoadingNode());
         body.scrollTop = 0;
     };
-
-    const cardChildren = [];
-    if (tabs.length > 1) {
-        const tabbar = document.createElement('div');
-        tabbar.className = 'stats-tabbar';
-        tabs.forEach((t, i) => {
+    const renderTabbar = () => {
+        // The bar is omitted when only one pane remains (e.g. deferred tabs
+        // resolved null), matching the single-pane behaviour.
+        tabbar.style.display = entries.length > 1 ? '' : 'none';
+        tabbar.replaceChildren();
+        for (const e of entries) {
             const b = document.createElement('button');
             b.className = 'stats-tab';
-            b.textContent = t.label;
-            b.onclick = () => select(i);
+            b.classList.toggle('active', e === current);
+            b.textContent = e.label;
+            b.onclick = () => { current = e; renderTabbar(); renderBody(); };
             tabbar.append(b);
-            buttons.push(b);
-        });
-        cardChildren.push(tabbar);
-    }
-    cardChildren.push(body, closeBtn);
-    card.append(...cardChildren);
+        }
+    };
+    const removeEntry = (e) => {
+        const idx = entries.indexOf(e);
+        if (idx === -1) return;
+        entries.splice(idx, 1);
+        if (entries.length === 0) { close(); return; }
+        if (current === e) current = entries[Math.min(idx, entries.length - 1)];
+        renderTabbar();
+        renderBody();
+    };
+
+    card.append(tabbar, body, closeBtn);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
 
-    select(0);
+    renderTabbar();
+    renderBody();
+
+    // Kick off deferred builds immediately (in the background) so a chart tab
+    // is usually ready by the time the user opens it; the spinner only shows if
+    // they get there first. A null/failed build drops the tab.
+    for (const e of entries) {
+        if (!e.loader) continue;
+        e.loader().then((node) => {
+            if (!node) { removeEntry(e); return; }
+            e.node = node;
+            e.loading = false;
+            if (current === e) renderBody();
+        }).catch((err) => {
+            console.error('Stats tab build failed:', err);
+            Sentry.captureException(err);
+            removeEntry(e);
+        });
+    }
 }
 
 function rankLabelFromIndex(rankIndex) {

@@ -998,4 +998,20 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* In-tab spinner: a stats tab whose chart is still building in the background. */
+.stats-tab-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 30vh;
+}
+
+.stats-tab-loading .loading-spinner {
+    width: 8vmin;
+    height: 8vmin;
+    border-width: 0.9vmin;
+    border-color: rgba(128, 128, 128, 0.3);
+    border-top-color: var(--text-color, #888);
+}
+
 
