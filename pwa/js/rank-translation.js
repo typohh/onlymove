@@ -16,6 +16,7 @@
 import { state } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
+import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
 
 let _mapPromise = null;
 
@@ -41,21 +42,8 @@ const RANK_INDEX_OFFSET = 19;
 // our_lo/our_hi clamp the fit used to apply server-side).
 const RANK_SCALAR_LO = -29, RANK_SCALAR_HI = 9;
 
-// Linear interp with end-slope extrapolation; xs strictly ascending, len ≥ 2.
-function interpExtrap(x, xs, ys) {
-    const n = xs.length;
-    if (x <= xs[0]) return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0]);
-    if (x >= xs[n - 1]) return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1]);
-    let a = 0, b = n - 1;
-    while (b - a > 1) { const m = (a + b) >> 1; if (xs[m] <= x) a = m; else b = m; }
-    return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a]);
-}
-
-// Rank scalar → nearest kyu/dan label (1k=0, 1d=1; no zero gap).
-function scalarToRankLabel(v) {
-    const k = Math.round(v);
-    return k <= 0 ? `${1 - k}k` : `${k}d`;
-}
+// interpExtrap + rankScalarToLabel now live in shared/rank-math.js (one copy
+// shared with the Worker).
 
 // {server: label} by interpolating the CONTINUOUS internal-rank scalar
 // `ourScalar` through each server's knots, then clamping + rounding — so a weak
@@ -71,7 +59,7 @@ function serverRanksFor(map, ourScalar, egfLabel) {
             || c.our.length < 2) continue;
         let s = interpExtrap(ourScalar, c.our, c.server);
         s = Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
-        out[server] = scalarToRankLabel(s);
+        out[server] = rankScalarToLabel(s);
     }
     return out;
 }

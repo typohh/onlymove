@@ -1,5 +1,6 @@
 import { buildPushPayload } from '@block65/webcrypto-web-push';
 import { APP_VERSION } from './version.js';
+import { interpExtrap, rankLabelToScalar, rankScalarToLabel } from '../shared/rank-math.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -318,25 +319,6 @@ async function maybeComputeServerStats(env) {
   }
 }
 
-// Rank-scalar convention (matches rank_map.json / rank-translation.js):
-// 1k = 0, 1d = 1, no zero gap. "5k" → -4, "3d" → 3.
-function rankLabelToScalar(label) {
-  const m = /^(\d+)([kd])$/.exec(String(label || ''));
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  return m[2] === 'k' ? 1 - n : n;
-}
-
-// Linear interpolation with end-slope extrapolation; xs strictly ascending.
-// Mirrors interpExtrap in js/rank-translation.js.
-function interpExtrap(x, xs, ys) {
-  const n = xs.length;
-  if (x <= xs[0]) return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0]);
-  if (x >= xs[n - 1]) return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1]);
-  let a = 0, b = n - 1;
-  while (b - a > 1) { const m = (a + b) >> 1; if (xs[m] <= x) a = m; else b = m; }
-  return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a]);
-}
 
 // Aggregate the preceding 7 days into the cached JSON blob the PWA renders.
 // Everything is a cheap GROUP BY; time histograms cap at 600s (10s buckets) so
@@ -504,6 +486,14 @@ async function computeServerStats(env) {
     console.error('rank_map fetch failed:', e);
   }
 
+  // Latest declaration per (user, server). This relies on SQLite's documented
+  // bare-columns-with-MAX behaviour: when a query has a single MAX() aggregate,
+  // the non-aggregated columns (`rank` here) are taken from the row holding that
+  // maximum — so `rank` is the rank from the row with MAX(created_at), i.e. the
+  // most recent. This is a SQLite/D1-specific guarantee and is NOT portable to
+  // other SQL engines; if this ever moves off D1, rewrite with ROW_NUMBER()
+  // OVER (PARTITION BY user_id, server ORDER BY created_at DESC) or a correlated
+  // subquery.
   const declarations = (await env.DB.prepare(
     `SELECT user_id, server, rank FROM (
         SELECT user_id, server, rank, MAX(created_at) AS mx
@@ -536,7 +526,7 @@ async function computeServerStats(env) {
   }
   const ranks = [...rankHist.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([v, n]) => ({ rank: v <= 0 ? `${1 - v}k` : `${v}d`, n }));
+    .map(([v, n]) => ({ rank: rankScalarToLabel(v), n }));
 
   const data = {
     // Stamp the code version so a deploy that changes this computation

@@ -50,6 +50,7 @@
 
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
+import { interpExtrap } from '../shared/rank-math.js';
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -114,15 +115,7 @@ function curveForSize(size) {
             && m.ratings.length >= 2) ? m : null;
 }
 
-// Linear interp with end-slope extrapolation; xs strictly ascending.
-function interpExtrap(x, xs, ys) {
-    const n = xs.length;
-    if (x <= xs[0]) return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0]);
-    if (x >= xs[n - 1]) return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1]);
-    let a = 0, b = n - 1;
-    while (b - a > 1) { const md = (a + b) >> 1; if (xs[md] <= x) a = md; else b = md; }
-    return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a]);
-}
+// interpExtrap lives in shared/rank-math.js (one copy shared with the Worker).
 
 function applyM(rating, c) { return interpExtrap(rating, c.ratings, c.rank_indices); }
 function Mslope(rating, c) {
