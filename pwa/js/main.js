@@ -28,7 +28,8 @@ try {
 }
 
 import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
-import { showDetailedStats, getRecallCandidates } from './model.js';
+import { getRecallCandidates } from './model.js';
+import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule } from './notifications.js';
 import { recordShareEvent } from './user-stats.js';
 import { loadSgf, redraw, initializeBoard, getBoardImageBlob } from './board.js';
