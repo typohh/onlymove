@@ -1547,9 +1547,71 @@ function buildTimeUsageChart(history = state.answerHistory) {
         return grid;
     };
 
+    // Problems/day is a RATE, not a per-attempt value, so it gets its own
+    // smoother: a Gaussian kernel-density estimate of the attempt timestamps
+    // (Σ kernel weights × the Gaussian normalisation × DAY_MS = attempts/day),
+    // with the same multiplier bootstrap for the band. Same gap rule as the
+    // mean smoother, so idle stretches break the line instead of reading zero.
+    const GAUSS_NORM = 1 / (bw * Math.sqrt(2 * Math.PI));
+    const smoothRate = (pts) => {
+        if (pts.length < 4) return null;
+        const ts = pts.map(p => p.t);
+        const grid = new Array(G);
+        for (let g = 0; g < G; g++) {
+            const t = t0 + tSpan * (g / (G - 1));
+            const i0 = lowerBound(ts, t - 3.5 * bw);
+            const i1 = lowerBound(ts, t + 3.5 * bw);
+            let idxs = [];
+            for (let i = i0; i < i1; i++) idxs.push(i);
+            // Subsample heavy windows but scale the sum back up so the rate stays
+            // unbiased (a plain thin would undercount, unlike the mean smoother).
+            let scale = 1;
+            if (idxs.length > LMAX) {
+                scale = idxs.length / LMAX;
+                const thin = [];
+                for (let k = 0; k < LMAX; k++) thin.push(idxs[Math.floor(k * scale)]);
+                idxs = thin;
+            }
+            const ws = [];
+            let W = 0, sumW2 = 0;
+            for (const i of idxs) {
+                const d = (t - ts[i]) / bw;
+                const w = Math.exp(-0.5 * d * d);
+                W += w; sumW2 += w * w;
+                ws.push(w);
+            }
+            const ess = W > 0 ? (W * W) / sumW2 : 0;
+            if (ess < ESS_MIN) { grid[g] = null; continue; }
+            const toRate = scale * GAUSS_NORM * DAY_MS;
+            const brates = new Array(B);
+            for (let b = 0; b < B; b++) {
+                let s = 0;
+                for (let k = 0; k < ws.length; k++) s += -Math.log(1 - rand()) * ws[k];
+                brates[b] = s * toRate;
+            }
+            brates.sort((x, y) => x - y);
+            grid[g] = { t, mean: W * toRate, lo: quantile(brates, 0.025), hi: quantile(brates, 0.975) };
+        }
+        return grid;
+    };
+
+    // Break a smoothed grid into runs of consecutive present points so the line
+    // and band stop across no-data gaps instead of bridging them.
+    const segments = (grid) => {
+        const runs = [];
+        let run = [];
+        for (const e of grid) {
+            if (e) run.push(e);
+            else { if (run.length) runs.push(run); run = []; }
+        }
+        if (run.length) runs.push(run);
+        return runs;
+    };
+
     const sGrid = smooth(solving);
     const rGrid = smooth(review);
     if (!sGrid && !rGrid) return null;
+    const cGrid = smoothRate(solving); // problems/day rate (every attempt logs solving time)
 
     // Robust ceiling from the upper-CI envelope so most of the band shows; the
     // most extreme spell clips at the top edge (overflow:hidden).
@@ -1561,18 +1623,13 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
     const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
 
-    // Number of tsumegos attempted per calendar day, shown as faint bars on a
-    // secondary right axis. Counts are honest activity (no idle-time artifact),
-    // so the ceiling is just a high quantile with headroom; a binge day clips.
-    const countByDay = new Map();
-    for (const p of solving) {
-        const d = new Date(p.t); d.setHours(0, 0, 0, 0);
-        const key = d.getTime();
-        countByDay.set(key, (countByDay.get(key) || 0) + 1);
-    }
-    const countDays = [...countByDay.entries()].map(([k, c]) => ({ t: k + DAY_MS / 2, c })).sort((a, b) => a.t - b.t);
-    const countsSorted = countDays.map(d => d.c).sort((a, b) => a - b);
-    const cMax = Math.max(quantile(countsSorted, 0.95) * 1.15, 1);
+    // Smoothed problems/day on a secondary right axis. Robust ceiling from the
+    // rate's upper-CI envelope (matching the left axis) so the band shows and a
+    // binge spell clips at the top edge rather than flattening the rest.
+    const cHiVals = [];
+    if (cGrid) for (const e of cGrid) if (e) cHiVals.push(e.hi);
+    cHiVals.sort((a, b) => a - b);
+    const cMax = Math.max(cHiVals.length ? quantile(cHiVals, 0.90) * 1.05 : 1, 1);
 
     const container = document.createElement('div');
     container.className = 'stats-chart';
@@ -1587,9 +1644,15 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const yaxis = document.createElement('div');
     yaxis.className = 'stats-chart-yaxis';
+    const leftLabels = [];
+    for (let i = 0; i <= 4; i++) leftLabels.push(fmt(yHigh * (i / 4)));
+    const widest = arr => arr.reduce((a, b) => (b.length > a.length ? b : a), '');
     const spacer = document.createElement('span');
     spacer.className = 'y-spacer';
-    spacer.textContent = fmt(yHigh);
+    // Size the column to the WIDEST label, not just the top one — an
+    // intermediate tick ("2.5m") can be wider than the ceiling ("10m") and
+    // would otherwise overflow the column and clip on the left.
+    spacer.textContent = widest(leftLabels);
     yaxis.append(spacer);
     const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
     for (let i = 0; i <= 4; i++) {
@@ -1597,7 +1660,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
         const tick = document.createElement('div');
         tick.className = 'y-tick';
         tick.style.top = `${topPct(v)}%`;
-        tick.textContent = fmt(v);
+        tick.textContent = leftLabels[i];
         yaxis.append(tick);
     }
 
@@ -1629,19 +1692,39 @@ function buildTimeUsageChart(history = state.answerHistory) {
     svg.setAttribute('role', 'img');
     svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
 
-    // Daily problem-count bars (secondary right axis), drawn first so the grid,
-    // bands, and mean lines all sit on top.
-    const yOfCount = c => H - Math.min(c, cMax) / cMax * H;
-    const barW = Math.max(0.5, Math.min(16, (W / Math.max(1, tSpan / DAY_MS)) * 0.7));
-    for (const d of countDays) {
-        const by = yOfCount(d.c);
-        const rect = document.createElementNS(SVG_NS, 'rect');
-        rect.setAttribute('x', (xOf(d.t) - barW / 2).toFixed(1));
-        rect.setAttribute('y', by.toFixed(1));
-        rect.setAttribute('width', barW.toFixed(1));
-        rect.setAttribute('height', (H - by).toFixed(1));
-        rect.setAttribute('fill', 'rgba(120,140,180,0.30)');
-        svg.appendChild(rect);
+    // Smoothed problems/day (secondary right axis), drawn first so the grid,
+    // time bands, and mean lines all sit on top. Same band + line treatment as
+    // the time series, just mapped through the right axis and gap-broken.
+    const COUNT_LINE = '#6f8bbf', COUNT_BAND = 'rgba(120,140,180,0.20)';
+    const yOfRate = r => (1 - Math.min(r, cMax) / cMax) * H;
+    if (cGrid) {
+        for (const run of segments(cGrid)) {
+            if (run.length < 2) continue;
+            let d = '';
+            for (let i = 0; i < run.length; i++) {
+                d += (i === 0 ? 'M' : 'L') + `${xOf(run[i].t).toFixed(1)} ${yOfRate(run[i].hi).toFixed(1)} `;
+            }
+            for (let i = run.length - 1; i >= 0; i--) {
+                d += `L${xOf(run[i].t).toFixed(1)} ${yOfRate(run[i].lo).toFixed(1)} `;
+            }
+            const path = document.createElementNS(SVG_NS, 'path');
+            path.setAttribute('d', d + 'Z');
+            path.setAttribute('fill', COUNT_BAND);
+            path.setAttribute('stroke', 'none');
+            svg.appendChild(path);
+        }
+        for (const run of segments(cGrid)) {
+            if (run.length < 2) continue;
+            const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOfRate(e.mean).toFixed(1)}`).join(' ');
+            const poly = document.createElementNS(SVG_NS, 'polyline');
+            poly.setAttribute('points', pts);
+            poly.setAttribute('fill', 'none');
+            poly.setAttribute('stroke', COUNT_LINE);
+            poly.setAttribute('stroke-width', '1.5');
+            poly.setAttribute('stroke-linejoin', 'round');
+            poly.setAttribute('vector-effect', 'non-scaling-stroke');
+            svg.appendChild(poly);
+        }
     }
 
     // Horizontal grid at each y-tick.
@@ -1662,19 +1745,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
         { grid: sGrid, line: '#2e9e5b', band: 'rgba(46,158,91,0.20)' },
         { grid: rGrid, line: '#d98a2b', band: 'rgba(217,138,43,0.20)' },
     ];
-
-    // Break each smoothed grid into runs of consecutive present points so the
-    // line and band stop across no-data gaps instead of bridging them.
-    const segments = (grid) => {
-        const runs = [];
-        let run = [];
-        for (const e of grid) {
-            if (e) run.push(e);
-            else { if (run.length) runs.push(run); run = []; }
-        }
-        if (run.length) runs.push(run);
-        return runs;
-    };
 
     // Bands first, then mean lines on top.
     for (const { grid, band } of SERIES) {
@@ -1738,8 +1808,8 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const legendItems = [
         { kind: 'line', color: '#2e9e5b', text: 'Solving' },
         { kind: 'line', color: '#d98a2b', text: 'Reviewing' },
+        { kind: 'line', color: COUNT_LINE, text: 'Problems/day' },
         { kind: 'band', color: 'rgba(128,128,128,0.30)', text: '95% CI (bootstrap)' },
-        { kind: 'band', color: 'rgba(120,140,180,0.55)', text: 'Problems/day' },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
