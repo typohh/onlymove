@@ -100,6 +100,20 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.setItem('sharedAcrossSizesMigrated_v2', 'true');
 })();
 
+// --- Recall model → FSRS retention curve reset ---
+// The recall model was reparameterized from an additive logistic (features
+// INTERCEPT/TIME/REVIEW/DIFFICULTY/IS_NOVEL/RECALL_FORMULA/SIZE_IS_13) into a
+// dual-head model with the SAME param-vector length (7) but different feature
+// semantics (… SIZE_IS_13/SUCCESS_SINCE_FAILURE/LN_C). Because the length is
+// unchanged the runtime length-guards can't detect the switch, so stored params
+// must be dropped explicitly and retrained from scratch on next load.
+(function resetRecallModelForRetention_v3() {
+    if (localStorage.getItem('recallRetentionModelMigrated_v3')) return;
+    localStorage.removeItem('modelParams');
+    localStorage.removeItem('adamState');
+    localStorage.setItem('recallRetentionModelMigrated_v3', 'true');
+})();
+
 // --- Board size + per-size backing buckets ---
 
 function readPerSize(key, fallback) {

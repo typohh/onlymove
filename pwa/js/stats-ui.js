@@ -18,6 +18,7 @@ import {
     getLogitPerRank,
     prepareTrainingData,
     calculateResultsAndStdErrors,
+    freshFailureReviewHours,
     MODEL_INDICES,
 } from './model.js';
 
@@ -78,15 +79,15 @@ export async function showDetailedStats() {
             }
         }
 
-        // Block 2: Summary Text
+        // Block 2: Summary Text. The "freshly-failed problem comes back in ~X h"
+        // figure is now the retention window-open delay (NEG_LN_080·S·24) for a
+        // just-failed (r=0) repeat at the user's typical repeat difficulty.
         if (varCovarMatrix) {
-            const N_idx = MODEL_INDICES.IS_NOVEL;
-            const R_idx = MODEL_INDICES.RECALL_FORMULA;
-            const N = finalParams[N_idx];
-            const R = finalParams[R_idx];
+            const repeatRanks = merged.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
+            const repRank = repeatRanks.length ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length : 0;
+            const firsttimeFailureTime = freshFailureReviewHours(finalParams, { problemRank: repRank, size: state.boardSize });
 
-            if (Math.abs(R) > 1e-9) {
-                const t_eq_days = Math.max(0, Math.exp(N / R) - 1);
+            if (firsttimeFailureTime !== null) {
                 const allRepeats = getRecallCandidates({
                     lowerProbabilityBound: 0.6,
                     upperProbabilityBound: 1.0,
@@ -99,7 +100,6 @@ export async function showDetailedStats() {
                     requireLastAnswerIncorrect: true,
                     history: merged,
                 }).length;
-                const firsttimeFailureTime = t_eq_days * 24;
 
                 resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
                 resultText += getTerm('statsOldFailures').replace('{count_other}', Math.max(0, allRepeats - firstTimeFailures)) + '\n';

@@ -52,48 +52,111 @@ export function calculatePercentile(sortedArr, target) {
     return (below + 0.5 * equal) / sortedArr.length;
 }
 
-function getFeaturesForPrediction(lastAnswer, { allReviewTimes, now }) {
-    const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
-    features[MODEL_INDICES.INTERCEPT] = 1;
-    features[MODEL_INDICES.TIME_SOLVING] = 0.5; // Neutral value for prediction
+// --- Retention/stability model ----------------------------------------------
+// Recall is an FSRS-style retention curve anchored at R(0)=1, NOT a logit on
+// population correctness (the old additive `base + βR·log(...)` form let a
+// problem's difficulty offset the curve downward so it could be "due" the
+// instant it was solved). For a REPEAT encounter the shared linear predictor is
+// the LOG of memory stability S (in days):
+//
+//   lnS = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
+//         + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13
+//         + SUCCESS_SINCE_FAILURE·r + LN_C
+//   R(t) = exp(-t_days / exp(lnS))
+//
+// so R(0)=1 always (no instant-due) and every per-problem signal scales the
+// time-constant multiplicatively instead of offsetting the curve — difficulty's
+// only action is on how S compounds, exactly the FSRS picture. Each consecutive
+// success multiplies S by e^{SUCCESS_SINCE_FAILURE} (geometric growth), and a
+// lapse resets r→0 (post-lapse reset).
+//
+// The SAME features (with LN_C and SUCCESS_SINCE_FAILURE zeroed) feed the
+// NOVEL-encounter cold-solve logit P = σ(z). That head is what trains
+// PROBLEM_DIFFICULTY / TIME_SOLVING / SIZE_IS_13 and backs the stats-panel
+// readouts; REVIEW_TIME and SUCCESS_SINCE_FAILURE are identified purely from
+// repeat rows (both are 0 on novel rows). There is no IS_NOVEL indicator: the
+// novel/repeat regime is carried by which head a row enters, and an indicator
+// that is 1 on every novel row would just be collinear with the intercept.
+const NEG_LN_080 = -Math.log(0.80); // 0.22314 — t/S at the 0.80 window-open
+const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
+// Stability floor/ceiling (days). The floor keeps a just-failed problem from
+// coming due sooner than ~18h (NEG_LN_080·MIN ≈ 18h window-open, matching the
+// old min-hours clamp); the ceiling guards against runaway intervals/overflow.
+const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
+const MAX_STABILITY_DAYS = 365;
 
-    const candidateReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
-    const reviewTimeFeature = calculatePercentile(allReviewTimes, candidateReviewTime);
-    features[MODEL_INDICES.REVIEW_TIME] = reviewTimeFeature;
-
-    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = lastAnswer.problemRank;
-    features[MODEL_INDICES.IS_NOVEL] = 0; // This is a recall problem
+// Shared linear-predictor feature vector. `isRepeat` toggles the retention-only
+// features (LN_C and SUCCESS_SINCE_FAILURE carry signal only on repeats); for
+// prediction `timePct` defaults to the neutral 0.5.
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0 }) {
+    const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
+    f[MODEL_INDICES.INTERCEPT] = 1;
+    f[MODEL_INDICES.TIME_SOLVING] = timePct;
+    f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = problemRank ?? 0;
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
-    features[MODEL_INDICES.SIZE_IS_13] = (lastAnswer.size ?? state.boardSize) === 13 ? 1 : 0;
-
-    const t = (now - lastAnswer.date) / (1000 * 60 * 60 * 24);
-    const r = lastAnswer.successSinceFailure !== undefined ? lastAnswer.successSinceFailure : 0;
-    const interactionTerm = Math.log(1 + t * Math.pow(0.5, r));
-    features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
-
-    return features;
+    f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
+    if (isRepeat) {
+        f[MODEL_INDICES.SUCCESS_SINCE_FAILURE] = r;
+        f[MODEL_INDICES.LN_C] = 1;
+    }
+    return f;
 }
 
-function getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }) {
-    const features = Array(Object.keys(MODEL_INDICES).length).fill(0);
-    features[MODEL_INDICES.INTERCEPT] = 1;
-    features[MODEL_INDICES.TIME_SOLVING] = percentileTime[i];
-    features[MODEL_INDICES.REVIEW_TIME] = percentileReview[i];
-    features[MODEL_INDICES.PROBLEM_DIFFICULTY] = p.problemRank;
-    // 9x9 baseline; 13x13 offset. p.size is set by getMergedAnswerHistory.
-    features[MODEL_INDICES.SIZE_IS_13] = (p.size ?? state.boardSize) === 13 ? 1 : 0;
+function dot(features, params) {
+    let s = 0;
+    for (let j = 0; j < features.length; j++) s += features[j] * params[j];
+    return s;
+}
 
-    if (!p.isRepeat) {
-        features[MODEL_INDICES.IS_NOVEL] = 1;
-    } else {
-        const prevAnswer = validHistory.filter(ans => ans.problemId === p.problemId && ans.date < p.date).pop();
-        const t = (p.date - (prevAnswer ? prevAnswer.date : p.date)) / (1000 * 60 * 60 * 24);
-        const r = p.successSinceFailure !== undefined ? p.successSinceFailure : 0;
-        const interactionTerm = Math.log( 1 + t * Math.pow(0.5,r));
-        features[MODEL_INDICES.RECALL_FORMULA] = interactionTerm;
+// Clamped stability (days) from a repeat-row linear predictor (lnS = eta).
+function stabilityDaysFromEta(eta) {
+    const S = Math.exp(eta);
+    if (!isFinite(S)) return MAX_STABILITY_DAYS;
+    return Math.min(MAX_STABILITY_DAYS, Math.max(MIN_STABILITY_DAYS, S));
+}
+
+// Window-open delay (hours) for a just-failed (r=0, no prior review) repeat at a
+// representative difficulty — the stats panel's "a missed problem comes back in
+// ~X h" readout. Returns null when params aren't ready.
+export function freshFailureReviewHours(params, { problemRank = 0, size } = {}) {
+    if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
+    const eta = dot(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0 }), params);
+    return NEG_LN_080 * stabilityDaysFromEta(eta) * 24;
+}
+
+// Builds the training feature vector for history row i (board-independent).
+function featuresForTrainingRow(td, i) {
+    const p = td.history[i];
+    return buildFeatures({
+        isRepeat: !!p.isRepeat,
+        timePct: td.percentileTime[i],
+        reviewPct: td.percentileReview[i],
+        problemRank: p.problemRank,
+        size: p.size,
+        r: p.successSinceFailure || 0,
+    });
+}
+
+// Per-row predicted probability + dLoss/dEta under the dual-head likelihood:
+// novel rows are a logistic on the cold-solve logit; repeat rows are the
+// retention curve R = exp(-t/S), S = exp(eta).
+function predictAndGrad(eta, { isRepeat, elapsedDays, y }) {
+    if (!isRepeat) {
+        const p = 1 / (1 + Math.exp(-eta));
+        const clipped = Math.max(1e-15, Math.min(1 - 1e-15, p));
+        const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
+        return { p, loss, dEta: p - y, fisherW: p * (1 - p) };
     }
-    return features;
+    const S = Math.exp(eta);
+    const u = elapsedDays / S;              // ≥ 0; u=0 ⇒ R=1 (just solved)
+    const R = Math.exp(-u);
+    const clipped = Math.max(1e-15, Math.min(1 - 1e-15, R));
+    const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
+    // dR/dEta = R·u, so dLoss/dEta = (R-y)·u/(1-R); Fisher = (R·u)²/(R(1-R)).
+    const oneMinusR = Math.max(1 - R, 1e-9);
+    return { p: R, loss, dEta: (R - y) * u / oneMinusR, fisherW: R * u * u / oneMinusR };
 }
 
 
@@ -116,26 +179,9 @@ export function getRecallCandidates(options = {}) {
 
     const numParams = Object.keys(MODEL_INDICES).length;
     if (!state.modelParams || state.modelParams.length !== numParams) {
-        return []; // Model not ready (or a stale shorter model awaiting retrain)
+        return []; // Model not ready (or a stale model awaiting retrain)
     }
-    const finalParams = state.modelParams;
-
-    const clippedParams = [...finalParams];
-    const N = clippedParams[MODEL_INDICES.IS_NOVEL];
-    const R = clippedParams[MODEL_INDICES.RECALL_FORMULA];
-
-    const min_hours = 18;
-    const max_hours = 168; // 7 days
-    const min_ratio = Math.log(1 + min_hours / 24);
-    const max_ratio = Math.log(1 + max_hours / 24);
-    if (Math.abs(R) < 1e-9) return [];
-    const current_ratio = N / R;
-
-    if (current_ratio < min_ratio) {
-        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / min_ratio;
-    } else if (current_ratio > max_ratio) {
-        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
-    }
+    const params = state.modelParams;
 
     const recentHistory = history.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
 
@@ -149,40 +195,52 @@ export function getRecallCandidates(options = {}) {
         lastAnswers[answer.problemId] = answer;
     }
 
+    const DAY_MS = 24 * 3600 * 1000;
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
 
         if (lastAnswer.ignored) continue; // Exclude ignored problems
         if (state.unavailableProblemIds.has(problemId)) continue; // Exclude problems that failed to load this session
+        if (!lastAnswer.date) continue;
 
         let condition = lastAnswer.problemRank < state.userRank && lastAnswer.successSinceFailure !== undefined;
         if (requireLastAnswerIncorrect) {
             condition = condition && !lastAnswer.correct;
         }
+        if (!condition) continue;
 
-        if (condition) {
-            const features = getFeaturesForPrediction(lastAnswer, { allReviewTimes, now });
-            const logit = features.reduce((acc, val, j) => acc + val * clippedParams[j], 0);
-            const probability = 1 / (1 + Math.exp(-logit));
+        const reviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
+        const reviewPct = calculatePercentile(allReviewTimes, reviewTime);
+        const eta = dot(buildFeatures({
+            isRepeat: true,
+            reviewPct,
+            problemRank: lastAnswer.problemRank,
+            size: lastAnswer.size,
+            r: lastAnswer.successSinceFailure || 0,
+        }), params);
+        const S = stabilityDaysFromEta(eta);
 
-            if (probability >= lowerProbabilityBound && probability <= upperProbabilityBound) {
-                recallCandidates.push({
-                    problemId,
-                    recallRate: probability,
-                });
-            }
+        const tDays = (now - lastAnswer.date) / DAY_MS;
+        if (tDays < 0) continue;
+        const probability = Math.exp(-tDays / S); // retention R(t); R(0)=1
+
+        if (probability >= lowerProbabilityBound && probability <= upperProbabilityBound) {
+            recallCandidates.push({
+                problemId,
+                recallRate: probability,
+            });
         }
     }
 
     return recallCandidates;
 }
 
-// Inverts the logistic recall model to predict the unix-ms timestamps at
-// which each candidate problem will cross P=0.80 (recall window opens) and
-// P=0.60 (recall window closes). Mirrors the eligibility filters of
-// getRecallCandidates and applies the same min/max-hour clipping to the
-// recall coefficient. Reads modelParams/answerHistory/userRank directly so
-// callers can request a size other than the currently active one.
+// Predicts the unix-ms timestamps at which each candidate problem will cross
+// R=0.80 (recall window opens) and R=0.60 (recall window closes), inverting the
+// retention curve R(t)=exp(-t/S) analytically: t = -ln(R)·S. Because R(0)=1,
+// both crossings are strictly in the future of the last attempt. Mirrors the
+// eligibility filters of getRecallCandidates. Reads modelParams/answerHistory/
+// userRank directly so callers can request a size other than the active one.
 //
 // Output rows are bounded:
 //   - exit_at must be in the future (we never ping about a window already past)
@@ -215,24 +273,6 @@ export function buildRecallSchedule(size) {
     const userRank = readSharedKey('userRank');
     if (typeof userRank !== 'number') return [];
 
-    const clippedParams = [...params];
-    const N = clippedParams[MODEL_INDICES.IS_NOVEL];
-    const R = clippedParams[MODEL_INDICES.RECALL_FORMULA];
-    const min_hours = 18;
-    const max_hours = 168;
-    const min_ratio = Math.log(1 + min_hours / 24);
-    const max_ratio = Math.log(1 + max_hours / 24);
-    if (Math.abs(R) < 1e-9) return [];
-    const current_ratio = N / R;
-    if (current_ratio < min_ratio) {
-        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / min_ratio;
-    } else if (current_ratio > max_ratio) {
-        clippedParams[MODEL_INDICES.RECALL_FORMULA] = N / max_ratio;
-    }
-
-    const betaRecall = clippedParams[MODEL_INDICES.RECALL_FORMULA];
-    if (!isFinite(betaRecall) || betaRecall >= 0) return [];
-
     const recentHistory = answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
     const allReviewTimes = recentHistory
         .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
@@ -255,27 +295,21 @@ export function buildRecallSchedule(size) {
         if (!lastAnswer.date) continue;
 
         const reviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
-        const reviewPercentile = calculatePercentile(allReviewTimes, reviewTime);
+        const reviewPct = calculatePercentile(allReviewTimes, reviewTime);
 
-        const base = clippedParams[MODEL_INDICES.INTERCEPT]
-                   + clippedParams[MODEL_INDICES.TIME_SOLVING] * 0.5
-                   + clippedParams[MODEL_INDICES.REVIEW_TIME] * reviewPercentile
-                   + clippedParams[MODEL_INDICES.PROBLEM_DIFFICULTY] * lastAnswer.problemRank
-                   + clippedParams[MODEL_INDICES.SIZE_IS_13] * (size === 13 ? 1 : 0);
+        // size is the explicit per-size arg here, not the active board.
+        const eta = dot(buildFeatures({
+            isRepeat: true,
+            reviewPct,
+            problemRank: lastAnswer.problemRank,
+            size,
+            r: lastAnswer.successSinceFailure || 0,
+        }), params);
+        const S = stabilityDaysFromEta(eta);
+        if (!isFinite(S)) continue;
 
-        const r = lastAnswer.successSinceFailure || 0;
-        const factor = Math.pow(2, r);
-
-        const daysFor = (p) => {
-            const logitTarget = Math.log(p / (1 - p));
-            const recallFeature = (logitTarget - base) / betaRecall;
-            return (Math.exp(recallFeature) - 1) * factor;
-        };
-
-        const tEnterDays = daysFor(0.80);
-        const tExitDays = daysFor(0.60);
-        if (!isFinite(tEnterDays) || !isFinite(tExitDays)) continue;
-        if (tExitDays <= tEnterDays) continue;
+        const tEnterDays = NEG_LN_080 * S; // R=0.80
+        const tExitDays = NEG_LN_060 * S;  // R=0.60
 
         const enterAt = lastAnswer.date + tEnterDays * DAY_MS;
         const exitAt = lastAnswer.date + tExitDays * DAY_MS;
@@ -301,22 +335,28 @@ export const MODEL_INDICES = {
     TIME_SOLVING: 1,
     REVIEW_TIME: 2,
     PROBLEM_DIFFICULTY: 3,
-    IS_NOVEL: 4,
-    RECALL_FORMULA: 5,
-    // 9x9 is the baseline (feature 0); this carries the 13x13 success offset at
-    // equal internal-rank difficulty. Its coefficient → ranks is the stats
-    // panel's "stronger/weaker on 13x13" readout.
-    SIZE_IS_13: 6,
+    // 9x9 is the baseline (feature 0); this carries the 13x13 offset at equal
+    // internal-rank difficulty. Its coefficient → ranks is the stats panel's
+    // "stronger/weaker on 13x13" readout.
+    SIZE_IS_13: 4,
+    // Retention-only (zero on novel rows). Each consecutive success adds this to
+    // lnS, i.e. multiplies memory stability by e^{coeff} (FSRS geometric SInc).
+    SUCCESS_SINCE_FAILURE: 5,
+    // Retention-only intercept: the log days-scale that converts the shared
+    // linear predictor into stability S = exp(lnS). Only the repeat head sees it.
+    LN_C: 6,
 };
 
 const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
     [MODEL_INDICES.PROBLEM_DIFFICULTY]: -10,
-    [MODEL_INDICES.IS_NOVEL]: -1,
-    [MODEL_INDICES.RECALL_FORMULA]: -1,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
     [MODEL_INDICES.SIZE_IS_13]: 0,
+    // Prior: each consecutive success ~doubles stability (ln 2 ≈ 0.69).
+    [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: Math.log(2),
+    // Prior: base stability ~e^{-1} ≈ 0.37 day before the other terms move it.
+    [MODEL_INDICES.LN_C]: -1,
 };
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
@@ -422,11 +462,24 @@ export function prepareTrainingData(history, validHistory) {
     
     const percentileReview = previousReviewTimes.map(t => calculatePercentile(sortedReview, t));
 
+    // Elapsed days since each repeat row's previous attempt of the same problem
+    // (the retention head's t). Zero for novel rows (they use the logistic head).
+    const DAY = 1000 * 60 * 60 * 24;
+    const elapsedDays = history.map(p => {
+        if (!p.isRepeat) return 0;
+        const prev = validHistory.filter(a => a.problemId === p.problemId && a.date < p.date).pop();
+        if (!prev) return 0;
+        return Math.max(0, (p.date - prev.date) / DAY);
+    });
+    const isRepeatArr = history.map(p => !!p.isRepeat);
+
     return {
         y: history.map(p => p.correct ? 1 : 0),
         weights: Array.from({ length: n }, (_, i) => (i + 1) / n),
         percentileTime,
         percentileReview,
+        elapsedDays,
+        isRepeatArr,
         time_per_percentile_min,
         time_per_percentile_min_r,
         history,
@@ -436,7 +489,7 @@ export function prepareTrainingData(history, validHistory) {
 }
 
 async function trainUserModel(trainingData, modelState) {
-    const { y, weights, percentileTime, percentileReview, history, validHistory, n } = trainingData;
+    const { y, weights, elapsedDays, isRepeatArr, n } = trainingData;
     let { params, adamState } = modelState;
 
     const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
@@ -446,21 +499,22 @@ async function trainUserModel(trainingData, modelState) {
     let prevLoss = Infinity;
     const startTime = Date.now();
 
+    // Features are independent of params, so build the design matrix once.
+    const numFeatures = Object.keys(MODEL_INDICES).length;
+    const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
+
     for (let epoch = 0; epoch < maxEpochs; epoch++) {
         adamState.t++;
-
-        const X = history.map((p, i) => getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }));
 
         const gradient = Array(params.length).fill(0);
         let currentLoss = 0;
 
         for (let i = 0; i < n; i++) {
-            const logit = X[i].reduce((acc, val, j) => acc + val * params[j], 0);
-            const predicted = 1 / (1 + Math.exp(-logit));
-            const clipped = Math.max(1e-15, Math.min(1 - 1e-15, predicted));
-            currentLoss += weights[i] * (-y[i] * Math.log(clipped) - (1 - y[i]) * Math.log(1 - clipped));
-            const error = weights[i] * (predicted - y[i]);
-            for (let j = 0; j < Object.keys(MODEL_INDICES).length; j++) gradient[j] += error * X[i][j];
+            const eta = dot(X[i], params);
+            const { loss, dEta } = predictAndGrad(eta, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+            currentLoss += weights[i] * loss;
+            const error = weights[i] * dEta;
+            for (let j = 0; j < numFeatures; j++) gradient[j] += error * X[i][j];
         }
 
         let l2_penalty = 0;
@@ -492,13 +546,19 @@ async function trainUserModel(trainingData, modelState) {
 }
 
 export function calculateResultsAndStdErrors(finalParams, trainingData) {
-    const { percentileTime, percentileReview, history, validHistory, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
+    const { elapsedDays, isRepeatArr, weights, y, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
 
-    const X = history.map((p, i) => getFeaturesForTraining(p, i, { percentileTime, percentileReview, validHistory }));
+    const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
 
     const X_matrix = math.matrix(X);
-    const p_hat = X.map(xi => 1 / (1 + Math.exp(-xi.reduce((acc, val, j) => acc + val * finalParams[j], 0))));
-    const W = math.diag(p_hat.map((pi, i) => trainingData.weights[i] * pi * (1 - pi)));
+    // Per-row Fisher weight under the dual-head likelihood: p(1-p) for logistic
+    // (novel) rows, R·u²/(1-R) for retention (repeat) rows.
+    const fisherWeights = X.map((xi, i) => {
+        const eta = dot(xi, finalParams);
+        const { fisherW } = predictAndGrad(eta, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+        return weights[i] * fisherW;
+    });
+    const W = math.diag(fisherWeights);
     const Xt = math.transpose(X_matrix);
     const fisherInfo = math.add(math.multiply(Xt, W, X_matrix), math.diag(Array(X[0].length).fill(1e-6)));
     const varCovarMatrix = math.inv(fisherInfo);
