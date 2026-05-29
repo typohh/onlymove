@@ -143,8 +143,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateBoardSize();
     });
 
-    const handleSizeToggle = async () => {
-        const next = await showBoardSizePicker({ dismissable: true });
+    const handleSizeToggle = async (next) => {
+        // With only two supported sizes the menu item names the target size
+        // ("Switch to 13x13"), so the menu path passes it explicitly and we
+        // switch directly. Other callers (none currently) can omit it to get
+        // the size picker.
+        if (next === undefined) {
+            next = await showBoardSizePicker({ dismissable: true });
+        }
         if (next === null || next === state.boardSize) return;
         setBoardSize(next);
         // Linked mode exits on size switch: the linked challenge belongs to
@@ -183,7 +189,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('menu-board-size').addEventListener('click', (e) => {
         e.preventDefault();
         closeMenu();
-        handleSizeToggle();
+        // Switch straight to the other size (the only alternative) instead of
+        // popping a picker — the menu item already names the destination.
+        const otherSize = SUPPORTED_BOARD_SIZES.find((s) => s !== state.boardSize);
+        handleSizeToggle(otherSize);
     });
     document.getElementById('menu-pause-recalls').addEventListener('click', (e) => {
         e.preventDefault();
