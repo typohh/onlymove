@@ -349,7 +349,7 @@ async function computeServerStats(env) {
   // the whole table), and sharing a single SELECT across every metric keeps D1
   // rows-read to roughly one window's worth per recompute.
   const rows = (await env.DB.prepare(
-    `SELECT user_id, success, size, time_used, review_time, substr(created_at, 1, 10) AS day
+    `SELECT user_id, problem, success, size, time_used, review_time, created_at, substr(created_at, 1, 10) AS day
      FROM tsumego_reports WHERE created_at >= ?`
   ).bind(since).all()).results || [];
 
@@ -357,8 +357,14 @@ async function computeServerStats(env) {
   let attemptsAll = 0, winsAll = 0;
   const byDay = new Map();     // day → { attempts, users:Set }
   const bySizeMap = new Map(); // size → { attempts, wins, users:Set }
-  const solveB = new Map();    // 10s bucket → count
-  const reviewB = new Map();
+  // Solving/review time is summarised PER USER (one sample per user) rather than
+  // per attempt, so heavy users don't dominate the distribution. Solving time is
+  // per-attempt, so we keep every sample. Review time is CUMULATIVE across a
+  // problem's repeats (each repeat re-reports the running total), so per (user,
+  // problem) we keep only the last instance — the final cumulative value — and
+  // earlier repeats are dropped to avoid massive double counting.
+  const userSolve = new Map();   // user → number[] of time_used (ms)
+  const userReview = new Map();  // user → Map<problem, { t, at }> last cumulative review_time
   const perUserActivity = new Map(); // user → { attempts, days:Set }
 
   for (const r of rows) {
@@ -375,17 +381,44 @@ async function computeServerStats(env) {
     s.attempts++; if (r.success) s.wins++; s.users.add(r.user_id);
 
     if (r.time_used != null && r.time_used > 0) {
-      const b = Math.min(Math.floor(r.time_used / 10000), 60);
-      solveB.set(b, (solveB.get(b) || 0) + 1);
+      let arr = userSolve.get(r.user_id);
+      if (!arr) { arr = []; userSolve.set(r.user_id, arr); }
+      arr.push(r.time_used);
     }
     if (r.review_time != null && r.review_time > 0) {
-      const b = Math.min(Math.floor(r.review_time / 10000), 60);
-      reviewB.set(b, (reviewB.get(b) || 0) + 1);
+      let m = userReview.get(r.user_id);
+      if (!m) { m = new Map(); userReview.set(r.user_id, m); }
+      const prev = m.get(r.problem);
+      if (!prev || r.created_at > prev.at) m.set(r.problem, { t: r.review_time, at: r.created_at });
     }
 
     let u = perUserActivity.get(r.user_id);
     if (!u) { u = { attempts: 0, days: new Set() }; perUserActivity.set(r.user_id, u); }
     u.attempts++; u.days.add(r.day);
+  }
+
+  // Per-user median time → 10s bucket; the histogram then counts USERS per
+  // bucket, so binHist (client) reads it unchanged with "users" as the y-axis.
+  const median = (arr) => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = s.length >> 1;
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+  const timeBucket = (ms) => Math.min(Math.floor(ms / 10000), 60);
+  const solveB = new Map();    // 10s bucket → user count
+  const reviewB = new Map();
+  for (const arr of userSolve.values()) {
+    const med = median(arr);
+    if (med == null) continue;
+    const b = timeBucket(med);
+    solveB.set(b, (solveB.get(b) || 0) + 1);
+  }
+  for (const perProblem of userReview.values()) {
+    const med = median([...perProblem.values()].map(v => v.t));
+    if (med == null) continue;
+    const b = timeBucket(med);
+    reviewB.set(b, (reviewB.get(b) || 0) + 1);
   }
 
   const totals = { attempts: attemptsAll, wins: winsAll, users: usersAll.size };

@@ -1023,14 +1023,14 @@ async function buildServerStatsPane() {
     if (data.solveHist && data.solveHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Solving time';
+        h.textContent = 'Solving time (median per user)';
         pane.append(h, makeBarList(binHist(data.solveHist)));
     }
 
     if (data.reviewHist && data.reviewHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Review time';
+        h.textContent = 'Review time (median per user)';
         pane.append(h, makeBarList(binHist(data.reviewHist)));
     }
 
