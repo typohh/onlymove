@@ -107,11 +107,16 @@ const DEFAULT_BOARD_SIZE = 9;
 // semantics (… SIZE_IS_13/SUCCESS_SINCE_FAILURE/LN_C). Because the length is
 // unchanged the runtime length-guards can't detect the switch, so stored params
 // must be dropped explicitly and retrained from scratch on next load.
-(function resetRecallModelForRetention_v3() {
-    if (localStorage.getItem('recallRetentionModelMigrated_v3')) return;
+//
+// v4: the stability form changed from S = c·e^z (over-disperses difficulty, and
+// LN_C was pinned to the floor by L2) to the bounded S = c·σ(z)·e^{β_r·r} with
+// LN_C unregularized. The v3 fit collapsed every repeat to the ~18h floor, so it
+// must be discarded too — bump the flag to re-wipe clients that already ran v3.
+(function resetRecallModelForRetention_v4() {
+    if (localStorage.getItem('recallRetentionModelMigrated_v4')) return;
     localStorage.removeItem('modelParams');
     localStorage.removeItem('adamState');
-    localStorage.setItem('recallRetentionModelMigrated_v3', 'true');
+    localStorage.setItem('recallRetentionModelMigrated_v4', 'true');
 })();
 
 // --- Board size + per-size backing buckets ---

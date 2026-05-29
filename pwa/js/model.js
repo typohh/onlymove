@@ -56,38 +56,65 @@ export function calculatePercentile(sortedArr, target) {
 // Recall is an FSRS-style retention curve anchored at R(0)=1, NOT a logit on
 // population correctness (the old additive `base + βR·log(...)` form let a
 // problem's difficulty offset the curve downward so it could be "due" the
-// instant it was solved). For a REPEAT encounter the shared linear predictor is
-// the LOG of memory stability S (in days):
+// instant it was solved). A REPEAT encounter's memory stability S (days) is:
 //
-//   lnS = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
-//         + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13
-//         + SUCCESS_SINCE_FAILURE·r + LN_C
-//   R(t) = exp(-t_days / exp(lnS))
+//   z   = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
+//         + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13   (the cold-solve logit)
+//   S   = c · σ(z) · exp(SUCCESS_SINCE_FAILURE·r),   c = exp(LN_C)
+//   R(t)= exp(-t_days / S)
 //
-// so R(0)=1 always (no instant-due) and every per-problem signal scales the
-// time-constant multiplicatively instead of offsetting the curve — difficulty's
-// only action is on how S compounds, exactly the FSRS picture. Each consecutive
-// success multiplies S by e^{SUCCESS_SINCE_FAILURE} (geometric growth), and a
-// lapse resets r→0 (post-lapse reset).
+// so R(0)=1 always (no instant-due) and difficulty scales the time-constant
+// multiplicatively, exactly the FSRS picture. Crucially S uses σ(z) (BOUNDED in
+// (0,1)), NOT raw e^z: cold-solve difficulty must only mildly move stability
+// (σ spans ~[0.6,0.95] over eligible sub-rank problems, ≈1.5×), because a
+// problem you find a little harder to *solve cold* is not forgotten 10-20×
+// faster. Using e^z over-disperses S so the lower-z problems collapse to the
+// floor and cycle every ~18h while you still recall them perfectly — the bug
+// this form fixes. Geometric review growth comes from r (S ×e^{β_r} per
+// consecutive success, unbounded), a lapse resets r→0 (post-lapse reset), and
+// `c` (LN_C) is the free, data-driven base-stability level — it is NOT L2-
+// regularized (see trainUserModel) and is seeded to a sane base for cold start,
+// so it can't be pinned down to the floor by a prior.
 //
-// The SAME features (with LN_C and SUCCESS_SINCE_FAILURE zeroed) feed the
-// NOVEL-encounter cold-solve logit P = σ(z). That head is what trains
-// PROBLEM_DIFFICULTY / TIME_SOLVING / SIZE_IS_13 and backs the stats-panel
-// readouts; REVIEW_TIME and SUCCESS_SINCE_FAILURE are identified purely from
-// repeat rows (both are 0 on novel rows). There is no IS_NOVEL indicator: the
-// novel/repeat regime is carried by which head a row enters, and an indicator
-// that is 1 on every novel row would just be collinear with the intercept.
+// The SAME logit z feeds the NOVEL-encounter cold-solve head P = σ(z); that head
+// trains PROBLEM_DIFFICULTY / TIME_SOLVING / SIZE_IS_13 and backs the stats
+// readouts. REVIEW_TIME / SUCCESS_SINCE_FAILURE / LN_C are identified purely
+// from repeat rows. There is no IS_NOVEL indicator: the regime is carried by
+// which head a row enters (a 1-on-every-novel-row indicator is collinear with
+// the intercept).
 const NEG_LN_080 = -Math.log(0.80); // 0.22314 — t/S at the 0.80 window-open
 const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
 // Stability floor/ceiling (days). The floor keeps a just-failed problem from
-// coming due sooner than ~18h (NEG_LN_080·MIN ≈ 18h window-open, matching the
-// old min-hours clamp); the ceiling guards against runaway intervals/overflow.
+// coming due sooner than ~18h (NEG_LN_080·MIN ≈ 18h window-open); the ceiling
+// guards against runaway intervals/overflow.
 const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
 const MAX_STABILITY_DAYS = 365;
+// Cold-start base stability level: c = e^{LN_C}. Seeded so a fresh (untrained)
+// model schedules first repeats at a sane ~2-3 days rather than the floor; the
+// retention data then moves it per-user (LN_C is unregularized).
+const LN_C_INIT = Math.log(10);
+// Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
+// overflow without flattening the gradient where the model still needs to learn.
+const LN_S_TRAIN_MIN = -5;
+const LN_S_TRAIN_MAX = 8;
 
-// Shared linear-predictor feature vector. `isRepeat` toggles the retention-only
-// features (LN_C and SUCCESS_SINCE_FAILURE carry signal only on repeats); for
-// prediction `timePct` defaults to the neutral 0.5.
+function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
+
+// Shared cold-solve logit z over the logit features only (excludes the
+// retention-only LN_C / SUCCESS_SINCE_FAILURE). Reads MODEL_INDICES at call time
+// (it is defined later in the module).
+function logitZ(features, params) {
+    const M = MODEL_INDICES;
+    return params[M.INTERCEPT] * features[M.INTERCEPT]
+         + params[M.TIME_SOLVING] * features[M.TIME_SOLVING]
+         + params[M.REVIEW_TIME] * features[M.REVIEW_TIME]
+         + params[M.PROBLEM_DIFFICULTY] * features[M.PROBLEM_DIFFICULTY]
+         + params[M.SIZE_IS_13] * features[M.SIZE_IS_13];
+}
+
+// Shared feature vector. `isRepeat` toggles the retention-only features
+// (LN_C, SUCCESS_SINCE_FAILURE carry signal only on repeats); for prediction
+// `timePct` defaults to the neutral 0.5.
 function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0 }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
     f[MODEL_INDICES.INTERCEPT] = 1;
@@ -104,15 +131,18 @@ function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0
     return f;
 }
 
-function dot(features, params) {
-    let s = 0;
-    for (let j = 0; j < features.length; j++) s += features[j] * params[j];
-    return s;
+// Unclamped log-stability for a repeat feature row: lnS = LN_C + ln σ(z) + β_r·r.
+function lnStabilityForRepeat(features, params) {
+    const M = MODEL_INDICES;
+    const p = Math.max(1e-6, Math.min(1 - 1e-6, sigmoid(logitZ(features, params))));
+    return params[M.LN_C] * features[M.LN_C]
+         + Math.log(p)
+         + params[M.SUCCESS_SINCE_FAILURE] * features[M.SUCCESS_SINCE_FAILURE];
 }
 
-// Clamped stability (days) from a repeat-row linear predictor (lnS = eta).
-function stabilityDaysFromEta(eta) {
-    const S = Math.exp(eta);
+// Clamped stability (days) for scheduling/prediction.
+function stabilityDaysForRepeat(features, params) {
+    const S = Math.exp(lnStabilityForRepeat(features, params));
     if (!isFinite(S)) return MAX_STABILITY_DAYS;
     return Math.min(MAX_STABILITY_DAYS, Math.max(MIN_STABILITY_DAYS, S));
 }
@@ -122,8 +152,8 @@ function stabilityDaysFromEta(eta) {
 // ~X h" readout. Returns null when params aren't ready.
 export function freshFailureReviewHours(params, { problemRank = 0, size } = {}) {
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
-    const eta = dot(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0 }), params);
-    return NEG_LN_080 * stabilityDaysFromEta(eta) * 24;
+    const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0 }), params);
+    return NEG_LN_080 * S * 24;
 }
 
 // Builds the training feature vector for history row i (board-independent).
@@ -139,24 +169,45 @@ function featuresForTrainingRow(td, i) {
     });
 }
 
-// Per-row predicted probability + dLoss/dEta under the dual-head likelihood:
-// novel rows are a logistic on the cold-solve logit; repeat rows are the
-// retention curve R = exp(-t/S), S = exp(eta).
-function predictAndGrad(eta, { isRepeat, elapsedDays, y }) {
+// Per-row likelihood pieces under the dual-head model. Returns the predicted
+// probability, the loss, the scalar dLoss/dη (η = z for novel rows, lnS for
+// repeat rows), the score-direction vector v = dη/dparams, and the Bernoulli
+// Fisher weight. The training gradient for a row is dScalar·v and its Fisher
+// contribution is fisherW·v·vᵀ — one shared v for both.
+function predictAndGrad(features, params, { isRepeat, elapsedDays, y }) {
+    const M = MODEL_INDICES;
+    const n = features.length;
     if (!isRepeat) {
-        const p = 1 / (1 + Math.exp(-eta));
+        const p = sigmoid(logitZ(features, params));
         const clipped = Math.max(1e-15, Math.min(1 - 1e-15, p));
         const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
-        return { p, loss, dEta: p - y, fisherW: p * (1 - p) };
+        // η = z, dη/dparams = features (retention-only entries are 0 here).
+        return { p, loss, dScalar: p - y, v: features, fisherW: p * (1 - p) };
     }
-    const S = Math.exp(eta);
+    const p = Math.max(1e-6, Math.min(1 - 1e-6, sigmoid(logitZ(features, params))));
+    let lnS = params[M.LN_C] * features[M.LN_C]
+            + Math.log(p)
+            + params[M.SUCCESS_SINCE_FAILURE] * features[M.SUCCESS_SINCE_FAILURE];
+    lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnS));
+    const S = Math.exp(lnS);
     const u = elapsedDays / S;              // ≥ 0; u=0 ⇒ R=1 (just solved)
     const R = Math.exp(-u);
     const clipped = Math.max(1e-15, Math.min(1 - 1e-15, R));
     const loss = -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
-    // dR/dEta = R·u, so dLoss/dEta = (R-y)·u/(1-R); Fisher = (R·u)²/(R(1-R)).
+    // dR/dlnS = R·u ⇒ dLoss/dlnS = (R-y)·u/(1-R); Fisher = (R·u)²/(R(1-R)).
     const oneMinusR = Math.max(1 - R, 1e-9);
-    return { p: R, loss, dEta: (R - y) * u / oneMinusR, fisherW: R * u * u / oneMinusR };
+    // v = dlnS/dparams: logit features chain through d(ln σ(z))/dz = (1-p);
+    // LN_C and SUCCESS_SINCE_FAILURE enter lnS linearly via their features.
+    const oneMinusP = 1 - p;
+    const v = new Array(n).fill(0);
+    v[M.INTERCEPT] = oneMinusP * features[M.INTERCEPT];
+    v[M.TIME_SOLVING] = oneMinusP * features[M.TIME_SOLVING];
+    v[M.REVIEW_TIME] = oneMinusP * features[M.REVIEW_TIME];
+    v[M.PROBLEM_DIFFICULTY] = oneMinusP * features[M.PROBLEM_DIFFICULTY];
+    v[M.SIZE_IS_13] = oneMinusP * features[M.SIZE_IS_13];
+    v[M.SUCCESS_SINCE_FAILURE] = features[M.SUCCESS_SINCE_FAILURE];
+    v[M.LN_C] = features[M.LN_C];
+    return { p: R, loss, dScalar: (R - y) * u / oneMinusR, v, fisherW: R * u * u / oneMinusR };
 }
 
 
@@ -211,14 +262,13 @@ export function getRecallCandidates(options = {}) {
 
         const reviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
         const reviewPct = calculatePercentile(allReviewTimes, reviewTime);
-        const eta = dot(buildFeatures({
+        const S = stabilityDaysForRepeat(buildFeatures({
             isRepeat: true,
             reviewPct,
             problemRank: lastAnswer.problemRank,
             size: lastAnswer.size,
             r: lastAnswer.successSinceFailure || 0,
         }), params);
-        const S = stabilityDaysFromEta(eta);
 
         const tDays = (now - lastAnswer.date) / DAY_MS;
         if (tDays < 0) continue;
@@ -298,14 +348,13 @@ export function buildRecallSchedule(size) {
         const reviewPct = calculatePercentile(allReviewTimes, reviewTime);
 
         // size is the explicit per-size arg here, not the active board.
-        const eta = dot(buildFeatures({
+        const S = stabilityDaysForRepeat(buildFeatures({
             isRepeat: true,
             reviewPct,
             problemRank: lastAnswer.problemRank,
             size,
             r: lastAnswer.successSinceFailure || 0,
         }), params);
-        const S = stabilityDaysFromEta(eta);
         if (!isFinite(S)) continue;
 
         const tEnterDays = NEG_LN_080 * S; // R=0.80
@@ -342,8 +391,8 @@ export const MODEL_INDICES = {
     // Retention-only (zero on novel rows). Each consecutive success adds this to
     // lnS, i.e. multiplies memory stability by e^{coeff} (FSRS geometric SInc).
     SUCCESS_SINCE_FAILURE: 5,
-    // Retention-only intercept: the log days-scale that converts the shared
-    // linear predictor into stability S = exp(lnS). Only the repeat head sees it.
+    // Retention-only, unregularized: ln of the base-stability scale c, so
+    // S = c·σ(z)·e^{SUCCESS_SINCE_FAILURE·r}. Only the repeat head sees it.
     LN_C: 6,
 };
 
@@ -355,8 +404,8 @@ const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.SIZE_IS_13]: 0,
     // Prior: each consecutive success ~doubles stability (ln 2 ≈ 0.69).
     [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: Math.log(2),
-    // Prior: base stability ~e^{-1} ≈ 0.37 day before the other terms move it.
-    [MODEL_INDICES.LN_C]: -1,
+    // LN_C is intentionally absent — it is unregularized (see trainUserModel) so
+    // the base-stability level tracks the user's true retention.
 };
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
@@ -403,7 +452,15 @@ export async function calculateAndStoreStatsResults() {
         const trainingData = prepareTrainingData(history, validHistory);
 
         const numParams = Object.keys(MODEL_INDICES).length;
-        let params = (state.modelParams && state.modelParams.length === numParams) ? [...state.modelParams] : Array(numParams).fill(0);
+        let params;
+        if (state.modelParams && state.modelParams.length === numParams) {
+            params = [...state.modelParams];
+        } else {
+            // Fresh start: seed the base-stability level so first repeats schedule
+            // at a sane interval instead of the floor while LN_C is still untrained.
+            params = Array(numParams).fill(0);
+            params[MODEL_INDICES.LN_C] = LN_C_INIT;
+        }
 
         let adamState = (state.adamState && state.adamState.m.length === numParams)
             ? JSON.parse(JSON.stringify(state.adamState))
@@ -510,16 +567,20 @@ async function trainUserModel(trainingData, modelState) {
         let currentLoss = 0;
 
         for (let i = 0; i < n; i++) {
-            const eta = dot(X[i], params);
-            const { loss, dEta } = predictAndGrad(eta, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+            const { loss, dScalar, v } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
             currentLoss += weights[i] * loss;
-            const error = weights[i] * dEta;
-            for (let j = 0; j < numFeatures; j++) gradient[j] += error * X[i][j];
+            const error = weights[i] * dScalar;
+            for (let j = 0; j < numFeatures; j++) gradient[j] += error * v[j];
         }
+
+        // INTERCEPT (logit level) and LN_C (free base-stability level) are not
+        // regularized — LN_C must be free to track the user's true retention,
+        // not pinned to a prior that would collapse S to the floor.
+        const isUnregularized = (j) => j === MODEL_INDICES.INTERCEPT || j === MODEL_INDICES.LN_C;
 
         let l2_penalty = 0;
         for (let j = 0; j < params.length; j++) {
-            if (j === MODEL_INDICES.INTERCEPT) continue;
+            if (isUnregularized(j)) continue;
             const target = L2_REGULARIZATION_TARGETS[j] || 0;
             l2_penalty += Math.pow(params[j] - target, 2);
         }
@@ -528,7 +589,7 @@ async function trainUserModel(trainingData, modelState) {
 
         for (let j = 0; j < params.length; j++) {
             gradient[j] /= n;
-            if (j !== MODEL_INDICES.INTERCEPT) {
+            if (!isUnregularized(j)) {
                 const target = L2_REGULARIZATION_TARGETS[j] || 0;
                 gradient[j] += (lambda / n) * (params[j] - target);
             }
@@ -550,17 +611,20 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
 
     const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
 
-    const X_matrix = math.matrix(X);
-    // Per-row Fisher weight under the dual-head likelihood: p(1-p) for logistic
-    // (novel) rows, R·u²/(1-R) for retention (repeat) rows.
-    const fisherWeights = X.map((xi, i) => {
-        const eta = dot(xi, finalParams);
-        const { fisherW } = predictAndGrad(eta, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
-        return weights[i] * fisherW;
-    });
+    // Fisher info I = Σ wᵢ·fisherWᵢ·vᵢ·vᵢᵀ, where vᵢ is the per-row score
+    // direction dη/dparams (= features for logistic novel rows, but chained
+    // through (1-p) on the logit features for retention repeat rows) and
+    // fisherW is the Bernoulli weight (p(1-p) novel, R·u²/(1-R) repeat).
+    const V = [], fisherWeights = [];
+    for (let i = 0; i < n; i++) {
+        const { v, fisherW } = predictAndGrad(X[i], finalParams, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+        V.push(Array.from(v));
+        fisherWeights.push(weights[i] * fisherW);
+    }
+    const V_matrix = math.matrix(V);
     const W = math.diag(fisherWeights);
-    const Xt = math.transpose(X_matrix);
-    const fisherInfo = math.add(math.multiply(Xt, W, X_matrix), math.diag(Array(X[0].length).fill(1e-6)));
+    const Vt = math.transpose(V_matrix);
+    const fisherInfo = math.add(math.multiply(Vt, W, V_matrix), math.diag(Array(V[0].length).fill(1e-6)));
     const varCovarMatrix = math.inv(fisherInfo);
     const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt).toArray();
 
