@@ -234,7 +234,7 @@ const localization = {
     undo: 'Undo',
     share: 'Share',
     stats: 'Stats',
-    statsTabSummary: 'Summary',
+    statsTabSummary: 'Overview',
     statsTabWeaknesses: 'Weaknesses',
     statsTabRank: 'Rank',
     statsTabTime: 'Time',

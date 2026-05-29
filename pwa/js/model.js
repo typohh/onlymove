@@ -555,9 +555,15 @@ export async function showDetailedStats() {
 
         const { results, varCovarMatrix } = state.statsResults;
         const finalParams = state.modelParams;
+        // The old single "overview" pane is now split across tabs: timing
+        // probabilities ride with the Time chart, the rank decomposition rides
+        // with the Rank chart, and only the review-queue counts stay on the
+        // (now last) summary pane.
+        let timingText = '';
+        let rankText = '';
         let resultText = '';
 
-        // Block 1: Observations
+        // Timing observations → Time tab.
         for (const result of results) {
             const { coeff, se, varIndex } = result;
             let termKey;
@@ -568,12 +574,9 @@ export async function showDetailedStats() {
                 const z = coeff / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = cdf * 100;
-                resultText += getTerm(termKey).replace('{percent_change}', conf.toFixed(0)) + '\n';
+                timingText += getTerm(termKey).replace('{percent_change}', conf.toFixed(0)) + '\n';
             }
         }
-
-        // Separator
-        resultText += '\n';
 
         // Block 2: Summary Text
         if (varCovarMatrix) {
@@ -630,15 +633,15 @@ export async function showDetailedStats() {
                 const seStr = Number.isFinite(summary.currentSkillSE)
                     ? `, (±${summary.currentSkillSE.toFixed(1)} ranks)`
                     : '';
-                resultText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
+                rankText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
             }
             if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
                 const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
                 const sign = summary.longTermDrift >= 0 ? '+' : '−';
-                resultText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
+                rankText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
             }
             if (typeof summary.sigmaM === 'number') {
-                resultText += summary.sigmaM >= 0.1
+                rankText += summary.sigmaM >= 0.1
                     ? `Session-to-session performance: good days +${summary.sigmaUp.toFixed(2)}, bad days −${summary.sigmaDown.toFixed(2)} ranks.\n`
                     : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
             }
@@ -658,7 +661,7 @@ export async function showDetailedStats() {
             const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
             const seRanks = sizeResult.se / logitPerRank;
             const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
-            resultText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
+            rankText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
         }
 
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
@@ -673,19 +676,25 @@ export async function showDetailedStats() {
         summaryPane.className = 'stats-modal-pre';
         summaryPane.textContent = resultText;
 
+        // The timing probabilities and rank decomposition used to live on the
+        // summary pane; they now ride with their respective charts.
+        const rankPane = combineChartWithText(chartElement, rankText);
+        const timePane = combineChartWithText(timeUsageElement, timingText);
+
         // Community/server-wide stats (null if the endpoint isn't ready or the
         // fetch fails — the tab is then dropped).
         const serverPane = await buildServerStatsPane();
 
-        // The two charts get their own pages. Empty panes (no weaknesses, too
-        // little data for a chart, server stats unavailable) are dropped by
-        // showStatsModal, so the corresponding tab simply doesn't appear.
+        // Weaknesses is the default (first) page; the renamed summary pane is
+        // last. Empty panes (no weaknesses, too little data for a chart, server
+        // stats unavailable) are dropped by showStatsModal, so the
+        // corresponding tab simply doesn't appear.
         showStatsModal([
-            { label: getTerm('statsTabSummary'), content: summaryPane },
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
-            { label: getTerm('statsTabRank'), content: chartElement },
-            { label: getTerm('statsTabTime'), content: timeUsageElement },
+            { label: getTerm('statsTabRank'), content: rankPane },
+            { label: getTerm('statsTabTime'), content: timePane },
             { label: getTerm('statsTabCommunity'), content: serverPane },
+            { label: getTerm('statsTabSummary'), content: summaryPane },
         ]);
 
     } catch (error) {
@@ -1080,6 +1089,26 @@ async function buildServerStatsPane() {
 // Tabbed stats modal. `tabs` is [{ label, content }]; tabs whose content is
 // null/absent are dropped (so an empty Weaknesses or Charts page just doesn't
 // appear), and the tab bar is omitted when only one page remains.
+// A tab pane that pairs a chart with the explanatory text that used to live on
+// the summary page (timing probabilities for Time, the rank decomposition for
+// Rank). Either piece may be missing: returns null only when both are, so an
+// empty tab is dropped by showStatsModal.
+function combineChartWithText(chartElement, text) {
+    const hasText = typeof text === 'string' && text.trim().length > 0;
+    if (!chartElement && !hasText) return null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'stats-chart-pane';
+    if (chartElement) wrap.append(chartElement);
+    if (hasText) {
+        const pre = document.createElement('pre');
+        pre.className = 'stats-modal-pre';
+        pre.textContent = text;
+        wrap.append(pre);
+    }
+    return wrap;
+}
+
 function showStatsModal(tabs) {
     tabs = tabs.filter(t => t.content);
     if (tabs.length === 0) return;
