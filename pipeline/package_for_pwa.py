@@ -511,7 +511,8 @@ def load_embeddings(board_size):
     return embedding_map, embedding_meta
 
 
-def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None):
+def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
+                 ratings_root="ratings"):
     """Run the full per-size packaging — ratings load, exponential rank
     mapping, metadata assembly, zip + per-cell sidecar emission. Returns
     (embedding_meta, ratings_hash); either element may be None if the
@@ -522,7 +523,9 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None):
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
-    RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings", str(board_size))
+    # ratings_root selects the backend rating set (e.g. "ratings" = v1, "ratings_v2"
+    # = combined MLP-2PL). Output still lands in the SAME pwa/tsumegos/ structure.
+    RATINGS_DIR = os.path.join(PROJECT_ROOT, ratings_root, str(board_size))
     PER_CELL_DIR = os.path.join(
         PROJECT_ROOT, "embeddings", "joint", "per_cell", str(board_size))
 
@@ -622,6 +625,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--workers", type=int, default=None,
         help="parallel shard-builder processes (default: os.cpu_count())")
+    parser.add_argument(
+        "--ratings-root", default="ratings",
+        help="backend rating set to package: 'ratings' (v1, default) or 'ratings_v2' "
+             "(combined MLP-2PL). Output always lands in the same pwa/tsumegos/ — only "
+             "the SOURCE differs, so the two pipelines stay separate on the backend only.")
+    parser.add_argument(
+        "--model-tag", default=None,
+        help="optional rating-model tag stamped into embedding_meta.json as "
+             "'rating_model' (e.g. 'v2'), so the PWA can branch handling if needed.")
     args = parser.parse_args()
 
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
@@ -631,7 +643,8 @@ if __name__ == "__main__":
     for size in ALL_BOARD_SIZES:
         meta, ratings_hash = process_size(
             size, OUTPUT_DIR,
-            reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers)
+            reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers,
+            ratings_root=args.ratings_root)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
         if ratings_hash is not None:
@@ -647,6 +660,8 @@ if __name__ == "__main__":
         meta_out["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
         if ratings_versions:
             meta_out["ratings_version"] = ratings_versions
+        if args.model_tag:
+            meta_out["rating_model"] = args.model_tag
         embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
         os.makedirs(os.path.dirname(embedding_meta_path), exist_ok=True)
         with open(embedding_meta_path, 'w', encoding='utf-8') as f:
