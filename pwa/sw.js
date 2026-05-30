@@ -15,7 +15,14 @@ const PRECACHE_URLS = [
     '/lib/jszip.min.js',
     '/lib/math.min.js',
     '/manifest.json',
-    '/sound/stone.wav'
+    '/sound/stone.wav',
+    // M (rating→rank map) is required at init with no fallback — main.js aborts
+    // fatal if it can't load (see Sentry JAVASCRIPT-2V/2W: transient mobile-Safari
+    // fetch failures). Precache it so a network blip can't kill the whole app.
+    // Version-stamped so ?v=VERSION matches the client's fetch in
+    // rank-decomposition.js; the precache is named per-VERSION and deleted on
+    // activate, so each deploy fetches a fresh copy — it can't go stale.
+    `/tsumegos/rating_to_rank.json?v=${VERSION}`,
 ];
 
 self.addEventListener('install', event => {

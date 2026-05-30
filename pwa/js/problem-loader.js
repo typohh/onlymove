@@ -11,11 +11,23 @@ import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize } from './rank-decomposition.js';
 
 async function simpleHash(str) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // crypto.subtle only exists in secure contexts; in-app webviews (e.g. Zalo)
+    // load us over a non-secure origin where it's undefined. Fall back to a
+    // synchronous non-crypto hash so this (debug-only) path never throws.
+    if (crypto?.subtle?.digest) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(str);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    // FNV-1a 32-bit fallback.
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, '0');
 }
 
 function weightedRandomSelect(items, weightFn) {

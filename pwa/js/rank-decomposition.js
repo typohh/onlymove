@@ -100,12 +100,49 @@ const SIGMA_PRIOR_SESSIONS = 8;  // shrinkage prior strength, in effective sessi
 let _ratingRankMap = null;
 let _loadPromise = null;
 
+// M is required with no fallback (main.js aborts fatal on null), so a single
+// transient network blip must not be the difference between a working app and a
+// dead one. Retry with backoff before giving up, mirroring the tsumego loader's
+// MAX_LOAD_ATTEMPTS pattern. The precached copy (sw.js) covers warm returning
+// clients; this covers first visits and Mobile-Safari cache eviction, the
+// dominant failure population in Sentry JAVASCRIPT-2V/2W.
+const M_LOAD_ATTEMPTS = 4;
+
+// Memoize the eventual map, NOT a rejected promise: a failed attempt must not
+// poison the cache so a later caller can re-trigger a load.
 export function loadRatingRankMap() {
     if (_loadPromise) return _loadPromise;
-    _loadPromise = fetch(`tsumegos/rating_to_rank.json?v=${APP_VERSION}`)
-        .then(r => (r.ok ? r.json() : null))
-        .then(m => { _ratingRankMap = m; return m; })
-        .catch(() => { _ratingRankMap = null; return null; });
+    _loadPromise = (async () => {
+        let lastErr = null;
+        for (let attempt = 0; attempt < M_LOAD_ATTEMPTS; attempt++) {
+            try {
+                const r = await fetch(`tsumegos/rating_to_rank.json?v=${APP_VERSION}`);
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                _ratingRankMap = await r.json();
+                return _ratingRankMap;
+            } catch (e) {
+                // Preserve the real cause (network vs HTTP status vs JSON parse)
+                // so a future systematic failure is distinguishable from a blip.
+                lastErr = e;
+                console.warn(`loadRatingRankMap attempt ${attempt + 1}/${M_LOAD_ATTEMPTS} failed:`, e);
+                if (attempt < M_LOAD_ATTEMPTS - 1) {
+                    await new Promise(res => setTimeout(res, 300 * 2 ** attempt));
+                }
+            }
+        }
+        // Exhausted retries. Drop the memo so a later call can try again, surface
+        // the cause to Sentry, and return null for main.js to handle.
+        _loadPromise = null;
+        _ratingRankMap = null;
+        try {
+            if (typeof Sentry !== 'undefined') {
+                Sentry.captureException(lastErr, {
+                    extra: { attempts: M_LOAD_ATTEMPTS, what: 'loadRatingRankMap' },
+                });
+            }
+        } catch (_) {}
+        return null;
+    })();
     return _loadPromise;
 }
 
