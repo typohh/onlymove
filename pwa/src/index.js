@@ -31,7 +31,11 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
+    // Per-IP rate limiting on the write endpoints, before any handler touches
+    // D1. /report is high-volume (one per solved move) so it gets a generous
+    // dedicated limiter; the rest are low-frequency and share a tighter one.
     if (url.pathname === '/report' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_REPORT')) return tooManyRequests();
       return handleReport(request, env);
     }
     if (url.pathname === '/push/vapid-public-key' && request.method === 'GET') {
@@ -40,18 +44,23 @@ export default {
       });
     }
     if (url.pathname === '/push/subscribe' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
       return handleSubscribe(request, env);
     }
     if (url.pathname === '/push/unsubscribe' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
       return handleUnsubscribe(request, env);
     }
     if (url.pathname === '/schedule' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
       return handleSchedule(request, env);
     }
     if (url.pathname === '/rank-survey' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
       return handleRankSurvey(request, env);
     }
     if (url.pathname === '/share-event' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
       return handleShareEvent(request, env);
     }
     if (url.pathname === '/server-stats' && request.method === 'GET') {
@@ -95,6 +104,48 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+// --- Abuse / D1-quota defenses ----------------------------------------------
+// Two cheap, in-Worker layers guard every D1 write (see also the outer
+// Cloudflare WAF rate-limit rule documented in wrangler.toml):
+//   1. A per-IP rate limit, checked BEFORE any D1 work, so a flood is dropped by
+//      a cheap Worker invocation instead of spending D1 write quota (and a
+//      spoofed row would also keep inflating the server-stats window scan for
+//      7 days — read quota — until purged).
+//   2. In-memory format validation (no D1 reads) so malformed/garbage writes
+//      never reach an INSERT. Deliberately format-only: we don't verify the
+//      problem id against the real corpus (that needs a bundled set); the rate
+//      limiter bounds the volume of valid-looking spoofs.
+
+// Tsumego ids are the symmetry-canonical hash truncated to 8 hex chars
+// (see get_orientation_invariant_hash). user_id is a short client-generated
+// token (observed 8 chars, a few legacy ids up to 23); bound it generously.
+const PROBLEM_ID_RE = /^[0-9a-f]{8}$/;
+const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const isValidProblemId = (v) => typeof v === 'string' && PROBLEM_ID_RE.test(v);
+const isValidUserId = (v) => typeof v === 'string' && USER_ID_RE.test(v);
+
+// Per-IP rate limit via a Workers ratelimit binding. Returns true when the
+// caller should be rejected. Fails OPEN on a missing binding (e.g. some local
+// dev) or a limiter error, so a misconfiguration never drops legitimate writes.
+async function rateLimited(request, env, binding) {
+  const limiter = env[binding];
+  if (!limiter) return false;
+  try {
+    const key = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const { success } = await limiter.limit({ key });
+    return !success;
+  } catch {
+    return false;
+  }
+}
+
+function tooManyRequests() {
+  return new Response('Too many requests', {
+    status: 429,
+    headers: { ...CORS_HEADERS, 'Retry-After': '60' },
+  });
+}
+
 async function handleReport(request, env) {
   // Every response carries the deployed Worker version so the client can
   // detect a stale bundle and trigger a quiescent reload (see
@@ -107,7 +158,12 @@ async function handleReport(request, env) {
   try {
     const data = await request.json();
 
-    if (!data.userId || !data.problem || typeof data.success !== 'boolean') {
+    // Identity fields must be well-formed: an 8-hex tsumego id and a short
+    // user token. Rejecting here (no D1 read) keeps garbage/spoofed ids from
+    // ever reaching an INSERT. (A deploy smoke test must therefore post a
+    // real 8-hex problem id, not a free-form marker.)
+    if (!isValidUserId(data.userId) || !isValidProblemId(data.problem) ||
+        typeof data.success !== 'boolean') {
       return new Response('Invalid request body', { status: 400, headers: reportHeaders });
     }
 
@@ -115,10 +171,13 @@ async function handleReport(request, env) {
     const size = (data.size === 9 || data.size === 13) ? data.size : 9;
 
     // New per-attempt fields; older clients (pre-rollout) won't send them, so
-    // every column is nullable except is_repeat which defaults to 0.
-    const move = typeof data.move === 'string' ? data.move : null;
-    const timeUsed = Number.isFinite(data.timeUsed) ? Math.round(data.timeUsed) : null;
-    const reviewTime = Number.isFinite(data.reviewTime) ? Math.round(data.reviewTime) : null;
+    // every column is nullable except is_repeat which defaults to 0. move is a
+    // GTP coordinate (≤3 chars) or "pass"; bound its length so a malformed
+    // payload can't store an unbounded blob. Times must be non-negative;
+    // idle-tab outliers (hours) are left intact — the stats layer caps them.
+    const move = (typeof data.move === 'string' && data.move.length <= 4) ? data.move : null;
+    const timeUsed = (Number.isFinite(data.timeUsed) && data.timeUsed >= 0) ? Math.round(data.timeUsed) : null;
+    const reviewTime = (Number.isFinite(data.reviewTime) && data.reviewTime >= 0) ? Math.round(data.reviewTime) : null;
     const isRepeat = data.isRepeat ? 1 : 0;
 
     if (!env.DB) {
@@ -141,7 +200,7 @@ async function handleReport(request, env) {
 async function handleSubscribe(request, env) {
   const data = await request.json();
   const sub = data && data.subscription;
-  if (!data?.userId || !sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
+  if (!isValidUserId(data?.userId) || !sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
     return jsonResponse({ error: 'Invalid body' }, 400);
   }
   const now = Date.now();
@@ -160,14 +219,14 @@ async function handleSubscribe(request, env) {
 
 async function handleUnsubscribe(request, env) {
   const data = await request.json();
-  if (!data?.userId) return jsonResponse({ error: 'Invalid body' }, 400);
+  if (!isValidUserId(data?.userId)) return jsonResponse({ error: 'Invalid body' }, 400);
   await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(data.userId).run();
   return jsonResponse({ ok: true });
 }
 
 async function handleSchedule(request, env) {
   const data = await request.json();
-  if (!data?.userId || !Array.isArray(data.schedule)) {
+  if (!isValidUserId(data?.userId) || !Array.isArray(data.schedule)) {
     return jsonResponse({ error: 'Invalid body' }, 400);
   }
 
@@ -175,7 +234,7 @@ async function handleSchedule(request, env) {
   const statements = [];
 
   for (const row of data.schedule) {
-    if (!row?.problemId || typeof row.enterAt !== 'number' || typeof row.exitAt !== 'number') continue;
+    if (!isValidProblemId(row?.problemId) || typeof row.enterAt !== 'number' || typeof row.exitAt !== 'number') continue;
     statements.push(env.DB.prepare(
       `INSERT INTO recall_schedule (user_id, problem_id, enter_at, exit_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, ?5)
@@ -211,7 +270,7 @@ const SURVEY_RANK_RE = /^(?:[1-9]|1\d|2[0-5])k$|^[1-9]d$/;
 async function handleRankSurvey(request, env) {
   try {
     const data = await request.json();
-    if (!data?.userId || !data.ranks || typeof data.ranks !== 'object') {
+    if (!isValidUserId(data?.userId) || !data.ranks || typeof data.ranks !== 'object') {
       return jsonResponse({ error: 'Invalid body' }, 400);
     }
     if (!env.DB) {
@@ -249,8 +308,8 @@ async function handleShareEvent(request, env) {
     }
 
     const size = (data.size === 9 || data.size === 13) ? data.size : null;
-    const problemId = typeof data.problemId === 'string' ? data.problemId : null;
-    const userId = typeof data.userId === 'string' ? data.userId : null;
+    const problemId = isValidProblemId(data.problemId) ? data.problemId : null;
+    const userId = isValidUserId(data.userId) ? data.userId : null;
     // "Where the link came from": the client sends document.referrer (the Referer
     // of the navigation that opened the shared link) for opens; creates send
     // none. We don't fall back to this POST's own Referer — that's just the app

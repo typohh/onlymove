@@ -37,3 +37,46 @@ crons = ["0 * * * *"]
 [vars]
 VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
 VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"
+
+# --- Per-IP rate limiting (abuse / D1-quota defense) -------------------------
+# Native Workers rate-limiting bindings, enforced in src/index.js BEFORE any D1
+# write, so a flood costs only a cheap Worker invocation instead of D1 write
+# quota (a spoofed INSERT also keeps costing read quota: it inflates every
+# server-stats `created_at >= ?` window scan for 7 days). Period must be 10 or
+# 60 seconds.
+#
+# Limits are sized from the production attempts dump: the heaviest legitimate
+# power user produced ~24 reports in any 60s window (review re-reports included;
+# p99.9 across all users = 20, p99 = 17). RL_REPORT at 100/60s leaves ~4x
+# headroom over that ceiling for several users sharing one NAT'd IP, while a
+# scripted flood (thousands/min) is rejected. The low-frequency write endpoints
+# (schedule/rank-survey/share-event/push subscribe) share the tighter RL_WRITE.
+[[unsafe.bindings]]
+name = "RL_REPORT"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 100, period = 60 }
+
+[[unsafe.bindings]]
+name = "RL_WRITE"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# OUTER edge layer: a Cloudflare dashboard WAF *rate-limiting rule* (Security →
+# WAF → Rate limiting rules). It is account config, not in this repo, so apply
+# it manually. Blocked requests never invoke the Worker (zero Worker + D1 cost),
+# so this is the cheapest layer and absorbs the worst bursts. Suggested rule:
+#   When incoming requests match:
+#     (http.request.method eq "POST") and (
+#        http.request.uri.path in {"/report" "/schedule" "/rank-survey" "/share-event"}
+#        or starts_with(http.request.uri.path, "/push/"))
+#   Counting characteristic: IP   Period: 60s   Requests: 300   (free plan: use
+#   the 10s window with 100 requests)   Action: Block   Duration: 60s
+# 300/60s is ~12x the observed real 60s ceiling (24), so it never trips a power
+# user yet stops a flood before it reaches the Worker.
+#
+# fetch_database is NOT affected: `wrangler d1 export` (pipeline.fetch_database)
+# hits api.cloudflare.com with an API token, a different hostname than the
+# onlymove.net zone these rules guard, and the rule is scoped to the write paths
+# anyway — not the D1 export API.
