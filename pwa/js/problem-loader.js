@@ -10,18 +10,12 @@ import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize } from './rank-decomposition.js';
 
-async function simpleHash(str) {
-    // crypto.subtle only exists in secure contexts; in-app webviews (e.g. Zalo)
-    // load us over a non-secure origin where it's undefined. Fall back to a
-    // synchronous non-crypto hash so this (debug-only) path never throws.
-    if (crypto?.subtle?.digest) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(str);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    // FNV-1a 32-bit fallback.
+// FNV-1a 32-bit fingerprint of a string. Used only for the debug "Metadata
+// hash:" log below, so it needs no cryptographic strength — just a stable short
+// digest. Deliberately a plain JS hash (not crypto.subtle.digest, which is
+// undefined in non-secure contexts like the Zalo in-app webview and used to
+// throw mid-load): one synchronous implementation that works everywhere.
+function simpleHash(str) {
     let h = 0x811c9dc5;
     for (let i = 0; i < str.length; i++) {
         h ^= str.charCodeAt(i);
@@ -148,7 +142,7 @@ export async function loadZipMetadata() {
         }
         state.zipMetadata = zips;
         const metadataStr = JSON.stringify(state.zipMetadata);
-        console.log('Metadata hash:', await simpleHash(metadataStr));
+        console.log('Metadata hash:', simpleHash(metadataStr));
     }
 }
 
