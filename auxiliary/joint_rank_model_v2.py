@@ -25,8 +25,22 @@ No per-problem free parameter (problems can't run to ±∞). No θ ridge: declar
 pinned by their declarations; non-declarers are kept only if they have ≥1 win AND ≥1 loss
 (finite MLE), all-win/all-loss ones dropped rather than leashed.
 
+The squash fix (`--theta-prior`): with only ~6% of users (declarers) anchored and
+adaptive selection pinning everyone's solve-rate near SOLVE_OFFSET (~80%, declarer sd
+≈0.04), the outcomes carry almost no ability signal — so the free non-declarer θ's
+collapse toward the centre and drag the global difficulty map w's spread in with them
+(the rank scale is under-identified, NOT a convergence or ridge artefact). The fix is an
+independent per-user ability prior: each user's θ is soft-anchored to an MLE ability fit
+on the production mixture params (compare_rank_surveys), affine-calibrated to internal
+rank on the declarer overlap (see load_user_theta_priors). This turns all ~1.5k users
+into scale-bearing anchors. Effect: placed-difficulty range +~60%, Val-3 ρ 0.65→0.71,
+Val-2 mid-band bias →~0 (outcome log-loss rises modestly — the free-θ baseline only
+"won" it by overfitting the collapsed scale). Residual squash beyond this is regression
+attenuation in w (activations explain ~0.6 of difficulty variance) — a separate ceiling.
+
 Usage:
   ./.venv/bin/python3 -m auxiliary.joint_rank_model_v2
+  ./.venv/bin/python3 -m auxiliary.joint_rank_model_v2 --theta-prior          # de-squashed
   ./.venv/bin/python3 -m auxiliary.joint_rank_model_v2 --lam-decl 30 --pca-dim 256
 """
 
@@ -44,7 +58,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.compare_rank_surveys import (  # noqa: E402
-    SQL_PATH_DEFAULT, latest_per_user_server, load_rank_surveys,
+    SQL_PATH_DEFAULT, fit_theta, latest_per_user_server,
+    load_attempts_for_users, load_problem_params, load_rank_surveys,
+    theta_to_kyudan,
 )
 from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
 from auxiliary.joint_rank_model import (  # noqa: E402
@@ -77,6 +93,85 @@ def cubic_baseline_spacing(g_lo, g_hi):
     slope = a + 2 * b * x + 3 * d * x * x
     slope0 = a + 2 * b * RANK_INDEX_OFFSET + 3 * d * RANK_INDEX_OFFSET ** 2
     return np.maximum(slope / slope0, 0.05)
+
+
+def load_user_theta_priors(user_ids, declarer_ids, sizes, sql_path, surveys,
+                           min_attempts=8, include_declarers=False):
+    """Per-user ability prior in INTERNAL-rank units, for soft-anchoring θ.
+
+    The squash this fixes: the model leaves ~96% of users' θ free and
+    unanchored, and because adaptive selection pins everyone's solve-rate near
+    the SOLVE_OFFSET (~80%), those outcomes carry almost no ability signal — so
+    the free θ's collapse toward the centre and drag the global difficulty map
+    w's spread in with them. Each user's ability, however, is independently
+    estimable from their OWN first-time attempts via the production 3-expert
+    mixture params (exactly as compare_rank_surveys does): fit_theta → the
+    handicap-calibrated rank scalar (theta_to_kyudan), max across boards.
+
+    That scalar lives on the handicap-stone axis (RANK_PRIOR: 3k=0), NOT the
+    internal/EGF axis the model's θ uses (1k=0), so it is calibrated with ONE
+    affine fit on the OVERLAP set — declarers, who carry both an MLE θ and a
+    declaration. The declaration's internal rank (via the frozen rank_map.json,
+    EGF=identity) is the affine target. The affine is FIXED, not learned
+    jointly: a learned slope could shrink to 0 and let θ collapse anyway, so
+    fixing it is what makes the prior carry a real, non-collapsible spread.
+
+    Returns ({user_id: prior_internal_rank}, (slope, intercept), n_with_mle).
+    By default the prior is emitted for NON-declarers only (declarers stay
+    pinned by their declarations alone); include_declarers=True emits it for
+    everyone (ablation)."""
+    import json as _json
+    want = set(user_ids) | set(declarer_ids)
+    pp = {s: load_problem_params(s) for s in sizes}
+    att = load_attempts_for_users(sql_path, want)
+    hcap = {}  # user_id -> handicap-rank scalar (max over boards)
+    for u in want:
+        best = None
+        for s in sizes:
+            params, ta, sa, _ = pp.get(s, (None, None, None, None))
+            if params is None or ta is None:
+                continue
+            a = att.get((u[:8], s), [])
+            if len(a) < min_attempts:
+                continue
+            th, _n = fit_theta(a, params)
+            if th is None:
+                continue
+            ks = theta_to_kyudan(th, ta, sa)
+            if ks is not None:
+                best = ks if best is None else max(best, ks)
+        if best is not None:
+            hcap[u] = best
+    # affine hcap → internal, fit on declarers via frozen rank_map (EGF=id)
+    rm_path = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rank_map.json")
+    rm = _json.load(open(rm_path)) if os.path.exists(rm_path) else {}
+
+    def declared_internal(server, g):
+        if server == "EGF":
+            return float(g)
+        if server in rm and len(rm[server]["our"]) >= 2:
+            return float(np.interp(g, rm[server]["server"], rm[server]["our"]))
+        return None
+
+    xs, ys = [], []
+    for u, sdf in surveys.groupby("user_id"):
+        if u not in hcap:
+            continue
+        vals = [declared_internal(r.server, r.rank_scalar) for r in sdf.itertuples()]
+        vals = [v for v in vals if v is not None]
+        if vals:
+            xs.append(hcap[u])
+            ys.append(float(np.mean(vals)))
+    if len(xs) < 5:
+        raise RuntimeError("too few declarers with MLE θ to calibrate the prior affine")
+    A = np.vstack([np.array(xs), np.ones(len(xs))]).T
+    (slope, intc), *_ = np.linalg.lstsq(A, np.array(ys), rcond=None)
+    priors = {}
+    for u, h in hcap.items():
+        if not include_declarers and u in declarer_ids:
+            continue
+        priors[u] = float(slope * h + intc)
+    return priors, (float(slope), float(intc)), len(hcap)
 
 
 class UnifiedModel(nn.Module):
@@ -206,14 +301,24 @@ def build_servers(surveys, ucat, min_decl):
 
 
 def train(model, tX, tu, ts, ty, decl_t, device, epochs, lr, lam_decl, ridge,
-          shape_lam, slope_ridge=1.0, user_weights=None):
+          shape_lam, slope_ridge=1.0, user_weights=None,
+          prior_mean=None, prior_mask=None, theta_prior_w=0.0):
     """user_weights: 1d tensor of length n_users, applied per-attempt as
     weight=user_weights[u_attempt]. Same weighting is applied to the per-declaration
     NLL. Normalized externally so mean weight ≈ 1 (keeps loss scale comparable to
-    the unweighted run, so lam_decl/ridge/shape_lam don't need re-tuning)."""
+    the unweighted run, so lam_decl/ridge/shape_lam don't need re-tuning).
+
+    prior_mean/prior_mask: per-user (len n_users) Gaussian θ-prior. Adds
+    theta_prior_w·Σ_u mask_u·(θ_u − prior_mean_u)² — the independent ability
+    anchor (see load_user_theta_priors) that stops the unanchored majority from
+    collapsing the rank scale."""
     model.to(device)
     tX, tu, ts, ty = tX.to(device), tu.to(device), ts.to(device), ty.to(device)
     decl_t = {n: (u.to(device), c.to(device)) for n, (u, c) in decl_t.items()}
+    use_prior = prior_mean is not None and theta_prior_w > 0
+    if use_prior:
+        prior_mean = prior_mean.to(device)
+        prior_mask = prior_mask.to(device)
     use_w = user_weights is not None
     if use_w:
         w_t = user_weights.to(device)
@@ -236,6 +341,9 @@ def train(model, tX, tu, ts, ty, decl_t, device, epochs, lr, lam_decl, ridge,
             else:
                 loss = loss + lam_decl * nll_per.sum()
         loss = loss + ridge * model.weight_l2() + shape_lam * model.logdev_penalty()
+        if use_prior:
+            th_all = model.theta.weight.squeeze(-1)
+            loss = loss + theta_prior_w * (((th_all - prior_mean) ** 2) * prior_mask).sum()
         if model.use_slope:
             loss = loss + slope_ridge * model.slope_l2()
         loss.backward()
@@ -355,6 +463,21 @@ def main():
                     help="Slope-head MLP hidden sizes (empty = linear). Rank is linear "
                          "in activations but discrimination may not be — test e.g. 64.")
     ap.add_argument("--shape-lam", type=float, default=10.0, help="Shape prior on per-server spacing.")
+    ap.add_argument("--theta-prior", action="store_true",
+                    help="Soft-anchor every user's θ with an independent ability "
+                         "estimate (MLE on the production mixture params, affine-"
+                         "calibrated to internal rank on the declarer overlap). Stops "
+                         "the unanchored majority from collapsing the rank scale — the "
+                         "principled de-squash. See load_user_theta_priors.")
+    ap.add_argument("--theta-prior-w", type=float, default=1.0,
+                    help="Weight of the per-user θ-prior (Σ_u (θ_u−prior_u)²). ρ and "
+                         "Val-2 recovery saturate by ~1.0; higher only widens the "
+                         "range further at a rising outcome-fit cost.")
+    ap.add_argument("--theta-prior-min-attempts", type=int, default=8,
+                    help="Min joined attempts to fit a user's MLE ability prior.")
+    ap.add_argument("--theta-prior-all", action="store_true",
+                    help="Also prior-anchor declarers (default: declarers stay pinned "
+                         "by their declarations alone). Ablation.")
     ap.add_argument("--user-weight", choices=("uniform", "inverse-density"),
                     default="uniform",
                     help="inverse-density: two-pass — uniform-weight pre-fit to "
@@ -435,6 +558,25 @@ def main():
     decl_t = {n: (torch.tensor(u), torch.tensor(c)) for n, (u, c) in decls.items()}
     common = dict(epochs=args.epochs, lr=args.lr, lam_decl=args.lam_decl,
                   ridge=args.ridge, shape_lam=args.shape_lam, slope_ridge=args.slope_ridge)
+
+    # ---- Independent per-user ability prior (optional, the de-squash anchor) ----
+    if args.theta_prior:
+        priors, (a_, b_), n_mle = load_user_theta_priors(
+            keep_users, declarer_ids, sizes, SQL_PATH_DEFAULT, surveys,
+            min_attempts=args.theta_prior_min_attempts,
+            include_declarers=args.theta_prior_all)
+        pm = np.zeros(n_users, np.float32)
+        mask = np.zeros(n_users, np.float32)
+        for u, v in priors.items():
+            if u in ucat:
+                pm[ucat[u]] = v
+                mask[ucat[u]] = 1.0
+        common.update(prior_mean=torch.tensor(pm), prior_mask=torch.tensor(mask),
+                      theta_prior_w=args.theta_prior_w)
+        print(f"θ-prior: MLE ability fit for {n_mle} users | calibration "
+              f"internal ≈ {a_:.3f}·hcap {b_:+.3f} | prior applied to "
+              f"{int(mask.sum())} users (w={args.theta_prior_w}, "
+              f"{'incl' if args.theta_prior_all else 'excl'} declarers)\n")
 
     # ---- Two-pass weighting (optional): pre-fit (uniform) → KDE on θ → weights ----
     user_weights = None
