@@ -669,7 +669,8 @@ function showStatsModal(tabs) {
             label: t.label,
             loader: t.loader || null,
             node: t.content || null,
-            loading: !!t.loader && !t.content,
+            loading: false,
+            built: !t.loader,   // content tabs are ready; loader tabs build on demand
         }));
     if (entries.length === 0) return;
 
@@ -703,6 +704,30 @@ function showStatsModal(tabs) {
         body.replaceChildren(current.node || makeStatsLoadingNode());
         body.scrollTop = 0;
     };
+    // Build a deferred (loader) tab once. Safe to call repeatedly — the in-flight
+    // build is deduped via the loading/built flags, so the lazy on-activation path
+    // and the idle pre-warm path never double-build. A null resolution drops the
+    // tab. The build itself is heavy synchronous main-thread work (rank
+    // decomposition / kernel smoothing), so it must never run while the user is
+    // mid-interaction — see the pre-warm note below.
+    const ensureBuilt = (e) => {
+        if (e.built || e.loading || !e.loader) return;
+        e.loading = true;
+        if (current === e) renderBody();   // show the spinner while it builds
+        e.loader().then((node) => {
+            e.loading = false;
+            e.built = true;
+            if (!node) { removeEntry(e); return; }
+            e.node = node;
+            if (current === e) renderBody();
+        }).catch((err) => {
+            e.loading = false;
+            e.built = true;
+            console.error('Stats tab build failed:', err);
+            Sentry.captureException(err);
+            removeEntry(e);
+        });
+    };
     const renderTabbar = () => {
         // The bar is omitted when only one pane remains (e.g. deferred tabs
         // resolved null), matching the single-pane behaviour.
@@ -713,7 +738,7 @@ function showStatsModal(tabs) {
             b.className = 'stats-tab';
             b.classList.toggle('active', e === current);
             b.textContent = e.label;
-            b.onclick = () => { current = e; renderTabbar(); renderBody(); };
+            b.onclick = () => { current = e; ensureBuilt(e); renderTabbar(); renderBody(); };
             tabbar.append(b);
         }
     };
@@ -733,22 +758,20 @@ function showStatsModal(tabs) {
 
     renderTabbar();
     renderBody();
+    ensureBuilt(current);   // in case the first tab is itself a loader
 
-    // Kick off deferred builds immediately (in the background) so a chart tab
-    // is usually ready by the time the user opens it; the spinner only shows if
-    // they get there first. A null/failed build drops the tab.
+    // Pre-warm the remaining deferred (chart) tabs so they're usually ready when
+    // opened — but during IDLE time, not the immediate post-open window. The
+    // rank/time builds are heavy synchronous tasks; firing them ~2 frames after
+    // open (the old behaviour) blocked the user's first tab click on the main
+    // thread, so e.g. switching to the Overview tab — whose content is already
+    // built — felt laggy. requestIdleCallback defers each build to a genuine idle
+    // period and yields to pending input; opening a chart tab first builds it
+    // eagerly via ensureBuilt (deduped). A null/failed build still drops the tab.
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
     for (const e of entries) {
-        if (!e.loader) continue;
-        e.loader().then((node) => {
-            if (!node) { removeEntry(e); return; }
-            e.node = node;
-            e.loading = false;
-            if (current === e) renderBody();
-        }).catch((err) => {
-            console.error('Stats tab build failed:', err);
-            Sentry.captureException(err);
-            removeEntry(e);
-        });
+        if (e === current || !e.loader) continue;
+        idle(() => ensureBuilt(e));
     }
 }
 
