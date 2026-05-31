@@ -28,13 +28,21 @@ EMBEDDING_DTYPE = np.float16
 EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
 
-# Rating-to-rank mapping. Each problem's raw rating r (natural-log-odds skill,
-# from pipeline.rank_tsumegos_and_bots) is mapped to a true-handicap-stones
+# Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
+# pipeline.train_rating_v2 + pipeline.map_rating_v2_to_egf) is the only rating
+# backend — package_for_pwa is the single writer of pwa/tsumegos/ and always
+# reads ratings_v2/. RATING_MODEL_TAG is stamped into embedding_meta.json as
+# `rating_model` for provenance (the PWA does not branch on it).
+RATINGS_ROOT = "ratings_v2"
+RATING_MODEL_TAG = "v2"
+
+# Rating-to-rank mapping. Each problem's raw rating r (the v2 model's 80%-clear
+# rating, from pipeline.train_rating_v2) is mapped to a true-handicap-stones
 # axis via r = A·exp(k·x_handi) + C, then linearly to the PWA's 0..1 axis
 # where x = -17 (true 20k) -> 0 and x = +11 (true 9d) -> 1. The PWA axis is
 # thus linear in handicap stones, which is the underlying definition of rank.
 #
-# The rating model in rank_tsumegos_and_bots is scale-invariant under joint
+# The rating model is scale-invariant under joint
 # additive shifts of (bot ratings, problem ratings), so the absolute level
 # of r drifts every time the model is refit on a new corpus. We therefore
 # can't hardcode (A, k, C) — they need to be re-fit at packaging time from
@@ -66,8 +74,9 @@ RATING_FLOOR_MARGIN = 0.1
 
 # package_for_pwa is rank-agnostic: it ships one raw black-box rating per
 # problem and never converts to ranks. The rating→rank curve (M) is fitted and
-# written straight to pwa/tsumegos/rating_to_rank.json by pipeline.fit_rank_curves;
-# the client fetches it and does all rating→rank conversion itself.
+# written into ratings_v2/rating_to_rank.json by pipeline.map_rating_v2_to_egf
+# (and copied across by this script); the client fetches it and does all
+# rating→rank conversion itself.
 
 
 def fit_rating_curve(ratings_dir):
@@ -535,7 +544,7 @@ def _hash_file_into(h, path):
         h.update(b"\x00MISSING")
 
 
-def size_inputs_hash(board_size, ratings_root, reorder_by_sgf):
+def size_inputs_hash(board_size, reorder_by_sgf):
     """Content hash of everything that determines a size's shards (zips + .bin +
     metadata.json). When this is unchanged the shard build can be skipped — the
     expensive SGF reparse + zip/bin emission. Inputs:
@@ -550,7 +559,7 @@ def size_inputs_hash(board_size, ratings_root, reorder_by_sgf):
         detects add/remove/content)
       - reorder flag + ratings_root (output semantics)."""
     h = hashlib.sha256()
-    rdir = os.path.join(PROJECT_ROOT, ratings_root, str(board_size))
+    rdir = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     _hash_file_into(h, os.path.join(rdir, "tsumego_ratings_final.csv"))
     _hash_file_into(h, os.path.join(rdir, "tsumego_quality_final.csv"))
     embed_dir, _ = _embeddings_dir(board_size)
@@ -561,18 +570,18 @@ def size_inputs_hash(board_size, ratings_root, reorder_by_sgf):
     names = sorted(f for f in os.listdir(tdir)
                    if f.endswith(".sgf")) if os.path.isdir(tdir) else []
     h.update(("\n".join(names)).encode())
-    h.update(f"|reorder={reorder_by_sgf}|root={ratings_root}".encode())
+    h.update(f"|reorder={reorder_by_sgf}|root={RATINGS_ROOT}".encode())
     return h.hexdigest()[:16]
 
 
-def copy_curve(ratings_root, output_dir):
+def copy_curve(output_dir):
     """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
-    backend ratings_root into the served pwa/tsumegos/. package_for_pwa is the
-    SINGLE writer of pwa/tsumegos/: fit_rank_curves (v1) / map_rating_v2_to_egf
-    (v2) now write the curve into their ratings dir, and this copies it across.
-    Returns the list of copied filenames (missing sources leave the served copy
-    untouched — packaging is otherwise rank-agnostic)."""
-    src_dir = os.path.join(PROJECT_ROOT, ratings_root)
+    backend RATINGS_ROOT into the served pwa/tsumegos/. package_for_pwa is the
+    SINGLE writer of pwa/tsumegos/: map_rating_v2_to_egf writes the curve into
+    ratings_v2/, and this copies it across. Returns the list of copied filenames
+    (missing sources leave the served copy untouched — packaging is otherwise
+    rank-agnostic)."""
+    src_dir = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
     served = os.path.join(output_dir, "tsumegos")
     os.makedirs(served, exist_ok=True)
     copied = []
@@ -582,13 +591,13 @@ def copy_curve(ratings_root, output_dir):
             shutil.copyfile(src, os.path.join(served, name))
             copied.append(name)
         else:
-            print(f"  [warn] no {name} in {ratings_root}/ — served copy left as-is "
-                  f"(run fit_rank_curves / map_rating_v2_to_egf first)")
+            print(f"  [warn] no {name} in {RATINGS_ROOT}/ — served copy left as-is "
+                  f"(run map_rating_v2_to_egf first)")
     return copied
 
 
 def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
-                 ratings_root="ratings", prev=None, force=False):
+                 prev=None, force=False):
     """Run the full per-size packaging — ratings load, metadata assembly, zip +
     per-cell sidecar emission. Returns (embedding_meta, ratings_hash, inputs_hash);
     the first two may be None if the artifact wasn't available. The multi-size loop
@@ -602,9 +611,9 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
-    # ratings_root selects the backend rating set (e.g. "ratings" = v1, "ratings_v2"
-    # = combined MLP-2PL). Output still lands in the SAME pwa/tsumegos/ structure.
-    RATINGS_DIR = os.path.join(PROJECT_ROOT, ratings_root, str(board_size))
+    # The backend rating set is always ratings_v2/ (combined MLP-2PL). Output
+    # lands in the served pwa/tsumegos/ structure.
+    RATINGS_DIR = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     PER_CELL_DIR = os.path.join(
         PROJECT_ROOT, "embeddings", "joint", "per_cell", str(board_size))
 
@@ -616,7 +625,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         print(f"  no ratings at {ratings_csv}; skipping")
         return None, None, None
 
-    inputs_hash = size_inputs_hash(board_size, ratings_root, reorder_by_sgf)
+    inputs_hash = size_inputs_hash(board_size, reorder_by_sgf)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
     have_zips = os.path.isdir(zip_dir) and any(
         f.endswith(".zip") for f in os.listdir(zip_dir))
@@ -718,18 +727,6 @@ if __name__ == "__main__":
         "--workers", type=int, default=None,
         help="parallel shard-builder processes (default: os.cpu_count())")
     parser.add_argument(
-        "--ratings-root", default="ratings_v2",
-        help="backend rating set to package: 'ratings_v2' (combined MLP-2PL, DEFAULT — "
-             "the production model) or 'ratings' (v1 mixture-of-sigmoids, kept as a "
-             "backup; pass --ratings-root ratings --model-tag v1). Output always lands "
-             "in the same pwa/tsumegos/ — only the SOURCE differs, so the two pipelines "
-             "stay separate on the backend only.")
-    parser.add_argument(
-        "--model-tag", default="v2",
-        help="rating-model tag stamped into embedding_meta.json as 'rating_model' so the "
-             "PWA can branch handling if needed. Default 'v2' (matches the default "
-             "--ratings-root); pass 'v1' when packaging the backup ratings.")
-    parser.add_argument(
         "--force", action="store_true",
         help="rebuild every size's shards even if the change-detection manifest says "
              "their inputs are unchanged (the curve + embedding_meta are always "
@@ -750,15 +747,7 @@ if __name__ == "__main__":
                 prev_manifest = json.load(f)
         except Exception as e:
             print(f"[warn] couldn't read {MANIFEST_PATH}: {e}; rebuilding all")
-    # A ratings_root switch changes output semantics for every size — drop the prior
-    # per-size entries so nothing is wrongly skipped. (model_tag only affects
-    # embedding_meta, which is always rewritten, so it doesn't force a rebuild.)
-    prev_sizes = (prev_manifest.get("sizes", {})
-                  if prev_manifest.get("ratings_root") == args.ratings_root else {})
-    if prev_sizes is not prev_manifest.get("sizes", {}):
-        print(f"  ratings_root changed "
-              f"({prev_manifest.get('ratings_root')} → {args.ratings_root}) — "
-              f"rebuilding all sizes")
+    prev_sizes = prev_manifest.get("sizes", {})
 
     joint_embedding_meta = None
     ratings_versions = {}
@@ -767,7 +756,6 @@ if __name__ == "__main__":
         meta, ratings_hash, inputs_hash = process_size(
             size, OUTPUT_DIR,
             reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers,
-            ratings_root=args.ratings_root,
             prev=prev_sizes.get(str(size)), force=args.force)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
@@ -776,13 +764,13 @@ if __name__ == "__main__":
             size_manifest[str(size)] = {
                 "inputs_hash": inputs_hash, "ratings_hash": ratings_hash}
 
-    # Copy the rating→rank curve from the backend ratings_root into the served path
+    # Copy the rating→rank curve from the backend ratings_v2/ into the served path
     # (single-writer rule). Cheap; always refreshed so a curve-only edit ships even
     # when every size's shards were skipped above.
     print("\n--- curve ---")
-    copied = copy_curve(args.ratings_root, OUTPUT_DIR)
+    copied = copy_curve(OUTPUT_DIR)
     if copied:
-        print(f"  copied {', '.join(copied)} from {args.ratings_root}/ → pwa/tsumegos/")
+        print(f"  copied {', '.join(copied)} from {RATINGS_ROOT}/ → pwa/tsumegos/")
 
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently
@@ -794,8 +782,7 @@ if __name__ == "__main__":
         meta_out["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
         if ratings_versions:
             meta_out["ratings_version"] = ratings_versions
-        if args.model_tag:
-            meta_out["rating_model"] = args.model_tag
+        meta_out["rating_model"] = RATING_MODEL_TAG
         embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
         os.makedirs(os.path.dirname(embedding_meta_path), exist_ok=True)
         with open(embedding_meta_path, 'w', encoding='utf-8') as f:
@@ -807,8 +794,8 @@ if __name__ == "__main__":
 
     # Persist the change-detection manifest for the next run.
     if size_manifest:
-        manifest = {"ratings_root": args.ratings_root,
-                    "model_tag": args.model_tag, "sizes": size_manifest}
+        manifest = {"ratings_root": RATINGS_ROOT,
+                    "model_tag": RATING_MODEL_TAG, "sizes": size_manifest}
         with open(MANIFEST_PATH, "w") as f:
             json.dump(manifest, f, indent=2)
 

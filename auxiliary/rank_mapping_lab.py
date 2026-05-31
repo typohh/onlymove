@@ -15,8 +15,6 @@ The non-`free` methods fix the SHAPE from EGF data (fit_statistics_shapes) and f
 only the affine (α, β) to surveys — principled, low-variance. Server couplings are
 the same ordinal-threshold fit (uniform prior) in every method.
 
-`v1` is also evaluated for reference (pipeline.fit_rank_curves, per-board).
-
 Usage:
   ./.venv/bin/python3 -m auxiliary.rank_mapping_lab --methods free linear cubic exp
   ./.venv/bin/python3 -m auxiliary.rank_mapping_lab --methods cubic --folds 5 --boot 3000
@@ -34,11 +32,11 @@ if PROJECT_ROOT not in sys.path:
 
 from auxiliary.compare_rank_surveys import (  # noqa: E402
     load_rank_surveys, latest_per_user_server, load_attempts_for_users,
-    load_problem_params, SQL_PATH_DEFAULT)
+    SQL_PATH_DEFAULT)
 from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
-from pipeline.fit_rank_curves import (  # noqa: E402
-    fit_user_rating, load_raw_ratings, fit_joint, build_server_curves,
-    _cubic_curve, ordinal_nll_vec, interp_extrap_vec, _unpack_thresholds)
+from utils.fit_rank_curves import (  # noqa: E402
+    fit_user_rating, build_server_curves,
+    ordinal_nll_vec, interp_extrap_vec, _unpack_thresholds)
 from pipeline.map_rating_v2_to_egf import load_v2_ratings  # noqa: E402
 
 SIZES = [9, 13]
@@ -62,37 +60,18 @@ def _shape_fn(name):
 # ---------------------------------------------------------------------------
 # data
 # ---------------------------------------------------------------------------
-def _cubic_by_size():
-    out = {}
-    for s in SIZES:
-        *_, stop = load_problem_params(s)
-        c = _cubic_curve(stop)
-        if c is not None:
-            out[s] = c
-    return out
-
-
 def load_data(sql=SQL_PATH_DEFAULT, use_cache=True):
     if use_cache and os.path.exists(CACHE):
-        data = pickle.load(open(CACHE, "rb"))
-        data["cubic_by_size"] = _cubic_by_size()   # not picklable; recompute (cheap)
-        return data
+        return pickle.load(open(CACHE, "rb"))
     surveys = latest_per_user_server(load_rank_surveys(sql))
     users = list(surveys.user_id.unique())
     att = load_attempts_for_users(sql, set(users))
-    v1r = {s: load_raw_ratings(s) for s in SIZES}
     v2m = {}
     for s in SIZES:
         v2m.update(load_v2_ratings(os.path.join(PROJECT_ROOT, "ratings_v2"), s))
-    Rv1, Rv2 = {}, {}
+    Rv2 = {}
     for uid in users:
         p = uid[:8]
-        for s in SIZES:
-            a = att.get((p, s), [])
-            if len(a) >= 20 and v1r[s]:
-                R, n = fit_user_rating(a, v1r[s], min_n=20)
-                if R is not None:
-                    Rv1[(p, s)] = R
         pool = []
         for s in SIZES:
             pool += att.get((p, s), [])
@@ -106,9 +85,8 @@ def load_data(sql=SQL_PATH_DEFAULT, use_cache=True):
         if g is None or pd.isna(g):
             continue
         recs[str(r.user_id)[:8]].append((r.server, float(g)))
-    data = dict(recs=dict(recs), Rv1=Rv1, Rv2=Rv2)
+    data = dict(recs=dict(recs), Rv2=Rv2)
     pickle.dump(data, open(CACHE, "wb"))
-    data["cubic_by_size"] = _cubic_by_size()
     return data
 
 
@@ -257,18 +235,6 @@ def fit_shared(decls, method, shape=None, rating_lam=1.0, lam=10.0,
     return (a, ys), build_server_curves(server_fits)
 
 
-def fit_v1(decls_v1, cubic_by_size):
-    rr, sf = fit_joint(decls_v1, cubic_by_size, SIZES, EGF_LO, EGF_HI,
-                       rating_lam=1.0, lam=10.0, rank_padding=2, extend_to=9,
-                       min_server_samples=3)
-    curves = {}
-    for s, thr in rr.items():
-        gs = sorted(thr)
-        curves[s] = (np.array([thr[g] for g in gs]),
-                     np.array([g - 0.5 for g in gs], float))
-    return curves, build_server_curves(sf)
-
-
 def srv2egf(server, g, rmap):
     if server == "EGF":
         return g
@@ -303,9 +269,9 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0,
         coupling_prior=None):
     rng = np.random.default_rng(seed)
     d = load_data()
-    recs, Rv1, Rv2, cubic = d["recs"], d["Rv1"], d["Rv2"], d["cubic_by_size"]
+    recs, Rv2 = d["recs"], d["Rv2"]
     shapes = {m: (_shape_fn(m) if m not in ("free",) else None)
-              for m in methods if m != "v1"}
+              for m in methods}
     c2018 = None
     if coupling_prior in ("2018", "2024"):
         from auxiliary.fit_2018_couplings import fit_2018_couplings, fit_2024_couplings
@@ -320,29 +286,19 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0,
     for i in range(folds):
         train = [p for p in prefs if fold[p] != i]
         test = [p for p in prefs if fold[p] == i]
-        # build decls for shared (v2) methods and for v1
+        # build decls for the shared (v2) rating→EGF methods
         d_shared = [(srv, Rv2[p], g) for p in train if p in Rv2 for srv, g in recs[p]]
-        d_v1 = [(s, srv, Rv1[(p, s)], g) for p in train for srv, g in recs[p]
-                for s in SIZES if (p, s) in Rv1]
         fitted = {}
         for m in methods:
-            if m == "v1":
-                fitted[m] = ("v1",) + fit_v1(d_v1, cubic)
-            else:
-                fitted[m] = ("shared",) + fit_shared(d_shared, m, shapes[m],
-                                                      rating_lam=rating_lam,
-                                                      lam=server_lam,
-                                                      coupling2018=c2018)
+            fitted[m] = fit_shared(d_shared, m, shapes[m],
+                                   rating_lam=rating_lam,
+                                   lam=server_lam,
+                                   coupling2018=c2018)
         for p in test:
             for m in methods:
-                kind, curve, rmap = fitted[m]
-                if kind == "v1":
-                    es = [float(interp_extrap_vec(np.array([Rv1[(p, s)]]), *curve[s])[0])
-                          for s in SIZES if (p, s) in Rv1 and s in curve]
-                    pe = float(np.mean(es)) if es else None
-                else:
-                    pe = (float(interp_extrap_vec(np.array([Rv2[p]]), *curve)[0])
-                          if p in Rv2 else None)
+                curve, rmap = fitted[m]
+                pe = (float(interp_extrap_vec(np.array([Rv2[p]]), *curve)[0])
+                      if p in Rv2 else None)
                 for srv, g in recs[p]:
                     te = srv2egf(srv, g, rmap)
                     psr = egf2srv(srv, pe, rmap) if pe is not None else None
@@ -429,7 +385,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--methods", nargs="+",
-                    default=["free", "linear", "cubic", "exp", "v1"])
+                    default=["free", "linear", "cubic", "exp"])
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--boot", type=int, default=3000)
     ap.add_argument("--seed", type=int, default=0)

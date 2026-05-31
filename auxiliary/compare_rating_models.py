@@ -22,7 +22,7 @@ What makes the comparison fair
        activations: d_p = w · PCA(act_p)          (KataGo trunk, correct move)
        both       : d_p = β·rating + w·PCA(act)
 3. 2-MONTH OVERLAPPING PROFILES as the ability unit (same windowing as
-   pipeline.evaluate_rating_model / rank_tsumegos_and_bots.load_data): a profile
+   pipeline.evaluate_rating_model): a profile
    is `{user[:8]}_{YYYY-MM}` holding that month + the next, so a profile's
    ability θ is roughly stationary and real improvement-over-time doesn't
    confound the fit. θ is a per-profile intercept; profiles span many problems
@@ -613,13 +613,14 @@ def main():
     rpath = os.path.join(PROJECT_ROOT, "ratings", str(args.size),
                          "tsumego_ratings_final.csv")
     rating = pd.read_csv(rpath).set_index("tsumego_id")["rating"].to_dict()
-    # Optional bot-ONLY rating (rank_tsumegos_and_bots --no-users), to isolate the
-    # human-outcome leakage the with-users tsumego_ratings_final.csv carries.
+    # Optional bot-ONLY rating (a no-user fit; the v1 model that produced it has
+    # been removed), to isolate the human-outcome leakage the with-users
+    # tsumego_ratings_final.csv carries.
     nupath = os.path.join(PROJECT_ROOT, "ratings", str(args.size),
                           "tsumego_ratings_botonly.csv")
     rating_nu = (pd.read_csv(nupath).set_index("tsumego_id")["rating"].to_dict()
                  if os.path.exists(nupath) else None)
-    # Bot-only QUALITY (rank_tsumegos_and_bots --no-users), to test whether the
+    # Bot-only QUALITY (a no-user fit; v1 model removed), to test whether the
     # per-problem quality measure helps the 3PL slope/floor on top of the rating.
     qupath = os.path.join(PROJECT_ROOT, "ratings", str(args.size),
                           "tsumego_quality_botonly.csv")

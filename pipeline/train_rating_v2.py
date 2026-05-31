@@ -1,8 +1,7 @@
-"""Combined cross-board MLP-2PL difficulty model — the v2 rating pipeline.
+"""Combined cross-board MLP-2PL difficulty model — the rating pipeline.
 
-PARALLEL to pipeline.rank_tsumegos_and_bots: it writes only under ratings_v2/ and
-touches nothing the current backend reads. Eventual drop-in replacement (output format
-matches what package_for_pwa + the PWA expect, see below), so no frontend changes.
+Writes under ratings_v2/, which package_for_pwa ships (output format matches what
+the PWA expects, see below — no frontend changes). This is the only rating backend.
 
 ONE model for 9x9 AND 13x13:
 
@@ -68,7 +67,7 @@ from auxiliary.compare_rating_models import (  # noqa: E402
 )
 from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
 from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
-from pipeline.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]

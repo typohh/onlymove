@@ -58,7 +58,7 @@ SQL_PATTERN = re.compile(
 
 
 def load_raw_user_attempts(sql_path, target_size):
-    """Same parsing logic as rank_tsumegos_and_bots.load_data, minus the
+    """Same D1 tsumego_reports INSERT parsing as the rating pipeline, minus the
     profile expansion. Returns (user_id, tsumego_id, success) tuples
     filtered to target_size."""
     if not os.path.exists(sql_path):

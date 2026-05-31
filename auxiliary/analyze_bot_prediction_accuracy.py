@@ -3,7 +3,7 @@ Analyzes how well each bot predicts human results in 2-month overlapping chunks.
 
 This script:
 1. Loads human attempt data from database.sql
-2. Splits user profiles into overlapping 2-month chunks (same as rank_tsumegos_and_bots.py)
+2. Splits user profiles into overlapping 2-month chunks (same windowing as the rating pipeline)
 3. For each bot, calculates correlation between bot success rates and human success rates
 4. Evaluates prediction accuracy using multiple metrics
 """

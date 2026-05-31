@@ -15,7 +15,7 @@ v1's rank_map.
 
 WHY 80%, not raw θ (the calibration fix):
   The PWA derives a user's rank as the rating level they clear at CALIBRATION_P
-  = 80% (pwa/js/rank-decomposition.js, model.js, == pipeline.fit_rank_curves),
+  = 80% (pwa/js/rank-decomposition.js, model.js, == utils.fit_rank_curves),
   then maps it through rating_to_rank.json. Raw θ is the 2PL 50%-point
   (P = σ(a_p·(θ − b_p)), so θ = b_p ⇒ P = 0.5). Anchoring raw θ → EGF therefore
   calibrates the curve at 50% while the client measures users at 80% — a
@@ -70,7 +70,7 @@ from auxiliary.compare_rank_surveys import (  # noqa: E402
     load_rank_surveys, scalar_to_rank,
 )
 from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
-from pipeline.fit_rank_curves import (  # noqa: E402
+from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, build_server_curves, fit_user_rating, interp_extrap_vec,
     ordinal_nll_vec, _unpack_thresholds,
 )
@@ -322,8 +322,8 @@ def main():
     server_curves = build_server_curves(server_fits)   # server↔EGF couplings, built here
 
     # Write ONLY to the backend (ratings_v2/). package_for_pwa is the single writer of
-    # the served pwa/tsumegos/ — run `package_for_pwa --ratings-root ratings_v2 --model-tag
-    # v2` to publish (it copies these two curve files across and change-detects the rest).
+    # the served pwa/tsumegos/ — run `python -m pipeline.package_for_pwa` to publish
+    # (it copies these two curve files across and change-detects the rest).
     os.makedirs(args.v2_dir, exist_ok=True)
     with open(os.path.join(args.v2_dir, "rating_to_rank.json"), "w") as f:
         json.dump(rr, f, indent=2)

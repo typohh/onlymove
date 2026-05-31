@@ -1,10 +1,9 @@
 """How accurate is bot-derived tsumego difficulty at predicting REAL users?
 
-Run AFTER fitting a bot-only rating model:
-    ./.venv/bin/python3 -m pipeline.rank_tsumegos_and_bots --no-users
-which writes a bot-only IRF (tsumego_parameters_final.csv) to ratings/<size>/.
-Because the IRF was fit without any user attempts, scoring it against real users
-is a fully out-of-sample test of "do the bots predict human difficulty?".
+Legacy diagnostic (the v1 bot-only rating model it was built against has been
+removed). It scores an existing bot-only IRF (tsumego_parameters_final.csv) in
+ratings/<size>/ — one fit without any user attempts — against real users, a
+fully out-of-sample test of "do the bots predict human difficulty?".
 
 Method
 ------

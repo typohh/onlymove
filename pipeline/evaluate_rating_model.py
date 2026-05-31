@@ -8,8 +8,8 @@ well the IRF predicts *held-out human* outcomes once a single per-user ability
 
 Protocol (matches how the model is used in production):
   1. Human attempts are bucketed into 2-month overlapping profiles
-     (`{user[:8]}_{YYYY-MM}` + the previous month), the same windowing
-     rank_tsumegos_and_bots.load_data builds, so a profile's ability is roughly
+     (`{user[:8]}_{YYYY-MM}` + the previous month), the same 2-month overlapping
+     windowing the rating pipeline builds, so a profile's ability is roughly
      stationary. Repeat attempts (is_repeat=1) are dropped.
   2. Item parameters are taken as fixed (these are what we'd ship). For each
      profile we hold out a random fraction of its attempts, MLE theta on the
@@ -52,7 +52,7 @@ from utils.configurations import BOARD_SIZE
 
 EPS = 1e-6
 
-# Mirrors the INSERT parser in rank_tsumegos_and_bots.load_data — keep in sync.
+# Mirrors the D1 tsumego_reports INSERT dump parser used across the pipeline.
 INSERT_PATTERN = re.compile(
     r"INSERT INTO [\"`]?tsumego_reports[\"`]?"
     r"(?:\s*\([^)]*\))?"
@@ -69,7 +69,7 @@ def load_human_attempts(size):
 
     Returns a DataFrame with columns [profile, tid, correct]. Each physical
     attempt contributes to two overlapping profiles (its month + the previous
-    month), exactly like rank_tsumegos_and_bots.load_data.
+    month), exactly like the rating-pipeline profile builder.
     """
     sql_file = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
     if not os.path.exists(sql_file):

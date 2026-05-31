@@ -24,9 +24,9 @@ Reported per size: out-of-fold LogLoss / Brier / AUC for each model. The deltas 
 the story — activations beating bot_rating ⇒ the raw trunk carries human-difficulty
 signal the bot-solve rating loses.
 
-NOTE: reads ratings/<size>/tsumego_ratings_final.csv as the bot rating. If you ran
-`rank_tsumegos_and_bots --no-users`, that is the clean bot-only difficulty (ideal
-here); otherwise it is the production with-user rating.
+NOTE: reads ratings/<size>/tsumego_ratings_final.csv as the bot rating. A bot-only
+fit (no user attempts) is the clean difficulty signal ideal here; otherwise it is
+a with-user rating. (The v1 bot-only model that produced these has been removed.)
 
 Usage:
   python -m auxiliary.predict_user_results_from_activations --size 13

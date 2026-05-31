@@ -7,7 +7,7 @@ from tqdm import tqdm
 def analyze_attempts(sql_path):
     print(f"Reading {sql_path}...")
     
-    # regex from pipeline/rank_tsumegos_and_bots.py
+    # regex matching the D1 tsumego_reports INSERT dump
     insert_pattern = re.compile(r"INSERT INTO [\"`]?tsumego_reports[\"`]? VALUES\(\d+,'([^']+)','([^']+)',([01]),'([^']+)'\);")
     
     records = []
