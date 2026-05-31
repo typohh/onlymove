@@ -20,13 +20,18 @@ ONE model for 9x9 AND 13x13:
 
 The 2PL SLOPE a_p replaces the old `quality`: a high-discrimination (sharp) problem is the
 "high quality" one the selector should up-weight. The RATING that maps to rank is the
-slope-corrected difficulty in ability units:
+ability at which the user CLEARS the problem 80% of the time (CALIBRATION_P) — the same
+margin the PWA serves and anchors at, NOT the 50%-point:
 
-    rating_p = b_p = -d_p / a_p     (the ability theta at which P = 0.5)
+    rating_p = (logit(0.8) - d_p) / a_p  =  b_p + logit(0.8)/a_p   (b_p = -d_p/a_p = 50%-pt)
 
-so the slope correction happens right here, and b_p is directly comparable to user ability
--> the EGF mapping (pipeline.map_rating_v2_to_egf) anchors theta to EGF and reuses the same
-curve for b_p.
+The slope-dependent 80% correction is load-bearing: under it a user clears exactly 80% on
+problems whose rating == their ability theta for EVERY problem regardless of slope (a flat
+low-discrimination problem genuinely needs more ability to clear at 80% than its 50%-point
+implies). A monotone rating->rank map cannot recover this per-problem reordering, so it has
+to be built here. The EGF mapping (pipeline.map_rating_v2_to_egf) then anchors each user's
+80%-clear rating -> EGF against these ratings (self-consistent — it re-derives the curve
+from whatever scalar we ship).
 
 Every corpus problem is scorable (bots benchmark all, activations are cached for all), so
 this assigns a rating to the whole set; unattempted problems fall back to the prior.
@@ -63,9 +68,14 @@ from auxiliary.compare_rating_models import (  # noqa: E402
 )
 from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
 from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
+from pipeline.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
+# logit of the serving/anchoring success rate (80%): the rating is the ability θ at which
+# P(clear) = CALIBRATION_P, i.e. (CLEAR_LOGIT − d)/a, NOT the 50%-point −d/a. Single source
+# of truth shared with the PWA + map_rating_v2_to_egf via fit_rank_curves.CALIBRATION_P.
+CLEAR_LOGIT = float(np.log(CALIBRATION_P / (1.0 - CALIBRATION_P)))
 
 
 class RatingV2(nn.Module):
@@ -128,6 +138,21 @@ def main():
     ap.add_argument("--lambda-w", type=float, default=1e-4,
                     help="Ridge on the feature-head weights.")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--dro-skill", action=argparse.BooleanOptionalAction, default=True,
+                    help="ON by default: spread held-out error evenly across the rating "
+                         "range with a base-rate-centered group-DRO objective (replaces "
+                         "mean BCE on the human-attempt term). Two-pass: pass 1 trains with "
+                         "mean BCE to get the rating, which defines the rating bins; pass 2 "
+                         "retrains with DRO over those bins. `--no-dro-skill` reverts to "
+                         "plain ERM (mean BCE), which is overall-LogLoss-optimal but "
+                         "concentrates error at the difficulty tails. See the --even-error "
+                         "study in docs/rating_model_comparison_results.md.")
+    ap.add_argument("--dro-eta", type=float, default=0.2,
+                    help="Group-DRO exponentiated-gradient step on per-bin base-centered "
+                         "loss. 0.2 is the flatness↔cost knee (η≥~1.6 collapses q onto one "
+                         "bin; <0.1 under-flattens the U-shaped 9×9 board).")
+    ap.add_argument("--dro-bins", type=int, default=10,
+                    help="Equal-count rating-quantile bins the DRO objective groups over.")
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
@@ -178,41 +203,90 @@ def main():
     tprof = torch.tensor(prof_idx, device=device)
     tprob = torch.tensor(prob_idx, device=device)
     ty = torch.tensor(y, device=device)
-    m = RatingV2(n_profiles, len(keys), fdim, tuple(args.diff_hidden), args.dropout).to(device)
-    feat_params = list(m.diff_head.parameters()) + list(m.slope_head.parameters())
-    opt = torch.optim.Adam(m.parameters(), lr=args.lr)
     bce = nn.BCELoss()
     n = len(y)
-    for ep in range(args.epochs):
-        m.train()
-        perm = torch.randperm(n, device=device)
-        tot = 0.0
-        for b0 in range(0, n, args.batch):
-            bi = perm[b0:b0 + args.batch]
-            opt.zero_grad()
-            p = m(tprof[bi], tprob[bi], tfeat[tprob[bi]])
-            loss = bce(p, ty[bi])
-            loss = loss + args.lambda_resid * (m.delta.weight.pow(2).mean()
-                                               + m.eta.weight.pow(2).mean())
-            loss = loss + args.lambda_theta * m.theta.weight.pow(2).mean()
-            loss = loss + args.lambda_w * sum(w.pow(2).sum() for w in feat_params)
-            loss.backward()
-            opt.step()
-            tot += loss.item() * len(bi)
-        if ep % 50 == 0 or ep == args.epochs - 1:
-            m.eval()
-            with torch.no_grad():
-                ll = bce(m(tprof, tprob, tfeat[tprob]), ty).item()
-            print(f"  epoch {ep:4d}  train BCE {ll:.4f}")
+
+    def fit_model(dro=None):
+        """Train one RatingV2. dro=(rank_bin_tensor, base_g, G, eta) swaps the human
+        BCE term for a base-rate-centered online group-DRO over rank bins (Sagawa et
+        al., centered to target REDUCIBLE skill-over-base, not the aleatoric base-rate
+        floor — see docs/rating_model_comparison_results.md --even-error). The ridge
+        priors are unchanged. q persists across minibatches/epochs."""
+        torch.manual_seed(args.seed)
+        m = RatingV2(n_profiles, len(keys), fdim, tuple(args.diff_hidden),
+                     args.dropout).to(device)
+        feat_params = list(m.diff_head.parameters()) + list(m.slope_head.parameters())
+        opt = torch.optim.Adam(m.parameters(), lr=args.lr)
+        if dro is not None:
+            rb, base_g, G, eta = dro
+            q = torch.ones(G, device=device) / G
+        for ep in range(args.epochs):
+            m.train()
+            perm = torch.randperm(n, device=device)
+            for b0 in range(0, n, args.batch):
+                bi = perm[b0:b0 + args.batch]
+                opt.zero_grad()
+                p = m(tprof[bi], tprob[bi], tfeat[tprob[bi]])
+                if dro is None:
+                    data_loss = bce(p, ty[bi])
+                else:
+                    l = torch.nn.functional.binary_cross_entropy(
+                        p, ty[bi], reduction="none")
+                    gb = rb[bi]
+                    gl = torch.zeros(G, device=device).index_add(0, gb, l)
+                    cnt = torch.zeros(G, device=device).index_add(
+                        0, gb, torch.ones_like(l))
+                    present = cnt > 0
+                    Lg = gl[present] / cnt[present]
+                    with torch.no_grad():           # update q on CENTERED bin loss
+                        q[present] = q[present] * torch.exp(
+                            eta * (Lg.detach() - base_g[present]))
+                        q[~present] = 0.0
+                        q /= q.sum().clamp(min=EPS)
+                    data_loss = (q[present] * Lg).sum()
+                loss = data_loss + args.lambda_resid * (m.delta.weight.pow(2).mean()
+                                                        + m.eta.weight.pow(2).mean())
+                loss = loss + args.lambda_theta * m.theta.weight.pow(2).mean()
+                loss = loss + args.lambda_w * sum(w.pow(2).sum() for w in feat_params)
+                loss.backward()
+                opt.step()
+            if ep % 50 == 0 or ep == args.epochs - 1:
+                m.eval()
+                with torch.no_grad():
+                    ll = bce(m(tprof, tprob, tfeat[tprob]), ty).item()
+                print(f"  [{'dro' if dro else 'mean'}] epoch {ep:4d}  train BCE {ll:.4f}")
+        return m
+
+    def score(m):
+        m.eval()
+        with torch.no_grad():
+            allprob = torch.arange(len(keys), device=device)
+            d, a = m.diff_slope(allprob, tfeat)
+        return d.cpu().numpy(), a.cpu().numpy()
+
+    m = fit_model()
+    if args.dro_skill:
+        # Pass 1 done. Bin TRAIN rows by their problem's pass-1 rating b_p (the shipped
+        # rating, pooled across boards in shared ability units), equal-count quantiles;
+        # per-bin base-rate loss = the bin's human-success entropy (the aleatoric floor).
+        d0, a0 = score(m)
+        row_b = ((CLEAR_LOGIT - d0) / a0)[prob_idx]   # bin by the shipped 80%-clear rating
+        edges = np.quantile(row_b, np.linspace(0, 1, args.dro_bins + 1))
+        edges[-1] += 1e-6
+        rb = np.clip(np.searchsorted(edges, row_b, side="right") - 1,
+                     0, args.dro_bins - 1).astype(np.int64)
+        br = np.array([y[rb == g].mean() if (rb == g).any() else 0.5
+                       for g in range(args.dro_bins)])
+        br = np.clip(br, EPS, 1 - EPS)
+        base_g = torch.tensor(-(br * np.log(br) + (1 - br) * np.log(1 - br)),
+                              dtype=torch.float32, device=device)
+        rbt = torch.tensor(rb, dtype=torch.long, device=device)
+        print(f"  dro_skill: {args.dro_bins} rating bins, eta {args.dro_eta} — refitting")
+        m = fit_model((rbt, base_g, args.dro_bins, args.dro_eta))
 
     # --- score the whole corpus ---
-    m.eval()
-    with torch.no_grad():
-        allprob = torch.arange(len(keys), device=device)
-        d, a = m.diff_slope(allprob, tfeat)
-        d = d.cpu().numpy()
-        a = a.cpu().numpy()
-    b = -d / a                                   # rating = ability threshold (P=0.5)
+    d, a = score(m)
+    b = (CLEAR_LOGIT - d) / a            # rating = ability at which P = CALIBRATION_P (80%)
     lo, hi = np.percentile(b, [args.winsor, 100 - args.winsor])
     b = np.clip(b, lo, hi)                        # tame the low-slope b=-d/a tail
     dres = m.delta.weight.detach().cpu().numpy().ravel()

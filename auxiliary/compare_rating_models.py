@@ -555,6 +555,37 @@ def main():
                     help="Decoupled weight decay on the MLP difficulty head.")
     ap.add_argument("--seeds", type=int, default=5,
                     help="Seeds for the --nonlinear stability check.")
+    ap.add_argument("--even-error", action="store_true",
+                    help="Test ERROR-ADAPTIVE training objectives that target a FLAT error "
+                         "profile across the rating range (vs ERM's mean BCE, which is "
+                         "dominated by the dense mid-ranks). Fits the leak-free source under "
+                         "{mean, balanced, dro, cvar, tilted} objectives defined over rank "
+                         "bins, then reports per-bin Δskill, flatness (std/spread of Δskill) "
+                         "and the overall-LogLoss cost of flattening.")
+    ap.add_argument("--ee-source", default="bw_act",
+                    help="Feature source for --even-error (leak-free: bw_act / bot_winrate / "
+                         "activations / bot_rating_nousers).")
+    ap.add_argument("--ee-head", choices=("lin", "mlp"), default="lin",
+                    help="Head for --even-error. 'lin' is seed-invariant and isolates the "
+                         "OBJECTIVE effect cleanly; 'mlp' matches the v2 production head.")
+    ap.add_argument("--ee-objectives", nargs="*",
+                    default=["mean", "balanced", "dro", "cvar", "tilted"],
+                    help="Which objectives to compare in --even-error.")
+    ap.add_argument("--ee-bins", type=int, default=10,
+                    help="Number of equal-count rank bins the robust objectives group over.")
+    ap.add_argument("--ee-slope", action="store_true",
+                    help="Use a 2PL slope head in --even-error (matches train_rating_v2; "
+                         "default is 1PL difficulty-only, which is seed-invariant for lin).")
+    ap.add_argument("--dro-eta", type=float, default=0.1,
+                    help="Group-DRO exponentiated-gradient step on per-bin loss.")
+    ap.add_argument("--cvar-alpha", type=float, default=0.3,
+                    help="CVaR tail fraction: average the worst ceil(alpha·n_bins) bins.")
+    ap.add_argument("--tilt", type=float, default=4.0,
+                    help="Tilted-ERM temperature over per-bin losses (t→0 = mean, t→∞ = max).")
+    ap.add_argument("--ee-eta-sweep", nargs="*", type=float, default=None,
+                    help="Sweep dro_skill over these --dro-eta values (one data load) to "
+                         "trace the flatness↔cost frontier and locate the knee. η=0 row is "
+                         "the mean-BCE baseline.")
     ap.add_argument("--nl-floor", choices=("none", "global", "feature"),
                     default="feature",
                     help="Floor mode used in the MLP-vs-linear test. Default 'feature' "
@@ -659,6 +690,9 @@ def main():
         return
     if args.floor_gap:
         floor_gap(prof_idx, feats, y, groups, n_profiles, args, device)
+        return
+    if args.even_error:
+        even_error(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, device)
         return
 
     hdr = f"  {'model':>11s} {'floor':>8s} {'LogLoss':>9s} {'Brier':>8s} {'AUC':>7s} {'ECE':>7s} {'n_eval':>9s}"
@@ -897,6 +931,266 @@ def rank_breakdown(prof_df, rating, y, oof, size, n_bins):
               + "".join(f"{lls[m]:>11.4f}" for m in models)
               + "".join(f"{lls[m]-bll:>+11.4f}" for m in models)
               + f"  {worst:>10s}")
+
+
+def _agg_loss(l, gb, G, objective, state, dro_eta, tilt, cvar_alpha):
+    """Aggregate a per-sample loss vector `l` into the training scalar for one
+    error-adaptive objective, grouping by rank-bin id `gb` (long, in [0,G)).
+
+        mean     : ERM — plain mean over samples (dense bins dominate).
+        balanced : equal weight per PRESENT bin (the inverse-frequency reweight the
+                   user flagged as INSUFFICIENT — equalises exposure, not error).
+        dro      : online group-DRO (Sagawa et al.) — exponentiated-gradient bin
+                   weights q_g ∝ q_g·exp(eta·L_g); the loss is Σ_g q_g·L_g, which
+                   chases the WORST bin. q persists across epochs in `state`.
+        cvar     : average of the worst ceil(alpha·n) bin losses (tail-risk).
+        tilted   : (1/t)·logsumexp(t·L_g) − log n/t — a smooth max over bins.
+
+    A `_skill` suffix (dro_skill/cvar_skill/tilted_skill) centers each bin loss by
+    its TRAIN base-rate loss (state["base"]) BEFORE aggregating, so the objective
+    targets REDUCIBLE skill-over-base, not absolute loss — absolute per-bin loss is
+    dominated by base-rate entropy (aleatoric), which is why the uncentered dro/cvar
+    chase the irreducible mid/hard bins. (Centering is a constant per bin, so it
+    leaves mean/balanced gradients unchanged — only the level-sensitive
+    dro/cvar/tilted react to it.)
+
+    All but `mean` operate on PER-BIN MEAN losses L_g, so a sparse tail bin counts
+    as much as the dense middle — the point of the experiment."""
+    if objective == "mean":
+        return l.mean()
+    center = objective.endswith("_skill")
+    obj = objective[:-6] if center else objective
+    gl = torch.zeros(G, device=l.device).index_add(0, gb, l)
+    cnt = torch.zeros(G, device=l.device).index_add(0, gb, torch.ones_like(l))
+    present = cnt > 0
+    Lg = gl[present] / cnt[present]
+    if center:
+        Lg = Lg - state["base"][present]      # per-bin skill-over-base (reducible)
+    if obj == "balanced":
+        return Lg.mean()
+    if obj == "tilted":
+        n = Lg.numel()
+        return torch.logsumexp(tilt * Lg, 0) / tilt - float(np.log(n)) / tilt
+    if obj == "cvar":
+        k = max(1, int(np.ceil(cvar_alpha * Lg.numel())))
+        return torch.topk(Lg, k).values.mean()
+    if obj == "dro":
+        q = state["q"]
+        with torch.no_grad():
+            q[present] = q[present] * torch.exp(dro_eta * Lg.detach())
+            q[~present] = 0.0
+            q /= q.sum().clamp(min=EPS)
+        return (q[present] * Lg).sum()
+    raise ValueError(f"unknown objective {objective}")
+
+
+def fit_eval_obj(prof_idx, feat, y, groups, rank_bin, n_profiles, objective,
+                 args, device, seed, slope, diff_hidden):
+    """GroupKFold-by-problem OOF prediction under an error-adaptive `objective`
+    (see _agg_loss), grouping the training loss by `rank_bin`. Mirrors fit_eval's
+    folds/model/early-stopping; the ONLY change is the training-loss aggregation,
+    so an objective's effect is isolated. MLP early stopping still monitors MEAN
+    inner-val BCE (we want generalisation, not a robust val metric)."""
+    from sklearn.model_selection import GroupKFold
+    import torch.nn.functional as F
+    oof = np.full(len(y), np.nan)
+    fdim = feat.shape[1]
+    G = int(rank_bin.max()) + 1
+    ty = torch.tensor(y, dtype=torch.float32, device=device)
+    tprof = torch.tensor(prof_idx, dtype=torch.long, device=device)
+    tfeat = torch.tensor(feat, dtype=torch.float32, device=device)
+    tbin = torch.tensor(rank_bin, dtype=torch.long, device=device)
+    mlp = bool(diff_hidden)
+    for tr, te in GroupKFold(args.folds).split(y, groups=groups):
+        torch.manual_seed(seed)
+        m = RatingModel(n_profiles, fdim, "none", slope=slope,
+                        diff_hidden=diff_hidden, dropout=args.dropout).to(device)
+        train_profs = set(prof_idx[tr].tolist())
+        te = te[np.isin(prof_idx[te], list(train_profs))]
+        if mlp:
+            mlp_p = set(map(id, m.diff.parameters()))
+            other = [p for p in m.parameters() if id(p) not in mlp_p]
+            opt = torch.optim.AdamW(
+                [{"params": other, "weight_decay": 0.0},
+                 {"params": list(m.diff.parameters()), "weight_decay": args.mlp_wd}],
+                lr=args.lr)
+        else:
+            opt = torch.optim.Adam(m.parameters(), lr=args.lr)
+        # per-bin TRAIN base-rate loss (for the _skill centered objectives): the
+        # bin's label entropy, the aleatoric floor we subtract to isolate skill.
+        bsum = torch.zeros(G, device=device).index_add(0, tbin[tr], ty[tr])
+        bcnt = torch.zeros(G, device=device).index_add(
+            0, tbin[tr], torch.ones(len(tr), device=device))
+        br = (bsum / bcnt.clamp(min=1)).clamp(EPS, 1 - EPS)
+        base_g = -(br * br.log() + (1 - br) * (1 - br).log())
+        state = {"q": torch.ones(G, device=device) / G, "base": base_g}
+
+        def train_loss(idx):
+            l = F.binary_cross_entropy(m(tprof[idx], tfeat[idx]), ty[idx],
+                                       reduction="none")
+            return _agg_loss(l, tbin[idx], G, objective, state,
+                             args.dro_eta, args.tilt, args.cvar_alpha) + m.reg(args.ridge)
+
+        if mlp:
+            rng = np.random.default_rng(seed)
+            tr_probs = np.unique(groups[tr]); rng.shuffle(tr_probs)
+            val_probs = set(tr_probs[:max(1, int(0.2 * len(tr_probs)))].tolist())
+            in_val = np.isin(groups[tr], list(val_probs))
+            itr, iva = tr[~in_val], tr[in_val]
+            iva = iva[np.isin(prof_idx[iva], list(set(prof_idx[itr].tolist())))]
+            t_itr = torch.tensor(itr, dtype=torch.long, device=device)
+            ivap, ivaf, ivay = tprof[iva], tfeat[iva], ty[iva]
+            best_ll, best_state, bad = np.inf, None, 0
+            for ep in range(args.epochs):
+                m.train(); opt.zero_grad()
+                train_loss(t_itr).backward(); opt.step()
+                if ep % 5 == 0 or ep == args.epochs - 1:
+                    m.eval()
+                    with torch.no_grad():
+                        vll = F.binary_cross_entropy(m(ivap, ivaf), ivay).item()
+                    if vll < best_ll - 1e-5:
+                        best_ll, bad = vll, 0
+                        best_state = {k: v.detach().clone()
+                                      for k, v in m.state_dict().items()}
+                    else:
+                        bad += 1
+                        if bad >= 6:
+                            break
+            if best_state is not None:
+                m.load_state_dict(best_state)
+        else:
+            t_tr = torch.tensor(tr, dtype=torch.long, device=device)
+            for _ in range(args.epochs):
+                m.train(); opt.zero_grad()
+                train_loss(t_tr).backward(); opt.step()
+        m.eval()
+        with torch.no_grad():
+            oof[te] = m(tprof[te], tfeat[te]).cpu().numpy()
+    return oof
+
+
+def even_error(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, device):
+    """Do error-adaptive objectives FLATTEN the per-rank error profile, and at what
+    overall cost? Fits one leak-free source under each --ee-objectives objective
+    (robust ones group over equal-count rank bins), then reports per-bin Δskill, a
+    flatness summary (std + spread + worst-bin Δskill across bins), and overall
+    LogLoss. The methodological question: can the objective buy flatness, or is the
+    tail error aleatoric (irreducible from features) so reweighting only trades the
+    mean for no flatness gain?"""
+    from sklearn.metrics import log_loss, roc_auc_score
+    src = args.ee_source
+    if src not in feats or feats[src] is None:
+        print(f"  source {src} unavailable"); return
+    dh = tuple(args.diff_hidden) if args.ee_head == "mlp" else ()
+    # Bin on the RAW rating (equal-count quantiles → comparably sized groups, so the
+    # robust objectives aren't dominated by one giant bin). The rank INDEX compresses
+    # the easy end (half the attempts land at rank≈0), which would collapse equal-count
+    # rank bins into one huge easy bin. `rank` (internal rank index) is used only to
+    # LABEL each bin easy→hard for readability.
+    raw = prof_df["problem"].map(rating).to_numpy(float)
+    rank = _rank_of(prof_df, rating, args.size)
+    edges = np.quantile(raw, np.linspace(0, 1, args.ee_bins + 1))
+    edges[-1] += 1e-6
+    rank_bin = np.clip(np.searchsorted(edges, raw, side="right") - 1,
+                       0, args.ee_bins - 1).astype(np.int64)
+    base = float(y.mean())
+    base_ll = -(base * np.log(base) + (1 - base) * np.log(1 - base))
+    print(f"\nEVEN-ERROR (size {args.size}) source={src} head={args.ee_head} "
+          f"{'2PL' if args.ee_slope else '1PL'} | {args.ee_bins} rank bins | "
+          f"base-rate LL {base_ll:.4f} | "
+          f"{'seeds '+str(args.seeds) if args.ee_head=='mlp' else 'seed-invariant'} | "
+          f"dro_eta {args.dro_eta} tilt {args.tilt} cvar_alpha {args.cvar_alpha}")
+
+    def run_obj(obj):
+        seeds = list(range(args.seeds)) if args.ee_head == "mlp" else [args.seed]
+        acc = None
+        for s in seeds:
+            o = fit_eval_obj(prof_idx, feats[src], y, groups, rank_bin, n_profiles,
+                             obj, args, device, s, args.ee_slope, dh)
+            acc = o if acc is None else acc + o
+        return acc / len(seeds)
+
+    def flatness(o):
+        d = []
+        for i in range(args.ee_bins):
+            sel = valid0 & (rank_bin == i)
+            if sel.sum() < 50:
+                continue
+            yy = y[sel]; b = yy.mean()
+            bll = -(b*np.log(max(b, EPS)) + (1-b)*np.log(max(1-b, EPS)))
+            pp = np.clip(o[sel], EPS, 1-EPS)
+            d.append(-np.mean(yy*np.log(pp)+(1-yy)*np.log(1-pp)) - bll)
+        d = np.array(d)
+        return d.std(), d.max(), d.max()-d.min()
+
+    if args.ee_eta_sweep is not None:
+        from sklearn.metrics import log_loss
+        base_o = run_obj("mean")
+        valid0 = ~np.isnan(base_o)
+        base_overall = log_loss(y[valid0], np.clip(base_o[valid0], EPS, 1-EPS))
+        print(f"\n  dro_skill η-sweep (flatness↔cost frontier; ΔLL vs mean):")
+        print(f"  {'η':>6s} {'overall LL':>11s} {'ΔLL':>8s} {'Δskill std':>11s} "
+              f"{'worst bin':>10s} {'spread':>8s}")
+        print("  " + "-" * 58)
+        for eta in [0.0] + list(args.ee_eta_sweep):
+            if eta == 0.0:
+                o, overall = base_o, base_overall
+            else:
+                args.dro_eta = eta
+                o = run_obj("dro_skill")
+                overall = log_loss(y[valid0], np.clip(o[valid0], EPS, 1-EPS))
+            std, worst, spread = flatness(o)
+            print(f"  {eta:>6.2f} {overall:>11.4f} {overall-base_overall:>+8.4f} "
+                  f"{std:>11.4f} {worst:>+10.4f} {spread:>8.4f}")
+        return
+
+    oof = {}
+    for obj in args.ee_objectives:
+        seeds = list(range(args.seeds)) if args.ee_head == "mlp" else [args.seed]
+        acc = None
+        for s in seeds:
+            o = fit_eval_obj(prof_idx, feats[src], y, groups, rank_bin, n_profiles,
+                             obj, args, device, s, args.ee_slope, dh)
+            acc = o if acc is None else acc + o
+        oof[obj] = acc / len(seeds)
+
+    valid = ~np.isnan(oof[args.ee_objectives[0]])
+    print(f"\n  {'objective':>10s} {'overall LL':>11s} {'AUC':>7s} "
+          f"{'Δskill std':>11s} {'worst bin':>10s} {'spread':>8s}")
+    print("  " + "-" * 62)
+    # per-bin Δskill for each objective (for flatness summary)
+    perbin = {}
+    for obj in args.ee_objectives:
+        o = oof[obj]
+        deltas = []
+        for i in range(args.ee_bins):
+            sel = valid & (rank_bin == i)
+            if sel.sum() < 50:
+                deltas.append(np.nan); continue
+            yy = y[sel]; b = yy.mean()
+            bll = -(b*np.log(max(b, EPS)) + (1-b)*np.log(max(1-b, EPS)))
+            pp = np.clip(o[sel], EPS, 1-EPS)
+            ll = -np.mean(yy*np.log(pp) + (1-yy)*np.log(1-pp))
+            deltas.append(ll - bll)
+        perbin[obj] = np.array(deltas)
+        d = perbin[obj][~np.isnan(perbin[obj])]
+        m = valid & ~np.isnan(o)
+        print(f"  {obj:>10s} {log_loss(y[m], np.clip(o[m], EPS, 1-EPS)):>11.4f} "
+              f"{roc_auc_score(y[m], o[m]):>7.4f} {d.std():>11.4f} "
+              f"{d.max():>+10.4f} {d.max()-d.min():>8.4f}")
+
+    # per-bin Δskill table (easy→hard); the flatness is read column-wise.
+    print(f"\n  Per-bin Δskill (LL − base LL; <0 beats base). Flat column = even error:")
+    hdr = f"  {'rank idx':>9s} {'n':>7s} {'base':>5s}" + \
+          "".join(f"{o:>10s}" for o in args.ee_objectives)
+    print(hdr); print("  " + "-" * (len(hdr) - 2))
+    for i in range(args.ee_bins):
+        sel = valid & (rank_bin == i)
+        if sel.sum() < 50:
+            continue
+        b = y[sel].mean()
+        print(f"  {rank[sel].mean():>9.1f} {int(sel.sum()):>7d} {b:>5.2f}"
+              + "".join(f"{perbin[o][i]:>+10.4f}" for o in args.ee_objectives))
 
 
 def floor_gap(prof_idx, feats, y, groups, n_profiles, args, device):
