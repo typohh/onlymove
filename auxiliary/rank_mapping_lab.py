@@ -116,7 +116,8 @@ def load_data(sql=SQL_PATH_DEFAULT, use_cache=True):
 # shared rating→EGF curve (+ couplings), pluggable rating-curve parameterization
 # ---------------------------------------------------------------------------
 def fit_shared(decls, method, shape=None, rating_lam=1.0, lam=10.0,
-               rank_padding=2, extend_to=9, min_server_samples=3):
+               rank_padding=2, extend_to=9, min_server_samples=3,
+               coupling2018=None, prior2018_lam=0.1):
     """decls: [(server, R, g)]. Returns (curve, server_curves) where
     curve = (rating_thresholds, ys) usable as interp_extrap_vec(R, *curve)."""
     N_egf = EGF_HI - EGF_LO + 1
@@ -173,7 +174,11 @@ def fit_shared(decls, method, shape=None, rating_lam=1.0, lam=10.0,
         def rating_pen(pr):
             return 0.0                      # shape is fixed; nothing to penalize
 
-    # server blocks
+    # server blocks. mode 'affine' (2-param affine on the 2018 SHAPE: thresholds
+    # = α + e^logβ·τ⁰, absorbing per-server temporal drift) when a 2018 curve is
+    # available; else 'free' (uniform-spacing-prior thresholds). τ⁰ is the 2018
+    # EGF value at each of this server's rank boundaries.
+    coupling2018 = coupling2018 or {}
     blocks = {}
     for server, rows in srv_rows.items():
         if len(rows) < min_server_samples:
@@ -185,21 +190,40 @@ def fit_shared(decls, method, shape=None, rating_lam=1.0, lam=10.0,
         if K < 1:
             continue
         N = g_max - g_min + 1
-        blocks[server] = dict(
+        blk = dict(
             g_min=g_min, g_max=g_max,
-            baseline=np.ones(K - 1) if K > 1 else np.array([]),
             rating=np.array([r for r, _ in rows], float),
             k=np.array([max(0, min(N - 1, g - g_min)) for _, g in rows], int))
+        bounds = np.array([g - 0.5 for g in range(g_min + 1, g_max + 1)], float)
+        if server in coupling2018:
+            c = coupling2018[server]
+            blk["mode"] = "affine"
+            blk["tau0"] = interp_extrap_vec(bounds, np.array(c["server"], float),
+                                            np.array(c["our"], float))
+            blk["nparam"] = 2
+        else:
+            blk["mode"] = "free"
+            blk["baseline"] = np.ones(K - 1) if K > 1 else np.array([])
+            blk["nparam"] = len(blk["baseline"]) + 1
+        blocks[server] = blk
 
     layout = [("rating", None, 0, n_rating)]
     x0 = list(x0_rating)
     idx = n_rating
     for server, blk in blocks.items():
-        n = len(blk["baseline"]) + 1
-        layout.append(("srv", server, idx, n))
-        x0.append(float(blk["g_min"])); x0.extend([0.0] * len(blk["baseline"]))
-        idx += n
+        layout.append(("srv", server, idx, blk["nparam"]))
+        if blk["mode"] == "affine":
+            x0.extend([0.0, 0.0])                      # α=0, logβ=0 ⇒ 2018 shape
+        else:
+            x0.append(float(blk["g_min"])); x0.extend([0.0] * (blk["nparam"] - 1))
+        idx += blk["nparam"]
     x0 = np.asarray(x0, float)
+
+    def srv_thr(server, pr):
+        blk = blocks[server]
+        if blk["mode"] == "affine":
+            return pr[0] + np.exp(pr[1]) * blk["tau0"]
+        return _unpack_thresholds(pr, blk["baseline"])
 
     def unpack(p):
         a = None; b = {}; logs = {}
@@ -207,19 +231,21 @@ def fit_shared(decls, method, shape=None, rating_lam=1.0, lam=10.0,
             if kind == "rating":
                 a = rating_thr(p[st:st + n]); logs["rating"] = p[st:st + n]
             else:
-                b[key] = _unpack_thresholds(p[st:st + n], blocks[key]["baseline"])
-                logs[("srv", key)] = p[st + 1:st + n]
+                b[key] = srv_thr(key, p[st:st + n]); logs[("srv", key)] = p[st:st + n]
         return a, b, logs
 
     def obj(p):
         a, b, logs = unpack(p)
         nll = ordinal_nll_vec(a, egf_R, egf_k)
+        pen = rating_pen(logs["rating"])
         for server, blk in blocks.items():
             x_int = interp_extrap_vec(blk["rating"], a, ys)
             nll += ordinal_nll_vec(b[server], x_int, blk["k"])
-        pen = rating_pen(logs["rating"])
-        for server in blocks:
-            pen += lam * float(np.sum(logs[("srv", server)] ** 2))
+            lg = logs[("srv", server)]
+            if blk["mode"] == "affine":   # mild prior toward (α,logβ)=(0,0): trust 2018
+                pen += prior2018_lam * float(lg[0] ** 2 + lg[1] ** 2)
+            else:
+                pen += lam * float(np.sum(lg[1:] ** 2))
         return nll + pen
 
     res = minimize(obj, x0, method="L-BFGS-B", options={"maxiter": 10000})
@@ -250,6 +276,15 @@ def srv2egf(server, g, rmap):
     return None if not k else float(interp_extrap_vec(np.array([g]), np.array(k["server"]), np.array(k["our"]))[0])
 
 
+def egf2srv(server, egf, rmap):
+    """Forward: internal/EGF rank -> declared server rank (the non-circular eval
+    direction). Identity for EGF."""
+    if server == "EGF":
+        return egf
+    k = rmap.get(server)
+    return None if not k else float(interp_extrap_vec(np.array([egf]), np.array(k["our"]), np.array(k["server"]))[0])
+
+
 # ---------------------------------------------------------------------------
 # CV + metrics
 # ---------------------------------------------------------------------------
@@ -264,12 +299,18 @@ def metrics(pred, targ):
                 MAE=float(np.mean(np.abs(res))), bias=float(res.mean()))
 
 
-def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0):
+def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0,
+        coupling_prior=None):
     rng = np.random.default_rng(seed)
     d = load_data()
     recs, Rv1, Rv2, cubic = d["recs"], d["Rv1"], d["Rv2"], d["cubic_by_size"]
     shapes = {m: (_shape_fn(m) if m not in ("free",) else None)
               for m in methods if m != "v1"}
+    c2018 = None
+    if coupling_prior in ("2018", "2024"):
+        from auxiliary.fit_2018_couplings import fit_2018_couplings, fit_2024_couplings
+        c2018 = fit_2018_couplings() if coupling_prior == "2018" else fit_2024_couplings()
+        print(f"{coupling_prior} coupling prior on: {[s for s in c2018 if s != 'EGF']}")
 
     prefs = list(recs.keys()); rng.shuffle(prefs)
     fold = {p: i % folds for i, p in enumerate(prefs)}
@@ -290,7 +331,8 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0):
             else:
                 fitted[m] = ("shared",) + fit_shared(d_shared, m, shapes[m],
                                                       rating_lam=rating_lam,
-                                                      lam=server_lam)
+                                                      lam=server_lam,
+                                                      coupling2018=c2018)
         for p in test:
             for m in methods:
                 kind, curve, rmap = fitted[m]
@@ -303,8 +345,9 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0):
                           if p in Rv2 else None)
                 for srv, g in recs[p]:
                     te = srv2egf(srv, g, rmap)
-                    oof[m].append((p, srv, g, pe, te))
-    frames = {m: pd.DataFrame(oof[m], columns=["p", "srv", "g", "pe", "te"])
+                    psr = egf2srv(srv, pe, rmap) if pe is not None else None
+                    oof[m].append((p, srv, g, pe, te, psr))
+    frames = {m: pd.DataFrame(oof[m], columns=["p", "srv", "g", "pe", "te", "psr"])
               for m in methods}
 
     print(f"\n{'='*78}\nOUT-OF-SAMPLE ({folds}-fold CV by user)\n{'='*78}")
@@ -343,6 +386,21 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0):
         br = np.array(band_rmse[m])
         print(f"  {m:11s} macro-RMSE={br.mean():.2f}  worst-band={br.max():.2f}")
 
+    # NON-CIRCULAR forward metric: predict the user's declared SERVER rank from R
+    # (R -> curve -> EGF -> coupling -> server rank), vs observed. The coupling is
+    # used FORWARD against an observed target, so coupling variants are comparable
+    # (unlike 'te', which is coupling-defined). Per-server macro de-weights big servers.
+    print("\n--- forward metric: predicted declared SERVER rank vs observed ---")
+    for m in methods:
+        f = frames[m].dropna(subset=["psr"])
+        ns = f[f.srv != "EGF"]
+        per = ns.groupby("srv").apply(
+            lambda x: np.sqrt(np.mean((x.psr - x.g) ** 2)), include_groups=False)
+        overall = np.sqrt(np.mean((ns.psr - ns.g) ** 2))
+        print(f"  {m:11s} server-RMSE overall={overall:.2f}  "
+              f"macro(per-server)={per.mean():.2f}  worst={per.max():.2f} "
+              f"({per.idxmax()})")
+
     # bootstrap on all-declaration RMSE, paired vs first method
     print(f"\n--- bootstrap RMSE 95% CI (all decls), paired vs '{methods[0]}' ---")
     base = methods[0]
@@ -379,9 +437,12 @@ if __name__ == "__main__":
                     help="Ridge strength for free/_prior curve deviations.")
     ap.add_argument("--server-lam", type=float, default=10.0,
                     help="Uniform-spacing prior strength for the server couplings.")
+    ap.add_argument("--coupling-prior", choices=["2018", "2024"], default=None,
+                    help="Use a cross-server survey as an affine (offset+scale) shape "
+                         "prior on the couplings (servers it covers).")
     ap.add_argument("--no-cache", action="store_true")
     args = ap.parse_args()
     if args.no_cache and os.path.exists(CACHE):
         os.remove(CACHE)
     run(args.methods, args.folds, args.boot, args.seed, args.rating_lam,
-        args.server_lam)
+        args.server_lam, args.coupling_prior)
