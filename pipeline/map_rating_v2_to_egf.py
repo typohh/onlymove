@@ -1,124 +1,336 @@
-"""Map the v2 combined rating (b_p, in ability-θ units) to EGF rank space.
+"""Map the v2 combined rating (b_p, in ability-θ units) to EGF rank space, and
+fit the server↔EGF rank couplings — SELF-CONTAINED, no v1 artifacts required.
 
-The v2 model (pipeline.train_rating_v2) puts problem difficulty b_p and user ability θ on
-ONE shared logit scale across both boards. So the rating→rank curve is a SINGLE curve:
+The v2 model (pipeline.train_rating_v2) puts problem difficulty b_p and user
+ability on ONE shared logit scale across both boards, so the rating→rank curve
+is a SINGLE shared curve. This step produces, from rank_surveys alone:
 
-  1. Aggregate the model's per-(user,2-month) θ into a per-user ability.
-  2. Anchor θ → EGF rank using rank_surveys: EGF declarations map directly; other servers
-     are converted to EGF via the existing server couplings (rank_map.json). Fit a robust
-     linear θ→EGF map E(θ)=α+βθ (EGF rank is ~linear in logit ability).
-  3. Emit rating_to_rank knots by inverting: at each EGF boundary g, rating = (g−α)/β and
-     rank_index = g + 18.5 (the exact convention fit_rank_curves uses). Because the scale is
-     shared, the SAME knots are written for both board keys ("9" and "13").
-
-Writes to the BACKEND v2 location (does NOT touch the served pwa/tsumegos/):
   ratings_v2/rating_to_rank.json   per-board (identical) {ratings, rank_indices}
-  ratings_v2/rank_map.json         server couplings (copied from the existing fit; server↔
-                                   EGF is model-independent)
+  ratings_v2/rank_map.json         per-server internal(EGF)↔server rank couplings
 
-Deploying v2 = run package_for_pwa --ratings-root ratings_v2 (ships the zips+metadata into
-the SAME pwa/tsumegos/), then copy these two files onto the served pwa/tsumegos/ paths.
+Both come out of ONE joint fit (fit_joint_shared), exactly the way v1's
+pipeline.fit_rank_curves produces its pair — v2 no longer reads v1's rank_map.
 
-Run pipeline.train_rating_v2 first (produces ratings_v2/user_theta.csv).
+WHY 80%, not raw θ (the calibration fix):
+  The PWA derives a user's rank as the rating level they clear at CALIBRATION_P
+  = 80% (pwa/js/rank-decomposition.js, model.js, == pipeline.fit_rank_curves),
+  then maps it through rating_to_rank.json. Raw θ is the 2PL 50%-point
+  (P = σ(a_p·(θ − b_p)), so θ = b_p ⇒ P = 0.5). Anchoring raw θ → EGF therefore
+  calibrates the curve at 50% while the client measures users at 80% — a
+  systematic offset in every displayed rank. So we instead estimate each survey
+  user's 80%-CLEAR rating against v2's OWN per-problem ratings (the same
+  fit_user_rating the v1 fitter uses, pooled across boards since b_p is one
+  shared scale) and anchor THAT → EGF. The curve then speaks the PWA's language.
+
+Model (internal rank ≡ EGF rank is the hub / identity), estimated TOGETHER:
+
+    rating R ──shared curve m──▶ INTERNAL(EGF) RANK ──per server──▶ server rank
+
+  * R = the v2-rating at which a user clears 80% (fit_user_rating, pooled).
+  * m: the EGF statistics.txt cubic SHAPE with a 2-param affine fit to surveys —
+    rating-thresholds `a_g = α + β·S(g)`, S = the ΔAIC-best fit to the even-game
+    win-rate table (auxiliary.fit_statistics_shapes). The shape is NOT a magic
+    constant: EGF data rejects a linear rank↔rating link (ΔAIC 1652 vs cubic 0),
+    and the bot Elo ladder + our human R(rank) independently show the same convex
+    acceleration. A linear/free curve over-rates kyu (+4 ranks) and under-rates
+    dan (−2); the cubic shape removes that tilt at no aggregate cost. Only α, β
+    (β>0 ⇒ monotone) are fit here. (NOT v1's cubic, which is pinned to v1's rating
+    scale via humanv0 bots; this re-fits the shape's affine to v2's b_p surveys.)
+    See docs/rank_mapping_experiments.md for the CV / per-rank-band evidence.
+  * Each non-EGF server: P(declared ≤ h | internal rank x) = expit(τ_{s,h} − x),
+    free ordinal thresholds, uniform-spacing prior (--lambda). EGF feeds the
+    rating curve directly (the identity hub); other servers couple in on top.
+
+Deploying v2 = package_for_pwa --ratings-root ratings_v2 (ships zips+metadata
+into the SAME pwa/tsumegos/), then copy these two files onto the served paths.
+
+Run pipeline.fetch_database first to refresh attempts/database.sql (the survey +
+attempts source); this step then needs neither GPU nor the heavy pipeline.
 """
 
 import argparse
 import json
 import os
 import sys
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.compare_rank_surveys import (  # noqa: E402
-    SQL_PATH_DEFAULT, latest_per_user_server, load_rank_surveys, scalar_to_rank,
+    SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
+    load_rank_surveys, scalar_to_rank,
+)
+from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
+from pipeline.fit_rank_curves import (  # noqa: E402
+    CALIBRATION_P, build_server_curves, fit_user_rating, interp_extrap_vec,
+    ordinal_nll_vec, _unpack_thresholds,
 )
 
 SIZES = [9, 13]
 
+# stats-shape rank_index axis: 20k=0 … 1k=19 … 1d=20. EGF scalar g: 1k=0, 1d=1.
+# So rank_index(g) = g + 19. The rating→EGF curve uses the EGF statistics.txt
+# cubic SHAPE (ΔAIC-best fit to the even-game win-rate table; see
+# docs/rank_mapping_experiments.md), with only the affine (α, β) fit to surveys.
+RATING_SHAPE = "cubic"
 
-def server_to_egf(server, scalar, rank_map):
-    """Convert a (server, server-rank-scalar) declaration to EGF/internal-rank scalar."""
-    if server == "EGF":
-        return scalar
-    knots = rank_map.get(server)
-    if not knots:
-        return None
-    return float(np.interp(scalar, knots["server"], knots["our"]))
+
+def load_v2_ratings(v2_dir, size):
+    """{tsumego_id: b_p rating} from ratings_v2/<size>/tsumego_ratings_final.csv
+    — the same shared-scale black-box scalar package_for_pwa ships for v2."""
+    path = os.path.join(v2_dir, str(size), "tsumego_ratings_final.csv")
+    if not os.path.exists(path):
+        return {}
+    df = pd.read_csv(path)
+    return dict(zip(df["tsumego_id"], df["rating"].astype(float)))
+
+
+def _shape_at(ys):
+    """The EGF statistics.txt RATING_SHAPE value at each EGF-boundary scalar in
+    `ys` (rank_index = g + 19). Monotone increasing — used as the fixed shape of
+    the rating→EGF curve, scaled by a 2-param affine fit to surveys."""
+    params, theta = fit_shape(RATING_SHAPE)
+    return np.asarray(theta(np.asarray(ys, float) + 19.0, params), dtype=float)
+
+
+def fit_joint_shared(decls, egf_lo, egf_hi, lam,
+                     rank_padding, extend_to, min_server_samples):
+    """Jointly fit ONE shared rating→internal(EGF)-rank curve and per-server
+    internal-rank→server-rank couplings over all `decls`.
+
+    The rating→EGF curve is the EGF statistics.txt cubic SHAPE with only a 2-param
+    affine (a, b>0) fit to surveys: rating-thresholds `a_g = α + β·S(g)`, where
+    `S` = _shape_at. A linear curve is decisively rejected by the same EGF data
+    (ΔAIC 1652) and over-/under-rates the rank extremes; the cubic shape removes
+    that tilt (docs/rank_mapping_experiments.md). Server couplings stay free
+    ordinal thresholds with a uniform-spacing prior (`lam`).
+
+    decls : iterable of (server, rating R, declared g_scalar). There is no board
+    split — b_p is one shared scale, so a user contributes ONE R (pooled across
+    boards) and one declaration per server.
+
+    Returns (rating_knots, egf_thr_ranks, server_fits):
+      rating_knots : (K,) fitted rating at each EGF-rank boundary g−0.5
+      egf_thr_ranks: [egf_lo+1 .. egf_hi]  (the K threshold ranks)
+      server_fits  : {server: ({declared_g: τ_internal}, nll, dev)}
+    Needs ≥1 EGF declaration to anchor the absolute internal-rank scale.
+    """
+    N_egf = egf_hi - egf_lo + 1
+    egf_thr_ranks = list(range(egf_lo + 1, egf_hi + 1))   # K = N_egf-1 ranks
+    ys = np.array([g - 0.5 for g in egf_thr_ranks], dtype=float)  # EGF scalar
+    S = _shape_at(ys)                                      # fixed cubic shape
+
+    # --- bucket declarations ---
+    egf_R, egf_k = [], []
+    server_rows = defaultdict(list)   # server -> [(rating, g_int)]
+    for server, R, g in decls:
+        gi = int(round(g))
+        if server == "EGF":
+            egf_R.append(R)
+            egf_k.append(max(0, min(N_egf - 1, gi - egf_lo)))
+        else:
+            server_rows[server].append((R, gi))
+    egf_R = np.asarray(egf_R, dtype=float)
+    egf_k = np.asarray(egf_k, dtype=int)
+    if len(egf_R) == 0:
+        sys.exit("No EGF declarations — cannot anchor the internal-rank scale.")
+
+    # --- init the curve's affine (α, β) from a robust linear EGF pre-fit ---
+    beta, alpha = np.polyfit(egf_R, egf_k.astype(float) + egf_lo, 1)
+    if beta <= 0:
+        sys.exit("Non-positive rating→EGF slope in pre-fit — check surveys.")
+    prior_rating = (ys - alpha) / beta            # rating at each EGF boundary
+    b0 = (prior_rating[-1] - prior_rating[0]) / (S[-1] - S[0])
+    a0 = float(prior_rating[0] - b0 * S[0])       # rating-thresholds = a0 + b0·S
+    x0_rating = [a0, float(np.log(max(b0, 1e-3)))]   # [α, log β]  (β>0 ⇒ monotone)
+
+    # --- per-server blocks (internal-rank thresholds), as in fit_rank_curves ---
+    server_blocks = {}
+    for server, rows in server_rows.items():
+        if len(rows) < min_server_samples:
+            continue
+        declared = [g for _, g in rows]
+        g_min = min(declared) - rank_padding
+        g_max = max(max(declared) + rank_padding, extend_to)
+        K = g_max - g_min
+        if K < 1:
+            continue
+        N = g_max - g_min + 1
+        rating = np.array([r for r, _ in rows], dtype=float)
+        kk = np.array([max(0, min(N - 1, g - g_min)) for _, g in rows], dtype=int)
+        server_blocks[server] = {
+            "g_min": g_min, "g_max": g_max,
+            "baseline": np.ones(K - 1) if K > 1 else np.array([]),
+            "rating": rating, "k": kk}
+
+    # --- parameter layout: 2-param rating affine, then per-server blocks ---
+    srv_layout = []   # (server, start, n)
+    x0 = list(x0_rating)
+    idx = 2
+    for server, blk in server_blocks.items():
+        n = len(blk["baseline"]) + 1
+        srv_layout.append((server, idx, n))
+        x0.append(float(blk["g_min"]))
+        x0.extend([0.0] * len(blk["baseline"]))
+        idx += n
+    x0 = np.asarray(x0, dtype=float)
+
+    def unpack(params):
+        a = params[0] + np.exp(params[1]) * S            # rating thresholds
+        b, logs = {}, {}
+        for server, st, n in srv_layout:
+            b[server] = _unpack_thresholds(params[st:st + n],
+                                           server_blocks[server]["baseline"])
+            logs[server] = params[st + 1:st + n]
+        return a, b, logs
+
+    def objective(params):
+        a, b, logs = unpack(params)
+        nll = ordinal_nll_vec(a, egf_R, egf_k)
+        for server, blk in server_blocks.items():
+            x_int = interp_extrap_vec(blk["rating"], a, ys)
+            nll += ordinal_nll_vec(b[server], x_int, blk["k"])
+        pen = lam * sum(float(np.sum(lg ** 2)) for lg in logs.values())
+        return nll + pen
+
+    res = minimize(objective, x0, method="L-BFGS-B", options={"maxiter": 10000})
+    a, b, logs = unpack(res.x)
+
+    server_fits = {}
+    for server, blk in server_blocks.items():
+        thr = b[server]
+        gs = list(range(blk["g_min"] + 1, blk["g_max"] + 1))
+        thresholds = {gs[i]: float(thr[i]) for i in range(len(gs))}
+        x_int = interp_extrap_vec(blk["rating"], a, ys)
+        nll = ordinal_nll_vec(thr, x_int, blk["k"])
+        dev = float(np.sum(logs[server] ** 2))
+        server_fits[server] = (thresholds, nll, dev)
+    return a, egf_thr_ranks, server_fits
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--v2-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
-    ap.add_argument("--rank-map", default=os.path.join(
-        PROJECT_ROOT, "pwa", "tsumegos", "rank_map.json"),
-        help="Existing server↔EGF couplings (model-independent); copied into v2-dir.")
-    ap.add_argument("--g-lo", type=int, default=-19, help="Lowest EGF boundary (≈20k).")
-    ap.add_argument("--g-hi", type=int, default=10, help="Highest EGF boundary (≈10d).")
+    ap.add_argument("--min-attempts", type=int, default=20,
+                    help="Drop survey users with fewer pooled attempts.")
+    ap.add_argument("--min-server-samples", type=int, default=3,
+                    help="Skip a server with fewer pooled declarations.")
+    ap.add_argument("--rank-padding", type=int, default=2,
+                    help="Extend a server's threshold range this many ranks "
+                         "past its min/max declared rank.")
+    ap.add_argument("--extend-to", type=int, default=9,
+                    help="Force each server range to cover at least up to this "
+                         "rank scalar (9 = 9d).")
+    ap.add_argument("--lambda", type=float, default=10.0, dest="lam",
+                    help="Uniform-spacing prior strength for the SERVER "
+                         "couplings (strong, so sparse servers stay a clean "
+                         "offset).")
+    ap.add_argument("--egf-lo", type=int, default=-20,
+                    help="Lowest EGF boundary (egf_lo+1 = weakest threshold).")
+    ap.add_argument("--egf-hi", type=int, default=10, help="Highest EGF boundary.")
     args = ap.parse_args()
 
-    theta_df = pd.read_csv(os.path.join(args.v2_dir, "user_theta.csv"))
-    # profile = user8_YYYY-MM → per-user attempt-weighted mean ability
-    theta_df["user8"] = theta_df["profile"].str.rsplit("_", n=1).str[0]
-    theta_df["w"] = theta_df["n_attempts"].clip(lower=1)
-    theta_df["wt"] = theta_df["theta"] * theta_df["w"]
-    per_user = theta_df.groupby("user8").agg(wt=("wt", "sum"), w=("w", "sum"))
-    user_theta = (per_user["wt"] / per_user["w"]).to_dict()
-
-    rank_map = json.load(open(args.rank_map))
+    print(f"Reading {args.sql} ...")
     surveys = load_rank_surveys(args.sql)
-    if surveys is None or len(surveys) == 0:
-        sys.exit("No rank_surveys rows found — cannot anchor θ→EGF.")
+    if surveys is None or surveys.empty:
+        sys.exit("No rank_surveys rows found — cannot anchor the curve.")
     surveys = latest_per_user_server(surveys)
+    print(f"  {len(surveys)} latest declarations from "
+          f"{surveys['user_id'].nunique()} users")
 
-    # anchor points (θ_user, EGF scalar)
-    th, eg = [], []
-    for _, r in surveys.iterrows():
-        u8 = str(r["user_id"])[:8]
-        if u8 not in user_theta or r.get("rank_scalar") is None or pd.isna(r["rank_scalar"]):
+    ratings_by_size = {s: load_v2_ratings(args.v2_dir, s) for s in SIZES}
+    merged_ratings = {}
+    for s in SIZES:
+        if not ratings_by_size[s]:
+            print(f"  size {s}: no v2 ratings at {args.v2_dir}/{s}/ (skipped)")
+        merged_ratings.update(ratings_by_size[s])   # b_p is one shared scale
+    if not merged_ratings:
+        sys.exit("No v2 per-problem ratings found — run train_rating_v2 first.")
+
+    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
+
+    # Each user's 80%-CLEAR v2-rating, POOLED across boards (shared scale). This
+    # is the same quantity the PWA computes per user (fit_user_rating @ 80%),
+    # so anchoring it → EGF makes the displayed rank match the survey rank.
+    print(f"\nEstimating each user's {int(CALIBRATION_P * 100)}%-clear v2-rating "
+          f"(pooled across boards) ...")
+    user_rating = {}
+    for uid in surveys["user_id"].unique():
+        pref = uid[:8]
+        pooled = []
+        for s in SIZES:
+            pooled.extend(attempts.get((pref, s), []))
+        if len(pooled) < args.min_attempts:
             continue
-        g = server_to_egf(r["server"], float(r["rank_scalar"]), rank_map)
-        if g is None:
+        R, n = fit_user_rating(pooled, merged_ratings, min_n=args.min_attempts)
+        if R is not None and n >= args.min_attempts:
+            user_rating[pref] = R
+    print(f"  {len(user_rating)} users with a usable rating "
+          f"(≥{args.min_attempts} attempts)")
+
+    decls = []  # (server, R, declared_scalar)
+    for _, row in surveys.iterrows():
+        pref = str(row["user_id"])[:8]
+        g = row.get("rank_scalar")
+        if pref not in user_rating or g is None or pd.isna(g):
             continue
-        th.append(user_theta[u8])
-        eg.append(g)
-    th, eg = np.asarray(th, float), np.asarray(eg, float)
-    if len(th) < 5:
-        sys.exit(f"Only {len(th)} survey anchors with a matching θ — too few to fit.")
+        decls.append((row["server"], user_rating[pref], float(g)))
+    n_egf = sum(1 for srv, _, _ in decls if srv == "EGF")
+    print(f"\nJoint fit over {len(decls)} declarations "
+          f"[{n_egf} EGF anchoring the scale; rating curve = '{RATING_SHAPE}' "
+          f"statistics.txt shape (2-param affine); server prior λ = {args.lam}, "
+          f"≥{args.min_server_samples} samples]")
 
-    # robust linear E(θ)=α+βθ: one trim pass on residuals (drops gross outliers)
-    beta, alpha = np.polyfit(th, eg, 1)
-    resid = eg - (alpha + beta * th)
-    keep = np.abs(resid) <= 2.5 * np.std(resid)
-    beta, alpha = np.polyfit(th[keep], eg[keep], 1)
-    pred = alpha + beta * th[keep]
-    ss = 1.0 - np.sum((eg[keep] - pred) ** 2) / np.sum((eg[keep] - eg[keep].mean()) ** 2)
-    print(f"θ→EGF anchors: {len(th)} ({int(keep.sum())} after trim) | "
-          f"EGF = {alpha:+.3f} {beta:+.3f}·θ | R² {ss:.3f}")
-    if beta <= 0:
-        sys.exit("Non-positive θ→EGF slope — anchoring failed (check surveys).")
+    rating_knots, egf_thr_ranks, server_fits = fit_joint_shared(
+        decls, args.egf_lo, args.egf_hi, lam=args.lam,
+        rank_padding=args.rank_padding, extend_to=args.extend_to,
+        min_server_samples=args.min_server_samples)
 
-    # invert to rating-at-EGF-boundary knots; shared across boards
-    gs = list(range(args.g_lo, args.g_hi + 1))
-    ratings = [float((g - alpha) / beta) for g in gs]
-    rank_indices = [float(g + 18.5) for g in gs]
-    curve = {"ratings": ratings, "rank_indices": rank_indices}
-    rr = {str(s): curve for s in SIZES}      # one shared curve, both board keys
+    # In-sample calibration check on the EGF anchors (predicted vs declared EGF).
+    ys = np.array([g - 0.5 for g in egf_thr_ranks], dtype=float)
+    egf_R = np.array([R for srv, R, _ in decls if srv == "EGF"])
+    egf_g = np.array([g for srv, _, g in decls if srv == "EGF"])
+    if len(egf_R) >= 2:
+        pred = interp_extrap_vec(egf_R, rating_knots, ys)
+        res = pred - egf_g
+        ss_tot = float(np.sum((egf_g - egf_g.mean()) ** 2))
+        r2 = 1.0 - float(np.sum(res ** 2)) / ss_tot if ss_tot > 0 else float("nan")
+        print(f"  EGF-anchor calibration: R² {r2:.3f} | "
+              f"RMSE {np.sqrt(np.mean(res ** 2)):.2f} | bias {res.mean():+.2f} ranks")
 
+    # --- write the shared rating→rank curve (both board keys, identical) ---
+    gs = egf_thr_ranks
+    curve = {
+        "ratings": [float(r) for r in rating_knots],
+        "rank_indices": [float((g - 0.5) + 19.0) for g in gs],
+    }
+    rr = {str(s): curve for s in SIZES}
     os.makedirs(args.v2_dir, exist_ok=True)
     with open(os.path.join(args.v2_dir, "rating_to_rank.json"), "w") as f:
         json.dump(rr, f, indent=2)
+
+    # --- write the server↔EGF couplings (built here, NOT copied from v1) ---
+    server_curves = build_server_curves(server_fits)
     with open(os.path.join(args.v2_dir, "rank_map.json"), "w") as f:
-        json.dump(rank_map, f, indent=2)
-    print(f"rating range mapped: {scalar_to_rank(args.g_lo)}→rating {ratings[0]:.2f} ... "
-          f"{scalar_to_rank(args.g_hi)}→rating {ratings[-1]:.2f}")
-    print(f"wrote {args.v2_dir}/rating_to_rank.json (shared 9≡13) + rank_map.json")
+        json.dump(server_curves, f, indent=2)
+
+    # report
+    print(f"\nrating range mapped: {scalar_to_rank(gs[0])}→rating "
+          f"{rating_knots[0]:.2f} ... {scalar_to_rank(gs[-1])}→rating "
+          f"{rating_knots[-1]:.2f}")
+    fitted = [s for s in SERVERS if s in server_curves and s != "EGF"]
+    print(f"wrote {args.v2_dir}/rating_to_rank.json (shared 9≡13) + "
+          f"rank_map.json ({len(fitted)} servers + EGF identity: "
+          f"{', '.join(fitted)})")
 
 
 if __name__ == "__main__":
