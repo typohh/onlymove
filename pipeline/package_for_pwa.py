@@ -412,17 +412,20 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
 
 
 def compute_ratings_hash(metadata):
-    """Stable content hash over (tsumego_id, rating) pairs for one size.
+    """Stable content hash over (tsumego_id, rating, slope) triples for one size.
 
     The PWA reads this from embedding_meta.json (ratings_version[size]) and
-    refreshes answerHistory.problemRating values from per-shard metadata.json
-    whenever the hash changes. Rounded to 6 decimals so floating-point noise
-    doesn't trigger spurious backfills."""
-    pairs = sorted(
-        (item["filename"].split(".")[0], round(float(item["rating"]), 6))
+    refreshes answerHistory.problemRating / problemSlope from per-shard
+    metadata.json whenever the hash changes. Slope is included so a rating-stable
+    re-fit that only moved the discriminations still bumps the version and
+    backfills problemSlope. Rounded to 6 decimals so floating-point noise doesn't
+    trigger spurious backfills."""
+    triples = sorted(
+        (item["filename"].split(".")[0], round(float(item["rating"]), 6),
+         round(float(item.get("slope", 0.0)), 6))
         for item in metadata
     )
-    payload = json.dumps(pairs, separators=(",", ":"))
+    payload = json.dumps(triples, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -449,11 +452,11 @@ def print_rating_distribution(metadata):
         items = buckets.get(i, [])
         count = len(items)
         percentage = (count / total_problems * 100) if total_problems > 0 else 0
-        avg_quality = sum(x['quality'] for x in items) / count if items else 0.0
+        avg_slope = sum(x['slope'] for x in items) / count if items else 0.0
         avg_rating = sum(x['rating'] for x in items) / count if items else 0.0
         label = f"[{i * BIN:+.1f},{(i + 1) * BIN:+.1f})"
         print(f"{label:>14s}: {count:>5d} problems ({percentage:5.1f}%, "
-              f"avg quality: {avg_quality:.3f}, avg rating: {avg_rating:.3f})")
+              f"avg slope: {avg_slope:.3f}, avg rating: {avg_rating:.3f})")
 
 
 def _embeddings_dir(board_size):
@@ -640,7 +643,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
 
     # 1. Ratings map: one raw black-box rating per problem. package_for_pwa is
     # rank-agnostic — the client converts each rating to a rank with the
-    # survey-calibrated curve fit_rank_curves writes to
+    # survey-calibrated curve map_rating_v2_to_egf writes to
     # pwa/tsumegos/rating_to_rank.json (no rank_index, no /29 here).
     tsumego_ratings_df = pd.read_csv(ratings_csv)
     tsumego_ratings_df = tsumego_ratings_df.sort_values(
@@ -650,15 +653,18 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         tsumego_ratings_df['rating'].astype(float),
     ))
 
-    # 2. Quality map (normalized to [0, 1]).
-    tsumego_quality_df = pd.read_csv(os.path.join(RATINGS_DIR, "tsumego_quality_final.csv"))
-    min_q = tsumego_quality_df['quality'].min()
-    max_q = tsumego_quality_df['quality'].max()
-    tsumego_quality_df['quality'] = (tsumego_quality_df['quality'] - min_q) / (max_q - min_q)
-    tsumego_quality_map = dict(zip(
-        tsumego_quality_df['tsumego_id'], tsumego_quality_df['quality']))
+    # 2. Slope map: the raw 2PL discrimination a_p per problem (the `quality`
+    # column in tsumego_quality_final.csv). Shipped RAW as `slope` — no
+    # normalization. The client uses it as the per-attempt success-curve slope in
+    # its rank estimator AND as the selection weight (∝ Fisher information a_p²).
+    quality_csv = os.path.join(RATINGS_DIR, "tsumego_quality_final.csv")
+    tsumego_slope_df = pd.read_csv(quality_csv) if os.path.exists(quality_csv) else None
+    tsumego_slope_map = (
+        dict(zip(tsumego_slope_df['tsumego_id'],
+                 tsumego_slope_df['quality'].astype(float)))
+        if tsumego_slope_df is not None else {})
 
-    print(f"  ratings: {len(tsumego_ratings_map)}, qualities: {len(tsumego_quality_map)}")
+    print(f"  ratings: {len(tsumego_ratings_map)}, slopes: {len(tsumego_slope_map)}")
     print(f"  loading joint embeddings (correct-cell field for metadata.json) ...")
     embedding_map, embedding_meta = load_embeddings(board_size)
 
@@ -672,11 +678,11 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         tsumego_id = filename.split('.')[0]
         if tsumego_id in tsumego_ratings_map:
             rating = tsumego_ratings_map[tsumego_id]
-            quality = tsumego_quality_map.get(tsumego_id, 0.0)
+            slope = tsumego_slope_map.get(tsumego_id, 0.0)
             item = {
                 "filename": filename,
                 "rating": rating,
-                "quality": quality,
+                "slope": slope,
             }
             if embedding_map is not None:
                 emb = embedding_map.get(tsumego_id)

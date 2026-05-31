@@ -42,27 +42,37 @@ if PROJECT_ROOT not in sys.path:
 from auxiliary.compare_rank_surveys import SERVERS  # noqa: E402
 
 
-def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1):
+def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
+                    slopes=None):
     """The user's rating = the problem RATING at which they clear `target` (80%).
 
-    MLE of R in  P(correct) = σ(LOGIT_PER_RATING·(R − raw_rating) + logit(target))
-    over the user's (raw_rating, correct) attempts. This is the in-loop estimator
-    — it never touches the rating-derivation internals, only the shipped ratings —
-    and it is the SAME quantity the client computes; M is then anchored on it.
+    MLE of R in  P(correct) = σ(a_p·(R − raw_rating) + logit(target))  over the
+    user's (raw_rating, correct) attempts. `raw_rating` is the shipped 80%-clear
+    rating r_p, so the +logit(target) offset is exact for ANY slope a_p; this is
+    the proper 2PL ability estimate. `slopes` is an optional {tid: a_p} map — when
+    given, each attempt uses its problem's true discrimination a_p; otherwise (or
+    for a missing/non-positive a_p) it falls back to the constant LOGIT_PER_RATING.
+    This is the in-loop estimator — it never touches the rating-derivation
+    internals, only the shipped ratings/slopes — and is the SAME quantity the
+    client (rank-decomposition.js) computes; M is then anchored on it, so the
+    client and the anchor MUST use the same per-problem a_p or the loop reopens.
 
     Returns (R, n_joined) or (None, 0)."""
-    rows = [(raw_ratings[t], s) for t, s in attempts if t in raw_ratings]
+    rows = [(raw_ratings[t], s, (slopes.get(t) if slopes else None))
+            for t, s in attempts if t in raw_ratings]
     if len(rows) < min_n:
         return None, 0
-    rr = np.array([r for r, _ in rows], dtype=float)
-    sc = np.array([s for _, s in rows], dtype=float)
+    rr = np.array([r for r, _, _ in rows], dtype=float)
+    sc = np.array([s for _, s, _ in rows], dtype=float)
+    sl = np.array([(a if (a is not None and np.isfinite(a) and a > 0)
+                    else LOGIT_PER_RATING) for _, _, a in rows], dtype=float)
     off = float(np.log(target / (1 - target)))
     R = float(rr.mean())
     for _ in range(80):
-        z = np.clip(LOGIT_PER_RATING * (R - rr) + off, -40.0, 40.0)
+        z = np.clip(sl * (R - rr) + off, -40.0, 40.0)
         p = 1.0 / (1.0 + np.exp(-z))
-        score = float(np.sum(LOGIT_PER_RATING * (sc - p)))
-        info = float(np.sum(LOGIT_PER_RATING ** 2 * p * (1 - p)))
+        score = float(np.sum(sl * (sc - p)))
+        info = float(np.sum(sl ** 2 * p * (1 - p)))
         if info < 1e-9:
             break
         step = max(-1.0, min(1.0, score / info))

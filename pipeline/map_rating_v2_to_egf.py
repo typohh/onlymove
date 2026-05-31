@@ -94,6 +94,18 @@ def load_v2_ratings(v2_dir, size):
     return dict(zip(df["tsumego_id"], df["rating"].astype(float)))
 
 
+def load_v2_slopes(v2_dir, size):
+    """{tsumego_id: a_p} from ratings_v2/<size>/tsumego_quality_final.csv — the raw
+    2PL discrimination (the `quality` column). fit_user_rating uses these as the
+    per-problem success-curve slope so the survey-user 80%-clear ratings (and thus
+    M) are anchored with the SAME per-problem a_p the PWA's estimator uses."""
+    path = os.path.join(v2_dir, str(size), "tsumego_quality_final.csv")
+    if not os.path.exists(path):
+        return {}
+    df = pd.read_csv(path)
+    return dict(zip(df["tsumego_id"], df["quality"].astype(float)))
+
+
 def _shape_at(ys):
     """The EGF statistics.txt RATING_SHAPE value at each EGF-boundary scalar in
     `ys` (rank_index = g + 19). Monotone increasing — used as the fixed shape of
@@ -253,11 +265,14 @@ def main():
           f"{surveys['user_id'].nunique()} users")
 
     ratings_by_size = {s: load_v2_ratings(args.v2_dir, s) for s in SIZES}
+    slopes_by_size = {s: load_v2_slopes(args.v2_dir, s) for s in SIZES}
     merged_ratings = {}
+    merged_slopes = {}
     for s in SIZES:
         if not ratings_by_size[s]:
             print(f"  size {s}: no v2 ratings at {args.v2_dir}/{s}/ (skipped)")
         merged_ratings.update(ratings_by_size[s])   # b_p is one shared scale
+        merged_slopes.update(slopes_by_size[s])     # a_p, same shared scale
     if not merged_ratings:
         sys.exit("No v2 per-problem ratings found — run train_rating_v2 first.")
 
@@ -276,7 +291,8 @@ def main():
             pooled.extend(attempts.get((pref, s), []))
         if len(pooled) < args.min_attempts:
             continue
-        R, n = fit_user_rating(pooled, merged_ratings, min_n=args.min_attempts)
+        R, n = fit_user_rating(pooled, merged_ratings, min_n=args.min_attempts,
+                               slopes=merged_slopes)
         if R is not None and n >= args.min_attempts:
             user_rating[pref] = R
     print(f"  {len(user_rating)} users with a usable rating "

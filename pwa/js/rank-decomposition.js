@@ -64,16 +64,22 @@ const KERNEL_TRUNC_SIGMA = 4;
 const CALIBRATION_P = 0.8;
 const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
 
-// Success-curve slope in rating space. Must match
-// pipeline/fit_rank_curves.LOGIT_PER_RATING. Per attempt we convert it to a
-// logit-per-internal-rank slope by dividing by the local steepness of M.
-const LOGIT_PER_RATING = 2.5;
+// Per attempt the success-curve slope is the problem's OWN 2PL discrimination
+// a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
+// logit-per-internal-rank slope by dividing by the local steepness of M. The
+// EGF anchor (map_rating_v2_to_egf → fit_user_rating) uses the same per-problem
+// a_p, so the rank loop stays closed. LOGIT_PER_RATING is only the FALLBACK slope
+// for legacy entries that predate `problemSlope`; set near the corpus-mean a_p
+// (~1.6) so an un-backfilled attempt isn't mis-scaled against the re-anchored M.
+const LOGIT_PER_RATING = 1.6;
 
 // Representative logit-per-internal-rank used when M's local slope is unusable
 // (degenerate curve segment, or a legacy entry with only problemRank stored).
 const LOGIT_PER_RANK_FALLBACK = 0.28;
-// Guard the converted per-attempt slope against pathological M' values.
-const SLOPE_LO = 0.05, SLOPE_HI = 2.0;
+// Guard the converted per-attempt slope against pathological M' values. SLOPE_HI
+// is set above the realized a_p/|M'| range (~2.1) so genuinely sharp problems
+// aren't clipped; it mainly catches the tiny-|M'| (MSLOPE_FLOOR) pathology.
+const SLOPE_LO = 0.05, SLOPE_HI = 3.0;
 const MSLOPE_FLOOR = 1e-3;
 
 // Working coordinate is the internal rank index (~0..29, with extrapolation
@@ -144,6 +150,19 @@ export function loadRatingRankMap() {
         return null;
     })();
     return _loadPromise;
+}
+
+// Raw 2PL slope a_p → problem-selection weight ∝ the Fisher information the
+// problem provides about a user's ability: I(θ) = a_p²·P(1−P). Selection draws
+// from a difficulty-matched pool (the 50 problems nearest the user's rank, all
+// ≈80%-clear), so P(1−P) is ~constant across candidates and information ∝ a_p².
+// Returned RAW (not on any [0,1] range): weightedRandomSelect normalizes, so only
+// the relative a_p² matters — a sharp problem is quadratically preferred and a
+// flat one strongly down-weighted, by genuine information rather than a min-max
+// remap. (Replaces the old arbitrary [0,1] quality.)
+export function slopeToQuality(slope) {
+    if (typeof slope !== 'number' || !Number.isFinite(slope) || slope <= 0) return 0;
+    return slope * slope;
 }
 
 function curveForSize(size) {
@@ -260,10 +279,12 @@ function clampSlope(s) {
 // Flatten answerHistory to sorted [{t, x, slope, correct}] in INTERNAL-RANK
 // space. Each attempt is mapped through ITS OWN size's curve (merged entries
 // carry `size`; otherwise the active size is assumed): x is the internal rank
-// index applyM(rawRating), slope is the logit-per-internal-rank at that rating.
-// `problemRating` holds the raw rating (legacy entries may carry a separate
-// `problemRawRating`). Attempts whose size curve is missing fall back to the
-// stored problemRank with a representative slope, or are dropped.
+// index applyM(rawRating), slope is the logit-per-internal-rank at that rating
+// = a_p / |M'(rating)|, where a_p is the problem's own 2PL discrimination
+// (`problemSlope`). Legacy entries without `problemSlope` fall back to the
+// LOGIT_PER_RATING constant. `problemRating` holds the raw rating (legacy entries
+// may carry a separate `problemRawRating`). Attempts whose size curve is missing
+// fall back to the stored problemRank with a representative slope, or are dropped.
 function flattenAttempts(answerHistory) {
     return answerHistory
         .filter(a => typeof a.date === 'number' && !a.isRepeat && !a.linked)
@@ -273,10 +294,12 @@ function flattenAttempts(answerHistory) {
             const raw = (typeof a.problemRawRating === 'number')
                 ? a.problemRawRating
                 : a.problemRating;
+            const aP = (typeof a.problemSlope === 'number' && a.problemSlope > 0)
+                ? a.problemSlope : LOGIT_PER_RATING;
             let x, slope;
             if (c && typeof raw === 'number') {
                 x = applyM(raw, c);
-                slope = clampSlope(LOGIT_PER_RATING / Math.max(Math.abs(Mslope(raw, c)), MSLOPE_FLOOR));
+                slope = clampSlope(aP / Math.max(Math.abs(Mslope(raw, c)), MSLOPE_FLOOR));
             } else if (typeof a.problemRank === 'number') {
                 x = a.problemRank * TOTAL_RANKS;
                 slope = LOGIT_PER_RANK_FALLBACK;

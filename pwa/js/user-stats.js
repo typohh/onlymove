@@ -123,6 +123,9 @@ export function updateUserStats(isCorrect, {
         problemRating: currentProblem.rating,
         problemRank: currentProblem.rank,
         problemQuality: currentProblem.quality || 0,
+        // Raw 2PL discrimination a_p of the problem; the skill decomposition uses
+        // it as the per-attempt success-curve slope (see flattenAttempts).
+        problemSlope: currentProblem.slope,
         timeTaken,
         reviewTime: 0,
         accumulatedReview,

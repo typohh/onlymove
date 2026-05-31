@@ -31,7 +31,7 @@ import {
 import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
-import { normalizedRankForSize, ratingRankCurveVersion } from './rank-decomposition.js';
+import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -263,6 +263,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 const items = JSON.parse(await metaFile.async('text'));
                 const embeddingByProblem = new Map();
                 const ratingByProblem = new Map();
+                const slopeByProblem = new Map();
                 for (const item of items) {
                     const tid = item.filename.replace(/\.sgf$/, '');
                     if (Array.isArray(item.embedding)) {
@@ -271,6 +272,9 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                     }
                     if (typeof item.rating === 'number') {
                         ratingByProblem.set(tid, item.rating);
+                    }
+                    if (typeof item.slope === 'number') {
+                        slopeByProblem.set(tid, item.slope);
                     }
                 }
 
@@ -292,6 +296,14 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                         const newRank = normalizedRankForSize(newRating, size);
                         if (newRank !== null && a.problemRank !== newRank) a.problemRank = newRank;
                         if (a.problemRawRating !== undefined) delete a.problemRawRating;
+                        // Raw 2PL slope a_p (the rank estimator's per-attempt
+                        // success-curve slope) + its derived [0,1] quality. Fills
+                        // pre-existing entries the first time `slope` ships.
+                        if (slopeByProblem.has(a.problemId)) {
+                            const newSlope = slopeByProblem.get(a.problemId);
+                            if (a.problemSlope !== newSlope) a.problemSlope = newSlope;
+                            a.problemQuality = slopeToQuality(newSlope);
+                        }
                     }
                 }
 

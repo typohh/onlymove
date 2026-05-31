@@ -8,7 +8,7 @@ import { reorientSgf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
-import { normalizedRankForSize } from './rank-decomposition.js';
+import { normalizedRankForSize, slopeToQuality } from './rank-decomposition.js';
 
 // FNV-1a 32-bit fingerprint of a string. Used only for the debug "Metadata
 // hash:" log below, so it needs no cryptographic strength — just a stable short
@@ -192,9 +192,13 @@ export async function loadZipProblems(zipFilename) {
 
     const metadataContent = await metadataFile.async('text');
     // `p.rating` is the raw black-box rating shipped by package_for_pwa; derive
-    // the normalized 0..1 rank here with M (the client owns rating→rank).
+    // the normalized 0..1 rank here with M (the client owns rating→rank). `p.slope`
+    // is the raw 2PL discrimination a_p; keep it raw (the rank estimator uses it)
+    // and derive the selection weight (∝ Fisher information a_p²) from it here.
     const problems = JSON.parse(metadataContent).map(p => ({
-        ...p, zipFilename, rank: normalizedRankForSize(p.rating, state.boardSize),
+        ...p, zipFilename,
+        rank: normalizedRankForSize(p.rating, state.boardSize),
+        quality: slopeToQuality(p.slope),
     }));
 
     state.loadedZips[zipFilename] = problems;
@@ -298,6 +302,7 @@ async function loadOneTsumego() {
             rating: selectedProblem.rating,
             rank: selectedProblem.rank,
             quality: selectedProblem.quality || 0,
+            slope: selectedProblem.slope,
             embedding: selectedProblem.embedding,
             isRepeat: selectedProblem.isRepeat || false,
             orientation: orientation,
@@ -453,6 +458,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
         const problemRating = problem ? problem.rating : 0;
         const problemRankValue = problem ? problem.rank : 0;
         const problemQuality = problem ? problem.quality : 0;
+        const problemSlopeValue = problem ? problem.slope : undefined;
         const problemEmbedding = problem ? problem.embedding : undefined;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
@@ -470,6 +476,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
             rating: problemRating,
             rank: problemRankValue,
             quality: problemQuality,
+            slope: problemSlopeValue,
             embedding: problemEmbedding,
             isRepeat: asRecall,
             orientation: actualOrientation,
