@@ -230,10 +230,12 @@ def main():
     ap.add_argument("--extend-to", type=int, default=9,
                     help="Force each server range to cover at least up to this "
                          "rank scalar (9 = 9d).")
-    ap.add_argument("--lambda", type=float, default=10.0, dest="lam",
-                    help="Uniform-spacing prior strength for the SERVER "
-                         "couplings (strong, so sparse servers stay a clean "
-                         "offset).")
+    ap.add_argument("--lambda", type=float, default=5.0, dest="lam",
+                    help="Uniform-spacing prior strength for the SERVER couplings. "
+                         "Default 5 (CV-selected: beats 10 on band-balanced error "
+                         "at every seed — it lets the couplings down-rate online "
+                         "dan inflation; see docs/rank_mapping_experiments.md). "
+                         "Sparse servers still stay near a clean offset.")
     ap.add_argument("--egf-lo", type=int, default=-20,
                     help="Lowest EGF boundary (egf_lo+1 = weakest threshold).")
     ap.add_argument("--egf-hi", type=int, default=10, help="Highest EGF boundary.")

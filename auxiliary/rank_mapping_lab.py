@@ -264,7 +264,7 @@ def metrics(pred, targ):
                 MAE=float(np.mean(np.abs(res))), bias=float(res.mean()))
 
 
-def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0):
+def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0, server_lam=10.0):
     rng = np.random.default_rng(seed)
     d = load_data()
     recs, Rv1, Rv2, cubic = d["recs"], d["Rv1"], d["Rv2"], d["cubic_by_size"]
@@ -289,7 +289,8 @@ def run(methods, folds=5, boot=3000, seed=0, rating_lam=1.0):
                 fitted[m] = ("v1",) + fit_v1(d_v1, cubic)
             else:
                 fitted[m] = ("shared",) + fit_shared(d_shared, m, shapes[m],
-                                                      rating_lam=rating_lam)
+                                                      rating_lam=rating_lam,
+                                                      lam=server_lam)
         for p in test:
             for m in methods:
                 kind, curve, rmap = fitted[m]
@@ -376,8 +377,11 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--rating-lam", type=float, default=1.0,
                     help="Ridge strength for free/_prior curve deviations.")
+    ap.add_argument("--server-lam", type=float, default=10.0,
+                    help="Uniform-spacing prior strength for the server couplings.")
     ap.add_argument("--no-cache", action="store_true")
     args = ap.parse_args()
     if args.no_cache and os.path.exists(CACHE):
         os.remove(CACHE)
-    run(args.methods, args.folds, args.boot, args.seed, args.rating_lam)
+    run(args.methods, args.folds, args.boot, args.seed, args.rating_lam,
+        args.server_lam)
