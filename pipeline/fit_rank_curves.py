@@ -459,18 +459,19 @@ def main():
                              "the cubic (dan over-rating returns).")
     parser.add_argument(
         "--map-out",
-        default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rank_map.json"),
+        default=os.path.join(PROJECT_ROOT, "ratings", "rank_map.json"),
         help="Write the board-independent server rank-translation curves "
              "(per-server knots mapping our internal rank → that server's rank; "
-             "the client interpolates its continuous rank through them). Empty "
-             "string skips it.")
+             "the client interpolates its continuous rank through them) to the v1 "
+             "backend (ratings/). package_for_pwa --ratings-root ratings copies it "
+             "to the served pwa/tsumegos/ (the single PWA writer). Empty string skips it.")
     parser.add_argument(
         "--rating-map-out",
-        default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json"),
-        help="Write the per-board rating→internal(EGF)-rank curves straight to "
-             "the PWA's served path. The client fetches this and converts every "
-             "problem's raw rating to a rank itself — package_for_pwa ships only "
-             "raw ratings and never touches ranks. Empty string skips it.")
+        default=os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json"),
+        help="Write the per-board rating→internal(EGF)-rank curves to the v1 backend "
+             "(ratings/). The client fetches the served copy and converts every "
+             "problem's raw rating to a rank itself — package_for_pwa ships raw ratings "
+             "and copies this curve across (single PWA writer). Empty string skips it.")
     args = parser.parse_args()
 
     sizes = [int(s) for s in args.sizes.split(",") if s.strip()]

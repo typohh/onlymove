@@ -5,11 +5,13 @@ The v2 model (pipeline.train_rating_v2) puts problem difficulty b_p and user
 ability on ONE shared logit scale across both boards, so the rating→rank curve
 is a SINGLE shared curve. This step produces, from rank_surveys alone:
 
-  ratings_v2/rating_to_rank.json   per-board (identical) {ratings, rank_indices}
-  ratings_v2/rank_map.json         per-server internal(EGF)↔server rank couplings
+  rating_to_rank.json   per-board (identical) {ratings, rank_indices}
+  rank_map.json         per-server internal(EGF)↔server rank couplings
 
-Both come out of ONE joint fit (fit_joint_shared), exactly the way v1's
-pipeline.fit_rank_curves produces its pair — v2 no longer reads v1's rank_map.
+written to ratings_v2/ (the backend). package_for_pwa is the SINGLE writer of the
+served pwa/tsumegos/ — it copies these two curve files across (and change-detects
+the rest). Both come out of ONE joint fit (fit_joint_shared) — v2 no longer reads
+v1's rank_map.
 
 WHY 80%, not raw θ (the calibration fix):
   The PWA derives a user's rank as the rating level they clear at CALIBRATION_P
@@ -41,8 +43,9 @@ Model (internal rank ≡ EGF rank is the hub / identity), estimated TOGETHER:
     free ordinal thresholds, uniform-spacing prior (--lambda). EGF feeds the
     rating curve directly (the identity hub); other servers couple in on top.
 
-Deploying v2 = package_for_pwa --ratings-root ratings_v2 (ships zips+metadata
-into the SAME pwa/tsumegos/), then copy these two files onto the served paths.
+Deploying v2 = run this (writes the curve to ratings_v2/), then package_for_pwa
+(now defaults to v2) — package_for_pwa is the single PWA writer: it copies the
+curve across and change-detects ratings/embeddings. No manual copy.
 
 Run pipeline.fetch_database first to refresh attempts/database.sql (the survey +
 attempts source); this step then needs neither GPU nor the heavy pipeline.
@@ -316,12 +319,14 @@ def main():
         "rank_indices": [float((g - 0.5) + 19.0) for g in gs],
     }
     rr = {str(s): curve for s in SIZES}
+    server_curves = build_server_curves(server_fits)   # server↔EGF couplings, built here
+
+    # Write ONLY to the backend (ratings_v2/). package_for_pwa is the single writer of
+    # the served pwa/tsumegos/ — run `package_for_pwa --ratings-root ratings_v2 --model-tag
+    # v2` to publish (it copies these two curve files across and change-detects the rest).
     os.makedirs(args.v2_dir, exist_ok=True)
     with open(os.path.join(args.v2_dir, "rating_to_rank.json"), "w") as f:
         json.dump(rr, f, indent=2)
-
-    # --- write the server↔EGF couplings (built here, NOT copied from v1) ---
-    server_curves = build_server_curves(server_fits)
     with open(os.path.join(args.v2_dir, "rank_map.json"), "w") as f:
         json.dump(server_curves, f, indent=2)
 
@@ -330,9 +335,9 @@ def main():
           f"{rating_knots[0]:.2f} ... {scalar_to_rank(gs[-1])}→rating "
           f"{rating_knots[-1]:.2f}")
     fitted = [s for s in SERVERS if s in server_curves and s != "EGF"]
-    print(f"wrote {args.v2_dir}/rating_to_rank.json (shared 9≡13) + "
-          f"rank_map.json ({len(fitted)} servers + EGF identity: "
-          f"{', '.join(fitted)})")
+    print(f"wrote {args.v2_dir}/rating_to_rank.json (shared 9≡13) + rank_map.json "
+          f"({len(fitted)} servers + EGF identity: {', '.join(fitted)})\n"
+          f"  → publish with: python -m pipeline.package_for_pwa  (defaults to v2)")
 
 
 if __name__ == "__main__":

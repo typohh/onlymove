@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sys
 import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -446,80 +447,158 @@ def print_rating_distribution(metadata):
               f"avg quality: {avg_quality:.3f}, avg rating: {avg_rating:.3f})")
 
 
-def load_embeddings(board_size):
+def _embeddings_dir(board_size):
+    """The embeddings source dir for this size: prefer the joint model, fall back
+    to the legacy per-size one. Returns (dir, is_joint) or (None, False)."""
+    joint_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
+    legacy_dir = os.path.join(PROJECT_ROOT, "embeddings", str(board_size))
+    if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
+        return joint_dir, True
+    if os.path.exists(os.path.join(legacy_dir, "per_problem.csv")):
+        return legacy_dir, False
+    return None, False
+
+
+def _read_embedding_version(embed_dir):
+    """The content-hash embedding_version stamped into pca.npz by build_embedding
+    (the PWA reads it to auto-invalidate localStorage on refits), or None."""
+    pca_path = os.path.join(embed_dir, "pca.npz")
+    if os.path.exists(pca_path):
+        try:
+            arc = np.load(pca_path, allow_pickle=False)
+            if "embedding_version" in arc.files:
+                return str(arc["embedding_version"].item())
+        except Exception as e:
+            print(f"  couldn't read embedding_version from pca.npz: {e}")
+    return None
+
+
+def load_embeddings(board_size, meta_only=False):
     """Load per-problem PCA scores filtered to this board size, plus the
     shared embedding metadata (model is fit jointly across sizes).
 
     Returns (embedding_map, embedding_meta) where:
-      embedding_map: tsumego_id -> list of K floats (or None if not available)
+      embedding_map: tsumego_id -> list of K floats (None if unavailable or
+                     meta_only — the per-row map is the only costly part, built
+                     only when shards are actually being (re)built).
       embedding_meta: dict with K, embedding_version, labels.
                      The PWA only reads version (for cache invalidation) and
                      labels (for stats display); fields like explained-variance
                      and extreme_problems are kept locally in embeddings/joint/
                      as inspection aids and not shipped.
     """
-    joint_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
-    legacy_dir = os.path.join(PROJECT_ROOT, "embeddings", str(board_size))
-
-    # Prefer the joint model. Fall back to per-size for backward compat
-    # if the joint pipeline hasn't been run yet.
-    if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
-        embed_dir = joint_dir
-        is_joint = True
-    elif os.path.exists(os.path.join(legacy_dir, "per_problem.csv")):
-        embed_dir = legacy_dir
-        is_joint = False
-    else:
-        print(f"  no embeddings at {joint_dir} or {legacy_dir}; skipping embedding fields")
+    embed_dir, is_joint = _embeddings_dir(board_size)
+    if embed_dir is None:
+        print(f"  no embeddings under embeddings/{{joint,{board_size}}}; "
+              f"skipping embedding fields")
         return None, None
 
-    print(f"  reading embeddings from {embed_dir}")
-    df = pd.read_csv(os.path.join(embed_dir, "per_problem.csv"))
-    if is_joint and "size" in df.columns:
-        df = df[df["size"] == board_size]
+    per_problem = os.path.join(embed_dir, "per_problem.csv")
+    # meta_only: read just the header to count K columns, skip the row map.
+    df = pd.read_csv(per_problem, nrows=0 if meta_only else None)
     embed_cols = sorted(
         [c for c in df.columns if c.startswith("embed_")],
         key=lambda c: int(c.split("_")[1]),
     )
     K = len(embed_cols)
-    embedding_map = {}
-    for _, row in df.iterrows():
-        embedding_map[row["tsumego_id"]] = [float(row[c]) for c in embed_cols]
+    embedding_map = None
+    if not meta_only:
+        print(f"  reading embeddings from {embed_dir}")
+        if is_joint and "size" in df.columns:
+            df = df[df["size"] == board_size]
+        embedding_map = {}
+        for _, row in df.iterrows():
+            embedding_map[row["tsumego_id"]] = [float(row[c]) for c in embed_cols]
 
     labels_path = os.path.join(embed_dir, "labels.json")
-    pca_path = os.path.join(embed_dir, "pca.npz")
     labels = None
-    embedding_version = None
     if os.path.exists(labels_path):
         with open(labels_path, "r", encoding="utf-8") as f:
             labels = json.load(f)
-    # The version travels with the model state; the PWA reads it from
-    # embedding_meta.json to auto-invalidate localStorage on refits.
-    if os.path.exists(pca_path):
-        try:
-            arc = np.load(pca_path, allow_pickle=False)
-            if "embedding_version" in arc.files:
-                embedding_version = str(arc["embedding_version"].item())
-        except Exception as e:
-            print(f"  couldn't read embedding_version from pca.npz: {e}")
 
     embedding_meta = {
         "K": K,
-        "embedding_version": embedding_version,
+        "embedding_version": _read_embedding_version(embed_dir),
         "labels": labels,
     }
     return embedding_map, embedding_meta
 
 
-def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
-                 ratings_root="ratings"):
-    """Run the full per-size packaging — ratings load, exponential rank
-    mapping, metadata assembly, zip + per-cell sidecar emission. Returns
-    (embedding_meta, ratings_hash); either element may be None if the
-    corresponding artifact wasn't available. The multi-size loop aggregates
-    both into the single shared embedding_meta.json at the end.
+def _hash_file_into(h, path):
+    """Feed a file's path + contents into hash `h` (chunked); 'MISSING' if absent."""
+    h.update(path.encode())
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    else:
+        h.update(b"\x00MISSING")
 
-    reorder_by_sgf and n_workers are forwarded to create_packages."""
+
+def size_inputs_hash(board_size, ratings_root, reorder_by_sgf):
+    """Content hash of everything that determines a size's shards (zips + .bin +
+    metadata.json). When this is unchanged the shard build can be skipped — the
+    expensive SGF reparse + zip/bin emission. Inputs:
+      - tsumego_ratings_final.csv (rating drives grouping + metadata + min/max)
+      - tsumego_quality_final.csv (metadata `quality`)
+      - embeddings/joint/per_problem.csv (correct-cell `embedding` in metadata)
+      - embedding_version (covers per_cell/*.npz content, which is regenerated
+        with the embedding refit — those files are tid-named but their CONTENTS
+        change on refit, so the version, not the filename set, is the signal)
+      - the SGF filename set (filenames ARE orientation-invariant content hashes,
+        so a content change cannot occur without a filename change → the set hash
+        detects add/remove/content)
+      - reorder flag + ratings_root (output semantics)."""
+    h = hashlib.sha256()
+    rdir = os.path.join(PROJECT_ROOT, ratings_root, str(board_size))
+    _hash_file_into(h, os.path.join(rdir, "tsumego_ratings_final.csv"))
+    _hash_file_into(h, os.path.join(rdir, "tsumego_quality_final.csv"))
+    embed_dir, _ = _embeddings_dir(board_size)
+    if embed_dir:
+        _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
+        h.update((_read_embedding_version(embed_dir) or "noemb").encode())
+    tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
+    names = sorted(f for f in os.listdir(tdir)
+                   if f.endswith(".sgf")) if os.path.isdir(tdir) else []
+    h.update(("\n".join(names)).encode())
+    h.update(f"|reorder={reorder_by_sgf}|root={ratings_root}".encode())
+    return h.hexdigest()[:16]
+
+
+def copy_curve(ratings_root, output_dir):
+    """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
+    backend ratings_root into the served pwa/tsumegos/. package_for_pwa is the
+    SINGLE writer of pwa/tsumegos/: fit_rank_curves (v1) / map_rating_v2_to_egf
+    (v2) now write the curve into their ratings dir, and this copies it across.
+    Returns the list of copied filenames (missing sources leave the served copy
+    untouched — packaging is otherwise rank-agnostic)."""
+    src_dir = os.path.join(PROJECT_ROOT, ratings_root)
+    served = os.path.join(output_dir, "tsumegos")
+    os.makedirs(served, exist_ok=True)
+    copied = []
+    for name in ("rating_to_rank.json", "rank_map.json"):
+        src = os.path.join(src_dir, name)
+        if os.path.exists(src):
+            shutil.copyfile(src, os.path.join(served, name))
+            copied.append(name)
+        else:
+            print(f"  [warn] no {name} in {ratings_root}/ — served copy left as-is "
+                  f"(run fit_rank_curves / map_rating_v2_to_egf first)")
+    return copied
+
+
+def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
+                 ratings_root="ratings", prev=None, force=False):
+    """Run the full per-size packaging — ratings load, metadata assembly, zip +
+    per-cell sidecar emission. Returns (embedding_meta, ratings_hash, inputs_hash);
+    the first two may be None if the artifact wasn't available. The multi-size loop
+    aggregates them into the single shared embedding_meta.json + the manifest.
+
+    CHANGE DETECTION: if `prev` (this size's last-run manifest entry) carries an
+    inputs_hash equal to the current size_inputs_hash AND the output zips still
+    exist, the shard build is SKIPPED (the expensive SGF reparse + zip/bin write)
+    and the cached ratings_hash is reused — so a curve-only or no-op re-run is near
+    instant. `force` bypasses the skip. reorder_by_sgf/n_workers → create_packages."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
@@ -531,11 +610,24 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
 
     if not os.path.isdir(TSUMEGOS_DIR):
         print(f"  no tsumegos dir at {TSUMEGOS_DIR}; skipping")
-        return None, None
+        return None, None, None
     ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
     if not os.path.exists(ratings_csv):
         print(f"  no ratings at {ratings_csv}; skipping")
-        return None, None
+        return None, None, None
+
+    inputs_hash = size_inputs_hash(board_size, ratings_root, reorder_by_sgf)
+    zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
+    have_zips = os.path.isdir(zip_dir) and any(
+        f.endswith(".zip") for f in os.listdir(zip_dir))
+    if (not force and prev and have_zips
+            and prev.get("inputs_hash") == inputs_hash
+            and prev.get("ratings_hash")):
+        print(f"  inputs unchanged (hash {inputs_hash}) and zips present — "
+              f"SKIP shard rebuild; reusing ratings_version "
+              f"{prev['ratings_hash']}")
+        _, embedding_meta = load_embeddings(board_size, meta_only=True)
+        return embedding_meta, prev["ratings_hash"], inputs_hash
 
     # 1. Ratings map: one raw black-box rating per problem. package_for_pwa is
     # rank-agnostic — the client converts each rating to a rank with the
@@ -611,7 +703,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     print_rating_distribution(all_metadata)
     ratings_hash = compute_ratings_hash(all_metadata)
     print(f"  ratings_version[{board_size}]={ratings_hash}")
-    return embedding_meta, ratings_hash
+    return embedding_meta, ratings_hash, inputs_hash
 
 
 if __name__ == "__main__":
@@ -626,29 +718,71 @@ if __name__ == "__main__":
         "--workers", type=int, default=None,
         help="parallel shard-builder processes (default: os.cpu_count())")
     parser.add_argument(
-        "--ratings-root", default="ratings",
-        help="backend rating set to package: 'ratings' (v1, default) or 'ratings_v2' "
-             "(combined MLP-2PL). Output always lands in the same pwa/tsumegos/ — only "
-             "the SOURCE differs, so the two pipelines stay separate on the backend only.")
+        "--ratings-root", default="ratings_v2",
+        help="backend rating set to package: 'ratings_v2' (combined MLP-2PL, DEFAULT — "
+             "the production model) or 'ratings' (v1 mixture-of-sigmoids, kept as a "
+             "backup; pass --ratings-root ratings --model-tag v1). Output always lands "
+             "in the same pwa/tsumegos/ — only the SOURCE differs, so the two pipelines "
+             "stay separate on the backend only.")
     parser.add_argument(
-        "--model-tag", default=None,
-        help="optional rating-model tag stamped into embedding_meta.json as "
-             "'rating_model' (e.g. 'v2'), so the PWA can branch handling if needed.")
+        "--model-tag", default="v2",
+        help="rating-model tag stamped into embedding_meta.json as 'rating_model' so the "
+             "PWA can branch handling if needed. Default 'v2' (matches the default "
+             "--ratings-root); pass 'v1' when packaging the backup ratings.")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="rebuild every size's shards even if the change-detection manifest says "
+             "their inputs are unchanged (the curve + embedding_meta are always "
+             "refreshed regardless).")
     args = parser.parse_args()
 
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "pwa")
+    MANIFEST_PATH = os.path.join(OUTPUT_DIR, "tsumegos", ".package_manifest.json")
+
+    # package_for_pwa is the SINGLE writer of pwa/tsumegos/. A manifest of per-size
+    # input content-hashes lets it skip rebuilding shards whose inputs are unchanged
+    # (e.g. a curve-only re-run), so the heavy SGF reparse only happens when ratings
+    # / embeddings / the SGF set actually changed.
+    prev_manifest = {}
+    if os.path.exists(MANIFEST_PATH):
+        try:
+            with open(MANIFEST_PATH) as f:
+                prev_manifest = json.load(f)
+        except Exception as e:
+            print(f"[warn] couldn't read {MANIFEST_PATH}: {e}; rebuilding all")
+    # A ratings_root switch changes output semantics for every size — drop the prior
+    # per-size entries so nothing is wrongly skipped. (model_tag only affects
+    # embedding_meta, which is always rewritten, so it doesn't force a rebuild.)
+    prev_sizes = (prev_manifest.get("sizes", {})
+                  if prev_manifest.get("ratings_root") == args.ratings_root else {})
+    if prev_sizes is not prev_manifest.get("sizes", {}):
+        print(f"  ratings_root changed "
+              f"({prev_manifest.get('ratings_root')} → {args.ratings_root}) — "
+              f"rebuilding all sizes")
 
     joint_embedding_meta = None
     ratings_versions = {}
+    size_manifest = {}
     for size in ALL_BOARD_SIZES:
-        meta, ratings_hash = process_size(
+        meta, ratings_hash, inputs_hash = process_size(
             size, OUTPUT_DIR,
             reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers,
-            ratings_root=args.ratings_root)
+            ratings_root=args.ratings_root,
+            prev=prev_sizes.get(str(size)), force=args.force)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
         if ratings_hash is not None:
             ratings_versions[str(size)] = ratings_hash
+            size_manifest[str(size)] = {
+                "inputs_hash": inputs_hash, "ratings_hash": ratings_hash}
+
+    # Copy the rating→rank curve from the backend ratings_root into the served path
+    # (single-writer rule). Cheap; always refreshed so a curve-only edit ships even
+    # when every size's shards were skipped above.
+    print("\n--- curve ---")
+    copied = copy_curve(args.ratings_root, OUTPUT_DIR)
+    if copied:
+        print(f"  copied {', '.join(copied)} from {args.ratings_root}/ → pwa/tsumegos/")
 
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently
@@ -671,8 +805,11 @@ if __name__ == "__main__":
               f"bytes_per_cell={meta_out['bytes_per_cell']}, "
               f"ratings_version={ratings_versions or 'none'})")
 
-    # The rating→rank map (M) is written straight to
-    # pwa/tsumegos/rating_to_rank.json by pipeline.fit_rank_curves; packaging is
-    # rank-agnostic and never reads or copies it.
+    # Persist the change-detection manifest for the next run.
+    if size_manifest:
+        manifest = {"ratings_root": args.ratings_root,
+                    "model_tag": args.model_tag, "sizes": size_manifest}
+        with open(MANIFEST_PATH, "w") as f:
+            json.dump(manifest, f, indent=2)
 
     print("\nAll sizes done.")
