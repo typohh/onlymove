@@ -1326,10 +1326,19 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     // Kernel smoother + multiplier-bootstrap band on a regular t-grid. Returns
     // an array of {t, mean, lo, hi}, or null at grid points with too little
-    // nearby data (those break the line). bw sets the smoothing scale — a few
-    // days — so the curve reads as a smoothed daily trend.
+    // nearby data (those break the line).
+    //
+    // Bandwidth is a fixed FRACTION of the visible span, so the smoothing scale
+    // is relative to the GRAPH, not to an absolute number of days. The x-axis
+    // always spans t0..t1 across the same pixel width, so a kernel of bw=tSpan/N
+    // covers a constant slice of the width at any span — the curve reads with the
+    // same visual smoothness whether it's a month or three years of history. The
+    // old code capped bw at 14 days, which for a long-time user was a sliver of a
+    // multi-year axis and left the line jagged (the cap, not the data, was the
+    // problem). The 2-day floor keeps a short history from over-smoothing to a
+    // flat line; there is deliberately no upper cap.
     const G = 140, B = 300, ESS_MIN = 1.5, LMAX = 700;
-    const bw = Math.min(14 * DAY_MS, Math.max(2 * DAY_MS, tSpan / 50));
+    const bw = Math.max(2 * DAY_MS, tSpan / 36);
     const smooth = (pts) => {
         if (pts.length < 4) return null;
         const ts = pts.map(p => p.t);
