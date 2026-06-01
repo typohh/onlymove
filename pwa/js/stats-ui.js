@@ -12,6 +12,7 @@ import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
+import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import {
     getRecallCandidates,
@@ -133,7 +134,7 @@ export async function showDetailedStats() {
 
         // Community/server-wide stats (null if the endpoint isn't ready or the
         // fetch fails — the tab is then dropped).
-        const serverPane = await buildServerStatsPane();
+        const serverPane = await buildServerStatsPane(merged);
 
         // The Rank and Time charts are the heavy part (rank decomposition +
         // kernel smoothing + bootstrap CI), but they're built eagerly here —
@@ -421,7 +422,96 @@ function probit(p) {
 // Worker cron, served from /server-stats). Returns null on any failure or when
 // there's no activity, so showStatsModal drops the tab. Labels are localized
 // via getTerm (stats* keys in i18n.js).
-async function buildServerStatsPane() {
+// Locate the current user within each Community distribution, reproducing the
+// Worker's per-user bucketing (computeServerStats in src/index.js) on the
+// client's own last-7-day merged history. Returns a bin index per bar-list
+// category (-1 when not determinable) plus an answer-derived rank label.
+// `timeBins` is the coarse 10s-bucket → display-bin table from the caller.
+function computeUserCommunityBuckets(history, timeBins) {
+    const out = { attemptsPerDay: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
+    if (!Array.isArray(history) || !history.length) return out;
+
+    const cutoff = Date.now() - 7 * 24 * 3600e3;
+    const recent = history.filter(a => typeof a.date === 'number' && a.date >= cutoff);
+    if (!recent.length) return out;
+
+    const median = (arr) => {
+        if (!arr.length) return null;
+        const s = arr.slice().sort((a, b) => a - b);
+        const m = s.length >> 1;
+        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    const timeBucket = (ms) => Math.min(Math.floor(ms / 10000), 60);   // matches server
+    const coarseTimeBin = (bucket) => timeBins.findIndex(b => bucket >= b.lo && bucket < b.hi);
+
+    // Attempts per active (UTC) day — every attempt counts, repeats included.
+    const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
+    const days = new Set(recent.map(a => new Date(a.date).toISOString().slice(0, 10)));
+    if (days.size) {
+        const rate = recent.length / days.size;
+        out.attemptsPerDay = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
+    }
+
+    // Solving time: median of per-attempt solve times (ms), then coarse-binned.
+    const solveMed = median(recent.map(a => a.timeTaken).filter(t => typeof t === 'number' && t > 0));
+    if (solveMed != null) out.solve = coarseTimeBin(timeBucket(solveMed));
+
+    // Review time: per distinct problem the cumulative review of its LAST
+    // attempt (the running total, as the server keeps), median across problems.
+    const lastByProblem = new Map();
+    for (const a of recent) {
+        if (!a.problemId) continue;
+        const prev = lastByProblem.get(a.problemId);
+        if (!prev || a.date > prev.date) lastByProblem.set(a.problemId, a);
+    }
+    const reviewMed = median([...lastByProblem.values()]
+        .map(a => (a.accumulatedReview || 0) + (a.reviewTime || 0))
+        .filter(t => t > 0));
+    if (reviewMed != null) out.review = coarseTimeBin(timeBucket(reviewMed));
+
+    // Recall time: shortest failure→next-attempt gap that is ≥12h, per problem.
+    const RECALL_MIN_MS = 12 * 3600e3;
+    const RECALL_HI = [24, 48, 72, 120, Infinity].map(h => h * 3600e3);
+    const seqByProblem = new Map();
+    for (const a of recent) {
+        if (!a.problemId) continue;
+        let seq = seqByProblem.get(a.problemId);
+        if (!seq) { seq = []; seqByProblem.set(a.problemId, seq); }
+        seq.push({ t: a.date, success: !!a.correct });
+    }
+    let recallMin = Infinity;
+    for (const seq of seqByProblem.values()) {
+        if (seq.length < 2) continue;
+        seq.sort((x, y) => x.t - y.t);
+        for (let i = 1; i < seq.length; i++) {
+            if (seq[i - 1].success) continue;            // recall after a success — skip
+            const gap = seq[i].t - seq[i - 1].t;
+            if (gap >= RECALL_MIN_MS && gap < recallMin) recallMin = gap;
+        }
+    }
+    if (recallMin < Infinity) out.recall = RECALL_HI.findIndex(hi => recallMin < hi);
+
+    // Answer-derived rank: mean internal-rank index of distinct first-time
+    // problems → EGF scalar → label (the server's recipe, minus shard rounding;
+    // problemRank is already the per-problem M index normalized to 0..1).
+    const MIN_RANK_PROBLEMS = 10;
+    const RANK_INDEX_OFFSET = 19;
+    const firstByProblem = new Map();
+    for (const a of recent) {
+        if (a.isRepeat || typeof a.problemRank !== 'number') continue;
+        if (!firstByProblem.has(a.problemId)) firstByProblem.set(a.problemId, a.problemRank);
+    }
+    if (firstByProblem.size >= MIN_RANK_PROBLEMS) {
+        let sum = 0;
+        for (const r of firstByProblem.values()) sum += r * TOTAL_RANKS;
+        const scalar = Math.max(-29, Math.min(9, Math.round(sum / firstByProblem.size) - RANK_INDEX_OFFSET));
+        out.rankLabel = rankScalarToLabel(scalar);
+    }
+
+    return out;
+}
+
+async function buildServerStatsPane(history = []) {
     let data;
     try {
         // Version the URL so a deploy bypasses any stale edge-cached response.
@@ -461,13 +551,16 @@ async function buildServerStatsPane() {
         if (h < 24) return getTerm('statsAgoHours').replace('{n}', Math.round(h));
         return getTerm('statsAgoDays').replace('{n}', Math.round(h / 24));
     };
-    const makeBarList = (rows) => {
+    // `highlightIndex` (optional) marks the bucket the current user falls into;
+    // that row is recoloured and a one-line legend is appended below the bars.
+    const makeBarList = (rows, highlightIndex = -1) => {
         const max = Math.max(1, ...rows.map(r => r.value));
         const wrap = document.createElement('div');
         wrap.className = 'server-bars';
-        for (const r of rows) {
+        rows.forEach((r, i) => {
             const row = document.createElement('div');
             row.className = 'server-bar-row';
+            if (i === highlightIndex) row.classList.add('server-bar-row--you');
             const label = document.createElement('span');
             label.className = 'server-bar-label';
             label.textContent = r.label;
@@ -482,9 +575,25 @@ async function buildServerStatsPane() {
             val.textContent = String(r.value);
             row.append(label, track, val);
             wrap.append(row);
+        });
+        if (highlightIndex >= 0 && highlightIndex < rows.length) {
+            const legend = document.createElement('div');
+            legend.className = 'server-bar-legend';
+            const swatch = document.createElement('span');
+            swatch.className = 'server-bar-legend-swatch';
+            const text = document.createElement('span');
+            text.textContent = getTerm('statsCommunityYouLegend');
+            legend.append(swatch, text);
+            wrap.append(legend);
         }
         return wrap;
     };
+
+    // Where the current user lands in each distribution, computed from their own
+    // last-7-day history with the SAME bucket boundaries the Worker uses
+    // server-side (see computeServerStats in src/index.js), so the highlighted
+    // bar is consistent with the community bars around it.
+    const you = computeUserCommunityBuckets(history, TIME_BINS);
 
     const pane = document.createElement('div');
     pane.className = 'server-stats';
@@ -521,21 +630,21 @@ async function buildServerStatsPane() {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsUsersByAttemptsPerDay');
-        pane.append(h, makeBarList(data.attemptsPerUserDist.map(b => ({ label: b.label, value: b.value }))));
+        pane.append(h, makeBarList(data.attemptsPerUserDist.map(b => ({ label: b.label, value: b.value })), you.attemptsPerDay));
     }
 
     if (data.solveHist && data.solveHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsSolvingTimeMedian');
-        pane.append(h, makeBarList(binHist(data.solveHist)));
+        pane.append(h, makeBarList(binHist(data.solveHist), you.solve));
     }
 
     if (data.reviewHist && data.reviewHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsReviewTimeMedian');
-        pane.append(h, makeBarList(binHist(data.reviewHist)));
+        pane.append(h, makeBarList(binHist(data.reviewHist), you.review));
     }
 
     // Recall time: per user, the shortest failure→next-attempt gap (pre-binned
@@ -544,7 +653,7 @@ async function buildServerStatsPane() {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsRecallTime');
-        pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value }))));
+        pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value })), you.recall));
     }
 
     // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
@@ -553,7 +662,10 @@ async function buildServerStatsPane() {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsRanks');
-        pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n }))));
+        const rankIdx = you.rankLabel != null
+            ? data.ranks.findIndex(r => r.rank === you.rankLabel)
+            : -1;
+        pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n })), rankIdx));
     }
 
     return pane;
