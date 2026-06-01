@@ -1276,8 +1276,10 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
 // pulled to zero, and stretches with no attempts within the kernel's reach
 // leave a GAP in the line (we never invent a zero where there is no data). The
 // band is the SPREAD of individual attempts, not a confidence interval for the
-// line: at each date it's the kernel-weighted 2.5%/97.5% quantiles of the
-// nearby attempts' times — i.e. "the middle 95% of attempts land in here". This
+// line: at each date it's the kernel-weighted 17.5%/82.5% quantiles of the
+// nearby attempts' times — i.e. "the middle 65% of attempts land in here" (the
+// central range ~1σ covers for symmetric data, but read off the empirical
+// skewed distribution, not a normal fit). This
 // is a direct weighted empirical quantile (sort the window, walk the cumulative
 // kernel weight to the target), so no bootstrap/resampling is involved; the
 // heavy idle-time right tail just lands in the upper quantile naturally. The
@@ -1379,7 +1381,11 @@ function buildTimeUsageChart(history = state.answerHistory) {
             const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
             if (ess < ESS_MIN) { grid[g] = null; continue; }
             pairs.sort((a, b) => a.v - b.v);
-            grid[g] = { t, mean: Wv / W, lo: wQuantile(pairs, W, 0.025), hi: wQuantile(pairs, W, 0.975) };
+            // 17.5%/82.5% edges = the middle 65% of attempts (the central range
+            // ~1σ would cover for symmetric data, but read off the EMPIRICAL
+            // skewed distribution — no normal assumption, which would be plainly
+            // wrong for the heavy idle-time tail).
+            grid[g] = { t, mean: Wv / W, lo: wQuantile(pairs, W, 0.175), hi: wQuantile(pairs, W, 0.825) };
         }
         return grid;
     };
@@ -1537,7 +1543,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const legendItems = [
         { kind: 'line', color: '#2e9e5b', text: getTerm('statsLegendSolving') },
         { kind: 'line', color: '#d98a2b', text: getTerm('statsLegendReviewing') },
-        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend95Spread') },
+        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend65Spread') },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
