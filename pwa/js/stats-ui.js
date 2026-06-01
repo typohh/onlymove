@@ -596,21 +596,6 @@ async function buildServerStatsPane(history = []) {
         .replace('{ago}', ago(data.computedAt));
     pane.append(head);
 
-    // One legend for the whole pane explaining the highlighted bar, shown only
-    // when at least one category actually has a "you" bucket to highlight.
-    const hasHighlight = you.attemptsPerDay >= 0 || you.solve >= 0
-        || you.review >= 0 || you.recall >= 0 || you.rankLabel != null;
-    if (hasHighlight) {
-        const legend = document.createElement('div');
-        legend.className = 'server-bar-legend';
-        const swatch = document.createElement('span');
-        swatch.className = 'server-bar-legend-swatch';
-        const text = document.createElement('span');
-        text.textContent = getTerm('statsCommunityYouLegend');
-        legend.append(swatch, text);
-        pane.append(legend);
-    }
-
     const attempts = data.totals.attempts || 0;
     const wins = data.totals.wins || 0;
     const rate = attempts ? Math.round(wins / attempts * 100) : 0;
@@ -672,6 +657,21 @@ async function buildServerStatsPane(history = []) {
             ? data.ranks.findIndex(r => r.rank === you.rankLabel)
             : -1;
         pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n })), rankIdx));
+    }
+
+    // One legend for the whole pane explaining the highlighted bar, at the very
+    // bottom, shown only when at least one category has a "you" bucket.
+    const hasHighlight = you.attemptsPerDay >= 0 || you.solve >= 0
+        || you.review >= 0 || you.recall >= 0 || you.rankLabel != null;
+    if (hasHighlight) {
+        const legend = document.createElement('div');
+        legend.className = 'server-bar-legend';
+        const swatch = document.createElement('span');
+        swatch.className = 'server-bar-legend-swatch';
+        const text = document.createElement('span');
+        text.textContent = getTerm('statsCommunityYouLegend');
+        legend.append(swatch, text);
+        pane.append(legend);
     }
 
     return pane;
@@ -1341,10 +1341,10 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // same visual smoothness whether it's a month or three years of history. The
     // old code capped bw at 14 days, which for a long-time user was a sliver of a
     // multi-year axis and left the line jagged (the cap, not the data, was the
-    // problem). The 2-day floor keeps a short history from over-smoothing to a
+    // problem). The 3-day floor keeps a short history from over-smoothing to a
     // flat line; there is deliberately no upper cap.
     const G = 140, B = 300, ESS_MIN = 1.5, LMAX = 700;
-    const bw = Math.max(5 * DAY_MS, tSpan / 14.4);
+    const bw = Math.max(3 * DAY_MS, tSpan / 36);
     const smooth = (pts) => {
         if (pts.length < 4) return null;
         const ts = pts.map(p => p.t);
@@ -1382,7 +1382,23 @@ function buildTimeUsageChart(history = state.answerHistory) {
             bmeans.sort((x, y) => x - y);
             grid[g] = { t, mean: Wv / W, lo: quantile(bmeans, 0.025), hi: quantile(bmeans, 0.975) };
         }
-        return grid;
+
+        // The bootstrap band's lo/hi are independent Monte-Carlo estimates per
+        // grid point, so their edges wiggle (the band looks "furry"/jagged) even
+        // where the mean line is smooth — that fur, not the mean, is what reads
+        // as jagged. Replace each edge with a moving average over a small window
+        // of CONTIGUOUS grid points (a null gap breaks the window so we never
+        // average across a no-data stretch). The mean is left untouched.
+        const R = 5;
+        const sm = grid.map(e => e ? { ...e } : null);
+        for (let g = 0; g < G; g++) {
+            if (!grid[g]) continue;
+            let sLo = grid[g].lo, sHi = grid[g].hi, n = 1;
+            for (let j = g - 1; j >= g - R && grid[j]; j--) { sLo += grid[j].lo; sHi += grid[j].hi; n++; }
+            for (let j = g + 1; j <= g + R && j < G && grid[j]; j++) { sLo += grid[j].lo; sHi += grid[j].hi; n++; }
+            sm[g].lo = sLo / n; sm[g].hi = sHi / n;
+        }
+        return sm;
     };
 
     // Break a smoothed grid into runs of consecutive present points so the line
