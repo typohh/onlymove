@@ -40,6 +40,22 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
 const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
 const RANK_CURVE_VERSION_KEY = (size) => `rankCurveVersion_${size}`;
+
+// Removed-problem prune. Problems get dropped from the corpus on regeneration
+// (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
+// entries keep the rating/rank stored at attempt time — the shard no longer
+// exists, so the rating-refresh walk above silently skips them — and that stale
+// early-era rating drags the rank chart down (the spurious early "dip"). lookup.txt
+// is the authoritative current-corpus manifest, so an id absent from it is gone
+// for good; we strip its model fields (the entry stays for activity/time/count).
+const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
+// Fields stripped from a removed-problem entry: everything the rank chart,
+// weakness model, and recall trainer key on. date/timeTaken/size/problemId/
+// correct stay, so the attempt still counts toward activity/time/solved stats.
+const PRUNE_STRIP_FIELDS = [
+    'problemRating', 'problemRawRating', 'problemRank', 'problemSlope',
+    'problemQuality', 'embedding', 'pickedEmbedding', 'pickedCellIndex',
+];
 // Old per-version flag keys; cleared on first run after the upgrade so they
 // don't linger in users' localStorage. The new scheme stores a content-hash
 // version string under VERSION_KEY instead.
@@ -83,6 +99,10 @@ export async function backfillMissingEmbeddings() {
         }
     } catch (_) { /* fall through to 'unknown' */ }
 
+    // Strip stale fields off entries whose problem left the corpus, before the
+    // per-size rating walk (which can't refresh them — the shard is gone).
+    const pruned = await pruneRemovedProblems(serverVersion, ratingsVersionsBySize);
+
     const sizesFilled = [];
     for (const size of SUPPORTED_BOARD_SIZES) {
         // ratings_version is keyed by string in the JSON; tolerate either.
@@ -93,10 +113,64 @@ export async function backfillMissingEmbeddings() {
         if (filled > 0) sizesFilled.push(size);
     }
     // One shared weakness model trained on the union of both histories — retrain
-    // once if any size's embeddings/ratings were refreshed.
-    if (sizesFilled.length > 0) {
+    // once if any size's embeddings/ratings were refreshed OR a prune changed
+    // what the model sees.
+    if (sizesFilled.length > 0 || pruned) {
         setTimeout(() => trainWeakness(), 0);
     }
+}
+
+// Strip model fields from answerHistory entries whose problem is no longer in
+// the corpus. Gated by the corpus signature so it scans only when the packaged
+// set actually changed. The one guard that matters: never prune against a
+// failed/empty lookup fetch (that would strip everything) — a real false
+// positive is harmless anyway, since the rating-refresh walk refills the fields
+// next time that problem's shard is touched. Returns true if it stripped fields.
+async function pruneRemovedProblems(embeddingVersion, ratingsVersionsBySize) {
+    const signature = JSON.stringify({ e: embeddingVersion, r: ratingsVersionsBySize });
+    // Corpus unchanged since the last prune — nothing new to remove.
+    if (localStorage.getItem(PRUNE_SIGNATURE_KEY) === signature) return false;
+
+    // Authoritative current-corpus membership. Bail on any fetch failure or an
+    // empty manifest so a transient blip can't strip a legitimate history.
+    let currentIds;
+    try {
+        const resp = await fetch(`lookup.txt?v=${APP_VERSION}`);
+        if (!resp.ok) return false;
+        const text = await resp.text();
+        currentIds = new Set();
+        for (const line of text.split('\n')) {
+            const id = line.split(/\s+/)[0];
+            if (id) currentIds.add(id);
+        }
+    } catch (_) {
+        return false;
+    }
+    if (currentIds.size === 0) return false;
+
+    let prunedAny = false;
+    for (const size of SUPPORTED_BOARD_SIZES) {
+        const history = getAnswerHistoryForSize(size);
+        if (!history || history.length === 0) continue;
+
+        // Entries whose problem the corpus no longer has and that still carry a
+        // strippable field. No problemId (linked/analysis rows) ⇒ never pruned.
+        const removed = history.filter(a =>
+            a && typeof a.problemId === 'string'
+            && !currentIds.has(a.problemId)
+            && PRUNE_STRIP_FIELDS.some(k => a[k] !== undefined));
+        if (removed.length === 0) continue;
+
+        for (const a of removed) {
+            for (const k of PRUNE_STRIP_FIELDS) delete a[k];
+        }
+        setAnswerHistoryForSize(size, history);
+        prunedAny = true;
+        console.log(`prune[${size}]: stripped removed-problem fields from ${removed.length} entries`);
+    }
+
+    localStorage.setItem(PRUNE_SIGNATURE_KEY, signature);
+    return prunedAny;
 }
 
 async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
