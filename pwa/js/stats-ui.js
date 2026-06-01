@@ -551,8 +551,9 @@ async function buildServerStatsPane(history = []) {
         if (h < 24) return getTerm('statsAgoHours').replace('{n}', Math.round(h));
         return getTerm('statsAgoDays').replace('{n}', Math.round(h / 24));
     };
-    // `highlightIndex` (optional) marks the bucket the current user falls into;
-    // that row is recoloured and a one-line legend is appended below the bars.
+    // `highlightIndex` (optional) marks the bucket the current user falls into
+    // by recolouring that row. The legend explaining the colour is shown once
+    // for the whole pane (see below), not per chart.
     const makeBarList = (rows, highlightIndex = -1) => {
         const max = Math.max(1, ...rows.map(r => r.value));
         const wrap = document.createElement('div');
@@ -576,16 +577,6 @@ async function buildServerStatsPane(history = []) {
             row.append(label, track, val);
             wrap.append(row);
         });
-        if (highlightIndex >= 0 && highlightIndex < rows.length) {
-            const legend = document.createElement('div');
-            legend.className = 'server-bar-legend';
-            const swatch = document.createElement('span');
-            swatch.className = 'server-bar-legend-swatch';
-            const text = document.createElement('span');
-            text.textContent = getTerm('statsCommunityYouLegend');
-            legend.append(swatch, text);
-            wrap.append(legend);
-        }
         return wrap;
     };
 
@@ -604,6 +595,21 @@ async function buildServerStatsPane(history = []) {
         .replace('{days}', data.windowDays)
         .replace('{ago}', ago(data.computedAt));
     pane.append(head);
+
+    // One legend for the whole pane explaining the highlighted bar, shown only
+    // when at least one category actually has a "you" bucket to highlight.
+    const hasHighlight = you.attemptsPerDay >= 0 || you.solve >= 0
+        || you.review >= 0 || you.recall >= 0 || you.rankLabel != null;
+    if (hasHighlight) {
+        const legend = document.createElement('div');
+        legend.className = 'server-bar-legend';
+        const swatch = document.createElement('span');
+        swatch.className = 'server-bar-legend-swatch';
+        const text = document.createElement('span');
+        text.textContent = getTerm('statsCommunityYouLegend');
+        legend.append(swatch, text);
+        pane.append(legend);
+    }
 
     const attempts = data.totals.attempts || 0;
     const wins = data.totals.wins || 0;
@@ -1338,7 +1344,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // problem). The 2-day floor keeps a short history from over-smoothing to a
     // flat line; there is deliberately no upper cap.
     const G = 140, B = 300, ESS_MIN = 1.5, LMAX = 700;
-    const bw = Math.max(2 * DAY_MS, tSpan / 36);
+    const bw = Math.max(5 * DAY_MS, tSpan / 14.4);
     const smooth = (pts) => {
         if (pts.length < 4) return null;
         const ts = pts.map(p => p.t);
