@@ -1407,10 +1407,13 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const rGrid = smooth(review);
     if (!sGrid && !rGrid) return null;
 
-    // Robust ceiling from the upper-CI envelope so most of the band shows; the
-    // most extreme spell clips at the top edge (overflow:hidden).
+    // Robust ceiling from the upper envelope so most of the band shows; the most
+    // extreme spell clips at the top edge (overflow:hidden). Use max(mean, hi)
+    // per grid point, NOT hi alone: with a heavy right tail the weighted mean can
+    // sit ABOVE the 82.5% band edge, so a hi-only ceiling would clip the mean
+    // line out of the window (the bug the 65% band exposed).
     const hiVals = [];
-    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(e.hi);
+    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mean));
     hiVals.sort((a, b) => a - b);
     const yHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;
