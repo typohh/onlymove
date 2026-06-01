@@ -124,9 +124,9 @@ export async function showDetailedStats() {
         // issue can carry an interactive `examples` toggle to past mistakes.
         const issuesElement = buildLikelyIssuesElement(merged);
 
-        const summaryPane = document.createElement('pre');
-        summaryPane.className = 'stats-modal-pre';
-        summaryPane.textContent = resultText;
+        // Activity pane: the problems-per-day chart (moved here off the Time
+        // chart's secondary axis) above the review-queue summary text.
+        const activityPane = combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
         // Community/server-wide stats (null if the endpoint isn't ready or the
         // fetch fails — the tab is then dropped).
@@ -134,7 +134,7 @@ export async function showDetailedStats() {
 
         // The Rank and Time charts are the heavy part (rank decomposition +
         // kernel smoothing + bootstrap CI). Build them in the background AFTER
-        // the modal paints so the cheap tabs (Weaknesses default, Overview,
+        // the modal paints so the cheap tabs (Weaknesses default, Activity,
         // Community) appear instantly; a spinner covers each chart tab until
         // its build resolves. The timing probabilities and rank decomposition
         // text used to live on the summary pane and now ride with their charts.
@@ -146,16 +146,16 @@ export async function showDetailedStats() {
             return combineChartWithText(buildTimeUsageChart(merged), timingText);
         });
 
-        // Weaknesses is the default (first) page; the renamed Overview pane is
-        // last. Empty panes (no weaknesses, too little data for a chart, server
-        // stats unavailable) are dropped by showStatsModal — for the deferred
-        // chart tabs that happens once their loader resolves null.
+        // Weaknesses is the default (first) page; Community is last. Empty panes
+        // (no weaknesses, too little data for a chart, server stats unavailable)
+        // are dropped by showStatsModal — for the deferred chart tabs that
+        // happens once their loader resolves null.
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
             { label: getTerm('statsTabRank'), loader: rankLoader },
             { label: getTerm('statsTabTime'), loader: timeLoader },
+            { label: getTerm('statsTabActivity'), content: activityPane },
             { label: getTerm('statsTabCommunity'), content: serverPane },
-            { label: getTerm('statsTabSummary'), content: summaryPane },
         ]);
 
     } catch (error) {
@@ -187,12 +187,12 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k) => {
         const entry = labelMap[String(k)];
-        return localizedMotif(entry) || `style #${k}`;
+        return localizedMotif(entry) || getTerm('statsStyleFallback').replace('{k}', k);
     };
     const QUADRANTS = [
-        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => `You ${l} when you shouldn't.` },
-        { key: 'notEnough', offDiagonal: true,  phrase: (l) => `You don't ${l} often enough.` },
-        { key: 'badAt',     offDiagonal: false, phrase: (l) => `You inconsistently ${l}.` },
+        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => getTerm('statsIssueTooMuch').replace('{motif}', l) },
+        { key: 'notEnough', offDiagonal: true,  phrase: (l) => getTerm('statsIssueNotEnough').replace('{motif}', l) },
+        { key: 'badAt',     offDiagonal: false, phrase: (l) => getTerm('statsIssueBadAt').replace('{motif}', l) },
     ];
 
     const root = document.createElement('div');
@@ -200,7 +200,7 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
 
     const heading = document.createElement('div');
     heading.className = 'stats-issues-heading';
-    heading.textContent = 'Likely issues';
+    heading.textContent = getTerm('statsIssuesHeading');
     root.appendChild(heading);
 
     const haveModel = (
@@ -211,7 +211,7 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
     if (!haveModel) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = '(not enough data yet)';
+        empty.textContent = getTerm('statsIssuesNotEnough');
         root.appendChild(empty);
         return root;
     }
@@ -240,7 +240,7 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
     if (issues.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = `(none above ${(PROB_THRESHOLD * 100).toFixed(0)}% confidence yet)`;
+        empty.textContent = getTerm('statsIssuesNoneAbove').replace('{percent}', (PROB_THRESHOLD * 100).toFixed(0));
         root.appendChild(empty);
         return root;
     }
@@ -275,7 +275,7 @@ function buildIssueRow(issue, recallSet, history = state.answerHistory) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'stats-issue-examples-toggle';
-    toggle.textContent = 'examples';
+    toggle.textContent = getTerm('statsExamples');
 
     head.append(prob, text, toggle);
     row.appendChild(head);
@@ -292,7 +292,7 @@ function buildIssueRow(issue, recallSet, history = state.answerHistory) {
             populated = true;
         }
         list.hidden = !list.hidden;
-        toggle.textContent = list.hidden ? 'examples' : 'hide';
+        toggle.textContent = list.hidden ? getTerm('statsExamples') : getTerm('statsHide');
     });
     return row;
 }
@@ -305,7 +305,7 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     if (examples.length === 0) {
         const none = document.createElement('div');
         none.className = 'stats-issue-examples-empty';
-        none.textContent = '(no past examples available)';
+        none.textContent = getTerm('statsNoExamples');
         list.appendChild(none);
         return;
     }
@@ -333,7 +333,7 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     if (examples.length > shown.length) {
         const more = document.createElement('div');
         more.className = 'stats-issue-examples-empty';
-        more.textContent = `(+${examples.length - shown.length} more)`;
+        more.textContent = getTerm('statsMoreExamples').replace('{count}', examples.length - shown.length);
         list.appendChild(more);
     }
 }
@@ -421,8 +421,8 @@ function probit(p) {
 
 // Community pane: server-wide stats over the preceding 7 days (computed by the
 // Worker cron, served from /server-stats). Returns null on any failure or when
-// there's no activity, so showStatsModal drops the tab. Internal labels are
-// English to match the chart legends; only the tab label is localized.
+// there's no activity, so showStatsModal drops the tab. Labels are localized
+// via getTerm (stats* keys in i18n.js).
 async function buildServerStatsPane() {
     let data;
     try {
@@ -457,11 +457,11 @@ async function buildServerStatsPane() {
     };
     const ago = (iso) => {
         const ms = Date.now() - Date.parse(iso);
-        if (!Number.isFinite(ms) || ms < 0) return 'just now';
+        if (!Number.isFinite(ms) || ms < 0) return getTerm('statsAgoJustNow');
         const h = ms / 3600000;
-        if (h < 1) return `${Math.round(ms / 60000)}m ago`;
-        if (h < 24) return `${Math.round(h)}h ago`;
-        return `${Math.round(h / 24)}d ago`;
+        if (h < 1) return getTerm('statsAgoMinutes').replace('{n}', Math.round(ms / 60000));
+        if (h < 24) return getTerm('statsAgoHours').replace('{n}', Math.round(h));
+        return getTerm('statsAgoDays').replace('{n}', Math.round(h / 24));
     };
     const makeBarList = (rows) => {
         const max = Math.max(1, ...rows.map(r => r.value));
@@ -493,7 +493,9 @@ async function buildServerStatsPane() {
 
     const head = document.createElement('div');
     head.className = 'stats-chart-title';
-    head.textContent = `Community · last ${data.windowDays} days (updated ${ago(data.computedAt)})`;
+    head.textContent = getTerm('statsCommunityHeader')
+        .replace('{days}', data.windowDays)
+        .replace('{ago}', ago(data.computedAt));
     pane.append(head);
 
     const attempts = data.totals.attempts || 0;
@@ -501,11 +503,14 @@ async function buildServerStatsPane() {
     const rate = attempts ? Math.round(wins / attempts * 100) : 0;
     const dayCount = (data.daily && data.daily.length) ? data.daily.length : 0;
     const attemptsPerDay = dayCount ? Math.round(attempts / dayCount) : 0;
-    let txt = `Active users: ${data.totals.users}\n`;
-    txt += `Attempts per day: ${attemptsPerDay}\n`;
-    txt += `Attempts: ${attempts} (${rate}% solved)\n`;
+    let txt = getTerm('statsActiveUsers').replace('{count}', data.totals.users) + '\n';
+    txt += getTerm('statsAttemptsPerDay').replace('{count}', attemptsPerDay) + '\n';
+    txt += getTerm('statsAttemptsSolved').replace('{count}', attempts).replace('{rate}', rate) + '\n';
     for (const s of (data.bySize || [])) {
-        txt += `  ${s.size}×${s.size}: ${s.attempts} attempts, ${s.users} users\n`;
+        txt += getTerm('statsBySizeLine')
+            .replace(/\{size\}/g, s.size)
+            .replace('{attempts}', s.attempts)
+            .replace('{users}', s.users) + '\n';
     }
     const summary = document.createElement('pre');
     summary.className = 'stats-modal-pre';
@@ -517,21 +522,21 @@ async function buildServerStatsPane() {
     if (data.attemptsPerUserDist && data.attemptsPerUserDist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Users by attempts per day';
+        h.textContent = getTerm('statsUsersByAttemptsPerDay');
         pane.append(h, makeBarList(data.attemptsPerUserDist.map(b => ({ label: b.label, value: b.value }))));
     }
 
     if (data.solveHist && data.solveHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Solving time (median per user)';
+        h.textContent = getTerm('statsSolvingTimeMedian');
         pane.append(h, makeBarList(binHist(data.solveHist)));
     }
 
     if (data.reviewHist && data.reviewHist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Review time (median per user)';
+        h.textContent = getTerm('statsReviewTimeMedian');
         pane.append(h, makeBarList(binHist(data.reviewHist)));
     }
 
@@ -540,16 +545,16 @@ async function buildServerStatsPane() {
     if (data.recallDist && data.recallDist.some(b => b.value)) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Recall time (shortest per user)';
+        h.textContent = getTerm('statsRecallTime');
         pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value }))));
     }
 
     // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
-    // per user (multi-server declarations averaged), so render them as-is.
+    // per active user (answer-derived from the last 7 days), so render as-is.
     if (data.ranks && data.ranks.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
-        h.textContent = 'Ranks';
+        h.textContent = getTerm('statsRanks');
         pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n }))));
     }
 
@@ -579,19 +584,29 @@ function buildRankSummaryText(history) {
             const curLabel = rankLabelFromIndex(lower);
             const nextLabel = rankLabelFromIndex(lower + 1);
             const seStr = Number.isFinite(summary.currentSkillSE)
-                ? `, (±${summary.currentSkillSE.toFixed(1)} ranks)`
+                ? getTerm('statsRankSESuffix').replace('{se}', summary.currentSkillSE.toFixed(1))
                 : '';
-            rankText += `Latest long term rank: ${curLabel} ${pct}% on the way to ${nextLabel}${seStr}.\n`;
+            rankText += getTerm('statsLatestLongTermRank')
+                .replace('{cur}', curLabel)
+                .replace('{pct}', pct)
+                .replace('{next}', nextLabel)
+                .replace('{se}', seStr) + '\n';
         }
         if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
             const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
             const sign = summary.longTermDrift >= 0 ? '+' : '−';
-            rankText += `Skill has drifted ${sign}${Math.abs(summary.longTermDrift).toFixed(1)} ranks over the past ${months.toFixed(0)} months.\n`;
+            rankText += getTerm('statsSkillDrift')
+                .replace('{sign}', sign)
+                .replace('{amount}', Math.abs(summary.longTermDrift).toFixed(1))
+                .replace('{months}', months.toFixed(0)) + '\n';
         }
         if (typeof summary.sigmaM === 'number') {
             rankText += summary.sigmaM >= 0.1
-                ? `Session-to-session performance: good days +${summary.sigmaUp.toFixed(2)}, bad days −${summary.sigmaDown.toFixed(2)} ranks.\n`
-                : `Session-to-session performance: no significant swing detected (under ±${summary.sigmaMUpper.toFixed(2)} ranks).\n`;
+                ? getTerm('statsSessionSwing')
+                    .replace('{up}', summary.sigmaUp.toFixed(2))
+                    .replace('{down}', summary.sigmaDown.toFixed(2)) + '\n'
+                : getTerm('statsSessionNoSwing')
+                    .replace('{upper}', summary.sigmaMUpper.toFixed(2)) + '\n';
         }
     }
 
@@ -609,8 +624,9 @@ function buildRankSummaryText(history) {
         const logitPerRank = getLogitPerRank(state.statsResults);
         const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
         const seRanks = sizeResult.se / logitPerRank;
-        const dir = ranksDiff >= 0 ? 'stronger' : 'weaker';
-        rankText += `You are ${Math.abs(ranksDiff).toFixed(1)}±${seRanks.toFixed(1)} ranks ${dir} on 13x13 than on 9x9.\n`;
+        rankText += getTerm(ranksDiff >= 0 ? 'statsSizeStronger' : 'statsSizeWeaker')
+            .replace('{amount}', Math.abs(ranksDiff).toFixed(1))
+            .replace('{se}', seRanks.toFixed(1)) + '\n';
     }
 
     return rankText;
@@ -682,7 +698,7 @@ function showStatsModal(tabs) {
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'stats-modal-close';
-    closeBtn.textContent = 'Close';
+    closeBtn.textContent = getTerm('statsClose');
 
     const close = () => {
         document.removeEventListener('keydown', onKey);
@@ -711,10 +727,10 @@ function showStatsModal(tabs) {
     // decomposition / kernel smoothing), so it must never run while the user is
     // mid-interaction — see the pre-warm note below.
     const ensureBuilt = (e) => {
-        if (e.built || e.loading || !e.loader) return;
+        if (e.built || e.loading || !e.loader) return Promise.resolve();
         e.loading = true;
         if (current === e) renderBody();   // show the spinner while it builds
-        e.loader().then((node) => {
+        return e.loader().then((node) => {
             e.loading = false;
             e.built = true;
             if (!node) { removeEntry(e); return; }
@@ -761,18 +777,23 @@ function showStatsModal(tabs) {
     ensureBuilt(current);   // in case the first tab is itself a loader
 
     // Pre-warm the remaining deferred (chart) tabs so they're usually ready when
-    // opened — but during IDLE time, not the immediate post-open window. The
-    // rank/time builds are heavy synchronous tasks; firing them ~2 frames after
-    // open (the old behaviour) blocked the user's first tab click on the main
-    // thread, so e.g. switching to the Overview tab — whose content is already
-    // built — felt laggy. requestIdleCallback defers each build to a genuine idle
-    // period and yields to pending input; opening a chart tab first builds it
-    // eagerly via ensureBuilt (deduped). A null/failed build still drops the tab.
+    // opened — but SERIALLY and during IDLE time, one build per idle slice, the
+    // next scheduled only after the previous resolves. The rank/time builds are
+    // heavy synchronous tasks; the old loop fired them all at once, and on
+    // engines without requestIdleCallback the setTimeout fallback ran them
+    // back-to-back, freezing the modal for seconds right after open — a tab
+    // click in that window got no response and the spinner never painted.
+    // Serializing keeps at most one build in flight so the main thread gets a
+    // paint/input window between them. Opening a chart tab still builds it
+    // eagerly via ensureBuilt (deduped), so a click never queues behind the
+    // pre-warm chain. A null/failed build still drops the tab.
     const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
-    for (const e of entries) {
-        if (e === current || !e.loader) continue;
-        idle(() => ensureBuilt(e));
-    }
+    const prewarmNext = () => {
+        const next = entries.find(e => e !== current && e.loader && !e.built && !e.loading);
+        if (!next) return;
+        ensureBuilt(next).then(() => idle(prewarmNext));
+    };
+    idle(prewarmNext);
 }
 
 function rankLabelFromIndex(rankIndex) {
@@ -862,7 +883,7 @@ function buildRatingHistoryChart(history = state.answerHistory) {
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = `Rank since ${new Date(t0).toISOString().slice(0, 10)}`;
+    title.textContent = getTerm('statsChartRankSince').replace('{date}', new Date(t0).toISOString().slice(0, 10));
     container.append(title);
 
     const plotRow = document.createElement('div');
@@ -1031,14 +1052,14 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const legend = document.createElement('div');
     legend.className = 'stats-chart-legend';
     const legendItems = [
-        { kind: 'dot', color: DOT_CORRECT, text: 'Correct' },
-        { kind: 'dot', color: DOT_WRONG, text: 'Wrong' },
+        { kind: 'dot', color: DOT_CORRECT, text: getTerm('statsLegendCorrect') },
+        { kind: 'dot', color: DOT_WRONG, text: getTerm('statsLegendWrong') },
     ];
     if (gridEvals.length >= 2) {
         legendItems.push(
-            { kind: 'line', color: SKILL_STROKE, text: 'Rank' },
-            { kind: 'band', color: SKILL_FILL_INNER, text: '95% confidence' },
-            { kind: 'band', color: SKILL_FILL_OUTER, text: 'Daily variance' },
+            { kind: 'line', color: SKILL_STROKE, text: getTerm('statsLegendRank') },
+            { kind: 'band', color: SKILL_FILL_INNER, text: getTerm('statsLegend95Confidence') },
+            { kind: 'band', color: SKILL_FILL_OUTER, text: getTerm('statsLegendDailyVariance') },
         );
     }
     for (const item of legendItems) {
@@ -1055,6 +1076,142 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     // After the chart hits the DOM and gets a real height, greedy-hide any
     // y-axis labels that would physically overlap a previously-shown one.
     // Re-runs on resize so density adapts to viewport.
+    const updateLabelVisibility = () => {
+        const h = svg.getBoundingClientRect().height;
+        if (h === 0) return;
+        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
+            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+        const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
+        let lastShownPx = -Infinity;
+        for (const el of tickEls) {
+            const topPx = (parseFloat(el.style.top) / 100) * h;
+            if (topPx - lastShownPx >= minSepPx) {
+                el.style.visibility = '';
+                lastShownPx = topPx;
+            } else {
+                el.style.visibility = 'hidden';
+            }
+        }
+    };
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(updateLabelVisibility).observe(svg);
+    } else {
+        queueMicrotask(updateLabelVisibility);
+    }
+
+    return container;
+}
+
+// Number of problems attempted per calendar day, as a bar chart. Each attempt
+// is binned into its local-midnight day; the bars span first→last active day,
+// so idle days simply show no bar. Lives on the Activity tab (it used to ride
+// the Time chart's secondary right axis as a smoothed rate). Returns null when
+// there's too little data to read as a daily trend.
+function buildProblemsPerDayChart(history = state.answerHistory) {
+    const DAY_MS = 24 * 3600 * 1000;
+    const dayMid = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+    const counts = new Map(); // day-midnight ms → attempt count
+    for (const a of history) {
+        if (typeof a.date !== 'number') continue;
+        const k = dayMid(a.date);
+        counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    if (counts.size < 2) return null;
+
+    const days = [...counts.keys()].sort((p, q) => p - q);
+    const d0 = days[0];
+    const d1 = days[days.length - 1];
+    const xStart = d0, xEnd = d1 + DAY_MS;
+    const total = xEnd - xStart;
+    const maxCount = Math.max(...counts.values());
+
+    // Integer y-ticks: 5 evenly-spaced labels at 0..(step·4).
+    const step = Math.max(1, Math.ceil(maxCount / 4));
+    const yHigh = step * 4;
+
+    const container = document.createElement('div');
+    container.className = 'stats-chart';
+
+    const title = document.createElement('div');
+    title.className = 'stats-chart-title';
+    title.textContent = getTerm('statsChartProblemsPerDaySince').replace('{date}', new Date(d0).toISOString().slice(0, 10));
+    container.append(title);
+
+    const plotRow = document.createElement('div');
+    plotRow.className = 'stats-chart-plot-row';
+
+    const yaxis = document.createElement('div');
+    yaxis.className = 'stats-chart-yaxis';
+    const spacer = document.createElement('span');
+    spacer.className = 'y-spacer';
+    spacer.textContent = String(yHigh);
+    yaxis.append(spacer);
+    for (let i = 0; i <= 4; i++) {
+        const v = step * i;
+        const tick = document.createElement('div');
+        tick.className = 'y-tick';
+        tick.style.top = `${(1 - v / yHigh) * 100}%`;
+        tick.textContent = String(v);
+        yaxis.append(tick);
+    }
+
+    const svgWrap = document.createElement('div');
+    svgWrap.className = 'stats-chart-svg-wrap';
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const W = 400, H = chartViewBoxHeight(W);
+    const xOf = t => ((t - xStart) / total) * W;
+    const yOf = v => (1 - v / yHigh) * H;
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role', 'img');
+
+    // Horizontal grid at each y-tick.
+    for (let i = 0; i <= 4; i++) {
+        const y = yOf(step * i);
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', 0);
+        line.setAttribute('x2', W);
+        line.setAttribute('y1', y);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', 'rgba(128,128,128,0.35)');
+        line.setAttribute('stroke-width', '0.5');
+        line.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(line);
+    }
+
+    // One bar per active day. Leave a thin gap between adjacent days unless the
+    // span is so long that bars are already sub-pixel.
+    const barW = (DAY_MS / total) * W;
+    const gap = barW > 2 ? Math.min(0.6, barW * 0.15) : 0;
+    for (const [k, c] of counts) {
+        const x = xOf(k) + gap / 2;
+        const w = Math.max(0.4, barW - gap);
+        const y = yOf(c);
+        const rect = document.createElementNS(SVG_NS, 'rect');
+        rect.setAttribute('x', x.toFixed(2));
+        rect.setAttribute('y', y.toFixed(2));
+        rect.setAttribute('width', w.toFixed(2));
+        rect.setAttribute('height', (H - y).toFixed(2));
+        rect.setAttribute('fill', '#6f8bbf');
+        svg.appendChild(rect);
+    }
+
+    svgWrap.append(svg);
+
+    const plotMain = document.createElement('div');
+    plotMain.className = 'stats-chart-plot-main';
+    plotMain.append(yaxis, svgWrap);
+
+    const xaxis = document.createElement('div');
+    xaxis.className = 'stats-chart-xaxis';
+    xaxis.textContent = new Date(d1).toISOString().slice(0, 10);
+
+    plotRow.append(plotMain, xaxis);
+    container.append(plotRow);
+
+    // Collapse overlapping y-tick labels, mirroring the Time chart.
     const updateLabelVisibility = () => {
         const h = svg.getBoundingClientRect().height;
         if (h === 0) return;
@@ -1187,54 +1344,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
         return grid;
     };
 
-    // Problems/day is a RATE, not a per-attempt value, so it gets its own
-    // smoother: a Gaussian kernel-density estimate of the attempt timestamps
-    // (Σ kernel weights × the Gaussian normalisation × DAY_MS = attempts/day),
-    // with the same multiplier bootstrap for the band. Same gap rule as the
-    // mean smoother, so idle stretches break the line instead of reading zero.
-    const GAUSS_NORM = 1 / (bw * Math.sqrt(2 * Math.PI));
-    const smoothRate = (pts) => {
-        if (pts.length < 4) return null;
-        const ts = pts.map(p => p.t);
-        const grid = new Array(G);
-        for (let g = 0; g < G; g++) {
-            const t = t0 + tSpan * (g / (G - 1));
-            const i0 = lowerBound(ts, t - 3.5 * bw);
-            const i1 = lowerBound(ts, t + 3.5 * bw);
-            let idxs = [];
-            for (let i = i0; i < i1; i++) idxs.push(i);
-            // Subsample heavy windows but scale the sum back up so the rate stays
-            // unbiased (a plain thin would undercount, unlike the mean smoother).
-            let scale = 1;
-            if (idxs.length > LMAX) {
-                scale = idxs.length / LMAX;
-                const thin = [];
-                for (let k = 0; k < LMAX; k++) thin.push(idxs[Math.floor(k * scale)]);
-                idxs = thin;
-            }
-            const ws = [];
-            let W = 0, sumW2 = 0;
-            for (const i of idxs) {
-                const d = (t - ts[i]) / bw;
-                const w = Math.exp(-0.5 * d * d);
-                W += w; sumW2 += w * w;
-                ws.push(w);
-            }
-            const ess = W > 0 ? (W * W) / sumW2 : 0;
-            if (ess < ESS_MIN) { grid[g] = null; continue; }
-            const toRate = scale * GAUSS_NORM * DAY_MS;
-            const brates = new Array(B);
-            for (let b = 0; b < B; b++) {
-                let s = 0;
-                for (let k = 0; k < ws.length; k++) s += -Math.log(1 - rand()) * ws[k];
-                brates[b] = s * toRate;
-            }
-            brates.sort((x, y) => x - y);
-            grid[g] = { t, mean: W * toRate, lo: quantile(brates, 0.025), hi: quantile(brates, 0.975) };
-        }
-        return grid;
-    };
-
     // Break a smoothed grid into runs of consecutive present points so the line
     // and band stop across no-data gaps instead of bridging them.
     const segments = (grid) => {
@@ -1251,7 +1360,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const sGrid = smooth(solving);
     const rGrid = smooth(review);
     if (!sGrid && !rGrid) return null;
-    const cGrid = smoothRate(solving); // problems/day rate (every attempt logs solving time)
 
     // Robust ceiling from the upper-CI envelope so most of the band shows; the
     // most extreme spell clips at the top edge (overflow:hidden).
@@ -1263,20 +1371,12 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
     const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
 
-    // Smoothed problems/day on a secondary right axis. Robust ceiling from the
-    // rate's upper-CI envelope (matching the left axis) so the band shows and a
-    // binge spell clips at the top edge rather than flattening the rest.
-    const cHiVals = [];
-    if (cGrid) for (const e of cGrid) if (e) cHiVals.push(e.hi);
-    cHiVals.sort((a, b) => a - b);
-    const cMax = Math.max(cHiVals.length ? quantile(cHiVals, 0.90) * 1.05 : 1, 1);
-
     const container = document.createElement('div');
     container.className = 'stats-chart';
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = `Time per problem since ${new Date(t0).toISOString().slice(0, 10)}`;
+    title.textContent = getTerm('statsChartTimePerProblemSince').replace('{date}', new Date(t0).toISOString().slice(0, 10));
     container.append(title);
 
     const plotRow = document.createElement('div');
@@ -1304,22 +1404,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
         yaxis.append(tick);
     }
 
-    // Secondary right axis for the daily problem count.
-    const yaxisRight = document.createElement('div');
-    yaxisRight.className = 'stats-chart-yaxis stats-chart-yaxis-right';
-    const spacerR = document.createElement('span');
-    spacerR.className = 'y-spacer';
-    spacerR.textContent = String(Math.round(cMax));
-    yaxisRight.append(spacerR);
-    for (let i = 0; i <= 3; i++) {
-        const v = cMax * (i / 3);
-        const tick = document.createElement('div');
-        tick.className = 'y-tick';
-        tick.style.top = `${(1 - v / cMax) * 100}%`;
-        tick.textContent = String(Math.round(v));
-        yaxisRight.append(tick);
-    }
-
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1331,41 +1415,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.setAttribute('role', 'img');
     svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
-
-    // Smoothed problems/day (secondary right axis), drawn first so the grid,
-    // time bands, and mean lines all sit on top. Same band + line treatment as
-    // the time series, just mapped through the right axis and gap-broken.
-    const COUNT_LINE = '#6f8bbf', COUNT_BAND = 'rgba(120,140,180,0.20)';
-    const yOfRate = r => (1 - Math.min(r, cMax) / cMax) * H;
-    if (cGrid) {
-        for (const run of segments(cGrid)) {
-            if (run.length < 2) continue;
-            let d = '';
-            for (let i = 0; i < run.length; i++) {
-                d += (i === 0 ? 'M' : 'L') + `${xOf(run[i].t).toFixed(1)} ${yOfRate(run[i].hi).toFixed(1)} `;
-            }
-            for (let i = run.length - 1; i >= 0; i--) {
-                d += `L${xOf(run[i].t).toFixed(1)} ${yOfRate(run[i].lo).toFixed(1)} `;
-            }
-            const path = document.createElementNS(SVG_NS, 'path');
-            path.setAttribute('d', d + 'Z');
-            path.setAttribute('fill', COUNT_BAND);
-            path.setAttribute('stroke', 'none');
-            svg.appendChild(path);
-        }
-        for (const run of segments(cGrid)) {
-            if (run.length < 2) continue;
-            const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOfRate(e.mean).toFixed(1)}`).join(' ');
-            const poly = document.createElementNS(SVG_NS, 'polyline');
-            poly.setAttribute('points', pts);
-            poly.setAttribute('fill', 'none');
-            poly.setAttribute('stroke', COUNT_LINE);
-            poly.setAttribute('stroke-width', '1.5');
-            poly.setAttribute('stroke-linejoin', 'round');
-            poly.setAttribute('vector-effect', 'non-scaling-stroke');
-            svg.appendChild(poly);
-        }
-    }
 
     // Horizontal grid at each y-tick.
     for (let i = 0; i <= 4; i++) {
@@ -1434,7 +1483,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const plotMain = document.createElement('div');
     plotMain.className = 'stats-chart-plot-main';
-    plotMain.append(yaxis, svgWrap, yaxisRight);
+    plotMain.append(yaxis, svgWrap);
 
     const xaxis = document.createElement('div');
     xaxis.className = 'stats-chart-xaxis';
@@ -1446,10 +1495,9 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const legend = document.createElement('div');
     legend.className = 'stats-chart-legend';
     const legendItems = [
-        { kind: 'line', color: '#2e9e5b', text: 'Solving' },
-        { kind: 'line', color: '#d98a2b', text: 'Reviewing' },
-        { kind: 'line', color: COUNT_LINE, text: 'Problems/day' },
-        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: '95% CI (bootstrap)' },
+        { kind: 'line', color: '#2e9e5b', text: getTerm('statsLegendSolving') },
+        { kind: 'line', color: '#d98a2b', text: getTerm('statsLegendReviewing') },
+        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend95CIBootstrap') },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
