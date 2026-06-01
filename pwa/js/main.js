@@ -703,7 +703,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             else {
                 // The user arrived via a shared link — record the open with the
                 // referrer (where the link was clicked from) for analytics.
-                recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
+                // Skip stats-panel example links (close_on_next=1): those are
+                // internal, same-origin navigations and would inflate the
+                // share_events 'open' count indistinguishably from real inbound
+                // shared-link traffic.
+                if (urlParams.get('close_on_next') !== '1') {
+                    recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
+                }
                 const explicitOrientation = orientationParam !== null;
                 const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
                 const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;
