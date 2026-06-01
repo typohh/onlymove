@@ -48,6 +48,7 @@ const localization = {
     whiteAdjustment: '白方调整',
     statsNotEnough: '您已完成 {count} 个死活题，启用统计需要5个。',
     statsFailed: '暂时没有统计数据，请尝试完成另一个问题。',
+    statsConstructing: '正在加载您的统计数据……',
     statsSolvingTimeNatural: '花更多时间解题有{percent_change}%的概率让您更有可能选择正确的下法。',
     statsReviewTimeNatural: '花更多时间复习有{percent_change}%的概率让您下次看到问题时更有可能选择正确的下法。',
     statsFailures: '您有 {count_recent} 个最近的失败，将在 {hours} 小时延迟后重复。',
@@ -167,6 +168,7 @@ const localization = {
     whiteAdjustment: '白の調整',
     statsNotEnough: '{count} つのツメゴを完了しました、統計を有効にするには5つが必要です。',
     statsFailed: '現在利用可能な統計はありません。別の問題を完了してみてください。',
+    statsConstructing: '統計を読み込んでいます……',
     statsSolvingTimeNatural: '解答により多くの時間を使うと、正しい手を選ぶ可能性が{percent_change}%高まる確率があります。',
     statsReviewTimeNatural: '復習により多くの時間を使うと、次に問題を見たときに正しい手を選ぶ可能性が{percent_change}%高まる確率があります。',
     statsFailures: 'あなたには {count_recent} 件の最近の失敗があり、 {hours} 時間の遅延後に繰り返されます。',
@@ -286,6 +288,7 @@ const localization = {
     whiteAdjustment: '백의 조정',
     statsNotEnough: '{count}개의 사활 문제를 완료했습니다, 통계를 활성화하려면 5개가 필요합니다.',
     statsFailed: '지금은 통계가 없습니다. 다른 문제를 풀어보세요.',
+    statsConstructing: '통계를 불러오는 중입니다……',
     statsSolvingTimeNatural: '문제를 푸는 데 더 많은 시간을 사용하면 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
     statsReviewTimeNatural: '복습에 더 많은 시간을 사용하면 다음에 문제를 볼 때 정답을 선택할 확률이 {percent_change}% 더 높아질 가능성이 있습니다.',
     statsFailures: '{count_recent}개의 최근 실패가 있으며 {hours}시간 지연 후 반복됩니다.',
@@ -406,6 +409,7 @@ const localization = {
 
     statsNotEnough: 'You have completed {count} tsumegos, 5 needed to enable statistics.',
     statsFailed: 'No stats available right now, try completing another problem.',
+    statsConstructing: 'Loading your stats…',
 
     statsSolvingTimeNatural: 'There is a {percent_change}% probability that using more time solving also makes you more likely to choose the correct move.',
     statsReviewTimeNatural: 'There is a {percent_change}% probability that using more time reviewing also makes you more likely to choose the correct move next time you see the problem.',

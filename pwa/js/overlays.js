@@ -181,7 +181,7 @@ export function fadeOverlay(duration, callback, stats = null) {
 let _loadingCount = 0;
 let _loadingEl = null;
 
-export function showLoading() {
+export function showLoading(message = null) {
     _loadingCount++;
     if (_loadingEl) return;
     const overlay = document.createElement('div');
@@ -189,6 +189,16 @@ export function showLoading() {
     const spinner = document.createElement('div');
     spinner.className = 'loading-spinner';
     overlay.appendChild(spinner);
+    // Optional static text — the heavy synchronous builds (e.g. the stats
+    // charts) freeze the spinner's animation, so a plain explanatory line is
+    // the reliable "still working" signal. It paints with the overlay and
+    // stays put through the block.
+    if (message) {
+        const label = document.createElement('div');
+        label.className = 'loading-message';
+        label.textContent = message;
+        overlay.appendChild(label);
+    }
     document.body.appendChild(overlay);
     _loadingEl = overlay;
     requestAnimationFrame(() => overlay.classList.add('visible'));

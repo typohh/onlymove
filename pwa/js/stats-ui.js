@@ -36,8 +36,11 @@ export async function showDetailedStats() {
         return;
     }
 
-    showLoading();
-    // Yield a paint so the spinner is actually visible before the synchronous
+    // Static explanatory text (not just a spinner): the synchronous chart build
+    // below freezes any animation, so a plain "constructing…" line is the
+    // reliable signal that the click registered and work is underway.
+    showLoading(getTerm('statsConstructing'));
+    // Yield a paint so the message is actually visible before the synchronous
     // decomposition + chart build (computeRankDecomposition, buildRatingHistory-
     // Chart, …) take over the main thread.
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -133,27 +136,22 @@ export async function showDetailedStats() {
         const serverPane = await buildServerStatsPane();
 
         // The Rank and Time charts are the heavy part (rank decomposition +
-        // kernel smoothing + bootstrap CI). Build them in the background AFTER
-        // the modal paints so the cheap tabs (Weaknesses default, Activity,
-        // Community) appear instantly; a spinner covers each chart tab until
-        // its build resolves. The timing probabilities and rank decomposition
-        // text used to live on the summary pane and now ride with their charts.
-        const rankLoader = () => deferredStatsBuild(() => {
-            const rankText = buildRankSummaryText(merged);
-            return combineChartWithText(buildRatingHistoryChart(merged), rankText);
-        });
-        const timeLoader = () => deferredStatsBuild(() => {
-            return combineChartWithText(buildTimeUsageChart(merged), timingText);
-        });
+        // kernel smoothing + bootstrap CI), but they're built eagerly here —
+        // under the "constructing charts" overlay shown above — so the modal
+        // opens fully-ready and every tab switch is instant. The overlay
+        // explains the build delay, which is why no in-modal lazy-load / spinner
+        // / pre-warm is needed anymore. The timing probabilities and rank
+        // decomposition text ride with their charts.
+        const rankPane = combineChartWithText(buildRatingHistoryChart(merged), buildRankSummaryText(merged));
+        const timePane = combineChartWithText(buildTimeUsageChart(merged), timingText);
 
         // Weaknesses is the default (first) page; Community is last. Empty panes
         // (no weaknesses, too little data for a chart, server stats unavailable)
-        // are dropped by showStatsModal — for the deferred chart tabs that
-        // happens once their loader resolves null.
+        // are dropped by showStatsModal.
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
-            { label: getTerm('statsTabRank'), loader: rankLoader },
-            { label: getTerm('statsTabTime'), loader: timeLoader },
+            { label: getTerm('statsTabRank'), content: rankPane },
+            { label: getTerm('statsTabTime'), content: timePane },
             { label: getTerm('statsTabActivity'), content: activityPane },
             { label: getTerm('statsTabCommunity'), content: serverPane },
         ]);
@@ -561,12 +559,10 @@ async function buildServerStatsPane() {
     return pane;
 }
 
-// Tabbed stats modal. `tabs` is [{ label, content }]; tabs whose content is
-// null/absent are dropped (so an empty Weaknesses or Charts page just doesn't
-// appear), and the tab bar is omitted when only one page remains.
 // The rank decomposition text (long-term skill + drift + session swing) and
-// the relative 13x13 readout that used to sit on the summary pane. Built lazily
-// inside the Rank tab loader because computeRankDecomposition is heavy. Reads
+// the relative 13x13 readout that used to sit on the summary pane. Built as
+// part of the Rank tab pane (computeRankDecomposition is heavy, but the whole
+// modal is constructed up front under the "constructing charts" overlay). Reads
 // state.statsResults (already computed by the time this runs).
 function buildRankSummaryText(history) {
     let rankText = '';
@@ -632,18 +628,6 @@ function buildRankSummaryText(history) {
     return rankText;
 }
 
-// Run a synchronous (heavy) pane build after two animation frames, so whatever
-// is already on screen — the just-opened modal and its ready tabs — paints
-// first. Resolves with the built node (or null). Used to background-build the
-// Rank/Time charts; the in-tab spinner covers the gap.
-function deferredStatsBuild(buildFn) {
-    return new Promise((resolve, reject) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            try { resolve(buildFn()); } catch (err) { reject(err); }
-        }));
-    });
-}
-
 // A tab pane that pairs a chart with the explanatory text that used to live on
 // the summary page (timing probabilities for Time, the rank decomposition for
 // Rank). Either piece may be missing: returns null only when both are, so an
@@ -664,30 +648,14 @@ function combineChartWithText(chartElement, text) {
     return wrap;
 }
 
-// A spinner node shown in the modal body while a deferred tab is still
-// building. Reuses the global .loading-spinner animation.
-function makeStatsLoadingNode() {
-    const wrap = document.createElement('div');
-    wrap.className = 'stats-tab-loading';
-    const spinner = document.createElement('div');
-    spinner.className = 'loading-spinner';
-    wrap.append(spinner);
-    return wrap;
-}
-
-// Each tab is either { label, content: node } (ready now) or
-// { label, loader: () => Promise<node|null> } (built in the background — a
-// spinner shows until it resolves; a null resolution drops the tab).
+// Tabbed stats modal. `tabs` is [{ label, content: node }]; every pane is built
+// before this is called (under the "constructing charts" overlay), so tab
+// switching is pure show/hide and instant. Tabs with null content are dropped,
+// and the tab bar is omitted when only one pane remains.
 function showStatsModal(tabs) {
     const entries = tabs
-        .filter(t => t.loader || t.content)
-        .map(t => ({
-            label: t.label,
-            loader: t.loader || null,
-            node: t.content || null,
-            loading: false,
-            built: !t.loader,   // content tabs are ready; loader tabs build on demand
-        }));
+        .filter(t => t.content)
+        .map(t => ({ label: t.label, node: t.content }));
     if (entries.length === 0) return;
 
     const backdrop = document.createElement('div');
@@ -717,36 +685,11 @@ function showStatsModal(tabs) {
     let current = entries[0];
 
     const renderBody = () => {
-        body.replaceChildren(current.node || makeStatsLoadingNode());
+        body.replaceChildren(current.node);
         body.scrollTop = 0;
     };
-    // Build a deferred (loader) tab once. Safe to call repeatedly — the in-flight
-    // build is deduped via the loading/built flags, so the lazy on-activation path
-    // and the idle pre-warm path never double-build. A null resolution drops the
-    // tab. The build itself is heavy synchronous main-thread work (rank
-    // decomposition / kernel smoothing), so it must never run while the user is
-    // mid-interaction — see the pre-warm note below.
-    const ensureBuilt = (e) => {
-        if (e.built || e.loading || !e.loader) return Promise.resolve();
-        e.loading = true;
-        if (current === e) renderBody();   // show the spinner while it builds
-        return e.loader().then((node) => {
-            e.loading = false;
-            e.built = true;
-            if (!node) { removeEntry(e); return; }
-            e.node = node;
-            if (current === e) renderBody();
-        }).catch((err) => {
-            e.loading = false;
-            e.built = true;
-            console.error('Stats tab build failed:', err);
-            Sentry.captureException(err);
-            removeEntry(e);
-        });
-    };
     const renderTabbar = () => {
-        // The bar is omitted when only one pane remains (e.g. deferred tabs
-        // resolved null), matching the single-pane behaviour.
+        // The bar is omitted when only one pane remains.
         tabbar.style.display = entries.length > 1 ? '' : 'none';
         tabbar.replaceChildren();
         for (const e of entries) {
@@ -754,18 +697,9 @@ function showStatsModal(tabs) {
             b.className = 'stats-tab';
             b.classList.toggle('active', e === current);
             b.textContent = e.label;
-            b.onclick = () => { current = e; ensureBuilt(e); renderTabbar(); renderBody(); };
+            b.onclick = () => { current = e; renderTabbar(); renderBody(); };
             tabbar.append(b);
         }
-    };
-    const removeEntry = (e) => {
-        const idx = entries.indexOf(e);
-        if (idx === -1) return;
-        entries.splice(idx, 1);
-        if (entries.length === 0) { close(); return; }
-        if (current === e) current = entries[Math.min(idx, entries.length - 1)];
-        renderTabbar();
-        renderBody();
     };
 
     card.append(tabbar, body, closeBtn);
@@ -774,26 +708,6 @@ function showStatsModal(tabs) {
 
     renderTabbar();
     renderBody();
-    ensureBuilt(current);   // in case the first tab is itself a loader
-
-    // Pre-warm the remaining deferred (chart) tabs so they're usually ready when
-    // opened — but SERIALLY and during IDLE time, one build per idle slice, the
-    // next scheduled only after the previous resolves. The rank/time builds are
-    // heavy synchronous tasks; the old loop fired them all at once, and on
-    // engines without requestIdleCallback the setTimeout fallback ran them
-    // back-to-back, freezing the modal for seconds right after open — a tab
-    // click in that window got no response and the spinner never painted.
-    // Serializing keeps at most one build in flight so the main thread gets a
-    // paint/input window between them. Opening a chart tab still builds it
-    // eagerly via ensureBuilt (deduped), so a click never queues behind the
-    // pre-warm chain. A null/failed build still drops the tab.
-    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
-    const prewarmNext = () => {
-        const next = entries.find(e => e !== current && e.loader && !e.built && !e.loading);
-        if (!next) return;
-        ensureBuilt(next).then(() => idle(prewarmNext));
-    };
-    idle(prewarmNext);
 }
 
 function rankLabelFromIndex(rankIndex) {
