@@ -90,3 +90,5 @@ auxiliary/labeler/cache/
 # auxiliary/joint_rank_model*.py. The small rank_map_v2*.json result files are
 # tracked; the bulky per-problem CSVs are not.
 auxiliary/joint_rank_placements*.csv
+# Per-user table dumped by auxiliary/time_value_analysis.py (regenerable).
+auxiliary/time_value_per_user.csv
