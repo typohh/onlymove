@@ -1275,11 +1275,14 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
 // attempts contributes nothing and is carried by its neighbours rather than
 // pulled to zero, and stretches with no attempts within the kernel's reach
 // leave a GAP in the line (we never invent a zero where there is no data). The
-// confidence band is a multiplier (exponential-weight) bootstrap of the
-// kernel-weighted mean — empirical, not a normal-theory mean ± z·SE — so the
-// heavy idle-time right tail (a tab left open for minutes) widens it
-// asymmetrically rather than symmetrically. The y-window clips to a robust
-// quantile of the upper band so one idle spell can't flatten the rest.
+// band is the SPREAD of individual attempts, not a confidence interval for the
+// line: at each date it's the kernel-weighted 2.5%/97.5% quantiles of the
+// nearby attempts' times — i.e. "the middle 95% of attempts land in here". This
+// is a direct weighted empirical quantile (sort the window, walk the cumulative
+// kernel weight to the target), so no bootstrap/resampling is involved; the
+// heavy idle-time right tail just lands in the upper quantile naturally. The
+// y-window clips to a robust quantile of the upper edge so one idle spell can't
+// flatten the rest.
 function buildTimeUsageChart(history = state.answerHistory) {
     const DAY_MS = 24 * 3600 * 1000;
 
@@ -1308,16 +1311,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const tSpan = t1 - t0;
     if (tSpan < 0.75 * DAY_MS) return null; // too short a span to read as a daily trend
 
-    // Seeded PRNG (mulberry32) so the bootstrap band is stable across re-opens
-    // rather than flickering with each Math.random draw.
-    let seed = (0x9e3779b9 ^ history.length) >>> 0;
-    const rand = () => {
-        seed = (seed + 0x6D2B79F5) >>> 0;
-        let t = seed;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
     const quantile = (sorted, p) => {
         if (sorted.length === 1) return sorted[0];
         const idx = p * (sorted.length - 1);
@@ -1329,10 +1322,27 @@ function buildTimeUsageChart(history = state.answerHistory) {
         while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < target) lo = m + 1; else hi = m; }
         return lo;
     };
+    // Kernel-WEIGHTED empirical quantile over a window. `pairs` is ascending by
+    // value; `total` is Σw. Walk the cumulative weight to p·total and linearly
+    // interpolate between the two bracketing samples, so the edge moves smoothly
+    // as the window slides instead of stepping from one sample value to the next.
+    const wQuantile = (pairs, total, p) => {
+        const target = p * total;
+        let cum = 0;
+        for (let i = 0; i < pairs.length; i++) {
+            const next = cum + pairs[i].w;
+            if (next >= target) {
+                if (i === 0) return pairs[0].v;
+                return pairs[i - 1].v + (pairs[i].v - pairs[i - 1].v) * ((target - cum) / pairs[i].w);
+            }
+            cum = next;
+        }
+        return pairs[pairs.length - 1].v;
+    };
 
-    // Kernel smoother + multiplier-bootstrap band on a regular t-grid. Returns
-    // an array of {t, mean, lo, hi}, or null at grid points with too little
-    // nearby data (those break the line).
+    // Kernel-weighted mean line + a weighted-quantile spread band on a regular
+    // t-grid. Returns an array of {t, mean, lo, hi}, or null at grid points with
+    // too little nearby data (those break the line).
     //
     // Bandwidth is a fixed FRACTION of the visible span, so the smoothing scale
     // is relative to the GRAPH, not to an absolute number of days. The x-axis
@@ -1343,7 +1353,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // multi-year axis and left the line jagged (the cap, not the data, was the
     // problem). The 3-day floor keeps a short history from over-smoothing to a
     // flat line; there is deliberately no upper cap.
-    const G = 140, B = 300, ESS_MIN = 1.5, LMAX = 700;
+    const G = 140, ESS_MIN = 1.5;
     const bw = Math.max(3 * DAY_MS, tSpan / 36);
     const smooth = (pts) => {
         if (pts.length < 4) return null;
@@ -1353,45 +1363,23 @@ function buildTimeUsageChart(history = state.answerHistory) {
             const t = t0 + tSpan * (g / (G - 1));
             const i0 = lowerBound(ts, t - 3.5 * bw);
             const i1 = lowerBound(ts, t + 3.5 * bw);
-            let idxs = [];
-            for (let i = i0; i < i1; i++) idxs.push(i);
-            if (idxs.length > LMAX) {
-                const stride = idxs.length / LMAX, thin = [];
-                for (let k = 0; k < LMAX; k++) thin.push(idxs[Math.floor(k * stride)]);
-                idxs = thin;
-            }
-            // Mean (Nadaraya–Watson): sum over EVERY sample in the window so the
-            // line is a smooth function of t. Thinning the mean was the bug — the
-            // strided subset jumped as the window slid (heavy-tailed solve-time
-            // outliers popped in and out at near-grid frequency), which is the
-            // ~50-spike sawtooth on the line, NOT a kernel-width problem.
-            const ws = [], vs = [];
+            // Sum over EVERY sample in the window (no thinning): the mean is the
+            // kernel-weighted average, the band is the kernel-weighted 2.5%/97.5%
+            // quantiles of those same samples. Using the full window keeps both a
+            // smooth function of t — strided subsampling here was the earlier
+            // sawtooth bug.
             let W = 0, sumW2 = 0, Wv = 0;
+            const pairs = [];
             for (let i = i0; i < i1; i++) {
                 const d = (t - ts[i]) / bw;
                 const w = Math.exp(-0.5 * d * d);
                 W += w; sumW2 += w * w; Wv += w * pts[i].v;
+                pairs.push({ v: pts[i].v, w });
             }
             const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
             if (ess < ESS_MIN) { grid[g] = null; continue; }
-            // The B×n bootstrap is the only part that needs its cost bounded, so
-            // thin to LMAX HERE (the band is already MC-noisy; a strided subset
-            // for it is fine — it never touches the mean).
-            for (const i of idxs) {
-                const d = (t - ts[i]) / bw;
-                ws.push(Math.exp(-0.5 * d * d)); vs.push(pts[i].v);
-            }
-            const bmeans = new Array(B);
-            for (let b = 0; b < B; b++) {
-                let num = 0, den = 0;
-                for (let k = 0; k < ws.length; k++) {
-                    const ew = -Math.log(1 - rand()) * ws[k]; // Exp(1) × kernel weight
-                    num += ew * vs[k]; den += ew;
-                }
-                bmeans[b] = num / den;
-            }
-            bmeans.sort((x, y) => x - y);
-            grid[g] = { t, mean: Wv / W, lo: quantile(bmeans, 0.025), hi: quantile(bmeans, 0.975) };
+            pairs.sort((a, b) => a.v - b.v);
+            grid[g] = { t, mean: Wv / W, lo: wQuantile(pairs, W, 0.025), hi: wQuantile(pairs, W, 0.975) };
         }
         return grid;
     };
@@ -1549,7 +1537,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const legendItems = [
         { kind: 'line', color: '#2e9e5b', text: getTerm('statsLegendSolving') },
         { kind: 'line', color: '#d98a2b', text: getTerm('statsLegendReviewing') },
-        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend95CIBootstrap') },
+        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend95Spread') },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
