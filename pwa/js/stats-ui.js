@@ -1360,16 +1360,27 @@ function buildTimeUsageChart(history = state.answerHistory) {
                 for (let k = 0; k < LMAX; k++) thin.push(idxs[Math.floor(k * stride)]);
                 idxs = thin;
             }
+            // Mean (Nadaraya–Watson): sum over EVERY sample in the window so the
+            // line is a smooth function of t. Thinning the mean was the bug — the
+            // strided subset jumped as the window slid (heavy-tailed solve-time
+            // outliers popped in and out at near-grid frequency), which is the
+            // ~50-spike sawtooth on the line, NOT a kernel-width problem.
             const ws = [], vs = [];
             let W = 0, sumW2 = 0, Wv = 0;
-            for (const i of idxs) {
+            for (let i = i0; i < i1; i++) {
                 const d = (t - ts[i]) / bw;
                 const w = Math.exp(-0.5 * d * d);
                 W += w; sumW2 += w * w; Wv += w * pts[i].v;
-                ws.push(w); vs.push(pts[i].v);
             }
             const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
             if (ess < ESS_MIN) { grid[g] = null; continue; }
+            // The B×n bootstrap is the only part that needs its cost bounded, so
+            // thin to LMAX HERE (the band is already MC-noisy; a strided subset
+            // for it is fine — it never touches the mean).
+            for (const i of idxs) {
+                const d = (t - ts[i]) / bw;
+                ws.push(Math.exp(-0.5 * d * d)); vs.push(pts[i].v);
+            }
             const bmeans = new Array(B);
             for (let b = 0; b < B; b++) {
                 let num = 0, den = 0;
@@ -1382,23 +1393,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
             bmeans.sort((x, y) => x - y);
             grid[g] = { t, mean: Wv / W, lo: quantile(bmeans, 0.025), hi: quantile(bmeans, 0.975) };
         }
-
-        // The bootstrap band's lo/hi are independent Monte-Carlo estimates per
-        // grid point, so their edges wiggle (the band looks "furry"/jagged) even
-        // where the mean line is smooth — that fur, not the mean, is what reads
-        // as jagged. Replace each edge with a moving average over a small window
-        // of CONTIGUOUS grid points (a null gap breaks the window so we never
-        // average across a no-data stretch). The mean is left untouched.
-        const R = 5;
-        const sm = grid.map(e => e ? { ...e } : null);
-        for (let g = 0; g < G; g++) {
-            if (!grid[g]) continue;
-            let sLo = grid[g].lo, sHi = grid[g].hi, n = 1;
-            for (let j = g - 1; j >= g - R && grid[j]; j--) { sLo += grid[j].lo; sHi += grid[j].hi; n++; }
-            for (let j = g + 1; j <= g + R && j < G && grid[j]; j++) { sLo += grid[j].lo; sHi += grid[j].hi; n++; }
-            sm[g].lo = sLo / n; sm[g].hi = sHi / n;
-        }
-        return sm;
+        return grid;
     };
 
     // Break a smoothed grid into runs of consecutive present points so the line
