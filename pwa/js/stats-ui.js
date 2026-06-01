@@ -1342,7 +1342,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
         return pairs[pairs.length - 1].v;
     };
 
-    // Kernel-weighted mean line + a weighted-quantile spread band on a regular
+    // Kernel-weighted median line + a weighted-quantile spread band on a regular
     // t-grid. Returns an array of {t, mean, lo, hi}, or null at grid points with
     // too little nearby data (those break the line).
     //
@@ -1365,27 +1365,33 @@ function buildTimeUsageChart(history = state.answerHistory) {
             const t = t0 + tSpan * (g / (G - 1));
             const i0 = lowerBound(ts, t - 3.5 * bw);
             const i1 = lowerBound(ts, t + 3.5 * bw);
-            // Sum over EVERY sample in the window (no thinning): the mean is the
-            // kernel-weighted average, the band is the kernel-weighted 2.5%/97.5%
-            // quantiles of those same samples. Using the full window keeps both a
-            // smooth function of t — strided subsampling here was the earlier
-            // sawtooth bug.
-            let W = 0, sumW2 = 0, Wv = 0;
+            // Sum over EVERY sample in the window (no thinning): both the centre
+            // line and the band are kernel-weighted quantiles of the same window.
+            // Using the full window keeps them smooth functions of t — strided
+            // subsampling here was the earlier sawtooth bug.
+            let W = 0, sumW2 = 0;
             const pairs = [];
             for (let i = i0; i < i1; i++) {
                 const d = (t - ts[i]) / bw;
                 const w = Math.exp(-0.5 * d * d);
-                W += w; sumW2 += w * w; Wv += w * pts[i].v;
+                W += w; sumW2 += w * w;
                 pairs.push({ v: pts[i].v, w });
             }
             const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
             if (ess < ESS_MIN) { grid[g] = null; continue; }
             pairs.sort((a, b) => a.v - b.v);
-            // 17.5%/82.5% edges = the middle 65% of attempts (the central range
-            // ~1σ would cover for symmetric data, but read off the EMPIRICAL
-            // skewed distribution — no normal assumption, which would be plainly
-            // wrong for the heavy idle-time tail).
-            grid[g] = { t, mean: Wv / W, lo: wQuantile(pairs, W, 0.175), hi: wQuantile(pairs, W, 0.825) };
+            // Centre line = kernel-weighted MEDIAN (not the mean): time usage is
+            // heavily right-skewed (idle-tab outliers), so the mean is dragged up
+            // by the tail and isn't a typical day. The median is, and it always
+            // sits inside the band. Band = 17.5%/82.5% edges = the middle 65% of
+            // attempts (the central range ~1σ covers for symmetric data, read off
+            // the EMPIRICAL skewed distribution — no normal assumption).
+            grid[g] = {
+                t,
+                mid: wQuantile(pairs, W, 0.5),
+                lo: wQuantile(pairs, W, 0.175),
+                hi: wQuantile(pairs, W, 0.825),
+            };
         }
         return grid;
     };
@@ -1413,7 +1419,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // sit ABOVE the 82.5% band edge, so a hi-only ceiling would clip the mean
     // line out of the window (the bug the 65% band exposed).
     const hiVals = [];
-    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mean));
+    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mid));
     hiVals.sort((a, b) => a - b);
     const yHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;
@@ -1484,7 +1490,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
         { grid: rGrid, line: '#d98a2b', band: 'rgba(217,138,43,0.20)' },
     ];
 
-    // Bands first, then mean lines on top.
+    // Bands first, then median lines on top.
     for (const { grid, band } of SERIES) {
         if (!grid) continue;
         for (const run of segments(grid)) {
@@ -1510,13 +1516,13 @@ function buildTimeUsageChart(history = state.answerHistory) {
             if (run.length === 1) {
                 const dot = document.createElementNS(SVG_NS, 'circle');
                 dot.setAttribute('cx', xOf(run[0].t).toFixed(1));
-                dot.setAttribute('cy', yOf(run[0].mean).toFixed(1));
+                dot.setAttribute('cy', yOf(run[0].mid).toFixed(1));
                 dot.setAttribute('r', '2');
                 dot.setAttribute('fill', line);
                 svg.appendChild(dot);
                 continue;
             }
-            const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mean).toFixed(1)}`).join(' ');
+            const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mid).toFixed(1)}`).join(' ');
             const poly = document.createElementNS(SVG_NS, 'polyline');
             poly.setAttribute('points', pts);
             poly.setAttribute('fill', 'none');
