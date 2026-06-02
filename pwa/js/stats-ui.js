@@ -1276,9 +1276,9 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
 // pulled to zero, and stretches with no attempts within the kernel's reach
 // leave a GAP in the line (we never invent a zero where there is no data). The
 // band is the SPREAD of individual attempts, not a confidence interval for the
-// line: at each date it's the kernel-weighted 17.5%/82.5% quantiles of the
-// nearby attempts' times — i.e. "the middle 65% of attempts land in here" (the
-// central range ~1σ covers for symmetric data, but read off the empirical
+// line: at each date it's the kernel-weighted 25%/75% quantiles of the
+// nearby attempts' times — i.e. "the middle 50% of attempts land in here" (the
+// interquartile range, read off the empirical
 // skewed distribution, not a normal fit). This
 // is a direct weighted empirical quantile (sort the window, walk the cumulative
 // kernel weight to the target), so no bootstrap/resampling is involved; the
@@ -1383,14 +1383,14 @@ function buildTimeUsageChart(history = state.answerHistory) {
             // Centre line = kernel-weighted MEDIAN (not the mean): time usage is
             // heavily right-skewed (idle-tab outliers), so the mean is dragged up
             // by the tail and isn't a typical day. The median is, and it always
-            // sits inside the band. Band = 17.5%/82.5% edges = the middle 65% of
-            // attempts (the central range ~1σ covers for symmetric data, read off
-            // the EMPIRICAL skewed distribution — no normal assumption).
+            // sits inside the band. Band = 25%/75% edges = the middle 50% of
+            // attempts (the interquartile range, read off the EMPIRICAL skewed
+            // distribution — no normal assumption).
             grid[g] = {
                 t,
                 mid: wQuantile(pairs, W, 0.5),
-                lo: wQuantile(pairs, W, 0.175),
-                hi: wQuantile(pairs, W, 0.825),
+                lo: wQuantile(pairs, W, 0.25),
+                hi: wQuantile(pairs, W, 0.75),
             };
         }
         return grid;
@@ -1417,25 +1417,41 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // extreme spell clips at the top edge (overflow:hidden). Use max(mean, hi)
     // per grid point, NOT hi alone: with a heavy right tail the weighted mean can
     // sit ABOVE the 82.5% band edge, so a hi-only ceiling would clip the mean
-    // line out of the window (the bug the 65% band exposed).
+    // line out of the window (the bug the spread band exposed).
     const hiVals = [];
     for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mid));
     hiVals.sort((a, b) => a - b);
     const rawHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;
-    // Nice y ticks: every tick lands on a whole number of seconds OR a whole
-    // number of minutes — never a fractional minute (the old `2.5m` bug). Pick
-    // the smallest "nice" step ≥ rawHigh/4 off a seconds→minutes ladder, then
-    // snap the ceiling up to a multiple of it so 0, step, 2·step, … are round.
-    // Minute steps are multiples of 60, so when we switch to minute labels every
-    // tick divides evenly; sub-minute steps stay in seconds.
-    const STEP_LADDER = [5, 10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 3600, 7200];
-    const step = STEP_LADDER.find(s => s >= rawHigh / 4) ?? STEP_LADDER[STEP_LADDER.length - 1];
-    const yHigh = Math.ceil(rawHigh / step) * step;
-    const useMin = step % 60 === 0; // minute steps ⇒ whole-minute ticks
-    const fmt = (s) => useMin ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`;
-    const yTickVals = [];
-    for (let v = 0; v <= yHigh + 1e-6; v += step) yTickVals.push(v);
+    // Two-tier y ticks. The CI band can reach several minutes while both median
+    // lines sit under a minute, so a single uniform step leaves the medians
+    // stranded between gridlines. Instead: a COARSE step (~4 ticks) spans the
+    // whole CI range, and a FINER step (~4 ticks) adds resolution across the
+    // median band [0, max median]. Both steps come off a seconds→minutes ladder,
+    // so every tick is a whole minute or a round number of seconds, and the two
+    // tiers share ticks where they coincide (e.g. 0, 1m). The render-time
+    // overlap pass below then drops whatever doesn't fit — coarse first — so we
+    // show as many as there's room for and never overlap.
+    const NICE = [10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 3600, 7200];
+    const niceStep = (span, target) => NICE.find(s => s >= span / target) ?? NICE[NICE.length - 1];
+    // value → tier (0 = coarse/preferred, 1 = fine). A Map dedupes shared ticks.
+    let medMax = 0;
+    for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) medMax = Math.max(medMax, e.mid);
+    const hiStep = niceStep(rawHigh, 4);
+    const yHigh = Math.ceil(rawHigh / hiStep) * hiStep;
+    // Median band hugs the actual medians (small headroom so a fine tick lands
+    // just above the highest one), capped at the ceiling. niceStep self-scales to
+    // ~4 ticks, so a sub-minute band yields sub-minute ticks — DON'T inflate it to
+    // a full coarse step: that spread the dense ticks more than twice past the
+    // medians (e.g. 30s/1m/90s when every median was under a minute).
+    medMax = medMax > 0 ? Math.min(medMax * 1.1, yHigh) : 0;
+    const lowStep = niceStep(medMax, 4);
+    const fmt = (s) => s === 0 ? '0' : (s % 60 === 0 ? `${s / 60}m` : `${Math.round(s)}s`);
+    const tierByVal = new Map();
+    for (let v = 0; v <= yHigh + 1e-6; v += hiStep) tierByVal.set(Math.round(v), 0);
+    for (let v = lowStep; v <= medMax + 1e-6; v += lowStep)
+        if (!tierByVal.has(Math.round(v))) tierByVal.set(Math.round(v), 1);
+    const yTicks = [...tierByVal.entries()].map(([v, pri]) => ({ v, pri })).sort((a, b) => a.v - b.v);
 
     const container = document.createElement('div');
     container.className = 'stats-chart';
@@ -1450,23 +1466,26 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const yaxis = document.createElement('div');
     yaxis.className = 'stats-chart-yaxis';
-    const leftLabels = yTickVals.map(fmt);
+    const leftLabels = yTicks.map(t => fmt(t.v));
     const widest = arr => arr.reduce((a, b) => (b.length > a.length ? b : a), '');
     const spacer = document.createElement('span');
     spacer.className = 'y-spacer';
     // Size the column to the WIDEST label, not just the top one — an
-    // intermediate tick ("2.5m") can be wider than the ceiling ("10m") and
+    // intermediate tick ("45s") can be wider than the ceiling ("3m") and
     // would otherwise overflow the column and clip on the left.
     spacer.textContent = widest(leftLabels);
     yaxis.append(spacer);
     const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
-    for (let i = 0; i < yTickVals.length; i++) {
-        const tick = document.createElement('div');
-        tick.className = 'y-tick';
-        tick.style.top = `${topPct(yTickVals[i])}%`;
-        tick.textContent = leftLabels[i];
-        yaxis.append(tick);
-    }
+    // tickRows pairs each label with its grid line (created below) and tier, so
+    // the overlap pass can hide both together and keep coarse ticks first.
+    const tickRows = yTicks.map(t => {
+        const labelEl = document.createElement('div');
+        labelEl.className = 'y-tick';
+        labelEl.style.top = `${topPct(t.v)}%`;
+        labelEl.textContent = fmt(t.v);
+        yaxis.append(labelEl);
+        return { v: t.v, pri: t.pri, labelEl, lineEl: null };
+    });
 
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
@@ -1490,12 +1509,12 @@ function buildTimeUsageChart(history = state.answerHistory) {
         line.setAttribute('stroke-width', '0.5');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
         svg.appendChild(line);
+        return line;
     };
 
-    // Horizontal grid at each y-tick.
-    for (const v of yTickVals) {
-        const y = yOf(v);
-        gridLine(0, y, W, y);
+    // Horizontal grid at each y-tick, kept in sync with its label's visibility.
+    for (const row of tickRows) {
+        row.lineEl = gridLine(0, yOf(row.v), W, yOf(row.v));
     }
 
     // Evenly-spaced x-axis date ticks, each with a matching vertical grid line.
@@ -1594,7 +1613,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const legendItems = [
         { kind: 'line', color: '#2e9e5b', text: getTerm('statsLegendSolving') },
         { kind: 'line', color: '#d98a2b', text: getTerm('statsLegendReviewing') },
-        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend65Spread') },
+        { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend50Spread') },
     ];
     for (const item of legendItems) {
         const el = document.createElement('span');
@@ -1607,21 +1626,24 @@ function buildTimeUsageChart(history = state.answerHistory) {
     }
     container.append(legend);
 
+    // Keep as many ticks as physically fit, coarse tier first. Walk ticks by
+    // priority (coarse before fine), then by position; keep one only if it
+    // clears minSep from every already-kept tick — so the CI-spanning coarse
+    // ticks always win and the finer median-band ticks fill the gaps where
+    // there's room, never overlapping. Each label and its grid line toggle as one.
     const updateLabelVisibility = () => {
         const h = svg.getBoundingClientRect().height;
         if (h === 0) return;
-        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
         const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
-        let lastShownPx = -Infinity;
-        for (const el of tickEls) {
-            const topPx = (parseFloat(el.style.top) / 100) * h;
-            if (topPx - lastShownPx >= minSepPx) {
-                el.style.visibility = '';
-                lastShownPx = topPx;
-            } else {
-                el.style.visibility = 'hidden';
-            }
+        const rows = tickRows
+            .map(r => ({ r, px: (parseFloat(r.labelEl.style.top) / 100) * h }))
+            .sort((a, b) => (a.r.pri - b.r.pri) || (a.px - b.px));
+        const kept = [];
+        for (const { r, px } of rows) {
+            const show = kept.every(p => Math.abs(p - px) >= minSepPx);
+            r.labelEl.style.visibility = show ? '' : 'hidden';
+            if (r.lineEl) r.lineEl.style.display = show ? '' : 'none';
+            if (show) kept.push(px);
         }
     };
     if (typeof ResizeObserver !== 'undefined') {
