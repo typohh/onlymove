@@ -126,6 +126,10 @@ export async function updateUserStats(isCorrect, {
         // Raw 2PL discrimination a_p of the problem; the skill decomposition uses
         // it as the per-attempt success-curve slope (see flattenAttempts).
         problemSlope: currentProblem.slope,
+        // Per-problem 3PL guessing floor c_p (bot-derived); the skill decomposition
+        // uses it as the success-curve lower asymptote so a far-above-rank clear is
+        // correctly down-weighted (see flattenAttempts / poolLogistic).
+        problemFloor: currentProblem.floor,
         timeTaken,
         reviewTime: 0,
         accumulatedReview,

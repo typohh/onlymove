@@ -63,6 +63,17 @@ const KERNEL_TRUNC_SIGMA = 4;
 // rank = the level you clear at this rate (matches model.js / fit_rank_curves).
 const CALIBRATION_P = 0.8;
 const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
+// Per-problem 3PL guessing floor c (problemFloor, shipped by train_rating_v2 from the
+// bot ladder): P(clear) = c + (1−c)·σ(slope·(R−x)+κ(c)). κ(c) keeps P(clear)=80% at
+// R==x for any c. Far below a problem (R≪x) P→c, so a success there is weak evidence of
+// skill — which correctly discounts a strong user's lucky above-rank clears (the early
+// over-credit behind the Rank-tab dip). FLOOR_MAX < CALIBRATION_P so κ stays finite.
+const FLOOR_MAX = 0.78;
+function clearKappa(c) {
+    if (!(c > 0)) return LOGIT_CALIBRATION;
+    const q = Math.min(Math.max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6);
+    return Math.log(q / (1 - q));
+}
 
 // Per attempt the success-curve slope is the problem's OWN 2PL discrimination
 // a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
@@ -219,10 +230,11 @@ function lowerBound(attempts, lo) {
     return a;
 }
 
-// Kernel-weighted pooled logistic MLE for the internal-rank skill R at time t0:
-// P(correct)=σ(slope_j·(R−x_j)+logit(0.8)), where each attempt j carries its own
-// slope (logit per internal rank, set in flattenAttempts from its size's M').
-// Returns { R, se, effN }; attempts MUST be sorted by t.
+// Kernel-weighted pooled 3PL MLE for the internal-rank skill R at time t0:
+// P(correct)=c_j+(1−c_j)·σ(slope_j·(R−x_j)+κ_j), where each attempt j carries its own
+// slope (logit per internal rank), guessing floor c_j (problemFloor) and κ_j=κ(c_j)
+// (so P=80% at R==x_j) — all set in flattenAttempts. Returns { R, se, effN };
+// attempts MUST be sorted by t.
 function poolLogistic(attempts, t0, tau) {
     const win = KERNEL_TRUNC_SIGMA * tau;
     const lo = lowerBound(attempts, t0 - win);
@@ -239,15 +251,21 @@ function poolLogistic(attempts, t0, tau) {
     const effN = (sumW * sumW) / sumW2;
     let R = sumWx / sumW;
 
+    // 3PL MLE for R: P = c + (1−c)·σ(slope·(R−x)+κ). dP/dR = (1−c)·slope·praw·(1−praw);
+    // Fisher info per attempt v = (dP/dR)²/(P(1−P)); Newton step = Σ w·(y−P)·(dP/dR)/(P(1−P))
+    // / Σ w·v. At c=0 this reduces exactly to the 2PL score Σ w·slope·(y−P) / Σ w·slope²P(1−P).
     for (let it = 0; it < 15; it++) {
         let score = 0, info = 0;
         for (let j = lo; j < hi; j++) {
             const w = gaussianWeight((attempts[j].t - t0) / tau);
             if (w <= 0) continue;
-            const slope = attempts[j].slope;
-            const p = sigmoid(slope * (R - attempts[j].x) + LOGIT_CALIBRATION);
-            score += w * slope * (attempts[j].correct - p);
-            info += w * slope * slope * p * (1 - p);
+            const slope = attempts[j].slope, c = attempts[j].floor;
+            const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
+            let p = c + (1 - c) * praw;
+            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+            const g = (1 - c) * slope * praw * (1 - praw);   // dP/dR
+            score += w * (attempts[j].correct - p) * g / (p * (1 - p));
+            info += w * g * g / (p * (1 - p));
         }
         if (info < 1e-9) break;
         let step = score / info;
@@ -257,14 +275,17 @@ function poolLogistic(attempts, t0, tau) {
         if (Math.abs(step) < 1e-6) break;
     }
 
-    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = slope_j²·p(1−p).
+    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = (dP/dR)²/(P(1−P)) (3PL Fisher info).
     let A = 0, B = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
-        const slope = attempts[j].slope;
-        const p = sigmoid(slope * (R - attempts[j].x) + LOGIT_CALIBRATION);
-        const v = slope * slope * p * (1 - p);
+        const slope = attempts[j].slope, c = attempts[j].floor;
+        const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
+        let p = c + (1 - c) * praw;
+        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+        const g = (1 - c) * slope * praw * (1 - praw);
+        const v = g * g / (p * (1 - p));
         A += w * v; B += w * w * v;
     }
     const se = A > 0 ? Math.sqrt(B) / A : Infinity;
@@ -306,7 +327,12 @@ function flattenAttempts(answerHistory) {
             } else {
                 return null;
             }
-            return { t: a.date, x, slope, correct: a.correct ? 1 : 0 };
+            // 3PL guessing floor (problemFloor, shipped per problem). Legacy entries
+            // without it fall back to 0 → the 2PL curve, unchanged behaviour.
+            const flr = Math.min(Math.max(
+                typeof a.problemFloor === 'number' ? a.problemFloor : 0, 0), FLOOR_MAX);
+            return { t: a.date, x, slope, correct: a.correct ? 1 : 0,
+                     floor: flr, kappa: clearKappa(flr) };
         })
         .filter(Boolean)
         .sort((a, b) => a.t - b.t);

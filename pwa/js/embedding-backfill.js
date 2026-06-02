@@ -54,7 +54,7 @@ const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
 // correct stay, so the attempt still counts toward activity/time/solved stats.
 const PRUNE_STRIP_FIELDS = [
     'problemRating', 'problemRawRating', 'problemRank', 'problemSlope',
-    'problemQuality', 'embedding', 'pickedEmbedding', 'pickedCellIndex',
+    'problemQuality', 'problemFloor', 'embedding', 'pickedEmbedding', 'pickedCellIndex',
 ];
 // Old per-version flag keys; cleared on first run after the upgrade so they
 // don't linger in users' localStorage. The new scheme stores a content-hash
@@ -338,6 +338,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 const embeddingByProblem = new Map();
                 const ratingByProblem = new Map();
                 const slopeByProblem = new Map();
+                const floorByProblem = new Map();
                 for (const item of items) {
                     const tid = item.filename.replace(/\.sgf$/, '');
                     if (Array.isArray(item.embedding)) {
@@ -349,6 +350,9 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                     }
                     if (typeof item.slope === 'number') {
                         slopeByProblem.set(tid, item.slope);
+                    }
+                    if (typeof item.floor === 'number') {
+                        floorByProblem.set(tid, item.floor);
                     }
                 }
 
@@ -377,6 +381,13 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                             const newSlope = slopeByProblem.get(a.problemId);
                             if (a.problemSlope !== newSlope) a.problemSlope = newSlope;
                             a.problemQuality = slopeToQuality(newSlope);
+                        }
+                        // Per-problem 3PL guessing floor c_p (rank estimator's
+                        // success-curve lower asymptote). Fills pre-existing entries
+                        // the first time `floor` ships.
+                        if (floorByProblem.has(a.problemId)) {
+                            const newFloor = floorByProblem.get(a.problemId);
+                            if (a.problemFloor !== newFloor) a.problemFloor = newFloor;
                         }
                     }
                 }

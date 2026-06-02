@@ -412,20 +412,21 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
 
 
 def compute_ratings_hash(metadata):
-    """Stable content hash over (tsumego_id, rating, slope) triples for one size.
+    """Stable content hash over (tsumego_id, rating, slope, floor) tuples for one size.
 
     The PWA reads this from embedding_meta.json (ratings_version[size]) and
-    refreshes answerHistory.problemRating / problemSlope from per-shard
-    metadata.json whenever the hash changes. Slope is included so a rating-stable
-    re-fit that only moved the discriminations still bumps the version and
-    backfills problemSlope. Rounded to 6 decimals so floating-point noise doesn't
-    trigger spurious backfills."""
-    triples = sorted(
+    refreshes answerHistory.problemRating / problemSlope / problemFloor from
+    per-shard metadata.json whenever the hash changes. Slope and floor are included
+    so a rating-stable re-fit that only moved the discriminations or guessing floors
+    still bumps the version and backfills them. Rounded to 6 decimals so
+    floating-point noise doesn't trigger spurious backfills."""
+    tuples = sorted(
         (item["filename"].split(".")[0], round(float(item["rating"]), 6),
-         round(float(item.get("slope", 0.0)), 6))
+         round(float(item.get("slope", 0.0)), 6),
+         round(float(item.get("floor", 0.0)), 6))
         for item in metadata
     )
-    payload = json.dumps(triples, separators=(",", ":"))
+    payload = json.dumps(tuples, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -553,6 +554,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     expensive SGF reparse + zip/bin emission. Inputs:
       - tsumego_ratings_final.csv (rating drives grouping + metadata + min/max)
       - tsumego_quality_final.csv (metadata `quality`)
+      - tsumego_floor_final.csv (metadata `floor`; absent on older backends)
       - embeddings/joint/per_problem.csv (correct-cell `embedding` in metadata)
       - embedding_version (covers per_cell/*.npz content, which is regenerated
         with the embedding refit — those files are tid-named but their CONTENTS
@@ -565,6 +567,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     rdir = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     _hash_file_into(h, os.path.join(rdir, "tsumego_ratings_final.csv"))
     _hash_file_into(h, os.path.join(rdir, "tsumego_quality_final.csv"))
+    _hash_file_into(h, os.path.join(rdir, "tsumego_floor_final.csv"))
     embed_dir, _ = _embeddings_dir(board_size)
     if embed_dir:
         _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
@@ -664,7 +667,20 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
                  tsumego_slope_df['quality'].astype(float)))
         if tsumego_slope_df is not None else {})
 
-    print(f"  ratings: {len(tsumego_ratings_map)}, slopes: {len(tsumego_slope_map)}")
+    # 2b. Floor map: the per-problem 3PL guessing floor c_p (the `floor` column in
+    # tsumego_floor_final.csv, written by train_rating_v2 from the bot ladder).
+    # Shipped RAW as `floor`; the client uses it as the lower asymptote of the
+    # per-attempt success curve: P = floor + (1-floor)·σ(slope·(R-rank)+κ(floor)).
+    # Absent (older backend) → 0.0, i.e. the client falls back to the 2PL.
+    floor_csv = os.path.join(RATINGS_DIR, "tsumego_floor_final.csv")
+    tsumego_floor_df = pd.read_csv(floor_csv) if os.path.exists(floor_csv) else None
+    tsumego_floor_map = (
+        dict(zip(tsumego_floor_df['tsumego_id'],
+                 tsumego_floor_df['floor'].astype(float)))
+        if tsumego_floor_df is not None else {})
+
+    print(f"  ratings: {len(tsumego_ratings_map)}, slopes: {len(tsumego_slope_map)}, "
+          f"floors: {len(tsumego_floor_map)}")
     print(f"  loading joint embeddings (correct-cell field for metadata.json) ...")
     embedding_map, embedding_meta = load_embeddings(board_size)
 
@@ -679,10 +695,12 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         if tsumego_id in tsumego_ratings_map:
             rating = tsumego_ratings_map[tsumego_id]
             slope = tsumego_slope_map.get(tsumego_id, 0.0)
+            floor = tsumego_floor_map.get(tsumego_id, 0.0)
             item = {
                 "filename": filename,
                 "rating": rating,
                 "slope": slope,
+                "floor": floor,
             }
             if embedding_map is not None:
                 emb = embedding_map.get(tsumego_id)
