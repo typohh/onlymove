@@ -1421,10 +1421,21 @@ function buildTimeUsageChart(history = state.answerHistory) {
     const hiVals = [];
     for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mid));
     hiVals.sort((a, b) => a - b);
-    const yHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
+    const rawHigh = Math.max(quantile(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;
-    const useMin = yHigh >= 90; // switch s → min once the axis tops 90s
-    const fmt = (s) => useMin ? `${(s / 60).toFixed(s / 60 < 10 ? 1 : 0)}m` : `${Math.round(s)}s`;
+    // Nice y ticks: every tick lands on a whole number of seconds OR a whole
+    // number of minutes — never a fractional minute (the old `2.5m` bug). Pick
+    // the smallest "nice" step ≥ rawHigh/4 off a seconds→minutes ladder, then
+    // snap the ceiling up to a multiple of it so 0, step, 2·step, … are round.
+    // Minute steps are multiples of 60, so when we switch to minute labels every
+    // tick divides evenly; sub-minute steps stay in seconds.
+    const STEP_LADDER = [5, 10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 3600, 7200];
+    const step = STEP_LADDER.find(s => s >= rawHigh / 4) ?? STEP_LADDER[STEP_LADDER.length - 1];
+    const yHigh = Math.ceil(rawHigh / step) * step;
+    const useMin = step % 60 === 0; // minute steps ⇒ whole-minute ticks
+    const fmt = (s) => useMin ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`;
+    const yTickVals = [];
+    for (let v = 0; v <= yHigh + 1e-6; v += step) yTickVals.push(v);
 
     const container = document.createElement('div');
     container.className = 'stats-chart';
@@ -1439,8 +1450,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const yaxis = document.createElement('div');
     yaxis.className = 'stats-chart-yaxis';
-    const leftLabels = [];
-    for (let i = 0; i <= 4; i++) leftLabels.push(fmt(yHigh * (i / 4)));
+    const leftLabels = yTickVals.map(fmt);
     const widest = arr => arr.reduce((a, b) => (b.length > a.length ? b : a), '');
     const spacer = document.createElement('span');
     spacer.className = 'y-spacer';
@@ -1450,11 +1460,10 @@ function buildTimeUsageChart(history = state.answerHistory) {
     spacer.textContent = widest(leftLabels);
     yaxis.append(spacer);
     const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
-    for (let i = 0; i <= 4; i++) {
-        const v = yHigh * (i / 4);
+    for (let i = 0; i < yTickVals.length; i++) {
         const tick = document.createElement('div');
         tick.className = 'y-tick';
-        tick.style.top = `${topPct(v)}%`;
+        tick.style.top = `${topPct(yTickVals[i])}%`;
         tick.textContent = leftLabels[i];
         yaxis.append(tick);
     }
@@ -1471,18 +1480,31 @@ function buildTimeUsageChart(history = state.answerHistory) {
     svg.setAttribute('role', 'img');
     svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
 
-    // Horizontal grid at each y-tick.
-    for (let i = 0; i <= 4; i++) {
-        const y = yOf(yHigh * (i / 4));
+    const gridLine = (x1, y1, x2, y2) => {
         const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', 0);
-        line.setAttribute('x2', W);
-        line.setAttribute('y1', y);
-        line.setAttribute('y2', y);
+        line.setAttribute('x1', x1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y1', y1);
+        line.setAttribute('y2', y2);
         line.setAttribute('stroke', 'rgba(128,128,128,0.35)');
         line.setAttribute('stroke-width', '0.5');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
         svg.appendChild(line);
+    };
+
+    // Horizontal grid at each y-tick.
+    for (const v of yTickVals) {
+        const y = yOf(v);
+        gridLine(0, y, W, y);
+    }
+
+    // Evenly-spaced x-axis date ticks, each with a matching vertical grid line.
+    const N_XTICKS = 3;
+    const xTicks = [];
+    for (let i = 0; i < N_XTICKS; i++) xTicks.push(t0 + tSpan * (i / (N_XTICKS - 1)));
+    for (const t of xTicks) {
+        const x = xOf(t);
+        gridLine(x, 0, x, H);
     }
 
     const SERIES = [
@@ -1540,9 +1562,29 @@ function buildTimeUsageChart(history = state.answerHistory) {
     plotMain.className = 'stats-chart-plot-main';
     plotMain.append(yaxis, svgWrap);
 
+    // Date labels under the plot, aligned to the vertical grid lines above. A
+    // hidden spacer matching the widest y-label (plus the plot-row gap) offsets
+    // the track so it sits flush under the SVG, then each label is positioned by
+    // its tick's x-fraction (ends anchored inward so they don't overflow).
+    const fmtDate = (t) => new Date(t).toISOString().slice(5, 10); // MM-DD
     const xaxis = document.createElement('div');
-    xaxis.className = 'stats-chart-xaxis';
-    xaxis.textContent = new Date(t1).toISOString().slice(0, 10);
+    xaxis.className = 'stats-chart-xaxis stats-chart-xaxis--ticks';
+    const xSpacer = document.createElement('span');
+    xSpacer.className = 'y-spacer';
+    xSpacer.textContent = widest(leftLabels);
+    const xTrack = document.createElement('div');
+    xTrack.className = 'stats-chart-xaxis-track';
+    for (let i = 0; i < xTicks.length; i++) {
+        const lbl = document.createElement('span');
+        lbl.className = 'x-tick';
+        lbl.style.left = `${(xOf(xTicks[i]) / W) * 100}%`;
+        lbl.style.transform = i === 0 ? 'translateX(0)'
+            : i === xTicks.length - 1 ? 'translateX(-100%)'
+            : 'translateX(-50%)';
+        lbl.textContent = fmtDate(xTicks[i]);
+        xTrack.append(lbl);
+    }
+    xaxis.append(xSpacer, xTrack);
 
     plotRow.append(plotMain, xaxis);
     container.append(plotRow);

@@ -610,6 +610,32 @@ body {
     text-align: right;
 }
 
+/* Multi-tick variant (Time chart): date labels aligned to the vertical grid. */
+.stats-chart-xaxis.stats-chart-xaxis--ticks {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4em;
+    text-align: left;
+}
+
+.stats-chart-xaxis--ticks .y-spacer {
+    flex: 0 0 auto;
+    visibility: hidden;
+}
+
+.stats-chart-xaxis-track {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 1.2em;
+}
+
+.stats-chart-xaxis-track .x-tick {
+    position: absolute;
+    top: 0;
+    white-space: nowrap;
+}
+
 .stats-chart-legend {
     display: flex;
     flex-wrap: wrap;
