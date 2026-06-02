@@ -400,10 +400,11 @@ async function computeServerStats(env) {
   const bySizeMap = new Map(); // size → { attempts, wins, users:Set }
   // Solving/review time is summarised PER USER (one sample per user) rather than
   // per attempt, so heavy users don't dominate the distribution. Solving time is
-  // per-attempt, so we keep every sample. Review time is CUMULATIVE across a
-  // problem's repeats (each repeat re-reports the running total), so per (user,
-  // problem) we keep only the last instance — the final cumulative value — and
-  // earlier repeats are dropped to avoid massive double counting.
+  // per-attempt, so we keep every sample. Review time is only meaningful on
+  // REPEAT (review) attempts, so we gate on is_repeat. It is also CUMULATIVE
+  // across a problem's repeats (each repeat re-reports the running total), so per
+  // (user, problem) we keep only the last instance — the final cumulative value —
+  // and earlier repeats are dropped to avoid massive double counting.
   const userSolve = new Map();   // user → number[] of time_used (ms)
   const userReview = new Map();  // user → Map<problem, { t, at }> last cumulative review_time
   const perUserActivity = new Map(); // user → { attempts, days:Set }
@@ -443,7 +444,7 @@ async function computeServerStats(env) {
       if (!arr) { arr = []; userSolve.set(r.user_id, arr); }
       arr.push(r.time_used);
     }
-    if (r.review_time != null && r.review_time > 0) {
+    if (r.is_repeat && r.review_time != null && r.review_time > 0) {
       let m = userReview.get(r.user_id);
       if (!m) { m = new Map(); userReview.set(r.user_id, m); }
       const prev = m.get(r.problem);
