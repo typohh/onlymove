@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory } from './state.js';
 import { runMigrations } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -176,11 +176,11 @@ function showConfirm(message) {
 }
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
-import { loadRatingRankMap } from './rank-decomposition.js';
+import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading } from './overlays.js';
-import { APP_MODES } from './constants.js';
+import { APP_MODES, TOTAL_RANKS } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -634,6 +634,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     // new problems before the weakness model has data. Curve must be cached
     // first (above) so the rank refresh can run.
     backfillMissingEmbeddings();
+
+    // One-time rank re-anchor for users whose momentum was corrupted by the a_p²
+    // scalingFactor bug (see repairCorruptedMomentum_v3 in state.js). The inverted
+    // rank update may have driven their front-page rank to an extreme, so re-anchor
+    // it to the principled skill-decomposition estimate — the same quantity the
+    // Rank tab shows — now that M and the merged history are available. Healthy
+    // users never set the flag and are untouched; users with too little history
+    // (decomposition returns null) keep their current rank and re-converge on play.
+    if (localStorage.getItem('rankNeedsReanchor_v3')) {
+        try {
+            const decomp = computeRankDecomposition(getMergedAnswerHistory());
+            const skill = decomp && decomp.summary ? decomp.summary.currentSkill : null;
+            if (typeof skill === 'number' && Number.isFinite(skill)) {
+                updateUserRank(Math.min(1, Math.max(0, skill / TOTAL_RANKS)));
+            }
+        } catch (e) {
+            console.warn('rank re-anchor after momentum repair failed:', e);
+        }
+        localStorage.removeItem('rankNeedsReanchor_v3');
+    }
 
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);

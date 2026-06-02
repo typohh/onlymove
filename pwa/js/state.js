@@ -4,6 +4,23 @@ import { APP_MODES } from './constants.js';
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
 
+// Momentum is the per-attempt step-size multiplier of the front-page rank loop
+// (user-stats.js). It must stay positive and bounded: the failure recurrence
+// m ← m − sf·(2m−1)/3 has its stable fixed point at 0.5, and with the now-bounded
+// scalingFactor healthy play self-limits momentum to well under ~150. A negative
+// or runaway value inverts/explodes the rank update (wins lower the rank, losses
+// raise it). The unambiguous corruption signal is a NEGATIVE momentum (the
+// oscillator's sign flip); MOMENTUM_MAX sits clearly above any legitimate value so
+// the one-time reset never clobbers a genuine fast-improver, while still catching
+// positive runaway — the a_p² scalingFactor bug (see repairCorruptedMomentum_v3).
+const DEFAULT_MOMENTUM = 30;
+export const MOMENTUM_MIN = 0.5;
+export const MOMENTUM_MAX = 300;
+export function clampMomentum(m) {
+    if (typeof m !== 'number' || !Number.isFinite(m)) return DEFAULT_MOMENTUM;
+    return Math.min(MOMENTUM_MAX, Math.max(MOMENTUM_MIN, m));
+}
+
 // --- localStorage migration ---
 // Old layout stored a single value per key (e.g. userRank: "0.5",
 // problemHistory: "[...]") because the app only supported 9x9.
@@ -118,6 +135,36 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.removeItem('modelParams');
     localStorage.removeItem('adamState');
     localStorage.setItem('recallRetentionModelMigrated_v5', 'true');
+})();
+
+// --- Repair momentum corrupted by the a_p² scalingFactor bug ---
+// The front-page momentum rank loop in user-stats.js was written when `quality`
+// was a normalized [0,1] weight, so its scalingFactor stayed ≤ 1. The v2 rating
+// migration redefined `quality` as the RAW Fisher-information selection weight
+// a_p² (median ~6, up to ~20). Fed into the failure recurrence
+// m ← m − sf·(2m−1)/3 — stable only for sf < 3 — momentum became an unstable
+// oscillator: it diverged and flipped sign every wrong answer, and a NEGATIVE
+// momentum inverts the rank update (a win lowers the rank, a loss raises it),
+// producing the wild 8d↔50k swings users reported. user-stats.js now bounds
+// scalingFactor and clamps momentum every step, but momentum already persisted in
+// a corrupt state must be reset once. A negative, non-finite, or runaway
+// (> MOMENTUM_MAX) value is unambiguously corrupt → reset to default and flag so
+// main.js can also re-anchor the (likely wrecked) rank from the user's history.
+(function repairCorruptedMomentum_v3() {
+    if (localStorage.getItem('momentumCorruptionRepaired_v3')) return;
+    const raw = localStorage.getItem('momentum');
+    if (raw !== null) {
+        let m = null;
+        try { m = JSON.parse(raw); } catch { m = parseFloat(raw); }
+        if (typeof m !== 'number' || !Number.isFinite(m) || m <= 0 || m > MOMENTUM_MAX) {
+            localStorage.setItem('momentum', JSON.stringify(DEFAULT_MOMENTUM));
+            // Rank may have been driven to an extreme by the inverted update;
+            // main.js re-anchors it to the skill decomposition (needs M + the
+            // merged history, both only available after async init).
+            localStorage.setItem('rankNeedsReanchor_v3', 'true');
+        }
+    }
+    localStorage.setItem('momentumCorruptionRepaired_v3', 'true');
 })();
 
 // --- Board size + per-size backing buckets ---
@@ -256,9 +303,9 @@ const getOrCreateUserId = () => {
     return userId;
 };
 
-// Defaults applied when a size's bucket is empty.
+// Defaults applied when a size's bucket is empty. (DEFAULT_MOMENTUM and the
+// momentum bounds are defined at the top of the file, alongside clampMomentum.)
 const DEFAULT_USER_RANK = 0;
-const DEFAULT_MOMENTUM = 30;
 
 export const state = {
     appMode: APP_MODES.SOLVING,

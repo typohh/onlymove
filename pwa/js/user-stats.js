@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending, clampMomentum } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults, MODEL_INDICES } from './model.js';
@@ -169,7 +169,18 @@ export async function updateUserStats(isCorrect, {
     const oldRank = state.userRank;
     let rank = oldRank;
     let momentum = state.momentum;
-    const scalingFactor = (currentProblem.quality || 0.5) * (currentProblem.isRepeat ? 1 / 5 : 1);
+    // `currentProblem.quality` is now the RAW 2PL Fisher-information selection
+    // weight a_p² (median ~6, up to ~20), NOT the normalized [0,1] quality this
+    // momentum loop was designed for. Feeding it raw makes scalingFactor ≫ 1,
+    // which turns the failure recurrence momentum ← momentum − sf·(2·momentum−1)/3
+    // into an unstable, sign-flipping oscillator (stable only for sf < 3): momentum
+    // diverges and goes negative, after which a win lowers the rank and a loss
+    // raises it (the wild 8d↔50k swings). Bound it back to [0,1] so the loop is the
+    // designed contraction. (NB: a_p² saturates the clamp for almost all problems,
+    // so this no longer modulates the step much — a proper [0,1] confidence mapping
+    // of a_p could restore that, but stability is the priority here.)
+    const qualityConfidence = Math.min(1, Math.max(0, currentProblem.quality || 0.5));
+    const scalingFactor = qualityConfidence * (currentProblem.isRepeat ? 1 / 5 : 1);
 
     if (isCorrect) {
         const maxIncrease = (1.0 - rank) / 9;
@@ -187,6 +198,10 @@ export async function updateUserStats(isCorrect, {
         momentum -= scalingFactor * (momentum - (momentum + 1) / 3);
         rank = Math.max(0, rank - 4 * scalingFactor * (momentum / 600));
     }
+
+    // Guardrail: keep momentum positive and bounded every step so a future
+    // mis-scaled input can never let the recurrence run away again.
+    momentum = clampMomentum(momentum);
 
     updateUserRank(rank);
     updateMomentum(momentum);
