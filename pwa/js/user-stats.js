@@ -3,7 +3,7 @@
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
-import { calculateAndStoreStatsResults } from './model.js';
+import { calculateAndStoreStatsResults, MODEL_INDICES } from './model.js';
 import { trainWeakness } from './weakness.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
@@ -81,7 +81,7 @@ function patchPickedEmbedding(problemId, attemptDate, embedding) {
     }
 }
 
-export function updateUserStats(isCorrect, {
+export async function updateUserStats(isCorrect, {
     pickedCellIndex = null,
     pickedEmbedding = null,
     pickedEmbeddingPromise = null,
@@ -195,12 +195,30 @@ export function updateUserStats(isCorrect, {
     if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
     else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
-    setTimeout(calculateAndStoreStatsResults, 1000); // a bit crude, but animations should be completed in 1 second.
-    setTimeout(trainWeakness, 1100);  // run shortly after the recall model so they don't compete for the main thread
+    // Time-efficiency delta — the time analogue of rankChange. The recall
+    // model's cold-solve logit already carries a per-user TIME_SOLVING
+    // coefficient with difficulty/review/size partialled out; that coefficient
+    // IS the model's estimate of "does this user convert time into correct
+    // answers". So we read it, fold in this attempt by retraining, and read it
+    // again — the shift is the efficiency gain/loss for the attempt. The
+    // retrain runs INLINE here (it used to be a deferred setTimeout) so the
+    // before/after bracket exactly this attempt and the value is ready for the
+    // result overlay. Raw param (not the SE-scaled statsResults figure) so the
+    // unit is stable across retrains — the per-minute rescale would otherwise
+    // leak into the delta.
+    const M = MODEL_INDICES;
+    const numParams = Object.keys(M).length;
+    const modelReady = (p) => Array.isArray(p) && p.length === numParams;
+    const effBefore = modelReady(state.modelParams) ? state.modelParams[M.TIME_SOLVING] : null;
+    await calculateAndStoreStatsResults();
+    const effAfter = modelReady(state.modelParams) ? state.modelParams[M.TIME_SOLVING] : null;
+    const timeEfficiencyChange = (effBefore !== null && effAfter !== null) ? (effAfter - effBefore) : 0;
+
+    setTimeout(trainWeakness, 100);  // weakness model trains off the merged history; deferred so it never blocks the overlay
     // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
     // active user is suppressed by the cron anyway, so per-attempt replace-all
     // writes were pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
+    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, timeEfficiencyChange };
 }

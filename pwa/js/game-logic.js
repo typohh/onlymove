@@ -44,10 +44,10 @@ const buildReportPayload = (success, x, y) => {
     };
 };
 
-const handleCorrectAnswer = (x, y) => {
+const handleCorrectAnswer = async (x, y) => {
     setAppMode(APP_MODES.SOLVING);
     sendReport(buildReportPayload(true, x, y));
-    const stats = updateUserStats(true);
+    const stats = await updateUserStats(true);
 
     // Return the load promise so fadeOverlay holds the white screen up until
     // the next problem is actually loaded (never lifting onto an empty board).
@@ -91,7 +91,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     playStoneSound();
 
     sendReport(buildReportPayload(false, x, y));
-    const stats = updateUserStats(false, {
+    const stats = await updateUserStats(false, {
         pickedCellIndex: moveIndex,
         pickedEmbeddingPromise,
     });
