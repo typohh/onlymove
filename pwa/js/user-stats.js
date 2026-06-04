@@ -6,6 +6,29 @@ import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 
+// Per-correct-answer rank gain used to asymptote to 0 as the normalized rank
+// approached 1.0 (the `(1 - rank)/9` headroom term), pinning even the strongest
+// players just under 10d and hiding the harder-than-9d tail of the corpus (≈6%
+// of 9×9 problems carry ratings that map past 9d, out to the winsor ceiling).
+// Instead the step decays toward 1/10th of a rank rather than 0: it slows near
+// the top but never stops, so a strong player keeps drifting up — slowly — into
+// the extrapolated rank range above 9d. One "rank" is 1/TOTAL_RANKS in
+// normalized units. Below ~9d this floor is far below the headroom term, so
+// normal players are unaffected.
+const MIN_RANK_INCREASE_PER_CORRECT = (1 / TOTAL_RANKS) / 10;
+
+// Smoothly lower-bound the headroom term at MIN_RANK_INCREASE_PER_CORRECT.
+// A plain Math.max(headroom, floor) is only C0 — it kinks where the two meet
+// (slope jumps from -1/9 to 0), so the step stops shrinking abruptly. This is a
+// C-infinity smooth maximum (the "soft-absolute" form): it tracks `headroom`
+// when headroom >> floor, eases into `floor` as headroom drops through it, and
+// asymptotes to `floor` from above as headroom goes negative (rank past 1.0).
+// eps = floor^2 sets the corner rounding (value at the join is ~1.5*floor).
+function softFloor(headroom, floor) {
+    const d = headroom - floor;
+    return 0.5 * (headroom + floor + Math.sqrt(d * d + floor * floor));
+}
+
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     try {
         const problemFilename = state.problemHistory[0].filename;
@@ -196,7 +219,7 @@ export async function updateUserStats(isCorrect, {
     const scalingFactor = qualityConfidence * (currentProblem.isRepeat ? 1 / 5 : 1);
 
     if (isCorrect) {
-        const maxIncrease = (1.0 - rank) / 9;
+        const maxIncrease = softFloor((1.0 - rank) / 9, MIN_RANK_INCREASE_PER_CORRECT);
         let intendedRatingIncrease = scalingFactor * momentum / 600;
         let intendedMomentumIncrease = scalingFactor * 0.1;
         if (intendedRatingIncrease > maxIncrease) {
