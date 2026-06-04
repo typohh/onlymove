@@ -46,23 +46,6 @@ function createOverlayContent(stats, message, textColor) {
         }
     }
 
-    // Time-efficiency delta — the shift in the recall model's per-user time
-    // coefficient from folding in this attempt (see updateUserStats). Shown
-    // beneath the rank delta; the ·100 is a display convention over the model's
-    // log-odds time slope, not a literal percentage.
-    if (stats && stats.timeEfficiencyChange && isFinite(stats.timeEfficiencyChange)) {
-        const teInUnits = stats.timeEfficiencyChange * 100;
-        const teElement = document.createElement('div');
-        Object.assign(teElement.style, {
-            fontSize: `${boardContainer.offsetWidth / 25}px`,
-            marginBottom: '20px',
-        });
-        const sign = teInUnits > 0 ? '+' : '';
-        teElement.textContent = getTerm('timeEfficiencyFormat')
-            .replace('{change}', `${sign}${teInUnits.toFixed(3)}%`);
-        container.appendChild(teElement);
-    }
-
     if (message) {
         const messageElement = document.createElement('div');
         Object.assign(messageElement.style, {

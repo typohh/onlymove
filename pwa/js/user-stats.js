@@ -3,7 +3,7 @@
 import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending, clampMomentum } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
-import { calculateAndStoreStatsResults, MODEL_INDICES } from './model.js';
+import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
@@ -52,6 +52,19 @@ export async function recordShareEvent({ type, problemId = null, referrer = null
         });
     } catch (error) {
         console.error('Failed to record share event:', error);
+    }
+}
+
+// Run heavy, non-urgent work (model retraining) when the main thread is idle so
+// it never competes with the result overlay's animation or the next-problem
+// load. Falls back to a short timer where requestIdleCallback is unavailable
+// (e.g. older Safari). The `timeout` bounds the wait so it still runs if the
+// page never reports an idle period.
+function scheduleIdle(fn, timeout = 2000) {
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => fn(), { timeout });
+    } else {
+        setTimeout(fn, 100);
     }
 }
 
@@ -214,30 +227,21 @@ export async function updateUserStats(isCorrect, {
     if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
     else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
-    // Time-efficiency delta — the time analogue of rankChange. The recall
-    // model's cold-solve logit already carries a per-user TIME_SOLVING
-    // coefficient with difficulty/review/size partialled out; that coefficient
-    // IS the model's estimate of "does this user convert time into correct
-    // answers". So we read it, fold in this attempt by retraining, and read it
-    // again — the shift is the efficiency gain/loss for the attempt. The
-    // retrain runs INLINE here (it used to be a deferred setTimeout) so the
-    // before/after bracket exactly this attempt and the value is ready for the
-    // result overlay. Raw param (not the SE-scaled statsResults figure) so the
-    // unit is stable across retrains — the per-minute rescale would otherwise
-    // leak into the delta.
-    const M = MODEL_INDICES;
-    const numParams = Object.keys(M).length;
-    const modelReady = (p) => Array.isArray(p) && p.length === numParams;
-    const effBefore = modelReady(state.modelParams) ? state.modelParams[M.TIME_SOLVING] : null;
-    await calculateAndStoreStatsResults();
-    const effAfter = modelReady(state.modelParams) ? state.modelParams[M.TIME_SOLVING] : null;
-    const timeEfficiencyChange = (effBefore !== null && effAfter !== null) ? (effAfter - effBefore) : 0;
-
-    setTimeout(trainWeakness, 100);  // weakness model trains off the merged history; deferred so it never blocks the overlay
+    // Recall + weakness models retrain off the merged history. Their training
+    // loops block the main thread (~up to 2s worst case), so we schedule them on
+    // browser idle time: requestIdleCallback fires only once the thread is free,
+    // so the work lands DURING the result overlay without janking its fade-in or
+    // the next-problem load (incorrect-path overlays sit idle while shown;
+    // correct-path runs it once the load settles). The `timeout` guarantees it
+    // still runs on a page that never goes idle. Nothing needs the fresh model
+    // before the overlay — the incorrect-path overlay message only needs stable
+    // coefficients, not this attempt folded in.
+    scheduleIdle(() => { calculateAndStoreStatsResults(); });
+    scheduleIdle(trainWeakness);
     // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
     // active user is suppressed by the cron anyway, so per-attempt replace-all
     // writes were pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, timeEfficiencyChange };
+    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
 }
