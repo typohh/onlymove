@@ -11,7 +11,7 @@ import { state, setStatsResults, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
-import { computeRankDecomposition, computeNearRankDecomposition, evaluateAt } from './rank-decomposition.js';
+import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import {
@@ -143,7 +143,13 @@ export async function showDetailedStats() {
         // explains the build delay, which is why no in-modal lazy-load / spinner
         // / pre-warm is needed anymore. The timing probabilities and rank
         // decomposition text ride with their charts.
-        const rankPane = combineChartWithText(buildRatingHistoryChart(merged), buildRankSummaryText(merged));
+        // computeRankDecomposition is the heavy part of this pane; the chart and
+        // the summary text both need it, so compute it ONCE here and pass it to
+        // both (null = too little data; both handle it).
+        const rankDecomp = computeRankDecomposition(merged);
+        const rankPane = combineChartWithText(
+            buildRatingHistoryChart(merged, rankDecomp),
+            buildRankSummaryText(merged, rankDecomp));
         const timePane = combineChartWithText(buildTimeUsageChart(merged), timingText);
 
         // Weaknesses is the default (first) page; Community is last. Empty panes
@@ -682,14 +688,16 @@ async function buildServerStatsPane(history = []) {
 // part of the Rank tab pane (computeRankDecomposition is heavy, but the whole
 // modal is constructed up front under the "constructing charts" overlay). Reads
 // state.statsResults (already computed by the time this runs).
-function buildRankSummaryText(history) {
+function buildRankSummaryText(history, decomp) {
     let rankText = '';
 
     // Two-component rank decomposition (R = skill S + form M). Gives a
     // long-term-trend number and a session-to-session swing number that can't
     // be read off the single-line smoother in the chart. See
-    // rank-decomposition.js for the model and the backfitting approach.
-    const decomp = computeRankDecomposition(history);
+    // rank-decomposition.js for the model and the backfitting approach. `decomp`
+    // is normally passed in (computed once for the whole Rank pane); fall back to
+    // computing it for any standalone caller.
+    if (decomp === undefined) decomp = computeRankDecomposition(history);
     if (decomp) {
         const { summary } = decomp;
         if (summary.currentSkill !== null) {
@@ -852,7 +860,7 @@ function chartViewBoxHeight(W) {
     return Math.round(W * ratio);
 }
 
-function buildRatingHistoryChart(history = state.answerHistory) {
+function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const entries = history
         .filter(a => typeof a.problemRank === 'number' && typeof a.date === 'number'
                      && !a.isRepeat && !a.linked)
@@ -867,7 +875,9 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
-    const decomp = computeRankDecomposition(history);
+    // Passed in by the Rank pane (computed once for both chart + summary); fall
+    // back to computing for any standalone caller.
+    if (decomp === undefined) decomp = computeRankDecomposition(history);
     const GRID_POINTS = 300;
     const Z = 1.96;
     // Half-widths in rank space: inner band = measurement uncertainty (how well
@@ -884,22 +894,6 @@ function buildRatingHistoryChart(history = state.answerHistory) {
             const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
             const e = evaluateAt(decomp, t);
             if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaUp: e.sigmaUp, sigmaDown: e.sigmaDown });
-        }
-    }
-
-    // Second line: skill re-estimated from only the attempts that were near the
-    // user's rank AT THE TIME (success-prob band). Seeded by the all-data decomp
-    // above, so the "far away" cutoff tracks the rank as it moved — see
-    // computeNearRankDecomposition. Drawn on the same axis as a thin amber line
-    // (no bands) so a divergence from the blue line flags far-from-rank attempts
-    // biasing the displayed rank. Reuses the same t-grid as the main line.
-    const nearDecomp = decomp ? computeNearRankDecomposition(history, decomp) : null;
-    const nearEvals = [];
-    if (nearDecomp) {
-        for (let i = 0; i < GRID_POINTS; i++) {
-            const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
-            const e = evaluateAt(nearDecomp, t);
-            if (e && Number.isFinite(e.S)) nearEvals.push({ t, S: e.S });
         }
     }
 
@@ -1035,7 +1029,6 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
-    const NEAR_STROKE = '#f59e0b'; // near-rank-only skill line (amber)
 
     // Separate upper/lower half-widths so the outer band can be asymmetric. The
     // top edge runs left→right at S + upHalf, the bottom edge runs right→left at
@@ -1077,23 +1070,6 @@ function buildRatingHistoryChart(history = state.answerHistory) {
         svg.appendChild(skillLine);
     }
 
-    // Near-rank-only skill line, drawn on top of the blue line/bands. Thinner and
-    // dashed so it reads as a comparison overlay, not a second primary series.
-    if (nearEvals.length >= 2) {
-        const nearPts = nearEvals
-            .map(e => `${xOf(e.t).toFixed(1)},${yOf(e.S).toFixed(1)}`)
-            .join(' ');
-        const nearLine = document.createElementNS(SVG_NS, 'polyline');
-        nearLine.setAttribute('points', nearPts);
-        nearLine.setAttribute('fill', 'none');
-        nearLine.setAttribute('stroke', NEAR_STROKE);
-        nearLine.setAttribute('stroke-width', '1.5');
-        nearLine.setAttribute('stroke-dasharray', '4 3');
-        nearLine.setAttribute('stroke-linejoin', 'round');
-        nearLine.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(nearLine);
-    }
-
     svgWrap.append(svg);
 
     // y-axis + SVG share one row whose height is exactly the SVG height, so the
@@ -1127,9 +1103,6 @@ function buildRatingHistoryChart(history = state.answerHistory) {
             { kind: 'band', color: SKILL_FILL_INNER, text: getTerm('statsLegend95Confidence') },
             { kind: 'band', color: SKILL_FILL_OUTER, text: getTerm('statsLegendDailyVariance') },
         );
-        if (nearEvals.length >= 2) {
-            legendItems.push({ kind: 'line', color: NEAR_STROKE, text: getTerm('statsLegendRankNearOnly') });
-        }
     }
     for (const item of legendItems) {
         const el = document.createElement('span');

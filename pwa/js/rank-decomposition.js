@@ -496,11 +496,11 @@ function globalPerformanceSigma(resid) {
     };
 }
 
-export function computeRankDecomposition(answerHistory) {
-    // No single active curve: flattenAttempts maps each attempt through its own
-    // size's M, so a merged 9x9+13x13 history pools on the internal-rank axis.
-    // Attempts whose size curve is missing are dropped there.
-    const attempts = flattenAttempts(answerHistory);
+// Core decomposition from an already-flattened, time-sorted attempt array — the
+// heavy lifting (wide skill grid, form residuals, global swing, summary). Both
+// the near-rank filter's seed pass and the final official pass route through
+// here. Returns null below MIN_ATTEMPTS.
+function decompose(attempts) {
     if (attempts.length < MIN_ATTEMPTS) return null;
 
     // Coarse wide track (for residual interpolation only) + per-attempt form
@@ -543,19 +543,23 @@ export function computeRankDecomposition(answerHistory) {
     return decomp;
 }
 
-// "Near-rank-only" skill curve: the same decomposition re-estimated after
-// dropping attempts that were far from the user's rank AT THE TIME they were
-// attempted. This is a seeded one-pass fixed point, NOT a circular filter:
-//   1. baseDecomp = computeRankDecomposition(full history) is the seed S0(t),
-//      estimated from the win/loss sequence alone (independent of any distance
-//      filter).
+// The official skill decomposition — skill line, 95% measurement CI and the
+// daily-variance band — computed from NEAR-RANK attempts only. Attempts taken
+// far from the user's rank carry systematic bias: a strong user's lucky
+// above-rank clears over-credit skill, and the guessing floor inflates far-below
+// clears, both of which distort the level AND fatten the residual that feeds the
+// daily-variance band. So we drop them before estimating. This is a seeded
+// one-pass fixed point, NOT a circular filter:
+//   1. Seed S0(t): the wide-kernel skill over the FULL history, from the win/loss
+//      sequence alone (independent of any distance filter). Only S0 is needed to
+//      measure distance, so the seed skips the resid/σ machinery.
 //   2. Each attempt is scored against the CONTEMPORANEOUS seed rank S0(t_attempt)
-//      (evaluateAt) — not the user's current rank — so the "what counts as far"
-//      threshold tracks the rank as it moved.
-//   3. Re-run the decomposition on the survivors → S1(t).
-// One pass suffices: the band drops exactly the low-Fisher-information attempts
-// the estimator already down-weights, so S1 ≈ S0 unless far-from-rank problems
-// were genuinely biasing the displayed rank — which is the whole diagnostic.
+//      — not the user's current rank — so "what counts as far" tracks the rank as
+//      it moved.
+//   3. The decomposition is re-run on the survivors → the official curve + bands.
+// One pass suffices: the filter drops exactly the low-Fisher-information attempts
+// the estimator already down-weights, so the result moves from the full-history
+// estimate only where far-from-rank attempts were genuinely biasing it.
 //
 // "Far" is measured in the SUCCESS-CURVE'S OWN LATENT z = slope·(S0 − x), NOT in
 // probability. z = 0 ⟺ problem exactly at rank ⟺ P = 0.8 (κ is defined to make
@@ -564,26 +568,33 @@ export function computeRankDecomposition(answerHistory) {
 // the ceiling, so equal ΔP means unequal rank gaps up vs down) and the floor c
 // squashes the low end (P→c, not 0) per-problem. z is floor-independent (c only
 // rescales P, it doesn't move z=0) and slope-aware (a sharp problem decides at a
-// smaller rank gap than a flat one — genuinely "farther" at equal Δrank), which
-// is the property the slope-scaled band was chosen for. We take the easy-side
-// edge as a single probability knob pHi and MIRROR it in z: keep
+// smaller rank gap than a flat one — genuinely "farther" at equal Δrank). We take
+// the easy-side edge as a single probability knob pHi and MIRROR it in z: keep
 //   |slope·(S0 − x)| ≤ L,   L = logit(pHi) − logit(0.8)
-// pHi = 0.95 ⇒ L ≈ 1.56. (The old asymmetric [0.5, 0.95] P-band was only
-// coincidentally near-symmetric in z, and broke once c ≠ 0.)
-// Returns null when there's no seed or too few survivors (caller hides the line).
+// pHi = 0.95 ⇒ L ≈ 1.56.
+//
+// If too few attempts survive the filter (a short or very erratic history), fall
+// back to the unfiltered decomposition rather than blanking the chart.
 const NEAR_RANK_P_HI = 0.95;
 const LOGIT_80 = Math.log(0.8 / 0.2);
-export function computeNearRankDecomposition(answerHistory, baseDecomp,
-                                             pHi = NEAR_RANK_P_HI) {
-    if (!baseDecomp) return null;
-    const L = Math.log(pHi / (1 - pHi)) - LOGIT_80;   // half-width in success-curve logits
-    const kept = [];
-    for (const a of flattenAttempts(answerHistory)) {
-        const e = evaluateAt(baseDecomp, a.t);
-        if (!e || !Number.isFinite(e.S)) continue;
-        if (Math.abs(a.slope * (e.S - a.x)) <= L) kept.push(a.src);
-    }
-    return computeRankDecomposition(kept);
+export function computeRankDecomposition(answerHistory) {
+    // flattenAttempts maps each attempt through its own size's M, so a merged
+    // 9x9+13x13 history pools on the internal-rank axis. Attempts whose size curve
+    // is missing are dropped there.
+    const all = flattenAttempts(answerHistory);
+    if (all.length < MIN_ATTEMPTS) return null;
+
+    // Seed: only the wide-kernel skill S0(t) is needed to measure each attempt's
+    // contemporaneous distance from rank, so the seed carries no resid track
+    // (evaluateAt's variance terms fall back to 0 on an empty resid).
+    const seed = { attempts: all, resid: [] };
+    const L = Math.log(NEAR_RANK_P_HI / (1 - NEAR_RANK_P_HI)) - LOGIT_80;
+    const near = all.filter(a => {
+        const e = evaluateAt(seed, a.t);
+        return e && Number.isFinite(e.S) && Math.abs(a.slope * (e.S - a.x)) <= L;
+    });
+
+    return decompose(near.length >= MIN_ATTEMPTS ? near : all);
 }
 
 // Continuous evaluation at arbitrary t (no buckets). The wide kernel is
