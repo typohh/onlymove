@@ -23,6 +23,32 @@ import {
     MODEL_INDICES,
 } from './model.js';
 
+// --- SVG chart primitives --------------------------------------------------
+// The three charts below all build raw SVG nodes; these helpers replace the
+// repeated createElementNS + per-attribute setAttribute boilerplate.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Create an SVG element, applying `attrs` via setAttribute. */
+function svgEl(tag, attrs) {
+    const el = document.createElementNS(SVG_NS, tag);
+    if (attrs) for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+}
+
+/** An <svg> chart canvas with a `0 0 W H` viewBox. */
+function makeChartSvg(W, H) {
+    return svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+}
+
+/** A faint horizontal gridline at `y` spanning the full chart width. */
+function hGridLine(y, W) {
+    return svgEl('line', {
+        x1: 0, x2: W, y1: y, y2: y,
+        stroke: 'rgba(128,128,128,0.35)', 'stroke-width': '0.5',
+        'vector-effect': 'non-scaling-stroke',
+    });
+}
+
 export async function showDetailedStats() {
     // The stats panel merges both board sizes: one rank, one recall model, one
     // weakness model. Build the union once and thread it through every block.
@@ -971,27 +997,14 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
     // SVG holds only the grid + dots. Aspect ratio tracks the visible modal
     // area (see chartViewBoxHeight) so the chart fits whole when scrolled to.
-    const SVG_NS = 'http://www.w3.org/2000/svg';
     const W = 400, H = chartViewBoxHeight(W);
     const xOf = t => ((t - t0) / tSpan) * W;
     const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
 
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    svg.setAttribute('role', 'img');
+    const svg = makeChartSvg(W, H);
 
-    const gridStroke = 'rgba(128,128,128,0.35)';
     for (const r of gridRanks) {
-        const y = yOf(r);
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', 0);
-        line.setAttribute('x2', W);
-        line.setAttribute('y1', y);
-        line.setAttribute('y2', y);
-        line.setAttribute('stroke', gridStroke);
-        line.setAttribute('stroke-width', '0.5');
-        line.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(line);
+        svg.appendChild(hGridLine(yOf(r), W));
     }
 
     // Per-attempt scatter: green=correct, red=wrong. Drawn UNDER the bands and
@@ -1013,13 +1026,13 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / Math.max(1, shownDots.length))).toFixed(3);
     const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
     for (const e of shownDots) {
-        const dot = document.createElementNS(SVG_NS, 'circle');
-        dot.setAttribute('cx', xOf(e.date).toFixed(1));
-        dot.setAttribute('cy', yOf(e.rankValue).toFixed(1));
-        dot.setAttribute('r', dotR);
-        dot.setAttribute('fill', e.correct ? DOT_CORRECT : DOT_WRONG);
-        dot.setAttribute('fill-opacity', dotAlpha);
-        svg.appendChild(dot);
+        svg.appendChild(svgEl('circle', {
+            cx: xOf(e.date).toFixed(1),
+            cy: yOf(e.rankValue).toFixed(1),
+            r: dotR,
+            fill: e.correct ? DOT_CORRECT : DOT_WRONG,
+            'fill-opacity': dotAlpha,
+        }));
     }
 
     // Two nested bands, drawn after the scatter so the curve + CIs sit on top.
@@ -1048,11 +1061,7 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
     if (gridEvals.length >= 2) {
         for (const [uh, dh, fill] of [[outerUp, outerDown, SKILL_FILL_OUTER], [innerHalf, innerHalf, SKILL_FILL_INNER]]) {
-            const band = document.createElementNS(SVG_NS, 'path');
-            band.setAttribute('d', bandPath(uh, dh));
-            band.setAttribute('fill', fill);
-            band.setAttribute('stroke', 'none');
-            svg.appendChild(band);
+            svg.appendChild(svgEl('path', { d: bandPath(uh, dh), fill, stroke: 'none' }));
         }
     }
 
@@ -1060,14 +1069,11 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         const skillPts = gridEvals
             .map(e => `${xOf(e.t).toFixed(1)},${yOf(e.S).toFixed(1)}`)
             .join(' ');
-        const skillLine = document.createElementNS(SVG_NS, 'polyline');
-        skillLine.setAttribute('points', skillPts);
-        skillLine.setAttribute('fill', 'none');
-        skillLine.setAttribute('stroke', SKILL_STROKE);
-        skillLine.setAttribute('stroke-width', '1.5');
-        skillLine.setAttribute('stroke-linejoin', 'round');
-        skillLine.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(skillLine);
+        svg.appendChild(svgEl('polyline', {
+            points: skillPts, fill: 'none', stroke: SKILL_STROKE,
+            'stroke-width': '1.5', 'stroke-linejoin': 'round',
+            'vector-effect': 'non-scaling-stroke',
+        }));
     }
 
     svgWrap.append(svg);
@@ -1200,27 +1206,15 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
 
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
-    const SVG_NS = 'http://www.w3.org/2000/svg';
     const W = 400, H = chartViewBoxHeight(W);
     const xOf = t => ((t - xStart) / total) * W;
     const yOf = v => (1 - v / yHigh) * H;
 
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    svg.setAttribute('role', 'img');
+    const svg = makeChartSvg(W, H);
 
     // Horizontal grid at each y-tick.
     for (let i = 0; i <= 4; i++) {
-        const y = yOf(step * i);
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', 0);
-        line.setAttribute('x2', W);
-        line.setAttribute('y1', y);
-        line.setAttribute('y2', y);
-        line.setAttribute('stroke', 'rgba(128,128,128,0.35)');
-        line.setAttribute('stroke-width', '0.5');
-        line.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(line);
+        svg.appendChild(hGridLine(yOf(step * i), W));
     }
 
     // One bar per active day. Leave a thin gap between adjacent days unless the
@@ -1231,13 +1225,11 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
         const x = xOf(k) + gap / 2;
         const w = Math.max(0.4, barW - gap);
         const y = yOf(c);
-        const rect = document.createElementNS(SVG_NS, 'rect');
-        rect.setAttribute('x', x.toFixed(2));
-        rect.setAttribute('y', y.toFixed(2));
-        rect.setAttribute('width', w.toFixed(2));
-        rect.setAttribute('height', (H - y).toFixed(2));
-        rect.setAttribute('fill', '#6f8bbf');
-        svg.appendChild(rect);
+        svg.appendChild(svgEl('rect', {
+            x: x.toFixed(2), y: y.toFixed(2),
+            width: w.toFixed(2), height: (H - y).toFixed(2),
+            fill: '#6f8bbf',
+        }));
     }
 
     svgWrap.append(svg);
@@ -1499,25 +1491,21 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const svgWrap = document.createElement('div');
     svgWrap.className = 'stats-chart-svg-wrap';
-    const SVG_NS = 'http://www.w3.org/2000/svg';
     const W = 400, H = chartViewBoxHeight(W);
     const xOf = t => ((t - t0) / tSpan) * W;
     const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
 
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    svg.setAttribute('role', 'img');
+    const svg = makeChartSvg(W, H);
     svg.style.overflow = 'hidden'; // clip clipped-day spikes at the top edge
 
+    // Grid lines here can be vertical (x-ticks) too, so this takes explicit
+    // endpoints rather than using hGridLine.
     const gridLine = (x1, y1, x2, y2) => {
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', x1);
-        line.setAttribute('x2', x2);
-        line.setAttribute('y1', y1);
-        line.setAttribute('y2', y2);
-        line.setAttribute('stroke', 'rgba(128,128,128,0.35)');
-        line.setAttribute('stroke-width', '0.5');
-        line.setAttribute('vector-effect', 'non-scaling-stroke');
+        const line = svgEl('line', {
+            x1, x2, y1, y2,
+            stroke: 'rgba(128,128,128,0.35)', 'stroke-width': '0.5',
+            'vector-effect': 'non-scaling-stroke',
+        });
         svg.appendChild(line);
         return line;
     };
@@ -1553,11 +1541,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
             for (let i = run.length - 1; i >= 0; i--) {
                 d += `L${xOf(run[i].t).toFixed(1)} ${yOf(run[i].lo).toFixed(1)} `;
             }
-            const path = document.createElementNS(SVG_NS, 'path');
-            path.setAttribute('d', d + 'Z');
-            path.setAttribute('fill', band);
-            path.setAttribute('stroke', 'none');
-            svg.appendChild(path);
+            svg.appendChild(svgEl('path', { d: d + 'Z', fill: band, stroke: 'none' }));
         }
     }
 
@@ -1565,23 +1549,18 @@ function buildTimeUsageChart(history = state.answerHistory) {
         if (!grid) continue;
         for (const run of segments(grid)) {
             if (run.length === 1) {
-                const dot = document.createElementNS(SVG_NS, 'circle');
-                dot.setAttribute('cx', xOf(run[0].t).toFixed(1));
-                dot.setAttribute('cy', yOf(run[0].mid).toFixed(1));
-                dot.setAttribute('r', '2');
-                dot.setAttribute('fill', line);
-                svg.appendChild(dot);
+                svg.appendChild(svgEl('circle', {
+                    cx: xOf(run[0].t).toFixed(1), cy: yOf(run[0].mid).toFixed(1),
+                    r: '2', fill: line,
+                }));
                 continue;
             }
             const pts = run.map(e => `${xOf(e.t).toFixed(1)},${yOf(e.mid).toFixed(1)}`).join(' ');
-            const poly = document.createElementNS(SVG_NS, 'polyline');
-            poly.setAttribute('points', pts);
-            poly.setAttribute('fill', 'none');
-            poly.setAttribute('stroke', line);
-            poly.setAttribute('stroke-width', '1.5');
-            poly.setAttribute('stroke-linejoin', 'round');
-            poly.setAttribute('vector-effect', 'non-scaling-stroke');
-            svg.appendChild(poly);
+            svg.appendChild(svgEl('polyline', {
+                points: pts, fill: 'none', stroke: line,
+                'stroke-width': '1.5', 'stroke-linejoin': 'round',
+                'vector-effect': 'non-scaling-stroke',
+            }));
         }
     }
 
