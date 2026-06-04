@@ -524,13 +524,19 @@ export function localizedMotif(component) {
     || null;
 }
 
-export function getTerm(key) {
+export function getTerm(key, params) {
   const langDb = localization[getLang()];
+  let term = (langDb && key in langDb) ? langDb[key] : localization.en[key];
 
-  if (langDb && key in langDb) {
-    return langDb[key];
+  // Optional `{name}` interpolation: getTerm('rankUpTo', { rank }) replaces
+  // each `{rank}` placeholder. Saves the chained `.replace('{x}', …)` calls
+  // scattered across callers. Values are coerced to string; missing keys are
+  // left as-is so a typo surfaces visibly rather than printing "undefined".
+  if (params && typeof term === 'string') {
+    term = term.replace(/\{(\w+)\}/g, (match, name) =>
+      (name in params ? String(params[name]) : match));
   }
-  return localization.en[key];
+  return term;
 }
 
 export function getDescriptiveRank(numericRank) {

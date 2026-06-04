@@ -29,7 +29,7 @@ function createOverlayContent(stats, message, textColor) {
             });
             const sign = rankChangeInUnits > 0 ? '+' : '';
             const formattedChange = `${sign}${rankChangeInUnits.toFixed(3)}`;
-            rankChangeElement.textContent = getTerm('rankChangeFormat').replace('{change}', formattedChange);
+            rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
             container.appendChild(rankChangeElement);
         }
 
@@ -41,7 +41,7 @@ function createOverlayContent(stats, message, textColor) {
             });
             const newRank = getDescriptiveRank(state.userRank);
             const term = stats.rankChangeDirection === 'up' ? 'rankUpTo' : 'rankDownTo';
-            rankChangeMessageElement.textContent = getTerm(term).replace('{rank}', newRank);
+            rankChangeMessageElement.textContent = getTerm(term, { rank: newRank });
             container.appendChild(rankChangeMessageElement);
         }
     }

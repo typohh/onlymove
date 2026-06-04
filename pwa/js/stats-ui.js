@@ -54,7 +54,7 @@ export async function showDetailedStats() {
     // weakness model. Build the union once and thread it through every block.
     const merged = getMergedAnswerHistory();
     if (merged.length < 10) {
-        alert(getTerm('statsNotEnough').replace('{count}', merged.length));
+        alert(getTerm('statsNotEnough', { count: merged.length }));
         return;
     }
 
@@ -105,7 +105,7 @@ export async function showDetailedStats() {
                 const z = coeff / se;
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = cdf * 100;
-                timingText += getTerm(termKey).replace('{percent_change}', conf.toFixed(0)) + '\n';
+                timingText += getTerm(termKey, { percent_change: conf.toFixed(0) }) + '\n';
             }
         }
 
@@ -131,13 +131,13 @@ export async function showDetailedStats() {
                     history: merged,
                 }).length;
 
-                resultText += getTerm('statsFailures').replace('{count_recent}', firstTimeFailures).replace('{hours}', Math.round(firsttimeFailureTime)) + '\n';
-                resultText += getTerm('statsOldFailures').replace('{count_other}', Math.max(0, allRepeats - firstTimeFailures)) + '\n';
+                resultText += getTerm('statsFailures', { count_recent: firstTimeFailures, hours: Math.round(firsttimeFailureTime) }) + '\n';
+                resultText += getTerm('statsOldFailures', { count_other: Math.max(0, allRepeats - firstTimeFailures) }) + '\n';
             }
         }
 
         const novelProblemCount = new Set(merged.filter(p => !p.isRepeat).map(p => p.problemId)).size;
-        resultText += getTerm('statsNovelProblems').replace('{count}', novelProblemCount) + '\n';
+        resultText += getTerm('statsNovelProblems', { count: novelProblemCount }) + '\n';
 
         const slippedProblemCount = getRecallCandidates({
             lowerProbabilityBound: 0,
@@ -146,7 +146,7 @@ export async function showDetailedStats() {
             history: merged,
         }).length;
         const ignoredProblemCount = merged.filter(p => p.ignored).length;
-        resultText += getTerm('statsIgnoredProblems').replace('{count_ignored}', ignoredProblemCount).replace('{count_slipped}', slippedProblemCount) + '\n';
+        resultText += getTerm('statsIgnoredProblems', { count_ignored: ignoredProblemCount, count_slipped: slippedProblemCount }) + '\n';
 
         // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
         // turned into sign-quadrant probabilities via bivariate-normal.js and
@@ -218,12 +218,12 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k) => {
         const entry = labelMap[String(k)];
-        return localizedMotif(entry) || getTerm('statsStyleFallback').replace('{k}', k);
+        return localizedMotif(entry) || getTerm('statsStyleFallback', { k });
     };
     const QUADRANTS = [
-        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => getTerm('statsIssueTooMuch').replace('{motif}', l) },
-        { key: 'notEnough', offDiagonal: true,  phrase: (l) => getTerm('statsIssueNotEnough').replace('{motif}', l) },
-        { key: 'badAt',     offDiagonal: false, phrase: (l) => getTerm('statsIssueBadAt').replace('{motif}', l) },
+        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => getTerm('statsIssueTooMuch', { motif: l }) },
+        { key: 'notEnough', offDiagonal: true,  phrase: (l) => getTerm('statsIssueNotEnough', { motif: l }) },
+        { key: 'badAt',     offDiagonal: false, phrase: (l) => getTerm('statsIssueBadAt', { motif: l }) },
     ];
 
     const root = document.createElement('div');
@@ -271,7 +271,7 @@ function buildLikelyIssuesElement(history = state.answerHistory) {
     if (issues.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = getTerm('statsIssuesNoneAbove').replace('{percent}', (PROB_THRESHOLD * 100).toFixed(0));
+        empty.textContent = getTerm('statsIssuesNoneAbove', { percent: (PROB_THRESHOLD * 100).toFixed(0) });
         root.appendChild(empty);
         return root;
     }
@@ -364,7 +364,7 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     if (examples.length > shown.length) {
         const more = document.createElement('div');
         more.className = 'stats-issue-examples-empty';
-        more.textContent = getTerm('statsMoreExamples').replace('{count}', examples.length - shown.length);
+        more.textContent = getTerm('statsMoreExamples', { count: examples.length - shown.length });
         list.appendChild(more);
     }
 }
@@ -579,9 +579,9 @@ async function buildServerStatsPane(history = []) {
         const ms = Date.now() - Date.parse(iso);
         if (!Number.isFinite(ms) || ms < 0) return getTerm('statsAgoJustNow');
         const h = ms / 3600000;
-        if (h < 1) return getTerm('statsAgoMinutes').replace('{n}', Math.round(ms / 60000));
-        if (h < 24) return getTerm('statsAgoHours').replace('{n}', Math.round(h));
-        return getTerm('statsAgoDays').replace('{n}', Math.round(h / 24));
+        if (h < 1) return getTerm('statsAgoMinutes', { n: Math.round(ms / 60000) });
+        if (h < 24) return getTerm('statsAgoHours', { n: Math.round(h) });
+        return getTerm('statsAgoDays', { n: Math.round(h / 24) });
     };
     // `highlightIndex` (optional) marks the bucket the current user falls into
     // by recolouring that row. The legend explaining the colour is shown once
@@ -623,9 +623,10 @@ async function buildServerStatsPane(history = []) {
 
     const head = document.createElement('div');
     head.className = 'stats-chart-title';
-    head.textContent = getTerm('statsCommunityHeader')
-        .replace('{days}', data.windowDays)
-        .replace('{ago}', ago(data.computedAt));
+    head.textContent = getTerm('statsCommunityHeader', {
+        days: data.windowDays,
+        ago: ago(data.computedAt),
+    });
     pane.append(head);
 
     const attempts = data.totals.attempts || 0;
@@ -633,9 +634,9 @@ async function buildServerStatsPane(history = []) {
     const rate = attempts ? Math.round(wins / attempts * 100) : 0;
     const dayCount = (data.daily && data.daily.length) ? data.daily.length : 0;
     const attemptsPerDay = dayCount ? Math.round(attempts / dayCount) : 0;
-    let txt = getTerm('statsActiveUsers').replace('{count}', data.totals.users) + '\n';
-    txt += getTerm('statsAttemptsPerDay').replace('{count}', attemptsPerDay) + '\n';
-    txt += getTerm('statsAttemptsSolved').replace('{count}', attempts).replace('{rate}', rate) + '\n';
+    let txt = getTerm('statsActiveUsers', { count: data.totals.users }) + '\n';
+    txt += getTerm('statsAttemptsPerDay', { count: attemptsPerDay }) + '\n';
+    txt += getTerm('statsAttemptsSolved', { count: attempts, rate }) + '\n';
     for (const s of (data.bySize || [])) {
         txt += getTerm('statsBySizeLine')
             .replace(/\{size\}/g, s.size)
@@ -732,29 +733,30 @@ function buildRankSummaryText(history, decomp) {
             const curLabel = rankLabelFromIndex(lower);
             const nextLabel = rankLabelFromIndex(lower + 1);
             const seStr = Number.isFinite(summary.currentSkillSE)
-                ? getTerm('statsRankSESuffix').replace('{se}', summary.currentSkillSE.toFixed(1))
+                ? getTerm('statsRankSESuffix', { se: summary.currentSkillSE.toFixed(1) })
                 : '';
-            rankText += getTerm('statsLatestLongTermRank')
-                .replace('{cur}', curLabel)
-                .replace('{pct}', pct)
-                .replace('{next}', nextLabel)
-                .replace('{se}', seStr) + '\n';
+            rankText += getTerm('statsLatestLongTermRank', {
+                cur: curLabel, pct, next: nextLabel, se: seStr,
+            }) + '\n';
         }
         if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
             const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
             const sign = summary.longTermDrift >= 0 ? '+' : '−';
-            rankText += getTerm('statsSkillDrift')
-                .replace('{sign}', sign)
-                .replace('{amount}', Math.abs(summary.longTermDrift).toFixed(1))
-                .replace('{months}', months.toFixed(0)) + '\n';
+            rankText += getTerm('statsSkillDrift', {
+                sign,
+                amount: Math.abs(summary.longTermDrift).toFixed(1),
+                months: months.toFixed(0),
+            }) + '\n';
         }
         if (typeof summary.sigmaM === 'number') {
             rankText += summary.sigmaM >= 0.1
-                ? getTerm('statsSessionSwing')
-                    .replace('{up}', summary.sigmaUp.toFixed(2))
-                    .replace('{down}', summary.sigmaDown.toFixed(2)) + '\n'
-                : getTerm('statsSessionNoSwing')
-                    .replace('{upper}', summary.sigmaMUpper.toFixed(2)) + '\n';
+                ? getTerm('statsSessionSwing', {
+                    up: summary.sigmaUp.toFixed(2),
+                    down: summary.sigmaDown.toFixed(2),
+                }) + '\n'
+                : getTerm('statsSessionNoSwing', {
+                    upper: summary.sigmaMUpper.toFixed(2),
+                }) + '\n';
         }
     }
 
@@ -951,7 +953,7 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = getTerm('statsChartRankSince').replace('{date}', new Date(t0).toISOString().slice(0, 10));
+    title.textContent = getTerm('statsChartRankSince', { date: new Date(t0).toISOString().slice(0, 10) });
     container.append(title);
 
     const plotRow = document.createElement('div');
@@ -1183,7 +1185,7 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = getTerm('statsChartProblemsPerDaySince').replace('{date}', new Date(d0).toISOString().slice(0, 10));
+    title.textContent = getTerm('statsChartProblemsPerDaySince', { date: new Date(d0).toISOString().slice(0, 10) });
     container.append(title);
 
     const plotRow = document.createElement('div');
@@ -1460,7 +1462,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
 
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = getTerm('statsChartTimePerProblemSince').replace('{date}', new Date(t0).toISOString().slice(0, 10));
+    title.textContent = getTerm('statsChartTimePerProblemSince', { date: new Date(t0).toISOString().slice(0, 10) });
     container.append(title);
 
     const plotRow = document.createElement('div');

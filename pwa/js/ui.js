@@ -296,7 +296,7 @@ const updateMenuItems = () => {
 
     // Practice group — always available.
     const otherSize = SUPPORTED_BOARD_SIZES.find((s) => s !== state.boardSize) ?? state.boardSize;
-    sizeItem.textContent = getTerm('switchTo').replace('{size}', `${otherSize}x${otherSize}`);
+    sizeItem.textContent = getTerm('switchTo', { size: `${otherSize}x${otherSize}` });
     // Pause/Resume recalls label flips on the live timestamp — an expired pause
     // auto-flips back to "Pause recalls".
     const recallsArePaused = state.recallPausedUntil > Date.now();

@@ -138,7 +138,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
                 const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
                 const conf = cdf * 100;
                 const x = Math.round(previousReviewTime / 1000);
-                message = getTerm('insufficientReviewMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
+                message = getTerm('insufficientReviewMessage', { seconds: x, confidence: conf.toFixed(0) });
                 buttonText = getTerm('iWontRushIt');
             }
         }
@@ -161,7 +161,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
             const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
             const conf = cdf * 100;
             const x = Math.round(timeSpent / 1000);
-            message = getTerm('rushingMessage').replace('{seconds}', x).replace('{confidence}', conf.toFixed(0));
+            message = getTerm('rushingMessage', { seconds: x, confidence: conf.toFixed(0) });
             buttonText = getTerm('iWontRushIt');
         }
     }

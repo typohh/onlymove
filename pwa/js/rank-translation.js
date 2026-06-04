@@ -90,10 +90,11 @@ export async function showRankTranslation() {
             progress.style.textAlign = 'center';
             progress.style.marginBottom = '1vmin';
             progress.style.fontWeight = 'bold';
-            progress.textContent = getTerm('rankProgressFormat')
-                .replace('{rank}', key)
-                .replace('{percent}', Math.round((rankValue - rankIndex) * 100))
-                .replace('{nextRank}', rankIndexToKey(rankIndex + 1));
+            progress.textContent = getTerm('rankProgressFormat', {
+                rank: key,
+                percent: Math.round((rankValue - rankIndex) * 100),
+                nextRank: rankIndexToKey(rankIndex + 1),
+            });
             modal.appendChild(progress);
 
             modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
