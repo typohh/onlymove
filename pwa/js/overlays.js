@@ -280,3 +280,36 @@ export function modalButtonRow(buttons) {
     for (const b of buttons) row.appendChild(b);
     return row;
 }
+
+/**
+ * A small centered toast. Auto-dismisses after 2s unless `autoDismiss` is
+ * false (the caller then removes the returned element itself, e.g. to keep a
+ * "preparing…" message up across an async op). Returns the toast element.
+ */
+export function showToast(text, { isError = false, autoDismiss = true } = {}) {
+    const message = document.createElement('div');
+    message.textContent = text;
+    Object.assign(message.style, {
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
+        color: 'white',
+        padding: '1vmin 2vmin',
+        borderRadius: '0.5vmin',
+        fontWeight: 'bold',
+        fontSize: '3vmin',
+        zIndex: isError ? '10000' : '9999',
+        pointerEvents: 'none',
+        whiteSpace: 'nowrap',
+        textAlign: 'center',
+    });
+    document.body.appendChild(message);
+    if (autoDismiss) {
+        setTimeout(() => {
+            if (message.parentNode) message.parentNode.removeChild(message);
+        }, 2000);
+    }
+    return message;
+}

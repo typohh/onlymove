@@ -32,7 +32,7 @@ import { getRecallCandidates } from './model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule } from './notifications.js';
 import { recordShareEvent } from './user-stats.js';
-import { loadSgf, redraw, initializeBoard, getBoardImageBlob } from './board.js';
+import { loadSgf, redraw, initializeBoard } from './board.js';
 import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
@@ -118,6 +118,7 @@ import { loadRatingRankMap, computeRankDecomposition } from './rank-decompositio
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
+import { performShare } from './share.js';
 import { APP_MODES, TOTAL_RANKS } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -314,178 +315,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             undoLastMove();
         }
     });
-
-    // Share is reachable from the analysis-mode hamburger menu. Pulled out
-    // as a named function (rather than inlined on a button handler) so the
-    // menu item can call it without dispatching through a hidden button.
-    let isSharing = false;
-    const performShare = () => {
-        if (isSharing) return;
-        if (!state.problemHistory[1]) {
-            console.error('No current problem to share');
-            return;
-        }
-        isSharing = true;
-        const releaseGuard = () => { isSharing = false; };
-
-        const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
-        const orientation = state.problemHistory[1].orientation;
-        let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
-        if (typeof orientation === 'number' && orientation !== 0) {
-            shareUrl += `&o=${orientation}`;
-        }
-
-        // Record that a share link was generated (fire-and-forget analytics).
-        recordShareEvent({ type: 'create', problemId: tsumegoId });
-
-        const showToast = (text, { isError = false, autoDismiss = true } = {}) => {
-            const message = document.createElement('div');
-            message.textContent = text;
-            Object.assign(message.style, {
-                position: 'fixed',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
-                color: 'white',
-                padding: '1vmin 2vmin',
-                borderRadius: '0.5vmin',
-                fontWeight: 'bold',
-                fontSize: '3vmin',
-                zIndex: isError ? '10000' : '9999',
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-                textAlign: 'center'
-            });
-            document.body.appendChild(message);
-            if (autoDismiss) {
-                setTimeout(() => {
-                    if (message.parentNode) message.parentNode.removeChild(message);
-                }, 2000);
-            }
-            return message;
-        };
-
-        const copyToClipboard = () => {
-            return navigator.clipboard.writeText(shareUrl).then(() => {
-                showToast(getTerm('linkCopied'));
-            }).catch(err => {
-                console.error('Failed to copy URL: ', err);
-                showToast(getTerm('error'), { isError: true });
-            });
-        };
-
-        const shareLink = () => {
-            if (navigator.share && navigator.canShare && navigator.canShare({ url: shareUrl })) {
-                return navigator.share({ url: shareUrl }).catch(err => {
-                    if (err.name === 'AbortError') return;
-                    console.error('Share link failed: ', err);
-                    showToast(getTerm('shareFailed'), { isError: true });
-                    return copyToClipboard();
-                });
-            }
-            return copyToClipboard();
-        };
-
-        // Generate the board image with a visible "preparing…" toast and a
-        // hard timeout so canvas/render hangs surface as an error rather than
-        // a silent forever-spinner.
-        const generateImageFile = async () => {
-            const toast = showToast(getTerm('preparingImage'), { autoDismiss: false });
-            const cleanup = () => { if (toast.parentNode) toast.parentNode.removeChild(toast); };
-            try {
-                const blob = await Promise.race([
-                    getBoardImageBlob(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('image generation timed out')), 10000))
-                ]);
-                cleanup();
-                if (!blob) throw new Error('No blob returned from getBoardImageBlob');
-                return new File([blob], 'tsumego.png', { type: 'image/png' });
-            } catch (err) {
-                cleanup();
-                console.error('Failed to capture image: ', err);
-                showToast(getTerm('imageCaptureFailed'), { isError: true });
-                throw err;
-            }
-        };
-
-        const shareImage = async () => {
-            let file;
-            try {
-                file = await generateImageFile();
-            } catch {
-                return shareLink();
-            }
-            const data = { files: [file], title: getTerm('tsumegoMode') };
-            if (navigator.share && navigator.canShare && navigator.canShare(data)) {
-                return navigator.share(data).catch(err => {
-                    if (err.name === 'AbortError') return;
-                    console.error('Share image failed: ', err);
-                    showToast(getTerm('shareFailed'), { isError: true });
-                    return shareLink();
-                });
-            }
-            return shareLink();
-        };
-
-        const shareBoth = async () => {
-            let file;
-            try {
-                file = await generateImageFile();
-            } catch {
-                return shareLink();
-            }
-            const data = { files: [file], url: shareUrl, title: getTerm('tsumegoMode') };
-            if (navigator.share && navigator.canShare && navigator.canShare(data)) {
-                return navigator.share(data).catch(err => {
-                    if (err.name === 'AbortError') return;
-                    console.error('Share both failed: ', err);
-                    showToast(getTerm('shareFailed'), { isError: true });
-                    return copyToClipboard();
-                });
-            }
-            return shareLink();
-        };
-
-        const showShareChooser = () => {
-            // Full-width stacked .btn buttons (not .btn-inline) — the chooser
-            // intentionally presents three equal-width options.
-            const mkBtn = (term, action) => {
-                const btn = document.createElement('button');
-                btn.className = 'btn';
-                btn.textContent = getTerm(term);
-                return [btn, action];
-            };
-            showModal({
-                onDismiss: releaseGuard,
-                build: (modal, close) => {
-                    for (const [btn, action] of [
-                        mkBtn('shareBoth', shareBoth),
-                        mkBtn('shareLink', shareLink),
-                        mkBtn('shareImage', shareImage),
-                    ]) {
-                        btn.addEventListener('click', () => { close(); action().finally(releaseGuard); });
-                        modal.appendChild(btn);
-                    }
-                },
-            });
-        };
-
-        // Probe whether the browser can share files at all, without actually generating one.
-        let filesSupported = false;
-        try {
-            filesSupported = !!(navigator.share && navigator.canShare &&
-                navigator.canShare({ files: [new File([], 'p.png', { type: 'image/png' })] }));
-        } catch {
-            filesSupported = false;
-        }
-
-        if (filesSupported) {
-            showShareChooser();
-        } else {
-            shareLink().finally(releaseGuard);
-        }
-    };
 
     // Handle capture score click
     document.getElementById('capture-score').addEventListener('click', (e) => {
@@ -759,21 +588,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Solution #4: Resume overlay click triggers full board recreation for manual recovery
+    // Solution #4: Resume overlay click triggers full board recreation for manual
+    // recovery — same path as the pageshow/visibilitychange handlers.
     resumeOverlay.addEventListener('click', () => {
         resumeOverlay.className = 'resume-overlay-hidden';
-        
-        // Force full board recreation when user clicks to resume
-        if (state.kifuReader) {
-            try {
-                const size = state.kifuReader.game.position.size;
-                initializeBoard(size);
-                redraw();
-            } catch (e) {
-                Sentry.captureMessage('Manual board recovery failed: ' + e.message, 'error');
-                location.reload();
-            }
-        }
+        if (!recoverBoardIfNeeded()) location.reload();
     });
 
 });
