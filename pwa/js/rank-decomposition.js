@@ -332,7 +332,7 @@ function flattenAttempts(answerHistory) {
             const flr = Math.min(Math.max(
                 typeof a.problemFloor === 'number' ? a.problemFloor : 0, 0), FLOOR_MAX);
             return { t: a.date, x, slope, correct: a.correct ? 1 : 0,
-                     floor: flr, kappa: clearKappa(flr) };
+                     floor: flr, kappa: clearKappa(flr), src: a };
         })
         .filter(Boolean)
         .sort((a, b) => a.t - b.t);
@@ -541,6 +541,49 @@ export function computeRankDecomposition(answerHistory) {
         longTermSpanMs: haveSpan ? lastT - firstT : null,
     };
     return decomp;
+}
+
+// "Near-rank-only" skill curve: the same decomposition re-estimated after
+// dropping attempts that were far from the user's rank AT THE TIME they were
+// attempted. This is a seeded one-pass fixed point, NOT a circular filter:
+//   1. baseDecomp = computeRankDecomposition(full history) is the seed S0(t),
+//      estimated from the win/loss sequence alone (independent of any distance
+//      filter).
+//   2. Each attempt is scored against the CONTEMPORANEOUS seed rank S0(t_attempt)
+//      (evaluateAt) — not the user's current rank — so the "what counts as far"
+//      threshold tracks the rank as it moved.
+//   3. Re-run the decomposition on the survivors → S1(t).
+// One pass suffices: the band drops exactly the low-Fisher-information attempts
+// the estimator already down-weights, so S1 ≈ S0 unless far-from-rank problems
+// were genuinely biasing the displayed rank — which is the whole diagnostic.
+//
+// "Far" is measured in the SUCCESS-CURVE'S OWN LATENT z = slope·(S0 − x), NOT in
+// probability. z = 0 ⟺ problem exactly at rank ⟺ P = 0.8 (κ is defined to make
+// that so), so a band symmetric in z is symmetric around the 80% serving target.
+// Probability is the wrong space for symmetry: it's bounded at 1 (0.8 sits near
+// the ceiling, so equal ΔP means unequal rank gaps up vs down) and the floor c
+// squashes the low end (P→c, not 0) per-problem. z is floor-independent (c only
+// rescales P, it doesn't move z=0) and slope-aware (a sharp problem decides at a
+// smaller rank gap than a flat one — genuinely "farther" at equal Δrank), which
+// is the property the slope-scaled band was chosen for. We take the easy-side
+// edge as a single probability knob pHi and MIRROR it in z: keep
+//   |slope·(S0 − x)| ≤ L,   L = logit(pHi) − logit(0.8)
+// pHi = 0.95 ⇒ L ≈ 1.56. (The old asymmetric [0.5, 0.95] P-band was only
+// coincidentally near-symmetric in z, and broke once c ≠ 0.)
+// Returns null when there's no seed or too few survivors (caller hides the line).
+const NEAR_RANK_P_HI = 0.95;
+const LOGIT_80 = Math.log(0.8 / 0.2);
+export function computeNearRankDecomposition(answerHistory, baseDecomp,
+                                             pHi = NEAR_RANK_P_HI) {
+    if (!baseDecomp) return null;
+    const L = Math.log(pHi / (1 - pHi)) - LOGIT_80;   // half-width in success-curve logits
+    const kept = [];
+    for (const a of flattenAttempts(answerHistory)) {
+        const e = evaluateAt(baseDecomp, a.t);
+        if (!e || !Number.isFinite(e.S)) continue;
+        if (Math.abs(a.slope * (e.S - a.x)) <= L) kept.push(a.src);
+    }
+    return computeRankDecomposition(kept);
 }
 
 // Continuous evaluation at arbitrary t (no buckets). The wide kernel is

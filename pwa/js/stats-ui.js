@@ -11,7 +11,7 @@ import { state, setStatsResults, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
-import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
+import { computeRankDecomposition, computeNearRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import {
@@ -887,6 +887,22 @@ function buildRatingHistoryChart(history = state.answerHistory) {
         }
     }
 
+    // Second line: skill re-estimated from only the attempts that were near the
+    // user's rank AT THE TIME (success-prob band). Seeded by the all-data decomp
+    // above, so the "far away" cutoff tracks the rank as it moved — see
+    // computeNearRankDecomposition. Drawn on the same axis as a thin amber line
+    // (no bands) so a divergence from the blue line flags far-from-rank attempts
+    // biasing the displayed rank. Reuses the same t-grid as the main line.
+    const nearDecomp = decomp ? computeNearRankDecomposition(history, decomp) : null;
+    const nearEvals = [];
+    if (nearDecomp) {
+        for (let i = 0; i < GRID_POINTS; i++) {
+            const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
+            const e = evaluateAt(nearDecomp, t);
+            if (e && Number.isFinite(e.S)) nearEvals.push({ t, S: e.S });
+        }
+    }
+
     // Focus the y-range on the user's rank — the skill curve and its prediction
     // band — not on the spread of problem difficulties. Problem ranks scatter
     // far wider than the user's skill, so anchoring on them squashes the part of
@@ -1019,6 +1035,7 @@ function buildRatingHistoryChart(history = state.answerHistory) {
     const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
+    const NEAR_STROKE = '#f59e0b'; // near-rank-only skill line (amber)
 
     // Separate upper/lower half-widths so the outer band can be asymmetric. The
     // top edge runs left→right at S + upHalf, the bottom edge runs right→left at
@@ -1060,6 +1077,23 @@ function buildRatingHistoryChart(history = state.answerHistory) {
         svg.appendChild(skillLine);
     }
 
+    // Near-rank-only skill line, drawn on top of the blue line/bands. Thinner and
+    // dashed so it reads as a comparison overlay, not a second primary series.
+    if (nearEvals.length >= 2) {
+        const nearPts = nearEvals
+            .map(e => `${xOf(e.t).toFixed(1)},${yOf(e.S).toFixed(1)}`)
+            .join(' ');
+        const nearLine = document.createElementNS(SVG_NS, 'polyline');
+        nearLine.setAttribute('points', nearPts);
+        nearLine.setAttribute('fill', 'none');
+        nearLine.setAttribute('stroke', NEAR_STROKE);
+        nearLine.setAttribute('stroke-width', '1.5');
+        nearLine.setAttribute('stroke-dasharray', '4 3');
+        nearLine.setAttribute('stroke-linejoin', 'round');
+        nearLine.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(nearLine);
+    }
+
     svgWrap.append(svg);
 
     // y-axis + SVG share one row whose height is exactly the SVG height, so the
@@ -1093,6 +1127,9 @@ function buildRatingHistoryChart(history = state.answerHistory) {
             { kind: 'band', color: SKILL_FILL_INNER, text: getTerm('statsLegend95Confidence') },
             { kind: 'band', color: SKILL_FILL_OUTER, text: getTerm('statsLegendDailyVariance') },
         );
+        if (nearEvals.length >= 2) {
+            legendItems.push({ kind: 'line', color: NEAR_STROKE, text: getTerm('statsLegendRankNearOnly') });
+        }
     }
     for (const item of legendItems) {
         const el = document.createElement('span');
