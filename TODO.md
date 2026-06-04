@@ -1,3 +1,1 @@
-- use short time span, ie day to day variance measurement, as the actual rank shown in main view and select tsumegos.
 - fix how weaknses are categorized, there seems to be a bug there, as they are always classified as inconsistent.
-- oh community page, from Recall time, remove the "(shortest per user)" part
