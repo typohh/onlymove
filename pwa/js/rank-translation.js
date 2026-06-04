@@ -17,7 +17,7 @@ import { state } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
-import { showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
+import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
 
 let _mapPromise = null;
 
@@ -100,19 +100,11 @@ export async function showRankTranslation() {
             modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
 
             if (servers && Object.keys(servers).length > 0) {
-                const grid = document.createElement('div');
-                grid.style.display = 'grid';
-                grid.style.gridTemplateColumns = 'max-content max-content';
-                grid.style.justifyContent = 'center';
-                grid.style.gap = '0.8vmin 1.5vmin';
-                grid.style.alignItems = 'center';
-                grid.style.maxHeight = '60vh';
-                grid.style.overflowY = 'auto';
+                const grid = modalRankGrid();
                 for (const [server, rank] of Object.entries(servers)) {
                     const label = document.createElement('div');
                     label.textContent = server;
-                    label.style.fontWeight = 'bold';
-                    label.style.textAlign = 'right';
+                    label.className = 'modal-rank-label';
                     const val = document.createElement('div');
                     val.textContent = rank;
                     grid.appendChild(label);

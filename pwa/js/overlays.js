@@ -282,6 +282,17 @@ export function modalButtonRow(buttons) {
 }
 
 /**
+ * A centered two-column (label, value) grid, scroll-capped at 60vh — shared by
+ * the rank-survey and rank-translation dialogs. Callers append their own
+ * label/value (or label/select) pairs.
+ */
+export function modalRankGrid() {
+    const grid = document.createElement('div');
+    grid.className = 'modal-rank-grid';
+    return grid;
+}
+
+/**
  * A small centered toast. Auto-dismisses after 2s unless `autoDismiss` is
  * false (the caller then removes the returned element itself, e.g. to keep a
  * "preparing…" message up across an async op). Returns the toast element.

@@ -11,7 +11,7 @@
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES } from './constants.js';
-import { showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
+import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
 
 // v2: the v1 key was committed-on-render, so users hit by the version-update
 // race got their cooldown burned without ever seeing the dialog. Bumping the
@@ -85,20 +85,12 @@ function showRankSurvey() {
         build: (modal) => {
             modal.appendChild(modalTitle(getTerm('rankSurveyTitle')));
 
-            const grid = document.createElement('div');
-            grid.style.display = 'grid';
-            grid.style.gridTemplateColumns = 'max-content max-content';
-            grid.style.justifyContent = 'center';
-            grid.style.gap = '0.8vmin 1.5vmin';
-            grid.style.alignItems = 'center';
-            grid.style.maxHeight = '60vh';
-            grid.style.overflowY = 'auto';
+            const grid = modalRankGrid();
 
             for (const server of SERVERS) {
                 const label = document.createElement('label');
                 label.textContent = server;
-                label.style.fontWeight = 'bold';
-                label.style.textAlign = 'right';
+                label.className = 'modal-rank-label';
 
                 const select = document.createElement('select');
                 select.style.padding = '0.5vmin 0.8vmin';

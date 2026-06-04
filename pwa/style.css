@@ -101,6 +101,21 @@ body {
     justify-content: center;
     margin-top: 0.5vmin;
 }
+/* Two-column (label, value) grid shared by the rank-survey and
+   rank-translation dialogs. */
+.modal-rank-grid {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    justify-content: center;
+    gap: 0.8vmin 1.5vmin;
+    align-items: center;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.modal-rank-label {
+    font-weight: bold;
+    text-align: right;
+}
 
 .info-text {
     color: #fff;
