@@ -40,39 +40,28 @@ const boardContainer = document.getElementById('board-container');
  * Shows an iOS-style modal with step-by-step instructions to add to Home Screen.
  */
 const showIosInstallModal = () => {
-    const overlay = document.createElement('div');
-    overlay.id = 'ios-install-overlay';
+    showModal({
+        build: (modal, close) => {
+            modal.appendChild(modalTitle(getTerm('installIosTitle')));
 
-    const modal = document.createElement('div');
-    modal.id = 'ios-install-modal';
+            const instructions = document.createElement('div');
+            instructions.id = 'ios-install-instructions';
+            // Replace literal \n with line breaks
+            getTerm('installIosInstructions').split('\n').forEach((line, i, arr) => {
+                instructions.appendChild(document.createTextNode(line));
+                if (i < arr.length - 1) instructions.appendChild(document.createElement('br'));
+            });
+            modal.appendChild(instructions);
 
-    const title = document.createElement('div');
-    title.id = 'ios-install-title';
-    title.textContent = getTerm('installIosTitle');
-
-    const instructions = document.createElement('div');
-    instructions.id = 'ios-install-instructions';
-    // Replace literal \n with line breaks
-    getTerm('installIosInstructions').split('\n').forEach((line, i, arr) => {
-        instructions.appendChild(document.createTextNode(line));
-        if (i < arr.length - 1) instructions.appendChild(document.createElement('br'));
+            // Keeps the dedicated #ios-install-close styling rather than .btn-inline.
+            const closeBtn = document.createElement('button');
+            closeBtn.id = 'ios-install-close';
+            closeBtn.className = 'btn';
+            closeBtn.textContent = getTerm('installIosClose');
+            closeBtn.addEventListener('click', close);
+            modal.appendChild(closeBtn);
+        },
     });
-
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'ios-install-close';
-    closeBtn.className = 'btn';
-    closeBtn.textContent = getTerm('installIosClose');
-    closeBtn.addEventListener('click', () => overlay.remove());
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
-    });
-
-    modal.appendChild(title);
-    modal.appendChild(instructions);
-    modal.appendChild(closeBtn);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
 };
 
 // State-machine cache for button4. refreshNotifState() refills it async;
@@ -348,7 +337,7 @@ const updateMenuItems = () => {
     }
 };
 
-import { displayOverlay, fadeOverlay } from './overlays.js';
+import { displayOverlay, fadeOverlay, showModal, modalTitle } from './overlays.js';
 
 
 

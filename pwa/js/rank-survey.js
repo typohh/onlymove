@@ -11,6 +11,7 @@
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES } from './constants.js';
+import { showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
 
 // v2: the v1 key was committed-on-render, so users hit by the version-update
 // race got their cooldown burned without ever seeing the dialog. Bumping the
@@ -64,126 +65,95 @@ function showRankSurvey() {
     // it again next session — the cooldown should reflect user choice, not
     // render time.
 
-    const overlay = document.createElement('div');
-    overlay.id = 'ios-install-overlay';
-
-    const modal = document.createElement('div');
-    modal.id = 'ios-install-modal';
-
-    const title = document.createElement('div');
-    title.id = 'ios-install-title';
-    title.textContent = getTerm('rankSurveyTitle');
-    modal.appendChild(title);
-
-    const grid = document.createElement('div');
-    grid.style.display = 'grid';
-    grid.style.gridTemplateColumns = 'max-content max-content';
-    grid.style.justifyContent = 'center';
-    grid.style.gap = '0.8vmin 1.5vmin';
-    grid.style.alignItems = 'center';
-    grid.style.maxHeight = '60vh';
-    grid.style.overflowY = 'auto';
-
     const noneLabel = getTerm('rankSurveyNone');
     const rankOptions = buildRankOptions();
     const selects = {};
-    for (const server of SERVERS) {
-        const label = document.createElement('label');
-        label.textContent = server;
-        label.style.fontWeight = 'bold';
-        label.style.textAlign = 'right';
 
-        const select = document.createElement('select');
-        select.style.padding = '0.5vmin 0.8vmin';
-        select.style.borderRadius = 'var(--radius)';
-        select.style.background = '#444';
-        select.style.color = '#fff';
-        select.style.border = '0.2vmin solid #555';
-        select.style.fontSize = 'inherit';
-        select.style.width = '8em';
-        select.style.boxSizing = 'border-box';
-
-        const blank = document.createElement('option');
-        blank.value = '';
-        blank.textContent = noneLabel;
-        select.appendChild(blank);
-        for (const r of rankOptions) {
-            const opt = document.createElement('option');
-            opt.value = r;
-            opt.textContent = r;
-            select.appendChild(opt);
-        }
-
-        const id = `rank-survey-${server.toLowerCase()}`;
-        select.id = id;
-        label.htmlFor = id;
-
-        selects[server] = select;
-        grid.appendChild(label);
-        grid.appendChild(select);
-    }
-    modal.appendChild(grid);
-
-    const buttonRow = document.createElement('div');
-    buttonRow.style.display = 'flex';
-    buttonRow.style.gap = '1.5vmin';
-    buttonRow.style.justifyContent = 'center';
-    buttonRow.style.marginTop = '0.5vmin';
-
-    const styleBtn = (btn) => {
-        // .btn brings flex: 1, vmin padding, and width: 100% in the landscape
-        // media query (used by the side panel). Reset all three so these
-        // dialog buttons size to content and stay inside the modal.
-        btn.style.flex = '0 0 auto';
-        btn.style.width = 'auto';
-        btn.style.padding = '0.6vmin 2vmin';
-        btn.style.borderRadius = 'var(--radius)';
-        btn.style.minWidth = '6em';
-    };
-
-    const dismissBtn = document.createElement('button');
-    dismissBtn.className = 'btn';
-    dismissBtn.textContent = getTerm('rankSurveyDismiss');
-    styleBtn(dismissBtn);
-
-    const submitBtn = document.createElement('button');
-    submitBtn.className = 'btn';
-    submitBtn.textContent = getTerm('rankSurveySubmit');
-    styleBtn(submitBtn);
-
+    let modalApi;
     // Commit the cooldown only here, on actual user click. If the user never
     // interacts (page reload, tab close, SW takeover), the dialog comes back
     // next stable session.
     const closeWithCooldown = () => {
         localStorage.setItem(STORAGE_KEY, String(Date.now()));
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        modalApi.close();
         dialogOpen = false;
     };
 
-    dismissBtn.addEventListener('click', closeWithCooldown);
-    submitBtn.addEventListener('click', () => {
-        const ranks = {};
-        for (const server of SERVERS) {
-            const v = selects[server].value;
-            if (v) ranks[server] = v;
-        }
-        // Fire and forget. Cooldown is committed below regardless — a dropped
-        // network submission is the user's choice to lose, not a reason to
-        // re-prompt every session until it goes through.
-        if (Object.keys(ranks).length > 0) {
-            fetch('/rank-survey', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: state.userId, ranks }),
-            }).catch(err => console.warn('Rank survey upload failed:', err));
-        }
-        closeWithCooldown();
+    modalApi = showModal({
+        // No backdrop dismissal: the cooldown must reflect an explicit choice.
+        dismissable: false,
+        build: (modal) => {
+            modal.appendChild(modalTitle(getTerm('rankSurveyTitle')));
+
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = 'max-content max-content';
+            grid.style.justifyContent = 'center';
+            grid.style.gap = '0.8vmin 1.5vmin';
+            grid.style.alignItems = 'center';
+            grid.style.maxHeight = '60vh';
+            grid.style.overflowY = 'auto';
+
+            for (const server of SERVERS) {
+                const label = document.createElement('label');
+                label.textContent = server;
+                label.style.fontWeight = 'bold';
+                label.style.textAlign = 'right';
+
+                const select = document.createElement('select');
+                select.style.padding = '0.5vmin 0.8vmin';
+                select.style.borderRadius = 'var(--radius)';
+                select.style.background = '#444';
+                select.style.color = '#fff';
+                select.style.border = '0.2vmin solid #555';
+                select.style.fontSize = 'inherit';
+                select.style.width = '8em';
+                select.style.boxSizing = 'border-box';
+
+                const blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = noneLabel;
+                select.appendChild(blank);
+                for (const r of rankOptions) {
+                    const opt = document.createElement('option');
+                    opt.value = r;
+                    opt.textContent = r;
+                    select.appendChild(opt);
+                }
+
+                const id = `rank-survey-${server.toLowerCase()}`;
+                select.id = id;
+                label.htmlFor = id;
+
+                selects[server] = select;
+                grid.appendChild(label);
+                grid.appendChild(select);
+            }
+            modal.appendChild(grid);
+
+            const submit = () => {
+                const ranks = {};
+                for (const server of SERVERS) {
+                    const v = selects[server].value;
+                    if (v) ranks[server] = v;
+                }
+                // Fire and forget. Cooldown is committed regardless — a dropped
+                // network submission is the user's choice to lose, not a reason
+                // to re-prompt every session until it goes through.
+                if (Object.keys(ranks).length > 0) {
+                    fetch('/rank-survey', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: state.userId, ranks }),
+                    }).catch(err => console.warn('Rank survey upload failed:', err));
+                }
+                closeWithCooldown();
+            };
+
+            modal.appendChild(modalButtonRow([
+                modalButton(getTerm('rankSurveyDismiss'), closeWithCooldown),
+                modalButton(getTerm('rankSurveySubmit'), submit),
+            ]));
+        },
     });
-
-    buttonRow.appendChild(dismissBtn);
-    buttonRow.appendChild(submitBtn);
-    modal.appendChild(buttonRow);
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
 }

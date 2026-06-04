@@ -212,3 +212,71 @@ export function hideLoading() {
     overlay.classList.remove('visible');
     setTimeout(() => overlay.remove(), 200);
 }
+
+// --- Shared modal-dialog scaffold ------------------------------------------
+// The app's dialogs (board-size picker, confirm, share chooser, iOS install,
+// rank survey, rank translation) all share the #ios-install-overlay /
+// #ios-install-modal shell, optional backdrop-click dismissal, and the same
+// content-sized button styling. These helpers build that shell once so callers
+// only supply the body.
+
+/**
+ * Builds the overlay + modal shell, optionally wires backdrop-click dismissal,
+ * and runs `build(modal, close)` so the caller fills the (empty) modal and wires
+ * its own buttons. Returns `{ overlay, modal, close }`. `close()` is idempotent.
+ */
+export function showModal({ build, dismissable = true, onDismiss } = {}) {
+    const overlay = document.createElement('div');
+    overlay.id = 'ios-install-overlay';
+    const modal = document.createElement('div');
+    modal.id = 'ios-install-modal';
+    overlay.appendChild(modal);
+
+    let closed = false;
+    const close = () => {
+        if (closed) return;
+        closed = true;
+        overlay.remove();
+    };
+
+    if (dismissable) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                close();
+                if (onDismiss) onDismiss();
+            }
+        });
+    }
+
+    if (build) build(modal, close);
+    document.body.appendChild(overlay);
+    return { overlay, modal, close };
+}
+
+/** A modal title row (#ios-install-title). */
+export function modalTitle(text) {
+    const el = document.createElement('div');
+    el.id = 'ios-install-title';
+    el.textContent = text;
+    return el;
+}
+
+/**
+ * A content-sized modal button. Plain `.btn` stretches full-width in the
+ * landscape side-panel media query; `.btn-inline` resets it to size-to-content.
+ */
+export function modalButton(label, onClick) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-inline';
+    btn.textContent = label;
+    if (onClick) btn.addEventListener('click', onClick);
+    return btn;
+}
+
+/** A centered flex row of modal buttons. */
+export function modalButtonRow(buttons) {
+    const row = document.createElement('div');
+    row.className = 'modal-button-row';
+    for (const b of buttons) row.appendChild(b);
+    return row;
+}

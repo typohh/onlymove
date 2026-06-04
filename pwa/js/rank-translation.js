@@ -17,6 +17,7 @@ import { state } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
+import { showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
 
 let _mapPromise = null;
 
@@ -79,78 +80,54 @@ export async function showRankTranslation() {
     // server's knots, so a weak vs strong same-rank player can map differently.
     const servers = serverRanksFor(map, rankValue - RANK_INDEX_OFFSET, key);
 
-    const overlay = document.createElement('div');
-    overlay.id = 'ios-install-overlay';
-    const modal = document.createElement('div');
-    modal.id = 'ios-install-modal';
+    showModal({
+        build: (modal, close) => {
+            // Our own rank as "<rank>, <progress>% towards <next rank>", shown
+            // above the other-server translation. Progress is the fractional
+            // position within the current rank band; the next rank is one step
+            // stronger (higher index).
+            const progress = document.createElement('div');
+            progress.style.textAlign = 'center';
+            progress.style.marginBottom = '1vmin';
+            progress.style.fontWeight = 'bold';
+            progress.textContent = getTerm('rankProgressFormat')
+                .replace('{rank}', key)
+                .replace('{percent}', Math.round((rankValue - rankIndex) * 100))
+                .replace('{nextRank}', rankIndexToKey(rankIndex + 1));
+            modal.appendChild(progress);
 
-    // Our own rank as "<rank>, <progress>% towards <next rank>", shown above the
-    // other-server translation. Progress is the fractional position within the
-    // current rank band; the next rank is one step stronger (higher index).
-    const progress = document.createElement('div');
-    progress.style.textAlign = 'center';
-    progress.style.marginBottom = '1vmin';
-    progress.style.fontWeight = 'bold';
-    progress.textContent = getTerm('rankProgressFormat')
-        .replace('{rank}', key)
-        .replace('{percent}', Math.round((rankValue - rankIndex) * 100))
-        .replace('{nextRank}', rankIndexToKey(rankIndex + 1));
-    modal.appendChild(progress);
+            modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
 
-    const title = document.createElement('div');
-    title.id = 'ios-install-title';
-    title.textContent = getTerm('rankTranslationTitle');
-    modal.appendChild(title);
+            if (servers && Object.keys(servers).length > 0) {
+                const grid = document.createElement('div');
+                grid.style.display = 'grid';
+                grid.style.gridTemplateColumns = 'max-content max-content';
+                grid.style.justifyContent = 'center';
+                grid.style.gap = '0.8vmin 1.5vmin';
+                grid.style.alignItems = 'center';
+                grid.style.maxHeight = '60vh';
+                grid.style.overflowY = 'auto';
+                for (const [server, rank] of Object.entries(servers)) {
+                    const label = document.createElement('div');
+                    label.textContent = server;
+                    label.style.fontWeight = 'bold';
+                    label.style.textAlign = 'right';
+                    const val = document.createElement('div');
+                    val.textContent = rank;
+                    grid.appendChild(label);
+                    grid.appendChild(val);
+                }
+                modal.appendChild(grid);
+            } else {
+                const empty = document.createElement('div');
+                empty.style.textAlign = 'center';
+                empty.textContent = getTerm('rankTranslationEmpty');
+                modal.appendChild(empty);
+            }
 
-    if (servers && Object.keys(servers).length > 0) {
-        const grid = document.createElement('div');
-        grid.style.display = 'grid';
-        grid.style.gridTemplateColumns = 'max-content max-content';
-        grid.style.justifyContent = 'center';
-        grid.style.gap = '0.8vmin 1.5vmin';
-        grid.style.alignItems = 'center';
-        grid.style.maxHeight = '60vh';
-        grid.style.overflowY = 'auto';
-        for (const [server, rank] of Object.entries(servers)) {
-            const label = document.createElement('div');
-            label.textContent = server;
-            label.style.fontWeight = 'bold';
-            label.style.textAlign = 'right';
-            const val = document.createElement('div');
-            val.textContent = rank;
-            grid.appendChild(label);
-            grid.appendChild(val);
-        }
-        modal.appendChild(grid);
-    } else {
-        const empty = document.createElement('div');
-        empty.style.textAlign = 'center';
-        empty.textContent = getTerm('rankTranslationEmpty');
-        modal.appendChild(empty);
-    }
-
-    const buttonRow = document.createElement('div');
-    buttonRow.style.display = 'flex';
-    buttonRow.style.justifyContent = 'center';
-    buttonRow.style.marginTop = '1vmin';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'btn';
-    closeBtn.textContent = getTerm('rankTranslationClose');
-    // .btn stretches to full width in the landscape side-panel media query;
-    // reset so the dialog button sizes to content (same as rank-survey.js).
-    closeBtn.style.flex = '0 0 auto';
-    closeBtn.style.width = 'auto';
-    closeBtn.style.padding = '0.6vmin 2vmin';
-    closeBtn.style.borderRadius = 'var(--radius)';
-    closeBtn.style.minWidth = '6em';
-    closeBtn.addEventListener('click', () => overlay.remove());
-    buttonRow.appendChild(closeBtn);
-    modal.appendChild(buttonRow);
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
+            modal.appendChild(modalButtonRow([
+                modalButton(getTerm('rankTranslationClose'), close),
+            ]));
+        },
     });
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
 }

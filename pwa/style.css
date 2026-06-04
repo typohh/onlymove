@@ -86,6 +86,21 @@ body {
     cursor: not-allowed;
     pointer-events: none;
 }
+/* Dialog buttons: reset .btn's full-width landscape stretch so modal buttons
+   size to content (was an inline-style quartet repeated across every dialog). */
+.btn-inline {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 6em;
+    padding: 0.6vmin 2vmin;
+    border-radius: var(--radius);
+}
+.modal-button-row {
+    display: flex;
+    gap: 1.5vmin;
+    justify-content: center;
+    margin-top: 0.5vmin;
+}
 
 .info-text {
     color: #fff;

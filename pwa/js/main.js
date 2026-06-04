@@ -69,51 +69,18 @@ function getBoardSizeFromPath() {
  */
 function showBoardSizePicker({ dismissable = false } = {}) {
     return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.id = 'ios-install-overlay';
-
-        const modal = document.createElement('div');
-        modal.id = 'ios-install-modal';
-        modal.style.width = 'max-content';
-
-        const title = document.createElement('div');
-        title.id = 'ios-install-title';
-        title.id = 'ios-install-title';
-        title.textContent = getTerm('boardSizePickerTitle');
-
-        const buttonRow = document.createElement('div');
-        buttonRow.style.display = 'flex';
-        buttonRow.style.gap = '1.5vmin';
-        buttonRow.style.justifyContent = 'center';
-
-        for (const size of SUPPORTED_BOARD_SIZES) {
-            const btn = document.createElement('button');
-            btn.className = 'btn';
-            btn.textContent = `${size}x${size}`;
-            btn.style.flex = '0 0 auto';
-            btn.style.width = 'auto';
-            btn.style.minWidth = '6em';
-            btn.style.borderRadius = 'var(--radius)';
-            btn.addEventListener('click', () => {
-                overlay.remove();
-                resolve(size);
-            });
-            buttonRow.appendChild(btn);
-        }
-
-        if (dismissable) {
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    overlay.remove();
-                    resolve(null);
-                }
-            });
-        }
-
-        modal.appendChild(title);
-        modal.appendChild(buttonRow);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+        showModal({
+            dismissable,
+            onDismiss: () => resolve(null),
+            build: (modal, close) => {
+                modal.style.width = 'max-content';
+                modal.appendChild(modalTitle(getTerm('boardSizePickerTitle')));
+                modal.appendChild(modalButtonRow(
+                    SUPPORTED_BOARD_SIZES.map((size) =>
+                        modalButton(`${size}x${size}`, () => { close(); resolve(size); }))
+                ));
+            },
+        });
     });
 }
 
@@ -127,51 +94,22 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 function showConfirm(message) {
     return new Promise((resolve) => {
         let settled = false;
-        const finish = (result) => {
+        const settle = (result, close) => {
             if (settled) return;
             settled = true;
-            overlay.remove();
+            close();
             resolve(result);
         };
-
-        const overlay = document.createElement('div');
-        overlay.id = 'ios-install-overlay';
-
-        const modal = document.createElement('div');
-        modal.id = 'ios-install-modal';
-
-        const text = document.createElement('div');
-        text.id = 'ios-install-title';
-        text.textContent = message;
-        modal.appendChild(text);
-
-        const buttonRow = document.createElement('div');
-        buttonRow.style.display = 'flex';
-        buttonRow.style.gap = '1.5vmin';
-        buttonRow.style.justifyContent = 'center';
-        buttonRow.style.marginTop = '1vmin';
-
-        for (const [label, result] of [[getTerm('confirmNo'), false], [getTerm('confirmYes'), true]]) {
-            const btn = document.createElement('button');
-            btn.className = 'btn';
-            btn.textContent = label;
-            // .btn stretches full-width in the landscape side panel; size to
-            // content here like the other dialog buttons.
-            btn.style.flex = '0 0 auto';
-            btn.style.width = 'auto';
-            btn.style.minWidth = '6em';
-            btn.style.borderRadius = 'var(--radius)';
-            btn.addEventListener('click', () => finish(result));
-            buttonRow.appendChild(btn);
-        }
-        modal.appendChild(buttonRow);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) finish(false);
+        showModal({
+            onDismiss: () => settle(false, () => {}),
+            build: (modal, close) => {
+                modal.appendChild(modalTitle(message));
+                modal.appendChild(modalButtonRow([
+                    modalButton(getTerm('confirmNo'), () => settle(false, close)),
+                    modalButton(getTerm('confirmYes'), () => settle(true, close)),
+                ]));
+            },
         });
-
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
     });
 }
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
@@ -179,7 +117,7 @@ import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
-import { showLoading, hideLoading } from './overlays.js';
+import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
 import { APP_MODES, TOTAL_RANKS } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -510,39 +448,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
 
         const showShareChooser = () => {
-            const overlay = document.createElement('div');
-            overlay.id = 'ios-install-overlay';
-
-            const modal = document.createElement('div');
-            modal.id = 'ios-install-modal';
-
-            const bothBtn = document.createElement('button');
-            bothBtn.className = 'btn';
-            bothBtn.textContent = getTerm('shareBoth');
-            bothBtn.addEventListener('click', () => { overlay.remove(); shareBoth().finally(releaseGuard); });
-
-            const linkBtn = document.createElement('button');
-            linkBtn.className = 'btn';
-            linkBtn.textContent = getTerm('shareLink');
-            linkBtn.addEventListener('click', () => { overlay.remove(); shareLink().finally(releaseGuard); });
-
-            const imageBtn = document.createElement('button');
-            imageBtn.className = 'btn';
-            imageBtn.textContent = getTerm('shareImage');
-            imageBtn.addEventListener('click', () => { overlay.remove(); shareImage().finally(releaseGuard); });
-
-            overlay.addEventListener('click', (ev) => {
-                if (ev.target === overlay) {
-                    overlay.remove();
-                    releaseGuard();
-                }
+            // Full-width stacked .btn buttons (not .btn-inline) — the chooser
+            // intentionally presents three equal-width options.
+            const mkBtn = (term, action) => {
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.textContent = getTerm(term);
+                return [btn, action];
+            };
+            showModal({
+                onDismiss: releaseGuard,
+                build: (modal, close) => {
+                    for (const [btn, action] of [
+                        mkBtn('shareBoth', shareBoth),
+                        mkBtn('shareLink', shareLink),
+                        mkBtn('shareImage', shareImage),
+                    ]) {
+                        btn.addEventListener('click', () => { close(); action().finally(releaseGuard); });
+                        modal.appendChild(btn);
+                    }
+                },
             });
-
-            modal.appendChild(bothBtn);
-            modal.appendChild(linkBtn);
-            modal.appendChild(imageBtn);
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
         };
 
         // Probe whether the browser can share files at all, without actually generating one.
