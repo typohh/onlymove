@@ -16,6 +16,15 @@ const PRECACHE_URLS = [
     '/lib/math.min.js',
     '/manifest.json',
     '/sound/stone.wav',
+    // Decorative ink-wash corner masks. Fixed filenames (not content-hashed),
+    // so precaching them in the version-stamped precache both makes them
+    // available offline from first install AND refreshes them on every deploy
+    // (the per-VERSION precache is rebuilt + the old one deleted on activate) —
+    // avoiding the runtime cache-first staleness that fixed-name assets hit.
+    '/corners/corner_tl.png',
+    '/corners/corner_tr.png',
+    '/corners/corner_bl.png',
+    '/corners/corner_br.png',
     // M (rating→rank map) is required at init with no fallback — main.js aborts
     // fatal if it can't load (see Sentry JAVASCRIPT-2V/2W: transient mobile-Safari
     // fetch failures). Precache it so a network blip can't kill the whole app.

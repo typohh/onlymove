@@ -1092,3 +1092,53 @@ body {
     to { transform: rotate(360deg); }
 }
 
+
+/* --- Decorative ink-wash corner art -------------------------------------- *
+ * Four monochrome sumi-e corner masks tinted with currentColor, so they
+ * adapt automatically to light/dark mode (white ink on dark, black on light).
+ * The layer sits behind all UI (z-index:-1) and never intercepts input; the
+ * opaque board background covers any overlap, and each scene fades to nothing
+ * toward the centre so it can't clash with the title/controls.
+ * Body's background is made transparent so the negative-z art isn't painted
+ * over by it; <html> keeps the themed canvas colour (#222 dark / #fff light). */
+body {
+    background-color: transparent;
+}
+#corner-art {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    color: inherit; /* tint follows body text colour (themed) */
+}
+#corner-art .corner-piece {
+    position: absolute;
+    width: min(38vmin, 360px);
+    height: min(38vmin, 360px);
+    background-color: currentColor;
+    opacity: 0.5; /* ~halfway subtlety */
+    -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+            mask-size: contain;
+}
+#corner-art .tl {
+    top: 0; left: 0;
+    -webkit-mask-image: url('../corners/corner_tl.png');
+            mask-image: url('../corners/corner_tl.png');
+}
+#corner-art .tr {
+    top: 0; right: 0;
+    -webkit-mask-image: url('../corners/corner_tr.png');
+            mask-image: url('../corners/corner_tr.png');
+}
+#corner-art .bl {
+    bottom: 0; left: 0;
+    -webkit-mask-image: url('../corners/corner_bl.png');
+            mask-image: url('../corners/corner_bl.png');
+}
+#corner-art .br {
+    bottom: 0; right: 0;
+    -webkit-mask-image: url('../corners/corner_br.png');
+            mask-image: url('../corners/corner_br.png');
+}

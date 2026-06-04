@@ -2,3 +2,8 @@ node_modules/
 dist/
 .wrangler/
 src/version.js
+# Full-res Gemini source images for the corner art (~27 MB). The derived,
+# production-ready alpha masks in pwa/corners/ ARE tracked; these originals are
+# kept locally only, for re-tuning the mask threshold. Remove this line to
+# version them.
+out/corners/

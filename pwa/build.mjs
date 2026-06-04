@@ -8,6 +8,7 @@ const DIST_DIR = 'dist';
 const STATIC_ASSETS = [
     'index.html',
     'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
+    'corners',
     'apple-touch-icon.png',
     'favicon.ico',
     'icon-192.png',
