@@ -32,6 +32,13 @@ const PRECACHE_URLS = [
     // rank-decomposition.js; the precache is named per-VERSION and deleted on
     // activate, so each deploy fetches a fresh copy — it can't go stale.
     `/tsumegos/rating_to_rank.json?v=${VERSION}`,
+    // population_constants.json (fitted time-bias + retention constants) is a
+    // MANDATORY asset — the client carries no baked defaults and main.js aborts if it
+    // can't load — so it joins the atomic precache like M. Version-stamped, so the
+    // per-VERSION precache (deleted + rebuilt on activate) fetches a fresh copy each
+    // deploy and it can't go stale. The pipeline always ships a valid file, so addAll
+    // won't 404 on a normal deploy.
+    `/tsumegos/population_constants.json?v=${VERSION}`,
 ];
 
 self.addEventListener('install', event => {

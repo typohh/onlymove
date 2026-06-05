@@ -384,10 +384,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error(msg);
     }
 
-    // Apply the fitted population constants (time/review bias + retention) before
-    // the model trains or schedules. Non-fatal: on failure the modules keep their
-    // hardcoded defaults (see population-constants.js).
-    await loadPopulationConstants();
+    // Population constants (time/review bias + retention) are REQUIRED — they back
+    // the recall scheduler and the rushing/review nudges, and the modules carry no
+    // baked fallback. Load before the model trains or schedules; bail loudly on
+    // failure, exactly like M above (there is no sane default to run without).
+    const populationConstants = await loadPopulationConstants();
+    if (!populationConstants) {
+        const msg = 'Failed to load population_constants.json (model constants); cannot continue.';
+        try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
+        throw new Error(msg);
+    }
 
     // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
     // (raw) + problemRank on legacy answerHistory entries from already-deployed

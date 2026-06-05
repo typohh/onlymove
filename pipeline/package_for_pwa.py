@@ -599,13 +599,17 @@ def copy_curve(output_dir):
         else:
             print(f"  [warn] no {name} in {RATINGS_ROOT}/ — served copy left as-is "
                   f"(run map_rating_v2_to_egf first)")
-    # Population model constants (time/review bias + retention) — optional; the
-    # client falls back to its hardcoded defaults if absent (run
-    # fit_population_constants to produce it).
+    # Population model constants (time/review bias + retention) — MANDATORY for the
+    # client: it carries no baked defaults and aborts boot if this is missing (see
+    # pwa/js/population-constants.js). Warn loudly if absent so a deploy can't ship a
+    # broken bundle.
     pc = os.path.join(src_dir, "population_constants.json")
     if os.path.exists(pc):
         shutil.copyfile(pc, os.path.join(served, "population_constants.json"))
         copied.append("population_constants.json")
+    else:
+        print(f"  [warn] no population_constants.json in {RATINGS_ROOT}/ — the client "
+              f"REQUIRES it and will fail to boot. Run fit_population_constants.")
     return copied
 
 

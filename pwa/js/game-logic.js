@@ -36,20 +36,22 @@ const median = (values) => {
 // ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
 const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
 // Population-mean solving/review-time coeff (logit/min) = the confounding bias the
-// gate recenters by. DEFAULTS here; overwritten at boot from the fitted
-// population_constants.json via setTimeBias() (population-constants.js /
-// pipeline.fit_population_constants). `let` so the loader can replace them; the
-// defaults (3PL-controlled fit: solving -0.91, review ~0) stand if the fetch
-// fails. Always ≤0 — only negative confounding is corrected (see the fitter).
-let TIME_BIAS_PER_MIN = -0.91;
-let REVIEW_BIAS_PER_MIN = 0.0;
+// gate recenters by. Loaded at boot from the MANDATORY population_constants.json via
+// setTimeBias() (population-constants.js); NO baked fallback — the pipeline always
+// ships a valid file and main.js aborts if it can't load. `let`, uninitialized until
+// setTimeBias() runs. Clamped ≤0 — only negative confounding is corrected (see fitter).
+let TIME_BIAS_PER_MIN;
+let REVIEW_BIAS_PER_MIN;
 
-// Overwrite the time-benefit biases from the fitted population constants. Ignores
-// non-finite values and clamps to ≤0 (a positive bias would suppress genuine
-// benefit, so it's never applied).
+// Apply the time-benefit biases from the (MANDATORY) population constants. Throws on a
+// non-finite field so a corrupt blob is fatal (the caller aborts boot) rather than
+// silently leaving the biases unset. Clamps to ≤0 (a positive bias would suppress
+// genuine benefit, so it's never applied).
 export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
-    if (Number.isFinite(timePerMin)) TIME_BIAS_PER_MIN = Math.min(timePerMin, 0);
-    if (Number.isFinite(reviewPerMin)) REVIEW_BIAS_PER_MIN = Math.min(reviewPerMin, 0);
+    if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
+    if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
+    TIME_BIAS_PER_MIN = Math.min(timePerMin, 0);
+    REVIEW_BIAS_PER_MIN = Math.min(reviewPerMin, 0);
 }
 
 // One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),

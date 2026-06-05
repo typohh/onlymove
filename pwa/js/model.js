@@ -85,17 +85,15 @@ const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
 // due sooner than ~18h; ceiling guards against runaway intervals/overflow.
 const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
 const MAX_STABILITY_DAYS = 365;
-// Population constants (clean recall-era fit, n=5787 events / 88 users).
-// Retention constants. DEFAULTS here; overwritten at boot from the fitted
-// population_constants.json via applyRetentionConstants() (see population-
-// constants.js / pipeline.fit_population_constants). `let` so the loader can
-// replace them; if the fetch fails these defaults stand.
-let KAPPA = 4.22;                 // stability's sensitivity to the cold-solve logit
-let GROWTH = Math.log(1.54);      // log stability growth per consecutive success (×1.54)
-let Z0 = Math.log(0.7 / 0.3);     // reference difficulty: LN_C is the base S at p=0.7
-// Per-user base log-stability prior c≈4.7d (≈25h first-repeat for a new user);
-// LN_C is L2-shrunk to this (via L2_REGULARIZATION_TARGETS) and moves with data.
-let LN_C_PRIOR = 1.55;
+// Retention constants — loaded at boot from the fitted population_constants.json (a
+// MANDATORY asset; main.js aborts if it can't load) via applyRetentionConstants().
+// NO baked fallback: the pipeline always ships a valid file (fit_population_constants
+// writes population-prior defaults when data is sparse), so the client trusts it.
+// `let`, uninitialized until applyRetentionConstants() runs — before any train/schedule.
+let KAPPA;        // stability's sensitivity to the cold-solve logit
+let GROWTH;       // log stability growth per consecutive success
+let Z0;           // reference difficulty: LN_C is the base S at p=0.7 (= logit(0.7))
+let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to this
 // Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
 // overflow without flattening the gradient where the model still needs to learn.
 const LN_S_TRAIN_MIN = -5;
@@ -468,22 +466,27 @@ const L2_REGULARIZATION_TARGETS = {
     // SUCCESS_SINCE_FAILURE carries no fitted coefficient (growth is constant) —
     // shrink its unused slot to 0.
     [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: 0,
-    // Per-user base log-stability, shrunk to the population prior.
+    // Per-user base log-stability, shrunk to the population prior. Set for real by
+    // applyRetentionConstants() at boot (LN_C_PRIOR is undefined until then); no
+    // training reads this before the mandatory population-constants load completes.
     [MODEL_INDICES.LN_C]: LN_C_PRIOR,
 };
 
-// Overwrite the retention constants from the fitted population_constants.json
-// (population-constants.js calls this at boot, before any training/scheduling).
-// Also re-points the LN_C L2 target at the new prior. Ignores non-finite / out-of-
-// range values so a malformed blob can't poison scheduling.
+// Apply the retention constants from the (MANDATORY) population_constants.json;
+// population-constants.js calls this at boot before any training/scheduling, and also
+// re-points the LN_C L2 target at the prior. Throws on a missing/invalid field so a
+// corrupt blob is fatal (the caller aborts boot) rather than silently leaving the
+// constants unset — there is no baked default to fall back to.
 export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior } = {}) {
-    if (Number.isFinite(kappa) && kappa > 0 && kappa < 20) KAPPA = kappa;
-    if (Number.isFinite(z0)) Z0 = z0;
-    if (Number.isFinite(growth) && growth > -2 && growth < 4) GROWTH = growth;
-    if (Number.isFinite(ln_c_prior)) {
-        LN_C_PRIOR = ln_c_prior;
-        L2_REGULARIZATION_TARGETS[MODEL_INDICES.LN_C] = ln_c_prior;
-    }
+    if (!(Number.isFinite(kappa) && kappa > 0 && kappa < 20)) throw new Error(`population constants: bad kappa ${kappa}`);
+    if (!Number.isFinite(z0)) throw new Error(`population constants: bad z0 ${z0}`);
+    if (!(Number.isFinite(growth) && growth > -2 && growth < 4)) throw new Error(`population constants: bad growth ${growth}`);
+    if (!Number.isFinite(ln_c_prior)) throw new Error(`population constants: bad ln_c_prior ${ln_c_prior}`);
+    KAPPA = kappa;
+    Z0 = z0;
+    GROWTH = growth;
+    LN_C_PRIOR = ln_c_prior;
+    L2_REGULARIZATION_TARGETS[MODEL_INDICES.LN_C] = ln_c_prior;
 }
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
