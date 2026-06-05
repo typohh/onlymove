@@ -134,8 +134,10 @@ def gtp_to_xy(gtp_coord):
 
 def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     """Load pre-projected per-cell embeddings for one tsumego in the order the
-    PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells), or
-    (None, 0) on missing/corrupt/empty input.
+    PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells). A missing,
+    corrupt, or SGF-inconsistent .npz RAISES — packaging requires a per-cell projection
+    for every problem (build_embedding fills the whole corpus), so a gap is a hard
+    error, never silently skipped.
 
     Reads embeddings/joint/per_cell/<size>/<tid>.npz, written upstream by
     build_embedding.write_per_cell_projections. Those rows are in *extraction
@@ -154,20 +156,19 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     current build_embedding output (board-scan order) it produces a corrupt bin.
     """
     if not os.path.exists(per_cell_path):
-        return None, 0
+        raise FileNotFoundError(
+            f"missing per-cell projection {per_cell_path} — corpus and per_cell/ are "
+            f"out of sync; run build_embedding")
 
-    try:
-        with np.load(per_cell_path) as data:
-            embeddings = np.asarray(data["embeddings"])  # (n_cells, K) fp16
-            xys = np.asarray(data["xys"])                # (n_cells, 2)
-    except Exception as e:
-        print(f"  [warn] corrupt per_cell {per_cell_path}: {type(e).__name__}; "
-              f"skipping per-cell sidecar for this problem", flush=True)
-        return None, 0
+    # A file that exists but won't load is corruption, not a coverage gap — let it
+    # propagate and abort the run rather than silently dropping the sidecar.
+    with np.load(per_cell_path) as data:
+        embeddings = np.asarray(data["embeddings"])  # (n_cells, K) fp16
+        xys = np.asarray(data["xys"])                # (n_cells, 2)
 
     if not reorder_by_sgf:
         if embeddings.shape[0] == 0:
-            return None, 0
+            raise RuntimeError(f"per_cell {per_cell_path} has zero embedded cells")
         return embeddings.astype(EMBEDDING_DTYPE), int(embeddings.shape[0])
 
     with open(sgf_path, "rb") as f:
@@ -182,14 +183,21 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
         _, mb = node.get_raw_move()
         xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
         if xy is None:
-            continue  # pass: not embedded
+            continue  # pass: never embedded (the one expected omission)
         row = xy_to_row.get(xy)
         if row is None:
-            continue  # rare: SGF has a cell the extraction didn't
+            # The npz is meant to be a superset of the SGF's non-pass variations, so a
+            # move with no embedded cell means stale/mismatched extraction. Bailing here
+            # is load-bearing: a silently-dropped cell shifts every later cell's bin
+            # index, corrupting picked-move lookups for the whole shard.
+            raise RuntimeError(
+                f"per_cell {per_cell_path} is missing cell {xy} present in {sgf_path} "
+                f"(stale extraction?) — refusing to ship a misaligned sidecar")
         ordered_rows.append(embeddings[row])
 
     if not ordered_rows:
-        return None, 0
+        raise RuntimeError(
+            f"per_cell {per_cell_path}: no non-pass variation matched {sgf_path}")
 
     return np.stack(ordered_rows, axis=0).astype(EMBEDDING_DTYPE), len(ordered_rows)
 
@@ -391,18 +399,18 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     if os.path.exists(lookup_path):
         with open(lookup_path, 'r', encoding='utf-8') as f:
             for line in f:
-                parts = line.strip().split()
-                if len(parts) == 3:
-                    tsumego_id, zip_id, size_str = parts
-                    try:
-                        size_int = int(size_str)
-                    except ValueError:
-                        continue
-                    if size_int != board_size:
-                        merged.append((tsumego_id, zip_id, size_int))
-                # Rows shorter than 3 cols are pre-multi-size legacy data and
-                # are dropped — they belong to the size we are rebuilding now
-                # (only one size existed before this change).
+                if not line.strip():
+                    continue  # tolerate blank/trailing lines only
+                parts = line.split()
+                # Every real row is "id zipHash size". A malformed row is corruption
+                # (the legacy single-size format is long gone) — abort, don't drop.
+                if len(parts) != 3:
+                    raise ValueError(
+                        f"malformed lookup.txt row (expected 'id zipHash size'): {line!r}")
+                tsumego_id, zip_id, size_str = parts
+                size_int = int(size_str)  # non-integer size aborts
+                if size_int != board_size:
+                    merged.append((tsumego_id, zip_id, size_int))
 
     merged.extend(new_lookup_entries)
     merged.sort(key=lambda x: x[0])
@@ -476,13 +484,14 @@ def _read_embedding_version(embed_dir):
     """The content-hash embedding_version stamped into pca.npz by build_embedding
     (the PWA reads it to auto-invalidate localStorage on refits), or None."""
     pca_path = os.path.join(embed_dir, "pca.npz")
-    if os.path.exists(pca_path):
-        try:
-            arc = np.load(pca_path, allow_pickle=False)
-            if "embedding_version" in arc.files:
-                return str(arc["embedding_version"].item())
-        except Exception as e:
-            print(f"  couldn't read embedding_version from pca.npz: {e}")
+    if not os.path.exists(pca_path):
+        return None
+    # A present pca.npz that won't load is corruption — let it abort rather than
+    # silently shipping embedding_meta with a null version (which disables the PWA's
+    # embedding-cache invalidation).
+    arc = np.load(pca_path, allow_pickle=False)
+    if "embedding_version" in arc.files:
+        return str(arc["embedding_version"].item())
     return None
 
 
@@ -502,9 +511,11 @@ def load_embeddings(board_size, meta_only=False):
     """
     embed_dir, is_joint = _embeddings_dir(board_size)
     if embed_dir is None:
-        print(f"  no embeddings under embeddings/{{joint,{board_size}}}; "
-              f"skipping embedding fields")
-        return None, None
+        # The whole embeddings artifact is missing (build_embedding never ran) — a
+        # misconfigured run, not a per-problem coverage gap. Abort.
+        raise FileNotFoundError(
+            f"no embeddings under embeddings/{{joint,{board_size}}}/per_problem.csv "
+            f"— run build_embedding")
 
     per_problem = os.path.join(embed_dir, "per_problem.csv")
     # meta_only: read just the header to count K columns, skip the row map.
@@ -584,32 +595,29 @@ def copy_curve(output_dir):
     """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
     backend RATINGS_ROOT into the served pwa/tsumegos/. package_for_pwa is the
     SINGLE writer of pwa/tsumegos/: map_rating_v2_to_egf writes the curve into
-    ratings_v2/, and this copies it across. Returns the list of copied filenames
-    (missing sources leave the served copy untouched — packaging is otherwise
-    rank-agnostic)."""
+    ratings_v2/, and this copies it across. Returns the list of copied filenames.
+    Every source is REQUIRED — the client cannot rank a problem without the curve and
+    aborts boot without the population constants — so a missing source aborts the run
+    rather than shipping a partial bundle."""
     src_dir = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
     served = os.path.join(output_dir, "tsumegos")
     os.makedirs(served, exist_ok=True)
     copied = []
-    for name in ("rating_to_rank.json", "rank_map.json"):
+    # rating_to_rank.json + rank_map.json: the survey-calibrated rating→rank curve M
+    # (map_rating_v2_to_egf). population_constants.json: the fitted model constants the
+    # client requires (fit_population_constants). All three are mandatory.
+    required = {
+        "rating_to_rank.json": "map_rating_v2_to_egf",
+        "rank_map.json": "map_rating_v2_to_egf",
+        "population_constants.json": "fit_population_constants",
+    }
+    for name, producer in required.items():
         src = os.path.join(src_dir, name)
-        if os.path.exists(src):
-            shutil.copyfile(src, os.path.join(served, name))
-            copied.append(name)
-        else:
-            print(f"  [warn] no {name} in {RATINGS_ROOT}/ — served copy left as-is "
-                  f"(run map_rating_v2_to_egf first)")
-    # Population model constants (time/review bias + retention) — MANDATORY for the
-    # client: it carries no baked defaults and aborts boot if this is missing (see
-    # pwa/js/population-constants.js). Warn loudly if absent so a deploy can't ship a
-    # broken bundle.
-    pc = os.path.join(src_dir, "population_constants.json")
-    if os.path.exists(pc):
-        shutil.copyfile(pc, os.path.join(served, "population_constants.json"))
-        copied.append("population_constants.json")
-    else:
-        print(f"  [warn] no population_constants.json in {RATINGS_ROOT}/ — the client "
-              f"REQUIRES it and will fail to boot. Run fit_population_constants.")
+        if not os.path.exists(src):
+            raise FileNotFoundError(
+                f"missing required {name} in {RATINGS_ROOT}/ — run {producer} first")
+        shutil.copyfile(src, os.path.join(served, name))
+        copied.append(name)
     return copied
 
 
@@ -634,13 +642,13 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     PER_CELL_DIR = os.path.join(
         PROJECT_ROOT, "embeddings", "joint", "per_cell", str(board_size))
 
+    # Every size in ALL_BOARD_SIZES is expected to have a full set of artifacts; a
+    # missing one is a misconfigured run, not something to skip past.
     if not os.path.isdir(TSUMEGOS_DIR):
-        print(f"  no tsumegos dir at {TSUMEGOS_DIR}; skipping")
-        return None, None, None
+        raise FileNotFoundError(f"no tsumegos dir at {TSUMEGOS_DIR}")
     ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
     if not os.path.exists(ratings_csv):
-        print(f"  no ratings at {ratings_csv}; skipping")
-        return None, None, None
+        raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating_v2")
 
     inputs_hash = size_inputs_hash(board_size, reorder_by_sgf)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
@@ -672,68 +680,78 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # normalization. The client uses it as the per-attempt success-curve slope in
     # its rank estimator AND as the selection weight (∝ Fisher information a_p²).
     quality_csv = os.path.join(RATINGS_DIR, "tsumego_quality_final.csv")
-    tsumego_slope_df = pd.read_csv(quality_csv) if os.path.exists(quality_csv) else None
-    tsumego_slope_map = (
-        dict(zip(tsumego_slope_df['tsumego_id'],
-                 tsumego_slope_df['quality'].astype(float)))
-        if tsumego_slope_df is not None else {})
+    if not os.path.exists(quality_csv):
+        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating_v2")
+    tsumego_slope_df = pd.read_csv(quality_csv)
+    tsumego_slope_map = dict(zip(tsumego_slope_df['tsumego_id'],
+                                 tsumego_slope_df['quality'].astype(float)))
 
     # 2b. Floor map: the per-problem 3PL guessing floor c_p (the `floor` column in
     # tsumego_floor_final.csv, written by train_rating_v2 from the bot ladder).
     # Shipped RAW as `floor`; the client uses it as the lower asymptote of the
     # per-attempt success curve: P = floor + (1-floor)·σ(slope·(R-rank)+κ(floor)).
-    # Absent (older backend) → 0.0, i.e. the client falls back to the 2PL.
+    # Required: v2 is the only backend and always writes it.
     floor_csv = os.path.join(RATINGS_DIR, "tsumego_floor_final.csv")
-    tsumego_floor_df = pd.read_csv(floor_csv) if os.path.exists(floor_csv) else None
-    tsumego_floor_map = (
-        dict(zip(tsumego_floor_df['tsumego_id'],
-                 tsumego_floor_df['floor'].astype(float)))
-        if tsumego_floor_df is not None else {})
+    if not os.path.exists(floor_csv):
+        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating_v2")
+    tsumego_floor_df = pd.read_csv(floor_csv)
+    tsumego_floor_map = dict(zip(tsumego_floor_df['tsumego_id'],
+                                 tsumego_floor_df['floor'].astype(float)))
 
     print(f"  ratings: {len(tsumego_ratings_map)}, slopes: {len(tsumego_slope_map)}, "
           f"floors: {len(tsumego_floor_map)}")
     print(f"  loading joint embeddings (correct-cell field for metadata.json) ...")
     embedding_map, embedding_meta = load_embeddings(board_size)
 
-    # 3. Final per-problem metadata.
+    # 3. Final per-problem metadata. Every SGF must have a rating, slope, floor, and
+    # correct-cell embedding; any gap means the corpus and the rating/embedding
+    # artifacts are out of sync, which aborts rather than shipping a partial bundle.
     all_metadata = []
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
     print(f"  found {len(sgf_files)} SGFs in {TSUMEGOS_DIR}")
-    skipped_count = 0
-    embedding_missing = 0
+    if not sgf_files:
+        raise RuntimeError(f"no SGFs in {TSUMEGOS_DIR}")
+    missing_rating, missing_slope, missing_floor, missing_emb = [], [], [], []
     for filename in sgf_files:
         tsumego_id = filename.split('.')[0]
-        if tsumego_id in tsumego_ratings_map:
-            rating = tsumego_ratings_map[tsumego_id]
-            slope = tsumego_slope_map.get(tsumego_id, 0.0)
-            floor = tsumego_floor_map.get(tsumego_id, 0.0)
-            item = {
-                "filename": filename,
-                "rating": rating,
-                "slope": slope,
-                "floor": floor,
-            }
-            if embedding_map is not None:
-                emb = embedding_map.get(tsumego_id)
-                if emb is None:
-                    embedding_missing += 1
-                else:
-                    item["embedding"] = emb
-            all_metadata.append(item)
-        else:
-            skipped_count += 1
+        if tsumego_id not in tsumego_ratings_map:
+            missing_rating.append(tsumego_id)
+            continue
+        if tsumego_id not in tsumego_slope_map:
+            missing_slope.append(tsumego_id)
+            continue
+        if tsumego_id not in tsumego_floor_map:
+            missing_floor.append(tsumego_id)
+            continue
+        emb = embedding_map.get(tsumego_id)
+        if emb is None:
+            missing_emb.append(tsumego_id)
+            continue
+        all_metadata.append({
+            "filename": filename,
+            "rating": tsumego_ratings_map[tsumego_id],
+            "slope": tsumego_slope_map[tsumego_id],
+            "floor": tsumego_floor_map[tsumego_id],
+            "embedding": emb,
+        })
 
-    print(f"  metadata built for {len(all_metadata)} tsumegos "
-          f"(skipped {skipped_count} without ratings)")
-    if embedding_map is not None:
-        n_with = sum(1 for m in all_metadata if "embedding" in m)
-        print(f"  correct-cell embeddings on metadata.json: {n_with}/{len(all_metadata)} "
-              f"(missing for {embedding_missing})")
+    def _sample(ids, n=5):
+        return ", ".join(ids[:n]) + (" ..." if len(ids) > n else "")
+    gaps = []
+    for label, ids in (("rating", missing_rating), ("slope", missing_slope),
+                       ("floor", missing_floor), ("embedding", missing_emb)):
+        if ids:
+            gaps.append(f"{len(ids)} without a {label} ({_sample(ids)})")
+    if gaps:
+        raise RuntimeError(
+            f"[size {board_size}] corpus/artifact mismatch — " + "; ".join(gaps)
+            + ". Re-run the rating + embedding pipeline (or remove the orphan SGFs).")
+    print(f"  metadata built for all {len(all_metadata)} tsumegos (no gaps)")
 
-    per_cell_arg = PER_CELL_DIR if os.path.isdir(PER_CELL_DIR) else None
-    if per_cell_arg is None:
-        print(f"  no per_cell/ at {PER_CELL_DIR} — skipping sidecar for this size "
-              f"(run build_embedding to generate)")
+    if not os.path.isdir(PER_CELL_DIR):
+        raise FileNotFoundError(
+            f"no per_cell dir at {PER_CELL_DIR} — run build_embedding")
+    per_cell_arg = PER_CELL_DIR
 
     print(f"  building shards ...")
     create_packages(
