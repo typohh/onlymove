@@ -130,7 +130,10 @@ def process_one_sgf(sgf_path: str, model, block_names):
         _, mb = node.get_raw_move()
         xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
         if xy is None:
-            raise ValueError(f"Variation {i} is a pass; not supported")
+            # Pass variation: never embedded. Packaging (project_cells_for_problem)
+            # also maps cells by (x, y) and drops the pass, so skip it here rather than
+            # failing extraction — consumers read by correct_idx / (x, y), not position.
+            continue
         candidate_xys.append(xy)
     # variation_nodes[0] is the correct move by generator convention.
     correct_idx = 0
