@@ -21,6 +21,32 @@ const median = (values) => {
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
+// --- "Would more time help THIS user?" gate (rushing / insufficient-review overlays) ---
+// The stats-model solving/review-time coefficient (logit per minute) is biased
+// NEGATIVE by residual-difficulty confounding: a problem harder-than-its-rating
+// for this user takes longer AND fails more, so the within-user time effect soaks
+// up difficulty the model didn't capture (it controls only for MEASURED rank).
+// Quantified offline in auxiliary/analyze_time_benefit.py: the population-mean
+// solving-time coefficient is ~ -1.25 logit/min (the bias); review time shows no
+// such bias (~0). We recenter by that bias, then require the corrected estimate to
+// be positive with BENEFIT_CONFIDENCE certainty. That second step also handles
+// cold start for free: a user with little data has a wide SE, so the recentered
+// estimate sits near 50% and never clears the bar — no nagging until there's real
+// evidence this user benefits from slowing down. Captures ~11% of users at 0.80,
+// ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
+const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
+const TIME_BIAS_PER_MIN = -1.25;      // population-mean solving-time coeff (logit/min)
+const REVIEW_BIAS_PER_MIN = 0.0;      // review-time bias is ~0 (no difficulty confound)
+
+// One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),
+// or 0 when the stat is missing/degenerate. SIGNED test (not |coeff|/se): after
+// recentering the sign carries the meaning.
+function benefitConfidence(stat, biasPerMin) {
+    if (!stat || !(stat.se > 0)) return 0;
+    const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
+    return 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+}
+
 // Standard Go column letters skip 'I' (so A..H, J..T). Row number is 1-based
 // from the bottom; WGo's y=0 is at the top, so row = boardSize - y.
 const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
@@ -105,10 +131,9 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     const statsAreAvailable = statsResults && statsResults.length > 0;
 
     if (state.problemHistory[0]?.isRepeat) {
-        let reviewTimeIsBeneficial = false;
+        let reviewConf = 0;
         let medianReviewTime = 0;
         let previousReviewTime = 0;
-        let reviewStat;
         if (statsAreAvailable) {
             const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
             const reviewTimeValues = recentHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
@@ -123,45 +148,31 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
                 previousReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
             }
 
-            const targetVarIndex = MODEL_INDICES.REVIEW_TIME;
-            reviewStat = statsResults.find(r => r.varIndex === targetVarIndex);
-            if (reviewStat && reviewStat.coeff > 0) {
-                reviewTimeIsBeneficial = true;
-            }
+            const reviewStat = statsResults.find(r => r.varIndex === MODEL_INDICES.REVIEW_TIME);
+            reviewConf = benefitConfidence(reviewStat, REVIEW_BIAS_PER_MIN);
         }
 
-        if (reviewTimeIsBeneficial && previousReviewTime < medianReviewTime) {
+        if (reviewConf >= BENEFIT_CONFIDENCE && previousReviewTime < medianReviewTime) {
             duration = 6000;
-            if (reviewStat) {
-                const { coeff, se } = reviewStat;
-                const z = Math.abs(coeff) / se;
-                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = cdf * 100;
-                const x = Math.round(previousReviewTime / 1000);
-                message = getTerm('insufficientReviewMessage', { seconds: x, confidence: conf.toFixed(0) });
-                buttonText = getTerm('iWontRushIt');
-            }
+            const x = Math.round(previousReviewTime / 1000);
+            message = getTerm('insufficientReviewMessage', { seconds: x, confidence: (reviewConf * 100).toFixed(0) });
+            buttonText = getTerm('iWontRushIt');
         }
     } else { // Careless mistake for new problems
-        let timeIsBeneficial = false;
+        let timeConf = 0;
         let medianSolvingTime = 0;
         if (statsAreAvailable) {
             const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
             const timeTakenValues = recentHistory.map(p => p.timeTaken).filter(t => t !== undefined);
             medianSolvingTime = median(timeTakenValues);
             const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
-            timeIsBeneficial = timeStat ? timeStat.coeff > 0 : false;
+            timeConf = benefitConfidence(timeStat, TIME_BIAS_PER_MIN);
         }
 
-        if (timeIsBeneficial && state.accumulatedSolvingTime < medianSolvingTime) {
+        if (timeConf >= BENEFIT_CONFIDENCE && state.accumulatedSolvingTime < medianSolvingTime) {
             duration = 6000; // This duration will be ignored as buttonText is set
-            const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
-            const { coeff, se } = timeStat;
-            const z = Math.abs(coeff) / se;
-            const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-            const conf = cdf * 100;
             const x = Math.round(timeSpent / 1000);
-            message = getTerm('rushingMessage', { seconds: x, confidence: conf.toFixed(0) });
+            message = getTerm('rushingMessage', { seconds: x, confidence: (timeConf * 100).toFixed(0) });
             buttonText = getTerm('iWontRushIt');
         }
     }
