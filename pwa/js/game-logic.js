@@ -35,7 +35,12 @@ const median = (values) => {
 // evidence this user benefits from slowing down. Captures ~11% of users at 0.80,
 // ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
 const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
-const TIME_BIAS_PER_MIN = -1.25;      // population-mean solving-time coeff (logit/min)
+// Population-mean solving-time coeff (logit/min) = the bias. Re-estimated under
+// the 3PL difficulty control the model now uses (-0.91; was -1.25 under the old
+// linear control — the better difficulty absorption removed ~27% of the bias,
+// the rest is unobserved difficulty the bot 3PL can't see). auxiliary/
+// analyze_time_benefit.py.
+const TIME_BIAS_PER_MIN = -0.91;
 const REVIEW_BIAS_PER_MIN = 0.0;      // review-time bias is ~0 (no difficulty confound)
 
 // One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),

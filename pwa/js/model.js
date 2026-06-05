@@ -99,8 +99,30 @@ const LN_S_TRAIN_MAX = 8;
 
 function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
 
-// Cold-solve logit z over the logit features only (excludes the retention-only
-// SUCCESS_SINCE_FAILURE / LN_C). Reads MODEL_INDICES at call time (defined below).
+// --- Per-problem 3PL ---------------------------------------------------------
+// Cold-solve probability is P = floor + (1−floor)·σ(inner + κ(floor)), the same
+// 3PL the rank estimator uses (rank-decomposition.js), anchored so P = 80% when
+// the user's rank equals the problem's (CALIBRATION_P). Two per-problem inputs,
+// both shipped and stored on each answer-history row: the guessing FLOOR c_p
+// (problemFloor) and the discrimination a_p (problemSlope). a_p is used RAW as
+// the weight on the rank gap — no rank-unit conversion (M is near-linear by its
+// uniform-spacing prior), so the fitted PROBLEM_DIFFICULTY multiplier absorbs
+// the rank↔rating unit constant. Legacy rows without a_p/c_p fall back to
+// a_p = A_REF and c_p = 0, i.e. the previous 2PL behaviour.
+const CALIBRATION_P = 0.8;
+const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
+const FLOOR_MAX = 0.78;
+const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
+function clearKappa(c) {
+    if (!(c > 0)) return LOGIT_CALIBRATION;
+    const q = Math.min(Math.max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6);
+    return Math.log(q / (1 - q));
+}
+function clampFloor(c) { return Math.min(Math.max(typeof c === 'number' ? c : 0, 0), FLOOR_MAX); }
+
+// Inner logit (linear in params): excludes the per-problem κ(floor) offset and
+// the retention-only SUCCESS_SINCE_FAILURE / LN_C. Reads MODEL_INDICES at call
+// time (defined below).
 function logitZ(features, params) {
     const M = MODEL_INDICES;
     return params[M.INTERCEPT] * features[M.INTERCEPT]
@@ -110,24 +132,42 @@ function logitZ(features, params) {
          + params[M.SIZE_IS_13] * features[M.SIZE_IS_13];
 }
 
+// Cold-solve probability under the per-problem 3PL.
+function solveProb(features, params, floor) {
+    const c = clampFloor(floor);
+    return c + (1 - c) * sigmoid(logitZ(features, params) + clearKappa(c));
+}
+
+// Cold-solve LOG-ODDS — what the retention head consumes as z. Still logit(P),
+// now computed through the 3PL, so the KAPPA·(z−Z0) stability calibration keeps
+// its meaning (z = log-odds of a cold solve).
+function retentionLogit(features, params, floor) {
+    const P = Math.max(1e-9, Math.min(1 - 1e-9, solveProb(features, params, floor)));
+    return Math.log(P / (1 - P));
+}
+
 // Shared feature vector. `isRepeat` toggles the retention-only features
 // (SUCCESS_SINCE_FAILURE carries r; LN_C the per-user base). For prediction
 // `timePct` defaults to the neutral 0.5.
 //
-// PROBLEM_DIFFICULTY is the RELATIVE difficulty problemRank − userRank (both
-// normalized 0..1), not the absolute rank: solve probability and retention
-// depend on how hard a problem is *for this user*. Feeding the delta makes that
-// explicit (and robust at cold start) rather than relying on the per-user
-// INTERCEPT to absorb userRank. `userRank` defaults to the active shared rank;
-// historical training rows approximate it with the current rank (not stored
-// per-attempt). When userRank is unknown (very early), falls back to absolute.
-function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0, userRank }) {
+// PROBLEM_DIFFICULTY is the RELATIVE difficulty (userRank − problemRank, both
+// normalized 0..1) WEIGHTED by the problem's own 3PL discrimination a_p, so a
+// sharper problem separates abilities more steeply. Feeding the user-vs-problem
+// delta (not absolute rank) makes "how hard is this *for this user*" explicit
+// and robust at cold start instead of leaning on the INTERCEPT to absorb
+// userRank. The fitted coefficient is now a dimensionless ~1 multiplier on a_p
+// (it also soaks up the rank↔rating unit constant). `userRank` defaults to the
+// active shared rank; training rows approximate it with the current rank. When
+// userRank is unknown (very early), falls back to absolute. `slope` defaults to
+// A_REF for legacy rows that predate per-problem a_p.
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0, userRank, slope }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
     const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : 0);
+    const aP = (typeof slope === 'number' && slope > 0) ? slope : A_REF;
     f[MODEL_INDICES.INTERCEPT] = 1;
     f[MODEL_INDICES.TIME_SOLVING] = timePct;
     f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
-    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = (problemRank ?? 0) - uRank;
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? 0));
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
     f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
@@ -138,27 +178,29 @@ function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0
     return f;
 }
 
-// Unclamped log-stability for a repeat feature row: lnS = LN_C + KAPPA·(z−Z0) + GROWTH·r.
-function lnStabilityForRepeat(features, params) {
+// Unclamped log-stability for a repeat feature row: lnS = LN_C + KAPPA·(z−Z0) + GROWTH·r,
+// z = the 3PL cold-solve log-odds (carries the problem's floor).
+function lnStabilityForRepeat(features, params, floor) {
     const M = MODEL_INDICES;
     return params[M.LN_C]
-         + KAPPA * (logitZ(features, params) - Z0)
+         + KAPPA * (retentionLogit(features, params, floor) - Z0)
          + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
 }
 
 // Clamped stability (days) for scheduling/prediction.
-function stabilityDaysForRepeat(features, params) {
-    const S = Math.exp(lnStabilityForRepeat(features, params));
+function stabilityDaysForRepeat(features, params, floor) {
+    const S = Math.exp(lnStabilityForRepeat(features, params, floor));
     if (!isFinite(S)) return MAX_STABILITY_DAYS;
     return Math.min(MAX_STABILITY_DAYS, Math.max(MIN_STABILITY_DAYS, S));
 }
 
 // Window-open delay (hours) for a just-failed (r=0, no prior review) repeat at a
 // representative difficulty — the stats panel's "a missed problem comes back in
-// ~X h" readout. Returns null when params aren't ready.
-export function freshFailureReviewHours(params, { problemRank = 0, size, userRank } = {}) {
+// ~X h" readout. Returns null when params aren't ready. Uses representative
+// per-problem 3PL inputs (corpus-mean a_p, no floor).
+export function freshFailureReviewHours(params, { problemRank = 0, size, userRank, slope = A_REF, floor = 0 } = {}) {
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
-    const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0, userRank }), params);
+    const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0, userRank, slope }), params, floor);
     return NEG_LN_080 * S * 24;
 }
 
@@ -173,6 +215,7 @@ function featuresForTrainingRow(td, i) {
         size: p.size,
         r: p.successSinceFailure || 0,
         userRank: state.userRank,   // current rank approximates the rank at attempt time
+        slope: p.problemSlope,      // per-problem a_p (3PL discrimination); A_REF if absent
     });
 }
 
@@ -181,17 +224,20 @@ function featuresForTrainingRow(td, i) {
 // rows additionally contribute a retention term that trains LN_C only (z is read
 // but treated as constant — the correctness head owns it). `pLogistic` is
 // returned for the Fisher/SE computation. Gradient is the full param vector.
-function predictAndGrad(features, params, { isRepeat, elapsedDays, y }) {
+function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     const M = MODEL_INDICES;
     const np = params.length;
     const grad = new Array(np).fill(0);
 
-    // Logistic correctness head (all rows).
-    const z = logitZ(features, params);
-    const pL = sigmoid(z);
-    const pc = Math.max(1e-15, Math.min(1 - 1e-15, pL));
+    // 3PL correctness head (all rows): P = c + (1−c)·σ(inner + κ(c)).
+    const c = clampFloor(floor);
+    const praw = sigmoid(logitZ(features, params) + clearKappa(c));
+    const P = c + (1 - c) * praw;
+    const pc = Math.max(1e-15, Math.min(1 - 1e-15, P));
     let loss = -y * Math.log(pc) - (1 - y) * Math.log(1 - pc);
-    const eL = pL - y;
+    // dLoss/dinner = (P−y)/(P(1−P)) · dP/dinner, dP/dinner = (1−c)·praw·(1−praw).
+    // Reduces to (P−y) when c=0 (the old logistic head).
+    const eL = (pc - y) / (pc * (1 - pc)) * (1 - c) * praw * (1 - praw);
     grad[M.INTERCEPT] += eL * features[M.INTERCEPT];
     grad[M.TIME_SOLVING] += eL * features[M.TIME_SOLVING];
     grad[M.REVIEW_TIME] += eL * features[M.REVIEW_TIME];
@@ -200,6 +246,7 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y }) {
 
     // Retention head (repeat rows): fits LN_C only; z is stop-gradient.
     if (isRepeat) {
+        const z = retentionLogit(features, params, c);
         let lnS = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
         lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnS));
         const S = Math.exp(lnS);
@@ -210,7 +257,7 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y }) {
         const oneMinusR = Math.max(1 - R, 1e-9);
         grad[M.LN_C] += (R - y) * u / oneMinusR;   // dlnS/dLN_C = 1
     }
-    return { loss, grad, pLogistic: pL };
+    return { loss, grad, pLogistic: P };
 }
 
 
@@ -272,7 +319,8 @@ export function getRecallCandidates(options = {}) {
             size: lastAnswer.size,
             r: lastAnswer.successSinceFailure || 0,
             userRank: state.userRank,
-        }), params);
+            slope: lastAnswer.problemSlope,
+        }), params, lastAnswer.problemFloor);
 
         const tDays = (now - lastAnswer.date) / DAY_MS;
         if (tDays < 0) continue;
@@ -359,7 +407,8 @@ export function buildRecallSchedule(size) {
             size,
             r: lastAnswer.successSinceFailure || 0,
             userRank,
-        }), params);
+            slope: lastAnswer.problemSlope,
+        }), params, lastAnswer.problemFloor);
         if (!isFinite(S)) continue;
 
         const tEnterDays = NEG_LN_080 * S; // R=0.80
@@ -405,10 +454,11 @@ export const MODEL_INDICES = {
 const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
-    // Empirical in-band cold-solve slope (success barely falls across the served
-    // near-rank band); the old -10 made σ(z) think the user's problems were
-    // p≈0.07 and collapsed the recall curve.
-    [MODEL_INDICES.PROBLEM_DIFFICULTY]: -1.5,
+    // Now a dimensionless multiplier on the per-problem a_p·(rank gap): 1.0 = the
+    // shipped 3PL discrimination is right as-is for this user. Shrunk to 1 (was a
+    // raw in-band slope of -1.5 in the pre-3PL parameterization, before a_p and
+    // the κ(floor) anchor carried the difficulty shape).
+    [MODEL_INDICES.PROBLEM_DIFFICULTY]: 1.0,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
     [MODEL_INDICES.SIZE_IS_13]: 0,
     // SUCCESS_SINCE_FAILURE carries no fitted coefficient (growth is constant) —
@@ -443,6 +493,9 @@ export function getLogitPerRank(statsResults) {
 }
 
 let isCalculatingStats = false;
+
+// NOTE: the one-shot wipe of pre-3PL persisted params lives in migrations.js
+// (migrateModelArch3pl), which runMigrations() runs at boot before any training.
 
 export async function calculateAndStoreStatsResults() {
     if (isCalculatingStats) return;
@@ -545,6 +598,8 @@ export function prepareTrainingData(history, validHistory) {
         weights: Array.from({ length: n }, (_, i) => (i + 1) / n),
         percentileTime,
         percentileReview,
+        // Per-row 3PL guessing floor (problemFloor); 0 for legacy rows → 2PL.
+        floors: history.map(p => clampFloor(p.problemFloor)),
         elapsedDays,
         isRepeatArr,
         time_per_percentile_min,
@@ -556,7 +611,7 @@ export function prepareTrainingData(history, validHistory) {
 }
 
 async function trainUserModel(trainingData, modelState) {
-    const { y, weights, elapsedDays, isRepeatArr, n } = trainingData;
+    const { y, weights, elapsedDays, isRepeatArr, n, floors } = trainingData;
     let { params, adamState } = modelState;
 
     const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
@@ -577,7 +632,7 @@ async function trainUserModel(trainingData, modelState) {
         let currentLoss = 0;
 
         for (let i = 0; i < n; i++) {
-            const { loss, grad } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i] });
+            const { loss, grad } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i], floor: floors[i] });
             currentLoss += weights[i] * loss;
             for (let j = 0; j < numFeatures; j++) gradient[j] += weights[i] * grad[j];
         }
@@ -615,17 +670,18 @@ async function trainUserModel(trainingData, modelState) {
 }
 
 export function calculateResultsAndStdErrors(finalParams, trainingData) {
-    const { elapsedDays, isRepeatArr, weights, y, n, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
+    const { elapsedDays, isRepeatArr, weights, y, n, floors, time_per_percentile_min, time_per_percentile_min_r } = trainingData;
 
     const M = MODEL_INDICES;
     const np = Object.keys(M).length;
     const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
 
-    // SE for the cold-solve logit coefficients (the only results the stats panel
-    // reads) come from the logistic head's Fisher info: I = Σ wᵢ·p(1-p)·xᵢ·xᵢᵀ
-    // over the LOGIT features only (SUCCESS_SINCE_FAILURE / LN_C don't enter the
-    // logistic, so their design columns are zeroed; the +1e-6 ridge keeps the
-    // matrix invertible and just yields large, unused SE for those slots).
+    // SE for the cold-solve coefficients (the only results the stats panel reads)
+    // come from the 3PL Fisher info: I = Σ wᵢ·vᵢ·xᵢ·xᵢᵀ over the LOGIT features
+    // (which are linear in the inner logit), with vᵢ = (dP/dinner)²/(P(1−P)) the
+    // per-row 3PL information — at floor c=0 this reduces to p(1−p). The retention
+    // features (SUCCESS_SINCE_FAILURE / LN_C) don't enter, so their columns are
+    // zeroed; the +1e-6 ridge keeps the matrix invertible (large unused SE there).
     const logitIdx = [M.INTERCEPT, M.TIME_SOLVING, M.REVIEW_TIME, M.PROBLEM_DIFFICULTY, M.SIZE_IS_13];
     const D = X.map(xi => {
         const row = new Array(np).fill(0);
@@ -633,8 +689,11 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         return row;
     });
     const W = math.diag(X.map((xi, i) => {
-        const p = sigmoid(logitZ(xi, finalParams));
-        return weights[i] * p * (1 - p);
+        const c = clampFloor(floors[i]);
+        const praw = sigmoid(logitZ(xi, finalParams) + clearKappa(c));
+        const P = Math.max(1e-9, Math.min(1 - 1e-9, c + (1 - c) * praw));
+        const dP = (1 - c) * praw * (1 - praw);   // dP/dinner
+        return weights[i] * dP * dP / (P * (1 - P));
     }));
     const Dm = math.matrix(D);
     const fisherInfo = math.add(math.multiply(math.transpose(Dm), W, Dm), math.diag(Array(np).fill(1e-6)));
@@ -646,7 +705,11 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         let coeff = finalParams[i], se = stdErrors[i], scaleFactor = 1;
         if (i === MODEL_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
         else if (i === MODEL_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
-        else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = 1 / 29;
+        // PROBLEM_DIFFICULTY is now a multiplier on a_p·gap, so the effective
+        // logit-per-rank is coeff·a_p. Fold a representative a_p (A_REF) into the
+        // reported coeff so getLogitPerRank / the size-comparison readout keep
+        // the same "logit per rank index" scale as the pre-3PL model (was 1/29).
+        else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = A_REF / 29;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }
     return { results, varCovarMatrix };

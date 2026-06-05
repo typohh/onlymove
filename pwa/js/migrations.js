@@ -126,6 +126,21 @@ function migrateClearIgnoredFlag() {
     console.log('Answer history migration for clearing ignored flags complete.');
 }
 
+// The cold-solve model switched to a per-problem 3PL (model.js): PROBLEM_DIFFICULTY
+// went from a raw negative in-band rank slope to a positive multiplier on the
+// problem's a_p·(rank gap), and a κ(floor) anchor now carries the difficulty shape.
+// A warm start from the old persisted params would be wrong (different units/sign),
+// so drop modelParams/adamState once and let the model retrain clean.
+function migrateModelArch3pl() {
+    if (localStorage.getItem('modelArchMigrated_v1_3plFloor')) {
+        return;
+    }
+    state.modelParams = null;
+    state.adamState = null;
+    localStorage.setItem('modelArchMigrated_v1_3plFloor', 'true');
+    console.log('Model arch migration: dropped pre-3PL model params for clean retrain.');
+}
+
 // Original successSinceFailure backfill: walk each problem's attempts in date
 // order, counting successes since the most recent failure.
 function migrateAnswerHistory() {
@@ -178,4 +193,5 @@ export function runMigrations() {
     migrateProblemTypeToIsRepeat();
     migrateClearIgnoredFlag();
     migrateAnswerHistory();
+    migrateModelArch3pl();
 }
