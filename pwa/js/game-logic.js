@@ -35,13 +35,22 @@ const median = (values) => {
 // evidence this user benefits from slowing down. Captures ~11% of users at 0.80,
 // ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
 const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
-// Population-mean solving-time coeff (logit/min) = the bias. Re-estimated under
-// the 3PL difficulty control the model now uses (-0.91; was -1.25 under the old
-// linear control — the better difficulty absorption removed ~27% of the bias,
-// the rest is unobserved difficulty the bot 3PL can't see). auxiliary/
-// analyze_time_benefit.py.
-const TIME_BIAS_PER_MIN = -0.91;
-const REVIEW_BIAS_PER_MIN = 0.0;      // review-time bias is ~0 (no difficulty confound)
+// Population-mean solving/review-time coeff (logit/min) = the confounding bias the
+// gate recenters by. DEFAULTS here; overwritten at boot from the fitted
+// population_constants.json via setTimeBias() (population-constants.js /
+// pipeline.fit_population_constants). `let` so the loader can replace them; the
+// defaults (3PL-controlled fit: solving -0.91, review ~0) stand if the fetch
+// fails. Always ≤0 — only negative confounding is corrected (see the fitter).
+let TIME_BIAS_PER_MIN = -0.91;
+let REVIEW_BIAS_PER_MIN = 0.0;
+
+// Overwrite the time-benefit biases from the fitted population constants. Ignores
+// non-finite values and clamps to ≤0 (a positive bias would suppress genuine
+// benefit, so it's never applied).
+export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
+    if (Number.isFinite(timePerMin)) TIME_BIAS_PER_MIN = Math.min(timePerMin, 0);
+    if (Number.isFinite(reviewPerMin)) REVIEW_BIAS_PER_MIN = Math.min(reviewPerMin, 0);
+}
 
 // One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),
 // or 0 when the stat is missing/degenerate. SIGNED test (not |coeff|/se): after

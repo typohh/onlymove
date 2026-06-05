@@ -599,6 +599,13 @@ def copy_curve(output_dir):
         else:
             print(f"  [warn] no {name} in {RATINGS_ROOT}/ — served copy left as-is "
                   f"(run map_rating_v2_to_egf first)")
+    # Population model constants (time/review bias + retention) — optional; the
+    # client falls back to its hardcoded defaults if absent (run
+    # fit_population_constants to produce it).
+    pc = os.path.join(src_dir, "population_constants.json")
+    if os.path.exists(pc):
+        shutil.copyfile(pc, os.path.join(served, "population_constants.json"))
+        copied.append("population_constants.json")
     return copied
 
 

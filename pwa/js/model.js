@@ -86,12 +86,16 @@ const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
 const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
 const MAX_STABILITY_DAYS = 365;
 // Population constants (clean recall-era fit, n=5787 events / 88 users).
-const KAPPA = 4.22;               // stability's sensitivity to the cold-solve logit
-const GROWTH = Math.log(1.54);    // log stability growth per consecutive success (×1.54)
-const Z0 = Math.log(0.7 / 0.3);   // reference difficulty: LN_C is the base S at p=0.7
+// Retention constants. DEFAULTS here; overwritten at boot from the fitted
+// population_constants.json via applyRetentionConstants() (see population-
+// constants.js / pipeline.fit_population_constants). `let` so the loader can
+// replace them; if the fetch fails these defaults stand.
+let KAPPA = 4.22;                 // stability's sensitivity to the cold-solve logit
+let GROWTH = Math.log(1.54);      // log stability growth per consecutive success (×1.54)
+let Z0 = Math.log(0.7 / 0.3);     // reference difficulty: LN_C is the base S at p=0.7
 // Per-user base log-stability prior c≈4.7d (≈25h first-repeat for a new user);
 // LN_C is L2-shrunk to this (via L2_REGULARIZATION_TARGETS) and moves with data.
-const LN_C_PRIOR = 1.55;
+let LN_C_PRIOR = 1.55;
 // Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
 // overflow without flattening the gradient where the model still needs to learn.
 const LN_S_TRAIN_MIN = -5;
@@ -467,6 +471,20 @@ const L2_REGULARIZATION_TARGETS = {
     // Per-user base log-stability, shrunk to the population prior.
     [MODEL_INDICES.LN_C]: LN_C_PRIOR,
 };
+
+// Overwrite the retention constants from the fitted population_constants.json
+// (population-constants.js calls this at boot, before any training/scheduling).
+// Also re-points the LN_C L2 target at the new prior. Ignores non-finite / out-of-
+// range values so a malformed blob can't poison scheduling.
+export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior } = {}) {
+    if (Number.isFinite(kappa) && kappa > 0 && kappa < 20) KAPPA = kappa;
+    if (Number.isFinite(z0)) Z0 = z0;
+    if (Number.isFinite(growth) && growth > -2 && growth < 4) GROWTH = growth;
+    if (Number.isFinite(ln_c_prior)) {
+        LN_C_PRIOR = ln_c_prior;
+        L2_REGULARIZATION_TARGETS[MODEL_INDICES.LN_C] = ln_c_prior;
+    }
+}
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
 // of a correct answer by roughly this much. Treated as a Gaussian prior whose

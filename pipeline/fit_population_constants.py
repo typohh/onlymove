@@ -1,0 +1,407 @@
+"""Fit the PWA's population-level model constants from the local D1 log and write
+them to ratings_v2/population_constants.json, which package_for_pwa copies into
+the served pwa/tsumegos/. The client fetches it at boot and uses these in place
+of the hardcoded defaults in game-logic.js (time/review bias) and model.js
+(retention constants), so the constants track the real user population instead of
+drifting from a one-off manual fit.
+
+Two groups of constants:
+
+1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
+   overlays gate on a per-user solving/review-time coefficient that is biased
+   NEGATIVE by residual-difficulty confounding (a problem harder-than-its-rating
+   for a user takes longer AND fails more). We estimate the population-mean
+   coefficient — the additive bias the client recenters by — under the SAME 3PL
+   difficulty control the cold-solve model now uses, in the client's
+   logit-per-minute feature space (percentile time → central per-minute slope).
+   Solving time carries the bias; review time empirically does not (~0).
+
+2. RETENTION constants (model.js: KAPPA, Z0, GROWTH, LN_C_PRIOR) for the
+   FSRS-style stability map  S = exp(LN_C + KAPPA·(z − Z0) + GROWTH·r),
+   R(t) = exp(−t_days / S),  where z = logit(P_cold-solve) is the 3PL cold-solve
+   log-odds. Fit by retention NLL over clean post-cutoff repeat chains (repeats
+   were only logged from 2026-05-15; a chain whose first attempt predates that has
+   unknown hidden reviews, so only post-cutoff chains give trustworthy gaps/r).
+   Z0 = logit(0.7) is a fixed reference (LN_C is the base stability at p=0.7).
+
+All constants are board-INDEPENDENT (the cold-solve scale is shared across sizes),
+so a single JSON serves both boards.
+
+Needs ratings_v2/ shard params via pwa/tsumegos/<size>/ (problem rating/slope/
+floor) and attempts/database.sqlite. No GPU, not part of the in-order pipeline.
+
+Run:
+  ./.venv/bin/python3 -m pipeline.fetch_database --rebuild-sqlite   # refresh first
+  ./.venv/bin/python3 -m pipeline.fit_population_constants
+  ./.venv/bin/python3 -m pipeline.package_for_pwa                   # publishes the JSON
+"""
+
+import argparse
+import bisect
+import hashlib
+import json
+import os
+import sqlite3
+import sys
+import zipfile
+from collections import defaultdict
+from datetime import datetime, timezone
+
+import numpy as np
+from scipy.optimize import minimize
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+# --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
+CALIBRATION_P = 0.8
+LOGIT_CALIBRATION = np.log(CALIBRATION_P / (1 - CALIBRATION_P))
+FLOOR_MAX = 0.78
+Z0 = np.log(0.7 / 0.3)                 # fixed retention reference (= logit(0.7))
+REPEAT_LOG_CUTOFF = "2026-05-15"       # repeats logged only from here (clean chains)
+AFK_CAP_S = 180.0                      # drop AFK solving times before the bias fit
+
+# Current hardcoded defaults — the fallback when data is too sparse to refit.
+DEFAULTS = {
+    "time_bias_per_min": -0.91,
+    "review_bias_per_min": 0.0,
+    "retention": {"kappa": 4.22, "z0": float(Z0),
+                  "growth": float(np.log(1.54)), "ln_c_prior": 1.55},
+}
+MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
+MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
+
+
+def sigmoid(x):
+    return 0.5 * (1.0 + np.tanh(0.5 * x))
+
+
+def clear_kappa(c):
+    c = np.clip(c, 0.0, FLOOR_MAX)
+    q = np.clip((CALIBRATION_P - c) / (1 - c), 1e-6, 1 - 1e-6)
+    out = np.log(q / (1 - q))
+    return np.where(np.asarray(c) > 0, out, LOGIT_CALIBRATION)
+
+
+def clear_kappa_scalar(c):
+    c = min(max(c, 0.0), FLOOR_MAX)
+    if c <= 0:
+        return float(LOGIT_CALIBRATION)
+    q = min(max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6)
+    return float(np.log(q / (1 - q)))
+
+
+# ---------------------------------------------------------------------------
+# Loading
+# ---------------------------------------------------------------------------
+def load_rows(db_path):
+    """All attempts, ordered by user/problem/time so chains are easy to walk."""
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        "SELECT user_id, problem, success, size, time_used, review_time, "
+        "is_repeat, created_at FROM tsumego_reports ORDER BY user_id, problem, created_at"
+    ).fetchall()
+    con.close()
+    return rows
+
+
+def load_problem_params(tsumegos_dir, needed):
+    """{(size, tid): (rating, slope, floor)} from the served shard metadata."""
+    params = {}
+    by_size = defaultdict(set)
+    for (size, tid) in needed:
+        by_size[size].add(tid)
+    for size, tids in by_size.items():
+        size_dir = os.path.join(tsumegos_dir, str(size))
+        if not os.path.isdir(size_dir):
+            print(f"  WARNING: {size_dir} missing; skipping size {size}")
+            continue
+        remaining = set(tids)
+        for shard in os.listdir(size_dir):
+            if not shard.endswith(".zip") or not remaining:
+                continue
+            try:
+                with zipfile.ZipFile(os.path.join(size_dir, shard)) as zf:
+                    meta = json.loads(zf.read("metadata.json"))
+            except (KeyError, zipfile.BadZipFile, json.JSONDecodeError):
+                continue
+            for item in meta:
+                tid = item.get("filename", "")[:-4]
+                if tid in remaining:
+                    s, r = item.get("slope"), item.get("rating")
+                    if s and r is not None and np.isfinite(s) and s > 0 and np.isfinite(r):
+                        params[(size, tid)] = (float(r), float(s),
+                                               float(np.clip(item.get("floor", 0.0), 0, FLOOR_MAX)))
+                    remaining.discard(tid)
+    return params
+
+
+# ---------------------------------------------------------------------------
+# Per-user ability (3PL MLE over novel attempts) — the cold-solve z source.
+# ---------------------------------------------------------------------------
+def fit_ability(rating, slope, floor, y, iters=50):
+    """1-D Newton for ability θ: P = c + (1−c)σ(a·(θ−rating)+κ(c))."""
+    kappa = clear_kappa(floor)
+    one_mc = 1 - floor
+    theta = 0.0
+    for _ in range(iters):
+        praw = sigmoid(slope * (theta - rating) + kappa)
+        P = np.clip(floor + one_mc * praw, 1e-9, 1 - 1e-9)
+        g = one_mc * slope * praw * (1 - praw)          # dP/dθ
+        score = np.sum((y - P) * g / (P * (1 - P))) - 0.04 * theta   # weak prior
+        info = np.sum(g * g / (P * (1 - P))) + 0.04
+        step = score / info
+        step = max(-2.0, min(2.0, step))
+        theta += step
+        theta = max(-20.0, min(20.0, theta))
+        if abs(step) < 1e-7:
+            break
+    return float(theta)
+
+
+def cold_solve_logit(theta, rating, slope, floor):
+    """z = logit(P_cold-solve) for the 3PL — what the retention head consumes."""
+    praw = sigmoid(slope * (theta - rating) + clear_kappa_scalar(floor))
+    P = min(max(floor + (1 - floor) * praw, 1e-9), 1 - 1e-9)
+    return float(np.log(P / (1 - P)))
+
+
+# ---------------------------------------------------------------------------
+# Time-benefit bias (client logit/min units, under the 3PL difficulty control)
+# ---------------------------------------------------------------------------
+def midrank_pct(sorted_ms, t):
+    n = len(sorted_ms)
+    lo = bisect.bisect_left(sorted_ms, t)
+    hi = bisect.bisect_right(sorted_ms, t)
+    return (lo + 0.5 * (hi - lo)) / n
+
+
+def fit_time_coeff_3pl(rating, slope, floor, pct, y, iters=60):
+    """Per-user (ability, time_coeff) under the 3PL with time on the inner logit:
+    inner = a·(ability−rating) + κ(floor) + time_coeff·pct. Returns (coeff, se)
+    in logit-per-percentile (caller scales to per-minute)."""
+    kappa = clear_kappa(floor)
+    one_mc = 1 - floor
+    w = np.array([0.0, 0.0])
+    X = np.column_stack([slope, pct])
+    ridge = np.diag([1e-4, 1e-4])
+    for _ in range(iters):
+        eta = slope * w[0] + pct * w[1] + kappa - slope * rating
+        praw = sigmoid(eta)
+        P = np.clip(floor + one_mc * praw, 1e-9, 1 - 1e-9)
+        g = one_mc * praw * (1 - praw)
+        v = g * g / (P * (1 - P))
+        s = (y - P) * g / (P * (1 - P))
+        H = (X * v[:, None]).T @ X + ridge
+        step = np.linalg.solve(H, X.T @ s - np.array([1e-4, 1e-4]) * w)
+        step = np.clip(step, -3, 3)
+        w = w + step
+        if np.max(np.abs(step)) < 1e-8:
+            break
+    cov = np.linalg.inv((X * v[:, None]).T @ X + ridge)
+    return float(w[1]), float(np.sqrt(max(cov[1, 1], 0.0)))
+
+
+def population_time_bias(by_user_rows, params, review=False, min_n=20):
+    """Inverse-variance pooled population-mean time/review coefficient (logit/min)
+    = the additive bias the client recenters by."""
+    coefs, ses = [], []
+    for user, rows in by_user_rows.items():
+        if review:
+            ev = [(r["review_time"], r["success"], params[(r["size"], r["problem"])])
+                  for r in rows
+                  if r["is_repeat"] and r["review_time"] and r["review_time"] > 0
+                  and r["review_time"] < 3600000 and (r["size"], r["problem"]) in params]
+        else:
+            ev = [(r["time_used"], r["success"], params[(r["size"], r["problem"])])
+                  for r in rows
+                  if not r["is_repeat"] and r["time_used"] and 0 < r["time_used"] <= AFK_CAP_S * 1000
+                  and (r["size"], r["problem"]) in params]
+        if len(ev) < min_n:
+            continue
+        ms = np.array([e[0] for e in ev], float)
+        y = np.array([1 if e[1] else 0 for e in ev], float)
+        rating = np.array([e[2][0] for e in ev])
+        slope = np.array([e[2][1] for e in ev])
+        floor = np.clip(np.array([e[2][2] for e in ev]), 0, FLOOR_MAX)
+        if y.std() == 0:
+            continue
+        sm = np.sort(ms)
+        n = len(sm)
+        tppm = (sm[int(np.ceil(0.55 * (n - 1)))] - sm[int(np.floor(0.45 * (n - 1)))]) / (60000 * 0.10)
+        if not (tppm > 0):
+            continue
+        pct = np.array([midrank_pct(sm, t) for t in ms])
+        if pct.std() < 1e-6:
+            continue
+        c, se = fit_time_coeff_3pl(rating, slope, floor, pct, y)
+        if se > 0 and np.isfinite(se):
+            coefs.append(c / tppm)
+            ses.append(se / tppm)
+    if len(coefs) < MIN_BIAS_USERS:
+        return None, len(coefs)
+    coefs = np.array(coefs)
+    w = 1.0 / np.array(ses) ** 2
+    return float(np.sum(w * coefs) / np.sum(w)), len(coefs)
+
+
+# ---------------------------------------------------------------------------
+# Retention constants (KAPPA, GROWTH, LN_C_PRIOR), Z0 fixed.
+# ---------------------------------------------------------------------------
+def build_retention_events(rows, params, abilities):
+    """One event per (prev → cur) consecutive pair in a clean post-cutoff chain:
+    y = cur.success, gap_days, r = prev.successSinceFailure, z = cold-solve logit.
+    Mirrors model.js scheduling (S from the previous attempt's features)."""
+    events = []
+    by_up = defaultdict(list)
+    for r in rows:
+        by_up[(r["user_id"], r["problem"], r["size"])].append(r)
+    for (user, problem, size), chain in by_up.items():
+        if (size, problem) not in params or user not in abilities:
+            continue
+        chain.sort(key=lambda r: r["created_at"])
+        if chain[0]["created_at"][:10] < REPEAT_LOG_CUTOFF:
+            continue   # unknown hidden reviews before the cutoff → corrupt gaps/r
+        z = cold_solve_logit(abilities[user], *params[(size, problem)])
+        ssf = 0          # successSinceFailure, walked over the chain
+        prev_ssf = 0     # the previous attempt's successSinceFailure (r for its gap)
+        has_failed = False
+        prev = None
+        for a in chain:
+            if prev is not None and a["is_repeat"]:
+                t_prev = datetime.fromisoformat(prev["created_at"].replace("Z", "+00:00"))
+                t_cur = datetime.fromisoformat(a["created_at"].replace("Z", "+00:00"))
+                gap_days = (t_cur - t_prev).total_seconds() / 86400.0
+                if gap_days > 0:
+                    events.append((1 if a["success"] else 0, gap_days, prev_ssf, z))
+            # update successSinceFailure AFTER using the previous value
+            if not a["success"]:
+                has_failed = True
+                ssf = 0
+            elif has_failed:
+                ssf += 1
+            prev_ssf = ssf
+            prev = a
+    return events
+
+
+def fit_retention(events):
+    """Fit KAPPA, GROWTH, LN_C (pooled) by retention NLL. R = exp(−gap/S),
+    S = exp(LN_C + KAPPA·(z−Z0) + GROWTH·r)."""
+    y = np.array([e[0] for e in events], float)
+    gap = np.array([e[1] for e in events], float)
+    r = np.array([e[2] for e in events], float)
+    z = np.array([e[3] for e in events], float)
+
+    def nll(p):
+        kappa, growth, ln_c = p
+        lnS = np.clip(ln_c + kappa * (z - Z0) + growth * r, -5, 8)
+        S = np.exp(lnS)
+        R = np.clip(np.exp(-gap / S), 1e-9, 1 - 1e-9)
+        return -np.sum(y * np.log(R) + (1 - y) * np.log(1 - R))
+
+    best = minimize(nll, x0=[DEFAULTS["retention"]["kappa"],
+                             DEFAULTS["retention"]["growth"],
+                             DEFAULTS["retention"]["ln_c_prior"]],
+                    method="Nelder-Mead",
+                    options={"xatol": 1e-4, "fatol": 1e-4, "maxiter": 5000})
+    kappa, growth, ln_c = best.x
+    # Guard against degenerate fits; keep sign/magnitude sane.
+    if not best.success or not (0 < kappa < 20) or not (-2 < growth < 4):
+        return None
+    return {"kappa": float(kappa), "z0": float(Z0),
+            "growth": float(growth), "ln_c_prior": float(ln_c)}
+
+
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+    ap.add_argument("--tsumegos-dir", default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos"))
+    ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings_v2", "population_constants.json"))
+    args = ap.parse_args()
+
+    print(f"Loading attempts from {args.db} ...")
+    rows = load_rows(args.db)
+    print(f"  {len(rows)} rows")
+    needed = {(r["size"], r["problem"]) for r in rows}
+    print(f"Loading 3PL params for {len(needed)} distinct problems ...")
+    params = load_problem_params(args.tsumegos_dir, needed)
+    print(f"  resolved {len(params)}")
+
+    by_user = defaultdict(list)
+    for r in rows:
+        by_user[r["user_id"]].append(r)
+
+    # --- Per-user ability (novel attempts) for the cold-solve z ---
+    abilities = {}
+    for user, urows in by_user.items():
+        ev = [(params[(r["size"], r["problem"])], r["success"]) for r in urows
+              if not r["is_repeat"] and (r["size"], r["problem"]) in params]
+        if len(ev) < 10:
+            continue
+        rating = np.array([e[0][0] for e in ev])
+        slope = np.array([e[0][1] for e in ev])
+        floor = np.clip(np.array([e[0][2] for e in ev]), 0, FLOOR_MAX)
+        y = np.array([1 if e[1] else 0 for e in ev], float)
+        abilities[user] = fit_ability(rating, slope, floor, y)
+    print(f"Estimated ability for {len(abilities)} users (≥10 novel attempts)")
+
+    out = dict(DEFAULTS)
+    out["retention"] = dict(DEFAULTS["retention"])
+
+    # --- Time / review bias ---
+    print("Fitting time-benefit bias (3PL-controlled, logit/min) ...")
+    tb, n_tb = population_time_bias(by_user, params, review=False)
+    rb, n_rb = population_time_bias(by_user, params, review=True)
+    # The bias correction only ever counteracts NEGATIVE residual-difficulty
+    # confounding; a positive population mean is most likely genuine benefit
+    # (notably review time, where slower review plausibly helps), so clamp to ≤0 —
+    # never recenter in the direction that would suppress a real positive effect.
+    if tb is not None:
+        out["time_bias_per_min"] = round(min(tb, 0.0), 4)
+        print(f"  solving-time bias = {tb:+.3f} logit/min  ({n_tb} users) "
+              f"→ shipped {out['time_bias_per_min']:+.3f}")
+    else:
+        print(f"  solving-time: only {n_tb} usable users (<{MIN_BIAS_USERS}); keeping default")
+    if rb is not None:
+        out["review_bias_per_min"] = round(min(rb, 0.0), 4)
+        print(f"  review-time bias  = {rb:+.3f} logit/min  ({n_rb} users) "
+              f"→ shipped {out['review_bias_per_min']:+.3f} (clamped ≤0)")
+    else:
+        print(f"  review-time: only {n_rb} usable users (<{MIN_BIAS_USERS}); keeping default")
+
+    # --- Retention constants ---
+    print("Building retention events from clean post-cutoff chains ...")
+    events = build_retention_events(rows, params, abilities)
+    print(f"  {len(events)} retention events")
+    if len(events) >= MIN_RETENTION_EVENTS:
+        fit = fit_retention(events)
+        if fit:
+            out["retention"] = {k: round(v, 4) for k, v in fit.items()}
+            print(f"  KAPPA={fit['kappa']:.3f}  GROWTH={fit['growth']:.3f}  "
+                  f"LN_C_PRIOR={fit['ln_c_prior']:.3f}  (Z0={fit['z0']:.3f} fixed)")
+        else:
+            print("  retention fit degenerate; keeping defaults")
+    else:
+        print(f"  <{MIN_RETENTION_EVENTS} events; keeping retention defaults")
+
+    out["fit_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out["n_retention_events"] = len(events)
+    payload = json.dumps({k: out[k] for k in sorted(out) if k != "version"},
+                         sort_keys=True)
+    out["version"] = hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"\nWrote {args.out}")
+    print(json.dumps(out, indent=2))
+    print("\nRun `package_for_pwa` to publish it into pwa/tsumegos/.")
+
+
+if __name__ == "__main__":
+    main()

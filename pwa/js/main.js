@@ -115,6 +115,7 @@ function showConfirm(message) {
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
+import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
@@ -382,6 +383,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
         throw new Error(msg);
     }
+
+    // Apply the fitted population constants (time/review bias + retention) before
+    // the model trains or schedules. Non-fatal: on failure the modules keep their
+    // hardcoded defaults (see population-constants.js).
+    await loadPopulationConstants();
 
     // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
     // (raw) + problemRank on legacy answerHistory entries from already-deployed
