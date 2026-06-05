@@ -92,3 +92,5 @@ auxiliary/labeler/cache/
 auxiliary/joint_rank_placements*.csv
 # Per-user table dumped by auxiliary/time_value_analysis.py (regenerable).
 auxiliary/time_value_per_user.csv
+# Per-user table dumped by auxiliary/analyze_time_benefit.py (regenerable).
+auxiliary/time_benefit_users.csv
