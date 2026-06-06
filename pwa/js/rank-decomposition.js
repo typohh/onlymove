@@ -54,7 +54,7 @@ import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
 import { sigmoid } from './math-utils.js';
-import { clearKappa, clampFloor } from './irt.js';
+import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
@@ -207,19 +207,21 @@ function poolLogistic(attempts, t0, tau) {
     const effN = (sumW * sumW) / sumW2;
     let R = sumWx / sumW;
 
-    // 3PL MLE for R: P = c + (1−c)·σ(slope·(R−x)+κ). dP/dR = (1−c)·slope·praw·(1−praw);
-    // Fisher info per attempt v = (dP/dR)²/(P(1−P)); Newton step = Σ w·(y−P)·(dP/dR)/(P(1−P))
-    // / Σ w·v. At c=0 this reduces exactly to the 2PL score Σ w·slope·(y−P) / Σ w·slope²P(1−P).
+    // 4PL MLE for R: P = c + (1−c−LAPSE)·σ(slope·(R−x)+κ). dP/dR = span·slope·praw·(1−praw),
+    // span = clearSpan(c) = 1−c−LAPSE. Fisher info per attempt v = (dP/dR)²/(P(1−P));
+    // Newton step = Σ w·(y−P)·(dP/dR)/(P(1−P)) / Σ w·v. The LAPSE cap is what bounds a
+    // misclick on a far-below-rank problem: there praw→1 so g→0 while P(1−P)→LAPSE·(1−LAPSE)
+    // stays > 0, so the slip's score → 0 instead of yanking R down.
     for (let it = 0; it < 15; it++) {
         let score = 0, info = 0;
         for (let j = lo; j < hi; j++) {
             const w = gaussianWeight((attempts[j].t - t0) / tau);
             if (w <= 0) continue;
-            const slope = attempts[j].slope, c = attempts[j].floor;
+            const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
             const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
-            let p = c + (1 - c) * praw;
+            let p = c + span * praw;
             if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-            const g = (1 - c) * slope * praw * (1 - praw);   // dP/dR
+            const g = span * slope * praw * (1 - praw);   // dP/dR
             score += w * (attempts[j].correct - p) * g / (p * (1 - p));
             info += w * g * g / (p * (1 - p));
         }
@@ -231,16 +233,16 @@ function poolLogistic(attempts, t0, tau) {
         if (Math.abs(step) < 1e-6) break;
     }
 
-    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = (dP/dR)²/(P(1−P)) (3PL Fisher info).
+    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = (dP/dR)²/(P(1−P)) (4PL Fisher info).
     let A = 0, B = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
-        const slope = attempts[j].slope, c = attempts[j].floor;
+        const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
         const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
-        let p = c + (1 - c) * praw;
+        let p = c + span * praw;
         if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-        const g = (1 - c) * slope * praw * (1 - praw);
+        const g = span * slope * praw * (1 - praw);
         const v = g * g / (p * (1 - p));
         A += w * v; B += w * w * v;
     }

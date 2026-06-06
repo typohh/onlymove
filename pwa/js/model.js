@@ -4,7 +4,7 @@ import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { sigmoid, normCdf } from './math-utils.js';
-import { clearKappa, clampFloor } from './irt.js';
+import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { adamUpdate } from './optimizer.js';
 
 // ------------------------------------------------------------------------------------------------
@@ -136,10 +136,10 @@ function logitZ(features, params) {
          + params[M.SIZE_IS_13] * features[M.SIZE_IS_13];
 }
 
-// Cold-solve probability under the per-problem 3PL.
+// Cold-solve probability under the per-problem 4PL (upper asymptote 1 − LAPSE).
 function solveProb(features, params, floor) {
     const c = clampFloor(floor);
-    return c + (1 - c) * sigmoid(logitZ(features, params) + clearKappa(c));
+    return c + clearSpan(c) * sigmoid(logitZ(features, params) + clearKappa(c));
 }
 
 // Cold-solve LOG-ODDS — what the retention head consumes as z. Still logit(P),
@@ -269,15 +269,15 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     const np = params.length;
     const grad = new Array(np).fill(0);
 
-    // 3PL correctness head (all rows): P = c + (1−c)·σ(inner + κ(c)).
-    const c = clampFloor(floor);
+    // 4PL correctness head (all rows): P = c + span·σ(inner + κ(c)), span = 1−c−LAPSE.
+    const c = clampFloor(floor), span = clearSpan(c);
     const praw = sigmoid(logitZ(features, params) + clearKappa(c));
-    const P = c + (1 - c) * praw;
+    const P = c + span * praw;
     const pc = Math.max(1e-15, Math.min(1 - 1e-15, P));
     let loss = -y * Math.log(pc) - (1 - y) * Math.log(1 - pc);
-    // dLoss/dinner = (P−y)/(P(1−P)) · dP/dinner, dP/dinner = (1−c)·praw·(1−praw).
-    // Reduces to (P−y) when c=0 (the old logistic head).
-    const eL = (pc - y) / (pc * (1 - pc)) * (1 - c) * praw * (1 - praw);
+    // dLoss/dinner = (P−y)/(P(1−P)) · dP/dinner, dP/dinner = span·praw·(1−praw).
+    // Reduces to (P−y) when c=0 and LAPSE=0 (the old logistic head).
+    const eL = (pc - y) / (pc * (1 - pc)) * span * praw * (1 - praw);
     grad[M.INTERCEPT] += eL * features[M.INTERCEPT];
     grad[M.TIME_SOLVING] += eL * features[M.TIME_SOLVING];
     grad[M.REVIEW_TIME] += eL * features[M.REVIEW_TIME];
@@ -797,10 +797,10 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         return row;
     });
     const W = math.diag(X.map((xi, i) => {
-        const c = clampFloor(floors[i]);
+        const c = clampFloor(floors[i]), span = clearSpan(c);
         const praw = sigmoid(logitZ(xi, finalParams) + clearKappa(c));
-        const P = Math.max(1e-9, Math.min(1 - 1e-9, c + (1 - c) * praw));
-        const dP = (1 - c) * praw * (1 - praw);   // dP/dinner
+        const P = Math.max(1e-9, Math.min(1 - 1e-9, c + span * praw));
+        const dP = span * praw * (1 - praw);   // dP/dinner
         return weights[i] * dP * dP / (P * (1 - P));
     }));
     const Dm = math.matrix(D);

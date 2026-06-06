@@ -1,15 +1,19 @@
 // js/irt.js
 //
-// Shared 3PL item-response math for the client's two rank-aware consumers:
+// Shared 4PL item-response math for the client's two rank-aware consumers:
 // the recall model (model.js) and the per-attempt rank estimator
 // (rank-decomposition.js). Both place a user on a problem's success curve
 //
-//     P(clear) = floor + (1 − floor)·σ(slope·(rank gap) + κ(floor))
+//     P(clear) = floor + (1 − floor − LAPSE)·σ(slope·(rank gap) + κ(floor))
 //
 // anchored so P(clear) = CALIBRATION_P when the user's rank equals the
-// problem's. These constants and κ/floor helpers were duplicated byte-for-byte
-// in both files; centralized here so the calibration point and floor convention
-// have a single source of truth.
+// problem's. These constants and κ/floor/span helpers were duplicated
+// byte-for-byte across both files; centralized here so the calibration point,
+// floor convention and lapse have a single source of truth.
+
+// Baked at build time. We read only the fat-finger (lapse) rate from it here;
+// population-constants.js is the validated loader for the rest.
+import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 // The margin the PWA serves and anchors at: a problem's "rating" is the ability
 // at which the user clears it CALIBRATION_P of the time (matches the backend
@@ -18,19 +22,45 @@ export const CALIBRATION_P = 0.8;
 export const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
 
 // Guessing floors are shipped raw by package_for_pwa. Clamp below CALIBRATION_P
-// so κ(c) = logit((CALIBRATION_P − c)/(1 − c)) stays finite (κ → ∞ as c → P).
+// so κ(c) = logit((CALIBRATION_P − c)/(1 − c − LAPSE)) stays finite (κ → ∞ as
+// c → P).
 export const FLOOR_MAX = 0.78;
 
+// LAPSE: the 4PL upper-asymptote slip ("fat-finger") rate — the irreducible
+// failure probability on a problem the user should clear with certainty (a
+// misclick / misread, most common when strong players are bored by trivial
+// problems). Fitted by pipeline.fit_population_constants as the plateau of the
+// observed failure rate as modeled-clear → 1 (~0.27%). Capping the success curve
+// at (1 − LAPSE) instead of 1 is what stops a single careless failure on a
+// far-below-rank problem from yanking the rank/recall estimate: at the top the
+// likelihood's P(1−P) stays bounded by LAPSE·(1−LAPSE) while the gradient → 0,
+// so the slip carries almost no weight. Clamped so (1 − floor − LAPSE) > 0 for
+// any floor ≤ FLOOR_MAX. Falls back to the fitted-population default if the
+// constant is missing/garbage in the bundle.
+const _ff = POPULATION_CONSTANTS && POPULATION_CONSTANTS.fat_finger_rate;
+export const LAPSE = (typeof _ff === 'number' && _ff >= 0 && _ff < 1 - FLOOR_MAX)
+    ? _ff : 0.0026;
+
 // κ(c): the offset that keeps P(clear) = CALIBRATION_P at a zero rank gap for a
-// 3PL problem with guessing floor c. For c ≤ 0 it degenerates to the 2PL anchor.
+// 4PL problem with guessing floor c and upper asymptote (1 − LAPSE). Re-anchored
+// for the lapse so the rating's 80%-clear definition still holds exactly; with
+// LAPSE = 0 it reduces to the old 3PL anchor.
 export function clearKappa(c) {
-    if (!(c > 0)) return LOGIT_CALIBRATION;
-    const q = Math.min(Math.max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6);
+    const cc = Math.max(typeof c === 'number' ? c : 0, 0);
+    const q = Math.min(Math.max((CALIBRATION_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6);
     return Math.log(q / (1 - q));
 }
 
+// The success-curve span (upper asymptote − floor) = (1 − floor − LAPSE). The
+// per-attempt clear probability is `floor + clearSpan(floor)·praw`, and the
+// gradient dP/dinner is `clearSpan(floor)·praw·(1−praw)`. Centralized so every
+// 3PL→4PL site stays consistent. Guarded ≥ 0.
+export function clearSpan(c) {
+    return Math.max(0, 1 - Math.max(typeof c === 'number' ? c : 0, 0) - LAPSE);
+}
+
 // Coerce a possibly-missing per-problem floor into [0, FLOOR_MAX]; legacy rows
-// without a floor fall back to 0 (i.e. plain 2PL behaviour).
+// without a floor fall back to 0 (i.e. plain 2PL-with-lapse behaviour).
 export function clampFloor(c) {
     return Math.min(Math.max(typeof c === 'number' ? c : 0, 0), FLOOR_MAX);
 }

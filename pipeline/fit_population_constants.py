@@ -70,6 +70,7 @@ AFK_CAP_S = 180.0                      # drop AFK solving times before the bias 
 DEFAULTS = {
     "time_bias_per_min": -0.91,
     "review_bias_per_min": 0.0,
+    "fat_finger_rate": 0.01,           # 4PL upper-asymptote slip rate (lapse)
     "retention": {"kappa": 4.22, "z0": float(Z0),
                   "growth": float(np.log(1.54)), "ln_c_prior": 1.55},
 }
@@ -186,6 +187,54 @@ def cold_solve_logit(theta, rating, slope, floor):
     praw = sigmoid(slope * (theta - rating) + clear_kappa_scalar(floor))
     P = min(max(floor + (1 - floor) * praw, 1e-9), 1 - 1e-9)
     return float(np.log(P / (1 - P)))
+
+
+# ---------------------------------------------------------------------------
+# Fat-finger (lapse) rate — the 4PL upper-asymptote slip floor.
+# ---------------------------------------------------------------------------
+# A problem is "trivially easy for the user" when the 3PL inner sigmoid is at
+# least this — i.e. modeled clear ≈ 1. By here genuine skill-failure has gone to
+# zero (the observed failure rate plateaus, verified across thresholds), so what
+# remains IS the slip floor. Below ~0.99 real difficulty still contributes.
+EASY_PRAW = 0.99
+
+
+def fit_fat_finger(by_user, params, abilities):
+    """Population slip/lapse rate λ: the irreducible failure probability on a
+    problem the user should clear with near-certainty (a misclick / misread on a
+    trivially-easy problem, most common for strong players bored by easy ones).
+    Turns the client's 3PL into a 4PL with upper asymptote (1−λ):
+
+        P(clear) = floor + (1 − floor − λ)·σ(slope·(θ − rating) + κ)
+
+    Estimated as the RAW observed failure rate on novel attempts where the problem
+    is trivially easy for the user (inner praw ≥ EASY_PRAW, modeled clear ≈ 1).
+    This is deliberately model-agnostic, NOT an excess over the 3PL's predicted
+    failure: the per-user θ is a whole-history average, so the 3PL is mildly
+    pessimistic up top and an excess estimate cancels to ~0. The asymptote itself
+    is the lapse: across praw thresholds the observed failure plateaus (1.7% @0.90
+    → 0.27% @0.99 → flat beyond), and that plateau is the slip floor. Returns
+    (λ, se, n_easy)."""
+    praw, floor, y = [], [], []
+    for user, urows in by_user.items():
+        th = abilities.get(user)
+        if th is None:
+            continue
+        for r in urows:
+            key = (r["size"], r["problem"])
+            if r["is_repeat"] or key not in params:
+                continue
+            rt, sl, fl = params[key]
+            praw.append(sigmoid(sl * (th - rt) + clear_kappa_scalar(fl)))
+            floor.append(fl); y.append(1 if r["success"] else 0)
+    praw = np.array(praw); y = np.array(y, float)
+    easy = praw >= EASY_PRAW
+    n_easy = int(easy.sum())
+    if n_easy < 1000:
+        return None, None, n_easy
+    lam = float(np.mean(1 - y[easy]))                       # raw slip floor
+    se = float(np.sqrt(lam * (1 - lam) / n_easy))
+    return lam, se, n_easy
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +421,16 @@ def main():
 
     out = dict(DEFAULTS)
     out["retention"] = dict(DEFAULTS["retention"])
+
+    # --- Fat-finger (lapse) rate ---
+    print("Fitting fat-finger (lapse) rate ...")
+    ff, ff_se, n_ff = fit_fat_finger(by_user, params, abilities)
+    if ff is not None:
+        out["fat_finger_rate"] = round(ff, 4)
+        print(f"  fat-finger rate = {ff:.4f} ± {ff_se:.4f}  ({n_ff} novel attempts) "
+              f"→ shipped {out['fat_finger_rate']}")
+    else:
+        print(f"  only {n_ff} novel attempts; keeping default {out['fat_finger_rate']}")
 
     # --- Time / review bias ---
     print("Fitting time-benefit bias (3PL-controlled, logit/min) ...")
