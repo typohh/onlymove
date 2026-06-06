@@ -12,8 +12,7 @@
 // instant the app boots — no runtime fetch, no precache, no eviction/offline path
 // that could fail. main.js still null-guards against a malformed packaged file.
 
-import { applyRetentionConstants } from './model.js';
-import { setTimeBias } from './game-logic.js';
+import { applyRetentionConstants, setTimeBias } from './model.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/population_constants.json).
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 

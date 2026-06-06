@@ -6,9 +6,8 @@ import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
-import { MODEL_INDICES } from './model.js';
+import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
 import { getTerm } from './i18n.js';
-import { normCdf } from './math-utils.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
@@ -36,42 +35,9 @@ const median = (values) => {
 // evidence this user benefits from slowing down. Captures ~11% of users at 0.80,
 // ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
 const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
-// Population-mean solving/review-time coeff (logit/min) = the confounding bias the
-// gate recenters by. Loaded at boot from the MANDATORY population_constants.json via
-// setTimeBias() (population-constants.js); NO baked fallback — the pipeline always
-// ships a valid file and main.js aborts if it can't load. `let`, uninitialized until
-// setTimeBias() runs. The value is the backend's fitted bias verbatim (the fitter owns
-// its sign/magnitude; the frontend does not second-guess it).
-let TIME_BIAS_PER_MIN;
-let REVIEW_BIAS_PER_MIN;
-
-// Apply the time-benefit biases from the (MANDATORY) population constants. Throws on a
-// non-finite field so a corrupt blob is fatal (the caller aborts boot) rather than
-// silently leaving the biases unset.
-export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
-    if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
-    if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
-    TIME_BIAS_PER_MIN = timePerMin;
-    REVIEW_BIAS_PER_MIN = reviewPerMin;
-}
-
-// One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),
-// or 0 when the stat is missing/degenerate. SIGNED test (not |coeff|/se): after
-// recentering the sign carries the meaning.
-function benefitConfidence(stat, biasPerMin) {
-    if (!stat || !(stat.se > 0)) return 0;
-    const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
-    return normCdf(z);
-}
-
-// Var-keyed wrapper: picks the population bias for this model term and returns the
-// recentered one-sided benefit confidence. Exported so the stats Time tab displays
-// the SAME corrected "% chance more time helps" the nudge gate tests against —
-// otherwise the tab would show the raw, confound-biased coeff.
-export function benefitConfidenceForVar(stat, varIndex) {
-    const biasPerMin = varIndex === MODEL_INDICES.REVIEW_TIME ? REVIEW_BIAS_PER_MIN : TIME_BIAS_PER_MIN;
-    return benefitConfidence(stat, biasPerMin);
-}
+// benefitConfidenceForVar (recenters the per-user time/review coeff by the
+// population confound) and setTimeBias now live in model.js, alongside the L2
+// prior the same coefficient is shrunk toward — they must stay in lockstep.
 
 // Standard Go column letters skip 'I' (so A..H, J..T). Row number is 1-based
 // from the bottom; WGo's y=0 is at the top, so row = boardSize - y.
@@ -175,7 +141,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
             }
 
             const reviewStat = statsResults.find(r => r.varIndex === MODEL_INDICES.REVIEW_TIME);
-            reviewConf = benefitConfidence(reviewStat, REVIEW_BIAS_PER_MIN);
+            reviewConf = benefitConfidenceForVar(reviewStat, MODEL_INDICES.REVIEW_TIME);
         }
 
         if (reviewConf >= BENEFIT_CONFIDENCE && previousReviewTime < medianReviewTime) {
@@ -192,7 +158,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
             const timeTakenValues = recentHistory.map(p => p.timeTaken).filter(t => t !== undefined);
             medianSolvingTime = median(timeTakenValues);
             const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
-            timeConf = benefitConfidence(timeStat, TIME_BIAS_PER_MIN);
+            timeConf = benefitConfidenceForVar(timeStat, MODEL_INDICES.TIME_SOLVING);
         }
 
         if (timeConf >= BENEFIT_CONFIDENCE && state.accumulatedSolvingTime < medianSolvingTime) {

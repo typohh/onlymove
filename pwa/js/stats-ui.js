@@ -14,7 +14,6 @@ import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
-import { benefitConfidenceForVar } from './game-logic.js';
 import { normCdf } from './math-utils.js';
 import {
     getRecallCandidates,
@@ -23,6 +22,7 @@ import {
     calculateResultsAndStdErrors,
     freshFailureReviewHours,
     recentFailureWindowHours,
+    benefitConfidenceForVar,
     MODEL_INDICES,
 } from './model.js';
 

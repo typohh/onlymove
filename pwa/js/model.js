@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
-import { sigmoid } from './math-utils.js';
+import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor } from './irt.js';
 import { adamUpdate } from './optimizer.js';
 
@@ -97,6 +97,16 @@ let KAPPA;        // stability's sensitivity to the cold-solve logit
 let GROWTH;       // log stability growth per consecutive success
 let Z0;           // reference difficulty: LN_C is the base S at p=0.7 (= logit(0.7))
 let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to this
+// Population-mean time/review benefit confound (logit per MINUTE), from
+// population_constants.json via setTimeBias(). Two roles, both load-bearing and
+// they MUST agree: (1) it is the prior the per-user TIME_SOLVING/REVIEW_TIME
+// coefficients are L2-shrunk toward (converted to per-percentile per training
+// run, see trainUserModel), and (2) the displayed/gated "% chance more time
+// helps" recenters the fitted coefficient by it (benefitConfidence). If the
+// shrinkage prior and the recentering offset disagree, an uninformative user
+// can never read 50% — anchoring both here keeps them consistent.
+let TIME_BIAS_PER_MIN;
+let REVIEW_BIAS_PER_MIN;
 // Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
 // overflow without flattening the gradient where the model still needs to learn.
 const LN_S_TRAIN_MIN = -5;
@@ -482,6 +492,12 @@ export const MODEL_INDICES = {
 };
 
 const L2_REGULARIZATION_TARGETS = {
+    // Placeholders only — trainUserModel OVERRIDES these per training run with the
+    // population time/review confound (TIME_BIAS_PER_MIN/REVIEW_BIAS_PER_MIN)
+    // converted from per-minute to this feature's per-percentile scale via that
+    // run's time_per_percentile_min. The prior the coefficient shrinks toward MUST
+    // equal the bias the confidence readout recenters by, else an uninformative
+    // user can't read 50% (it saturated to ~100% when these were fixed at -0.1).
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
     // Now a dimensionless multiplier on the per-problem a_p·(rank gap): 1.0 = the
@@ -515,6 +531,40 @@ export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior } = {}) 
     GROWTH = growth;
     LN_C_PRIOR = ln_c_prior;
     L2_REGULARIZATION_TARGETS[MODEL_INDICES.LN_C] = ln_c_prior;
+}
+
+// Apply the time-benefit confound biases from the (MANDATORY) population
+// constants. Throws on a non-finite field so a corrupt blob is fatal (the caller
+// aborts boot) rather than silently leaving the biases unset. The value is the
+// backend's fitted bias verbatim (the fitter owns its sign/magnitude; the
+// frontend does not second-guess it). population-constants.js calls this at boot
+// before any training; the per-user time coefficients are L2-shrunk toward it
+// (see trainUserModel) and the confidence readout recenters by it.
+export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
+    if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
+    if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
+    TIME_BIAS_PER_MIN = timePerMin;
+    REVIEW_BIAS_PER_MIN = reviewPerMin;
+}
+
+// One-sided confidence that the bias-corrected coefficient is positive (in
+// [0,1]), or 0 when the stat is missing/degenerate. SIGNED test (not |coeff|/se):
+// after recentering by the population confound the sign carries the meaning. The
+// coeff/se passed in are already per-MINUTE (calculateResultsAndStdErrors scales
+// them by 1/time_per_percentile_min), matching the per-minute bias.
+function benefitConfidence(stat, biasPerMin) {
+    if (!stat || !(stat.se > 0)) return 0;
+    const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
+    return normCdf(z);
+}
+
+// Var-keyed wrapper: picks the population bias for this model term and returns the
+// recentered one-sided benefit confidence. Exported so the stats Time tab displays
+// the SAME corrected "% chance more time helps" the nudge gate tests against —
+// otherwise the tab would show the raw, confound-biased coeff.
+export function benefitConfidenceForVar(stat, varIndex) {
+    const biasPerMin = varIndex === MODEL_INDICES.REVIEW_TIME ? REVIEW_BIAS_PER_MIN : TIME_BIAS_PER_MIN;
+    return benefitConfidence(stat, biasPerMin);
 }
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
@@ -660,12 +710,23 @@ export function prepareTrainingData(history, validHistory) {
 }
 
 async function trainUserModel(trainingData, modelState) {
-    const { y, weights, elapsedDays, isRepeatArr, n, floors } = trainingData;
+    const { y, weights, elapsedDays, isRepeatArr, n, floors,
+            time_per_percentile_min, time_per_percentile_min_r } = trainingData;
     let { params, adamState } = modelState;
 
     const learningRate = 0.02;
     const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
     const lambda = 10; // L2 regularization parameter
+
+    // Per-run L2 targets. The TIME_SOLVING/REVIEW_TIME coefficients live in
+    // per-percentile units (the feature is a 0..1 percentile), but the population
+    // confound is shipped per-MINUTE; convert it to this run's per-percentile
+    // scale (×time_per_percentile_min) so the coefficient is shrunk toward exactly
+    // the offset the confidence readout later recenters by — an uninformative user
+    // then reads ~50%, not the saturated ~100% the fixed -0.1 target produced.
+    const targets = { ...L2_REGULARIZATION_TARGETS };
+    targets[MODEL_INDICES.TIME_SOLVING] = (TIME_BIAS_PER_MIN ?? 0) * (time_per_percentile_min || 0);
+    targets[MODEL_INDICES.REVIEW_TIME] = (REVIEW_BIAS_PER_MIN ?? 0) * (time_per_percentile_min_r || 0);
 
     let prevLoss = Infinity;
     const startTime = Date.now();
@@ -693,7 +754,7 @@ async function trainUserModel(trainingData, modelState) {
         let l2_penalty = 0;
         for (let j = 0; j < params.length; j++) {
             if (isUnregularized(j)) continue;
-            const target = L2_REGULARIZATION_TARGETS[j] || 0;
+            const target = targets[j] || 0;
             l2_penalty += Math.pow(params[j] - target, 2);
         }
         currentLoss += (lambda / 2) * l2_penalty;
@@ -704,7 +765,7 @@ async function trainUserModel(trainingData, modelState) {
         for (let j = 0; j < params.length; j++) {
             gradient[j] /= n;
             if (!isUnregularized(j)) {
-                const target = L2_REGULARIZATION_TARGETS[j] || 0;
+                const target = targets[j] || 0;
                 gradient[j] += (lambda / n) * (params[j] - target);
             }
         }
