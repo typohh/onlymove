@@ -27,23 +27,27 @@ Two groups of constants:
 All constants are board-INDEPENDENT (the cold-solve scale is shared across sizes),
 so a single JSON serves both boards.
 
-Needs ratings_v2/ shard params via pwa/tsumegos/<size>/ (problem rating/slope/
-floor) and attempts/database.sqlite. No GPU, not part of the in-order pipeline.
+Needs the backend ratings_v2/<size>/ 3PL params (tsumego_ratings_final.csv,
+tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating_v2)
+and attempts/database.sqlite. It reads the backend directly, NOT the served
+pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
+upstream of it depends on the dist artifacts. No GPU, not part of the in-order
+pipeline.
 
 Run:
   ./.venv/bin/python3 -m pipeline.fetch_database --rebuild-sqlite   # refresh first
-  ./.venv/bin/python3 -m pipeline.fit_population_constants
+  ./.venv/bin/python3 -m pipeline.fit_population_constants          # reads ratings_v2/
   ./.venv/bin/python3 -m pipeline.package_for_pwa                   # publishes the JSON
 """
 
 import argparse
 import bisect
+import csv
 import hashlib
 import json
 import os
 import sqlite3
 import sys
-import zipfile
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -107,34 +111,50 @@ def load_rows(db_path):
     return rows
 
 
-def load_problem_params(tsumegos_dir, needed):
-    """{(size, tid): (rating, slope, floor)} from the served shard metadata."""
+def _read_id_value(path, value_col, keep):
+    """{tid: float(value_col)} for tids in `keep` from a 2-col `tsumego_id,<value>`
+    CSV. Missing file → empty (the caller treats absent params as unresolvable)."""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        id_col = reader.fieldnames[0]
+        for row in reader:
+            tid = row[id_col]
+            if tid in keep:
+                try:
+                    out[tid] = float(row[value_col])
+                except (TypeError, ValueError):
+                    pass
+    return out
+
+
+def load_problem_params(ratings_dir, needed):
+    """{(size, tid): (rating, slope, floor)} from the backend ratings_v2/<size>/
+    CSVs — the SAME source package_for_pwa ships into the shard metadata
+    (rating ← tsumego_ratings_final, slope ← tsumego_quality_final's `quality`,
+    floor ← tsumego_floor_final). Reading the backend directly keeps the pipeline
+    from depending on the served pwa/tsumegos/ artifacts (package_for_pwa is the
+    sole bridge into pwa/)."""
     params = {}
     by_size = defaultdict(set)
     for (size, tid) in needed:
         by_size[size].add(tid)
     for size, tids in by_size.items():
-        size_dir = os.path.join(tsumegos_dir, str(size))
+        size_dir = os.path.join(ratings_dir, str(size))
         if not os.path.isdir(size_dir):
             print(f"  WARNING: {size_dir} missing; skipping size {size}")
             continue
-        remaining = set(tids)
-        for shard in os.listdir(size_dir):
-            if not shard.endswith(".zip") or not remaining:
+        ratings = _read_id_value(os.path.join(size_dir, "tsumego_ratings_final.csv"), "rating", tids)
+        slopes = _read_id_value(os.path.join(size_dir, "tsumego_quality_final.csv"), "quality", tids)
+        floors = _read_id_value(os.path.join(size_dir, "tsumego_floor_final.csv"), "floor", tids)
+        for tid in tids:
+            r, s = ratings.get(tid), slopes.get(tid)
+            if s is None or r is None or not np.isfinite(s) or s <= 0 or not np.isfinite(r):
                 continue
-            try:
-                with zipfile.ZipFile(os.path.join(size_dir, shard)) as zf:
-                    meta = json.loads(zf.read("metadata.json"))
-            except (KeyError, zipfile.BadZipFile, json.JSONDecodeError):
-                continue
-            for item in meta:
-                tid = item.get("filename", "")[:-4]
-                if tid in remaining:
-                    s, r = item.get("slope"), item.get("rating")
-                    if s and r is not None and np.isfinite(s) and s > 0 and np.isfinite(r):
-                        params[(size, tid)] = (float(r), float(s),
-                                               float(np.clip(item.get("floor", 0.0), 0, FLOOR_MAX)))
-                    remaining.discard(tid)
+            params[(size, tid)] = (float(r), float(s),
+                                   float(np.clip(floors.get(tid, 0.0), 0, FLOOR_MAX)))
     return params
 
 
@@ -320,7 +340,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
-    ap.add_argument("--tsumegos-dir", default=os.path.join(PROJECT_ROOT, "pwa", "tsumegos"))
+    ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings_v2", "population_constants.json"))
     args = ap.parse_args()
 
@@ -329,7 +349,7 @@ def main():
     print(f"  {len(rows)} rows")
     needed = {(r["size"], r["problem"]) for r in rows}
     print(f"Loading 3PL params for {len(needed)} distinct problems ...")
-    params = load_problem_params(args.tsumegos_dir, needed)
+    params = load_problem_params(args.ratings_dir, needed)
     print(f"  resolved {len(params)}")
 
     by_user = defaultdict(list)
