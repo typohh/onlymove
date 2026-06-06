@@ -3,7 +3,7 @@ per-problem KataGo trunk activations across all configured board sizes.
 
 Inputs (loads from each size that has data):
   activations/<size>/<id>.npy
-  ratings/<size>/tsumego_ratings_final.csv
+  ratings_v2/<size>/tsumego_ratings_final.csv
 
 Outputs (single shared model — embeddings/joint/):
   pca.npz                 — full model state, sufficient to project a new problem
