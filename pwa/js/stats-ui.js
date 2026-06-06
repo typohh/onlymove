@@ -15,6 +15,7 @@ import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import { benefitConfidenceForVar } from './game-logic.js';
+import { normCdf } from './math-utils.js';
 import {
     getRecallCandidates,
     getLogitPerRank,
@@ -437,7 +438,7 @@ function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold
     return Array.from(byId.values()).sort((a, b) => b.score - a.score);
 }
 
-// Inverse standard-normal CDF via bisection over `math.erf`. ~50 iterations
+// Inverse standard-normal CDF via bisection over `normCdf`. ~50 iterations
 // converges to ≪ 1e-9; cheap once per issue at panel-open time. Returns 0 for
 // p ≤ 0.5 since callers only ever pass posterior probabilities in [0.5, 1).
 function probit(p) {
@@ -446,7 +447,7 @@ function probit(p) {
     let lo = 0, hi = 8;
     for (let i = 0; i < 50; i++) {
         const mid = (lo + hi) / 2;
-        const cdf = 0.5 * (1 + math.erf(mid / Math.SQRT2));
+        const cdf = normCdf(mid);
         if (cdf < p) lo = mid; else hi = mid;
     }
     return (lo + hi) / 2;

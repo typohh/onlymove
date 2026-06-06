@@ -8,6 +8,7 @@ import { isCorrectMove } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES } from './model.js';
 import { getTerm } from './i18n.js';
+import { normCdf } from './math-utils.js';
 import { sendReport, updateUserStats } from './user-stats.js';
 import { loadTsumego } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
@@ -60,7 +61,7 @@ export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
 function benefitConfidence(stat, biasPerMin) {
     if (!stat || !(stat.se > 0)) return 0;
     const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
-    return 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+    return normCdf(z);
 }
 
 // Var-keyed wrapper: picks the population bias for this model term and returns the

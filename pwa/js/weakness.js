@@ -27,6 +27,8 @@
 import * as Sentry from "@sentry/browser";
 import { state, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { sigmoid } from './math-utils.js';
+import { adamUpdate } from './optimizer.js';
 
 // Recommender temperature for weight = quality * exp(T * weaknessScore).
 // Higher T = more aggressive mining of weak directions. Owned here because
@@ -46,14 +48,6 @@ const LEARNING_RATE = 0.05;
 const LOSS_CONVERGENCE = 1e-6;
 
 let trainingInProgress = false;
-
-function sigmoid(z) {
-    if (z >= 0) {
-        return 1 / (1 + Math.exp(-z));
-    }
-    const e = Math.exp(z);
-    return e / (1 + e);
-}
 
 // Train the single shared weakness model on the union of both sizes' answer
 // histories. Every per-problem feature it reads (problemRank, the joint-ICA
@@ -100,7 +94,6 @@ export async function trainWeakness() {
             return a.embedding;  // fallback: row only informs β_correct + β_picked
         });
 
-        const beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
         const N = history.length;
         const startTime = Date.now();
         let prevLoss = Infinity;
@@ -137,15 +130,13 @@ export async function trainWeakness() {
             for (let j = 2; j < numParams; j++) l2 += params[j] * params[j];
             loss = loss / N + (RIDGE_LAMBDA / (2 * N)) * l2;
 
+            // Finalize the gradient (mean-reduce + ridge on the β block, j ≥ 2),
+            // then apply the shared Adam moment update.
             for (let j = 0; j < numParams; j++) {
                 grad[j] /= N;
                 if (j >= 2) grad[j] += (RIDGE_LAMBDA / N) * params[j];
-                adam.m[j] = beta1 * adam.m[j] + (1 - beta1) * grad[j];
-                adam.v[j] = beta2 * adam.v[j] + (1 - beta2) * grad[j] * grad[j];
-                const mHat = adam.m[j] / (1 - Math.pow(beta1, adam.t));
-                const vHat = adam.v[j] / (1 - Math.pow(beta2, adam.t));
-                params[j] -= LEARNING_RATE * mHat / (Math.sqrt(vHat) + eps);
             }
+            adamUpdate(params, grad, adam, LEARNING_RATE);
 
             if (Math.abs(prevLoss - loss) < LOSS_CONVERGENCE) break;
             if (Date.now() - startTime > MAX_TRAINING_TIME_MS) break;

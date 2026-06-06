@@ -11,11 +11,10 @@
 // (well-behaved) integrand — accurate to ~1e-7 with N=128 subdivisions,
 // which is plenty for a UI that thresholds at 60-70% probability.
 
-// Standard normal CDF via math.js's erf. Mirrors the existing usage in
-// weakness.js (where erf is also pulled off the math globals).
-export function normCdf(z) {
-    return 0.5 * (1 + math.erf(z / Math.SQRT2));
-}
+// Standard normal CDF (math.js erf), shared from math-utils; re-exported here
+// for the historical import surface of this module.
+import { normCdf } from './math-utils.js';
+export { normCdf };
 
 // Owen's T function:
 //   T(h, a) = (1/(2π)) ∫₀^a exp(-h²(1+x²)/2) / (1+x²) dx
@@ -41,7 +40,7 @@ export function owensT(h, a) {
     // when β_correct and β_picked are near-singular for lack of disambiguating
     // picked-move data.
     if (absA * absH > 10) {
-        return sign * 0.5 * (1 - 0.5 * (1 + math.erf(absH / Math.SQRT2)));
+        return sign * 0.5 * (1 - normCdf(absH));
     }
 
     // Cap the Simpson interval at 40 so dx stays sane for small |h| where the

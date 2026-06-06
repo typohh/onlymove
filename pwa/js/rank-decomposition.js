@@ -53,6 +53,8 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
+import { sigmoid } from './math-utils.js';
+import { clearKappa, clampFloor } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
@@ -64,20 +66,13 @@ const TAU_M_MS = 4 * HOUR_MS;               // form (fast): ~session kernel
 const TAU_V_MS = 10 * DAY_MS;               // σ_M(t) variance-smoothing window
 const KERNEL_TRUNC_SIGMA = 4;
 
-// rank = the level you clear at this rate (matches model.js / fit_rank_curves).
-const CALIBRATION_P = 0.8;
-const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
-// Per-problem 3PL guessing floor c (problemFloor, shipped by train_rating_v2 from the
-// bot ladder): P(clear) = c + (1−c)·σ(slope·(R−x)+κ(c)). κ(c) keeps P(clear)=80% at
-// R==x for any c. Far below a problem (R≪x) P→c, so a success there is weak evidence of
-// skill — which correctly discounts a strong user's lucky above-rank clears (the early
-// over-credit behind the Rank-tab dip). FLOOR_MAX < CALIBRATION_P so κ stays finite.
-const FLOOR_MAX = 0.78;
-function clearKappa(c) {
-    if (!(c > 0)) return LOGIT_CALIBRATION;
-    const q = Math.min(Math.max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6);
-    return Math.log(q / (1 - q));
-}
+// rank = the level you clear at this rate (CALIBRATION_P; matches model.js /
+// fit_rank_curves). The per-problem 3PL guessing floor c (problemFloor, shipped
+// by train_rating_v2 from the bot ladder) gives P(clear) = c + (1−c)·σ(slope·
+// (R−x)+κ(c)); κ(c) keeps P(clear)=80% at R==x for any c. Far below a problem
+// (R≪x) P→c, so a success there is weak evidence of skill — which correctly
+// discounts a strong user's lucky above-rank clears (the early over-credit
+// behind the Rank-tab dip). The 3PL constants + κ/floor helpers live in irt.js.
 
 // Per attempt the success-curve slope is the problem's OWN 2PL discrimination
 // a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
@@ -184,11 +179,6 @@ function gaussianWeight(dtOverTau) {
     return Math.exp(-0.5 * dtOverTau * dtOverTau);
 }
 
-function sigmoid(x) {
-    if (x > 40) return 1;
-    if (x < -40) return 0;
-    return 1 / (1 + Math.exp(-x));
-}
 
 function lowerBound(attempts, lo) {
     let a = 0, b = attempts.length;
@@ -295,8 +285,7 @@ function flattenAttempts(answerHistory) {
             }
             // 3PL guessing floor (problemFloor, shipped per problem). Legacy entries
             // without it fall back to 0 → the 2PL curve, unchanged behaviour.
-            const flr = Math.min(Math.max(
-                typeof a.problemFloor === 'number' ? a.problemFloor : 0, 0), FLOOR_MAX);
+            const flr = clampFloor(a.problemFloor);
             return { t: a.date, x, slope, correct: a.correct ? 1 : 0,
                      floor: flr, kappa: clearKappa(flr), src: a };
         })

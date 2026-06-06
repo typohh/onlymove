@@ -3,6 +3,9 @@
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { sigmoid } from './math-utils.js';
+import { clearKappa, clampFloor } from './irt.js';
+import { adamUpdate } from './optimizer.js';
 
 // ------------------------------------------------------------------------------------------------
 // --- Moved from problem-loader.js ---------------------------------------------------------------
@@ -99,8 +102,6 @@ let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to thi
 const LN_S_TRAIN_MIN = -5;
 const LN_S_TRAIN_MAX = 8;
 
-function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
-
 // --- Per-problem 3PL ---------------------------------------------------------
 // Cold-solve probability is P = floor + (1−floor)·σ(inner + κ(floor)), the same
 // 3PL the rank estimator uses (rank-decomposition.js), anchored so P = 80% when
@@ -111,16 +112,7 @@ function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
 // uniform-spacing prior), so the fitted PROBLEM_DIFFICULTY multiplier absorbs
 // the rank↔rating unit constant. Legacy rows without a_p/c_p fall back to
 // a_p = A_REF and c_p = 0, i.e. the previous 2PL behaviour.
-const CALIBRATION_P = 0.8;
-const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
-const FLOOR_MAX = 0.78;
 const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
-function clearKappa(c) {
-    if (!(c > 0)) return LOGIT_CALIBRATION;
-    const q = Math.min(Math.max((CALIBRATION_P - c) / (1 - c), 1e-6), 1 - 1e-6);
-    return Math.log(q / (1 - q));
-}
-function clampFloor(c) { return Math.min(Math.max(typeof c === 'number' ? c : 0, 0), FLOOR_MAX); }
 
 // Inner logit (linear in params): excludes the per-problem κ(floor) offset and
 // the retention-only SUCCESS_SINCE_FAILURE / LN_C. Reads MODEL_INDICES at call
@@ -635,7 +627,7 @@ async function trainUserModel(trainingData, modelState) {
     const { y, weights, elapsedDays, isRepeatArr, n, floors } = trainingData;
     let { params, adamState } = modelState;
 
-    const learningRate = 0.02, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8;
+    const learningRate = 0.02;
     const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
     const lambda = 10; // L2 regularization parameter
 
@@ -671,18 +663,16 @@ async function trainUserModel(trainingData, modelState) {
         currentLoss += (lambda / 2) * l2_penalty;
         currentLoss /= n;
 
+        // Finalize the gradient (mean-reduce + L2 toward each param's target),
+        // then apply the shared Adam moment update.
         for (let j = 0; j < params.length; j++) {
             gradient[j] /= n;
             if (!isUnregularized(j)) {
                 const target = L2_REGULARIZATION_TARGETS[j] || 0;
                 gradient[j] += (lambda / n) * (params[j] - target);
             }
-            adamState.m[j] = beta1 * adamState.m[j] + (1 - beta1) * gradient[j];
-            adamState.v[j] = beta2 * adamState.v[j] + (1 - beta2) * Math.pow(gradient[j], 2);
-            const m_hat = adamState.m[j] / (1 - Math.pow(beta1, adamState.t));
-            const v_hat = adamState.v[j] / (1 - Math.pow(beta2, adamState.t));
-            params[j] -= learningRate * m_hat / (Math.sqrt(v_hat) + epsilon);
         }
+        adamUpdate(params, gradient, adamState, learningRate);
 
         if (Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold || Date.now() - startTime > maxTrainingTimeMs) break;
         prevLoss = currentLoss;
