@@ -46,6 +46,17 @@ async function writeWorkerVersion(version) {
     );
 }
 
+// rating_to_rank.json and population_constants.json are inlined into the JS and
+// Worker bundles at build time (rank-decomposition.js, population-constants.js,
+// src/index.js), so they're never fetched at runtime. The pipeline still writes
+// them to tsumegos/ as the import source, but the served copies are dead weight —
+// drop them from dist. Safe because every client force-upgrades on a version
+// change, so nothing is still fetching the old served path.
+const DIST_DEAD_FILES = [
+    'tsumegos/rating_to_rank.json',
+    'tsumegos/population_constants.json',
+];
+
 async function copyStaticAssets() {
     for (const asset of STATIC_ASSETS) {
         const source = path.join(process.cwd(), asset);
@@ -55,6 +66,9 @@ async function copyStaticAssets() {
         } catch (error) {
             console.warn(`Could not copy '${asset}': ${error.message}`);
         }
+    }
+    for (const dead of DIST_DEAD_FILES) {
+        await fs.rm(path.join(DIST_DIR, dead), { force: true });
     }
 }
 

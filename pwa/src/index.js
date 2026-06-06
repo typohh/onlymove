@@ -1,6 +1,10 @@
 import { buildPushPayload } from '@block65/webcrypto-web-push';
 import { APP_VERSION } from './version.js';
 import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
+// M (rating→rank curve) is inlined at build time — same source the client bundles
+// (pwa/tsumegos/rating_to_rank.json) — so the Community rank histogram needs no
+// asset fetch for it. Other tsumego assets (lookup.txt, metadata.json) stay served.
+import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -630,10 +634,9 @@ async function computeAnswerRankHist(env, userFirstProblems, neededProblems) {
     }
   }
 
-  // 3. M curve (raw rating → internal rank index), per board size.
-  const curveRes = await fetchTsumegoAsset(env, '/tsumegos/rating_to_rank.json');
-  if (!curveRes) return [];
-  const curves = await curveRes.json();
+  // 3. M curve (raw rating → internal rank index), per board size — inlined at
+  //    build time (see the import at the top), so no asset fetch is needed.
+  const curves = RATING_RANK_MAP;
   const rankIndexOf = (rating, size) => {
     const c = curves[String(size)] || curves['9'];
     if (!c || !Array.isArray(c.ratings) || !Array.isArray(c.rank_indices)) return null;

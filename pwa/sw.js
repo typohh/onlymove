@@ -25,20 +25,10 @@ const PRECACHE_URLS = [
     '/corners/corner_tr.png',
     '/corners/corner_bl.png',
     '/corners/corner_br.png',
-    // M (rating→rank map) is required at init with no fallback — main.js aborts
-    // fatal if it can't load (see Sentry JAVASCRIPT-2V/2W: transient mobile-Safari
-    // fetch failures). Precache it so a network blip can't kill the whole app.
-    // Version-stamped so ?v=VERSION matches the client's fetch in
-    // rank-decomposition.js; the precache is named per-VERSION and deleted on
-    // activate, so each deploy fetches a fresh copy — it can't go stale.
-    `/tsumegos/rating_to_rank.json?v=${VERSION}`,
-    // population_constants.json (fitted time-bias + retention constants) is a
-    // MANDATORY asset — the client carries no baked defaults and main.js aborts if it
-    // can't load — so it joins the atomic precache like M. Version-stamped, so the
-    // per-VERSION precache (deleted + rebuilt on activate) fetches a fresh copy each
-    // deploy and it can't go stale. The pipeline always ships a valid file, so addAll
-    // won't 404 on a normal deploy.
-    `/tsumegos/population_constants.json?v=${VERSION}`,
+    // NOTE: rating_to_rank.json (M) and population_constants.json are no longer
+    // precached or fetched — they are inlined into the JS bundle at build time
+    // (see pwa/js/rank-decomposition.js + population-constants.js), so they ride
+    // the hashed bundle and can't fail to load (was Sentry JAVASCRIPT-2V/2W).
 ];
 
 self.addEventListener('install', event => {

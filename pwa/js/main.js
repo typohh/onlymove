@@ -375,22 +375,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     runMigrations();
 
     // M (rating→rank) is REQUIRED: package_for_pwa ships only raw ratings, so
-    // the client cannot rank a single problem (selection, UI, recall) without
-    // it. Block init on it and bail loudly — there is no sane fallback.
-    const ratingRankMap = await loadRatingRankMap();
+    // the client cannot rank a single problem (selection, UI, recall) without it.
+    // It is now inlined into the bundle at build time, so it cannot fail to load
+    // at runtime; the guard only trips on a malformed/empty package (a build-time
+    // error). Bail loudly if so.
+    const ratingRankMap = loadRatingRankMap();
     if (!ratingRankMap) {
-        const msg = 'Failed to load rating_to_rank.json (rating→rank map M); cannot continue.';
+        const msg = 'rating_to_rank.json (rating→rank map M) missing/empty in bundle; cannot continue.';
         try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
         throw new Error(msg);
     }
 
     // Population constants (time/review bias + retention) are REQUIRED — they back
     // the recall scheduler and the rushing/review nudges, and the modules carry no
-    // baked fallback. Load before the model trains or schedules; bail loudly on
-    // failure, exactly like M above (there is no sane default to run without).
-    const populationConstants = await loadPopulationConstants();
+    // baked fallback. Also inlined at build time (same as M); apply before the
+    // model trains or schedules. Bail loudly if the package is malformed/empty.
+    const populationConstants = loadPopulationConstants();
     if (!populationConstants) {
-        const msg = 'Failed to load population_constants.json (model constants); cannot continue.';
+        const msg = 'population_constants.json (model constants) missing/empty in bundle; cannot continue.';
         try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
         throw new Error(msg);
     }
