@@ -307,6 +307,7 @@ const updateMenuItems = () => {
     statsItem.classList.remove('disabled');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
+    document.getElementById('menu-discord').textContent = getTerm('discord');
 
     // Review group — Share/Ignore act on the problem under review, so the whole
     // category only appears in analysis mode.
