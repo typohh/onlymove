@@ -951,12 +951,22 @@
       }
     },
     "44": {
-      "positive": null,
-      "motif_id": null
+      "positive": "hane",
+      "motif_id": null,
+      "positive_i18n": {
+        "zh": "扳",
+        "ja": "ハネ",
+        "ko": "젖힘"
+      }
     },
     "45": {
-      "positive": null,
-      "motif_id": null
+      "positive": "capture stone to create a false eye",
+      "motif_id": null,
+      "positive_i18n": {
+        "zh": "提子制造假眼",
+        "ja": "石を取って欠け眼にする",
+        "ko": "돌을 따내 거짓눈 만들기"
+      }
     },
     "46": {
       "positive": "atari the cutting group while you still can",
@@ -1029,8 +1039,13 @@
       }
     },
     "53": {
-      "positive": null,
-      "motif_id": null
+      "positive": "extend cutting stone",
+      "motif_id": null,
+      "positive_i18n": {
+        "zh": "长出断的棋子",
+        "ja": "切りの石をノビる",
+        "ko": "끊은 돌을 뻗기"
+      }
     },
     "54": {
       "positive": "atari before fix",
@@ -1063,8 +1078,13 @@
       }
     },
     "57": {
-      "positive": null,
-      "motif_id": null
+      "positive": "increase liberties",
+      "motif_id": null,
+      "positive_i18n": {
+        "zh": "增加气",
+        "ja": "ダメを増やす",
+        "ko": "활로 늘리기"
+      }
     },
     "58": {
       "positive": "read carefully",
@@ -1097,8 +1117,13 @@
       }
     },
     "61": {
-      "positive": null,
-      "motif_id": null
+      "positive": "prevent cut",
+      "motif_id": null,
+      "positive_i18n": {
+        "zh": "防止切断",
+        "ja": "切りを防ぐ",
+        "ko": "끊김 방지"
+      }
     },
     "62": {
       "positive": null,
