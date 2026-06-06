@@ -17,6 +17,19 @@ import { trainWeakness } from './weakness.js';
 // normal players are unaffected.
 const MIN_RANK_INCREASE_PER_CORRECT = (1 / TOTAL_RANKS) / 10;
 
+// Loss-step size relative to the win step. The loop is designed around a 4:1
+// loss:win ratio, whose fixed point is an 80% clear rate (the serving target).
+// But the SHIPPED loss branch shrank `momentum` to (m+1)/3 *before* taking the
+// rank penalty, so the realized penalty was only ~2.9× a win, equilibrating
+// serving at ~75% (a steady ~5% miss, level-independent — verified in
+// auxiliary/eval_rank_estimators.py: --simulate, and the controlled steady-state
+// loop). The fix penalizes on the PRE-cut momentum (symmetric with the win
+// branch, which uses the pre-growth momentum). Pre-cut at 4× over-corrects to
+// ~82% (a loss tends to follow a win streak, so momentum is elevated right then),
+// so the multiplier is retuned to 3.6, which re-centers the clear rate on 80.0%
+// across all ranks and slopes without changing onboarding speed.
+const LOSS_PENALTY_MULTIPLIER = 3.6;
+
 // Smoothly lower-bound the headroom term at MIN_RANK_INCREASE_PER_CORRECT.
 // A plain Math.max(headroom, floor) is only C0 — it kinks where the two meet
 // (slope jumps from -1/9 to 0), so the step stops shrinking abruptly. This is a
@@ -231,8 +244,11 @@ export async function updateUserStats(isCorrect, {
         }
         rank += intendedRatingIncrease;
     } else {
+        // Penalize the rank on the PRE-cut momentum (mirrors the win branch, which
+        // uses pre-growth momentum), THEN shrink momentum. Order + multiplier
+        // re-center serving on the 80% target — see LOSS_PENALTY_MULTIPLIER.
+        rank = Math.max(0, rank - LOSS_PENALTY_MULTIPLIER * scalingFactor * (momentum / 600));
         momentum -= scalingFactor * (momentum - (momentum + 1) / 3);
-        rank = Math.max(0, rank - 4 * scalingFactor * (momentum / 600));
     }
 
     // Guardrail: keep momentum positive and bounded every step so a future
