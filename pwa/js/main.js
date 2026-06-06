@@ -134,7 +134,23 @@ document.addEventListener('touchstart', () => setUserHasInteracted(true));
 
 
 
+/**
+ * Drop the pure-CSS boot splash (index.html) now that the app's own JS is in
+ * control. Called at the very top of the init handler: every subsequent screen
+ * the user can see — the size picker, the showLoading() spinner over the first
+ * zip load, or the loaded board — is rendered by JS within this same handler,
+ * so the splash hands off without ever exposing the static placeholder layout.
+ */
+function hideBootSplash() {
+    const el = document.getElementById('boot-splash');
+    if (!el) return;
+    el.classList.add('boot-hidden');
+    setTimeout(() => el.remove(), 300);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    hideBootSplash();
+
     // Log the hash of the main file
     const scriptElement = document.currentScript || document.querySelector('script[src*="main"]');
     if (scriptElement) {

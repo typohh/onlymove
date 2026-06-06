@@ -8,8 +8,38 @@
   <title id="app-title">Only Move</title>
   <link rel="stylesheet" type="text/css" href="lib/wgo/wgo.player.css" />
   <link rel="stylesheet" type="text/css" href="style.css">
+  <!-- Critical, self-contained boot-splash CSS: inlined so the loading state
+       paints on the very first frame, before the (deferred, module) JS bundle
+       has downloaded/parsed. Without it the static HTML below shows a
+       half-built UI (placeholder header text + empty board) during the bundle
+       load window. The app removes #boot-splash once its DOMContentLoaded
+       handler runs (hideBootSplash in main.js). -->
+  <style id="boot-splash-style">
+    #boot-splash {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #222;
+      transition: opacity 0.25s ease;
+    }
+    #boot-splash.boot-hidden { opacity: 0; pointer-events: none; }
+    #boot-splash .boot-spinner {
+      width: 12vmin; height: 12vmin;
+      border: 1.2vmin solid rgba(255, 255, 255, 0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: boot-spin 0.8s linear infinite;
+    }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: light) {
+      #boot-splash { background: #f0f0f0; }
+      #boot-splash .boot-spinner { border-color: rgba(0, 0, 0, 0.15); border-top-color: #333; }
+    }
+  </style>
 </head>
 <body>
+  <!-- Pure-CSS loading state shown from first paint until the app is ready;
+       see #boot-splash-style in <head>. -->
+  <div id="boot-splash"><div class="boot-spinner"></div></div>
   <!-- Decorative monochrome ink-wash corner art; purely cosmetic, sits behind all UI. -->
   <div id="corner-art" aria-hidden="true">
     <div class="corner-piece tl"></div>
@@ -20,11 +50,11 @@
   <!-- New main container for Flexbox layout -->
   <div id="main-container">
     <div id="title-container">
-      <div id="title" class="info-text">Title</div>
+      <div id="title" class="info-text"></div>
       <div id="captures-container" class="captures-container">
-        <div id="capture-score" class="capture-score" role="button" tabindex="0">0.0</div>
+        <div id="capture-score" class="capture-score" role="button" tabindex="0"></div>
       </div>
-      <div id="text1" class="info-text">Rank</div>
+      <div id="text1" class="info-text"></div>
       <a href="#" id="menu-toggle" class="menu-toggle" role="button" tabindex="0" aria-label="Menu">☰</a>
     </div>
 
@@ -33,11 +63,11 @@
     <!-- New wrapper for control panels -->
     <div id="controls-wrapper">
       <div id="info-container">
-        <div id="title-h" class="info-text horizontal-only">Title</div>
+        <div id="title-h" class="info-text horizontal-only"></div>
         <div id="captures-container-h" class="captures-container horizontal-only">
-          <div id="capture-score-h" class="capture-score" role="button" tabindex="0">0.0</div>
+          <div id="capture-score-h" class="capture-score" role="button" tabindex="0"></div>
         </div>
-        <div id="text1-h" class="info-text horizontal-only">Rank</div>
+        <div id="text1-h" class="info-text horizontal-only"></div>
         <a href="#" id="menu-toggle-h" class="menu-toggle horizontal-only" role="button" tabindex="0" aria-label="Menu">☰</a>
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>
@@ -88,6 +118,16 @@
   <script type="text/javascript" src="lib/math.min.js"></script>
   <script type="text/javascript" src="lib/jszip.min.js"></script>
   <script type="module" src="js/main.js"></script>
+  <script>
+    // Safety net: if the JS bundle fails to load/parse entirely, main.js's
+    // hideBootSplash() never runs. Drop the splash after 15s so a catastrophic
+    // failure degrades to the (blank-header) static UI instead of an eternal
+    // spinner. The happy path removes the splash long before this fires.
+    setTimeout(function () {
+      var el = document.getElementById('boot-splash');
+      if (el) el.classList.add('boot-hidden');
+    }, 15000);
+  </script>
   <script>
     // Register Service Worker — skipped in local dev so wrangler rebuilds
     // aren't masked by SW cache-first asset serving. Any SW left over from a
