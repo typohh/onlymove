@@ -39,19 +39,19 @@ const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show th
 // gate recenters by. Loaded at boot from the MANDATORY population_constants.json via
 // setTimeBias() (population-constants.js); NO baked fallback — the pipeline always
 // ships a valid file and main.js aborts if it can't load. `let`, uninitialized until
-// setTimeBias() runs. Clamped ≤0 — only negative confounding is corrected (see fitter).
+// setTimeBias() runs. The value is the backend's fitted bias verbatim (the fitter owns
+// its sign/magnitude; the frontend does not second-guess it).
 let TIME_BIAS_PER_MIN;
 let REVIEW_BIAS_PER_MIN;
 
 // Apply the time-benefit biases from the (MANDATORY) population constants. Throws on a
 // non-finite field so a corrupt blob is fatal (the caller aborts boot) rather than
-// silently leaving the biases unset. Clamps to ≤0 (a positive bias would suppress
-// genuine benefit, so it's never applied).
+// silently leaving the biases unset.
 export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
     if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
     if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
-    TIME_BIAS_PER_MIN = Math.min(timePerMin, 0);
-    REVIEW_BIAS_PER_MIN = Math.min(reviewPerMin, 0);
+    TIME_BIAS_PER_MIN = timePerMin;
+    REVIEW_BIAS_PER_MIN = reviewPerMin;
 }
 
 // One-sided confidence that the bias-corrected coefficient is positive (in [0,1]),
@@ -61,6 +61,15 @@ function benefitConfidence(stat, biasPerMin) {
     if (!stat || !(stat.se > 0)) return 0;
     const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
     return 0.5 * (1 + math.erf(z / Math.sqrt(2)));
+}
+
+// Var-keyed wrapper: picks the population bias for this model term and returns the
+// recentered one-sided benefit confidence. Exported so the stats Time tab displays
+// the SAME corrected "% chance more time helps" the nudge gate tests against —
+// otherwise the tab would show the raw, confound-biased coeff.
+export function benefitConfidenceForVar(stat, varIndex) {
+    const biasPerMin = varIndex === MODEL_INDICES.REVIEW_TIME ? REVIEW_BIAS_PER_MIN : TIME_BIAS_PER_MIN;
+    return benefitConfidence(stat, biasPerMin);
 }
 
 // Standard Go column letters skip 'I' (so A..H, J..T). Row number is 1-based

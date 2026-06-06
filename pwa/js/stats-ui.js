@@ -14,6 +14,7 @@ import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
+import { benefitConfidenceForVar } from './game-logic.js';
 import {
     getRecallCandidates,
     getLogitPerRank,
@@ -94,17 +95,18 @@ export async function showDetailedStats() {
         let timingText = '';
         let resultText = '';
 
-        // Timing observations → Time tab.
+        // Timing observations → Time tab. Recenter by the population confounding
+        // bias (benefitConfidenceForVar) so the displayed "% chance more time helps"
+        // is the SAME corrected figure the rushing/insufficient-review nudge gate
+        // tests against — not the raw, difficulty-confounded coefficient.
         for (const result of results) {
-            const { coeff, se, varIndex } = result;
+            const { varIndex } = result;
             let termKey;
             if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTimeNatural';
             else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTimeNatural';
 
             if (termKey) {
-                const z = coeff / se;
-                const cdf = 0.5 * (1 + math.erf(z / Math.sqrt(2)));
-                const conf = cdf * 100;
+                const conf = benefitConfidenceForVar(result, varIndex) * 100;
                 timingText += getTerm(termKey, { percent_change: conf.toFixed(0) }) + '\n';
             }
         }
