@@ -427,11 +427,11 @@
       }
     },
     "m0053": {
-      "positive": "atari before fix",
+      "positive": "sente before fix",
       "positive_i18n": {
-        "zh": "先打吃后补棋",
-        "ja": "継ぐ前にアタリを利かす",
-        "ko": "잇기 전에 단수 활용"
+        "zh": "先手后补棋",
+        "ja": "継ぐ前に先手を利かす",
+        "ko": "잇기 전에 선수 활용"
       }
     },
     "m0054": {
@@ -1048,13 +1048,13 @@
       }
     },
     "54": {
-      "positive": "atari before fix",
+      "positive": "sente before fix",
       "motif_id": "m0053",
       "anchor_cos": 0.9143,
       "positive_i18n": {
-        "zh": "先打吃后补棋",
-        "ja": "継ぐ前にアタリを利かす",
-        "ko": "잇기 전에 단수 활용"
+        "zh": "先手后补棋",
+        "ja": "継ぐ前に先手を利かす",
+        "ko": "잇기 전에 선수 활용"
       }
     },
     "55": {
