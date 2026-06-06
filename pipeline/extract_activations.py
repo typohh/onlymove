@@ -1,26 +1,28 @@
 """Extract per-block trunk activations at every legal cell for each tsumego.
 
 For each SGF in tsumegos/<size>/:
-  - Parse SGF, replay setup moves to obtain board state.
-  - Walk root-level variation nodes — utils/add_variations.add_shallow_variations
-    emits one variation per legal move via queries.get_legal_moves, so SGF
-    document order IS the legal-move enumeration. Using that order means the
-    PWA can index cells by variation position without recomputing legality.
+  - Parse SGF, replay setup moves to obtain the board state the solver faces.
+  - Enumerate EVERY legal cell for the player to move (the color of the correct
+    variation), in board-scan order — sorted by (y, x). This is a *superset* of
+    the SGF's root variations (the generator prunes those down), so the cell set
+    is independent of SGF document order. Downstream maps cells by (x, y) and the
+    correct cell by correct_idx, never by row position — so order need only be
+    self-consistent with xys/correct_idx, which scan order guarantees.
   - Run one forward pass through KataGo's b18 net.
   - Capture post-skip-add output of all 18 residual blocks (rconv1.out..rconv18.out).
-  - Slice each block at every variation's first-move (x, y); concatenate blocks
-    -> one 6912-float vector per legal cell.
+  - Slice each block at every legal cell's (x, y); concatenate blocks
+    -> one 6912-float vector per cell.
   - Save to activations/<size>/<id>.npz with:
-      candidates  (n_legal, 6912) float16  -- per-cell vector, SGF variation order
-      xys         (n_legal, 2)    int32    -- KataGo (x, y) per row (matches order)
-      correct_idx ()              int32    -- index of the correct cell; always 0
+      candidates  (n_legal, 6912) float16  -- per-cell vector, board-scan order
+      xys         (n_legal, 2)    int32    -- KataGo (x, y) per row (scan order)
+      correct_idx ()              int32    -- scan-order index of the correct cell
 
-Downstream (build_embedding / package_for_pwa) decides which candidates to ship.
+Downstream consumers: build_embedding reads the correct-cell row via
+candidates[correct_idx]; package_for_pwa re-parses the SGF and remaps cells into
+SGF-variation order by (x, y) (the npz being a superset of the SGF's non-pass
+variations is what makes that remap total).
 
-Resumable: skips problems where the output .npz already exists. Legacy
-correct-cell-only .npy files are not auto-skipped by this script — they live
-alongside the new .npz until manually cleaned up. build_embedding.py reads
-either format (.npz preferred).
+Resumable: skips problems where the output .npz already exists (--force overrides).
 """
 
 import argparse
@@ -115,30 +117,50 @@ def vecs_at_cells(activations_by_name, block_names, xys) -> np.ndarray:
     return np.concatenate(parts, axis=0).T.astype(np.float16)  # (n_cells, sum_C)
 
 
+def enumerate_legal_cells(board, pla, size):
+    """Every empty point that is a legal move for `pla`, in board-scan order
+    (y outer, x inner → sorted by (y, x)). This is the cell set the corpus
+    embeds: a superset of the SGF's pruned root variations and independent of
+    SGF document order, so downstream consumers index by (x, y) / correct_idx,
+    never by row position."""
+    cells = []
+    for y in range(size):
+        for x in range(size):
+            loc = board.loc(x, y)
+            if board.board[loc] == Board.EMPTY and board.would_be_legal(pla, loc):
+                cells.append((x, y))
+    return cells
+
+
 def process_one_sgf(sgf_path: str, model, block_names):
     with open(sgf_path, "rb") as f:
         game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
     size = game.get_size()
     setup_moves, variation_nodes = parse_tsumego_sgf(game)
 
-    # The generator emits one root variation per legal move (see
-    # utils/add_variations.add_shallow_variations). Iterate in SGF document
-    # order so downstream cell indexing matches what the client sees when
-    # parsing the same SGF — no client-side legality recomputation needed.
-    candidate_xys = []
-    for i, node in enumerate(variation_nodes):
-        _, mb = node.get_raw_move()
-        xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
-        if xy is None:
-            # Pass variation: never embedded. Packaging (project_cells_for_problem)
-            # also maps cells by (x, y) and drops the pass, so skip it here rather than
-            # failing extraction — consumers read by correct_idx / (x, y), not position.
-            continue
-        candidate_xys.append(xy)
-    # variation_nodes[0] is the correct move by generator convention.
-    correct_idx = 0
+    # variation_nodes[0] is the correct move by generator convention; its color
+    # is the player to move for the whole problem (and thus whose legal moves
+    # define the candidate cells).
+    correct_color, correct_mb = variation_nodes[0].get_raw_move()
+    pla = Board.BLACK if correct_color.lower() == "b" else Board.WHITE
+    correct_xy = gtp_to_xy(sgf_to_gtp(correct_mb.decode("utf-8"), size))
+    if correct_xy is None:
+        raise ValueError(f"{sgf_path}: correct variation is a pass; cannot embed")
 
     state = build_state(setup_moves, size)
+
+    # Embed EVERY legal cell (a superset of the SGF variations), in scan order,
+    # and record where the correct move lands in that scan. Note this is
+    # independent of the SGF's variation set/order — the client recovers a
+    # picked move's cell via its (x, y), and build_embedding via correct_idx.
+    candidate_xys = enumerate_legal_cells(state.board, pla, size)
+    try:
+        correct_idx = candidate_xys.index(correct_xy)
+    except ValueError:
+        raise ValueError(
+            f"{sgf_path}: correct move {correct_xy} is not a legal cell "
+            f"(setup-replay or coordinate mismatch)")
+
     activations = extract_block_activations(state, model, block_names)
     vecs = vecs_at_cells(activations, block_names, candidate_xys)  # (n_legal, 6912)
     xys = np.array(candidate_xys, dtype=np.int32)
@@ -150,7 +172,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None,
                         help="Process only the first N problems (debugging).")
     parser.add_argument("--force", action="store_true",
-                        help="Re-extract even if the output .npy exists.")
+                        help="Re-extract even if the output .npz exists.")
     parser.add_argument("--device", default=None,
                         help="cuda or cpu (default: cuda if available).")
     parser.add_argument("--ckpt", default=DEFAULT_CKPT,
