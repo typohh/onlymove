@@ -22,6 +22,7 @@ import {
     prepareTrainingData,
     calculateResultsAndStdErrors,
     freshFailureReviewHours,
+    recentFailureWindowHours,
     MODEL_INDICES,
 } from './model.js';
 
@@ -118,7 +119,14 @@ export async function showDetailedStats() {
         if (varCovarMatrix) {
             const repeatRanks = merged.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
             const repRank = repeatRanks.length ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length : 0;
-            const firsttimeFailureTime = freshFailureReviewHours(finalParams, { problemRank: repRank, size: state.boardSize, userRank: state.userRank });
+            // Prefer scoring the user's actual recent failures through the model
+            // as-if-just-failed-now (real per-problem difficulty/slope/floor +
+            // each failure's review percentile, mirroring getRecallCandidates);
+            // fall back to the idealized average-difficulty figure when recent
+            // failures are too sparse to be representative.
+            const firsttimeFailureTime =
+                recentFailureWindowHours(finalParams, merged, { userRank: state.userRank })
+                ?? freshFailureReviewHours(finalParams, { problemRank: repRank, size: state.boardSize, userRank: state.userRank });
 
             if (firsttimeFailureTime !== null) {
                 const allRepeats = getRecallCandidates({

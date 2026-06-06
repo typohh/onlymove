@@ -198,6 +198,42 @@ export function freshFailureReviewHours(params, { problemRank = 0, size, userRan
     return NEG_LN_080 * S * 24;
 }
 
+// Median window-open delay (hours) over the user's recent failures, each scored
+// AS IF it just failed now — using each problem's real difficulty/slope/floor and
+// that failure's own review percentile, exactly as getRecallCandidates schedules
+// them (model.js:307-317). Reflects when the recommender would actually re-serve
+// the user's recent misses, unlike freshFailureReviewHours which evaluates a
+// single idealized average-difficulty, no-review, reference-slope, zero-floor
+// failure (the minimal-stability corner, so a systematic underestimate). Returns
+// null when params aren't ready or too few recent failures exist; callers fall
+// back to freshFailureReviewHours then.
+export function recentFailureWindowHours(params, history, { userRank, days = 7, minFailures = 5 } = {}) {
+    if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
+    if (!Array.isArray(history)) return null;
+    const cutoff = Date.now() - days * 24 * 3600e3;
+    const recent = history.filter(a => typeof a.date === 'number' && a.date >= cutoff);
+    // Review-percentile basis: the same recent review totals the scheduler ranks against.
+    const allReviewTimes = recent
+        .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
+        .filter(t => t > 0)
+        .sort((a, b) => a - b);
+    const hrs = [];
+    for (const a of recent) {
+        if (a.correct || typeof a.problemRank !== 'number') continue;   // failures only
+        const reviewPct = calculatePercentile(allReviewTimes,
+            (a.accumulatedReview || 0) + (a.reviewTime || 0));
+        const S = stabilityDaysForRepeat(buildFeatures({
+            isRepeat: true, reviewPct, problemRank: a.problemRank,
+            size: a.size, r: 0, userRank, slope: a.problemSlope,
+        }), params, a.problemFloor);
+        hrs.push(NEG_LN_080 * S * 24);
+    }
+    if (hrs.length < minFailures) return null;          // too sparse → caller falls back
+    hrs.sort((x, y) => x - y);
+    const m = hrs.length >> 1;
+    return hrs.length % 2 ? hrs[m] : (hrs[m - 1] + hrs[m]) / 2;
+}
+
 // Builds the training feature vector for history row i (board-independent).
 function featuresForTrainingRow(td, i) {
     const p = td.history[i];
