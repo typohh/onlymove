@@ -18,17 +18,12 @@ import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
-
-let _mapPromise = null;
-
-function loadRankMap() {
-    if (_mapPromise === null) {
-        _mapPromise = fetch(`tsumegos/rank_map.json?v=${APP_VERSION}`)
-            .then(r => (r.ok ? r.json() : null))
-            .catch(() => null);
-    }
-    return _mapPromise;
-}
+// rank_map.json is inlined at build time (like rating_to_rank.json in
+// rank-decomposition.js / src/index.js), so it's never fetched at runtime —
+// build.mjs drops the served copy from dist. A curve re-fit
+// (map_rating_v2_to_egf) is published by rebuilding + deploying, same as the
+// rating→rank curve it ships alongside.
+import RANK_MAP from '../tsumegos/rank_map.json';
 
 // The same integer index getDescriptiveRank uses (floor(rating · 29)), in the
 // kyu/dan label format (k/d suffix, not localized).
@@ -72,7 +67,7 @@ export async function showRankTranslation() {
     const rating = state.userRank;
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
-    const map = await loadRankMap();
+    const map = RANK_MAP;
     const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
     const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
     const key = rankIndexToKey(rankIndex);
