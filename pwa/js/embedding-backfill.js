@@ -65,6 +65,30 @@ const STALE_FLAG_KEYS = (size) => [
     `weaknessEmbeddingBackfill_v3_${size}`,
 ];
 
+// Persist answerHistory edits WITHOUT clobbering attempts logged while the
+// backfill awaited its (potentially minutes-long) shard + sidecar walk.
+//
+// THE BUG THIS FIXES: backfillForSize / pruneRemovedProblems capture the live
+// answerHistory array up front (`const history = getAnswerHistoryForSize(size)`),
+// then await a long network walk. Every solve in that window runs updateUserStats
+// → updateAnswerHistory([...state.answerHistory, answer]), which REPLACES
+// perSize.answerHistory[size] with a fresh array. Writing the captured snapshot
+// back via setAnswerHistoryForSize(size, history) silently dropped all those
+// attempts, reverting the history to its session-start state — which made
+// getRecallCandidates re-serve already-solved recalls (the sub-18h repeat bug)
+// and the novel filter re-serve novel problems.
+//
+// The backfill edits entries IN PLACE and updateUserStats shallow-spreads, so the
+// live array shares our edited entry objects AND additionally holds the new
+// attempts. Persisting the live array therefore keeps BOTH the backfilled fields
+// and the session's attempts. The length guard falls back to the snapshot only in
+// the degenerate case where the bucket somehow shrank out from under us (never on
+// the append-only updateUserStats path).
+function persistAnswerHistory(size, snapshot) {
+    const live = getAnswerHistoryForSize(size);
+    setAnswerHistoryForSize(size, live.length >= snapshot.length ? live : snapshot);
+}
+
 export async function backfillMissingEmbeddings() {
     // Joint metadata (embedding version + labels + sidecar layout + per-size
     // ratings_version) is shared across sizes. Fetch once, then iterate sizes
@@ -164,7 +188,7 @@ async function pruneRemovedProblems(embeddingVersion, ratingsVersionsBySize) {
         for (const a of removed) {
             for (const k of PRUNE_STRIP_FIELDS) delete a[k];
         }
-        setAnswerHistoryForSize(size, history);
+        persistAnswerHistory(size, history);
         prunedAny = true;
         console.log(`prune[${size}]: stripped removed-problem fields from ${removed.length} entries`);
     }
@@ -212,7 +236,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 state.weaknessAdam = null;
                 state.weaknessSe = null;
                 state.weaknessAxisCov = null;
-                setAnswerHistoryForSize(size, history);
+                persistAnswerHistory(size, history);
                 console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedEmbeddingVersion || 'first run'} -> ${serverEmbeddingVersion})`);
             }
             for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
@@ -238,7 +262,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 }
             }
             if (curveRankUpdated > 0) {
-                setAnswerHistoryForSize(size, history);
+                persistAnswerHistory(size, history);
                 console.log(`embedding-backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
             }
         }
@@ -281,7 +305,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 if (touched) strippedOld++;
             }
             if (strippedOld > 0) {
-                setAnswerHistoryForSize(size, history);
+                persistAnswerHistory(size, history);
                 console.log(`embedding-backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
             }
         }
@@ -446,7 +470,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         }
 
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
-            setAnswerHistoryForSize(size, history);
+            persistAnswerHistory(size, history);
             console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
         persistVersions();
