@@ -172,6 +172,11 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats, buttonText));
 
     await loadTsumego(true);
+    // loadTsumego re-enabled clicks while appMode is still SOLVING; keep them
+    // disabled across the SOLVING→ANALYZING flip so a tap landing in that window
+    // can't be mis-routed as a solving-mode action. enterAnalysisMode re-enables
+    // once it has switched to ANALYZING.
+    setAcceptClicks(false);
     await enterAnalysisMode();
 }
 

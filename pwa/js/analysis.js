@@ -44,6 +44,9 @@ export function enterAnalysisMode() {
 
         if (!state.problemHistory || state.problemHistory.length < 2 || !state.problemHistory[1].sgf ) {
             setAppMode(APP_MODES.SOLVING);
+            // Nothing to review — stay clickable in solving mode so a button1
+            // lock taken by the caller (see main.js) is always released.
+            setAcceptClicks(true);
             updateAllUI();
             resolve();
             return;

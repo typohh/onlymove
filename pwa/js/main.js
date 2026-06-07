@@ -296,11 +296,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             // the in-flight history.unshift + loadSgf and lands the user in
             // ANALYZING mode on top of the next problem.
             if (!state.acceptClicks) return;
+            // Lock immediately so a rapid second tap can't re-enter before the
+            // transition this click starts has settled. enterAnalysisMode()
+            // re-enables clicks once the review view (or its solving fallback)
+            // is ready; the disabled/no-op path unlocks here.
+            setAcceptClicks(false);
             if (!e.target.classList.contains('disabled')) {
                 enterAnalysisMode();
+            } else {
+                setAcceptClicks(true);
             }
         } else if (state.appMode === APP_MODES.ANALYZING) {
             if (!state.acceptClicks) return;
+            // Lock against a fast double-tap re-entering before loadTsumego
+            // re-enables clicks once the next problem is actually ready.
+            setAcceptClicks(false);
             if (state.reviewStartTime !== null) {
                 const reviewTime = Date.now() - state.reviewStartTime;
                 const answerHistory = [...state.answerHistory];
