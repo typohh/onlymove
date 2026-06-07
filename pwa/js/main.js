@@ -430,24 +430,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     // first (above) so the rank refresh can run.
     backfillMissingEmbeddings();
 
-    // One-time rank re-anchor for users whose momentum was corrupted by the a_p²
-    // scalingFactor bug (see repairCorruptedMomentum_v3 in state.js). The inverted
-    // rank update may have driven their front-page rank to an extreme, so re-anchor
-    // it to the principled skill-decomposition estimate — the same quantity the
-    // Rank tab shows — now that M and the merged history are available. Healthy
-    // users never set the flag and are untouched; users with too little history
-    // (decomposition returns null) keep their current rank and re-converge on play.
-    if (localStorage.getItem('rankNeedsReanchor_v3')) {
+    // One-time front-page (momentum) rank re-anchor to the maximum-likelihood
+    // estimate. The a_p² scalingFactor bug (see repairCorruptedMomentum_v3 in
+    // state.js / user-stats.js) drove some users' front-page rank to extremes via
+    // an inverted update — and a kyu reached an absurd dan rank by *losing*, not
+    // winning. The original repair only re-anchored users whose *momentum* still
+    // looked corrupt at load, missing everyone whose oscillating momentum had
+    // frozen on a normal-looking positive value (their wrecked rank was left as-is).
+    // This pass re-anchors to the principled skill-decomposition currentSkill — the
+    // same quantity the Rank tab shows — gated so we only touch users who are
+    // actually off:
+    //   1. > 30 attempts, so the decomposition is reliable (don't disturb onboarding)
+    //   2. front-page rank more than REANCHOR_GRADE_THRESHOLD grades from the MLE
+    //      (don't disturb users already in a reasonable band; the gap is symmetric
+    //      so it catches both the inflated-up corruption and a cratered-down one)
+    // currentSkill is in grade (rank-index) units; state.userRank is normalized
+    // 0..1, so multiply by TOTAL_RANKS to compare in grades. No upper cap on the
+    // anchor — a genuinely strong player's MLE rank can sit above 1.0 (past 9d).
+    const REANCHOR_GRADE_THRESHOLD = 2;
+    if (!localStorage.getItem('mleRankReanchor_v4')) {
         try {
-            const decomp = computeRankDecomposition(getMergedAnswerHistory());
-            const skill = decomp && decomp.summary ? decomp.summary.currentSkill : null;
-            if (typeof skill === 'number' && Number.isFinite(skill)) {
-                updateUserRank(Math.min(1, Math.max(0, skill / TOTAL_RANKS)));
+            const merged = getMergedAnswerHistory();
+            if (merged.length > 30) {
+                const decomp = computeRankDecomposition(merged);
+                const skill = decomp && decomp.summary ? decomp.summary.currentSkill : null;
+                if (typeof skill === 'number' && Number.isFinite(skill)) {
+                    const currentGrades = state.userRank * TOTAL_RANKS;
+                    if (Math.abs(currentGrades - skill) > REANCHOR_GRADE_THRESHOLD) {
+                        updateUserRank(Math.max(0, skill / TOTAL_RANKS));
+                    }
+                }
             }
         } catch (e) {
-            console.warn('rank re-anchor after momentum repair failed:', e);
+            console.warn('one-time MLE rank re-anchor failed:', e);
         }
+        // The momentum repair's flag is subsumed by the deviation gate above (a
+        // genuinely wrecked rank is always > 2 grades off); clear it so the old
+        // repair path doesn't re-anchor again (with its 1.0 cap) on a later load.
         localStorage.removeItem('rankNeedsReanchor_v3');
+        localStorage.setItem('mleRankReanchor_v4', 'true');
     }
 
     // Check for URL parameter
