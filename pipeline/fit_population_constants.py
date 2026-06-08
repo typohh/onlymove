@@ -189,52 +189,23 @@ def cold_solve_logit(theta, rating, slope, floor):
     return float(np.log(P / (1 - P)))
 
 
-# ---------------------------------------------------------------------------
-# Fat-finger (lapse) rate — the 4PL upper-asymptote slip floor.
-# ---------------------------------------------------------------------------
-# A problem is "trivially easy for the user" when the 3PL inner sigmoid is at
-# least this — i.e. modeled clear ≈ 1. By here genuine skill-failure has gone to
-# zero (the observed failure rate plateaus, verified across thresholds), so what
-# remains IS the slip floor. Below ~0.99 real difficulty still contributes.
-EASY_PRAW = 0.99
+# Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is no longer fit here.
+# pipeline.train_rating_v2 LEARNS it jointly with the rating model (a single global ceiling on
+# the success curve) and writes it to ratings_v2/rating_constants.json; main() reads it through
+# into population_constants.json so the JS-bundle contract is unchanged (see read_rating_lapse).
 
 
-def fit_fat_finger(by_user, params, abilities):
-    """Population slip/lapse rate λ: the irreducible failure probability on a
-    problem the user should clear with near-certainty (a misclick / misread on a
-    trivially-easy problem, most common for strong players bored by easy ones).
-    Turns the client's 3PL into a 4PL with upper asymptote (1−λ):
-
-        P(clear) = floor + (1 − floor − λ)·σ(slope·(θ − rating) + κ)
-
-    Estimated as the RAW observed failure rate on novel attempts where the problem
-    is trivially easy for the user (inner praw ≥ EASY_PRAW, modeled clear ≈ 1).
-    This is deliberately model-agnostic, NOT an excess over the 3PL's predicted
-    failure: the per-user θ is a whole-history average, so the 3PL is mildly
-    pessimistic up top and an excess estimate cancels to ~0. The asymptote itself
-    is the lapse: across praw thresholds the observed failure plateaus (1.7% @0.90
-    → 0.27% @0.99 → flat beyond), and that plateau is the slip floor. Returns
-    (λ, se, n_easy)."""
-    praw, floor, y = [], [], []
-    for user, urows in by_user.items():
-        th = abilities.get(user)
-        if th is None:
-            continue
-        for r in urows:
-            key = (r["size"], r["problem"])
-            if r["is_repeat"] or key not in params:
-                continue
-            rt, sl, fl = params[key]
-            praw.append(sigmoid(sl * (th - rt) + clear_kappa_scalar(fl)))
-            floor.append(fl); y.append(1 if r["success"] else 0)
-    praw = np.array(praw); y = np.array(y, float)
-    easy = praw >= EASY_PRAW
-    n_easy = int(easy.sum())
-    if n_easy < 1000:
-        return None, None, n_easy
-    lam = float(np.mean(1 - y[easy]))                       # raw slip floor
-    se = float(np.sqrt(lam * (1 - lam) / n_easy))
-    return lam, se, n_easy
+def read_rating_lapse(ratings_dir):
+    """The global ceiling λ produced by the rating model (train_rating_v2 →
+    ratings_v2/rating_constants.json: {"fat_finger_rate": λ}). Returns float or None."""
+    path = os.path.join(ratings_dir, "rating_constants.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return float(json.load(f).get("fat_finger_rate"))
+    except (ValueError, TypeError, KeyError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -422,15 +393,15 @@ def main():
     out = dict(DEFAULTS)
     out["retention"] = dict(DEFAULTS["retention"])
 
-    # --- Fat-finger (lapse) rate ---
-    print("Fitting fat-finger (lapse) rate ...")
-    ff, ff_se, n_ff = fit_fat_finger(by_user, params, abilities)
-    if ff is not None:
-        out["fat_finger_rate"] = round(ff, 4)
-        print(f"  fat-finger rate = {ff:.4f} ± {ff_se:.4f}  ({n_ff} novel attempts) "
-              f"→ shipped {out['fat_finger_rate']}")
+    # --- Fat-finger (lapse) rate: PRODUCED by the rating model (train_rating_v2), read through ---
+    lam = read_rating_lapse(args.ratings_dir)
+    if lam is not None:
+        out["fat_finger_rate"] = round(lam, 4)
+        print(f"Fat-finger (lapse) rate from the rating model: {out['fat_finger_rate']} "
+              f"(ratings_v2/rating_constants.json — train_rating_v2 learns it jointly)")
     else:
-        print(f"  only {n_ff} novel attempts; keeping default {out['fat_finger_rate']}")
+        print(f"No rating_constants.json (run train_rating_v2 first); "
+              f"keeping default fat_finger_rate {out['fat_finger_rate']}")
 
     # --- Time / review bias ---
     print("Fitting time-benefit bias (3PL-controlled, logit/min) ...")
