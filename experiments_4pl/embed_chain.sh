@@ -1,0 +1,1 @@
+./.venv/bin/python3 -m pipeline.build_embedding > experiments_4pl/prod_6_embedding.log 2>&1 && ./.venv/bin/python3 -m pipeline.package_for_pwa > experiments_4pl/prod_7_package2.log 2>&1 && echo EMBED_CHAIN_DONE
