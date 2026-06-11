@@ -29,6 +29,17 @@ needs more ability to clear at 80% than its midpoint implies:
 The global ceiling λ is produced HERE (written to ratings_v2/rating_constants.json);
 pipeline.fit_population_constants reads it through and no longer fits it posthoc.
 
+OBJECTIVE — base-rate-centered even-error group-DRO (ON by default, ported from the legacy
+residual model). Plain mean BCE is gradient-dominated by the dense mid-ranks, so it under-fits
+the sparse difficulty TAILS — exactly where strong/grinder users live, who then over-rate. So the
+HUMAN-attempt term is a two-pass online group-DRO (Sagawa et al.) over rating(×gap) bins: pass 1
+trains mean BCE to get the rating that defines the bins, pass 2 reweights bins by their loss
+EXCESS over each bin's base-rate entropy (the aleatoric floor — centering is load-bearing, raw-loss
+DRO chases that floor and loses to ERM). The bot-anchor coverage rows keep their flat weighted BCE.
+`--no-dro-skill` reverts to plain weighted BCE (ERM). A per-bin train-logloss table prints under
+either objective (`--report-bins`) so a DRO and an ERM run compare bin-for-bin. See
+docs/rating_model_comparison_results.md (--even-error) and auxiliary/train_rating_v2_legacy.py.
+
 Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
   ratings_v2/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
   ratings_v2/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
@@ -37,15 +48,19 @@ Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships
   ratings_v2/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
   ratings_v2/model_v2.pt                        weights + run metadata
 
-The defaults reproduce the production result; the knobs are for experiments only.
+Defaults are the production config (even-error DRO on); the other knobs are for experiments.
 
 Usage:
   ./.venv/bin/python3 -m pipeline.train_rating_v2 [--epochs 300] [--anchor-weight 0.2] ...
+  ./.venv/bin/python3 -m pipeline.train_rating_v2 --no-dro-skill   # plain-BCE ERM baseline
+  # compare objectives without writing CSVs (per-bin logloss + held-out + survey ρ):
+  ./.venv/bin/python3 -m pipeline.train_rating_v2 --holdout-problem-frac 0.1 [--no-dro-skill]
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -68,9 +83,34 @@ from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
+# The bot-anchor ladder size --anchor-weight is calibrated at (20k, 9d). With --anchor-fixed-mass
+# the per-rung weight is rescaled by this/len(ladder) so a DENSER ladder sharpens slope
+# identification (more rungs ⇒ more points on each problem's success curve) without growing the
+# total bot mass and drowning the human attempts.
+ANCHOR_REF_RUNGS = 2
 # logit of the serving/anchoring success rate (80%): rating = the ability θ at which
 # P(clear) = CALIBRATION_P. Single source of truth shared with the PWA + map_rating_v2_to_egf.
 CLEAR_LOGIT = float(np.log(CALIBRATION_P / (1.0 - CALIBRATION_P)))
+# Effective support of the success curve in gap (= slope·(ability−rating)) logits: past ±ZCLIP the
+# sigmoid is within ~0.7% of its asymptote, so a larger gap carries no curve information (and extreme
+# gaps are broken-ability artifacts). Bounds the gap-DRO bin range — a structural constant, not tuned.
+ZCLIP = 5.0
+
+
+def dyadic_tail_bins(vals, depth):
+    """Bin `vals` so cells are mass-balanced (quantile edges, never near-empty) BUT resolution
+    concentrates at the two EXTREMES: start from a median split (2 bins), then each level splits the
+    current outermost bin on each side at its own median. The depth-d extreme cell holds the
+    most-extreme 2^-(d+1) of the mass — shrinking but always a real fraction. depth=0 → 2 bins;
+    n_bins = 2·depth+2. Favors the tails (where the structural biases live) without the empty-cell
+    blowup of equal-width bins or the no-extreme-resolution of plain quantiles. Returns
+    (bin_index_per_value, n_bins)."""
+    qpts = np.array(sorted({0.0, 0.5, 1.0}
+                           | {0.5 ** (k + 1) for k in range(1, depth + 1)}
+                           | {1.0 - 0.5 ** (k + 1) for k in range(1, depth + 1)}))
+    edges = np.quantile(vals, qpts); edges[-1] += 1e-6
+    nb = len(edges) - 1
+    return np.clip(np.searchsorted(edges, vals, side="right") - 1, 0, nb - 1), nb
 
 
 def clear_logit_vec(c, lapse=0.0):
@@ -83,17 +123,53 @@ def clear_logit_vec(c, lapse=0.0):
     return np.log(q / (1.0 - q))
 
 
+def _rank_scalar(r):
+    """'20k'→-20, '1d'→1 (for sorting the humanv0 ladder)."""
+    return -int(r[:-1]) if r.endswith("k") else int(r[:-1])
+
+
+def discover_humanv0_ranks():
+    """All humanv0 benchmark ranks present on disk (attempts/<size>/...humanv0_<rank>.txt),
+    weakest→strongest. Used to build the bot-floor distribution prior (min correct-move
+    rate over the WHOLE ladder per problem)."""
+    import glob
+    rs = set()
+    for sz in SIZES:
+        for fn in glob.glob(os.path.join(PROJECT_ROOT, "attempts", str(sz),
+                                         "b18c384nbt-humanv0_*.txt")):
+            m = re.search(r"humanv0_([0-9]+[kd])\.txt$", fn)
+            if m:
+                rs.add(m.group(1))
+    return sorted(rs, key=_rank_scalar)
+
+
+def anchor_filename(token):
+    """An --anchor-ranks token is either a humanv0 rank ('9d' → the humanv0 ladder file), a
+    full attempt-file stem (e.g. 'kata1-b18c384nbt-s9996604416-d4316597426_t0.02' — any bot
+    benchmarked by pipeline.benchmark_bots can anchor, incl. the general KataGo engine and the
+    near-random 20k temperature variants), or a synthetic 'const<p>' examinee (e.g. 'const0.5':
+    target pass rate p on EVERY problem — no file; one mid-curve point per problem, a
+    blowup-taming pivot for regimes no real examinee observes)."""
+    if re.fullmatch(r"[0-9]+[kd]", token):
+        return f"b18c384nbt-humanv0_{token}.txt"
+    return f"{token}.txt"
+
+
 def load_anchor_winrates(keys, ranks):
-    """Per-problem humanv0 pass-rate for each anchor rank, aligned to `keys` (the model's problem
-    order). Returns float (n_keys, n_ranks), NaN where a rank lacks a value for that problem. These
-    are the soft targets for the bot 'users': value = P(the rank-conditioned humanv0 bot plays the
+    """Per-problem pass-rate for each anchor token (see anchor_filename), aligned to `keys` (the
+    model's problem order). Returns float (n_keys, n_ranks), NaN where a token lacks a value for
+    that problem. These are the soft targets for the bot 'users': value = P(the bot plays the
     correct first move) — the same first-move-correct semantics as a human attempt."""
     out = np.full((len(keys), len(ranks)), np.nan, dtype=np.float32)
+    for j, r in enumerate(ranks):
+        m = re.fullmatch(r"const([0-9.]+)", r)
+        if m:
+            out[:, j] = float(m.group(1))  # synthetic examinee: no file (the file loop skips it)
     key_row = {k: i for i, k in enumerate(keys)}
     for sz in sorted({s for s, _ in keys}):
         adir = os.path.join(PROJECT_ROOT, "attempts", str(sz))
         for j, r in enumerate(ranks):
-            fn = os.path.join(adir, f"b18c384nbt-humanv0_{r}.txt")
+            fn = os.path.join(adir, anchor_filename(r))
             if not os.path.exists(fn):
                 continue
             with open(fn) as fh:
@@ -165,44 +241,283 @@ class RatingNet(nn.Module):
     margin λ below the 1 − λ upper asymptote, so the active band 1 − c − λ ≥ λ > 0)."""
 
     def __init__(self, fdim, n_users, hidden=(128, 64), dropout=0.1, lapse_cap=0.05, lapse_init=0.01,
-                 slope_floor=0.01):
+                 slope_floor=0.01, floor_cap=1.0, n_anchor=0, slope_discount=False,
+                 hier_slope=False, hier_floor=False, global_slope=False,
+                 global_slope_fixed=None,
+                 mech_floor_botf=None, mech_floor_scale_fixed=None,
+                 floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
+                 lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0):
         super().__init__()
         self.slope_floor = float(slope_floor)
+        self.floor_cap = float(floor_cap)   # hard upper bound on the guessing floor c_p
+        # Hierarchical empirical-Bayes priors on the per-problem heads (--hier-slope/--hier-floor):
+        # log a_p ~ N(μ_a, σ_a²), logit-floor o_c ~ N(μ_c, σ_c²). Two-pass EM with FROZEN pass-1
+        # robust moments (see main): pass 1 fits free, then μ = median, σ = IQR/1.349 of the
+        # model's OWN unpenalized spectrum become a fixed quadratic-shrinkage target for pass 2.
+        # Two simpler schemes are verified-degenerate: gradient-learned σ collapses via the
+        # unbounded N·log σ reward (Neyman-Scott — every problem got the identical 4PL, survey
+        # rho −0.11), and per-step stop-grad moment matching cold-start-locks (net outputs start
+        # near-constant ⇒ σ̂≈0 ⇒ shrinkage force ≫ data gradient forever). A frozen target is
+        # stationary — no ratchet, no lock-in — and still answer-free: the target is the corpus'
+        # own fitted distribution, nothing imported from legacy.
+        self.hier_slope, self.hier_floor = bool(hier_slope), bool(hier_floor)
+        # --act-dropout: drop the ENTIRE activation feature block per row (train only), scaled
+        # 1/(1−p). The activation PCs are near-unique per-problem fingerprints — the measured
+        # memorization channel (Findings F, S: the net attaches attempted problems' base rates
+        # to their signatures; removing the block entirely improves unseen-problem transfer).
+        # Block dropout regularizes that reliance without losing the features at eval time:
+        # the net must keep working when the fingerprint is absent, so base-rate information
+        # routes through the transferable bot-winrate columns instead.
+        self.act_dropout, self.act_dim = float(act_dropout), int(act_dim)
+        # --bw-dropout: elementwise dropout on the bot-winrate columns (train only, scaled).
+        # Per-bot pass rates are ~50% overdispersed vs human difficulty — column dropout keeps
+        # the net from leaning on any single rung's idiosyncratic value and pushes it toward
+        # ladder consensus.
+        self.bw_dropout, self.bw_dim = float(bw_dropout), int(bw_dim)
+        # --global-slope: ONE learned discrimination for the whole corpus (3PL+lapse reference
+        # model). Motivated by an (accidental but clean) finding: a constant-slope fit had the
+        # best held-out-problem transfer and honest-val calibration of any healthy run — much of
+        # the unconstrained net's per-problem slope variation is overfit. This is the explicit,
+        # reproducible version; the net's slope column is ignored.
+        self.global_slope = None
+        if global_slope_fixed is not None:
+            # --global-slope-fixed: a PINNED constant discrimination (not learned) — deletes the
+            # hier machinery's regime-sensitive cached (μ, σ) target outright. Per-problem slope
+            # stays available only through the data-attested η_p residual column.
+            self.global_slope = nn.Parameter(
+                torch.tensor(float(np.log(np.expm1(global_slope_fixed)))), requires_grad=False)
+        elif global_slope:
+            self.global_slope = nn.Parameter(torch.tensor(float(np.log(np.expm1(2.0)))))
+        # --mech-floor: the guessing floor is MEASURED, not learned. c_p = s·bot_floor_p where
+        # bot_floor_p = min pass-rate over the standard-temperature humanv0 ladder (the empirical
+        # guess rate; same convention as auxiliary/diag_4pl_structure.py) and s is ONE global
+        # human-vs-bot scalar (independently measured ≈0.70; legacy shipped exactly 0.70·bot).
+        # Rationale: the floor is the one 4PL parameter with a physical meaning a measurement can
+        # pin (chance of guessing the move among plausible candidates). Removing the learned head
+        # closes the floor⇄difficulty swap BY CONSTRUCTION (no per-problem floor direction left to
+        # relocate difficulty into) and bounds the easy end with the bot floor (the universal
+        # easy-tail inflation wart no learned config fixed). Per-problem floor freedom survives
+        # only as the detached/frozen δ_floor residual where human attempts attest it.
+        self.mech_floor_scale = None
+        if mech_floor_botf is not None:
+            self.register_buffer("botf", mech_floor_botf)
+            init_s = 0.70 if mech_floor_scale_fixed is None else float(mech_floor_scale_fixed)
+            self.mech_floor_scale = nn.Parameter(
+                torch.tensor(float(np.log(np.expm1(init_s)))),
+                requires_grad=mech_floor_scale_fixed is None)
+        # --floor-residual: per-problem additive logit δ_p on the floor head, ridge-shrunk to 0.
+        # The Finding-O architecture test: floors are locally identifiable (~0.04 nats by-row)
+        # but NOT feature-predictable beyond f(rating) (smooth-family models transfer far
+        # better), so the only way to get both is prior-from-features + attested local residual
+        # — unattested/held-out problems keep δ=0 and fall back to the feature prior.
+        # Frozen-pass per-problem residuals (gate: --floor-residual; columns: --resid-cols).
+        # One (n_problems, 3) table of additive corrections (Δdifficulty, Δraw-slope, Δfloor-
+        # logit), masked to the requested columns — fit ONLY in the frozen pass (see main).
+        # Generalizes the original floor-only residual after the per-problem reference model
+        # showed ~0.06 nats of real local heterogeneity beyond any pooled fit.
+        self.floor_resid = None
+        if floor_resid:
+            self.floor_resid = nn.Embedding(n_problems, 3)
+            nn.init.zeros_(self.floor_resid.weight)
+            self.register_buffer("resid_mask", torch.zeros(3))
+        # --per-problem: a unique FREE 3PL per tsumego (no feature net at all) — the maximal-
+        # local reference model. Identification rests entirely on examinee coverage (run with
+        # --anchor-ranks all = the full 61-bot battery, down-weighted); without it this is the
+        # Finding-R swap waiting to happen. Held-out problems' params are never trained, so the
+        # held-out-problem metric is MEANINGLESS under this flag.
+        self.per_problem = bool(per_problem)
+        self.pp = None
+        if per_problem:
+            self.pp = nn.Embedding(n_problems, 3)             # (difficulty b, raw slope, raw floor)
+            with torch.no_grad():
+                self.pp.weight[:, 0] = 0.0
+                self.pp.weight[:, 1] = float(np.log(np.expm1(2.0)))   # softplus⁻¹(2): slope init 2
+                self.pp.weight[:, 2] = 0.0                            # floor init mid-cap
+        # --lapse-human-only: the global ceiling models HUMAN slips; slip-free bot examinees
+        # (e.g. kata1 t0.02) otherwise anchor it to zero (Finding T). Bot rows get lapse 0 —
+        # their miss process is already in their learned ability/temperature.
+        self.lapse_human_only = bool(lapse_human_only)
         self.theta = nn.Embedding(n_users, 1)
         nn.init.normal_(self.theta.weight, std=1.0)
-        layers, d = [], fdim
-        for h in hidden:                                       # decreasing layers, ReLU between
-            layers += [nn.Linear(d, h), nn.ReLU()]
-            if dropout > 0:
-                layers += [nn.Dropout(dropout)]
-            d = h
-        layers += [nn.Linear(d, 3)]                            # → (difficulty b, slope a, floor c)
-        self.net = nn.Sequential(*layers)
+        # Per-bot steepness discount (--anchor-slope-discount): bot examinees see each
+        # problem's curve flattened by a learned per-bot factor (softplus, init 1.0). Bot
+        # response curves across the ladder are FLATTER than human curves (the ~50%
+        # overdispersion of bot-derived difficulty), so anchoring many rungs as plain
+        # examinees forces bot-flat slopes/floors into the SHIPPED human-scale params
+        # (verified: dense-20 ladder → 97% hard-tail slope clamp, floors → 0; see
+        # docs/rating_4pl_structure_log.md). The discount absorbs that mismatch per bot:
+        # bots keep teaching difficulty location and RELATIVE shape across problems;
+        # humans alone pin the absolute steepness scale. Slope-side analogue of legacy's
+        # human-recalibrated (0.70·) bot floor, but learned.
+        self.n_human = n_users - n_anchor
+        self.slope_discount = None
+        if slope_discount and n_anchor > 0:
+            self.slope_discount = nn.Parameter(
+                torch.full((n_anchor,), float(np.log(np.expm1(1.0)))))  # softplus⁻¹(1)
+        if per_problem:
+            self.net = None                                    # no feature net at all
+        else:
+            layers, d = [], fdim
+            for h in hidden:                                   # decreasing layers, ReLU between
+                layers += [nn.Linear(d, h), nn.ReLU()]
+                if dropout > 0:
+                    layers += [nn.Dropout(dropout)]
+                d = h
+            layers += [nn.Linear(d, 3)]                        # → (difficulty b, slope a, floor c)
+            self.net = nn.Sequential(*layers)
         self.lapse_cap = float(lapse_cap)
+        # --lapse-fixed: freeze the global ceiling at an externally calibrated value (the
+        # posthoc plateau λ̂) instead of trusting the trained MLE, which under-estimates λ
+        # whenever floors are free (Finding Q) — folds the posthoc rescoring stage into the fit.
+        if lapse_fixed is not None:
+            assert 0.0 < lapse_fixed < lapse_cap, "--lapse-fixed must lie in (0, lapse_cap)"
+            lapse_init = lapse_fixed
         li = float(np.clip(lapse_init / max(lapse_cap, EPS), EPS, 1 - EPS))
         self.lapse_raw = nn.Parameter(torch.tensor(float(np.log(li / (1 - li)))))
+        if lapse_fixed is not None:
+            self.lapse_raw.requires_grad_(False)
 
     def lapse(self):
         """Global 4PL upper-asymptote slip rate λ ∈ (0, lapse_cap)."""
         return self.lapse_cap * torch.sigmoid(self.lapse_raw)
 
-    def params(self, feat):
-        o = self.net(feat)
+    def params(self, feat, pidx=None, use_resid=True, detach_backbone=False, pin=None):
+        """pidx = problem indices (key order) for the rows of `feat`; None ⇒ feat IS the full
+        corpus in key order (the score_corpus / prior-block convention).
+        use_resid=False evaluates the bare backbone (no δ_p); detach_backbone=True cuts the
+        gradient to everything upstream of the δ table — together they implement the ONE-STAGE
+        detached residual mode (--floor-resid-mode detached): the backbone trains residual-free
+        while δ_p trains against a frozen-in-the-graph copy of it, reproducing the two-stage
+        frozen fixed point in a single optimization pass."""
+        if self.pp is not None:
+            if pidx is None:
+                pidx = torch.arange(len(feat), device=feat.device)
+            o = self.pp(pidx)
+        else:
+            if self.training and self.act_dropout > 0 and self.act_dim > 0:
+                keep = (torch.rand(len(feat), 1, device=feat.device)
+                        >= self.act_dropout).float() / (1.0 - self.act_dropout)
+                feat = torch.cat([feat[:, :self.act_dim] * keep, feat[:, self.act_dim:]], dim=1)
+            if self.training and self.bw_dropout > 0 and self.bw_dim > 0:
+                d0 = self.act_dim
+                keep = (torch.rand(len(feat), self.bw_dim, device=feat.device)
+                        >= self.bw_dropout).float() / (1.0 - self.bw_dropout)
+                feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.bw_dim] * keep,
+                                  feat[:, d0 + self.bw_dim:]], dim=1)
+            o = self.net(feat)
+        if self.global_slope is not None:
+            # substitute the single global slope into the raw-slope column so per-problem slope
+            # residuals (and the detach below) compose with it like with the net's slope head
+            gs = self.global_slope.view(1, 1).expand(len(o), 1)
+            o = torch.cat([o[:, :1], gs, o[:, 2:]], dim=1)
+        if self.mech_floor_scale is not None:
+            # substitute logit(s·bot_floor_p) into the floor column so the cap·sigmoid pathway,
+            # δ_floor residuals, detach and head-pin all compose unchanged (same pattern as the
+            # global-slope substitution above)
+            pid = pidx if pidx is not None else torch.arange(len(o), device=o.device)
+            s = torch.nn.functional.softplus(self.mech_floor_scale)
+            cf = (s * self.botf[pid]).clamp(EPS, 1.0 - EPS)
+            o = torch.cat([o[:, :2], torch.log(cf / (1.0 - cf)).unsqueeze(1)], dim=1)
+        if detach_backbone:
+            o = o.detach()
+        if pin:
+            # --head-pin-dropout: this batch sees the pinned head(s) replaced by a corpus-
+            # median constant — no gradient reaches the pinned head, the others must fit the
+            # rows alone (head-level dropout; the user's compensation-learning test).
+            o = o.clone()
+            for col_, v_ in pin.items():
+                o[:, col_] = v_
+        if use_resid and self.floor_resid is not None:
+            if pidx is None:
+                pidx = torch.arange(len(o), device=o.device)
+            o = o + self.floor_resid(pidx) * self.resid_mask
         b = o[:, 0]
         a = torch.nn.functional.softplus(o[:, 1]).clamp(min=self.slope_floor)  # lower bound only
-        cap = (1.0 - 2.0 * self.lapse()).clamp(min=EPS)
+        lam = self.lapse()
+        if detach_backbone:
+            lam = lam.detach()
+        cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=self.floor_cap)
         c = cap * torch.sigmoid(o[:, 2])
         return b, a, c
+
+    def slope_unclamped(self, feat):
+        """Per-problem slope BEFORE the slope_floor clamp — the distribution prior penalizes
+        this (the clamp zeroes gradients exactly where collapsed slopes need lifting)."""
+        return torch.nn.functional.softplus(self.net(feat)[:, 1]).clamp_min(1e-4)
+
+    def hier_nll(self, feat, target):
+        """Mean per-problem quadratic shrinkage toward the FROZEN pass-1 robust moments in
+        `target` ({head: (μ, σ)}; see __init__). Uses the PRE-clamp slope (gradient survives at
+        the slope_floor rail) and the raw floor logit."""
+        o = self.net(feat)
+        loss = torch.zeros((), device=o.device)
+        if "log-slope" in target:
+            mu, sig = target["log-slope"]
+            la = torch.log(torch.nn.functional.softplus(o[:, 1]).clamp_min(1e-4))
+            loss = loss + ((la - mu).pow(2) / (2 * sig * sig)).mean()
+        if "floor-logit" in target:
+            mu, sig = target["floor-logit"]
+            loss = loss + ((o[:, 2] - mu).pow(2) / (2 * sig * sig)).mean()
+        return loss
+
+    def cond_diversity_nll(self, feat, tgt):
+        """Continuous conditional diversity+decorrelation objective (user proposal, kept as a
+        falsifiable TEST): residualize both heads on the frozen pass-1 conditional means
+        μ(rating) in `tgt` ({head: (μ_vec, σ_resid)}), then (a) pull each head's residual spread
+        toward its pass-1 value (diversity), (b) penalize the residual cross-correlation
+        (decorrelation given rating). Prediction on record: structure tables improve while
+        slope↔bot_steep stays ≈0 — diversity rewards manufacture ASSIGNMENT noise along the
+        flat directions of the likelihood (Findings G+I)."""
+        o = self.net(feat)
+        vals = {"log-slope": torch.log(torch.nn.functional.softplus(o[:, 1]).clamp_min(1e-4)),
+                "floor-logit": o[:, 2]}
+        pen = torch.zeros((), device=o.device)
+        resid = {}
+        for head, v in vals.items():
+            mu, sig = tgt[head]
+            r = v - mu
+            pen = pen + (r.std() / sig - 1.0).pow(2)
+            resid[head] = r - r.mean()
+        ra, rc = resid["log-slope"], resid["floor-logit"]
+        corr = (ra * rc).mean() / (ra.std() * rc.std() + 1e-6)
+        return pen + corr.pow(2)
+
+    def hier_moments(self, feat):
+        """Current corpus moments the shrinkage is matched to (for reporting)."""
+        with torch.no_grad():
+            o = self.net(feat)
+            out = {}
+            if self.hier_slope:
+                la = torch.log(torch.nn.functional.softplus(o[:, 1]).clamp_min(1e-4))
+                out["log-slope"] = (float(la.mean()), float(la.std()))
+            if self.hier_floor:
+                out["floor-logit"] = (float(o[:, 2].mean()), float(o[:, 2].std()))
+        return out
 
     def ability(self, u):
         """Per-user ability, hard-whitened to mean 0 / std 1 each call (unit-Gaussian gauge)."""
         w = self.theta.weight
         return ((self.theta(u) - w.mean()) / (w.std() + EPS)).squeeze(-1)
 
-    def forward(self, u, feat):
-        b, a, c = self.params(feat)
-        praw = torch.sigmoid(a * (self.ability(u) - b))
-        return (c + (1.0 - c - self.lapse()) * praw).clamp(EPS, 1 - EPS)
+    def forward(self, u, feat, pidx=None, use_resid=True, detach_backbone=False, pin=None):
+        b, a, c = self.params(feat, pidx, use_resid=use_resid, detach_backbone=detach_backbone,
+                              pin=pin)
+        th = self.ability(u)
+        lam = self.lapse()
+        if detach_backbone:
+            th, lam = th.detach(), lam.detach()
+        g = a * (th - b)
+        if self.slope_discount is not None:
+            is_bot = u >= self.n_human
+            disc = torch.nn.functional.softplus(
+                self.slope_discount)[(u - self.n_human).clamp(min=0)]
+            if detach_backbone:
+                disc = disc.detach()
+            g = torch.where(is_bot, g * disc, g)
+        praw = torch.sigmoid(g)
+        if self.lapse_human_only:
+            lam = lam * (u < self.n_human).float()
+        return (c + (1.0 - c - lam) * praw).clamp(EPS, 1 - EPS)
 
 
 def main():
@@ -210,8 +525,43 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
+    ap.add_argument("--features", choices=["bw_act", "act", "bw"], default="bw_act",
+                    help="Feature ablation: bw_act = activations ⊕ bot-winrate columns (the "
+                         "validated production set), act = activations only (tests whether the "
+                         "bot ladder columns are a convenient-but-flawed SHORTCUT for the shape "
+                         "heads — bot per-problem signals are ~50%% overdispersed vs humans, and "
+                         "a free floor head loses to f(rating) on unseen problems despite having "
+                         "the bot floor available), bw = bot columns only (attribution "
+                         "reference). The scorable problem set stays the SAME intersection in "
+                         "all modes — only the fed columns change.")
     ap.add_argument("--diff-hidden", type=int, nargs="*", default=[128, 64])
     ap.add_argument("--dropout", type=float, default=0.1)
+    ap.add_argument("--act-dropout", type=float, default=0.0,
+                    help="Probability of dropping the ENTIRE activation feature block per row "
+                         "during training (scaled 1/(1−p); eval uses all features). Targets the "
+                         "measured memorization channel (Findings F, S): the activation PCs are "
+                         "near-unique per-problem fingerprints the net uses to memorize attempted "
+                         "problems' base rates — which inflates by-row fit but pollutes the "
+                         "feature prior that unseen problems receive. Block dropout forces "
+                         "base-rate information through the transferable bot-winrate columns "
+                         "(soft version of the bw-backbone/act-local split). No-op for "
+                         "--features bw. 0 = off.")
+    ap.add_argument("--bw-dropout", type=float, default=0.0,
+                    help="Elementwise dropout on the bot-winrate feature columns during "
+                         "training (scaled; eval uses all). Per-bot pass rates are ~50%% "
+                         "overdispersed vs human difficulty, so this regularizes reliance on "
+                         "any single rung's idiosyncratic value toward ladder consensus. "
+                         "No-op for --features act. 0 = off.")
+    ap.add_argument("--head-pin-dropout", type=float, default=0.0,
+                    help="Per-batch head-level dropout (user compensation-learning test): with "
+                         "this probability, ONE head from --head-pin-heads is pinned to an EMA "
+                         "of its corpus-median raw output for the batch's backbone loss — the "
+                         "remaining heads must fit the rows alone. Prediction on record: acts "
+                         "like shrinkage (robustness-to-pinning is maximized by not using the "
+                         "head per problem), so per-problem floor spread/meaning shrink toward "
+                         "the smooth-family equilibrium rather than assignment improving. 0 = off.")
+    ap.add_argument("--head-pin-heads", default="slope,floor",
+                    help="Comma subset of {diff,slope,floor} eligible for --head-pin-dropout.")
     ap.add_argument("--epochs", type=int, default=300)
     ap.add_argument("--lr", type=float, default=0.01)
     ap.add_argument("--batch", type=int, default=65536)
@@ -221,33 +571,303 @@ def main():
     ap.add_argument("--winsor", type=float, default=1.0,
                     help="Winsorize final ratings to [p, 100-p] percentile (legacy robustness for "
                          "the low-slope b + logit/a tail on the unattempted extrapolation).")
-    ap.add_argument("--slope-floor", type=float, default=0.2,
-                    help="Lower bound on the per-problem slope a_p in the MODEL (softplus floor) — the "
-                         "real knob behind the low-slope rating tail, tuned by the objectives, NOT by "
-                         "how the rating histogram looks. Default 0.2 is the compromise across seeds: "
-                         "weighted survey ρ ≈ 0.80 (matches legacy 0.802, vs 0.792 at 0.3), held-out-"
-                         "problem logloss ≈ the 0.01 level (0.3 is ~0.005 better there), and the "
-                         "positive rating tail stays sane (~14). 0.01 overfits flat slopes AND blows "
-                         "the rating to ~229; the bound is thus a consequence of the objective, not a cap.")
+    ap.add_argument("--slope-floor", type=float, default=0.01,
+                    help="Lower bound on the per-problem slope a_p in the MODEL (softplus floor). "
+                         "Under the default hier-slope shrinkage this is a numerical guard, not a "
+                         "clamp — the hard 0.2 clamp era (pileup at the rail, U-shaped by rating "
+                         "decile) is obsolete (Findings D/K); 0.01 is safe whenever any sound "
+                         "slope constraint is active, and only a fully FREE slope head blows the "
+                         "rating tail through it (Finding UU).")
     ap.add_argument("--holdout-problem-frac", type=float, default=0.0,
                     help="If >0, hold out this fraction of ATTEMPTED problems (and their anchor "
                          "rows) from training and report held-out-PROBLEM logloss — the feature "
                          "prior's generalization to unseen problems. Eval mode: skips writing CSVs.")
+    ap.add_argument("--mixed-only", action=argparse.BooleanOptionalAction, default=False,
+                    help="Train only on human rows whose problem has BOTH successes and failures "
+                         "and whose user does too (iterated to a fixed point; eval rows are not "
+                         "filtered). Conditional-MLE-style drop of perfect/zero score patterns, "
+                         "whose monotone likelihood exerts unbounded outward pull on difficulty — "
+                         "tests whether the anchors' Finding-OO location job is only needed "
+                         "because of one-sided rows.")
+    ap.add_argument("--holdout-keep-anchors", action=argparse.BooleanOptionalAction, default=False,
+                    help="Keep the BOT anchor rows for held-out problems (only their HUMAN rows "
+                         "are excluded). Changes what metric 2 measures: bot→human per-problem "
+                         "transfer (how well bot-fitted curves predict unseen humans) instead of "
+                         "pure feature-prior transfer. The right mode for --per-problem, where "
+                         "the default exclusion leaves held-out params at init.")
     ap.add_argument("--anchors", action=argparse.BooleanOptionalAction, default=True,
                     help="Add humanv0 bot 'users' (--anchor-ranks) as extra examinees with learned "
                          "ability + soft-target responses on every problem (coverage prior). On by "
                          "default; --no-anchors trains on human attempts only.")
     ap.add_argument("--anchor-ranks", default="20k,9d",
-                    help="comma-separated humanv0 ranks used as bot users (default 20k,9d).")
+                    help="comma-separated anchor tokens (default 20k,9d). A token is a humanv0 "
+                         "rank ('9d') or a full attempts/<size>/ file stem (any benchmarked bot, "
+                         "e.g. 'kata1-b18c384nbt-s9996604416-d4316597426_t0.02' for the general "
+                         "KataGo engine, or 'b18c384nbt-humanv0_20k_t10' for a near-random "
+                         "easy-tail rung).")
     ap.add_argument("--anchor-weight", type=float, default=0.2,
-                    help="per-row weight on bot-anchor responses (human rows = 1.0). Low = minimal "
-                         "prior: humans own the shape where attested, bots fill the empty regions.")
+                    help="per-row weight on bot-anchor responses (human rows = 1.0), calibrated at "
+                         "the 2-rung (20k,9d) ladder. Low = minimal prior: humans own the shape "
+                         "where attested, bots fill the empty regions.")
+    ap.add_argument("--anchor-slope-discount", action=argparse.BooleanOptionalAction, default=False,
+                    help="Give each anchor bot ONE learned steepness-discount scalar (init 1.0): "
+                         "for bot rows P = c + (1−c−λ)·σ(discount·a·(θ−b)); human rows unchanged. "
+                         "Absorbs 'bot curves are flatter than human curves' so a dense ladder "
+                         "teaches difficulty location + relative shape without forcing bot-flat "
+                         "slopes/floors into the shipped params.")
+    ap.add_argument("--anchor-fixed-mass", action=argparse.BooleanOptionalAction, default=True,
+                    help="Hold TOTAL bot mass fixed as the ladder grows: each rung is weighted "
+                         "anchor_weight·2/len(ladder), so a denser --anchor-ranks adds slope-"
+                         "identifying rungs without overwhelming the human attempts. --no-anchor-"
+                         "fixed-mass keeps every rung at anchor_weight (mass grows with the ladder).")
     ap.add_argument("--lapse-cap", type=float, default=0.05,
                     help="Upper bound on the learned global ceiling λ.")
+    ap.add_argument("--floor-cap", type=float, default=1.0,
+                    help="Hard upper bound on the per-problem guessing floor c_p. Default 1.0 is a "
+                         "no-op (the floor stays ceiling-coupled at 1−2λ≈0.97). Set 0.5 to forbid a "
+                         "guessing rate above 'pick one of two moves' — caps the high easy-end floors "
+                         "(0.9+) the unconstrained 4PL otherwise learns.")
+    ap.add_argument("--l2-floor", type=float, default=0.0,
+                    help="Outlier penalty on the per-problem floor: λ·Var(c_p) over all problems "
+                         "(= L2 of each floor toward the corpus mean). Quadratic, so it pulls in the "
+                         "collapsed-to-~0 outliers (the floor↔slope-ridge degeneracy in the hard "
+                         "tail) without a per-problem target. GLOBAL only — does not import the bot "
+                         "floor's over-extreme tails. 0 = off.")
+    ap.add_argument("--slope-dist-prior", type=float, default=0.0,
+                    help="Weight on a DISTRIBUTION prior over the corpus slope spectrum: sort all "
+                         "problems' UNCLAMPED log-slopes and L2-match them to the quantiles of a "
+                         "target normal (--slope-dist-mu/sigma, i.e. log-normal slopes). Unlike "
+                         "--l2-slope (variance shrinkage to the mean) this pins location, spread "
+                         "AND shape — it penalizes both the clamp pileup and the runaway 7–12 "
+                         "slopes, while leaving WHICH problem gets which slope entirely to the "
+                         "data. Acts on pre-clamp slopes so the gradient survives at the clamp. "
+                         "0 = off.")
+    ap.add_argument("--slope-dist-mu", type=float, default=0.50,
+                    help="Target log-slope mean (default from the validated legacy artifact's "
+                         "slope distribution: median slope ≈ 1.65).")
+    ap.add_argument("--slope-dist-sigma", type=float, default=0.45,
+                    help="Target log-slope std (legacy: 0.45; the live 4PL artifact shows 1.27 — "
+                         "i.e. ~3x over-dispersed, clamp pileup + runaway tail).")
+    ap.add_argument("--hier-slope", action=argparse.BooleanOptionalAction, default=True,
+                    help="Hierarchical empirical-Bayes shrinkage on the slope head: log a_p ~ "
+                         "N(μ, σ²), two-pass with μ, σ FROZEN at the pass-1 fit's robust corpus "
+                         "moments (median, IQR/1.349; gradient-learned σ and per-step moment "
+                         "matching are both verified-degenerate — see RatingNet), weighted at "
+                         "the Bayes-correct rate of one prior draw per problem vs one BCE term per "
+                         "data row (scale = n_problems / total row mass — no tuned knob). Answer-"
+                         "free alternative to --slope-dist-prior (which imports legacy's μ/σ): the "
+                         "corpus chooses its own slope distribution; intended to replace the hard "
+                         "--slope-floor clamp (run with --slope-floor 0.01).")
+    ap.add_argument("--hier-slope-mu", type=float, default=0.8,
+                    help="FIXED hier-slope target mean (log-slope). With --hier-slope-sigma, "
+                         "replaces the frozen pass-1 robust moments with a constant target, so "
+                         "the free pass-1 fit is SKIPPED entirely (one optimization pass). "
+                         "Justified by Finding G/K: the shrinkage equilibrium is insensitive to "
+                         "the pass-1 target's σ (1.20 → 0.034 spread), and pass-1 medians land "
+                         "at 0.63–0.92 across configs — μ 0.8 / σ 0.8 reproduces the stack's "
+                         "target within that band. Two ordinary hyperparameters in exchange for "
+                         "a whole training pass.")
+    ap.add_argument("--hier-slope-sigma", type=float, default=0.8,
+                    help="FIXED hier-slope target std (see --hier-slope-mu). The default 0.8/0.8 "
+                         "is a CACHED pass-1 calibrated on the anchored bw_act regime and is "
+                         "regime-SENSITIVE (Finding DD): re-derive it whenever the anchor set or "
+                         "feature set changes by passing a NEGATIVE value (e.g. "
+                         "--hier-slope-mu -1 --hier-slope-sigma -1), which restores the two-pass "
+                         "mode (free pass 1 → frozen robust moments).")
+    ap.add_argument("--lapse-fixed", type=float, default=0.02,
+                    help="Freeze the global ceiling λ at this value instead of learning it. The "
+                         "trained MLE under-estimates λ whenever floors are free (Finding Q; "
+                         "plateau λ̂ ≈ 0.0225 vs trained 0.013 on the final stack) — fixing it at "
+                         "the externally calibrated plateau value folds the posthoc λ rescoring "
+                         "stage into the fit (ratings come out consistent in one pass).")
+    ap.add_argument("--hier-floor", action=argparse.BooleanOptionalAction, default=False,
+                    help="Same hierarchical prior on the floor head's raw logit (pre-sigmoid). "
+                         "Targets the unidentified easy-end floors (no examinee sits below an easy "
+                         "problem's rating, so c_p is free there and inflates to 0.9+): they shrink "
+                         "to the learned corpus floor distribution instead.")
+    ap.add_argument("--per-problem", action=argparse.BooleanOptionalAction, default=False,
+                    help="Unique FREE 3PL per tsumego — no feature net (the maximal-local "
+                         "reference model; the bot ladder IS the model, humans correct it where "
+                         "attested). Run with --anchor-ranks all and --lapse-human-only. "
+                         "Held-out-problem LL is MEANINGLESS under this flag (no features to "
+                         "transfer through). Incompatible with the head priors/--global-slope/"
+                         "--floor-residual.")
+    ap.add_argument("--lapse-human-only", action=argparse.BooleanOptionalAction, default=False,
+                    help="Apply the global ceiling λ to HUMAN rows only. λ models human slips; "
+                         "a slip-free bot examinee otherwise anchors it to zero (Finding T, "
+                         "kata1 t0.02 → λ 0.0004).")
+    ap.add_argument("--floor-residual", action=argparse.BooleanOptionalAction, default=True,
+                    help="Per-problem additive logit residual δ_p on the floor head, ridge-shrunk "
+                         "to 0 (--floor-resid-l2). The Finding-O architecture test: floors are "
+                         "locally identifiable (~0.04 nats by-row) but not feature-predictable "
+                         "beyond f(rating), so prior-from-features + attested residual should win "
+                         "by-row AND held-out-problem simultaneously (held-out problems keep δ=0 "
+                         "= the feature prior).")
+    ap.add_argument("--floor-resid-l2", type=float, default=4.0,
+                    help="Ridge weight on mean(δ_p²). 4.0 (prior σ≈0.23) is the chain14 ship "
+                         "knee: matches floor-only by-row with the best calibration; looser "
+                         "values buy by-row at a real rho/calibration tax (Finding W).")
+    ap.add_argument("--resid-cols", default="diff,slope,floor",
+                    help="Comma subset of {diff,slope,floor}: which per-problem corrections the "
+                         "frozen residual pass fits (gate: --floor-residual). The per-problem "
+                         "reference model showed ~0.06 nats of real local heterogeneity; "
+                         "diff+floor on a frozen backbone extracts it without the geometry "
+                         "damage (legacy's δ_p/η_p, rebuilt on the measured-best backbone).")
+    ap.add_argument("--floor-resid-mode", choices=["frozen", "joint", "detached"], default="detached",
+                    help="frozen: fit the model normally, then FREEZE net/θ/λ and fit "
+                         "only δ_p — local corrections on a fixed backbone, so the global "
+                         "geometry can't drift. joint: train δ_p with everything else — "
+                         "verified-degenerate (floor⇄difficulty swap: floors→0.74 mean, ratings "
+                         "compressed, survey rho 0.07; the model explains difficulty AS floor). "
+                         "detached: ONE-STAGE gradient-isolated residuals — the backbone loss is "
+                         "computed residual-free while δ_p trains in the same pass against a "
+                         "detached copy of the backbone (+ its own ridge); same fixed point as "
+                         "frozen, no second pass, and the joint-mode swap is impossible because "
+                         "the backbone never sees δ.")
+    ap.add_argument("--floor-resid-epochs", type=int, default=100,
+                    help="Epochs for the frozen residual pass (δ is per-problem and converges "
+                         "fast against a fixed backbone).")
+    ap.add_argument("--hier-conditional", action=argparse.BooleanOptionalAction, default=False,
+                    help="Make the hier shrinkage targets RATING-CONDITIONAL: shrink log-slope / "
+                         "floor-logit toward smooth pass-1 conditional medians μ(rating) (20 "
+                         "quantile bins, piecewise-linear) instead of a global μ. Conditional "
+                         "means are identified by POOLED data even where per-problem deviations "
+                         "are not, so the real rating-coupled structure (e.g. easy ⇒ high floor) "
+                         "is preserved and only residual spread is shrunk — fixes the global-"
+                         "target floor-crushing of the plain hier prior.")
+    ap.add_argument("--cond-diversity", type=float, default=0.0,
+                    help="Weight on the continuous conditional diversity+decorrelation objective "
+                         "(TEST cell): maintain each head's pass-1 residual spread around "
+                         "μ(rating) and penalize residual cross-correlation given rating. "
+                         "Prediction on record: improves structure tables without improving "
+                         "slope↔bot_steep / heavy-val calibration (manufactured assignment). "
+                         "0 = off.")
+    ap.add_argument("--global-slope", action=argparse.BooleanOptionalAction, default=False,
+                    help="ONE learned discrimination a for the whole corpus (3PL+lapse reference "
+                         "model; the net keeps per-problem difficulty + floor). An accidental "
+                         "constant-slope fit had the best held-out-problem LL and honest-val "
+                         "calibration of any healthy run — this makes that model explicit: the "
+                         "ceiling on how much per-problem slope variation is worth shipping.")
+    ap.add_argument("--global-slope-fixed", type=float, default=None,
+                    help="PIN the corpus discrimination to this constant (e.g. 2.2 — the hier "
+                         "equilibrium level) instead of learning it; deletes the hier machinery's "
+                         "regime-sensitive cached target. η_p residuals still compose on top.")
+    ap.add_argument("--mech-floor", action=argparse.BooleanOptionalAction, default=True,
+                    help="MEASURED floor: c_p = s·bot_floor_p (min standard-temp humanv0 ladder "
+                         "pass rate, the empirical guess rate) with s ONE global human-vs-bot "
+                         "scalar (fixed at 0.70 by default; see --mech-floor-scale-fixed). "
+                         "Replaces the learned floor head; closes the floor⇄difficulty swap by "
+                         "construction. δ_floor residuals still compose on top where attempts "
+                         "attest. --no-mech-floor restores the learned floor head.")
+    ap.add_argument("--mech-floor-scale-fixed", type=float, default=0.70,
+                    help="Freeze the --mech-floor scale s at this value — zero learned floor "
+                         "parameters (Finding QQ: pinning at the measured 0.70 strictly improves "
+                         "every config vs learning s). Pass a NEGATIVE value to LEARN s instead "
+                         "(init 0.70).")
+    ap.add_argument("--hier-weight", type=float, default=1.0,
+                    help="Multiplier on the Bayes-correct hierarchical-prior scale (1.0 = exactly "
+                         "one prior draw per problem). A robustness knob, not a tuning target.")
+    ap.add_argument("--gap-balance", action=argparse.BooleanOptionalAction, default=False,
+                    help="Two-pass regime-balanced likelihood: pass 1 trains plain mean BCE, then "
+                         "each human row's gap z = a·(θ−rating) (success-curve logits, pass-1 "
+                         "model) is binned EQUAL-WIDTH over ±ZCLIP and rows are reweighted by "
+                         "inverse bin mass (capped, total human mass preserved). Makes the floor "
+                         "(far-below), slope (transition) and ceiling (far-above) regimes count in "
+                         "the gradient instead of being drowned by the near-rank bulk — the "
+                         "deterministic, non-adversarial fix for the 'fitted curve globally too "
+                         "flat' miscalibration (gap-DRO's dynamics lost to ERM; this keeps ERM and "
+                         "just fixes the regime weighting). No target values injected.")
+    ap.add_argument("--gap-balance-bins", type=int, default=10,
+                    help="Equal-width gap bins over ±ZCLIP for --gap-balance.")
+    ap.add_argument("--gap-balance-max", type=float, default=10.0,
+                    help="Cap on the per-row inverse-mass upweight for --gap-balance (keeps a "
+                         "near-empty extreme bin from dominating the gradient).")
+    ap.add_argument("--gap-balance-power", type=float, default=1.0,
+                    help="Exponent on the inverse-mass weight (w ∝ (1/bin mass)^p). 1.0 = full "
+                         "regime balance; <1 softens it — full balance amplifies the outcome-"
+                         "contaminated tail rows of sparse profiles (see the train-vs-val "
+                         "calibration discrepancy) and over-sharpens the tails.")
+    ap.add_argument("--l2-slope", type=float, default=0.0,
+                    help="Optional companion shrinkage on slope spread: λ·Var(log a_p) over all "
+                         "problems. May be unnecessary once the floor prior holds (a sound floor "
+                         "absorbs the flat hard-tail performance the slope was floored to mimic). "
+                         "0 = off.")
+    # --- even-error group-DRO (ported from the legacy residual model; ON by default) ---
+    ap.add_argument("--dro-skill", action=argparse.BooleanOptionalAction, default=False,
+                    help="Spread held-out error evenly across the rating range with a base-rate-"
+                         "centered group-DRO objective (replaces mean BCE on the HUMAN-attempt term; "
+                         "bot anchors keep their flat coverage BCE). Two-pass: pass 1 trains with "
+                         "mean BCE to get the rating, which defines the bins; pass 2 retrains with "
+                         "DRO over those bins. OFF by default: in its first honest test ERM beat "
+                         "DRO on all three objectives at fixed anchors (Round 1, the 4PL "
+                         "investigation) — plain weighted BCE (ERM) is the production objective.")
+    ap.add_argument("--dro-eta", type=float, default=0.2,
+                    help="Group-DRO exponentiated-gradient step on per-bin base-centered loss. 0.2 "
+                         "is the flatness↔cost knee (η≥~1.6 collapses q onto one bin).")
+    ap.add_argument("--dro-bins", type=int, default=10,
+                    help="Equal-count rating-quantile bins the DRO objective groups over "
+                         "(--no-dro-dyadic).")
+    ap.add_argument("--dro-2d", action=argparse.BooleanOptionalAction, default=True,
+                    help="Group-DRO over (relative-gap z × absolute-rating) instead of rating alone "
+                         "— resolves the far-below/above-rank gap regions, otherwise drowned by the "
+                         "near-rank bulk.")
+    ap.add_argument("--dro-z-bins", type=int, default=5,
+                    help="Relative-gap z bins for --dro-2d (× the rating bins), non-dyadic modes.")
+    ap.add_argument("--dro-dyadic", action=argparse.BooleanOptionalAction, default=True,
+                    help="Bin BOTH DRO axes by dyadic-tail-by-mass (--dro-z-depth / --dro-r-depth): "
+                         "mass-balanced cells with resolution concentrated at the extremes. "
+                         "--no-dro-dyadic uses plain quantile/uniform with --dro-bins / --dro-z-bins.")
+    ap.add_argument("--dro-z-depth", type=int, default=4,
+                    help="Dyadic tail depth for the gap axis (n_bins = 2·depth+2).")
+    ap.add_argument("--dro-r-depth", type=int, default=3,
+                    help="Dyadic tail depth for the absolute-rating axis (n_bins = 2·depth+2).")
+    ap.add_argument("--dro-z-uniform", action=argparse.BooleanOptionalAction, default=True,
+                    help="Bin the gap axis equal-WIDTH over ±ZCLIP (non-dyadic) so --dro-z-bins is a "
+                         "real lever on the far-from-rank extremes (quantile bins crowd the bulk).")
+    ap.add_argument("--report-gap-bins", type=int, default=10,
+                    help="Equal-width gap bins (gap = slope·(ability−rating), clipped to ±ZCLIP) "
+                         "for the gap-binned CALIBRATION diagnostic: mean predicted vs realized "
+                         "success per bin. The curve-SHAPE metric the three objectives barely see "
+                         "(a globally-too-flat fit shows as +Δ far below rank / −Δ far above) — "
+                         "printed on train rows always, and on the by-row val rows in eval mode. "
+                         "0 disables.")
+    ap.add_argument("--report-bins", type=int, default=10,
+                    help="Equal-count rating-quantile bins for the final per-bin train-logloss "
+                         "diagnostic (printed regardless of --dro-skill, so a DRO run and an ERM run "
+                         "can be compared bin-for-bin). 0 disables the report.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--log-every", type=int, default=50)
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # The M0b production config is the DEFAULT (zero flags = ship config). Flags that replace a
+    # default-on component auto-disable it with a note instead of asserting, so research
+    # invocations like --global-slope-fixed or --per-problem keep working unchanged.
+    if args.mech_floor_scale_fixed is not None and args.mech_floor_scale_fixed < 0:
+        args.mech_floor_scale_fixed = None                      # negative sentinel: LEARN s
+    if not args.mech_floor:
+        args.mech_floor_scale_fixed = None
+    if args.per_problem:
+        for f in ("hier_slope", "mech_floor", "floor_residual"):
+            if getattr(args, f):
+                print(f"NOTE: --per-problem disables the default --{f.replace('_', '-')}")
+                setattr(args, f, False)
+        args.mech_floor_scale_fixed = None
+        assert not (args.hier_floor or args.cond_diversity > 0
+                    or args.global_slope or args.global_slope_fixed is not None
+                    or args.slope_dist_prior > 0 or args.l2_floor > 0 or args.l2_slope > 0), \
+            "--per-problem has no feature heads; the head priors/residual flags do not apply"
+        if args.holdout_problem_frac > 0 and not args.holdout_keep_anchors:
+            print("NOTE: --per-problem without --holdout-keep-anchors ⇒ held-out-problem "
+                  "logloss is MEANINGLESS (held-out problems' free params are never trained); "
+                  "use --holdout-keep-anchors to measure bot→human per-problem transfer")
+    if (args.global_slope_fixed is not None or args.global_slope) and args.hier_slope:
+        print("NOTE: --global-slope(-fixed) replaces the hier slope machinery "
+              "(default --hier-slope disabled)")
+        args.hier_slope = False
+    assert not (args.global_slope and args.global_slope_fixed is not None), \
+        "--global-slope and --global-slope-fixed are mutually exclusive"
+    if args.mech_floor:
+        assert not args.hier_floor, "--mech-floor replaces the floor head; no hier-floor prior"
 
     # --- features (joint-PCA correct-move activations ⊕ common-column bot winrate) ---
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
@@ -255,12 +875,46 @@ def main():
     bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
     keys = [key for key in act if key in bw]                  # (size, tid); scorable iff both blocks
     key_idx = {key: i for i, key in enumerate(keys)}
-    fdim = k + nb + 1                                         # + size_is_13 board indicator
+    use_act = args.features in ("bw_act", "act")
+    use_bw = args.features in ("bw_act", "bw")
+    fdim = (k if use_act else 0) + (nb if use_bw else 0) + 1  # + size_is_13 board indicator
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
-        feat[i] = np.concatenate([act[key], bw[key], [1.0 if key[0] == 13 else 0.0]])
+        blocks = ([act[key]] if use_act else []) + ([bw[key]] if use_bw else [])
+        feat[i] = np.concatenate(blocks + [[1.0 if key[0] == 13 else 0.0]])
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
-          f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} (act {k} + bot {nb} + size_is_13)")
+          f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
+          f"[{args.features}] (act {k if use_act else 0} + bot {nb if use_bw else 0} + size_is_13)")
+
+    botf_t = None
+    if args.mech_floor:
+        ladder = discover_humanv0_ranks()
+        lw = load_anchor_winrates(keys, ladder)               # (n_keys, n_rungs), NaN where absent
+        botf = np.nanmin(lw, axis=1)
+        n_nan = int(np.isnan(botf).sum())
+        botf = np.where(np.isnan(botf), np.nanmedian(botf), botf)
+        botf_t = torch.tensor(botf.astype(np.float32), device=device)
+        print(f"mech floor: c_p = s·bot_floor_p over {len(ladder)}-rung humanv0 ladder | "
+              f"bot_floor p[5,50,95] {np.percentile(botf, [5, 50, 95]).round(3)} | "
+              f"{n_nan} problems lack ladder data (median-filled) | "
+              f"s {'fixed ' + str(args.mech_floor_scale_fixed) if args.mech_floor_scale_fixed is not None else 'learned (init 0.70)'}")
+
+    if args.l2_floor > 0 or args.l2_slope > 0:
+        print(f"param outlier penalty: λ_floor {args.l2_floor} (Var(c_p) → shrink outlier "
+              f"floors to the mean) | λ_slope {args.l2_slope} (Var(log a_p))")
+    slope_target_q = None
+    if args.slope_dist_prior > 0:
+        pp = (torch.arange(len(keys), dtype=torch.float32, device=device) + 0.5) / len(keys)
+        slope_target_q = (args.slope_dist_mu
+                          + args.slope_dist_sigma * float(np.sqrt(2.0)) * torch.erfinv(2 * pp - 1))
+        print(f"slope distribution prior: weight {args.slope_dist_prior}, target log-slope ~ "
+              f"N({args.slope_dist_mu}, {args.slope_dist_sigma}²) quantile-matched over "
+              f"{len(keys)} problems (pre-clamp)")
+    if args.hier_slope or args.hier_floor:
+        heads = [h for h, on in (("log-slope", args.hier_slope),
+                                 ("floor-logit", args.hier_floor)) if on]
+        print(f"hierarchical EB shrinkage on {'+'.join(heads)}: two-pass, frozen pass-1 robust "
+              f"moments, Bayes scale = n_problems/row-mass (× --hier-weight {args.hier_weight})")
 
     # --- HUMAN first-time attempts, pooled, shared profiles (no size in profile id) ---
     df = load_first_time_attempts()
@@ -300,13 +954,27 @@ def main():
               f"({int(ho_mask_h.sum())} human rows) — feature-prior generalization test")
 
     # --- bot 'anchor users': extra examinees (learned ability) with soft-target responses on every
-    #     problem. Coverage is the prior; two strengths ⇒ b AND a identified everywhere. ---
+    #     problem. Coverage is the prior; each rung is a point on every problem's success curve, so
+    #     the SLOPE a_p is only identified where adjacent rungs separate the problem — a 2-rung
+    #     (20k,9d) ladder floors the slope wherever those two don't (→ rating=b+clear_logit/a blows
+    #     up). A denser --anchor-ranks adds separating rungs; --anchor-fixed-mass keeps total mass. ---
     n_anchor, ranks = 0, []
     au = ap_ = at = np.empty(0)
+    per_bot_weight = args.anchor_weight
     if args.anchors:
-        ranks = [r.strip() for r in args.anchor_ranks.split(",") if r.strip()]
+        if args.anchor_ranks.strip().lower() == "all":
+            # every attempt file common to both sizes (the full bot battery, 61 examinees)
+            import glob as _glob
+            stems = [set(os.path.basename(f)[:-4]
+                         for f in _glob.glob(os.path.join(PROJECT_ROOT, "attempts", str(s), "*.txt")))
+                     for s in SIZES]
+            ranks = sorted(set.intersection(*stems))
+        else:
+            ranks = [r.strip() for r in args.anchor_ranks.split(",") if r.strip()]
         aw = load_anchor_winrates(keys, ranks)
         n_anchor = len(ranks)
+        if args.anchor_fixed_mass and n_anchor:
+            per_bot_weight = args.anchor_weight * ANCHOR_REF_RUNGS / n_anchor
         uu, pp_, tt_ = [], [], []
         for j in range(n_anchor):
             ok = np.where(np.isfinite(aw[:, j]))[0]
@@ -315,8 +983,9 @@ def main():
             tt_.append(aw[ok, j].astype(np.float32))
         au, ap_, at = np.concatenate(uu), np.concatenate(pp_), np.concatenate(tt_)
         cover = [int(np.isfinite(aw[:, j]).sum()) for j in range(n_anchor)]
-        print(f"anchors: bot users {ranks} | coverage {cover}/{len(keys)} | "
-              f"row-weight {args.anchor_weight} | abilities LEARNED")
+        print(f"anchors: {n_anchor} bot users {ranks} | coverage {cover}/{len(keys)} | "
+              f"per-rung weight {per_bot_weight:.4f} (total bot mass "
+              f"{'FIXED' if args.anchor_fixed_mass else 'grows'}) | abilities LEARNED")
 
     # by-row val (only in eval mode): among the kept human rows, hold out 15% of ATTEMPTS on
     # SEEN problems — generalization to new attempts, distinct from the new-problem held-out set.
@@ -330,12 +999,42 @@ def main():
     # --- assemble training rows: human (w=1) ⊕ anchor (w=anchor_weight), MINUS held-out problems
     #     and the by-row val rows ---
     train_h = (~ho_mask_h) & (~byrow_val)
+    if args.mixed_only:
+        # Conditional-MLE-style filter (user direction): train only on rows whose PROBLEM has both
+        # outcomes and whose USER has both outcomes among the kept training rows. One-sided score
+        # patterns have monotone likelihood (an all-success problem's BCE only improves as
+        # difficulty → −∞) — the classical Rasch perfect/zero-score drop — and their outward pull
+        # is a candidate cause of the no-anchor difficulty-axis warp (Finding OO). Iterated to a
+        # fixed point (each pass can re-expose one-sided units). Eval rows (by-row val, held-out
+        # problems) are deliberately NOT filtered: the treatment is training-only, so metrics stay
+        # comparable across cells; dropped users' θ never trains (stays at init) — their val rows
+        # are counted below.
+        before = int(train_h.sum())
+        for _ in range(50):
+            ps = np.zeros(len(keys)); pf = np.zeros(len(keys))
+            np.add.at(ps, prob_idx[train_h], y[train_h])
+            np.add.at(pf, prob_idx[train_h], 1.0 - y[train_h])
+            us = np.zeros(n_profiles); uf = np.zeros(n_profiles)
+            np.add.at(us, prof_idx[train_h], y[train_h])
+            np.add.at(uf, prof_idx[train_h], 1.0 - y[train_h])
+            ok = (((ps > 0) & (pf > 0))[prob_idx] & ((us > 0) & (uf > 0))[prof_idx] & train_h)
+            if int(ok.sum()) == int(train_h.sum()):
+                break
+            train_h = ok
+        trained_users = np.unique(prof_idx[train_h])
+        orphan_val = int((byrow_val & ~np.isin(prof_idx, trained_users)).sum())
+        print(f"mixed-only filter: train rows {before} → {int(train_h.sum())} "
+              f"({int(train_h.sum()) / before:.1%}) | problems "
+              f"{len(np.unique(prob_idx[train_h]))} | profiles {len(trained_users)}/{n_profiles} "
+              f"| by-row-val rows from untrained users: {orphan_val}")
     u_all = [prof_idx[train_h]]; p_all = [prob_idx[train_h]]; t_all = [y[train_h]]
     w_all = [np.ones(int(train_h.sum()), np.float32)]
     if n_anchor:
-        keep_a = ~np.isin(ap_, list(ho_problems)) if ho_problems else np.ones(len(ap_), bool)
+        keep_a = (np.ones(len(ap_), bool) if (args.holdout_keep_anchors or not ho_problems)
+                  else ~np.isin(ap_, list(ho_problems)))
         u_all.append(au[keep_a]); p_all.append(ap_[keep_a]); t_all.append(at[keep_a])
-        w_all.append(np.full(int(keep_a.sum()), args.anchor_weight, np.float32))
+        w_all.append(np.full(int(keep_a.sum()), per_bot_weight, np.float32))
+    n_human = int(train_h.sum())                             # human rows lead; anchors follow
     u_all = np.concatenate(u_all); p_all = np.concatenate(p_all)
     t_all = np.concatenate(t_all); w_all = np.concatenate(w_all)
 
@@ -349,62 +1048,569 @@ def main():
     thy = torch.tensor(y, device=device)
     n = len(u_all)
 
-    # --- fit ---
-    torch.manual_seed(args.seed)
-    m = RatingNet(fdim, n_profiles + n_anchor, tuple(args.diff_hidden),
-                  dropout=args.dropout, lapse_cap=args.lapse_cap,
-                  slope_floor=args.slope_floor).to(device)
-    opt = torch.optim.Adam(m.parameters(), lr=args.lr)
+    # --- fit (optionally two-pass even-error group-DRO; see fit_model / the DRO block below) ---
+    is_human = np.zeros(n, bool); is_human[:n_human] = True   # anchors gated out of the DRO term
+    t_is_human = torch.tensor(is_human, device=device)
     epoch_records = []                                        # (pass, epoch, human_train_bce, λ)
-    for ep in range(args.epochs):
-        m.train()
-        perm = torch.randperm(n, device=device)
-        for b0 in range(0, n, args.batch):
-            bi = perm[b0:b0 + args.batch]
-            opt.zero_grad()
-            p = m(tu[bi], tfeat[tp[bi]])
-            bce = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
-            loss = (bce * tw[bi]).sum() / tw[bi].sum().clamp_min(EPS)
-            loss.backward()
-            opt.step()
+
+    def score_corpus(m):
+        """(b, a, c, all-user-θ, λ) for every problem/user, on cpu — used for the DRO binning
+        (pass-1) and the final outputs (pass-2)."""
         m.eval()
         with torch.no_grad():
-            ll = torch.nn.functional.binary_cross_entropy(m(thu, tfeat[thp]), thy).item()
-        lam_ep = float(m.lapse())
-        epoch_records.append((1, ep, ll, lam_ep))
-        if ep % args.log_every == 0 or ep == args.epochs - 1:
-            print(f"  epoch {ep:4d}  human train BCE {ll:.4f}  λ {lam_ep:.5f}")
+            b_all, a_all, c_all = m.params(tfeat)
+            theta_full = m.ability(
+                torch.arange(n_profiles + n_anchor, device=device)).cpu().numpy()
+            lam = float(m.lapse())
+        return (b_all.cpu().numpy(), a_all.cpu().numpy(), c_all.cpu().numpy(),
+                theta_full, lam)
 
-    # --- score the whole corpus ---
-    m.eval()
-    with torch.no_grad():
-        b_all, a_all, c_all = m.params(tfeat)
-        b_arr = b_all.cpu().numpy(); a = a_all.cpu().numpy(); c = c_all.cpu().numpy()
-        theta_full = m.ability(torch.arange(n_profiles + n_anchor, device=device)).cpu().numpy()
-        lam = float(m.lapse())
+    def fit_model(dro=None, hier_target=None, cond_div=None):
+        """Train one RatingNet. dro=(bin_per_row, base_g, G, eta) swaps the HUMAN mean-BCE term for
+        a base-rate-centered online group-DRO over rating(/gap) bins (Sagawa et al.): each minibatch
+        aggregates the human rows' BCE into per-bin means Lg, the exponentiated-gradient weight q is
+        nudged up on bins whose loss EXCEEDS their base-rate entropy base_g, and the human loss is
+        the q-weighted bin mean. Centering on base_g targets REDUCIBLE skill-over-base, not the
+        aleatoric base-rate floor — raw-loss DRO chases that floor and underperforms ERM (see
+        docs/rating_model_comparison_results.md, --even-error). The bot-anchor rows keep their plain
+        weighted-BCE coverage term; only the human term is reweighted, and the batch human:anchor
+        balance is preserved. q persists across minibatches/epochs. dro=None ⇒ plain weighted BCE."""
+        torch.manual_seed(args.seed)
+        m = RatingNet(fdim, n_profiles + n_anchor, tuple(args.diff_hidden),
+                      dropout=args.dropout, lapse_cap=args.lapse_cap,
+                      slope_floor=args.slope_floor, floor_cap=args.floor_cap,
+                      n_anchor=n_anchor,
+                      slope_discount=args.anchor_slope_discount,
+                      hier_slope=args.hier_slope, hier_floor=args.hier_floor,
+                      global_slope=args.global_slope,
+                      global_slope_fixed=args.global_slope_fixed,
+                      mech_floor_botf=botf_t,
+                      mech_floor_scale_fixed=args.mech_floor_scale_fixed,
+                      floor_resid=args.floor_residual, n_problems=len(keys),
+                      per_problem=args.per_problem,
+                      lapse_human_only=args.lapse_human_only,
+                      lapse_fixed=args.lapse_fixed,
+                      act_dropout=args.act_dropout,
+                      act_dim=k if use_act else 0,
+                      bw_dropout=args.bw_dropout,
+                      bw_dim=nb if use_bw else 0).to(device)
+        if args.floor_residual:
+            ci = {"diff": 0, "slope": 1, "floor": 2}
+            with torch.no_grad():
+                for cn in args.resid_cols.split(","):
+                    m.resid_mask[ci[cn.strip()]] = 1.0
+        # frozen-mode residuals are fit in their own pass AFTER the backbone; exclude the
+        # δ table from the main optimizer so the backbone never sees it. detached-mode
+        # residuals DO train here, but in their own param group at the frozen pass's δ lr
+        # (their gradient comes only from the detached branch below).
+        detached = args.floor_residual and args.floor_resid_mode == "detached"
+        main_params = [p for nm, p in m.named_parameters()
+                       if not (args.floor_residual and args.floor_resid_mode != "joint"
+                               and nm == "floor_resid.weight")]
+        groups = [{"params": main_params}]
+        if detached:
+            groups.append({"params": [m.floor_resid.weight], "lr": 0.05})
+        opt = torch.optim.Adam(groups, lr=args.lr)
+        pass_tag = 1 if dro is None else 2
+        if dro is not None:
+            rbt, base_g, G, eta = dro
+            q = torch.ones(G, device=device) / G
+        pin_cols, pin_ema = [], {}
+        if args.head_pin_dropout > 0:
+            assert m.net is not None, "--head-pin-dropout needs the feature net"
+            hci = {"diff": 0, "slope": 1, "floor": 2}
+            pin_cols = [hci[h.strip()] for h in args.head_pin_heads.split(",") if h.strip()]
+        for ep in range(args.epochs):
+            m.train()
+            perm = torch.randperm(n, device=device)
+            for b0 in range(0, n, args.batch):
+                bi = perm[b0:b0 + args.batch]
+                opt.zero_grad()
+                pin = None
+                if pin_cols:
+                    with torch.no_grad():      # EMA of each pinnable head's batch median
+                        m.eval()
+                        o_nb = m.net(tfeat[tp[bi]])
+                        m.train()
+                        for c_ in pin_cols:
+                            med = float(o_nb[:, c_].median())
+                            pin_ema[c_] = (med if c_ not in pin_ema
+                                           else 0.99 * pin_ema[c_] + 0.01 * med)
+                    if float(torch.rand(())) < args.head_pin_dropout:
+                        c_ = pin_cols[int(torch.randint(len(pin_cols), ()).item())]
+                        pin = {c_: pin_ema[c_]}
+                # detached mode: the backbone term is evaluated WITHOUT δ_p (use_resid=False) so
+                # the backbone fits exactly what a residual-free run would; δ gets its own
+                # likelihood term against the detached backbone further down.
+                p = m(tu[bi], tfeat[tp[bi]], tp[bi], use_resid=not detached, pin=pin)
+                l = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
+                w = tw[bi]
+                if dro is None:
+                    loss = (l * w).sum() / w.sum().clamp_min(EPS)
+                else:
+                    hm = t_is_human[bi]
+                    lh = l[hm]                                # human rows in this batch
+                    gb = rbt[bi][hm]
+                    gl = torch.zeros(G, device=device).index_add(0, gb, lh)
+                    cnt = torch.zeros(G, device=device).index_add(0, gb, torch.ones_like(lh))
+                    present = cnt > 0
+                    Lg = gl[present] / cnt[present]
+                    with torch.no_grad():                    # update q on base-centered bin loss
+                        q[present] = q[present] * torch.exp(eta * (Lg.detach() - base_g[present]))
+                        q[~present] = 0.0
+                        q /= q.sum().clamp(min=EPS)
+                    human_loss = (q[present] * Lg).sum()      # macro-mean over bins (the DRO term)
+                    wa = w[~hm]                               # bot-anchor coverage term stays flat
+                    anchor_loss = ((l[~hm] * wa).sum() / wa.sum().clamp_min(EPS)
+                                   if wa.numel() else torch.zeros((), device=device))
+                    fh = w[hm].sum() / w.sum().clamp_min(EPS)  # preserve the human:anchor balance
+                    loss = fh * human_loss + (1.0 - fh) * anchor_loss
+                if detached:
+                    # one-stage residual term: same rows/weights as the frozen pass would see,
+                    # but the backbone (net, θ, λ, global slope) is detached in the graph — only
+                    # δ_p receives this gradient, plus its ridge. At convergence the fixed point
+                    # is the frozen two-stage solution (backbone at its residual-free optimum,
+                    # δ at the ridge optimum given the backbone).
+                    m.eval()      # dropout off: δ fits the clean backbone, like the frozen pass
+                    pr = m(tu[bi], tfeat[tp[bi]], tp[bi], detach_backbone=True)
+                    m.train()
+                    lres = torch.nn.functional.binary_cross_entropy(pr, tt[bi], reduction="none")
+                    loss = loss + ((lres * w).sum() / w.sum().clamp_min(EPS)
+                                   + args.floor_resid_l2 * m.floor_resid.weight.pow(2).mean())
+                if (args.l2_floor > 0 or args.l2_slope > 0 or args.slope_dist_prior > 0
+                        or hier_target is not None or cond_div is not None
+                        or args.floor_residual):
+                    # global distribution priors over ALL problems' params (dropout off for a clean
+                    # read of the per-problem floor/slope the net emits)
+                    m.eval()
+                    if cond_div is not None:
+                        loss = loss + args.cond_diversity * m.cond_diversity_nll(tfeat, cond_div)
+                    if m.floor_resid is not None and not detached:   # detached adds its own ridge
+                        loss = loss + args.floor_resid_l2 * m.floor_resid.weight.pow(2).mean()
+                    if hier_target is not None:
+                        # Bayes-correct scale: the full objective is Σ_rows w·BCE + Σ_problems
+                        # prior-NLL; in the per-row-mean units the loss is expressed in, the prior
+                        # contributes (n_problems / total row mass)·mean-NLL — a derived constant,
+                        # not a tuned knob.
+                        hier_scale = args.hier_weight * len(keys) / float(tw.sum())
+                        loss = loss + hier_scale * m.hier_nll(tfeat, hier_target)
+                    if args.l2_floor > 0 or args.l2_slope > 0:
+                        _, a_pen, c_pen = m.params(tfeat)
+                        if args.l2_floor > 0:                   # L2 outlier penalty: floor → its mean
+                            loss = loss + args.l2_floor * c_pen.var(unbiased=False)
+                        if args.l2_slope > 0:                   # shrink log-slope spread to its mean
+                            loss = loss + args.l2_slope * torch.log(
+                                a_pen.clamp_min(1e-4)).var(unbiased=False)
+                    if args.slope_dist_prior > 0:
+                        # Quantile-match the corpus UNCLAMPED log-slope spectrum to the target
+                        # normal: sorted log-slopes vs the target's inverse CDF on the plotting
+                        # grid. Pins location/spread/shape of the distribution; assignment of
+                        # slopes to problems stays free.
+                        la_sorted = torch.sort(torch.log(m.slope_unclamped(tfeat))).values
+                        loss = loss + args.slope_dist_prior * (
+                            la_sorted - slope_target_q).pow(2).mean()
+                    m.train()
+                loss.backward()
+                opt.step()
+            m.eval()
+            with torch.no_grad():
+                ll = torch.nn.functional.binary_cross_entropy(m(thu, tfeat[thp], thp), thy).item()
+            lam_ep = float(m.lapse())
+            maxq = float(q.max().item()) if dro is not None else float("nan")
+            epoch_records.append((pass_tag, ep, ll, lam_ep))
+            if ep % args.log_every == 0 or ep == args.epochs - 1:
+                tag = "dro" if dro is not None else "mean"
+                print(f"  [{tag}] epoch {ep:4d}  human train BCE {ll:.4f}  λ {lam_ep:.5f}"
+                      + (f"  max_q {maxq:.3f}" if dro is not None else ""))
+        return m
+
+    # --hier-slope-mu/sigma: a FIXED shrinkage target makes the free pass-1 fit unnecessary —
+    # the target goes straight into the first (and then only) fit. Finding G/K ground this:
+    # the shrinkage equilibrium barely depends on the pass-1 moments, so deriving them each run
+    # buys a whole training pass for nothing.
+    # Negative mu/sigma = sentinel for "derive the target from a free pass 1" (two-pass mode) —
+    # needed since the cached 0.8/0.8 target became the DEFAULT; it is regime-sensitive
+    # (Finding DD) and must be re-derived (one two-pass run) whenever the anchor or feature
+    # set changes.
+    fixed_hier = (args.hier_slope and args.hier_slope_mu is not None
+                  and args.hier_slope_sigma is not None
+                  and args.hier_slope_mu >= 0 and args.hier_slope_sigma >= 0)
+    hier_target = cond_div_tgt = None
+    if fixed_hier:
+        assert not (args.hier_floor or args.hier_conditional or args.cond_diversity > 0), \
+            "--hier-slope-mu/sigma implement a fixed SLOPE target only"
+        hier_target = {"log-slope": (
+            torch.full((len(keys),), args.hier_slope_mu, device=device),
+            args.hier_slope_sigma)}
+        print(f"  hier shrinkage target FIXED: log-slope μ {args.hier_slope_mu:+.3f} "
+              f"σ {args.hier_slope_sigma:.3f} (pass-1 skipped)")
+    m = fit_model(hier_target=hier_target)
+    if (args.hier_slope or args.hier_floor or args.cond_diversity > 0) and not fixed_hier:
+        # --- frozen pass-1 robust moments: the shrinkage target is the model's OWN unpenalized
+        #     spectrum (median + IQR/1.349, so the clamp pileup / runaway tail don't poison it).
+        #     See RatingNet.__init__ for why the target must be frozen (learned σ and per-step
+        #     moment matching are both verified-degenerate). With --hier-conditional (and always
+        #     for --cond-diversity) μ is RATING-conditional: smooth pass-1 conditional medians
+        #     μ(rating) over 20 quantile bins, so the real rating-coupled structure is kept and
+        #     only residual spread is shrunk/judged. ---
+        m.eval()
+        with torch.no_grad():
+            o1 = m.net(tfeat).cpu().numpy().astype(np.float64)
+        head_vals = {"log-slope": np.log(np.maximum(np.log1p(np.exp(np.minimum(o1[:, 1], 30.0))),
+                                                    1e-4)),
+                     "floor-logit": o1[:, 2]}
+        rating1 = None
+        if args.hier_conditional or args.cond_diversity > 0:
+            b1, a1, c1, _, lam1 = score_corpus(m)
+            rating1 = b1 + clear_logit_vec(c1, lam1) / a1
+
+        def head_target(v, conditional):
+            if conditional:
+                edges = np.quantile(rating1, np.linspace(0, 1, 21)); edges[-1] += 1e-6
+                bi = np.clip(np.searchsorted(edges, rating1, side="right") - 1, 0, 19)
+                ok = [g for g in range(20) if (bi == g).any()]
+                centers = np.array([np.median(rating1[bi == g]) for g in ok])
+                meds = np.array([np.median(v[bi == g]) for g in ok])
+                mu = np.interp(rating1, centers, meds)
+            else:
+                mu = np.full_like(v, np.median(v))
+            r = v - mu
+            sig = max(float((np.percentile(r, 75) - np.percentile(r, 25)) / 1.349), 0.1)
+            return torch.tensor(mu, dtype=torch.float32, device=device), sig
+
+        def tgt_str(tgt):
+            return " | ".join(f"{k} μ~{float(np.median(mu.cpu().numpy())):+.3f} σ {sg:.3f}"
+                              for k, (mu, sg) in tgt.items())
+
+        if args.hier_slope or args.hier_floor:
+            hier_target = {h: head_target(head_vals[h], args.hier_conditional)
+                           for h, on in (("log-slope", args.hier_slope),
+                                         ("floor-logit", args.hier_floor)) if on}
+            print(f"  hier shrinkage target (pass-1 robust moments"
+                  f"{', rating-conditional' if args.hier_conditional else ''}): "
+                  + tgt_str(hier_target))
+        if args.cond_diversity > 0:
+            cond_div_tgt = {h: head_target(v, True) for h, v in head_vals.items()}
+            print(f"  cond-diversity target (pass-1, rating-conditional, weight "
+                  f"{args.cond_diversity}): " + tgt_str(cond_div_tgt))
+    if args.gap_balance:
+        # --- regime-balanced pass 2: reweight each HUMAN row by the inverse mass of its gap bin
+        #     (gap z = a·(θ−rating) under the pass-1 model, equal-width bins over ±ZCLIP). The
+        #     floor regime (far below), the transition band (slope) and the ceiling regime (far
+        #     above) then pull on the gradient with the same total force as the near-rank bulk,
+        #     instead of being outvoted by it — likelihood pressure, not injected targets. Weights
+        #     are capped (--gap-balance-max) and renormalized so total human mass is unchanged
+        #     (the human:anchor balance is preserved). Composes with --dro-skill (DRO pass bins
+        #     from this model and keeps these row weights), but the intended use is ERM. ---
+        bg_, ag_, cg_, thg_full, lamg = score_corpus(m)
+        rating_g = bg_ + clear_logit_vec(cg_, lamg) / ag_
+        hp_g = p_all[:n_human]; hu_g = u_all[:n_human]
+        z_g = np.clip(ag_[hp_g] * (thg_full[hu_g] - rating_g[hp_g]), -ZCLIP, ZCLIP)
+        gedges = np.linspace(-ZCLIP, ZCLIP, args.gap_balance_bins + 1); gedges[-1] += 1e-6
+        gb = np.clip(np.searchsorted(gedges, z_g, side="right") - 1, 0, args.gap_balance_bins - 1)
+        cnt = np.bincount(gb, minlength=args.gap_balance_bins).astype(np.float64)
+        wmul = (n_human / (args.gap_balance_bins * np.maximum(cnt, 1.0))) ** args.gap_balance_power
+        wmul = np.minimum(wmul, args.gap_balance_max)[gb]
+        wmul *= n_human / wmul.sum()                          # preserve total human mass
+        w_all[:n_human] = wmul.astype(np.float32)
+        tw = torch.tensor(w_all, device=device)
+        with np.printoptions(precision=2, suppress=True):
+            print(f"  gap_balance: {args.gap_balance_bins} equal-width gap bins over ±{ZCLIP}, "
+                  f"counts {cnt.astype(int)},\n               row weights "
+                  f"{np.array([wmul[gb == g].mean() if (gb == g).any() else 0 for g in range(args.gap_balance_bins)])} "
+                  f"(cap {args.gap_balance_max}, power {args.gap_balance_power})")
+    if (hier_target is not None and not fixed_hier) or cond_div_tgt is not None or args.gap_balance:
+        print("  refitting (pass 2: "
+              + " + ".join(s for s, on in (("hier shrinkage", hier_target is not None),
+                                           ("cond-diversity", cond_div_tgt is not None),
+                                           ("gap-balanced weights", args.gap_balance)) if on) + ")")
+        m = fit_model(hier_target=hier_target, cond_div=cond_div_tgt)
+    if args.dro_skill:
+        # Pass 1 done. Bin the HUMAN train rows by their problem's pass-1 80%-clear rating (shared
+        # ability units, pooled across boards), optionally × a relative-gap z axis; per-bin base-
+        # rate loss = the bin's human-success entropy (the aleatoric floor the centering subtracts).
+        b0_, a0_, c0_, theta0_full, lam0 = score_corpus(m)
+        rating0 = b0_ + clear_logit_vec(c0_, lam0) / a0_      # per-problem rating (key order)
+        hp = p_all[:n_human]; hu = u_all[:n_human]            # problem/user index per human train row
+        row_b = rating0[hp]
+        if args.dro_dyadic:
+            rbin, nrb = dyadic_tail_bins(row_b, args.dro_r_depth)
+        else:
+            r_edges = np.quantile(row_b, np.linspace(0, 1, args.dro_bins + 1)); r_edges[-1] += 1e-6
+            rbin = np.clip(np.searchsorted(r_edges, row_b, side="right") - 1, 0, args.dro_bins - 1)
+            nrb = args.dro_bins
+        if args.dro_2d:
+            # gap z = a·(θ−rating) in success-curve logits; clip the broken-ability artifact tail.
+            z_row = np.clip(a0_[hp] * (theta0_full[hu] - rating0[hp]), -ZCLIP, ZCLIP)
+            if args.dro_dyadic:
+                zbin, nzb = dyadic_tail_bins(z_row, args.dro_z_depth)
+            elif args.dro_z_uniform:
+                z_edges = np.linspace(-ZCLIP, ZCLIP, args.dro_z_bins + 1); z_edges[-1] += 1e-6
+                zbin = np.clip(np.searchsorted(z_edges, z_row, side="right") - 1,
+                               0, args.dro_z_bins - 1); nzb = args.dro_z_bins
+            else:
+                z_edges = np.quantile(z_row, np.linspace(0, 1, args.dro_z_bins + 1)); z_edges[-1] += 1e-6
+                zbin = np.clip(np.searchsorted(z_edges, z_row, side="right") - 1,
+                               0, args.dro_z_bins - 1); nzb = args.dro_z_bins
+            G = nrb * nzb
+            rb_h = (zbin * nrb + rbin).astype(np.int64)
+            tag = f"2D {nzb}z×{nrb}r" + ("(dyadic)" if args.dro_dyadic else "")
+        else:
+            G = nrb
+            rb_h = rbin.astype(np.int64)
+            tag = f"{nrb} rating" + ("(dyadic)" if args.dro_dyadic else "")
+        yh = t_all[:n_human]
+        br = np.array([yh[rb_h == g].mean() if (rb_h == g).any() else 0.5 for g in range(G)])
+        br = np.clip(br, EPS, 1 - EPS)
+        base_g = torch.tensor(-(br * np.log(br) + (1 - br) * np.log(1 - br)),
+                              dtype=torch.float32, device=device)
+        rb_full = np.zeros(n, np.int64); rb_full[:n_human] = rb_h  # anchors → bin 0 (gated out)
+        print(f"  dro_skill: {tag} bins, eta {args.dro_eta} — refitting (pass 2)")
+        m = fit_model((torch.tensor(rb_full, device=device), base_g, G, args.dro_eta),
+                      hier_target=hier_target, cond_div=cond_div_tgt)
+
+    if args.floor_residual and args.floor_resid_mode == "frozen":
+        # --- frozen-backbone residual pass: freeze net/θ/λ, fit ONLY the ridge-shrunk δ_p.
+        #     Local corrections on a fixed geometry — the joint variant let the optimizer explain
+        #     difficulty AS floor (verified collapse, --floor-resid-mode joint). Held-out problems
+        #     have no training rows, so their δ stays 0 = pure feature prior. ---
+        for p_ in m.parameters():
+            p_.requires_grad_(False)
+        m.floor_resid.weight.requires_grad_(True)
+        ropt = torch.optim.Adam([m.floor_resid.weight], lr=0.05)
+        m.eval()                                              # dropout off: backbone is fixed
+        for ep in range(args.floor_resid_epochs):
+            perm = torch.randperm(n, device=device)
+            for b0 in range(0, n, args.batch):
+                bi = perm[b0:b0 + args.batch]
+                ropt.zero_grad()
+                p = m(tu[bi], tfeat[tp[bi]], tp[bi])
+                l = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
+                w = tw[bi]
+                loss = ((l * w).sum() / w.sum().clamp_min(EPS)
+                        + args.floor_resid_l2 * m.floor_resid.weight.pow(2).mean())
+                loss.backward()
+                ropt.step()
+        with torch.no_grad():
+            d_ = (m.floor_resid.weight * m.resid_mask).cpu().numpy()
+        names = ["diff", "slope", "floor"]
+        stats = " | ".join(
+            f"δ_{names[j]} std {d_[:, j].std():.3f} |>0.1|: "
+            f"{100 * float((np.abs(d_[:, j]) > 0.1).mean()):.0f}%"
+            for j in range(3) if float(m.resid_mask[j]) > 0)
+        print(f"  frozen residual pass ({args.floor_resid_epochs} epochs, cols "
+              f"{args.resid_cols}): {stats}")
+    elif args.floor_residual and args.floor_resid_mode == "detached":
+        with torch.no_grad():
+            d_ = (m.floor_resid.weight * m.resid_mask).cpu().numpy()
+        names = ["diff", "slope", "floor"]
+        stats = " | ".join(
+            f"δ_{names[j]} std {d_[:, j].std():.3f} |>0.1|: "
+            f"{100 * float((np.abs(d_[:, j]) > 0.1).mean()):.0f}%"
+            for j in range(3) if float(m.resid_mask[j]) > 0)
+        print(f"  detached one-stage residuals (cols {args.resid_cols}): {stats}")
+
+    # --- score the whole corpus (final model) ---
+    b_arr, a, c, theta_full, lam = score_corpus(m)
     theta = theta_full[:n_profiles]
     bot_theta = theta_full[n_profiles:]
     rating = b_arr + clear_logit_vec(c, lam) / a             # 80%-clear ability under the 4PL
     lo, hi = np.percentile(rating, [args.winsor, 100 - args.winsor])
     rating = np.clip(rating, lo, hi)                          # percentile winsor (legacy robustness)
+    if m.mech_floor_scale is not None:
+        print(f"  mech-floor scale s (c_p = s·bot_floor_p): "
+              f"{float(torch.nn.functional.softplus(m.mech_floor_scale)):.3f}"
+              f"{' (fixed)' if not m.mech_floor_scale.requires_grad else ''}")
     print(f"  λ {lam:.5f} | floor mean {c.mean():.3f} p[5,50,95] "
           f"{np.percentile(c, [5, 50, 95]).round(3)} | slope p[1,50,99] "
           f"{np.percentile(a, [1, 50, 99]).round(2)} | rating winsor [{lo:.2f},{hi:.2f}] "
           f"| ability std {theta.std():.3f}")
+    if hier_target is not None:
+        print("  hier shrinkage: target (pass-1) "
+              + " | ".join(f"{k} μ~{float(np.median(mu.cpu().numpy())):+.3f} σ {sg:.3f}"
+                           for k, (mu, sg) in hier_target.items())
+              + "  →  final corpus moments "
+              + " | ".join(f"{k} μ {mu:+.3f} σ {sg:.3f}"
+                           for k, (mu, sg) in m.hier_moments(tfeat).items()))
     if n_anchor:
         print("  bot-user learned ability θ: "
               + ", ".join(f"{ranks[j]}={bot_theta[j]:+.2f}" for j in range(n_anchor)))
+        if args.anchor_slope_discount:
+            with torch.no_grad():
+                disc = torch.nn.functional.softplus(m.slope_discount).cpu().numpy()
+            print("  bot steepness discount (1.0 = human-equal): "
+                  + ", ".join(f"{ranks[j]}={disc[j]:.2f}" for j in range(n_anchor)))
+
+    # --- per-bin train-logloss diagnostic: HUMAN rows grouped into equal-count FINAL-rating bins.
+    #     Printed for ERM and DRO alike (so two runs compare bin-for-bin), it shows WHERE the
+    #     objective spends its error across the rating range. `excess` = logloss − the bin's base-
+    #     rate entropy (the aleatoric floor); a low std of excess across bins = flat, even error
+    #     (what the DRO targets), a high std = error piled at the tails (the ERM failure mode). ---
+    if args.report_bins and args.report_bins > 1:
+        with torch.no_grad():
+            ph = np.clip(m(thu, tfeat[thp], thp).cpu().numpy(), EPS, 1 - EPS)
+        bce_h = -(y * np.log(ph) + (1 - y) * np.log(1 - ph))
+        r_h = rating[prob_idx]                               # each human row's problem FINAL rating
+        edges = np.quantile(r_h, np.linspace(0, 1, args.report_bins + 1)); edges[-1] += 1e-6
+        b_of = np.clip(np.searchsorted(edges, r_h, side="right") - 1, 0, args.report_bins - 1)
+        obj = "DRO" if args.dro_skill else "ERM/BCE"
+        print(f"\n  per-bin train logloss [{args.report_bins} equal-count rating bins | obj {obj}]:")
+        print(f"    {'bin':>3} {'lo':>7} {'hi':>7} {'n':>8} {'base':>6} {'logloss':>8} {'excess':>8}")
+        excess = []
+        for g in range(args.report_bins):
+            sel = b_of == g
+            if not sel.any():
+                continue
+            brg = float(np.clip(y[sel].mean(), EPS, 1 - EPS))
+            ent = -(brg * np.log(brg) + (1 - brg) * np.log(1 - brg))
+            llg = float(bce_h[sel].mean()); ex = llg - ent
+            excess.append(ex)
+            print(f"    {g:>3} {edges[g]:>7.2f} {edges[g + 1]:>7.2f} {int(sel.sum()):>8} "
+                  f"{brg:>6.3f} {llg:>8.4f} {ex:>+8.4f}")
+        excess = np.array(excess)
+        print(f"    overall {float(bce_h.mean()):.4f} | excess-over-base across bins: mean "
+              f"{excess.mean():+.4f} std {excess.std():.4f} "
+              f"[{excess.min():+.4f},{excess.max():+.4f}]  (lower std = flatter error)")
+
+    # --- gap-binned CALIBRATION: predicted vs realized success by user-problem gap (the curve-
+    #     shape metric; see --report-gap-bins). Δ = predicted − realized; a globally-too-flat fit
+    #     over-predicts far below rank (+Δ, floor too high / slope too flat) and under-predicts
+    #     far above (−Δ, ceiling too low). The client rank estimator consumes exactly this curve. ---
+    def gap_calibration(mask, label):
+        idx = np.where(mask)[0]
+        if args.report_gap_bins < 2 or len(idx) == 0:
+            return
+        with torch.no_grad():
+            tpi = torch.tensor(prob_idx[idx], device=device)
+            pp = m(torch.tensor(prof_idx[idx], device=device), tfeat[tpi], tpi).cpu().numpy()
+        z = np.clip(a[prob_idx[idx]] * (theta[prof_idx[idx]] - rating[prob_idx[idx]]),
+                    -ZCLIP, ZCLIP)
+        gedges = np.linspace(-ZCLIP, ZCLIP, args.report_gap_bins + 1); gedges[-1] += 1e-6
+        bo = np.clip(np.searchsorted(gedges, z, side="right") - 1, 0, args.report_gap_bins - 1)
+        print(f"\n  gap-binned calibration [{label} | gap = slope·(ability−rating), ±{ZCLIP}]:")
+        print(f"    {'bin':>3} {'gap_lo':>7} {'gap_hi':>7} {'n':>8} {'pred':>6} {'real':>6} {'Δ':>7}")
+        absd, ws = 0.0, 0
+        for g_ in range(args.report_gap_bins):
+            sel = bo == g_
+            if not sel.any():
+                continue
+            pr, re_ = float(pp[sel].mean()), float(y[idx][sel].mean())
+            absd += abs(pr - re_) * int(sel.sum()); ws += int(sel.sum())
+            print(f"    {g_:>3} {gedges[g_]:>7.2f} {gedges[g_ + 1]:>7.2f} {int(sel.sum()):>8} "
+                  f"{pr:>6.3f} {re_:>6.3f} {pr - re_:>+7.3f}")
+        print(f"    n-weighted mean |Δ|: {absd / max(ws, 1):.4f}  (lower = truer curve shape)")
+
+    # Two-way slice: corpus rating deciles × gap regimes. This is the PREDICTIVE form of the
+    # structure tables' floor question — where humans actually visit a problem's floor regime
+    # (z < −2), does predicted success match realized, conditioned on where the problem sits on
+    # the rating axis? An empty far-below cell at an easy decile means the regime is
+    # UNOBSERVABLE there (criterion vacuous, not passed); the floor shipped for such cells is a
+    # prior choice no human row can falsify.
+    def gap_rating_calibration(mask, label):
+        idx = np.where(mask)[0]
+        if args.report_gap_bins < 2 or len(idx) == 0:
+            return
+        with torch.no_grad():
+            tpi = torch.tensor(prob_idx[idx], device=device)
+            pp = m(torch.tensor(prof_idx[idx], device=device), tfeat[tpi], tpi).cpu().numpy()
+        z = a[prob_idx[idx]] * (theta[prof_idx[idx]] - rating[prob_idx[idx]])
+        dec_edges = np.quantile(rating, np.linspace(0, 1, 11)); dec_edges[-1] += 1e-6
+        dec = np.clip(np.searchsorted(dec_edges, rating[prob_idx[idx]], side="right") - 1, 0, 9)
+        regimes = [("z<-2", z < -2.0), ("-2..0", (z >= -2.0) & (z < 0.0)),
+                   ("0..3", (z >= 0.0) & (z < 3.0)), ("z>3", z >= 3.0)]
+        print(f"\n  rating-decile × gap-regime calibration [{label}] (Δ = pred − real):")
+        print("    " + f"{'dec':>3} {'r_lo':>6} {'r_hi':>6}"
+              + "".join(f" | {nm:^25}" for nm, _ in regimes))
+        print("    " + " " * 17
+              + "".join(f" | {'n':>7} {'pred':>5} {'real':>5} {'Δ':>4}" for _ in regimes))
+        fb_absd, fb_n = 0.0, 0
+        for d_ in range(10):
+            row = f"    {d_:>3} {dec_edges[d_]:>6.2f} {dec_edges[d_ + 1]:>6.2f}"
+            for ri, (nm, rm) in enumerate(regimes):
+                sel = (dec == d_) & rm
+                if sel.any():
+                    pr, re_ = float(pp[sel].mean()), float(y[idx][sel].mean())
+                    row += f" | {int(sel.sum()):>7} {pr:>5.3f} {re_:>5.3f} {pr - re_:>+5.2f}"
+                    if ri == 0:
+                        fb_absd += abs(pr - re_) * int(sel.sum()); fb_n += int(sel.sum())
+                else:
+                    row += f" | {0:>7} {'—':>5} {'—':>5} {'—':>5}"
+            print(row)
+        if fb_n:
+            print(f"    far-below (z<-2) n-weighted mean |Δ| across deciles: "
+                  f"{fb_absd / fb_n:.4f} (n {fb_n})")
+
+    # Heavy-user variants bound the two opposite measurement biases: TRAIN tails are outcome-
+    # contaminated (a sparse profile's row outcome is baked into the θ/gap it is binned by — a
+    # leave-one-out effect; verified: baseline train far-below realized 0.23–0.28 vs val 0.38–0.46
+    # at the same gap), while VAL tails are attenuation-biased (gap estimation noise flattens the
+    # realized curve, over-stating "model too sharp"). For ≥100-train-row profiles both effects
+    # shrink; if heavy-train and heavy-val converge, that shared table is the honest curve shape.
+    train_mask = (np.ones(len(y), bool) if args.holdout_problem_frac == 0
+                  else ~(ho_mask_h | byrow_val))
+    prof_cnt = np.bincount(prof_idx[train_mask], minlength=n_profiles)
+    heavy_row = prof_cnt[prof_idx] >= 100
+    gap_calibration(train_mask, "train rows")
+    gap_calibration(train_mask & heavy_row, "train rows, heavy users (≥100 train rows)")
+    gap_rating_calibration(train_mask & heavy_row,
+                           "train rows, heavy users — outcome-contaminated, read A/B diffs only")
 
     if args.holdout_problem_frac > 0:
         # --- objective eval (no CSVs written): three independent objectives ---
         def _ll(mask):
             with torch.no_grad():
-                pp = m(torch.tensor(prof_idx[mask], device=device),
-                       tfeat[torch.tensor(prob_idx[mask], device=device)]).cpu().numpy()
+                tpi = torch.tensor(prob_idx[mask], device=device)
+                pp = m(torch.tensor(prof_idx[mask], device=device), tfeat[tpi], tpi).cpu().numpy()
             yy = y[mask]; pp = np.clip(pp, EPS, 1 - EPS)
             return float(-(yy * np.log(pp) + (1 - yy) * np.log(1 - pp)).mean())
         byrow_ll = _ll(byrow_val)                    # new attempts on SEEN problems
         ho_ll = _ll(ho_mask_h)                       # new (UNSEEN) problems — feature-prior transfer
+        gap_calibration(byrow_val, "by-row VAL (held-out attempts, seen problems)")
+        gap_calibration(byrow_val & heavy_row, "by-row VAL, heavy users (≥100 train rows)")
+        gap_rating_calibration(byrow_val, "by-row VAL, all users")
+        gap_rating_calibration(byrow_val & heavy_row, "by-row VAL, heavy users — the honest table")
+        # Posthoc plateau λ (the regime-conditioned external anchor aux/test_lapse.py called for):
+        # on heavy-user val rows the model places far above rank (z = a·(θ−b) > 3), the 4PL gives
+        # realized = P0 − λ·σ(z) with P0 = c + (1−c)·σ(z) the lapse-free prediction, so
+        # λ̂ = Σ(P0 − y) / Σ σ(z). Replaces gap-balance's λ identification without its collateral
+        # damage (Finding H). Mildly biased UP by gap-estimation noise (attenuation) — read as an
+        # upper bracket against the trained λ's lower one.
+        sel = np.where(byrow_val & heavy_row)[0]
+        if len(sel):
+            zb = a[prob_idx[sel]] * (theta[prof_idx[sel]] - b_arr[prob_idx[sel]])
+            far = zb > 3.0
+            if far.sum() >= 200:
+                cc = c[prob_idx[sel][far]]
+                sig = 1.0 / (1.0 + np.exp(-zb[far]))
+                p0 = cc + (1.0 - cc) * sig
+                lam_hat = float((p0 - y[sel][far]).sum() / sig.sum())
+                print(f"  posthoc plateau λ̂ (heavy-val, z>3, n {int(far.sum())}): {lam_hat:.4f}  "
+                      f"(trained λ {lam:.4f})")
+        # Residual-association test (user idea, held-out form): for a well-specified model the
+        # held-out error e = y − P̂ is unpredictable from ANYTHING, so within user-ability bins
+        # Spearman(e, rating/slope/floor) ≈ 0. A nonzero association pinpoints WHICH head is
+        # misassigned, with the outputs left entirely free (only θ — user-side — conditions the
+        # bins; conditioning on e itself would be outcome selection, the Finding-B trap).
+        if len(sel) >= 600:
+            with torch.no_grad():
+                tpi = torch.tensor(prob_idx[sel], device=device)
+                pv = m(torch.tensor(prof_idx[sel], device=device), tfeat[tpi], tpi).cpu().numpy()
+            e_res = y[sel] - pv
+            th_u = theta[prof_idx[sel]]
+
+            def _sp(x, yv):
+                xr = np.argsort(np.argsort(x)); yr = np.argsort(np.argsort(yv))
+                return float(np.corrcoef(xr, yr)[0, 1])
+
+            ter = np.searchsorted(np.quantile(th_u, [1 / 3, 2 / 3]), th_u)
+            print("  residual association (heavy-val; want ≈0; noise ≈ ±"
+                  f"{1.96 / np.sqrt(len(sel) / 3):.3f}):")
+            for t, lab in enumerate(["weak θ", "mid θ", "strong θ"]):
+                r_ = ter == t
+                print(f"    {lab:>9} (n {int(r_.sum()):>6}): e↔rating "
+                      f"{_sp(e_res[r_], rating[prob_idx[sel][r_]]):+.3f} | e↔slope "
+                      f"{_sp(e_res[r_], a[prob_idx[sel][r_]]):+.3f} | e↔floor "
+                      f"{_sp(e_res[r_], c[prob_idx[sel][r_]]):+.3f}")
         ratemap = {keys[i][1]: float(rating[i]) for i in range(len(keys))}
         slopemap = {keys[i][1]: float(a[i]) for i in range(len(keys))}
         wrho, per = survey_weighted_rho(ratemap, slopemap)
@@ -413,7 +1619,9 @@ def main():
         print(f"  1. by-row val logloss      : {byrow_ll:.4f}  "
               f"({int(byrow_val.sum())} held-out attempts, seen problems)")
         print(f"  2. held-out-PROBLEM logloss: {ho_ll:.4f}  "
-              f"({int(ho_mask_h.sum())} attempts on {len(ho_problems)} UNSEEN problems)")
+              f"({int(ho_mask_h.sum())} attempts on {len(ho_problems)} "
+              + ("problems with BOT rows kept (bot→human transfer)"
+                 if args.holdout_keep_anchors else "UNSEEN problems") + ")")
         print(f"  3. survey rho (weighted)   : {wrho:.4f}  "
               f"(per-server Spearman, n-weighted: "
               + " ".join(f"{s}:{r:.2f}(n{n})" for s, (n, r) in sorted(per.items(), key=lambda kv: -kv[1][0]))

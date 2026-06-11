@@ -94,3 +94,7 @@ auxiliary/joint_rank_placements*.csv
 auxiliary/time_value_per_user.csv
 # Per-user table dumped by auxiliary/analyze_time_benefit.py (regenerable).
 auxiliary/time_benefit_users.csv
+
+# Rating-model experiment artifacts (4PL investigation; full-run outputs per config)
+/ratings_v2_*/
+/experiments_4pl/*.log

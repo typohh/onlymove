@@ -151,15 +151,44 @@ def load_bot_winrate(size, tids, clip=1e-4):
     return {t: X[i].astype(np.float32) for i, t in enumerate(usable)}, int(keep.sum())
 
 
-def load_joint_activations(sizes, tids_by_size, pca_dim, seed):
+def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed):
+    """Deterministic cache file for the joint-PCA reduction. Keyed on (sizes, pca_dim, seed),
+    the raw activation-cache file fingerprints (basename+size+mtime — so a re-extraction
+    invalidates it), AND the exact tid subset requested (a caller fitting on a different subset
+    gets a different basis, hence a different file). Lives beside the raw activation cache."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(repr((list(sizes), int(pca_dim), int(seed))).encode())
+    for size in sizes:
+        for p in (_cache_ids_path(size), _cache_vecs_path(size)):
+            st = os.stat(p)
+            h.update(f"{os.path.basename(p)}:{st.st_size}:{st.st_mtime_ns}".encode())
+        h.update("\x00".join(tids_by_size[size]).encode())
+    cdir = os.path.dirname(_cache_vecs_path(sizes[0]))
+    return os.path.join(cdir, f"joint_pca_{h.hexdigest()[:16]}.npz")
+
+
+def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
     """ONE PCA basis shared across boards (so a pooled model's activation weights mean
     the same thing on 9×9 and 13×13). Loads each board's raw correct-move activation
     cache for its attempted problems, stacks, fits a single StandardScaler+randomized
     PCA, z-scores. Returns {(size, tid): vec}, k. (Distinct from embeddings/joint, which
-    residualises rating OUT — useless as a difficulty feature.)"""
+    residualises rating OUT — useless as a difficulty feature.)
+
+    The randomized-PCA fit over the stacked ~N×6912 activation matrix is the dominant
+    startup cost and is fully determined by its inputs, so the reduced output is memoized to
+    joint_pca_<hash>.npz (atomic write, fingerprinted on the raw-cache files). cache=False
+    forces a recompute (e.g. to rebuild a corrupt cache)."""
     import json as _json
     from sklearn.decomposition import PCA
     from sklearn.preprocessing import StandardScaler
+    cpath = _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed) if cache else None
+    if cpath and os.path.exists(cpath):
+        d = np.load(cpath, allow_pickle=False)
+        Z, k = d["Z"], int(d["k"])
+        keys = list(zip(d["key_size"].tolist(), d["key_tid"].tolist()))
+        print(f"  joint-PCA: cache hit {os.path.basename(cpath)} ({Z.shape[0]} problems, k={k})")
+        return {key: Z[i] for i, key in enumerate(keys)}, k
     Xparts, keys = [], []
     for size in sizes:
         ids = _json.load(open(_cache_ids_path(size)))
@@ -176,8 +205,16 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed):
     X = StandardScaler().fit_transform(X)
     k = min(pca_dim, X.shape[1], X.shape[0])
     Z = PCA(n_components=k, random_state=seed, svd_solver="randomized").fit_transform(X)
-    Z = StandardScaler().fit_transform(Z)
-    return {key: Z[i].astype(np.float32) for i, key in enumerate(keys)}, k
+    Z = StandardScaler().fit_transform(Z).astype(np.float32)
+    if cpath:
+        tmp = f"{cpath}.tmp{os.getpid()}.npz"
+        np.savez(tmp, Z=Z, k=k,
+                 key_size=np.array([s for s, _ in keys], dtype=np.int16),
+                 key_tid=np.array([t for _, t in keys]))
+        os.replace(tmp, cpath)
+        print(f"  joint-PCA: computed + cached {os.path.basename(cpath)} "
+              f"({Z.shape[0]} problems, k={k})")
+    return {key: Z[i] for i, key in enumerate(keys)}, k
 
 
 def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
