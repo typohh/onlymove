@@ -11,7 +11,8 @@ import { state, setStatsResults, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
-import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
+import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
+import { getPopulationConstants } from './population-constants.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import { normCdf } from './math-utils.js';
@@ -721,6 +722,24 @@ async function buildServerStatsPane(history = []) {
     return pane;
 }
 
+// Median solving time in minutes over novel timed attempts, AFK-capped — the
+// SAME feature definition pipeline.fit_population_constants fits the
+// time-adjustment alpha against (its AFK_CAP_S / TA_MIN_TIMED). Null when too
+// few attempts carry a usable time.
+const TIME_ADJUST_AFK_CAP_MS = 180000;
+const TIME_ADJUST_MIN_TIMED = 20;
+function medianNovelSolveMinutes(history) {
+    const ts = history
+        .filter(p => !p.isRepeat && Number.isFinite(p.timeTaken)
+            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS)
+        .map(p => p.timeTaken)
+        .sort((a, b) => a - b);
+    if (ts.length < TIME_ADJUST_MIN_TIMED) return null;
+    const mid = ts.length >> 1;
+    const med = ts.length % 2 ? ts[mid] : (ts[mid - 1] + ts[mid]) / 2;
+    return med / 60000;
+}
+
 // The rank decomposition text (long-term skill + drift + session swing) and
 // the relative 13x13 readout that used to sit on the summary pane. Built as
 // part of the Rank tab pane (computeRankDecomposition is heavy, but the whole
@@ -746,9 +765,34 @@ function buildRankSummaryText(history, decomp) {
             const seStr = Number.isFinite(summary.currentSkillSE)
                 ? getTerm('statsRankSESuffix', { se: summary.currentSkillSE.toFixed(1) })
                 : '';
-            rankText += getTerm('statsLatestLongTermRank', {
+            rankText += getTerm('statsStableRank', {
                 cur: curLabel, pct, next: nextLabel, se: seStr,
             }) + '\n';
+
+            // Time-adjusted rank: the stable rank corrected for the user's
+            // typical solving time. Practice here is untimed while server
+            // ranks reflect timed play, so a slow solver's stable rank
+            // overstates their timed strength (survey-validated; constants
+            // from pipeline.fit_population_constants). The correction is in
+            // RATING space — alpha · (log10(median minutes) − population
+            // mean) — and mapped back through M.
+            const ta = getPopulationConstants()?.time_adjust;
+            const medMin = medianNovelSolveMinutes(history);
+            if (ta && Number.isFinite(ta.alpha_per_log10_min)
+                && Number.isFinite(ta.pop_mean_log10_min) && medMin !== null) {
+                const deltaRating = ta.alpha_per_log10_min
+                    * (Math.log10(medMin) - ta.pop_mean_log10_min);
+                const adjIdx = rankIndexAfterRatingDelta(summary.currentSkill, deltaRating);
+                if (Number.isFinite(adjIdx)) {
+                    const aLower = Math.floor(adjIdx);
+                    const aPct = Math.round((adjIdx - aLower) * 100);
+                    rankText += getTerm('statsTimeAdjustedRank', {
+                        cur: rankLabelFromIndex(aLower),
+                        pct: aPct,
+                        next: rankLabelFromIndex(aLower + 1),
+                    }) + '\n';
+                }
+            }
         }
         if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
             const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);

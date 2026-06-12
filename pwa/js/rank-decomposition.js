@@ -165,6 +165,20 @@ export function isRatingRankMapLoaded() {
     return _ratingRankMap != null;
 }
 
+// Apply a RATING-space delta to a rank index: invert M at the rank index, shift
+// by deltaRating (raw rating units), re-apply M. Exact rather than linearized
+// via M', so it stays correct across knot boundaries. The curve is shared
+// across both board sizes (map_rating_v2_to_egf writes one curve to both keys),
+// so size 9's key stands in for either. Used by the stats Rank tab to turn the
+// population time-adjustment (alpha · Δlog10-minutes, fit in rating units by
+// pipeline.fit_population_constants) into a rank-space shift.
+export function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
+    const c = curveForSize(9);
+    if (!c || !Number.isFinite(rankIndex) || !Number.isFinite(deltaRating)) return null;
+    const rating = interpExtrap(rankIndex, c.rank_indices, c.ratings);
+    return applyM(rating + deltaRating, c);
+}
+
 // Stable per-size signature of the loaded curve. Stored ranks are invalidated
 // when this changes (a fit_rank_curves re-fit that didn't also change ratings).
 export function ratingRankCurveVersion(size) {
