@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "onlymove" generated at 2026-03-08T19:07:52.589Z.
