@@ -50,7 +50,8 @@ VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0
 # p99.9 across all users = 20, p99 = 17). RL_REPORT at 100/60s leaves ~4x
 # headroom over that ceiling for several users sharing one NAT'd IP, while a
 # scripted flood (thousands/min) is rejected. The low-frequency write endpoints
-# (schedule/rank-survey/share-event/push subscribe) share the tighter RL_WRITE.
+# (schedule/rank-survey/share-event/push subscribe) share the tighter RL_WRITE,
+# as does /sync (a read, but per-user-keyed and D1-rows-read-relevant).
 [[unsafe.bindings]]
 name = "RL_REPORT"
 type = "ratelimit"
@@ -69,7 +70,7 @@ simple = { limit = 30, period = 60 }
 # so this is the cheapest layer and absorbs the worst bursts. Suggested rule:
 #   When incoming requests match:
 #     (http.request.method eq "POST") and (
-#        http.request.uri.path in {"/report" "/schedule" "/rank-survey" "/share-event"}
+#        http.request.uri.path in {"/report" "/schedule" "/rank-survey" "/share-event" "/sync"}
 #        or starts_with(http.request.uri.path, "/push/"))
 #   Counting characteristic: IP   Period: 60s   Requests: 300   (free plan: use
 #   the 10s window with 100 requests)   Action: Block   Duration: 60s

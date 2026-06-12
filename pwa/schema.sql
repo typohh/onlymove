@@ -16,6 +16,13 @@ CREATE TABLE IF NOT EXISTS tsumego_reports (
 -- read), which is what the community-stats aggregation hits each recompute.
 CREATE INDEX IF NOT EXISTS idx_tsumego_reports_created ON tsumego_reports(created_at);
 
+-- Per-user cursor scan for POST /sync (account sync across devices). The
+-- endpoint runs `WHERE user_id = ? AND created_at > ?` on every device poll;
+-- with this index an up-to-date device reads ~0 rows, without it every poll
+-- is a scan (D1 bills rows read) — same failure mode the created_at index
+-- above guards against for server-stats.
+CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_created ON tsumego_reports(user_id, created_at);
+
 -- One row per attempt (including repeats). There is no UNIQUE constraint on
 -- (user_id, problem) anymore — the client is expected to send a report for
 -- every solving attempt, and is_repeat flags whether the user had seen the

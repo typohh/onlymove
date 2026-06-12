@@ -305,9 +305,10 @@ const updateMenuItems = () => {
     document.getElementById('menu-audio').textContent =
         getTerm(state.audioEnabled ? 'disableSound' : 'enableSound');
 
-    // More group — Stats and About are always available, in every mode.
+    // More group — Stats, Account, and About are always available, in every mode.
     statsItem.textContent = getTerm('stats');
     statsItem.classList.remove('disabled');
+    document.getElementById('menu-account').textContent = getTerm('menuAccount');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');

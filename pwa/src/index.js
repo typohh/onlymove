@@ -42,6 +42,16 @@ export default {
       if (await rateLimited(request, env, 'RL_REPORT')) return tooManyRequests();
       return handleReport(request, env);
     }
+    if (url.pathname === '/sync' && request.method === 'POST') {
+      // A read, not a write — but it's per-user-keyed and quota-relevant
+      // (rows read), so it shares the low-frequency limiter with the writes.
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
+      return handleSync(request, env);
+    }
+    if (url.pathname === '/report-backfill' && request.method === 'POST') {
+      if (await rateLimited(request, env, 'RL_WRITE')) return tooManyRequests();
+      return handleReportBackfill(request, env);
+    }
     if (url.pathname === '/push/vapid-public-key' && request.method === 'GET') {
       return new Response(env.VAPID_PUBLIC_KEY || '', {
         headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' },
@@ -188,16 +198,171 @@ async function handleReport(request, env) {
       return new Response('Database not configured', { status: 500, headers: reportHeaders });
     }
 
-    await env.DB.prepare(
-      'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    )
-      .bind(data.userId, data.problem, data.success ? 1 : 0, new Date().toISOString(), size, move, timeUsed, reviewTime, isRepeat)
-      .run();
+    // The server-stamped timestamp is echoed back so the client can store it
+    // on the matching answerHistory entry (serverCreatedAt) — that's how a
+    // /sync pull recognizes the device's own rows instead of re-merging them.
+    //
+    // prevCreatedAt — the user's latest report BEFORE this one — is the
+    // account-sync piggyback signal: a device that doesn't recognize the
+    // timestamp knows another device wrote it and pulls, so active sessions
+    // need no sync polling at all. The SELECT rides the same batch round trip
+    // and reads ~1 row via idx_tsumego_reports_user_created.
+    const createdAt = new Date().toISOString();
+    const [prevRes] = await env.DB.batch([
+      env.DB.prepare(
+        'SELECT max(created_at) AS last FROM tsumego_reports WHERE user_id = ?'
+      ).bind(data.userId),
+      env.DB.prepare(
+        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(data.userId, data.problem, data.success ? 1 : 0, createdAt, size, move, timeUsed, reviewTime, isRepeat),
+    ]);
+    const prevCreatedAt = (prevRes && prevRes.results && prevRes.results[0])
+      ? (prevRes.results[0].last ?? null)
+      : null;
 
-    return new Response('Report saved', { status: 201, headers: reportHeaders });
+    return new Response(JSON.stringify({ createdAt, prevCreatedAt }), {
+      status: 201,
+      headers: { ...reportHeaders, 'Content-Type': 'application/json' },
+    });
   } catch (error) {
     console.error('Error handling report:', error);
     return new Response('Internal server error', { status: 500, headers: reportHeaders });
+  }
+}
+
+// --- Account sync ------------------------------------------------------------
+// Returns this user's reports newer than the client's cursor, ordered by
+// created_at, so a device can rebuild/merge its local history (multi-device
+// accounts: the account credential IS the userId). Reports are append-only, so
+// a created_at cursor fully captures "what changed since last sync" — no
+// content hash needed. The query REQUIRES idx_tsumego_reports_user_created:
+// with it an up-to-date device's poll reads ~0 rows; without it every poll is
+// a scan (the read-quota failure mode the server-stats index fixed).
+const SYNC_PAGE_LIMIT = 1000;
+
+async function handleSync(request, env) {
+  const syncHeaders = {
+    ...CORS_HEADERS,
+    'Content-Type': 'application/json',
+    'X-App-Version': APP_VERSION,
+  };
+  try {
+    const data = await request.json();
+    if (!isValidUserId(data.userId)) {
+      return new Response('Invalid request body', { status: 400, headers: syncHeaders });
+    }
+    // Cursor is an ISO created_at string ('' = from the beginning). Bound its
+    // length; anything malformed simply matches nothing or everything — the
+    // merge on the client is idempotent either way.
+    const since = (typeof data.since === 'string' && data.since.length <= 40) ? data.since : '';
+    // Optional smaller page, used as a cheap existence probe (limit: 1 reads
+    // ~1 row instead of a full page). NB: paging onward from a small-limit
+    // response can skip timestamp ties past the cut — fine for probes, which
+    // discard the cursor; real pulls use the default.
+    const limit = (Number.isInteger(data.limit) && data.limit > 0)
+      ? Math.min(data.limit, SYNC_PAGE_LIMIT)
+      : SYNC_PAGE_LIMIT;
+
+    if (!env.DB) {
+      return new Response('Database not configured', { status: 500, headers: syncHeaders });
+    }
+
+    // Fetch one row past the page limit to detect truncation.
+    const { results } = await env.DB.prepare(
+      `SELECT problem, success, size, move, time_used, review_time, is_repeat, created_at
+       FROM tsumego_reports WHERE user_id = ? AND created_at > ?
+       ORDER BY created_at LIMIT ?`
+    ).bind(data.userId, since, limit + 1).all();
+
+    let rows = results || [];
+    let hasMore = false;
+    if (rows.length > limit) {
+      hasMore = true;
+      rows = rows.slice(0, limit);
+      // The cursor is exclusive (`> created_at`), so a page must not end in
+      // the middle of a run of equal timestamps — the next page would skip the
+      // run's remainder. Cut back to the last timestamp change; if the whole
+      // page somehow shares one timestamp (pathological), keep it as-is.
+      const boundary = rows[rows.length - 1].created_at;
+      let cut = rows.length;
+      while (cut > 0 && rows[cut - 1].created_at === boundary) cut--;
+      if (cut > 0) rows = rows.slice(0, cut);
+    }
+
+    const reports = rows.map((r) => ({
+      problem: r.problem,
+      success: !!r.success,
+      size: r.size,
+      move: r.move,
+      timeUsed: r.time_used,
+      reviewTime: r.review_time,
+      isRepeat: !!r.is_repeat,
+      createdAt: r.created_at,
+    }));
+    const cursor = rows.length > 0 ? rows[rows.length - 1].created_at : since;
+    return new Response(JSON.stringify({ reports, cursor, hasMore }), {
+      status: 200,
+      headers: syncHeaders,
+    });
+  } catch (error) {
+    console.error('Error handling sync:', error);
+    return new Response('Internal server error', { status: 500, headers: syncHeaders });
+  }
+}
+
+// --- One-off historical report backfill (TEMPORARY — remove after rollout) ---
+// Before 2026-05-15 clients reported only one row per problem (no repeats, no
+// move/time fields), so the server log is missing ~36% of real attempts that
+// still live in clients' localStorage. account-sync.maybeBackfillLocalHistory
+// uploads those once per device: it first pulls the full server history and
+// fuzzy-claims matches, then posts the provably-absent entries here WITH THEIR
+// CLIENT TIMESTAMPS (created_at far in the past, so the rows never enter the
+// server-stats 7-day window). The client staggers itself by hash(userId) over
+// 14 days; fleet-wide volume ≈ 49k rows total vs the ~3.2k/day live write
+// rate (measured June 2026). Once actives have run it (~2 stagger cycles,
+// say August 2026), delete this handler, the route, and the client one-off.
+const BACKFILL_MAX_BATCH = 500;
+// Backfilled timestamps must be historical: after the site could plausibly
+// have data, and old enough not to collide with live reporting.
+const BACKFILL_MIN_CREATED = '2024-01-01T00:00:00.000Z';
+
+async function handleReportBackfill(request, env) {
+  const headers = {
+    ...CORS_HEADERS,
+    'Content-Type': 'application/json',
+    'X-App-Version': APP_VERSION,
+  };
+  try {
+    const data = await request.json();
+    if (!isValidUserId(data.userId) || !Array.isArray(data.reports) ||
+        data.reports.length === 0 || data.reports.length > BACKFILL_MAX_BATCH) {
+      return new Response('Invalid request body', { status: 400, headers });
+    }
+    const maxCreated = new Date(Date.now() - 3600 * 1000).toISOString();
+    const stmts = [];
+    for (const r of data.reports) {
+      const createdAt = (typeof r.createdAt === 'string' &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(r.createdAt) &&
+          r.createdAt > BACKFILL_MIN_CREATED && r.createdAt < maxCreated)
+        ? r.createdAt : null;
+      if (!isValidProblemId(r.problem) || typeof r.success !== 'boolean' || !createdAt) {
+        return new Response('Invalid request body', { status: 400, headers });
+      }
+      const size = (r.size === 9 || r.size === 13) ? r.size : 9;
+      const timeUsed = (Number.isFinite(r.timeUsed) && r.timeUsed >= 0) ? Math.round(r.timeUsed) : null;
+      const reviewTime = (Number.isFinite(r.reviewTime) && r.reviewTime >= 0) ? Math.round(r.reviewTime) : null;
+      stmts.push(env.DB.prepare(
+        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+      ).bind(data.userId, r.problem, r.success ? 1 : 0, createdAt, size, timeUsed, reviewTime, r.isRepeat ? 1 : 0));
+    }
+    if (!env.DB) {
+      return new Response('Database not configured', { status: 500, headers });
+    }
+    await env.DB.batch(stmts);
+    return new Response(JSON.stringify({ inserted: stmts.length }), { status: 201, headers });
+  } catch (error) {
+    console.error('Error handling report backfill:', error);
+    return new Response('Internal server error', { status: 500, headers });
   }
 }
 

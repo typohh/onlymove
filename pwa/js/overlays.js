@@ -253,6 +253,34 @@ export function showModal({ build, dismissable = true, onDismiss } = {}) {
     return { overlay, modal, close };
 }
 
+/**
+ * Custom Yes/Cancel confirmation dialog. Replaces the native blocking
+ * `confirm()` (which is janky in an installed PWA and inconsistent with the
+ * app's other custom overlays). Resolves to true on confirm, false on
+ * cancel/backdrop.
+ */
+export function showConfirm(message) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const settle = (result, close) => {
+            if (settled) return;
+            settled = true;
+            close();
+            resolve(result);
+        };
+        showModal({
+            onDismiss: () => settle(false, () => {}),
+            build: (modal, close) => {
+                modal.appendChild(modalTitle(message));
+                modal.appendChild(modalButtonRow([
+                    modalButton(getTerm('confirmNo'), () => settle(false, close)),
+                    modalButton(getTerm('confirmYes'), () => settle(true, close)),
+                ]));
+            },
+        });
+    });
+}
+
 /** A modal title row (#ios-install-title). */
 export function modalTitle(text) {
     const el = document.createElement('div');

@@ -113,3 +113,7 @@ auxiliary/time_benefit_users.csv
 # Rating-model experiment artifacts (4PL investigation; full-run outputs per config)
 /ratings_v2_*/
 /experiments_4pl/*.log
+
+# Raw user data pulled for analysis: localStorage dumps contain the user's
+# account credential (userId) and full history — never version-control these.
+/data/

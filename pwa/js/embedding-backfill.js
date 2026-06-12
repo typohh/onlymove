@@ -33,6 +33,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
+import { boardNotationToXy } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -192,6 +193,53 @@ async function pruneRemovedProblems(embeddingVersion, ratingsVersionsBySize) {
     return prunedAny;
 }
 
+// problemId → shard resolution for one size: lookup.txt (id → zip hash) plus
+// the per-size metadata.json (zip hash → zip filename). Shared by the
+// version-driven walk below and the synced-entry fill. Null on any fetch
+// failure so callers can bail without partial work.
+async function buildShardLocator(size) {
+    const lookupLines = await fetchLookupLines();
+    if (!lookupLines) return null;
+    const lookupMap = new Map();
+    for (const line of lookupLines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 3 && parseInt(parts[2]) === size) {
+            lookupMap.set(parts[0], parts[1]);
+        }
+    }
+
+    const metaResp = await fetch(`tsumegos/${size}/metadata.json?v=${APP_VERSION}`);
+    if (!metaResp.ok) return null;
+    const zipMeta = await metaResp.json();
+    const zipFilenameByHash = new Map();
+    for (const z of zipMeta) {
+        zipFilenameByHash.set(z.filename.split('.')[0], z.filename);
+    }
+    return { lookupMap, zipFilenameByHash };
+}
+
+// Shard-walk concurrency. Both walks below (the version-driven rating/
+// embedding refresh and the account-sync synced-entry fill) process one shard
+// fully independently of the others — each zip's writes touch only the
+// history entries whose problems live in that zip — so shards can be fetched
+// and processed in parallel. The bound keeps the simultaneous-request count
+// predictable (per-cell sidecar Range fetches stay sequential WITHIN a shard,
+// so total in-flight requests ≤ this), which is what the old fully-sequential
+// loop was protecting: Cloudflare's free-plan limits are forgiving, not
+// unlimited. 4 shards in flight cuts the account-restore walk to roughly a
+// quarter while staying far from any limit.
+const SHARD_WALK_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, limit, fn) {
+    const queue = [...items];
+    const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+        while (queue.length > 0) {
+            await fn(queue.shift());
+        }
+    });
+    await Promise.all(workers);
+}
+
 async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
     const storedEmbeddingVersion = localStorage.getItem(VERSION_KEY(size));
     const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
@@ -311,25 +359,9 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             return curveRankUpdated;
         }
 
-        // Read lookup.txt and pick rows matching this size.
-        const lookupLines = await fetchLookupLines();
-        if (!lookupLines) return 0;
-        const lookupMap = new Map();
-        for (const line of lookupLines) {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length >= 3 && parseInt(parts[2]) === size) {
-                lookupMap.set(parts[0], parts[1]);
-            }
-        }
-
-        // Map zipHash -> zipFilename via per-size metadata.json.
-        const metaResp = await fetch(`tsumegos/${size}/metadata.json?v=${APP_VERSION}`);
-        if (!metaResp.ok) return 0;
-        const zipMeta = await metaResp.json();
-        const zipFilenameByHash = new Map();
-        for (const z of zipMeta) {
-            zipFilenameByHash.set(z.filename.split('.')[0], z.filename);
-        }
+        const locator = await buildShardLocator(size);
+        if (!locator) return 0;
+        const { lookupMap, zipFilenameByHash } = locator;
 
         const zipToIds = new Map();
         for (const id of allNeedIds) {
@@ -342,16 +374,16 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         let totalFilled = 0;
         let totalFilledPicked = 0;
         let totalRatingsUpdated = 0;
-        for (const [zipHash, _ids] of zipToIds) {
+        await mapWithConcurrency([...zipToIds.keys()], SHARD_WALK_CONCURRENCY, async (zipHash) => {
             const zipFilename = zipFilenameByHash.get(zipHash);
-            if (!zipFilename) continue;
+            if (!zipFilename) return;
             try {
                 const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
-                if (!resp.ok) continue;
+                if (!resp.ok) return;
                 const buf = await resp.arrayBuffer();
                 const zip = await new JSZip().loadAsync(buf);
                 const metaFile = zip.file('metadata.json');
-                if (!metaFile) continue;
+                if (!metaFile) return;
                 const items = JSON.parse(await metaFile.async('text'));
                 const embeddingByProblem = new Map();
                 const ratingByProblem = new Map();
@@ -430,11 +462,10 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                             console.warn(`embedding-backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
                         }
                         if (indexPayload && indexPayload.problems) {
-                            // Sequential per-entry on purpose: Range requests are
-                            // cheap (~256B), and a sequential loop within a shard
-                            // keeps the simultaneous-request count predictable —
-                            // Cloudflare's free-plan rate limits are forgiving but
-                            // not unlimited.
+                            // Sequential per-entry WITHIN the shard: Range
+                            // requests are cheap (~256B), and with shards
+                            // running SHARD_WALK_CONCURRENCY-wide this bounds
+                            // the total in-flight request count.
                             for (let i = startIdx; i < history.length; i++) {
                                 const a = history[i];
                                 if (a.correct !== false) continue;
@@ -459,9 +490,8 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 }
             } catch (err) {
                 console.warn(`embedding-backfill[${size}]: failed for ${zipFilename}:`, err);
-                continue;
             }
-        }
+        });
 
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
             persistAnswerHistory(size, history);
@@ -473,5 +503,173 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         console.error(`embedding-backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
         return 0;
+    }
+}
+
+// --- Synced-entry field fill (account-sync) ----------------------------------
+// account-sync merges /sync rows as skeleton entries: problemId, correct, date,
+// timing — none of the model fields. This walk fills them from the shards,
+// independent of the version bookkeeping above (the versions haven't changed;
+// the ENTRIES are new):
+//   - rating/rank/slope/quality/floor for every synced entry missing them
+//   - correct-move `embedding` inside the keep-last window
+//   - `pickedCellIndex` derived from the reported move (`syncedMove`, present
+//     only on wrong NON-repeat attempts — new problems are served at
+//     orientation 0 = identity, so the reported coordinate matches the shard
+//     SGF; repeats are served randomly reoriented and unrecoverable). The SGF
+//     root variations are the same order extraction/packaging use, so the
+//     index addresses the per-cell sidecar directly.
+//   - `pickedEmbedding` via the sidecar, same as the version-driven walk.
+export async function fillSyncedHistoryFields(sizes) {
+    let total = 0;
+    for (const size of sizes) {
+        if (!SUPPORTED_BOARD_SIZES.includes(size)) continue;
+        try {
+            total += await fillSyncedForSize(size);
+        } catch (err) {
+            console.error(`synced-fill[${size}] failed`, err);
+            try { Sentry.captureException(err); } catch (_) {}
+        }
+    }
+    return total;
+}
+
+async function fillSyncedForSize(size) {
+    const history = getAnswerHistoryForSize(size);
+    if (!history || history.length === 0) return 0;
+    const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
+
+    const needIds = new Set();
+    for (let i = 0; i < history.length; i++) {
+        const a = history[i];
+        if (!a || !a.synced || !a.problemId) continue;
+        const needsRating = typeof a.problemRating !== 'number';
+        const inWindow = i >= startIdx;
+        const needsEmbed = inWindow && !a.embedding;
+        const needsPickedIndex = inWindow && a.correct === false &&
+            typeof a.syncedMove === 'string' && typeof a.pickedCellIndex !== 'number';
+        const needsPicked = inWindow && a.correct === false &&
+            !a.pickedEmbedding &&
+            (typeof a.pickedCellIndex === 'number' || needsPickedIndex);
+        if (needsRating || needsEmbed || needsPickedIndex || needsPicked) {
+            needIds.add(a.problemId);
+        }
+    }
+    if (needIds.size === 0) return 0;
+
+    const locator = await buildShardLocator(size);
+    if (!locator) return 0;
+    const { lookupMap, zipFilenameByHash } = locator;
+
+    const zipToIds = new Map();
+    for (const id of needIds) {
+        const zipHash = lookupMap.get(id);
+        if (!zipHash) continue;  // problem left the corpus — entry stays a skeleton
+        if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
+        zipToIds.get(zipHash).push(id);
+    }
+
+    let filled = 0;
+    await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, ids]) => {
+        const zipFilename = zipFilenameByHash.get(zipHash);
+        if (!zipFilename) return;
+        try {
+            const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
+            if (!resp.ok) return;
+            const buf = await resp.arrayBuffer();
+            const zip = await new JSZip().loadAsync(buf);
+            const metaFile = zip.file('metadata.json');
+            if (!metaFile) return;
+            const items = JSON.parse(await metaFile.async('text'));
+            const itemByProblem = new Map();
+            for (const item of items) {
+                itemByProblem.set(item.filename.replace(/\.sgf$/, ''), item);
+            }
+            let indexPayload = null;
+            const idxFile = zip.file('embeddings_index.json');
+            if (idxFile) {
+                try { indexPayload = JSON.parse(await idxFile.async('text')); }
+                catch (_) { /* shard without a usable sidecar index */ }
+            }
+            const idsHere = new Set(ids);
+
+            for (let i = 0; i < history.length; i++) {
+                const a = history[i];
+                if (!a || !a.synced || !idsHere.has(a.problemId)) continue;
+                const item = itemByProblem.get(a.problemId);
+                if (!item) continue;
+                const inWindow = i >= startIdx;
+
+                if (typeof a.problemRating !== 'number' && typeof item.rating === 'number') {
+                    a.problemRating = item.rating;
+                    const rank = normalizedRankForSize(item.rating, size);
+                    if (rank !== null) a.problemRank = rank;
+                    if (typeof item.slope === 'number') {
+                        a.problemSlope = item.slope;
+                        a.problemQuality = slopeToQuality(item.slope);
+                    }
+                    if (typeof item.floor === 'number') a.problemFloor = item.floor;
+                    filled++;
+                }
+
+                if (inWindow && !a.embedding && Array.isArray(item.embedding)) {
+                    a.embedding = item.embedding.map(v => Math.round(v * 100) / 100);
+                    filled++;
+                }
+
+                if (inWindow && a.correct === false && typeof a.syncedMove === 'string') {
+                    const idx = await cellIndexForMove(zip, a.problemId, a.syncedMove, size);
+                    if (typeof idx === 'number' && idx >= 0) a.pickedCellIndex = idx;
+                    // One-shot either way: an unresolvable move (illegal after a
+                    // corpus change, parse failure) would otherwise re-walk this
+                    // shard on every sync.
+                    delete a.syncedMove;
+                }
+
+                if (inWindow && a.correct === false && !a.pickedEmbedding &&
+                    typeof a.pickedCellIndex === 'number' &&
+                    indexPayload && indexPayload.problems) {
+                    const indexEntry = indexPayload.problems[a.problemId];
+                    if (indexEntry) {
+                        const emb = await fetchPickedEmbeddingWithIndexEntry({
+                            tsumegoId: a.problemId,
+                            cellIndex: a.pickedCellIndex,
+                            zipFilename,
+                            boardSize: size,
+                            indexEntry,
+                        });
+                        if (Array.isArray(emb)) {
+                            a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
+                            filled++;
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`synced-fill[${size}]: failed for ${zipFilename}:`, err);
+        }
+    });
+
+    if (filled > 0) {
+        persistAnswerHistory(size, history);
+        console.log(`synced-fill[${size}]: filled ${filled} fields on synced entries`);
+    }
+    return filled;
+}
+
+// Map a reported board-notation move (orientation-0 frame) to the problem's
+// SGF root-variation index — the same `children.indexOf(moveNode)` the live
+// click path records, and the index the per-cell sidecar is keyed by.
+async function cellIndexForMove(zip, problemId, move, size) {
+    const xy = boardNotationToXy(move, size);
+    if (!xy) return null;
+    const sgfFile = zip.file(`${problemId}.sgf`);
+    if (!sgfFile || typeof WGo === 'undefined') return null;
+    try {
+        const kifu = WGo.Kifu.fromSgf(await sgfFile.async('text'));
+        const children = (kifu && kifu.root && kifu.root.children) || [];
+        return children.findIndex(c => c.move && c.move.x === xy.x && c.move.y === xy.y);
+    } catch (_) {
+        return null;
     }
 }

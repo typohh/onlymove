@@ -51,6 +51,21 @@ export function findBestMoveFromChildren(children) {
     return null;
 }
 
+// Standard Go board notation: column letters skip 'I', row is 1-based from the
+// bottom (WGo's y=0 is the top row). Inverse of game-logic's toBoardNotation —
+// used by account-sync's field fill to map a reported move (e.g. "C3") back to
+// WGo {x, y} coordinates.
+const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
+export function boardNotationToXy(move, size) {
+    if (typeof move !== 'string') return null;
+    const m = move.toUpperCase().match(/^([A-HJ-T])(\d{1,2})$/);
+    if (!m) return null;
+    const x = COL_LETTERS.indexOf(m[1]);
+    const y = size - parseInt(m[2]);
+    if (x < 0 || x >= size || y < 0 || y >= size) return null;
+    return { x, y };
+}
+
 /**
  * Checks if a move is correct.
  * @param {object} moveNode - The node of the move to check.

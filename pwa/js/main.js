@@ -85,41 +85,15 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-/**
- * Custom Yes/Cancel confirmation dialog. Replaces the native blocking
- * `confirm()` (which is janky in an installed PWA and inconsistent with the
- * app's other custom overlays). Resolves to true on confirm, false on
- * cancel/backdrop. Reuses the shared #ios-install-overlay/#ios-install-modal
- * styling.
- */
-function showConfirm(message) {
-    return new Promise((resolve) => {
-        let settled = false;
-        const settle = (result, close) => {
-            if (settled) return;
-            settled = true;
-            close();
-            resolve(result);
-        };
-        showModal({
-            onDismiss: () => settle(false, () => {}),
-            build: (modal, close) => {
-                modal.appendChild(modalTitle(message));
-                modal.appendChild(modalButtonRow([
-                    modalButton(getTerm('confirmNo'), () => settle(false, close)),
-                    modalButton(getTerm('confirmYes'), () => settle(true, close)),
-                ]));
-            },
-        });
-    });
-}
 import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
-import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow } from './overlays.js';
+import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
+import { hasPendingAccountSwitch, maybeFinishAccountSwitch, startBackgroundSync } from './account-sync.js';
+import { showAccountModal } from './account-ui.js';
 import { performShare } from './share.js';
 import { APP_MODES, TOTAL_RANKS } from './constants.js';
 
@@ -242,6 +216,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         closeMenu();
         showDetailedStats();
+    });
+    document.getElementById('menu-account').addEventListener('click', (e) => {
+        e.preventDefault();
+        closeMenu();
+        showAccountModal();
     });
     document.getElementById('menu-share').addEventListener('click', (e) => {
         e.preventDefault();
@@ -430,6 +409,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error(msg);
     }
 
+    // A just-completed account switch (switchAccount wiped local state and
+    // reloaded) pulls the account's full server history NOW, before anything
+    // derives state from local history: the pulled-and-re-anchored rank drives
+    // the first problem selection, and the backfill below sees the rebuilt
+    // entries. Needs M (loaded above) for the rank refill. No-op otherwise.
+    if (hasPendingAccountSwitch()) {
+        // The full-history pull + shard field fill + retrain can take on the
+        // order of a minute; say so instead of showing a bare spinner.
+        showLoading(getTerm('accountRestoring'));
+        try {
+            await maybeFinishAccountSwitch();
+        } catch (e) {
+            console.error('account switch pull failed:', e);
+        } finally {
+            hideLoading();
+        }
+    }
+
     // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
     // (raw) + problemRank on legacy answerHistory entries from already-deployed
     // zips and the now-cached curve, so returning users don't need to solve 20+
@@ -464,7 +461,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (typeof skill === 'number' && Number.isFinite(skill)) {
                     const currentGrades = state.userRank * TOTAL_RANKS;
                     if (Math.abs(currentGrades - skill) > REANCHOR_GRADE_THRESHOLD) {
-                        updateUserRank(Math.max(0, skill / TOTAL_RANKS));
+                        // No lower clamp — rank below 0 = below 20k is allowed.
+                        updateUserRank(skill / TOTAL_RANKS);
                     }
                 }
             }
@@ -619,6 +617,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // cron has up-to-date enter/exit timestamps. No-op for users who haven't
     // opted in.
     maybeUploadSchedule();
+
+    // Account sync: pull attempts made on other devices under this userId —
+    // on load (now) and when the tab becomes visible. During active play the
+    // per-report piggyback signal (checkSyncSignal) covers it with no polling.
+    startBackgroundSync();
 
     // Heartbeat: keep the server's schedule — and its updated_at watermark,
     // which the cron uses to suppress reminders for active users — fresh during

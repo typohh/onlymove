@@ -1,46 +1,15 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending, clampMomentum } from './state.js';
+import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
-
-// Per-correct-answer rank gain used to asymptote to 0 as the normalized rank
-// approached 1.0 (the `(1 - rank)/9` headroom term), pinning even the strongest
-// players just under 10d and hiding the harder-than-9d tail of the corpus (≈6%
-// of 9×9 problems carry ratings that map past 9d, out to the winsor ceiling).
-// Instead the step decays toward 1/10th of a rank rather than 0: it slows near
-// the top but never stops, so a strong player keeps drifting up — slowly — into
-// the extrapolated rank range above 9d. One "rank" is 1/TOTAL_RANKS in
-// normalized units. Below ~9d this floor is far below the headroom term, so
-// normal players are unaffected.
-const MIN_RANK_INCREASE_PER_CORRECT = (1 / TOTAL_RANKS) / 10;
-
-// Loss-step size relative to the win step. The loop is designed around a 4:1
-// loss:win ratio, whose fixed point is an 80% clear rate (the serving target).
-// But the SHIPPED loss branch shrank `momentum` to (m+1)/3 *before* taking the
-// rank penalty, so the realized penalty was only ~2.9× a win, equilibrating
-// serving at ~75% (a steady ~5% miss, level-independent — verified in
-// auxiliary/eval_rank_estimators.py: --simulate, and the controlled steady-state
-// loop). The fix penalizes on the PRE-cut momentum (symmetric with the win
-// branch, which uses the pre-growth momentum). Pre-cut at 4× over-corrects to
-// ~82% (a loss tends to follow a win streak, so momentum is elevated right then),
-// so the multiplier is retuned to 3.6, which re-centers the clear rate on 80.0%
-// across all ranks and slopes without changing onboarding speed.
-const LOSS_PENALTY_MULTIPLIER = 3.6;
-
-// Smoothly lower-bound the headroom term at MIN_RANK_INCREASE_PER_CORRECT.
-// A plain Math.max(headroom, floor) is only C0 — it kinks where the two meet
-// (slope jumps from -1/9 to 0), so the step stops shrinking abruptly. This is a
-// C-infinity smooth maximum (the "soft-absolute" form): it tracks `headroom`
-// when headroom >> floor, eases into `floor` as headroom drops through it, and
-// asymptotes to `floor` from above as headroom goes negative (rank past 1.0).
-// eps = floor^2 sets the corner rounding (value at the join is ~1.5*floor).
-function softFloor(headroom, floor) {
-    const d = headroom - floor;
-    return 0.5 * (headroom + floor + Math.sqrt(d * d + floor * floor));
-}
+import { recordReportAck, checkSyncSignal } from './account-sync.js';
+// The momentum-rank update itself (step sizes, headroom cap, loss penalty,
+// quality modulation, momentum guards) lives in momentum-rank.js — one pure
+// step function shared with the account-sync anchored replay.
+import { momentumRankStep } from './momentum-rank.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     try {
@@ -63,6 +32,19 @@ export async function sendReport({ success, move = null, timeUsed = null, review
         const serverVersion = res.headers.get('X-App-Version');
         if (serverVersion && serverVersion !== APP_VERSION) {
             setReloadPending(true);
+        }
+        // The Worker echoes its server-stamped created_at; stamping it on the
+        // matching answerHistory entry lets account-sync pulls recognize this
+        // device's own rows. prevCreatedAt (the user's latest report before
+        // this one) is the cross-device signal: unrecognized → another device
+        // wrote it → account-sync pulls. Older Workers return plain text —
+        // tolerate that.
+        if (res.ok) {
+            const body = await res.json().catch(() => null);
+            if (body && typeof body.createdAt === 'string') {
+                recordReportAck(problemId, body.createdAt);
+            }
+            if (body) checkSyncSignal(body.prevCreatedAt);
         }
     } catch (error) {
         console.error('Failed to send report:', error);
@@ -216,44 +198,11 @@ export async function updateUserStats(isCorrect, {
     setCurrentSolvingStartTime(null);
 
     const oldRank = state.userRank;
-    let rank = oldRank;
-    let momentum = state.momentum;
-    // `currentProblem.quality` is now the RAW 2PL Fisher-information selection
-    // weight a_p² (median ~6, up to ~20), NOT the normalized [0,1] quality this
-    // momentum loop was designed for. Feeding it raw makes scalingFactor ≫ 1,
-    // which turns the failure recurrence momentum ← momentum − sf·(2·momentum−1)/3
-    // into an unstable, sign-flipping oscillator (stable only for sf < 3): momentum
-    // diverges and goes negative, after which a win lowers the rank and a loss
-    // raises it (the wild 8d↔50k swings). Bound it back to [0,1] so the loop is the
-    // designed contraction. (NB: a_p² saturates the clamp for almost all problems,
-    // so this no longer modulates the step much — a proper [0,1] confidence mapping
-    // of a_p could restore that, but stability is the priority here.)
-    const qualityConfidence = Math.min(1, Math.max(0, currentProblem.quality || 0.5));
-    const scalingFactor = qualityConfidence * (currentProblem.isRepeat ? 1 / 5 : 1);
-
-    if (isCorrect) {
-        const maxIncrease = softFloor((1.0 - rank) / 9, MIN_RANK_INCREASE_PER_CORRECT);
-        let intendedRatingIncrease = scalingFactor * momentum / 600;
-        let intendedMomentumIncrease = scalingFactor * 0.1;
-        if (intendedRatingIncrease > maxIncrease) {
-            intendedMomentumIncrease *= maxIncrease / intendedRatingIncrease;
-            intendedRatingIncrease = maxIncrease;
-        }
-        if (!currentProblem.isRepeat) {
-            momentum *= 1 + intendedMomentumIncrease;
-        }
-        rank += intendedRatingIncrease;
-    } else {
-        // Penalize the rank on the PRE-cut momentum (mirrors the win branch, which
-        // uses pre-growth momentum), THEN shrink momentum. Order + multiplier
-        // re-center serving on the 80% target — see LOSS_PENALTY_MULTIPLIER.
-        rank = Math.max(0, rank - LOSS_PENALTY_MULTIPLIER * scalingFactor * (momentum / 600));
-        momentum -= scalingFactor * (momentum - (momentum + 1) / 3);
-    }
-
-    // Guardrail: keep momentum positive and bounded every step so a future
-    // mis-scaled input can never let the recurrence run away again.
-    momentum = clampMomentum(momentum);
+    const { rank, momentum } = momentumRankStep(oldRank, state.momentum, {
+        correct: isCorrect,
+        isRepeat: currentProblem.isRepeat || false,
+        quality: currentProblem.quality,
+    });
 
     updateUserRank(rank);
     updateMomentum(momentum);

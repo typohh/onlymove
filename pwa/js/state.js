@@ -1,25 +1,13 @@
 // js/state.js
 import { APP_MODES } from './constants.js';
+// The momentum-rank loop constants/guards live in momentum-rank.js (the pure
+// step function shared by user-stats.js and the account-sync replay);
+// re-exported here for the existing importers.
+import { DEFAULT_MOMENTUM, MOMENTUM_MAX, clampMomentum } from './momentum-rank.js';
+export { MOMENTUM_MIN, MOMENTUM_MAX, clampMomentum } from './momentum-rank.js';
 
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
-
-// Momentum is the per-attempt step-size multiplier of the front-page rank loop
-// (user-stats.js). It must stay positive and bounded: the failure recurrence
-// m ← m − sf·(2m−1)/3 has its stable fixed point at 0.5, and with the now-bounded
-// scalingFactor healthy play self-limits momentum to well under ~150. A negative
-// or runaway value inverts/explodes the rank update (wins lower the rank, losses
-// raise it). The unambiguous corruption signal is a NEGATIVE momentum (the
-// oscillator's sign flip); MOMENTUM_MAX sits clearly above any legitimate value so
-// the one-time reset never clobbers a genuine fast-improver, while still catching
-// positive runaway — the a_p² scalingFactor bug (see repairCorruptedMomentum_v3).
-const DEFAULT_MOMENTUM = 30;
-export const MOMENTUM_MIN = 0.5;
-export const MOMENTUM_MAX = 300;
-export function clampMomentum(m) {
-    if (typeof m !== 'number' || !Number.isFinite(m)) return DEFAULT_MOMENTUM;
-    return Math.min(MOMENTUM_MAX, Math.max(MOMENTUM_MIN, m));
-}
 
 // --- localStorage migration ---
 // Old layout stored a single value per key (e.g. userRank: "0.5",
@@ -291,10 +279,32 @@ let _boardSize = (() => {
     return SUPPORTED_BOARD_SIZES.includes(stored) ? stored : DEFAULT_BOARD_SIZE;
 })();
 
+// The userId doubles as the account credential: entering it on another device
+// logs that device into the same server-side history (see account-sync.js).
+// That makes it a read capability, not just a write identity, so new ids must
+// be crypto-strength — Math.random() is predictable. Existing ids are
+// grandfathered as-is. 8 chars of base36 ≈ 41 bits; enumeration is bounded by
+// the Worker's per-IP rate limits.
+const generateUserId = () => {
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    if (globalThis.crypto && typeof crypto.getRandomValues === 'function') {
+        let id = '';
+        while (id.length < 8) {
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            for (const v of bytes) {
+                // Rejection-sample: 252 = 7·36, so v % 36 is unbiased below it.
+                if (id.length < 8 && v < 252) id += alphabet[v % 36];
+            }
+        }
+        return id;
+    }
+    return Math.random().toString(36).substring(2, 10);
+};
+
 const getOrCreateUserId = () => {
     let userId = localStorage.getItem('userId');
     if (!userId) {
-        userId = Math.random().toString(36).substring(2, 10);
+        userId = generateUserId();
         localStorage.setItem('userId', userId);
     } else if (userId.length > 8) {
         userId = userId.substring(0, 8);
