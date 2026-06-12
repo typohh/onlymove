@@ -20,11 +20,12 @@ const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 // roughly four pushes per day in the worst case.
 const MIN_NOTIFY_INTERVAL_MS = 6 * 3600 * 1000;
 // Suppress recall reminders for users who were active since the previous cron
-// tick. The client re-uploads the schedule on app load and after every solved
-// attempt (stamping recall_schedule.updated_at = now), so a recent updated_at
-// means they're already practicing — a "ready to review" push would be noise.
-// We don't mark anything notified, so the reminder simply defers to the next
-// tick once they've gone idle. Matches the hourly cron in wrangler.toml.
+// tick. Every /schedule call (load / tab-hidden / heartbeat, even an empty
+// diff) bumps push_subscriptions.last_seen_at, so a recent watermark means
+// they're already practicing — a "ready to review" push would be noise.
+// (recall_schedule.updated_at doubles as the watermark for legacy replace-all
+// clients.) We don't mark anything notified, so the reminder simply defers to
+// the next tick once they've gone idle. Matches the hourly cron in wrangler.toml.
 const ACTIVE_SUPPRESS_MS = 1 * 3600 * 1000;
 
 export default {
@@ -393,17 +394,37 @@ async function handleUnsubscribe(request, env) {
   return jsonResponse({ ok: true });
 }
 
+// /schedule accepts two payload shapes:
+//   { userId, schedule: [...] }            — LEGACY replace-all (older clients;
+//     every row upserted, then untouched rows swept by updated_at watermark).
+//   { userId, upserts: [...], removals: [...] } — diff mode: the client keeps a
+//     per-row snapshot of what it last uploaded and sends only rows whose
+//     hour-rounded window moved, plus explicit removals. Each upsert bills the
+//     row + its two partial indexes (~3 write units), so the diff cuts the
+//     dominant D1 write consumer to the handful of rows an attempt actually
+//     changes. An EMPTY diff is still a valid call — it lands only the
+//     activity-watermark bump below.
+// Either way the call bumps push_subscriptions.last_seen_at (one row, no-op
+// for users without a subscription): the cron's mid-session suppression reads
+// it, since with diff uploads recall_schedule.updated_at no longer refreshes
+// across the board on every upload.
+const SCHEDULE_MAX_ROWS = 1000;
+
 async function handleSchedule(request, env) {
   const data = await request.json();
-  if (!isValidUserId(data?.userId) || !Array.isArray(data.schedule)) {
+  if (!isValidUserId(data?.userId)) {
+    return jsonResponse({ error: 'Invalid body' }, 400);
+  }
+  const legacy = Array.isArray(data.schedule);
+  const diff = Array.isArray(data.upserts) && Array.isArray(data.removals);
+  if (!legacy && !diff) {
     return jsonResponse({ error: 'Invalid body' }, 400);
   }
 
   const now = Date.now();
   const statements = [];
-
-  for (const row of data.schedule) {
-    if (!isValidProblemId(row?.problemId) || typeof row.enterAt !== 'number' || typeof row.exitAt !== 'number') continue;
+  const pushUpsert = (row) => {
+    if (!isValidProblemId(row?.problemId) || typeof row.enterAt !== 'number' || typeof row.exitAt !== 'number') return;
     statements.push(env.DB.prepare(
       `INSERT INTO recall_schedule (user_id, problem_id, enter_at, exit_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, ?5)
@@ -416,20 +437,44 @@ async function handleSchedule(request, env) {
                                  THEN NULL ELSE recall_schedule.exit_notified_at END,
          updated_at = excluded.updated_at`
     ).bind(data.userId, row.problemId, row.enterAt, row.exitAt, now));
+  };
+
+  if (legacy) {
+    if (data.schedule.length > SCHEDULE_MAX_ROWS) {
+      return jsonResponse({ error: 'Invalid body' }, 400);
+    }
+    for (const row of data.schedule) pushUpsert(row);
+
+    // Replace-all semantics: anything previously scheduled for this user but
+    // absent from the new upload gets deleted. ON CONFLICT above preserves the
+    // notified flags for surviving rows. We identify "untouched" rows by their
+    // updated_at watermark — every row in this upload was just stamped with
+    // `now`, so anything still carrying an earlier timestamp wasn't in the
+    // payload. A NOT IN (?,?,…) version would hit D1's 100-bound-params cap
+    // per statement once a user's schedule exceeds ~100 problems.
+    statements.push(env.DB.prepare(
+      'DELETE FROM recall_schedule WHERE user_id = ? AND updated_at < ?'
+    ).bind(data.userId, now));
+  } else {
+    if (data.upserts.length > SCHEDULE_MAX_ROWS || data.removals.length > SCHEDULE_MAX_ROWS) {
+      return jsonResponse({ error: 'Invalid body' }, 400);
+    }
+    for (const row of data.upserts) pushUpsert(row);
+    // Explicit removals, chunked under D1's ~100-bound-params-per-statement cap.
+    const ids = data.removals.filter(isValidProblemId);
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      statements.push(env.DB.prepare(
+        `DELETE FROM recall_schedule WHERE user_id = ? AND problem_id IN (${chunk.map(() => '?').join(',')})`
+      ).bind(data.userId, ...chunk));
+    }
   }
 
-  // Replace-all semantics: anything previously scheduled for this user but
-  // absent from the new upload gets deleted. ON CONFLICT above preserves the
-  // notified flags for surviving rows. We identify "untouched" rows by their
-  // updated_at watermark — every row in this upload was just stamped with
-  // `now`, so anything still carrying an earlier timestamp wasn't in the
-  // payload. A NOT IN (?,?,…) version would hit D1's 100-bound-params cap
-  // per statement once a user's schedule exceeds ~100 problems.
   statements.push(env.DB.prepare(
-    'DELETE FROM recall_schedule WHERE user_id = ? AND updated_at < ?'
-  ).bind(data.userId, now));
+    'UPDATE push_subscriptions SET last_seen_at = ? WHERE user_id = ?'
+  ).bind(now, data.userId));
 
-  if (statements.length > 0) await env.DB.batch(statements);
+  await env.DB.batch(statements);
   return jsonResponse({ ok: true });
 }
 
@@ -842,7 +887,7 @@ async function runRecallNotifications(env) {
   const due = await env.DB.prepare(
     `SELECT s.user_id, s.problem_id, s.enter_at, s.exit_at,
             s.enter_notified_at, s.exit_notified_at, s.updated_at,
-            p.endpoint, p.p256dh, p.auth, p.last_notified_at
+            p.endpoint, p.p256dh, p.auth, p.last_notified_at, p.last_seen_at
      FROM recall_schedule s
      JOIN push_subscriptions p ON p.user_id = s.user_id
      WHERE (s.enter_notified_at IS NULL AND s.enter_at <= ?1)
@@ -878,9 +923,10 @@ async function runRecallNotifications(env) {
       };
       byUser.set(row.user_id, u);
     }
-    // After any /schedule upload all of a user's surviving rows share the same
-    // updated_at, but take the max defensively in case a read races an upload.
-    u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0);
+    // Activity watermark: push_subscriptions.last_seen_at is bumped on every
+    // /schedule call (including empty diffs); per-row updated_at still covers
+    // legacy replace-all clients, so take the max of both.
+    u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0, row.last_seen_at || 0);
     if (row.enter_notified_at === null && row.enter_at <= now) {
       u.enteredIds.push(row.problem_id);
     }

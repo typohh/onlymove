@@ -128,48 +128,52 @@ export async function disableNotifications() {
 }
 
 let pendingUpload = false;
-// Session-scoped (in-memory, reset on reload) dedup state. Each upload does a
-// full replace-all on the server (N row-writes), so we avoid re-POSTing when
-// the schedule hasn't materially moved. On a fresh load the fingerprint is
-// null, so the first call always uploads — re-establishing the server's rows
-// and stamping a fresh updated_at ("active now") for that session.
-let lastUploadFingerprint = null;
 let lastUploadAt = 0;
-// Unchanged uploads are gated to at most once per this interval. Changed
-// schedules always upload. The gap lets the heartbeat (see main.js) refresh
-// the server's updated_at watermark on long idle-but-open sessions without
-// spamming writes; kept under the heartbeat interval so a 30-min heartbeat
-// always clears it.
+// Empty-diff uploads (pure activity-watermark refreshes) are gated to at most
+// once per this interval. Real changes always upload. The gap lets the
+// heartbeat (see main.js) keep the server's last_seen_at watermark fresh on
+// long idle-but-open sessions without spamming; kept under the heartbeat
+// interval so a 30-min heartbeat always clears it.
 const UNCHANGED_UPLOAD_THROTTLE_MS = 20 * 60 * 1000;
+const HOUR_MS = 3600 * 1000;
 
-// Canonical, hourly-resolution fingerprint of a schedule. The recall cron runs
-// hourly, so sub-hour drift in enter/exit (from per-attempt model retrains) is
-// invisible to it — rounding to the hour lets us treat those as "unchanged"
-// and skip the write.
-function fingerprintSchedule(schedule) {
-    const HOUR_MS = 3600 * 1000;
-    return schedule
-        .map(r => `${r.problemId}:${Math.round(r.enterAt / HOUR_MS)}:${Math.round(r.exitAt / HOUR_MS)}`)
-        .sort()
-        .join('|');
+// Per-row snapshot of what the server holds for this account, persisted so it
+// survives reloads. Rows are hour-rounded — the recall cron runs hourly, so
+// sub-hour drift from per-attempt model retrains is invisible to it. This is
+// what turns the upload into a DIFF: each upsert bills the row plus its two
+// partial indexes on D1, and replace-all uploads were the single biggest
+// write consumer (~27.5k rows/day), almost all of them rewriting unchanged
+// rows. The snapshot is only advanced after the server confirms the POST, so
+// a dropped request merely re-sends the same idempotent upserts next time.
+const SCHEDULE_SNAPSHOT_KEY = 'recallScheduleSnapshot';
+
+function readScheduleSnapshot() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SCHEDULE_SNAPSHOT_KEY));
+        if (s && s.userId === state.userId && s.rows && typeof s.rows === 'object') return s.rows;
+    } catch { /* fall through */ }
+    return null;
 }
 
-// Computes the recall schedule across both board sizes and POSTs it to the
-// Worker. Idempotent — replace-all semantics on the server side, so calling
-// this twice in quick succession is fine. Fails silently because losing one
-// upload just delays the next notification by one tick.
+function writeScheduleSnapshot(rows) {
+    try {
+        localStorage.setItem(SCHEDULE_SNAPSHOT_KEY, JSON.stringify({ userId: state.userId, rows }));
+    } catch { /* snapshot is an optimization; losing it only costs re-upserts */ }
+}
+
+// Computes the recall schedule across both board sizes and POSTs the CHANGES
+// to the Worker. Fails silently because losing one upload just delays the
+// next notification by one tick.
 //
-// Skips the POST when the schedule is empty: the worker treats an empty
-// array as "delete every row for this user", so a transient empty result
-// (e.g. recent slice happens to contain only high-streak successes) would
-// wipe a previously-good schedule and silently disable reminders.
+// Skips the POST when the schedule is empty: a transient empty result (e.g.
+// the recent slice happens to contain only high-streak successes) must not
+// wipe a previously-good schedule and silently disable reminders. Stale rows
+// the client never explicitly removes age out server-side anyway — the cron
+// sweeps exit_at < now.
 //
-// Also skips when the schedule is unchanged (hourly fingerprint) and a recent
-// upload already covers it — unless `force` is set or it's been long enough to
-// warrant refreshing updated_at. This is what keeps active-session write volume
-// down: an active user is suppressed by the cron anyway, so the schedule only
-// needs to reach the server fresh once they go idle (see the hidden-tab and
-// heartbeat triggers in main.js).
+// A no-change call still POSTs an empty diff (throttled) — the Worker bumps
+// the user's last_seen_at watermark, which is what defers reminders while
+// they're actively in the app.
 export async function uploadSchedule({ force = false } = {}) {
     if (pendingUpload) return;
     pendingUpload = true;
@@ -182,21 +186,51 @@ export async function uploadSchedule({ force = false } = {}) {
         }
         if (schedule.length === 0) return;
 
-        const fingerprint = fingerprintSchedule(schedule);
-        const changed = fingerprint !== lastUploadFingerprint;
+        const current = {};
+        for (const r of schedule) {
+            current[r.problemId] = {
+                e: Math.round(r.enterAt / HOUR_MS),
+                x: Math.round(r.exitAt / HOUR_MS),
+            };
+        }
+
+        const prev = readScheduleSnapshot();
+        const upserts = [];
+        const removals = [];
+        for (const [pid, v] of Object.entries(current)) {
+            const p = prev && prev[pid];
+            if (!p || p.e !== v.e || p.x !== v.x) {
+                upserts.push({ problemId: pid, enterAt: v.e * HOUR_MS, exitAt: v.x * HOUR_MS });
+            }
+        }
+        if (prev) {
+            for (const pid of Object.keys(prev)) {
+                if (!current[pid]) removals.push(pid);
+            }
+        }
+
+        const changed = upserts.length > 0 || removals.length > 0;
         const sinceLast = Date.now() - lastUploadAt;
         if (!force && !changed && sinceLast < UNCHANGED_UPLOAD_THROTTLE_MS) return;
 
-        await fetch('/schedule', {
+        // No snapshot yet (first upload for this account on this device):
+        // send the legacy replace-all shape once, so any rows left behind by
+        // older clients get swept; diff thereafter.
+        const payload = prev
+            ? { userId: state.userId, upserts, removals }
+            : { userId: state.userId, schedule: upserts };
+        const res = await fetch('/schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: state.userId, schedule }),
+            body: JSON.stringify(payload),
             // Let the request outlive a page being hidden/torn down so the
             // visibilitychange-time upload in main.js actually lands.
             keepalive: true,
         });
-        lastUploadFingerprint = fingerprint;
-        lastUploadAt = Date.now();
+        if (res && res.ok) {
+            writeScheduleSnapshot(current);
+            lastUploadAt = Date.now();
+        }
     } catch (err) {
         console.warn('Schedule upload failed:', err);
     } finally {

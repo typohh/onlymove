@@ -51,8 +51,17 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     auth              TEXT NOT NULL,
     last_notified_at  INTEGER,
     created_at        INTEGER NOT NULL,
-    updated_at        INTEGER NOT NULL
+    updated_at        INTEGER NOT NULL,
+    -- Activity watermark for the recall cron's mid-session suppression:
+    -- bumped by every /schedule call (one row write, even when the schedule
+    -- diff is empty). Replaces relying on recall_schedule.updated_at, which
+    -- diff-mode uploads no longer refresh across the board.
+    last_seen_at      INTEGER
 );
+
+-- For an existing deployment, run once against the live D1:
+--   ALTER TABLE push_subscriptions ADD COLUMN last_seen_at INTEGER;
+-- (Not idempotent in SQLite, so it's not part of the schema script itself.)
 
 -- Per-(user, problem) recall window. enter_at / exit_at are unix ms epochs at
 -- which the client-side logistic model predicts P(recall) crosses 0.80 and
