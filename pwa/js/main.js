@@ -227,6 +227,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         closeMenu();
         updateAllUI();
     });
+    document.getElementById('menu-audio').addEventListener('click', (e) => {
+        e.preventDefault();
+        state.audioEnabled = !state.audioEnabled;
+        closeMenu();
+        updateAllUI();
+    });
     // menu-about is a real anchor (target=_blank); let the browser navigate.
     document.getElementById('menu-about').addEventListener('click', () => {
         closeMenu();

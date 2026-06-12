@@ -301,6 +301,9 @@ const updateMenuItems = () => {
     // auto-flips back to "Pause recalls".
     const recallsArePaused = state.recallPausedUntil > Date.now();
     pauseItem.textContent = getTerm(recallsArePaused ? 'resumeRecalls' : 'pauseRecalls');
+    // Sound toggle label names the action, not the current state.
+    document.getElementById('menu-audio').textContent =
+        getTerm(state.audioEnabled ? 'disableSound' : 'enableSound');
 
     // More group — Stats and About are always available, in every mode.
     statsItem.textContent = getTerm('stats');

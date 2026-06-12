@@ -360,6 +360,19 @@ export const state = {
         }
     },
 
+    // Stone-placement sound toggle (hamburger menu). Shared across board
+    // sizes. Stored as a "disabled" flag so the missing-key default is ON.
+    get audioEnabled() {
+        return localStorage.getItem('audioDisabled') === null;
+    },
+    set audioEnabled(on) {
+        if (on) {
+            localStorage.removeItem('audioDisabled');
+        } else {
+            localStorage.setItem('audioDisabled', '1');
+        }
+    },
+
     // In-memory cache of labels.components (joint across board sizes —
     // the PCA + ICA fit is joint, so labels are shared). Populated by
     // embedding-backfill.js after fetching any size's embedding_meta.json.

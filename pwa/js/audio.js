@@ -1,4 +1,5 @@
 // js/audio.js
+import { state } from './state.js';
 
 let stoneSound = null;
 let isAudioInitialized = false;
@@ -25,6 +26,7 @@ export function initAudio() {
 }
 
 export function playStoneSound() {
+    if (!state.audioEnabled) return;
     // If audio hasn't been initialized yet, initialize it now
     if (!isAudioInitialized) {
         initAudio();
