@@ -39,6 +39,20 @@ body {
     aspect-ratio: 1 / 1;
 }
 
+/* The element WGo.Board renders into. Lifted verbatim from the WGo player
+   stylesheet (lib/wgo/wgo.player.css, now removed) — the Player widget itself
+   is never instantiated, and this was the only rule from that file our DOM
+   ever matched. */
+.wgo-board {
+    margin: 0 auto;
+    background-color: #CEB053;
+    border-top: #F0E7A7 solid 1px;
+    border-right: #D1A974 solid 1px;
+    border-left: #CCB467 solid 1px;
+    border-bottom: #665926 solid 3px;
+    border-radius: 3px;
+}
+
 #controls-wrapper {
     display: flex;
     position: relative;

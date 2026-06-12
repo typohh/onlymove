@@ -9,7 +9,6 @@ const PRECACHE_URLS = [
     '/lib/wgo/wood_1024.jpg',
     '/lib/wgo/stones/black_128.png',
     '/lib/wgo/stones/white_128.png',
-    '/lib/wgo/wgo.player.css',
     '/lib/wgo/wgo.min.js',
     '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js',
