@@ -5,7 +5,7 @@ of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
 drifting from a one-off manual fit.
 
-Two groups of constants:
+Three groups of constants:
 
 1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
    overlays gate on a per-user solving/review-time coefficient that is biased
@@ -16,7 +16,21 @@ Two groups of constants:
    logit-per-minute feature space (percentile time → central per-minute slope).
    Solving time carries the bias; review time empirically does not (~0).
 
-2. RETENTION constants (model.js: KAPPA, Z0, GROWTH, LN_C_PRIOR) for the
+2. TIME-ADJUSTED-RANK constants (stats-ui.js, the Rank tab's "time adjusted
+   rank"). Practice here is untimed while server ranks reflect timed play, so a
+   user who leans on long thinking time clears more than their server rank
+   implies. Validated in auxiliary/validate_time_adjusted_rating.py: adjusting
+   rating by the user's median solving time raises the per-server-weighted
+   Spearman vs survey-declared ranks (0.84 → 0.87 cross-fitted). We ship
+   alpha_per_log10_min (rating units per log10-minute of median solve time,
+   ≤ 0) and pop_mean_log10_min (the population centering point, so the average
+   user's adjusted rank equals their stable rank). Alpha is refit from the
+   survey cohort only when a cross-fitted check confirms it still helps;
+   otherwise the validated default ships. The client computes
+   rating' = rating + alpha·(log10(median_minutes) − pop_mean) and maps it
+   through M.
+
+3. RETENTION constants (model.js: KAPPA, Z0, GROWTH, LN_C_PRIOR) for the
    FSRS-style stability map  S = exp(LN_C + KAPPA·(z − Z0) + GROWTH·r),
    R(t) = exp(−t_days / S),  where z = logit(P_cold-solve) is the 3PL cold-solve
    log-odds. Fit by retention NLL over clean post-cutoff repeat chains (repeats
@@ -53,10 +67,14 @@ from datetime import datetime, timezone
 
 import numpy as np
 from scipy.optimize import minimize
+from scipy.stats import spearmanr
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
+
+from auxiliary.compare_rank_surveys import rank_to_scalar  # noqa: E402
+from utils.fit_rank_curves import fit_user_rating  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
 CALIBRATION_P = 0.8
@@ -73,9 +91,21 @@ DEFAULTS = {
     "fat_finger_rate": 0.01,           # 4PL upper-asymptote slip rate (lapse)
     "retention": {"kappa": 4.22, "z0": float(Z0),
                   "growth": float(np.log(1.54)), "ln_c_prior": 1.55},
+    # Time-adjusted rank (validated 2026-06: weighted Spearman 0.84 → 0.87
+    # cross-fitted; see auxiliary/validate_time_adjusted_rating.py).
+    "time_adjust": {"alpha_per_log10_min": -0.41, "pop_mean_log10_min": -0.63},
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
+
+# --- Time-adjusted rank fit knobs ---
+TA_MIN_TIMED = 20          # timed novel attempts needed for a user's time feature
+TA_MIN_PAIRS = 50          # (user, server) survey pairs needed to refit alpha
+TA_MIN_SERVER_USERS = 5    # per-server minimum for a Spearman term
+TA_MIN_ATTEMPTS = 10       # novel rated attempts needed for a survey user's rating
+TA_ALPHA_GRID = np.linspace(-1.5, 0.5, 81)   # rating units per log10-minute
+TA_CV_FOLDS = 5
+TA_CV_SEEDS = 10
 
 
 def sigmoid(x):
@@ -288,6 +318,126 @@ def population_time_bias(by_user_rows, params, review=False, min_n=20):
 
 
 # ---------------------------------------------------------------------------
+# Time-adjusted rank (alpha per log10-minute of median solve time + centering)
+# ---------------------------------------------------------------------------
+def load_surveys(db_path):
+    """Latest parseable declaration per (user, server): [(user, server, scalar)].
+    Empty when the dump carries no rank_surveys table."""
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT user_id, server, rank, created_at FROM rank_surveys "
+            "ORDER BY created_at").fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    latest = {}
+    for user, server, rank, _ in rows:
+        sc = rank_to_scalar(rank)
+        if sc is not None:
+            latest[(user, server)] = sc
+    return [(u, s, sc) for (u, s), sc in latest.items()]
+
+
+def user_median_log10_minutes(urows):
+    """log10(median solving minutes) over novel timed attempts (AFK-capped),
+    or None below TA_MIN_TIMED — the client computes the same from timeTaken."""
+    ts = [r["time_used"] for r in urows
+          if not r["is_repeat"] and r["time_used"]
+          and 0 < r["time_used"] <= AFK_CAP_S * 1000]
+    if len(ts) < TA_MIN_TIMED:
+        return None
+    return float(np.log10(np.median(ts) / 60000.0))
+
+
+def _weighted_spearman(pairs, alpha):
+    """pairs: [(user, server, rating, rank_scalar, centered_feature)]. Per-server
+    Spearman(rating + alpha·feature, declared rank), user-count-weighted mean."""
+    by_server = defaultdict(list)
+    for _, server, rating, sc, f in pairs:
+        by_server[server].append((rating + alpha * f, sc))
+    acc, w = 0.0, 0.0
+    for rows_ in by_server.values():
+        if len(rows_) < TA_MIN_SERVER_USERS:
+            continue
+        r = np.array([x for x, _ in rows_])
+        s = np.array([y for _, y in rows_])
+        if np.ptp(r) == 0 or np.ptp(s) == 0:
+            continue
+        rho = spearmanr(r, s).statistic
+        if np.isfinite(rho):
+            acc += rho * len(rows_)
+            w += len(rows_)
+    return acc / w if w else np.nan
+
+
+def fit_time_adjust(by_user, params, surveys):
+    """Returns (alpha_or_None, pop_mean_or_None, info-string). alpha is refit
+    (grid sweep on the survey cohort, clamped ≤0) only when the cross-fitted
+    improvement over alpha=0 is positive; pop_mean is the centering point over
+    ALL users with a time feature (the average user's rank doesn't move)."""
+    feat = {}
+    for user, urows in by_user.items():
+        f = user_median_log10_minutes(urows)
+        if f is not None:
+            feat[user] = f
+    pop_mean = (float(np.mean(list(feat.values())))
+                if len(feat) >= MIN_BIAS_USERS else None)
+    if pop_mean is None:
+        return None, None, f"only {len(feat)} users with a time feature (<{MIN_BIAS_USERS})"
+
+    raw_ratings = {k: v[0] for k, v in params.items()}
+    slopes = {k: v[1] for k, v in params.items()}
+    rating_of = {}
+    for user in {u for u, _, _ in surveys}:
+        if user not in feat:
+            continue
+        urows = [r for r in by_user.get(user, ())
+                 if not r["is_repeat"] and (r["size"], r["problem"]) in params]
+        if len(urows) < TA_MIN_ATTEMPTS:
+            continue
+        att = [((r["size"], r["problem"]), r["success"]) for r in urows]
+        R, _ = fit_user_rating(att, raw_ratings, slopes=slopes,
+                               min_n=TA_MIN_ATTEMPTS)
+        if R is not None:
+            rating_of[user] = R
+
+    pairs = [(u, server, rating_of[u], sc, feat[u] - pop_mean)
+             for u, server, sc in surveys if u in rating_of]
+    if len(pairs) < TA_MIN_PAIRS:
+        return None, pop_mean, f"only {len(pairs)} survey pairs (<{TA_MIN_PAIRS})"
+
+    base = _weighted_spearman(pairs, 0.0)
+    sweep = [_weighted_spearman(pairs, a) for a in TA_ALPHA_GRID]
+    a_best = float(TA_ALPHA_GRID[int(np.nanargmax(sweep))])
+
+    # Cross-fitted guard: alpha picked on train folds only, applied to held-out
+    # users; ship the refit alpha only if the assembled score beats alpha=0.
+    users_list = sorted(rating_of)
+    cv = []
+    for seed in range(TA_CV_SEEDS):
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(users_list))
+        fold = {users_list[j]: i % TA_CV_FOLDS for i, j in enumerate(order)}
+        a_of_fold = []
+        for k in range(TA_CV_FOLDS):
+            train = [p for p in pairs if fold[p[0]] != k]
+            sw = [_weighted_spearman(train, a) for a in TA_ALPHA_GRID]
+            a_of_fold.append(float(TA_ALPHA_GRID[int(np.nanargmax(sw))]))
+        adj = [(u, server, rating + a_of_fold[fold[u]] * f, sc, 0.0)
+               for u, server, rating, sc, f in pairs]
+        cv.append(_weighted_spearman(adj, 0.0))
+    cv_mean = float(np.mean(cv))
+    info = (f"{len(pairs)} pairs; weighted Spearman base={base:.4f} "
+            f"best={max(sweep):.4f} @ alpha={a_best:+.3f}; "
+            f"cross-fitted {cv_mean:.4f}")
+    if cv_mean <= base:
+        return None, pop_mean, info + " — no held-out gain, keeping default alpha"
+    # Never adjust in the implausible direction (slow ⇒ rated higher).
+    return min(a_best, 0.0), pop_mean, info
+
+
+# ---------------------------------------------------------------------------
 # Retention constants (KAPPA, GROWTH, LN_C_PRIOR), Z0 fixed.
 # ---------------------------------------------------------------------------
 def build_retention_events(rows, params, abilities):
@@ -423,6 +573,20 @@ def main():
               f"→ shipped {out['review_bias_per_min']:+.3f} (clamped ≤0)")
     else:
         print(f"  review-time: only {n_rb} usable users (<{MIN_BIAS_USERS}); keeping default")
+
+    # --- Time-adjusted rank constants ---
+    print("Fitting time-adjusted-rank constants (survey-validated) ...")
+    out["time_adjust"] = dict(DEFAULTS["time_adjust"])
+    ta_alpha, ta_pop_mean, ta_info = fit_time_adjust(by_user, params,
+                                                     load_surveys(args.db))
+    print(f"  {ta_info}")
+    if ta_pop_mean is not None:
+        out["time_adjust"]["pop_mean_log10_min"] = round(ta_pop_mean, 4)
+    if ta_alpha is not None:
+        out["time_adjust"]["alpha_per_log10_min"] = round(ta_alpha, 4)
+    print(f"  shipped alpha={out['time_adjust']['alpha_per_log10_min']:+.3f} "
+          f"rating/log10-min, pop_mean={out['time_adjust']['pop_mean_log10_min']:+.3f} "
+          f"log10-min{' (default alpha)' if ta_alpha is None else ''}")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")
