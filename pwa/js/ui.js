@@ -15,7 +15,7 @@ import { getTerm, getDescriptiveRank } from './i18n.js';
 const isInstalled = () =>
     window.matchMedia('(display-mode: standalone)').matches ||
     window.navigator.standalone === true;
-import { TOTAL_RANKS, APP_MODES } from './constants.js';
+import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
 
@@ -305,10 +305,16 @@ const updateMenuItems = () => {
     document.getElementById('menu-audio').textContent =
         getTerm(state.audioEnabled ? 'disableSound' : 'enableSound');
 
-    // More group — Stats, Account, and About are always available, in every mode.
+    // More group — Stats and About are always available, in every mode.
     statsItem.textContent = getTerm('stats');
     statsItem.classList.remove('disabled');
-    document.getElementById('menu-account').textContent = getTerm('menuAccount');
+    // Account appears only once the one-off history backfill has confirmed
+    // every local attempt is on the server (fresh devices pass immediately) —
+    // until then, logging this account in elsewhere would rebuild from an
+    // incomplete server log and silently lose the unreported history.
+    const accountItem = document.getElementById('menu-account');
+    accountItem.style.display = localStorage.getItem(HISTORY_BACKFILL_DONE_KEY) ? '' : 'none';
+    accountItem.textContent = getTerm('menuAccount');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');

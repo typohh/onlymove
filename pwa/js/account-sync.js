@@ -36,7 +36,7 @@ import {
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateMomentum,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
-import { TOTAL_RANKS } from './constants.js';
+import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
@@ -403,6 +403,9 @@ export function switchAccount(newId) {
         'modelParams', 'adamState',
         'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
         'recallPausedUntil',
+        // The server-side recall schedule snapshot belongs to the old account;
+        // the new account's first upload must go replace-all.
+        'recallScheduleSnapshot',
         SYNC_STATE_KEY,
     ];
     for (const k of wipeKeys) localStorage.removeItem(k);
@@ -497,7 +500,7 @@ export function checkSyncSignal(prevCreatedAt) {
 // after (no cycles — once your day has passed you run on the next open).
 // Spreads the measured ~49k total rows (834 actives, worst user ~5.7k) to
 // ~10k/day during the ramp — far under the 100k/day D1 write quota.
-const BACKFILL_DONE_KEY = 'historyBackfillDone_v1';
+const BACKFILL_DONE_KEY = HISTORY_BACKFILL_DONE_KEY;
 const BACKFILL_SPREAD_DAYS = 5;
 // Anchor of the ramp. Set to (or just after) the deploy date: if the deploy
 // lands later, the slots whose days already passed simply bunch onto the
