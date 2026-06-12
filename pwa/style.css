@@ -100,9 +100,12 @@ body {
     cursor: not-allowed;
     pointer-events: none;
 }
-/* Dialog buttons: reset .btn's full-width landscape stretch so modal buttons
-   size to content (was an inline-style quartet repeated across every dialog). */
-.btn-inline {
+/* Dialog buttons: reset .btn's full-width stretch so modal buttons size to
+   content (was an inline-style quartet repeated across every dialog). The
+   doubled selector out-specifies the later media-query `.btn { width: 100% }`
+   rules, which tie on specificity and would otherwise win on order and
+   stretch every dialog button to the full modal width. */
+.btn.btn-inline {
     flex: 0 0 auto;
     width: auto;
     min-width: 6em;
