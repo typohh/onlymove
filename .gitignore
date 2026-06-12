@@ -59,6 +59,17 @@ activations/
 # pipeline/package_for_pwa.py. Reproducible from activations/ + pca.npz.
 embeddings/joint/per_cell/
 
+# Joint embedding fit outputs (pipeline/build_embedding.py): regenerable from
+# activations/, multi-MB, and churn on every refit. Two files stay TRACKED on
+# purpose: labels.json (handcrafted motif labels) and label_anchors.npz (the
+# frozen anchor directions that let those labels survive refits — frozen at
+# each motif's first appearance, so a refit cannot reproduce them).
+embeddings/joint/pca.npz
+embeddings/joint/per_problem.csv
+embeddings/joint/explained_variance.csv
+embeddings/joint/extreme_problems.json
+embeddings/joint/ica_stability.json
+
 # D1 attempts dump: a large (~50 MB) snapshot pulled from production by
 # pipeline.fetch_database. Regenerable on demand and changes constantly, so it's
 # not version-controlled (the benchmark attempts under attempts/<size>/ are).
