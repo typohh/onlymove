@@ -38,13 +38,10 @@ function weightedRandomSelect(items, weightFn) {
 async function selectProblem() {
     if (state.allProblems.length === 0) return null;
 
-    // Check for nextTsumego first
-    if (state.nextTsumego) {
-        const problem = state.nextTsumego;
-        updateNextTsumego(null);
-        return problem;
-    }
-
+    // Due recalls are served before the stashed nextTsumego: nextTsumego is
+    // the challenge problem that was interrupted by a deep-linked/recall solve
+    // (stashed in loadTsumegoById), and it should come back only once ALL due
+    // recalls are done — not between recall #1 and recall #2.
     const recallCandidates = getRecallCandidates();
 
     if (recallCandidates.length > 0) {
@@ -80,6 +77,13 @@ async function selectProblem() {
         console.error(`Failed to load recall problem ${chosenProblemInfo.problemId}.`);
         state.unavailableProblemIds.add(chosenProblemInfo.problemId);
         return await selectProblem();
+    }
+
+    // No recalls due — resume the stashed (interrupted) challenge problem.
+    if (state.nextTsumego) {
+        const problem = state.nextTsumego;
+        updateNextTsumego(null);
+        return problem;
     }
 
     // Default selection logic (fallback)

@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
 import { runMigrations } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -45,6 +45,7 @@ import { initAudio } from './audio.js';
 function cleanUrl() {
     const url = new URL(window.location);
     url.searchParams.delete('id');
+    url.searchParams.delete('recall');
     let newPath = url.pathname.replace(/index\.html$/, '');
     if (/^\/(9|13)\/?$/.test(newPath)) {
         newPath = '/';
@@ -480,6 +481,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const tsumegoId = urlParams.get('id');
+    // Recall-notification clicks land on /?recall=1 — an intent, not a problem
+    // id. The client picks which recall problem to serve from its own scheduler
+    // state, which is fresher than the Worker's snapshot at push time (the
+    // problem may have been reviewed since, or its window may have closed).
+    const wantsRecall = urlParams.get('recall') === '1';
     const orientationParam = urlParams.get('o');
     let orientation = null;
     if (orientationParam !== null) {
@@ -556,6 +562,36 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
                 const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;
                 await loadTsumegoById(tsumegoId, effectiveOrientation, { asRecall: isRecall });
+            }
+        } else if (wantsRecall) {
+            // Notification click: pick the due recall problem ourselves and
+            // route it through loadTsumegoById's asRecall path — the same one
+            // ?id= recalls use — which stashes the current challenge problem
+            // into nextTsumego; selectProblem hands it back once all due
+            // recalls are exhausted. Prefer the active board; recalls can only
+            // be re-shown on their own board, so if the active size has none
+            // due, take one from the other size (the uploaded schedule spans
+            // both) and let loadTsumegoById switch boards via the lookup
+            // column. If nothing is due anywhere (already reviewed since the
+            // push, or recall is paused), fall back to the normal flow.
+            let candidates = getRecallCandidates();
+            if (candidates.length === 0) {
+                for (const size of SUPPORTED_BOARD_SIZES) {
+                    if (size === state.boardSize) continue;
+                    candidates = getRecallCandidates({ history: getAnswerHistoryForSize(size) });
+                    if (candidates.length > 0) break;
+                }
+            }
+            let loaded = false;
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => a.recallRate - b.recallRate);
+                loaded = await loadTsumegoById(candidates[0].problemId, null, { asRecall: true });
+            }
+            if (!loaded) {
+                await loadTsumego(false);
+                if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
+                    setAppMode(APP_MODES.LINKED);
+                }
             }
         } else {
             // No ID in URL

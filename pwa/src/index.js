@@ -808,11 +808,13 @@ function buildNotificationMessage(enteredIds, exitingIds, backlog) {
     body = 'Tap to open';
   }
 
-  // Deep-link to a single problem when there's only one; otherwise drop the
-  // user at the app root. The PWA's link handler routes in-window problems
-  // through recall mode rather than linked/view mode.
+  // Never deep-link a specific problem: this message is a snapshot, and by
+  // the time the user taps it the problem may already have been reviewed (or
+  // left its window). `?recall=1` tells the client to pick a due recall
+  // problem itself from its own, fresher scheduler state — and to fall back
+  // to normal selection if nothing is due anymore.
   const allIds = [...enteredIds, ...exitingIds];
-  const url = allIds.length === 1 ? `/?id=${allIds[0]}` : '/';
+  const url = '/?recall=1';
 
   return { title, body, url, ids: allIds };
 }
