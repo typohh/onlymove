@@ -45,6 +45,10 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Claude Code harness runtime state (which session holds the scheduled-tasks
+# lock); rewritten every session. settings*.json stay tracked.
+.claude/scheduled_tasks.lock
+
 # Logs
 *.log
 
