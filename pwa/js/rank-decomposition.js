@@ -175,6 +175,21 @@ export function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
     return applyM(rating + deltaRating, c);
 }
 
+// Rating units spanned by ONE normalized-rank unit (the full 0..1 = 29-index
+// scale), from the shipped curve's endpoints (~5.4). This is the unit constant
+// between a rank gap in normalized 0..1 units and the same gap in raw-rating
+// units; the recall model needs it to center its PROBLEM_DIFFICULTY prior (its
+// gap feature is normalized-rank while a_p is per RATING unit). An endpoint
+// mean — local knot slopes vary ~2-11 ranks/rating — the model's fitted
+// multiplier absorbs the local mismatch.
+export function ratingSpanPerNormalizedRank() {
+    const c = curveForSize(9);   // one shared curve, written to both size keys
+    if (!c) return null;
+    const dRating = c.ratings[c.ratings.length - 1] - c.ratings[0];
+    const dRankNorm = (c.rank_indices[c.rank_indices.length - 1] - c.rank_indices[0]) / TOTAL_RANKS;
+    return dRankNorm > 0 ? dRating / dRankNorm : null;
+}
+
 // Stable per-size signature of the loaded curve. Stored ranks are invalidated
 // when this changes (a fit_rank_curves re-fit that didn't also change ratings).
 export function ratingRankCurveVersion(size) {
@@ -447,7 +462,10 @@ function globalPerformanceSigma(resid) {
         const vv = x + d.v;
         return a + d.wgt * (-0.5 * Math.log(vv) - 0.5 * d.r2 / vv);
     }, 0);
-    const target = LL(s2) - 1.92;   // χ²₁ 95% one-parameter drop
+    // 95% drop for a parameter tested at its boundary (σ² ≥ 0): the LR statistic
+    // is a ½χ²₀ + ½χ²₁ mixture there, so the one-sided 95% point is
+    // χ²₁(0.90)/2 = 1.353 — the two-sided χ²₁(0.95)/2 = 1.92 over-widened the bound.
+    const target = LL(s2) - 1.353;
     let lo = s2, hi = s2 + 1, guard = 0;
     while (LL(hi) > target && guard++ < 80) hi *= 2;
     for (let it = 0; it < 80; it++) {

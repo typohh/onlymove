@@ -5,6 +5,7 @@ import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHi
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
+import { ratingSpanPerNormalizedRank } from './rank-decomposition.js';
 import { adamUpdate } from './optimizer.js';
 
 // ------------------------------------------------------------------------------------------------
@@ -124,6 +125,18 @@ const LN_S_TRAIN_MAX = 8;
 // a_p = A_REF and c_p = 0, i.e. the previous 2PL behaviour.
 const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
 
+// Neutral value of the PROBLEM_DIFFICULTY multiplier — the coefficient at which
+// coeff·a_p·(rank gap in NORMALIZED 0..1 units) equals the 2PL's a_p·(gap in
+// raw-rating units): the rating span of the full rank scale (~5.4 from the
+// shipped curve). The L2 prior shrinks toward THIS, not 1.0: a_p is per rating
+// unit, so a target of 1.0 was unit-inconsistent by that same ~5.4 factor — and
+// since at lambda=10 the prior dominates the <1 nat of Fisher information even
+// a full 500-attempt history carries on this coefficient, it pinned the fitted
+// difficulty slope ~5x too flat (reported logit/rank ~0.06 vs the ~0.28
+// everything else is calibrated to, and a retention z far flatter than the
+// rating-space z KAPPA was fit against in pipeline.fit_population_constants).
+const DIFFICULTY_NEUTRAL = ratingSpanPerNormalizedRank() ?? 5.4;
+
 // Inner logit (linear in params): excludes the per-problem κ(floor) offset and
 // the retention-only SUCCESS_SINCE_FAILURE / LN_C. Reads MODEL_INDICES at call
 // time (defined below).
@@ -159,8 +172,9 @@ function retentionLogit(features, params, floor) {
 // sharper problem separates abilities more steeply. Feeding the user-vs-problem
 // delta (not absolute rank) makes "how hard is this *for this user*" explicit
 // and robust at cold start instead of leaning on the INTERCEPT to absorb
-// userRank. The fitted coefficient is now a dimensionless ~1 multiplier on a_p
-// (it also soaks up the rank↔rating unit constant). `userRank` defaults to the
+// userRank. The fitted coefficient is a multiplier on a_p whose neutral value
+// is DIFFICULTY_NEUTRAL ≈ 5.4 — the rank↔rating unit constant, since the gap is
+// in normalized rank units while a_p is per rating unit. `userRank` defaults to the
 // active shared rank; training rows approximate it with the current rank. When
 // userRank is unknown (very early), falls back to absolute. `slope` defaults to
 // A_REF for legacy rows that predate per-problem a_p.
@@ -222,8 +236,10 @@ export function recentFailureWindowHours(params, history, { userRank, days = 7, 
     if (!Array.isArray(history)) return null;
     const cutoff = Date.now() - days * 24 * 3600e3;
     const recent = history.filter(a => typeof a.date === 'number' && a.date >= cutoff);
-    // Review-percentile basis: the same recent review totals the scheduler ranks against.
-    const allReviewTimes = recent
+    // Review-percentile basis: the same window the scheduler ranks against
+    // (getRecallCandidates: the last RECALL_CANDIDATE_HISTORY_LENGTH entries),
+    // not just the 7-day failure window being scored.
+    const allReviewTimes = history.slice(-RECALL_CANDIDATE_HISTORY_LENGTH)
         .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
         .filter(t => t > 0)
         .sort((a, b) => a - b);
@@ -284,18 +300,24 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     grad[M.PROBLEM_DIFFICULTY] += eL * features[M.PROBLEM_DIFFICULTY];
     grad[M.SIZE_IS_13] += eL * features[M.SIZE_IS_13];
 
-    // Retention head (repeat rows): fits LN_C only; z is stop-gradient.
-    if (isRepeat) {
+    // Retention head (repeat rows): fits LN_C only; z is stop-gradient. Skipped
+    // when the elapsed gap is unknown (elapsedDays === null: the previous attempt
+    // fell outside the history window) — without a true t the retention
+    // likelihood is meaningless; the old elapsedDays=0 fallback injected a
+    // constant ~34-nat loss on failed rows while contributing zero gradient.
+    if (isRepeat && elapsedDays !== null) {
         const z = retentionLogit(features, params, c);
-        let lnS = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
-        lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnS));
+        const lnSRaw = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
+        const lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnSRaw));
         const S = Math.exp(lnS);
         const u = elapsedDays / S;          // ≥ 0; u=0 ⇒ R=1 (just solved)
         const R = Math.exp(-u);
         const Rc = Math.max(1e-15, Math.min(1 - 1e-15, R));
         loss += -y * Math.log(Rc) - (1 - y) * Math.log(1 - Rc);
         const oneMinusR = Math.max(1 - R, 1e-9);
-        grad[M.LN_C] += (R - y) * u / oneMinusR;   // dlnS/dLN_C = 1
+        // dlnS/dLN_C = 1 inside the clamp, 0 at the rails — a clamped row
+        // contributes loss but no LN_C gradient (the clamp owns lnS there).
+        if (lnSRaw === lnS) grad[M.LN_C] += (R - y) * u / oneMinusR;
     }
     return { loss, grad, pLogistic: P };
 }
@@ -500,11 +522,11 @@ const L2_REGULARIZATION_TARGETS = {
     // user can't read 50% (it saturated to ~100% when these were fixed at -0.1).
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
-    // Now a dimensionless multiplier on the per-problem a_p·(rank gap): 1.0 = the
-    // shipped 3PL discrimination is right as-is for this user. Shrunk to 1 (was a
-    // raw in-band slope of -1.5 in the pre-3PL parameterization, before a_p and
-    // the κ(floor) anchor carried the difficulty shape).
-    [MODEL_INDICES.PROBLEM_DIFFICULTY]: 1.0,
+    // Multiplier on the per-problem a_p·(rank gap). Neutral ("the shipped
+    // discrimination is right as-is for this user") is DIFFICULTY_NEUTRAL ≈ 5.4,
+    // NOT 1.0: the gap feature is in normalized 0..1 rank units while a_p is per
+    // raw-rating unit (see DIFFICULTY_NEUTRAL above).
+    [MODEL_INDICES.PROBLEM_DIFFICULTY]: DIFFICULTY_NEUTRAL,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
     [MODEL_INDICES.SIZE_IS_13]: 0,
     // SUCCESS_SINCE_FAILURE carries no fitted coefficient (growth is constant) —
@@ -584,7 +606,10 @@ export function getLogitPerRank(statsResults) {
     if (!pd || !isFinite(pd.coeff) || !isFinite(pd.se) || pd.se <= 0) {
         return LOGIT_PER_RANK_PRIOR;
     }
-    const userSlope = Math.abs(pd.coeff);
+    // Signed: a negative fitted slope is weak/contrary evidence and should pull
+    // the blend DOWN toward the floor, not flip into positive evidence (the old
+    // Math.abs did exactly that). The 0.05 floor below keeps the result usable.
+    const userSlope = pd.coeff;
     const userPrecision = 1 / (pd.se * pd.se);
     const blended = (priorPrecision * LOGIT_PER_RANK_PRIOR + userPrecision * userSlope)
         / (priorPrecision + userPrecision);
@@ -670,10 +695,19 @@ export function prepareTrainingData(history, validHistory) {
         }
         return 0;
     });
-    const reviewTimes = previousReviewTimes.filter(t => t > 0);
-    const sortedReview = [...reviewTimes].sort((a, b) => a - b);
+    // Percentile basis: the SAME distribution the scheduler ranks against
+    // (getRecallCandidates / buildRecallSchedule) — review totals
+    // (accumulatedReview + reviewTime, positive only) over the last
+    // RECALL_CANDIDATE_HISTORY_LENGTH entries — so the trained coefficient is
+    // applied at scheduling on the percentile scale it was fit on. (Was the
+    // repeats-only accumulatedReview of the 500-row training window: a smaller-
+    // valued distribution that shifted every percentile between train and serve.)
+    const sortedReview = validHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH)
+        .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
+        .filter(t => t > 0)
+        .sort((a, b) => a - b);
     let time_per_percentile_min_r = 0;
-    if (reviewTimes.length > 0) {
+    if (sortedReview.length > 0) {
         const idx_low_r = Math.floor(p_low * (sortedReview.length - 1));
         const idx_high_r = Math.ceil(p_high * (sortedReview.length - 1));
         time_per_percentile_min_r = (sortedReview[idx_high_r] - sortedReview[idx_low_r]) / (60000 * (p_high - p_low));
@@ -682,12 +716,15 @@ export function prepareTrainingData(history, validHistory) {
     const percentileReview = previousReviewTimes.map(t => calculatePercentile(sortedReview, t));
 
     // Elapsed days since each repeat row's previous attempt of the same problem
-    // (the retention head's t). Zero for novel rows (they use the logistic head).
+    // (the retention head's t). Zero for novel rows (they use the logistic head);
+    // null for a repeat whose previous attempt fell outside validHistory — there
+    // is no usable gap, so predictAndGrad skips its retention term (the row
+    // still trains the correctness head).
     const DAY = 1000 * 60 * 60 * 24;
     const elapsedDays = history.map(p => {
         if (!p.isRepeat) return 0;
         const prev = validHistory.filter(a => a.problemId === p.problemId && a.date < p.date).pop();
-        if (!prev) return 0;
+        if (!prev) return null;
         return Math.max(0, (p.date - prev.date) / DAY);
     });
     const isRepeatArr = history.map(p => !!p.isRepeat);
