@@ -31,6 +31,7 @@ import {
 import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
+import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
@@ -157,18 +158,12 @@ async function pruneRemovedProblems(embeddingVersion, ratingsVersionsBySize) {
 
     // Authoritative current-corpus membership. Bail on any fetch failure or an
     // empty manifest so a transient blip can't strip a legitimate history.
-    let currentIds;
-    try {
-        const resp = await fetch(`lookup.txt?v=${APP_VERSION}`);
-        if (!resp.ok) return false;
-        const text = await resp.text();
-        currentIds = new Set();
-        for (const line of text.split('\n')) {
-            const id = line.split(/\s+/)[0];
-            if (id) currentIds.add(id);
-        }
-    } catch (_) {
-        return false;
+    const lines = await fetchLookupLines();
+    if (!lines) return false;
+    const currentIds = new Set();
+    for (const line of lines) {
+        const id = line.split(/\s+/)[0];
+        if (id) currentIds.add(id);
     }
     if (currentIds.size === 0) return false;
 
@@ -317,11 +312,10 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         }
 
         // Read lookup.txt and pick rows matching this size.
-        const lookupResp = await fetch(`lookup.txt?v=${APP_VERSION}`);
-        if (!lookupResp.ok) return 0;
-        const text = await lookupResp.text();
+        const lookupLines = await fetchLookupLines();
+        if (!lookupLines) return 0;
         const lookupMap = new Map();
-        for (const line of text.split('\n')) {
+        for (const line of lookupLines) {
             const parts = line.trim().split(/\s+/);
             if (parts.length >= 3 && parseInt(parts[2]) === size) {
                 lookupMap.set(parts[0], parts[1]);

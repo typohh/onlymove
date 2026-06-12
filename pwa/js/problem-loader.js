@@ -520,13 +520,29 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
     }
 }
 
+// Fetches the global lookup.txt corpus manifest (one "id zipHash size" row
+// per problem, sorted by id) and returns its non-empty lines, or null on any
+// fetch failure so callers can bail rather than act on a partial manifest.
+// The single fetch/split for every lookup.txt consumer (the resolver below
+// and embedding-backfill.js) — keep it that way so the parses can't drift.
+export async function fetchLookupLines() {
+    try {
+        const response = await fetch(`lookup.txt?v=${APP_VERSION}`);
+        if (!response.ok) return null;
+        const text = await response.text();
+        return text.split('\n').filter(line => line.trim() !== '');
+    } catch (_) {
+        return null;
+    }
+}
+
 // Resolves a tsumego id to its zip hash and board size by binary-searching
 // the global lookup.txt. Each row is "id zipHash size". Returns null when
-// the id is unknown, otherwise { zipId, size }.
+// the id is unknown (or the manifest can't be fetched), otherwise
+// { zipId, size }.
 export async function findZipIdForTsumegoId(tsumegoId) {
-    const response = await fetch(`lookup.txt?v=${APP_VERSION}`);
-    const text = await response.text();
-    const lines = text.split('\n').filter(line => line.trim() !== '');
+    const lines = await fetchLookupLines();
+    if (!lines) return null;
 
     let low = 0;
     let high = lines.length - 1;
