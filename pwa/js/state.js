@@ -341,7 +341,6 @@ export const state = {
     linkedId: null,
 
     statsResults: null,
-    learningRate: parseFloat(localStorage.getItem('learningRate')) || 5,
 
     // Unix-ms timestamp until which recalls are paused (no recall candidates
     // are returned). 0 / NaN / past timestamps all mean "not paused". Shared
@@ -667,11 +666,6 @@ export function setModelParams(params) {
 
 export function setAdamState(adamState) {
     state.adamState = adamState;
-}
-
-export function setLearningRate(rate) {
-    state.learningRate = rate;
-    localStorage.setItem('learningRate', rate.toString());
 }
 
 // Switch to another supported size. Resets the in-memory problem pool so the

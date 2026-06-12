@@ -19,7 +19,6 @@ import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 // at which the user clears it CALIBRATION_P of the time (matches the backend
 // fit_user_rating / fit_rank_curves and map_rating_v2_to_egf).
 export const CALIBRATION_P = 0.8;
-export const LOGIT_CALIBRATION = Math.log(CALIBRATION_P / (1 - CALIBRATION_P));
 
 // Guessing floors are shipped raw by package_for_pwa. Clamp below CALIBRATION_P
 // so κ(c) = logit((CALIBRATION_P − c)/(1 − c − LAPSE)) stays finite (κ → ∞ as

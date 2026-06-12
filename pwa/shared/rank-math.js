@@ -24,17 +24,6 @@ export function interpExtrap(x, xs, ys) {
 }
 
 /**
- * Parse a kyu/dan label ("5k", "3d") to a rank scalar. Returns null on a
- * malformed label.
- */
-export function rankLabelToScalar(label) {
-    const m = /^(\d+)([kd])$/.exec(String(label || ''));
-    if (!m) return null;
-    const n = parseInt(m[1], 10);
-    return m[2] === 'k' ? 1 - n : n;
-}
-
-/**
  * Rank scalar → nearest kyu/dan label. Rounds to the nearest band first, so a
  * continuous scalar maps to the closest whole rank.
  */

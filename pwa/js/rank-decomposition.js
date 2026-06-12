@@ -161,10 +161,6 @@ export function normalizedRankForSize(rawRating, size) {
     return applyM(rawRating, c) / TOTAL_RANKS;
 }
 
-export function isRatingRankMapLoaded() {
-    return _ratingRankMap != null;
-}
-
 // Apply a RATING-space delta to a rank index: invert M at the rank index, shift
 // by deltaRating (raw rating units), re-apply M. Exact rather than linearized
 // via M', so it stays correct across knot boundaries. The curve is shared
