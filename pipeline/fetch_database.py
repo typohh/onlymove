@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -108,9 +109,84 @@ def rebuild_sqlite(sql_file):
     print("Local SQLite DB rebuilt successfully.")
 
 
+def _table_names_from_dump(sql_file):
+    """Return the table names defined in the D1 dump, in declaration order.
+
+    Matches both `CREATE TABLE x (` and `CREATE TABLE IF NOT EXISTS "x" (`.
+    """
+    pat = re.compile(
+        r'^CREATE TABLE(?:\s+IF NOT EXISTS)?\s+["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?',
+        re.IGNORECASE,
+    )
+    names = []
+    seen = set()
+    with open(sql_file, "r", encoding="utf-8") as f:
+        for line in f:
+            m = pat.match(line)
+            if m and m.group(1) not in seen:
+                seen.add(m.group(1))
+                names.append(m.group(1))
+    return names
+
+
+def update_local_d1(sql_file):
+    """
+    Mirror the freshly-fetched dump into wrangler's *local* D1 — the miniflare
+    database under pwa/.wrangler/state that `npm run dev` serves — so local dev
+    runs against production data.
+
+    D1's export emits bare `CREATE TABLE` (no IF NOT EXISTS) for most tables, so
+    re-importing the dump over an existing local DB would error on the first
+    CREATE. We therefore: (1) DROP the dump's tables, (2) import the dump
+    (recreates tables + data), (3) apply the idempotent schema.sql to (re)create
+    any tables/indexes the dump omits — D1 export drops empty tables, and a dump
+    can lag a newly-added index. All three run via `wrangler d1 execute DB
+    --local` from the pwa dir, where the `DB` binding in wrangler.toml resolves.
+
+    A wrangler failure here is non-fatal: the remote dump (the pipeline's actual
+    product) is already on disk, so we warn and return rather than aborting.
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    pwa_dir = os.path.join(project_root, "pwa")
+    schema_file = os.path.join(pwa_dir, "schema.sql")
+
+    tables = _table_names_from_dump(sql_file)
+    if not tables:
+        print("\nWarning: no CREATE TABLE statements found in dump; skipping local D1 update.")
+        return
+
+    print("Updating local wrangler D1 (the `npm run dev` database)...")
+
+    base = ["npx", "wrangler", "d1", "execute", "DB", "--local"]
+    steps = [
+        # 1. Drop the dump's tables so its bare CREATE TABLEs don't collide.
+        base + ["--command", "".join(f'DROP TABLE IF EXISTS "{t}";' for t in tables)],
+        # 2. Recreate the tables and load their rows from the fetched dump.
+        base + [f"--file={os.path.abspath(sql_file)}"],
+    ]
+    # 3. Backfill tables/indexes the dump omits (empty tables, newer indexes).
+    if os.path.exists(schema_file):
+        steps.append(base + [f"--file={schema_file}"])
+
+    try:
+        for cmd in steps:
+            subprocess.run(cmd, cwd=pwa_dir, check=True)
+    except FileNotFoundError:
+        print("\nError: 'npx' command not found. Ensure Node.js and npm are installed.")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print(f"\nWarning: failed to update local wrangler D1: {e}")
+        print("(The remote dump was fetched fine; only the local dev DB was not refreshed.)")
+        return
+
+    print("Local wrangler D1 updated successfully.")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch the latest D1 database dump, optionally rebuilding the local SQLite DB."
+        description="Fetch the latest D1 database dump, refresh wrangler's local "
+                    "dev D1 with it, and optionally rebuild the local SQLite DB."
     )
     parser.add_argument(
         "--rebuild-sqlite",
@@ -118,11 +194,19 @@ def main():
         help="After fetching, reconstruct attempts/database.sqlite from the dump "
              "(drops and re-imports under a single transaction).",
     )
+    parser.add_argument(
+        "--no-local-d1",
+        action="store_true",
+        help="Skip refreshing wrangler's local D1 (the `npm run dev` database) "
+             "with the fetched dump.",
+    )
     args = parser.parse_args()
 
     sql_file = fetch_database()
     if args.rebuild_sqlite:
         rebuild_sqlite(sql_file)
+    if not args.no_local_d1:
+        update_local_d1(sql_file)
 
 
 if __name__ == "__main__":
