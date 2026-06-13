@@ -128,6 +128,7 @@
     <h2>Features</h2>
     <ul>
         <li>It can be installed from your browser as a standalone app.</li>
+        <li>Your progress is tied to a personal account code, shown under the Account menu. Enter the same code on another device to keep your solving history and rank in sync everywhere you play.</li>
         <li>The review mode has numerous positions pre-evaluated by <code>kata9x9-b18c384nbt-20231025</code> with a minimum of 30 playouts, usually hundreds of playouts.</li>
         <li>For positions that have not been pre-evaluated, it uses a server to provide <code>kata9x9-b18c384nbt-20231025</code> with 1 playout to analyze positions.</li>
         <li>Upon failure, if you played too fast and you get better results when you think for longer, a slow red screen will appear.</li>
@@ -142,7 +143,9 @@
 
     <h2>Changelog</h2>
     <ul>
-        <li><strong>2026-06-07:</strong> Added a link to the community Discord, both in the menu and at the bottom of this page.</li>
+        <li><strong>2026-06-13:</strong> Your progress is now a portable account. Open Account (menu → More) to see your personal code, then enter it on another device to sync your full solving history and rank across all your devices. The Rank tab's chart also gained a server selector — switch between OnlyMove's own rank and how your strength would read on each Go server, adjusted for your typical solving speed. Tapping your front-page rank shows the same per-server, time-adjusted ranks.</li>
+        <li><strong>2026-06-12:</strong> Added a sound on/off toggle to the menu. Tapping a review reminder now always opens whichever problem is actually due, rather than one you may have already cleared. Corrected several details in the stats and rank math for more accurate recall difficulty, weakness trends, time comparisons, and confidence bands.</li>
+        <li><strong>2026-06-07:</strong> Added a link to the community Discord, both in the menu and at the bottom of this page. A rare misclick on an easy problem no longer dents your rank, problem difficulty is now centered so you clear about 80% of the problems you are served, and some front-page ranks that had drifted were re-anchored.</li>
         <li><strong>2026-06-06:</strong> Added five new weakness motifs (with Chinese, Japanese, and Korean translations) to the recommender and stats page. The "comes back in about X hours" estimate shown when you fail a problem is now based on your own recent recall performance rather than idealized assumptions. The Time tab now shows how confident the app is that thinking longer actually helps you. Added a brief loading splash so the app no longer flashes a half-built screen on startup.</li>
         <li><strong>2026-06-05:</strong> The post-failure "don't rush" and "review more" warnings are now bias-corrected and only appear when there is real evidence that slowing down would help you. Improved the estimate of your chance of solving an unfamiliar problem, including the realistic chance of a lucky guess on hard ones.</li>
         <li><strong>2026-06-04:</strong> Added decorative ink-wash corner artwork that adapts to light and dark themes. Strong players can now climb past 9 dan, with rank gains smoothly slowing at the top. The skill estimate on the Rank tab now focuses on problems near your own rank for a cleaner read of your progress.</li>
