@@ -632,7 +632,11 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     inputs_hash equal to the current size_inputs_hash AND the output zips still
     exist, the shard build is SKIPPED (the expensive SGF reparse + zip/bin write)
     and the cached ratings_hash is reused — so a curve-only or no-op re-run is near
-    instant. `force` bypasses the skip. reorder_by_sgf/n_workers → create_packages."""
+    instant. `force` bypasses the skip. If embeddings/ is absent (e.g. the GPU
+    artifacts were cleaned up) the shards can't be rebuilt: existing shards are kept
+    as-is (returns (None, None, None), leaving meta + manifest untouched) so a
+    curve/constants-only publish still works; only missing shards are then fatal.
+    reorder_by_sgf/n_workers → create_packages."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
@@ -654,6 +658,26 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
     have_zips = os.path.isdir(zip_dir) and any(
         f.endswith(".zip") for f in os.listdir(zip_dir))
+
+    # Embeddings absent: the shards CANNOT be (re)built. They may, however, already
+    # exist from a prior full run on a machine where the heavy embeddings/ artifacts
+    # have since been cleaned up. In that case leave the shards, the served
+    # embedding_meta.json and the manifest entry UNTOUCHED (sentinel return) so a
+    # curve/constants-only re-run still succeeds — the rating→rank curve and the
+    # population constants are published separately (copy_curve) and don't depend on
+    # the shard build. Only a missing shard set with no embeddings to build from is
+    # fatal. This also sidesteps size_inputs_hash dropping its embedding terms when
+    # embeddings/ is gone, which would otherwise change the hash and force a doomed
+    # rebuild instead of the skip the unchanged shards deserve.
+    if _embeddings_dir(board_size)[0] is None:
+        if have_zips:
+            print("  embeddings/ absent but shards present — keeping shards, "
+                  "embedding_meta and manifest untouched (curve/constants-only run)")
+            return None, None, None
+        raise FileNotFoundError(
+            f"no embeddings under embeddings/{{joint,{board_size}}}/ AND no existing "
+            f"shards in {zip_dir} — run build_embedding first")
+
     if (not force and prev and have_zips
             and prev.get("inputs_hash") == inputs_hash
             and prev.get("ratings_hash")):
@@ -804,7 +828,9 @@ if __name__ == "__main__":
 
     joint_embedding_meta = None
     ratings_versions = {}
-    size_manifest = {}
+    # Seed with the prior manifest so a size that no-ops this run (unchanged shards,
+    # or embeddings/ absent) keeps its recorded entry instead of being dropped.
+    size_manifest = dict(prev_sizes)
     for size in ALL_BOARD_SIZES:
         meta, ratings_hash, inputs_hash = process_size(
             size, OUTPUT_DIR,
