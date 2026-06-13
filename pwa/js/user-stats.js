@@ -12,6 +12,13 @@ import { recordReportAck, checkSyncSignal } from './account-sync.js';
 import { momentumRankStep } from './momentum-rank.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
+    // Linked-mode problems are rank-frozen URL-shares: updateUserStats already
+    // early-returns on currentProblem.linked so they never enter local history,
+    // and they must not be logged to D1 either (no rank-frozen share attempt
+    // should count toward the corpus or anyone's stats). Gate on the SAME flag so
+    // "report to D1" and "enter local history" stay in lockstep — one source of
+    // truth for "don't record this attempt".
+    if (state.problemHistory[0]?.linked) return;
     try {
         const problemFilename = state.problemHistory[0].filename;
         const problemId = problemFilename.replace(/\.[^/.]+$/, "");
