@@ -1023,21 +1023,25 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // (non-onlymove) server views: the skill line is corrected for the user's
     // typical solving time AT THAT POINT IN TIME — medMin varies over history, so
     // the correction is temporal — since practice here is untimed while server
-    // ranks reflect timed play. alpha and the centering are population constants
-    // (fit_population_constants); only the median is temporal. Where time data is
-    // thin the shift degrades smoothly to the whole-history correction (see
+    // ranks reflect timed play. alpha and the time-vs-rank line (g0/g1) are
+    // population constants (fit_population_constants); the per-point center is the
+    // time EXPECTED for the skill at that point (e.S, a rank index), so only time
+    // unexplained by rank shifts the line. Only the median is temporal. Where time
+    // data is thin the shift degrades smoothly to the whole-history correction (see
     // makeMedianSolveMinutesAt). delta = 0 (constants or timed data unavailable) ⇒
     // the timed view becomes pure rank translation with no time correction.
     const ta = getPopulationConstants()?.time_adjust;
     const medAt = makeMedianSolveMinutesAt(history);
     const haveTimeAdjust = !!(ta && Number.isFinite(ta.alpha_per_log10_min)
-        && Number.isFinite(ta.pop_mean_log10_min) && medAt);
+        && Number.isFinite(ta.time_vs_rank_intercept)
+        && Number.isFinite(ta.time_vs_rank_slope) && medAt);
     for (const e of gridEvals) {
         let d = 0;
         if (haveTimeAdjust) {
             const m = medAt(e.t);
             if (Number.isFinite(m) && m > 0) {
-                d = ta.alpha_per_log10_min * (Math.log10(m) - ta.pop_mean_log10_min);
+                const expectedLog10 = ta.time_vs_rank_intercept + ta.time_vs_rank_slope * e.S;
+                d = ta.alpha_per_log10_min * (Math.log10(m) - expectedLog10);
             }
         }
         e.delta = d;

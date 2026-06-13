@@ -96,7 +96,7 @@ export async function showRankTranslation() {
     // timed play, so a slow solver's untimed rank overstates their timed
     // strength. Same single-point correction the Rank-chart server views use
     // (whole-history median solve time → rating delta → mapped through M).
-    const deltaRating = timeAdjustDeltaRating(getMergedAnswerHistory());
+    const deltaRating = timeAdjustDeltaRating(getMergedAnswerHistory(), rankValue);
     const adjusted = deltaRating !== null;
     const adjValue = adjusted ? rankIndexAfterRatingDelta(rankValue, deltaRating) : rankValue;
     const adjIndex = Number.isFinite(adjValue) ? adjValue : rankValue;

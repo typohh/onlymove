@@ -19,16 +19,21 @@ Three groups of constants:
 2. TIME-ADJUSTED-RANK constants (stats-ui.js, the Rank tab's "time adjusted
    rank"). Practice here is untimed while server ranks reflect timed play, so a
    user who leans on long thinking time clears more than their server rank
-   implies. Validated in auxiliary/validate_time_adjusted_rating.py: adjusting
-   rating by the user's median solving time raises the per-server-weighted
-   Spearman vs survey-declared ranks (0.84 → 0.87 cross-fitted). We ship
-   alpha_per_log10_min (rating units per log10-minute of median solve time,
-   ≤ 0) and pop_mean_log10_min (the population centering point, so the average
-   user's adjusted rank equals their stable rank). Alpha is refit from the
-   survey cohort only when a cross-fitted check confirms it still helps;
-   otherwise the validated default ships. The client computes
-   rating' = rating + alpha·(log10(median_minutes) − pop_mean) and maps it
-   through M.
+   implies. The time feature is RANK-RESIDUALIZED: each user is centered on the
+   solving time EXPECTED FOR THEIR RANK (a linear log10(median-min)=g0+g1·rank
+   line fit over the active population), NOT a single global mean — so only time
+   unexplained by rank moves the rank (a player merely as slow as is typical for
+   their level gets no dock; this is the strong-but-deliberate case the old global
+   centering over-penalized). We ship alpha_per_log10_min (rating units per
+   log10-minute, ≤ 0) plus time_vs_rank_intercept / time_vs_rank_slope (the g0/g1
+   line, log10-min per rank index). Alpha is refit from the survey cohort only
+   when a cross-fitted check confirms it still helps; otherwise the validated
+   default ships. The client reproduces the SAME centering (it has the user's rank
+   index): rating' = rating + alpha·(log10(median_minutes) − (g0 + g1·rank_index))
+   then maps through M — fit and application share the identical feature, so the
+   alpha (the rank-controlled partial time effect) is valid as applied. (A global
+   center applied with this partial alpha would be a mismatch; measured no better
+   than today and worse-principled — the gain lives entirely in the centering.)
 
 3. RETENTION constants (model.js: KAPPA, Z0, GROWTH, LN_C_PRIOR) for the
    FSRS-style stability map  S = exp(LN_C + KAPPA·(z − Z0) + GROWTH·r),
@@ -74,7 +79,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.compare_rank_surveys import rank_to_scalar  # noqa: E402
-from utils.fit_rank_curves import fit_user_rating  # noqa: E402
+from utils.fit_rank_curves import fit_user_rating, interp_extrap_vec  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
 CALIBRATION_P = 0.8
@@ -91,9 +96,12 @@ DEFAULTS = {
     "fat_finger_rate": 0.01,           # 4PL upper-asymptote slip rate (lapse)
     "retention": {"kappa": 4.22, "z0": float(Z0),
                   "growth": float(np.log(1.54)), "ln_c_prior": 1.55},
-    # Time-adjusted rank (validated 2026-06: weighted Spearman 0.84 → 0.87
-    # cross-fitted; see auxiliary/validate_time_adjusted_rating.py).
-    "time_adjust": {"alpha_per_log10_min": -0.41, "pop_mean_log10_min": -0.63},
+    # Time-adjusted rank (rank-RESIDUALIZED: center each user on the time expected
+    # for their rank via the log10(median-min)=g0+g1·rank_index line, not a global
+    # mean). Fallback values (= the validated 2026-06-14 fit); main() overwrites with
+    # the fresh fit when it validates.
+    "time_adjust": {"alpha_per_log10_min": -0.45, "time_vs_rank_intercept": -0.7719,
+                    "time_vs_rank_slope": 0.005826},
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
@@ -339,6 +347,28 @@ def load_surveys(db_path):
     return [(u, s, sc) for (u, s), sc in latest.items()]
 
 
+def load_rating_to_rank(ratings_dir):
+    """rating→rank-index interpolator M from ratings_v2/rating_to_rank.json (one
+    shared curve; the size-9 key stands in for either board). None if absent/bad —
+    the caller then keeps the default time_adjust block."""
+    path = os.path.join(ratings_dir, "rating_to_rank.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            m = json.load(f)
+    except (ValueError, OSError):
+        return None
+    c = m.get("9") or next(iter(m.values()), None)
+    if not c:
+        return None
+    xs = np.asarray(c.get("ratings", []), float)
+    ys = np.asarray(c.get("rank_indices", []), float)
+    if xs.size < 2 or ys.size != xs.size:
+        return None
+    return lambda r: float(interp_extrap_vec(np.asarray([r], float), xs, ys)[0])
+
+
 def user_median_log10_minutes(urows):
     """log10(median solving minutes) over novel timed attempts (AFK-capped),
     or None below TA_MIN_TIMED — the client computes the same from timeTaken."""
@@ -371,49 +401,67 @@ def _weighted_spearman(pairs, alpha):
     return acc / w if w else np.nan
 
 
-def fit_time_adjust(by_user, params, surveys):
-    """Returns (alpha_or_None, pop_mean_or_None, info-string). alpha is refit
-    (grid sweep on the survey cohort, clamped ≤0) only when the cross-fitted
-    improvement over alpha=0 is positive; pop_mean is the centering point over
-    ALL users with a time feature (the average user's rank doesn't move)."""
-    feat = {}
-    for user, urows in by_user.items():
-        f = user_median_log10_minutes(urows)
-        if f is not None:
-            feat[user] = f
-    pop_mean = (float(np.mean(list(feat.values())))
-                if len(feat) >= MIN_BIAS_USERS else None)
-    if pop_mean is None:
-        return None, None, f"only {len(feat)} users with a time feature (<{MIN_BIAS_USERS})"
+def fit_time_adjust(by_user, params, surveys, apply_m):
+    """Returns (alpha, time_vs_rank_intercept, time_vs_rank_slope, info); any numeric
+    is None when too sparse to fit (caller keeps the default block).
 
+    The time feature is RANK-RESIDUALIZED: instead of centering every user on one
+    population-mean solving time, we center on the time EXPECTED FOR THEIR RANK — a
+    linear log10(median-min)=g0+g1·rank_index line fit over the active population —
+    so only solving time UNEXPLAINED by rank drives the adjustment. The client ships
+    g0/g1 and the user's own rank index, reproducing the identical feature, so the
+    fitted alpha (the rank-controlled partial time effect, rating units per log10-min)
+    is valid as applied. alpha is still refit by the cross-validated survey Spearman
+    sweep, clamped ≤0; g0/g1 come from the OLS time-vs-rank line."""
     raw_ratings = {k: v[0] for k, v in params.items()}
     slopes = {k: v[1] for k, v in params.items()}
-    rating_of = {}
-    for user in {u for u, _, _ in surveys}:
-        if user not in feat:
+
+    # Time feature + our 80%-clear rating/rank for every user that has both. The raw
+    # rating feeds the survey Spearman term (so alpha lands in rating units); the rank
+    # index feeds the residualization line. Computed over the FULL population (not just
+    # survey users) so the line is a stable population fit.
+    feat, rating_of, rank_of = {}, {}, {}
+    for user, urows in by_user.items():
+        f = user_median_log10_minutes(urows)
+        if f is None:
             continue
-        urows = [r for r in by_user.get(user, ())
+        feat[user] = f
+        if apply_m is None:
+            continue
+        rated = [r for r in urows
                  if not r["is_repeat"] and (r["size"], r["problem"]) in params]
-        if len(urows) < TA_MIN_ATTEMPTS:
+        if len(rated) < TA_MIN_ATTEMPTS:
             continue
-        att = [((r["size"], r["problem"]), r["success"]) for r in urows]
-        R, _ = fit_user_rating(att, raw_ratings, slopes=slopes,
-                               min_n=TA_MIN_ATTEMPTS)
+        att = [((r["size"], r["problem"]), r["success"]) for r in rated]
+        R, _ = fit_user_rating(att, raw_ratings, slopes=slopes, min_n=TA_MIN_ATTEMPTS)
         if R is not None:
             rating_of[user] = R
+            rank_of[user] = apply_m(R)
 
-    pairs = [(u, server, rating_of[u], sc, feat[u] - pop_mean)
-             for u, server, sc in surveys if u in rating_of]
+    pop = [u for u in feat if u in rank_of]
+    if len(pop) < MIN_BIAS_USERS:
+        return None, None, None, f"only {len(pop)} users with time+rank (<{MIN_BIAS_USERS})"
+
+    # Time-vs-rank line: log10(median min) = g0 + g1·rank_index (OLS over the pop).
+    rk = np.array([rank_of[u] for u in pop])
+    tt = np.array([feat[u] for u in pop])
+    g1, g0 = (float(x) for x in np.polyfit(rk, tt, 1))     # slope, intercept
+    resid = {u: feat[u] - (g0 + g1 * rank_of[u]) for u in pop}
+
+    # Survey pairs: rank-residualized time feature; rating term is the raw rating.
+    pairs = [(u, server, rating_of[u], sc, resid[u])
+             for u, server, sc in surveys if u in resid]
     if len(pairs) < TA_MIN_PAIRS:
-        return None, pop_mean, f"only {len(pairs)} survey pairs (<{TA_MIN_PAIRS})"
+        return None, g0, g1, f"only {len(pairs)} survey pairs (<{TA_MIN_PAIRS})"
 
     base = _weighted_spearman(pairs, 0.0)
     sweep = [_weighted_spearman(pairs, a) for a in TA_ALPHA_GRID]
     a_best = float(TA_ALPHA_GRID[int(np.nanargmax(sweep))])
 
     # Cross-fitted guard: alpha picked on train folds only, applied to held-out
-    # users; ship the refit alpha only if the assembled score beats alpha=0.
-    users_list = sorted(rating_of)
+    # users; ship the refit alpha only if the assembled score beats alpha=0. (The
+    # g0/g1 line is a population nuisance fit on the full pop, not cross-validated.)
+    users_list = sorted({p[0] for p in pairs})
     cv = []
     for seed in range(TA_CV_SEEDS):
         rng = np.random.default_rng(seed)
@@ -428,13 +476,13 @@ def fit_time_adjust(by_user, params, surveys):
                for u, server, rating, sc, f in pairs]
         cv.append(_weighted_spearman(adj, 0.0))
     cv_mean = float(np.mean(cv))
-    info = (f"{len(pairs)} pairs; weighted Spearman base={base:.4f} "
-            f"best={max(sweep):.4f} @ alpha={a_best:+.3f}; "
-            f"cross-fitted {cv_mean:.4f}")
+    info = (f"{len(pairs)} pairs, {len(pop)}-user time-vs-rank line "
+            f"(g0={g0:+.3f}, g1={g1:+.4f}); weighted Spearman base={base:.4f} "
+            f"best={max(sweep):.4f} @ alpha={a_best:+.3f}; cross-fitted {cv_mean:.4f}")
     if cv_mean <= base:
-        return None, pop_mean, info + " — no held-out gain, keeping default alpha"
-    # Never adjust in the implausible direction (slow ⇒ rated higher).
-    return min(a_best, 0.0), pop_mean, info
+        return None, g0, g1, info + " — no held-out gain, keeping default alpha"
+    # Never adjust in the implausible direction (slow-for-rank ⇒ rated higher).
+    return min(a_best, 0.0), g0, g1, info
 
 
 # ---------------------------------------------------------------------------
@@ -574,19 +622,28 @@ def main():
     else:
         print(f"  review-time: only {n_rb} usable users (<{MIN_BIAS_USERS}); keeping default")
 
-    # --- Time-adjusted rank constants ---
-    print("Fitting time-adjusted-rank constants (survey-validated) ...")
-    out["time_adjust"] = dict(DEFAULTS["time_adjust"])
-    ta_alpha, ta_pop_mean, ta_info = fit_time_adjust(by_user, params,
-                                                     load_surveys(args.db))
+    # --- Time-adjusted rank constants (survey-validated, rank-residualized) ---
+    print("Fitting time-adjusted-rank constants (survey-validated, rank-residualized) ...")
+    apply_m = load_rating_to_rank(args.ratings_dir)
+    if apply_m is None:
+        print("  WARNING: ratings_v2/rating_to_rank.json missing (run map_rating_v2_to_egf "
+              "first) — keeping default time_adjust block")
+    ta_alpha, ta_g0, ta_g1, ta_info = fit_time_adjust(
+        by_user, params, load_surveys(args.db), apply_m)
     print(f"  {ta_info}")
-    if ta_pop_mean is not None:
-        out["time_adjust"]["pop_mean_log10_min"] = round(ta_pop_mean, 4)
-    if ta_alpha is not None:
-        out["time_adjust"]["alpha_per_log10_min"] = round(ta_alpha, 4)
-    print(f"  shipped alpha={out['time_adjust']['alpha_per_log10_min']:+.3f} "
-          f"rating/log10-min, pop_mean={out['time_adjust']['pop_mean_log10_min']:+.3f} "
-          f"log10-min{' (default alpha)' if ta_alpha is None else ''}")
+    if ta_alpha is not None and ta_g0 is not None and ta_g1 is not None:
+        out["time_adjust"] = {
+            "alpha_per_log10_min": round(ta_alpha, 4),
+            "time_vs_rank_intercept": round(ta_g0, 4),
+            "time_vs_rank_slope": round(ta_g1, 6),
+        }
+    else:
+        out["time_adjust"] = dict(DEFAULTS["time_adjust"])
+    ta = out["time_adjust"]
+    print(f"  shipped alpha={ta['alpha_per_log10_min']:+.3f} rating/log10-min, "
+          f"time-vs-rank g0={ta['time_vs_rank_intercept']:+.3f} "
+          f"g1={ta['time_vs_rank_slope']:+.5f} log10-min/rank"
+          f"{' (defaults)' if ta_alpha is None else ''}")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")
