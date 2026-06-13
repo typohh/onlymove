@@ -154,7 +154,24 @@ export async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
     const cacheKey = `tsumegos/${state.boardSize}/${zipFilename}`;
-        const zipResponse = await fetch(cacheKey);
+    let zipResponse;
+    try {
+        zipResponse = await fetch(cacheKey);
+    } catch (fetchError) {
+        // A network-level *reject* lands here — distinct from the resolved-but-404
+        // case handled below. On mobile Safari a dropped/backgrounded connection
+        // surfaces as a bare `TypeError: Load failed`, and navigating away mid-fetch
+        // throws an AbortError. Re-throw a clearly labelled, retryable error so the
+        // outer retry/reload loop handles it and Sentry groups it as a zip-fetch
+        // failure rather than an unattributed "Load failed".
+        const networkError = new Error(`Failed to fetch zip ${zipFilename}: ${fetchError && fetchError.message}`);
+        networkError.networkError = true;
+        networkError.cause = fetchError;
+        // Aborts are almost always benign (tab close / navigation) — flag so the
+        // retry loop can skip the Sentry report.
+        if (fetchError && fetchError.name === 'AbortError') networkError.aborted = true;
+        throw networkError;
+    }
 
     const contentType = zipResponse.headers.get('content-type');
     if (!zipResponse.ok || (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream'))) {
@@ -379,7 +396,9 @@ export async function loadTsumego(isUpdate) {
             if (error.reorientedSgf) {
                 console.error(`  reoriented SGF (orientation=${error.chosenOrientation}): ${error.reorientedSgf}`);
             }
-            try {
+            // An AbortError from the user navigating away mid-fetch (tagged by
+            // loadZipProblems) is benign noise — skip the Sentry report for it.
+            if (!error.aborted) try {
                 Sentry.captureException(error, {
                     extra: {
                         attempt: attempt + 1,
