@@ -13,10 +13,12 @@
 // weak 3d and a strong 3d can translate to different server ranks. EGF is the
 // identity hub.
 
-import { state } from './state.js';
+import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
+import { rankIndexAfterRatingDelta } from './rank-decomposition.js';
+import { timeAdjustDeltaRating } from './population-constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
 // rank_map.json is inlined at build time (like rating_to_rank.json in
 // rank-decomposition.js / src/index.js), so it's never fetched at runtime —
@@ -41,21 +43,39 @@ const RANK_SCALAR_LO = -29, RANK_SCALAR_HI = 9;
 // interpExtrap + rankScalarToLabel now live in shared/rank-math.js (one copy
 // shared with the Worker).
 
-// {server: label} by interpolating the CONTINUOUS internal-rank scalar
-// `ourScalar` through each server's knots, then clamping + rounding — so a weak
-// vs strong same-band player can land on different server ranks. EGF is the
-// identity hub, so it shows the user's own displayed rank (`egfLabel`) verbatim,
-// keeping the table consistent with the header rather than re-rounding identity.
-function serverRanksFor(map, ourScalar, egfLabel) {
-    if (!map) return null;
+// The surveyed servers, in rank_map.json order. EGF is the identity hub but is
+// still a key here (serverRanksFor shortcuts it). Consumed by the stats Rank
+// tab's server dropdown.
+export const RANK_TRANSLATION_SERVERS = Object.keys(RANK_MAP || {});
+
+// internal-rank INDEX (~0..29, floor(rating·29) scale) → that server's CONTINUOUS
+// rank scalar (1k=0, 1d=1), clamped to the real rank range. EGF is identity.
+// Returns null if the server has no usable curve. This is the scalar form of
+// serverRanksFor (which returns rounded labels) — the Rank chart needs the
+// continuous value to place the skill line, not a label.
+export function internalIndexToServerScalar(rankIndex, server) {
+    if (!Number.isFinite(rankIndex)) return null;
+    const ourScalar = rankIndex - RANK_INDEX_OFFSET;
+    if (server === 'EGF') {
+        return Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, ourScalar));
+    }
+    const c = RANK_MAP && RANK_MAP[server];
+    if (!c || !Array.isArray(c.our) || !Array.isArray(c.server) || c.our.length < 2) return null;
+    const s = interpExtrap(ourScalar, c.our, c.server);
+    return Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
+}
+
+// {server: label} translating the (already time-adjusted) CONTINUOUS internal
+// rank INDEX through each server's curve via internalIndexToServerScalar — so a
+// weak vs strong same-band player can land on different server ranks. EGF is the
+// identity hub; its label is passed in (`egfLabel`), the caller deciding whether
+// it shows the time-adjusted identity or the raw header rank.
+function serverRanksFor(adjRankIndex, egfLabel) {
     const out = {};
-    for (const [server, c] of Object.entries(map)) {
+    for (const server of RANK_TRANSLATION_SERVERS) {
         if (server === 'EGF') { out.EGF = egfLabel; continue; }
-        if (!c || !Array.isArray(c.our) || !Array.isArray(c.server)
-            || c.our.length < 2) continue;
-        let s = interpExtrap(ourScalar, c.our, c.server);
-        s = Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
-        out[server] = rankScalarToLabel(s);
+        const s = internalIndexToServerScalar(adjRankIndex, server);
+        if (Number.isFinite(s)) out[server] = rankScalarToLabel(s);
     }
     return out;
 }
@@ -67,13 +87,30 @@ export async function showRankTranslation() {
     const rating = state.userRank;
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
-    const map = RANK_MAP;
     const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
     const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
     const key = rankIndexToKey(rankIndex);
-    // Translate the CONTINUOUS internal rank (not the floored band) through each
-    // server's knots, so a weak vs strong same-rank player can map differently.
-    const servers = serverRanksFor(map, rankValue - RANK_INDEX_OFFSET, key);
+
+    // The header keeps the raw, untimed onlymove rank; the server translations
+    // are TIME-ADJUSTED — practice here is untimed while server ranks reflect
+    // timed play, so a slow solver's untimed rank overstates their timed
+    // strength. Same single-point correction the Rank-chart server views use
+    // (whole-history median solve time → rating delta → mapped through M).
+    const deltaRating = timeAdjustDeltaRating(getMergedAnswerHistory());
+    const adjusted = deltaRating !== null;
+    const adjValue = adjusted ? rankIndexAfterRatingDelta(rankValue, deltaRating) : rankValue;
+    const adjIndex = Number.isFinite(adjValue) ? adjValue : rankValue;
+
+    // EGF (identity hub): the time-adjusted identity when adjusted (it then
+    // differs from the header, by design); otherwise mirror the header rank so
+    // the table stays consistent with the progress line (avoids a floor-vs-round
+    // mismatch on the unadjusted identity).
+    let egfLabel = key;
+    if (adjusted) {
+        const egfScalar = internalIndexToServerScalar(adjIndex, 'EGF');
+        if (Number.isFinite(egfScalar)) egfLabel = rankScalarToLabel(egfScalar);
+    }
+    const servers = serverRanksFor(adjIndex, egfLabel);
 
     showModal({
         build: (modal, close) => {

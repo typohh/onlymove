@@ -615,6 +615,16 @@ body {
     margin-bottom: 0.5em;
 }
 
+/* Rank-tab server selector — sits inline in the chart title ("[onlymove ▾] rank
+   since …"). onlymove = the raw untimed rank; a server = time-adjusted +
+   translated. */
+.stats-chart-title .stats-rank-server-select {
+    font: inherit;
+    padding: 0 0.2em;
+    margin-right: 0.15em;
+    vertical-align: baseline;
+}
+
 .stats-chart-plot-row {
     display: flex;
     flex-direction: column;

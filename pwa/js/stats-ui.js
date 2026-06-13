@@ -12,7 +12,12 @@ import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
-import { getPopulationConstants } from './population-constants.js';
+import {
+    getPopulationConstants,
+    TIME_ADJUST_AFK_CAP_MS,
+    TIME_ADJUST_MIN_TIMED,
+} from './population-constants.js';
+import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading } from './overlays.js';
 import { normCdf } from './math-utils.js';
@@ -185,7 +190,7 @@ export async function showDetailedStats() {
         // the summary text both need it, so compute it ONCE here and pass it to
         // both (null = too little data; both handle it).
         const rankDecomp = computeRankDecomposition(merged);
-        const rankPane = combineChartWithText(
+        const rankPane = buildRankPane(
             buildRatingHistoryChart(merged, rankDecomp),
             buildRankSummaryText(merged, rankDecomp));
         const timePane = combineChartWithText(buildTimeUsageChart(merged), timingText);
@@ -722,22 +727,70 @@ async function buildServerStatsPane(history = []) {
     return pane;
 }
 
-// Median solving time in minutes over novel timed attempts, AFK-capped — the
-// SAME feature definition pipeline.fit_population_constants fits the
-// time-adjustment alpha against (its AFK_CAP_S / TA_MIN_TIMED). Null when too
-// few attempts carry a usable time.
-const TIME_ADJUST_AFK_CAP_MS = 180000;
-const TIME_ADJUST_MIN_TIMED = 20;
-function medianNovelSolveMinutes(history) {
-    const ts = history
+// medianNovelSolveMinutes + the TIME_ADJUST_* feature constants + the scalar
+// timeAdjustDeltaRating now live in population-constants.js (one definition,
+// shared with the rank-translation modal). They are imported above.
+
+// A TIME-VARYING version of medianNovelSolveMinutes: the kernel-weighted median
+// (in minutes) of the SAME capped-novel timed series the population time-adjust
+// alpha was fit against, evaluated at any t. Smoothed at the skill kernel's
+// ~30-day scale so the correction tracks the slow skill line, not session noise.
+// Where a window has thin timed support the estimate is shrunk toward the
+// whole-history median (empirical Bayes in log-minute space) — so the adjusted
+// line stays CONTINUOUS, degrading smoothly to today's single-scalar correction
+// rather than breaking. NB the inclusion rule (non-repeat, >0, AFK-capped) must
+// match user_median_log10_minutes in fit_population_constants — the Time tab's
+// solving series is broader (repeats, no AFK cap), so we reuse the SMOOTHER idea
+// here, not that series. Returns null (no time adjustment possible) when the
+// whole history has fewer than TIME_ADJUST_MIN_TIMED timed attempts.
+const TIME_ADJUST_TAU_MS = 30 * 24 * 3600 * 1000;   // matches TAU_S_MS (skill kernel)
+const TIME_ADJUST_SHRINK_ESS = 8;                   // log-space shrink prior, in attempts
+function makeMedianSolveMinutesAt(history) {
+    const pts = history
         .filter(p => !p.isRepeat && Number.isFinite(p.timeTaken)
-            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS)
-        .map(p => p.timeTaken)
-        .sort((a, b) => a - b);
-    if (ts.length < TIME_ADJUST_MIN_TIMED) return null;
-    const mid = ts.length >> 1;
-    const med = ts.length % 2 ? ts[mid] : (ts[mid - 1] + ts[mid]) / 2;
-    return med / 60000;
+            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS
+            && typeof p.date === 'number')
+        .map(p => ({ t: p.date, v: p.timeTaken }))
+        .sort((a, b) => a.t - b.t);
+    if (pts.length < TIME_ADJUST_MIN_TIMED) return null;
+    const ts = pts.map(p => p.t);
+    const sortedAll = pts.map(p => p.v).slice().sort((a, b) => a - b);
+    const gm = sortedAll.length % 2 ? sortedAll[sortedAll.length >> 1]
+        : (sortedAll[(sortedAll.length >> 1) - 1] + sortedAll[sortedAll.length >> 1]) / 2;
+    const globalLog = Math.log10(gm / 60000);
+
+    const wMedian = (pairs, total) => {
+        const target = 0.5 * total;
+        let cum = 0;
+        for (let i = 0; i < pairs.length; i++) {
+            const next = cum + pairs[i].w;
+            if (next >= target) {
+                return i === 0 ? pairs[0].v
+                    : pairs[i - 1].v + (pairs[i].v - pairs[i - 1].v) * ((target - cum) / pairs[i].w);
+            }
+            cum = next;
+        }
+        return pairs[pairs.length - 1].v;
+    };
+
+    return (t) => {
+        let W = 0, sumW2 = 0;
+        const pairs = [];
+        for (let i = 0; i < pts.length; i++) {
+            const d = (t - ts[i]) / TIME_ADJUST_TAU_MS;
+            if (Math.abs(d) > 4) continue;
+            const w = Math.exp(-0.5 * d * d);
+            W += w; sumW2 += w * w;
+            pairs.push({ v: pts[i].v, w });
+        }
+        if (W <= 0 || pairs.length < 2) return Math.pow(10, globalLog);
+        const ess = (W * W) / sumW2;
+        pairs.sort((a, b) => a.v - b.v);
+        const localLog = Math.log10(wMedian(pairs, W) / 60000);
+        // Shrink the local median toward the global one by effective sample size.
+        const wl = ess / (ess + TIME_ADJUST_SHRINK_ESS);
+        return Math.pow(10, wl * localLog + (1 - wl) * globalLog);
+    };
 }
 
 // The rank decomposition text (long-term skill + drift + session swing) and
@@ -757,52 +810,10 @@ function buildRankSummaryText(history, decomp) {
     if (decomp === undefined) decomp = computeRankDecomposition(history);
     if (decomp) {
         const { summary } = decomp;
-        if (summary.currentSkill !== null) {
-            const lower = Math.floor(summary.currentSkill);
-            const pct = Math.round((summary.currentSkill - lower) * 100);
-            const curLabel = rankLabelFromIndex(lower);
-            const nextLabel = rankLabelFromIndex(lower + 1);
-            const seStr = Number.isFinite(summary.currentSkillSE)
-                ? getTerm('statsRankSESuffix', { se: summary.currentSkillSE.toFixed(1) })
-                : '';
-            rankText += getTerm('statsStableRank', {
-                cur: curLabel, pct, next: nextLabel, se: seStr,
-            }) + '\n';
-
-            // Time-adjusted rank: the stable rank corrected for the user's
-            // typical solving time. Practice here is untimed while server
-            // ranks reflect timed play, so a slow solver's stable rank
-            // overstates their timed strength (survey-validated; constants
-            // from pipeline.fit_population_constants). The correction is in
-            // RATING space — alpha · (log10(median minutes) − population
-            // mean) — and mapped back through M.
-            const ta = getPopulationConstants()?.time_adjust;
-            const medMin = medianNovelSolveMinutes(history);
-            if (ta && Number.isFinite(ta.alpha_per_log10_min)
-                && Number.isFinite(ta.pop_mean_log10_min) && medMin !== null) {
-                const deltaRating = ta.alpha_per_log10_min
-                    * (Math.log10(medMin) - ta.pop_mean_log10_min);
-                const adjIdx = rankIndexAfterRatingDelta(summary.currentSkill, deltaRating);
-                if (Number.isFinite(adjIdx)) {
-                    const aLower = Math.floor(adjIdx);
-                    const aPct = Math.round((adjIdx - aLower) * 100);
-                    rankText += getTerm('statsTimeAdjustedRank', {
-                        cur: rankLabelFromIndex(aLower),
-                        pct: aPct,
-                        next: rankLabelFromIndex(aLower + 1),
-                    }) + '\n';
-                }
-            }
-        }
-        if (summary.longTermDrift !== null && summary.longTermSpanMs > 30 * 24 * 3600 * 1000) {
-            const months = summary.longTermSpanMs / (30 * 24 * 3600 * 1000);
-            const sign = summary.longTermDrift >= 0 ? '+' : '−';
-            rankText += getTerm('statsSkillDrift', {
-                sign,
-                amount: Math.abs(summary.longTermDrift).toFixed(1),
-                months: months.toFixed(0),
-            }) + '\n';
-        }
+        // The current rank line (raw onlymove rank or the selected server's
+        // time-adjusted rank) now lives below the CHART, where it reacts to the
+        // server dropdown — see the readout in buildRatingHistoryChart. Here we
+        // keep only the variance/size readouts the chart can't show.
         if (typeof summary.sigmaM === 'number') {
             rankText += summary.sigmaM >= 0.1
                 ? getTerm('statsSessionSwing', {
@@ -853,6 +864,34 @@ function combineChartWithText(chartElement, text) {
         pre.className = 'stats-modal-pre';
         pre.textContent = text;
         wrap.append(pre);
+    }
+    return wrap;
+}
+
+// The Rank pane: the chart (which returns { chart, readout }) plus a text
+// section. The reactive current-rank readout (driven by the chart's server
+// dropdown) leads the text section, above the static decomposition text — so the
+// "Latest <server> rank is …" sentence reads as part of the text, not the graph.
+function buildRankPane(build, text) {
+    const chart = build && build.chart;
+    const readout = build && build.readout;
+    const hasText = typeof text === 'string' && text.trim().length > 0;
+    if (!chart && !readout && !hasText) return null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'stats-chart-pane';
+    if (chart) wrap.append(chart);
+    if (readout || hasText) {
+        const textPart = document.createElement('div');
+        textPart.className = 'stats-rank-textpart';
+        if (readout) textPart.append(readout);
+        if (hasText) {
+            const pre = document.createElement('pre');
+            pre.className = 'stats-modal-pre';
+            pre.textContent = text;
+            textPart.append(pre);
+        }
+        wrap.append(textPart);
     }
     return wrap;
 }
@@ -980,180 +1019,96 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         }
     }
 
-    // Focus the y-range on the user's rank — the skill curve and its prediction
-    // band — not on the spread of problem difficulties. Problem ranks scatter
-    // far wider than the user's skill, so anchoring on them squashes the part of
-    // the chart that matters. Dots outside this window are dropped (see scatter).
-    let bandMin = Infinity, bandMax = -Infinity;
+    // Per-grid time-adjustment shift (RATING units), used only for the timed
+    // (non-onlymove) server views: the skill line is corrected for the user's
+    // typical solving time AT THAT POINT IN TIME — medMin varies over history, so
+    // the correction is temporal — since practice here is untimed while server
+    // ranks reflect timed play. alpha and the centering are population constants
+    // (fit_population_constants); only the median is temporal. Where time data is
+    // thin the shift degrades smoothly to the whole-history correction (see
+    // makeMedianSolveMinutesAt). delta = 0 (constants or timed data unavailable) ⇒
+    // the timed view becomes pure rank translation with no time correction.
+    const ta = getPopulationConstants()?.time_adjust;
+    const medAt = makeMedianSolveMinutesAt(history);
+    const haveTimeAdjust = !!(ta && Number.isFinite(ta.alpha_per_log10_min)
+        && Number.isFinite(ta.pop_mean_log10_min) && medAt);
     for (const e of gridEvals) {
-        bandMin = Math.min(bandMin, e.S - outerDown(e));
-        bandMax = Math.max(bandMax, e.S + outerUp(e));
+        let d = 0;
+        if (haveTimeAdjust) {
+            const m = medAt(e.t);
+            if (Number.isFinite(m) && m > 0) {
+                d = ta.alpha_per_log10_min * (Math.log10(m) - ta.pop_mean_log10_min);
+            }
+        }
+        e.delta = d;
     }
-    if (!Number.isFinite(bandMin)) {
-        // No decomposition (too little data) — fall back to the scatter range.
-        const sortedRanks = entries.map(e => e.rankValue).slice().sort((a, b) => a - b);
-        bandMin = sortedRanks[0];
-        bandMax = sortedRanks[sortedRanks.length - 1];
-    }
-    // Window exactly one rank beyond the outer CI band — no rounding out to
-    // integers (that slop nearly doubled the padding). Grid lines below still
-    // land on the integer ranks that fall inside this range.
-    const Y_PAD = 1; // exactly one rank beyond the outer CI band
-    let yHigh = bandMax + Y_PAD;
-    let yLow = bandMin - Y_PAD;
-    if (yHigh <= yLow) yHigh = yLow + 1;
 
     const container = document.createElement('div');
     container.className = 'stats-chart';
 
+    // Server selector — sits INSIDE the chart title ("[server ▾] rank since
+    // <date>"). "OnlyMove" shows the raw, untimed internal rank (the historical
+    // behaviour — no time adjustment). Every other option shows the rank as it
+    // would read ON THAT SERVER: the internal skill TIME-ADJUSTED for the user's
+    // solving speed, then translated through that server's rank curve. Only
+    // servers with a usable translation curve are offered. EGF is the identity
+    // hub, so "EGF" vs "OnlyMove" differ only by the time adjustment.
+    const ONLYMOVE = 'OnlyMove';
+    const serverOptions = [ONLYMOVE, ...RANK_TRANSLATION_SERVERS.filter(
+        s => Number.isFinite(internalIndexToServerScalar(19, s)))];
+    let selectedServer = ONLYMOVE;
+    const select = document.createElement('select');
+    select.className = 'stats-rank-server-select';
+    for (const s of serverOptions) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;   // option value IS the display text ("OnlyMove", "OGS", …)
+        select.appendChild(opt);
+    }
+    select.value = selectedServer;
+
     const title = document.createElement('div');
     title.className = 'stats-chart-title';
-    title.textContent = getTerm('statsChartRankSince', { date: new Date(t0).toISOString().slice(0, 10) });
+    title.append(select, document.createTextNode(
+        ' ' + getTerm('statsChartRankSince', { date: new Date(t0).toISOString().slice(0, 10) })));
     container.append(title);
 
-    const plotRow = document.createElement('div');
-    plotRow.className = 'stats-chart-plot-row';
+    // Display transforms for the selected server. The skill line + its band edges
+    // are SKILL values, so they take the (temporal) time adjustment then translate;
+    // the scatter dots are PROBLEM difficulties (independent of how fast the user
+    // solves), so they translate only. onlymove = identity (raw internal index).
+    const skillToDisplay = (internalIdx, delta) => {
+        if (selectedServer === ONLYMOVE) return internalIdx;
+        const adj = (Number.isFinite(delta) && delta !== 0)
+            ? rankIndexAfterRatingDelta(internalIdx, delta) : internalIdx;
+        return internalIndexToServerScalar(Number.isFinite(adj) ? adj : internalIdx, selectedServer);
+    };
+    const rankToDisplay = (internalIdx) =>
+        selectedServer === ONLYMOVE ? internalIdx
+            : internalIndexToServerScalar(internalIdx, selectedServer);
+    // Integer display value (rank-band floor) → label: an internal index uses the
+    // kyu/dan index labeller; a server scalar uses the shared scalar labeller.
+    const displayLabel = (intVal) =>
+        selectedServer === ONLYMOVE ? rankLabelFromIndex(intVal) : rankScalarToLabel(intVal);
 
-    // Grid lines mark the rank CUTOFFS (integer rank boundaries); the label for
-    // a rank sits BETWEEN its two bounding lines, so it reads as "this band is
-    // rank X" — a range — rather than a value pinned to one line. Labels that
-    // would visually overlap their neighbor get hidden after layout (see
-    // ResizeObserver below).
-    const gridRanks = [];
-    for (let r = Math.ceil(yLow); r <= Math.floor(yHigh); r++) gridRanks.push(r);
-    // One label per rank band, centered at r+0.5 (between cutoff lines r and
-    // r+1). Values in [r, r+1) carry rank rankLabelFromIndex(r). Bands clipped
-    // at a chart edge keep the same midpoint and just get clipped off.
-    const labelTicks = [];
-    for (let r = Math.floor(yLow); r <= Math.ceil(yHigh); r++) {
-        const mid = r + 0.5;
-        if (mid < yLow || mid > yHigh) continue;
-        labelTicks.push({ pos: mid, text: rankLabelFromIndex(r) });
-    }
+    // The plot (y-axis + svg + x-date) is rebuilt into this holder on every
+    // server change; the title, readout and legend persist around it.
+    const plotHolder = document.createElement('div');
 
-    // Y-axis labels live in HTML so they inherit the surrounding pre font
-    // (13px monospace) exactly. The hidden spacer sizes the column to the
-    // widest tick label.
-    const yaxis = document.createElement('div');
-    yaxis.className = 'stats-chart-yaxis';
-    const spacer = document.createElement('span');
-    spacer.className = 'y-spacer';
-    spacer.textContent = '20k';
-    yaxis.append(spacer);
-    const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
-    for (const t of labelTicks) {
-        const tick = document.createElement('div');
-        tick.className = 'y-tick';
-        tick.style.top = `${topPct(t.pos)}%`;
-        tick.textContent = t.text;
-        yaxis.append(tick);
-    }
+    // Current-rank readout below the graph: the selected server's current rank
+    // (raw for onlymove, time-adjusted + translated otherwise). Reacts to the
+    // dropdown — this replaced the old "stable / time adjusted rank" summary text.
+    // Same element/class as the decomposition text (stats-modal-pre) so it reads
+    // as just another line of that text, not a distinct callout.
+    const readout = document.createElement('pre');
+    readout.className = 'stats-modal-pre stats-rank-readout';
 
-    const svgWrap = document.createElement('div');
-    svgWrap.className = 'stats-chart-svg-wrap';
-
-    // SVG holds only the grid + dots. Aspect ratio tracks the visible modal
-    // area (see chartViewBoxHeight) so the chart fits whole when scrolled to.
-    const W = 400, H = chartViewBoxHeight(W);
-    const xOf = t => ((t - t0) / tSpan) * W;
-    const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
-
-    const svg = makeChartSvg(W, H);
-
-    for (const r of gridRanks) {
-        svg.appendChild(hGridLine(yOf(r), W));
-    }
-
-    // Per-attempt scatter: green=correct, red=wrong. Drawn UNDER the bands and
-    // skill line so the curve and its CIs always read on top — at high volume
-    // (count is typically ~200, up to ~10k) the dots stay faint density texture
-    // instead of an opaque slab. The narrow y-window clips most dots — problem
-    // ranks scatter far wider than the band — so key the overplotting guards to
-    // the count of dots that actually fall INSIDE the window, not the raw total.
-    // (Keying off the total drove opacity to the floor while only a handful of
-    // dots were visible, so they vanished.) Two guards: cap the rendered dots
-    // (uniform stride), and scale per-dot opacity down as the visible count
-    // grows. The 0.15 floor matters: dots sit beneath the translucent bands, so
-    // anything fainter is swallowed by the band tint near the curve.
-    const visibleDots = entries.filter(e => e.rankValue >= yLow && e.rankValue <= yHigh);
-    const SCATTER_CAP = 1500;
-    const stride = Math.max(1, Math.ceil(visibleDots.length / SCATTER_CAP));
-    const shownDots = stride > 1 ? visibleDots.filter((_, i) => i % stride === 0) : visibleDots;
-    const dotR = shownDots.length > 600 ? '1.4' : '1.6';
-    const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / Math.max(1, shownDots.length))).toFixed(3);
-    const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
-    for (const e of shownDots) {
-        svg.appendChild(svgEl('circle', {
-            cx: xOf(e.date).toFixed(1),
-            cy: yOf(e.rankValue).toFixed(1),
-            r: dotR,
-            fill: e.correct ? DOT_CORRECT : DOT_WRONG,
-            'fill-opacity': dotAlpha,
-        }));
-    }
-
-    // Two nested bands, drawn after the scatter so the curve + CIs sit on top.
-    // Outer (lighter) = prediction interval: skill ± where a session's form
-    // actually lands. Inner (darker) = measurement uncertainty on skill. The
-    // gap between them is the genuine session-to-session swing σ_M(t).
+    // Legend (server-independent text); skill curve + bands listed only when the
+    // decomposition produced them.
     const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
-
-    // Separate upper/lower half-widths so the outer band can be asymmetric. The
-    // top edge runs left→right at S + upHalf, the bottom edge runs right→left at
-    // S − downHalf, closing the ring. The inner band passes innerHalf for both.
-    const bandPath = (upHalf, downHalf) => {
-        let d = '';
-        for (let i = 0; i < gridEvals.length; i++) {
-            const e = gridEvals[i];
-            d += (i === 0 ? 'M' : 'L') + `${xOf(e.t).toFixed(1)} ${yOf(e.S + upHalf(e)).toFixed(1)} `;
-        }
-        for (let i = gridEvals.length - 1; i >= 0; i--) {
-            const e = gridEvals[i];
-            d += `L${xOf(e.t).toFixed(1)} ${yOf(e.S - downHalf(e)).toFixed(1)} `;
-        }
-        return d + 'Z';
-    };
-
-    if (gridEvals.length >= 2) {
-        for (const [uh, dh, fill] of [[outerUp, outerDown, SKILL_FILL_OUTER], [innerHalf, innerHalf, SKILL_FILL_INNER]]) {
-            svg.appendChild(svgEl('path', { d: bandPath(uh, dh), fill, stroke: 'none' }));
-        }
-    }
-
-    if (gridEvals.length >= 2) {
-        const skillPts = gridEvals
-            .map(e => `${xOf(e.t).toFixed(1)},${yOf(e.S).toFixed(1)}`)
-            .join(' ');
-        svg.appendChild(svgEl('polyline', {
-            points: skillPts, fill: 'none', stroke: SKILL_STROKE,
-            'stroke-width': '1.5', 'stroke-linejoin': 'round',
-            'vector-effect': 'non-scaling-stroke',
-        }));
-    }
-
-    svgWrap.append(svg);
-
-    // y-axis + SVG share one row whose height is exactly the SVG height, so the
-    // y-tick percentages (positioned against the y-axis column) line up with the
-    // grid lines. The x-axis date sits BELOW this row, not inside the SVG column
-    // — folding it in there stretched the y-axis column past the SVG and pushed
-    // every label down.
-    const plotMain = document.createElement('div');
-    plotMain.className = 'stats-chart-plot-main';
-    plotMain.append(yaxis, svgWrap);
-
-    const xaxis = document.createElement('div');
-    xaxis.className = 'stats-chart-xaxis';
-    xaxis.textContent = new Date(t1).toISOString().slice(0, 10);
-
-    plotRow.append(plotMain, xaxis);
-    container.append(plotRow);
-
-    // Legend below the plot. One entry per visual element; swatch shapes match
-    // how each is drawn (dot / line / filled band). Only list the skill curve
-    // and its bands when the decomposition actually produced them.
+    const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
     const legend = document.createElement('div');
     legend.className = 'stats-chart-legend';
     const legendItems = [
@@ -1176,35 +1131,179 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         el.append(swatch, document.createTextNode(item.text));
         legend.append(el);
     }
-    container.append(legend);
 
-    // After the chart hits the DOM and gets a real height, greedy-hide any
-    // y-axis labels that would physically overlap a previously-shown one.
-    // Re-runs on resize so density adapts to viewport.
-    const updateLabelVisibility = () => {
-        const h = svg.getBoundingClientRect().height;
-        if (h === 0) return;
-        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
-        let lastShownPx = -Infinity;
-        for (const el of tickEls) {
-            const topPx = (parseFloat(el.style.top) / 100) * h;
-            if (topPx - lastShownPx >= minSepPx) {
-                el.style.visibility = '';
-                lastShownPx = topPx;
-            } else {
-                el.style.visibility = 'hidden';
-            }
+    // Rebuild the plot for the current selectedServer. Everything below is in
+    // DISPLAY space (internal index for onlymove, that server's rank scalar
+    // otherwise); the band edges are transformed individually so the monotone
+    // adjust+translate keeps them ordered across server-curve knots.
+    let labelObserver = null;
+    const renderPlot = () => {
+        const gd = [];
+        for (const e of gridEvals) {
+            const S = skillToDisplay(e.S, e.delta);
+            const up = skillToDisplay(e.S + outerUp(e), e.delta);
+            const dn = skillToDisplay(e.S - outerDown(e), e.delta);
+            const iu = skillToDisplay(e.S + innerHalf(e), e.delta);
+            const id = skillToDisplay(e.S - innerHalf(e), e.delta);
+            if ([S, up, dn, iu, id].every(Number.isFinite)) gd.push({ t: e.t, S, up, dn, iu, id });
         }
-    };
-    if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(updateLabelVisibility).observe(svg);
-    } else {
-        queueMicrotask(updateLabelVisibility);
-    }
 
-    return container;
+        // Readout = the current rank (the line's right endpoint) in the selected
+        // server's scale. Hidden when there's no skill curve (too little data).
+        if (gd.length >= 1) {
+            const cur = gd[gd.length - 1].S;
+            const lower = Math.floor(cur);
+            readout.textContent = getTerm('statsSelectedServerRank', {
+                server: selectedServer,
+                cur: displayLabel(lower),
+                pct: Math.round((cur - lower) * 100),
+                next: displayLabel(lower + 1),
+            });
+            readout.hidden = false;
+        } else {
+            readout.hidden = true;
+        }
+
+        const dots = [];
+        for (const e of entries) {
+            const y = rankToDisplay(e.rankValue);
+            if (Number.isFinite(y)) dots.push({ t: e.date, y, correct: e.correct });
+        }
+
+        // Focus the y-range on the skill band — not the (far wider) spread of
+        // problem difficulties. Dots outside this window are dropped below.
+        let bandMin = Infinity, bandMax = -Infinity;
+        for (const g of gd) { bandMin = Math.min(bandMin, g.dn); bandMax = Math.max(bandMax, g.up); }
+        if (!Number.isFinite(bandMin)) {
+            // No decomposition — fall back to the scatter range.
+            const ys = dots.map(d => d.y).slice().sort((a, b) => a - b);
+            bandMin = ys.length ? ys[0] : 0;
+            bandMax = ys.length ? ys[ys.length - 1] : 1;
+        }
+        const Y_PAD = 1; // exactly one rank beyond the outer CI band
+        let yHigh = bandMax + Y_PAD;
+        let yLow = bandMin - Y_PAD;
+        if (yHigh <= yLow) yHigh = yLow + 1;
+
+        const plotRow = document.createElement('div');
+        plotRow.className = 'stats-chart-plot-row';
+
+        // Grid lines mark the rank CUTOFFS (integer boundaries); each label sits
+        // BETWEEN its two bounding lines (at r+0.5) so it reads as "this band is
+        // rank X". Overlapping labels get hidden after layout (see below).
+        const gridLines = [];
+        for (let r = Math.ceil(yLow); r <= Math.floor(yHigh); r++) gridLines.push(r);
+        const labelTicks = [];
+        for (let r = Math.floor(yLow); r <= Math.ceil(yHigh); r++) {
+            const mid = r + 0.5;
+            if (mid < yLow || mid > yHigh) continue;
+            labelTicks.push({ pos: mid, text: displayLabel(r) });
+        }
+
+        const yaxis = document.createElement('div');
+        yaxis.className = 'stats-chart-yaxis';
+        const spacer = document.createElement('span');
+        spacer.className = 'y-spacer';
+        spacer.textContent = '20k';
+        yaxis.append(spacer);
+        const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
+        for (const t of labelTicks) {
+            const tick = document.createElement('div');
+            tick.className = 'y-tick';
+            tick.style.top = `${topPct(t.pos)}%`;
+            tick.textContent = t.text;
+            yaxis.append(tick);
+        }
+
+        const svgWrap = document.createElement('div');
+        svgWrap.className = 'stats-chart-svg-wrap';
+        const W = 400, H = chartViewBoxHeight(W);
+        const xOf = t => ((t - t0) / tSpan) * W;
+        const yOf = v => (1 - (v - yLow) / (yHigh - yLow)) * H;
+        const svg = makeChartSvg(W, H);
+
+        for (const r of gridLines) svg.appendChild(hGridLine(yOf(r), W));
+
+        // Per-attempt scatter: green=correct, red=wrong, drawn UNDER the bands so
+        // the curve always reads on top. Cap the rendered count (stride) and fade
+        // opacity by the count actually INSIDE the window (most dots clip out, as
+        // problem ranks scatter far wider than the band).
+        const visibleDots = dots.filter(d => d.y >= yLow && d.y <= yHigh);
+        const SCATTER_CAP = 1500;
+        const stride = Math.max(1, Math.ceil(visibleDots.length / SCATTER_CAP));
+        const shownDots = stride > 1 ? visibleDots.filter((_, i) => i % stride === 0) : visibleDots;
+        const dotR = shownDots.length > 600 ? '1.4' : '1.6';
+        const dotAlpha = Math.max(0.15, Math.min(0.6, 50 / Math.max(1, shownDots.length))).toFixed(3);
+        for (const d of shownDots) {
+            svg.appendChild(svgEl('circle', {
+                cx: xOf(d.t).toFixed(1), cy: yOf(d.y).toFixed(1), r: dotR,
+                fill: d.correct ? DOT_CORRECT : DOT_WRONG, 'fill-opacity': dotAlpha,
+            }));
+        }
+
+        // Two nested bands: outer (lighter) = prediction interval (where a
+        // session's form lands), inner (darker) = measurement uncertainty. Each
+        // edge is already in display space; top runs left→right, bottom closes it
+        // right→left.
+        const bandPath = (top, bot) => {
+            let d = '';
+            for (let i = 0; i < gd.length; i++) d += (i === 0 ? 'M' : 'L') + `${xOf(gd[i].t).toFixed(1)} ${yOf(gd[i][top]).toFixed(1)} `;
+            for (let i = gd.length - 1; i >= 0; i--) d += `L${xOf(gd[i].t).toFixed(1)} ${yOf(gd[i][bot]).toFixed(1)} `;
+            return d + 'Z';
+        };
+        if (gd.length >= 2) {
+            svg.appendChild(svgEl('path', { d: bandPath('up', 'dn'), fill: SKILL_FILL_OUTER, stroke: 'none' }));
+            svg.appendChild(svgEl('path', { d: bandPath('iu', 'id'), fill: SKILL_FILL_INNER, stroke: 'none' }));
+            const skillPts = gd.map(g => `${xOf(g.t).toFixed(1)},${yOf(g.S).toFixed(1)}`).join(' ');
+            svg.appendChild(svgEl('polyline', {
+                points: skillPts, fill: 'none', stroke: SKILL_STROKE,
+                'stroke-width': '1.5', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke',
+            }));
+        }
+
+        svgWrap.append(svg);
+        const plotMain = document.createElement('div');
+        plotMain.className = 'stats-chart-plot-main';
+        plotMain.append(yaxis, svgWrap);
+        plotRow.append(plotMain);   // no x-axis end-date label
+
+        // Greedy-hide y-axis labels that would physically overlap; re-runs on
+        // resize. Re-created per render, so disconnect the prior observer first.
+        const updateLabelVisibility = () => {
+            const h = svg.getBoundingClientRect().height;
+            if (h === 0) return;
+            const tickEls = [...yaxis.querySelectorAll('.y-tick')]
+                .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
+            const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
+            let lastShownPx = -Infinity;
+            for (const el of tickEls) {
+                const topPx = (parseFloat(el.style.top) / 100) * h;
+                if (topPx - lastShownPx >= minSepPx) { el.style.visibility = ''; lastShownPx = topPx; }
+                else el.style.visibility = 'hidden';
+            }
+        };
+        if (labelObserver) { labelObserver.disconnect(); labelObserver = null; }
+        if (typeof ResizeObserver !== 'undefined') {
+            labelObserver = new ResizeObserver(updateLabelVisibility);
+            labelObserver.observe(svg);
+        } else {
+            queueMicrotask(updateLabelVisibility);
+        }
+
+        plotHolder.replaceChildren(plotRow);
+    };
+
+    select.addEventListener('change', () => {
+        selectedServer = select.value;
+        renderPlot();
+    });
+    renderPlot();
+
+    container.append(plotHolder, legend);
+    // The readout is NOT appended here — it's returned so the Rank pane can place
+    // it in the text section (below the chart). renderPlot still drives it via the
+    // shared reference, so it stays reactive to the dropdown wherever it's placed.
+    return { chart: container, readout };
 }
 
 // Number of problems attempted per calendar day, as a bar chart. Each attempt
