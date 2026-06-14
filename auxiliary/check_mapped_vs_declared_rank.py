@@ -44,7 +44,9 @@ Usage:
 import argparse
 import json
 import os
+import sqlite3
 import sys
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -100,6 +102,49 @@ def load_server_curves(v2_dir):
 def apply_M(R, m_ratings, m_internal):
     """rating R → internal(EGF) rank scalar."""
     return float(interp_extrap_vec(np.array([R]), m_ratings, m_internal)[0])
+
+
+# --- Time adjustment (optional, mirrors the client) ------------------------
+# The PWA docks the *server-translated* rank (header onlymove rank stays raw):
+# practice here is untimed but server ranks are timed, so a solver slower than
+# typical FOR THEIR RANK overstates their timed strength. See
+# pwa/js/population-constants.js (timeAdjustDeltaRating) + rank-decomposition.js
+# (rankIndexAfterRatingDelta). Feature must match user_median_log10_minutes in
+# fit_population_constants: non-repeat, time_used in (0, AFK cap], ≥MIN_TIMED.
+TIME_ADJUST_AFK_CAP_MS = 180000
+TIME_ADJUST_MIN_TIMED = 20
+
+
+def load_time_adjust(v2_dir):
+    """(alpha, g0, g1) from the shipped population_constants.json, or None."""
+    with open(os.path.join(v2_dir, "population_constants.json")) as f:
+        ta = json.load(f).get("time_adjust")
+    if not ta:
+        return None
+    return (float(ta["alpha_per_log10_min"]),
+            float(ta["time_vs_rank_intercept"]),
+            float(ta["time_vs_rank_slope"]))
+
+
+def load_user_median_solve_minutes(sqlite_path):
+    """{user_prefix8: median novel solve minutes}, reproducing the client's
+    medianNovelSolveMinutes() so the alpha is applied to the same feature."""
+    con = sqlite3.connect(sqlite_path)
+    try:
+        cur = con.execute(
+            "SELECT user_id, time_used FROM tsumego_reports "
+            "WHERE is_repeat=0 AND time_used>0 AND time_used<=?",
+            (TIME_ADJUST_AFK_CAP_MS,))
+        buckets = defaultdict(list)
+        for uid, t in cur:
+            buckets[uid[:8]].append(float(t))
+    finally:
+        con.close()
+    out = {}
+    for pref, ts in buckets.items():
+        if len(ts) >= TIME_ADJUST_MIN_TIMED:
+            out[pref] = float(np.median(ts)) / 60000.0
+    return out
 
 
 def declared_to_internal(server, declared_scalar, server_curves):
@@ -179,6 +224,18 @@ def main():
                     help="Drop survey users with fewer pooled attempts.")
     ap.add_argument("--csv", default=None,
                     help="If set, write the per-declaration error table here.")
+    ap.add_argument("--time-adjust", action="store_true",
+                    help="Apply the client's whole-history time adjustment to the "
+                         "displayed (server) rank — docks solvers slower than "
+                         "typical for their rank, the same correction the PWA shows.")
+    ap.add_argument("--time-recenter", action="store_true",
+                    help="With --time-adjust: demean the time-dock over the survey "
+                         "cohort (the fleet-fit g0,g1 line has a non-zero mean "
+                         "residual on survey users, leaking a uniform bias). Keeps "
+                         "the within-cohort precision gain, drops the mean shift.")
+    ap.add_argument("--sqlite",
+                    default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"),
+                    help="SQLite DB for per-user median solve time (--time-adjust).")
     args = ap.parse_args()
 
     print(f"Reading {args.sql} ...")
@@ -223,6 +280,33 @@ def main():
             user_internal[pref] = apply_M(R, m_ratings, m_internal)
     print(f"  {len(user_internal)} users with a usable rating "
           f"(≥{args.min_attempts} attempts)")
+
+    if args.time_adjust:
+        ta = load_time_adjust(args.v2_dir)
+        if ta is None:
+            sys.exit("--time-adjust: no time_adjust block in population_constants.json")
+        alpha, g0, g1 = ta
+        med_min = load_user_median_solve_minutes(args.sqlite)
+        # delta in RATING units per user (skip users missing the feature — the
+        # client shows them the raw rank). Center on the time expected for THIS
+        # user's (base) rank index; the curve's native axis is
+        # internal_scalar + RANK_INDEX_OFFSET.
+        deltas = {}
+        for pref in user_R:
+            mm = med_min.get(pref)
+            if mm is None or mm <= 0:
+                continue
+            native_idx = user_internal[pref] + RANK_INDEX_OFFSET
+            deltas[pref] = alpha * (np.log10(mm) - (g0 + g1 * native_idx))
+        if args.time_recenter and deltas:
+            mean_delta = float(np.mean(list(deltas.values())))
+            deltas = {p: d - mean_delta for p, d in deltas.items()}
+        for pref, d in deltas.items():
+            user_internal[pref] = apply_M(user_R[pref] + d, m_ratings, m_internal)
+        print(f"  TIME ADJUSTMENT applied to {len(deltas)}/{len(user_R)} users "
+              f"(alpha={alpha}, g0={g0}, g1={g1:g}"
+              f"{', survey-recentered' if args.time_recenter else ''}); the rest "
+              f"lack ≥{TIME_ADJUST_MIN_TIMED} timed novel attempts (raw rank shown)")
 
     # --- one row per (user, server) declaration ---
     rows = []
