@@ -792,6 +792,29 @@ def main():
                          "problems. May be unnecessary once the floor prior holds (a sound floor "
                          "absorbs the flat hard-tail performance the slope was floored to mimic). "
                          "0 = off.")
+    # --- continuous kNN inverse-density reweighting (--gap-balance's bin-free analogue) ---
+    ap.add_argument("--knn-reweight", action=argparse.BooleanOptionalAction, default=False,
+                    help="Continuous kNN inverse-density analogue of --gap-balance over a CHOICE of "
+                         "the {rating, ability, gap} axes (--knn-axes) and their pairs. Each human "
+                         "row is upweighted ∝ (k-th NN distance in the z-scored axis space)^beta, "
+                         "capped + mass-preserving — reaching the sparse extremes coarse bins smear. "
+                         "Pass-1 model defines the axes; intended standalone (ERM + these weights).")
+    ap.add_argument("--knn-axes", default="rating+gap",
+                    help="'+'-joined subset of {rating, ability, gap} for --knn-reweight.")
+    ap.add_argument("--knn-k", type=int, default=50,
+                    help="Neighbours for the kNN density estimate (--knn-reweight).")
+    ap.add_argument("--knn-beta", type=float, default=1.0,
+                    help="Upweight sparse rows ∝ (k-th NN distance)^beta (0 = uniform).")
+    ap.add_argument("--knn-max", type=float, default=10.0,
+                    help="Cap on the per-row kNN upweight (mirrors --gap-balance-max).")
+    ap.add_argument("--knn-count-normalize", action=argparse.BooleanOptionalAction, default=False,
+                    help="Sample-count-normalize the kNN density: estimate it over per-USER points "
+                         "(one per user = their mean axis position) → user rarity W_u, then split "
+                         "W_u across the user's rows (w_row = W_u/n_u), capping per user. Fixes the "
+                         "ability-axis collapse where per-ATTEMPT density is dominated by who "
+                         "attempted most (heavy users spike it → zeroed; rare-ability users blow "
+                         "up). Exact for ability-only; per-user mean is approximate when "
+                         "rating/gap (which vary within a user) are in --knn-axes.")
     # --- even-error group-DRO (ported from the legacy residual model; ON by default) ---
     ap.add_argument("--dro-skill", action=argparse.BooleanOptionalAction, default=False,
                     help="Spread held-out error evenly across the rating range with a base-rate-"
@@ -1319,11 +1342,50 @@ def main():
                   f"counts {cnt.astype(int)},\n               row weights "
                   f"{np.array([wmul[gb == g].mean() if (gb == g).any() else 0 for g in range(args.gap_balance_bins)])} "
                   f"(cap {args.gap_balance_max}, power {args.gap_balance_power})")
-    if (hier_target is not None and not fixed_hier) or cond_div_tgt is not None or args.gap_balance:
+    if args.knn_reweight:
+        # Continuous kNN analogue of --gap-balance over a choice of {rating, ability, gap}.
+        # Each human row's weight ∝ (distance to its k-th NN in the z-scored axis space)^beta,
+        # so the sparse EXTREMES (which equal-width/quantile bins smear into a neighbour) get
+        # upweighted smoothly; capped (--knn-max) and renormalized to preserve total human mass.
+        # Pass-1 model defines the axes (as gap_balance/dro_skill). Standalone (ERM + weights).
+        from sklearn.neighbors import NearestNeighbors
+        bk_, ak_, ck_, thk_full, lamk = score_corpus(m)
+        rating_k = bk_ + clear_logit_vec(ck_, lamk) / ak_
+        hp_k = p_all[:n_human]; hu_k = u_all[:n_human]
+        ax = {"rating": rating_k[hp_k], "ability": thk_full[hu_k],
+              "gap": np.clip(ak_[hp_k] * (thk_full[hu_k] - rating_k[hp_k]), -ZCLIP, ZCLIP)}
+        names = [a.strip() for a in args.knn_axes.split("+") if a.strip()]
+        if any(nm not in ax for nm in names):
+            raise SystemExit(f"--knn-axes must be a '+'-subset of {list(ax)}; got {args.knn_axes}")
+        X = np.column_stack([(ax[nm] - ax[nm].mean()) / (ax[nm].std() + 1e-9) for nm in names])
+        if args.knn_count_normalize:
+            # Density over per-USER points (mean axis position), so heavy users don't spike it;
+            # split each user's rarity mass W_u across their rows. See --knn-count-normalize.
+            uniq, inv, cnt_u = np.unique(hu_k, return_inverse=True, return_counts=True)
+            sums = np.zeros((len(uniq), X.shape[1])); np.add.at(sums, inv, X)
+            Xu = sums / cnt_u[:, None]
+            du, _ = NearestNeighbors(n_neighbors=min(args.knn_k + 1, len(uniq))).fit(Xu).kneighbors(Xu)
+            Wu = np.power(np.maximum(du[:, -1], 1e-9), args.knn_beta)
+            Wu = np.minimum(Wu / Wu.mean(), args.knn_max)     # cap per-USER rarity
+            wmul = (Wu / cnt_u)[inv]                           # split across that user's rows
+        else:
+            dist, _ = NearestNeighbors(n_neighbors=args.knn_k + 1).fit(X).kneighbors(X)
+            wmul = np.power(np.maximum(dist[:, -1], 1e-9), args.knn_beta)
+            wmul = np.minimum(wmul / wmul.mean(), args.knn_max)
+        wmul *= n_human / wmul.sum()                          # preserve total human mass
+        w_all[:n_human] = wmul.astype(np.float32)
+        tw = torch.tensor(w_all, device=device)
+        print(f"  knn_reweight: axes [{'+'.join(names)}] k={args.knn_k} beta={args.knn_beta} "
+              f"cap {args.knn_max}{' count-norm' if args.knn_count_normalize else ''} — row wt "
+              f"p99/p50/p1 {np.percentile(wmul, 99):.2f}/{np.percentile(wmul, 50):.2f}/"
+              f"{np.percentile(wmul, 1):.2f}")
+    if (hier_target is not None and not fixed_hier) or cond_div_tgt is not None or args.gap_balance \
+            or args.knn_reweight:
         print("  refitting (pass 2: "
               + " + ".join(s for s, on in (("hier shrinkage", hier_target is not None),
                                            ("cond-diversity", cond_div_tgt is not None),
-                                           ("gap-balanced weights", args.gap_balance)) if on) + ")")
+                                           ("gap-balanced weights", args.gap_balance),
+                                           ("knn-reweight weights", args.knn_reweight)) if on) + ")")
         m = fit_model(hier_target=hier_target, cond_div=cond_div_tgt)
     if args.dro_skill:
         # Pass 1 done. Bin the HUMAN train rows by their problem's pass-1 80%-clear rating (shared
@@ -1563,8 +1625,36 @@ def main():
                 pp = m(torch.tensor(prof_idx[mask], device=device), tfeat[tpi], tpi).cpu().numpy()
             yy = y[mask]; pp = np.clip(pp, EPS, 1 - EPS)
             return float(-(yy * np.log(pp) + (1 - yy) * np.log(1 - pp)).mean())
+
+        def _bin_flatness(mask, nbins=10):
+            """HELD-OUT per-rating-bin Δskill (bin LL − bin base-rate entropy), the even-error
+            target evaluated OUT OF SAMPLE (the pass-1 'excess-over-base' table is on TRAIN rows).
+            Returns (std, worst, spread, per_bin) over equal-count rating bins; flat = even error,
+            and `worst` is the worst-bin held-out skill the user weights above overall LL."""
+            idx = np.where(mask)[0]
+            if len(idx) == 0:
+                return None
+            with torch.no_grad():
+                tpi = torch.tensor(prob_idx[idx], device=device)
+                pp = m(torch.tensor(prof_idx[idx], device=device), tfeat[tpi], tpi).cpu().numpy()
+            pp = np.clip(pp, EPS, 1 - EPS); yy = y[idx]; rr = rating[prob_idx[idx]]
+            edges = np.quantile(rr, np.linspace(0, 1, nbins + 1)); edges[-1] += 1e-6
+            b = np.clip(np.searchsorted(edges, rr, side="right") - 1, 0, nbins - 1)
+            d = []
+            for i in range(nbins):
+                s = b == i
+                if s.sum() < 50:
+                    continue
+                base = min(max(float(yy[s].mean()), EPS), 1 - EPS)
+                bll = -(base * np.log(base) + (1 - base) * np.log(1 - base))
+                d.append(float(-(yy[s] * np.log(pp[s]) + (1 - yy[s]) * np.log(1 - pp[s])).mean()) - bll)
+            d = np.array(d)
+            return float(d.std()), float(d.max()), float(d.max() - d.min()), d
+
         byrow_ll = _ll(byrow_val)                    # new attempts on SEEN problems
         ho_ll = _ll(ho_mask_h)                       # new (UNSEEN) problems — feature-prior transfer
+        flat_v = _bin_flatness(byrow_val)            # held-out per-bin even-error (seen problems)
+        flat_h = _bin_flatness(ho_mask_h)            # held-out per-bin even-error (unseen problems)
         gap_calibration(byrow_val, "by-row VAL (held-out attempts, seen problems)")
         gap_calibration(byrow_val & heavy_row, "by-row VAL, heavy users (≥100 train rows)")
         gap_rating_calibration(byrow_val, "by-row VAL, all users")
@@ -1626,6 +1716,16 @@ def main():
               f"(per-server Spearman, n-weighted: "
               + " ".join(f"{s}:{r:.2f}(n{n})" for s, (n, r) in sorted(per.items(), key=lambda kv: -kv[1][0]))
               + ")")
+        worst_srv = min(((n, r, s) for s, (n, r) in per.items() if n >= 12), default=None,
+                        key=lambda t: t[1])
+        if worst_srv is not None:
+            print(f"     worst server (n≥12)     : {worst_srv[2]} ρ={worst_srv[1]:.2f} (n{worst_srv[0]})")
+        if flat_v is not None:
+            print(f"  4. held-out Δskill flatness : VAL(seen) std {flat_v[0]:.4f} worst {flat_v[1]:+.4f} "
+                  f"spread {flat_v[2]:.4f}"
+                  + (f" | new-prob std {flat_h[0]:.4f} worst {flat_h[1]:+.4f} spread {flat_h[2]:.4f}"
+                     if flat_h is not None else "")
+                  + "  (rating bins; lower = flatter held-out error)")
         return
 
     # --- write outputs ---

@@ -613,6 +613,18 @@ def main():
     ap.add_argument("--ee-slope", action="store_true",
                     help="Use a 2PL slope head in --even-error (matches train_rating_v2; "
                          "default is 1PL difficulty-only, which is seed-invariant for lin).")
+    ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"),
+                    help="Backend rating dir (the old mixture-of-sigmoids 'ratings/' was "
+                         "removed; ratings_v2 is the only backend now).")
+    ap.add_argument("--knn-reweight", action="store_true",
+                    help="kNN inverse-density SAMPLE reweighting over {rating, ability, "
+                         "gap} and all 3 pairs, vs ERM + dro_skill, same flatness report.")
+    ap.add_argument("--knn-k", type=int, default=50,
+                    help="Neighbours for the kNN density estimate (--knn-reweight).")
+    ap.add_argument("--knn-beta", type=float, default=1.0,
+                    help="Upweight sparse points ∝ (kth-NN distance)**beta (0 = uniform).")
+    ap.add_argument("--knn-clip", type=float, default=10.0,
+                    help="Clip per-sample weights to [1/clip, clip] after mean-normalising.")
     ap.add_argument("--dro-eta", type=float, default=0.1,
                     help="Group-DRO exponentiated-gradient step on per-bin loss.")
     ap.add_argument("--cvar-alpha", type=float, default=0.3,
@@ -647,13 +659,13 @@ def main():
     qual = set(g.index[(g["c"] >= args.min) & (g["w"] >= args.min)])
     df = df[df["user_id"].isin(qual)].copy()
 
-    rpath = os.path.join(PROJECT_ROOT, "ratings", str(args.size),
+    rpath = os.path.join(args.ratings_dir, str(args.size),
                          "tsumego_ratings_final.csv")
     rating = pd.read_csv(rpath).set_index("tsumego_id")["rating"].to_dict()
     # Optional bot-ONLY rating (a no-user fit; the v1 model that produced it has
     # been removed), to isolate the human-outcome leakage the with-users
     # tsumego_ratings_final.csv carries.
-    nupath = os.path.join(PROJECT_ROOT, "ratings", str(args.size),
+    nupath = os.path.join(args.ratings_dir, str(args.size),
                           "tsumego_ratings_botonly.csv")
     rating_nu = (pd.read_csv(nupath).set_index("tsumego_id")["rating"].to_dict()
                  if os.path.exists(nupath) else None)
@@ -731,6 +743,9 @@ def main():
         return
     if args.even_error:
         even_error(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, device)
+        return
+    if args.knn_reweight:
+        knn_reweight(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, device)
         return
 
     hdr = f"  {'model':>11s} {'floor':>8s} {'LogLoss':>9s} {'Brier':>8s} {'AUC':>7s} {'ECE':>7s} {'n_eval':>9s}"
@@ -1023,12 +1038,15 @@ def _agg_loss(l, gb, G, objective, state, dro_eta, tilt, cvar_alpha):
 
 
 def fit_eval_obj(prof_idx, feat, y, groups, rank_bin, n_profiles, objective,
-                 args, device, seed, slope, diff_hidden):
+                 args, device, seed, slope, diff_hidden, sample_w=None):
     """GroupKFold-by-problem OOF prediction under an error-adaptive `objective`
     (see _agg_loss), grouping the training loss by `rank_bin`. Mirrors fit_eval's
     folds/model/early-stopping; the ONLY change is the training-loss aggregation,
     so an objective's effect is isolated. MLP early stopping still monitors MEAN
-    inner-val BCE (we want generalisation, not a robust val metric)."""
+    inner-val BCE (we want generalisation, not a robust val metric).
+
+    `sample_w` (per-attempt, optional) switches the train loss to a WEIGHTED mean
+    BCE (`objective` is then ignored) — the kNN inverse-density reweighting path."""
     from sklearn.model_selection import GroupKFold
     import torch.nn.functional as F
     oof = np.full(len(y), np.nan)
@@ -1038,6 +1056,8 @@ def fit_eval_obj(prof_idx, feat, y, groups, rank_bin, n_profiles, objective,
     tprof = torch.tensor(prof_idx, dtype=torch.long, device=device)
     tfeat = torch.tensor(feat, dtype=torch.float32, device=device)
     tbin = torch.tensor(rank_bin, dtype=torch.long, device=device)
+    tw = (None if sample_w is None
+          else torch.tensor(sample_w, dtype=torch.float32, device=device))
     mlp = bool(diff_hidden)
     for tr, te in GroupKFold(args.folds).split(y, groups=groups):
         torch.manual_seed(seed)
@@ -1066,6 +1086,9 @@ def fit_eval_obj(prof_idx, feat, y, groups, rank_bin, n_profiles, objective,
         def train_loss(idx):
             l = F.binary_cross_entropy(m(tprof[idx], tfeat[idx]), ty[idx],
                                        reduction="none")
+            if tw is not None:
+                w = tw[idx]
+                return (l * w).sum() / w.sum().clamp(min=EPS) + m.reg(args.ridge)
             return _agg_loss(l, tbin[idx], G, objective, state,
                              args.dro_eta, args.tilt, args.cvar_alpha) + m.reg(args.ridge)
 
@@ -1229,6 +1252,135 @@ def even_error(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, de
         b = y[sel].mean()
         print(f"  {rank[sel].mean():>9.1f} {int(sel.sum()):>7d} {b:>5.2f}"
               + "".join(f"{perbin[o][i]:>+10.4f}" for o in args.ee_objectives))
+
+
+def _full_fit_theta_gap(prof_idx, feat, y, n_profiles, args, device, seed=0):
+    """One full-data (no held-out) linear 1PL fit → per-attempt ability
+    (θ_profile) and gap (θ + difficulty = predicted logit). Defines the kNN
+    reweighting axes ONLY; predictions are still scored OOF by fit_eval_obj, so
+    this is propensity-style weighting, not a leaked predictor. The label
+    dependence is second-order: GroupKFold holds out PROBLEMS, and a profile's θ
+    is estimated from many problems, so dropping a test problem barely moves it."""
+    import torch.nn.functional as F
+    torch.manual_seed(seed)
+    m = RatingModel(n_profiles, feat.shape[1], "none", slope=False).to(device)
+    tprof = torch.tensor(prof_idx, dtype=torch.long, device=device)
+    tfeat = torch.tensor(feat, dtype=torch.float32, device=device)
+    ty = torch.tensor(y, dtype=torch.float32, device=device)
+    opt = torch.optim.Adam(m.parameters(), lr=args.lr)
+    for _ in range(args.epochs):
+        m.train(); opt.zero_grad()
+        (F.binary_cross_entropy(m(tprof, tfeat), ty) + m.reg(args.ridge)).backward()
+        opt.step()
+    m.eval()
+    with torch.no_grad():
+        ability = m.theta.weight.squeeze(-1)[tprof].cpu().numpy()
+        p = m(tprof, tfeat).clamp(EPS, 1 - EPS).cpu().numpy()
+    return ability, np.log(p / (1 - p))     # gap = θ + d (predicted logit)
+
+
+def _knn_inv_density_weights(cols, k, beta, clip):
+    """Per-sample inverse-density weights from the distance to the k-th nearest
+    neighbour in the z-scored axis space `cols` (list of 1-D arrays). Sparse points
+    (large kth-NN distance) are upweighted ∝ r_k**beta; weights are mean-normalised
+    and clipped to [1/clip, clip] so a few outliers can't dominate. Continuous, so
+    the extremes get the weight that coarse bins miss."""
+    from sklearn.neighbors import NearestNeighbors
+    X = np.column_stack([(c - c.mean()) / (c.std() + 1e-9) for c in cols])
+    d, _ = NearestNeighbors(n_neighbors=k + 1).fit(X).kneighbors(X)
+    w = np.power(np.maximum(d[:, -1], 1e-9), beta)   # r_k = k-th NN distance
+    w = w / w.mean()
+    return np.clip(w, 1.0 / clip, clip)
+
+
+def knn_reweight(prof_idx, feats, y, groups, n_profiles, prof_df, rating, args, device):
+    """kNN inverse-density SAMPLE reweighting vs ERM and the shipped dro_skill,
+    over the three axes {tsumego rating, user ability, gap=ability+difficulty} and
+    all three 2-D pairs. Question: does continuous density reweighting (which
+    actually reaches the sparse extremes) flatten the per-rating error better than
+    the coarse-bin DRO, and do the axis choices differ? Same rating-bin flatness
+    report as --even-error so the numbers are directly comparable. Linear head
+    (seed-invariant), 1PL unless --ee-slope."""
+    from sklearn.metrics import log_loss, roc_auc_score
+    src = args.ee_source
+    if src not in feats or feats[src] is None:
+        print(f"  source {src} unavailable"); return
+    raw = prof_df["problem"].map(rating).to_numpy(float)
+    rank = _rank_of(prof_df, rating, args.size)
+    edges = np.quantile(raw, np.linspace(0, 1, args.ee_bins + 1)); edges[-1] += 1e-6
+    rank_bin = np.clip(np.searchsorted(edges, raw, side="right") - 1,
+                       0, args.ee_bins - 1).astype(np.int64)
+
+    ability, gap = _full_fit_theta_gap(prof_idx, feats[src], y, n_profiles,
+                                       args, device, args.seed)
+    axes = {"rating": raw, "ability": ability, "gap": gap}
+    combos = [("rating",), ("ability",), ("gap",),
+              ("rating", "ability"), ("rating", "gap"), ("ability", "gap")]
+
+    base = float(y.mean())
+    base_ll = -(base * np.log(base) + (1 - base) * np.log(1 - base))
+    print(f"\nKNN-REWEIGHT (size {args.size}) source={src} | k={args.knn_k} "
+          f"beta={args.knn_beta} clip={args.knn_clip} | {args.ee_bins} rating bins | "
+          f"base-rate LL {base_ll:.4f} | {'2PL' if args.ee_slope else '1PL'} linear "
+          f"| axis corr rating·ability={np.corrcoef(raw, ability)[0,1]:+.2f} "
+          f"rating·gap={np.corrcoef(raw, gap)[0,1]:+.2f}")
+
+    def flat(o, valid):
+        d = []
+        for i in range(args.ee_bins):
+            sel = valid & (rank_bin == i)
+            if sel.sum() < 50:
+                continue
+            yy = y[sel]; b = yy.mean()
+            bll = -(b * np.log(max(b, EPS)) + (1 - b) * np.log(max(1 - b, EPS)))
+            pp = np.clip(o[sel], EPS, 1 - EPS)
+            d.append(-np.mean(yy * np.log(pp) + (1 - yy) * np.log(1 - pp)) - bll)
+        d = np.array(d)
+        return d.std(), d.max(), d.max() - d.min()
+
+    runs, wstr = [], {}
+    runs.append(("ERM(mean)", fit_eval_obj(prof_idx, feats[src], y, groups, rank_bin,
+                 n_profiles, "mean", args, device, args.seed, args.ee_slope, ())))
+    runs.append((f"dro_skill η{args.dro_eta}", fit_eval_obj(prof_idx, feats[src], y,
+                 groups, rank_bin, n_profiles, "dro_skill", args, device, args.seed,
+                 args.ee_slope, ())))
+    for combo in combos:
+        w = _knn_inv_density_weights([axes[a] for a in combo], args.knn_k,
+                                     args.knn_beta, args.knn_clip)
+        label = "knn:" + "+".join(combo)
+        wstr[label] = f"{np.percentile(w, 99):.1f}/{np.percentile(w, 1):.2f}"
+        runs.append((label, fit_eval_obj(prof_idx, feats[src], y, groups, rank_bin,
+                     n_profiles, "mean", args, device, args.seed, args.ee_slope, (),
+                     sample_w=w)))
+
+    valid = ~np.isnan(runs[0][1])
+    erm_ll = log_loss(y[valid], np.clip(runs[0][1][valid], EPS, 1 - EPS))
+    print(f"\n  {'scheme':>16s} {'overall LL':>11s} {'ΔLL vs ERM':>11s} {'AUC':>7s} "
+          f"{'Δskill std':>11s} {'worst':>8s} {'spread':>8s} {'wt p99/p1':>10s}")
+    print("  " + "-" * 88)
+    for label, o in runs:
+        m = valid & ~np.isnan(o)
+        ll = log_loss(y[m], np.clip(o[m], EPS, 1 - EPS))
+        std, worst, spread = flat(o, valid)
+        print(f"  {label:>16s} {ll:>11.4f} {ll - erm_ll:>+11.4f} "
+              f"{roc_auc_score(y[m], o[m]):>7.4f} {std:>11.4f} {worst:>+8.4f} "
+              f"{spread:>8.4f} {wstr.get(label, ''):>10s}")
+
+    print(f"\n  Per-bin Δskill (LL − base; <0 beats base). Flat column = even error:")
+    labels = [r[0] for r in runs]
+    hdr = f"  {'rank':>6s} {'n':>7s} {'base':>5s}" + "".join(f"{l[:9]:>10s}" for l in labels)
+    print(hdr); print("  " + "-" * (len(hdr) - 2))
+    for i in range(args.ee_bins):
+        sel = valid & (rank_bin == i)
+        if sel.sum() < 50:
+            continue
+        yy = y[sel]; b = yy.mean()
+        bll = -(b * np.log(max(b, EPS)) + (1 - b) * np.log(max(1 - b, EPS)))
+        row = f"  {rank[sel].mean():>6.1f} {int(sel.sum()):>7d} {b:>5.2f}"
+        for _, o in runs:
+            pp = np.clip(o[sel], EPS, 1 - EPS)
+            row += f"{-np.mean(yy * np.log(pp) + (1 - yy) * np.log(1 - pp)) - bll:>+10.4f}"
+        print(row)
 
 
 def floor_gap(prof_idx, feats, y, groups, n_profiles, args, device):
