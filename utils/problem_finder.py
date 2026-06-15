@@ -72,6 +72,17 @@ class ProblemFinder:
         return moves
 
     def is_valid(self, moves):
+        """Verify the position is a sound tsumego and RETURN the move that wins it.
+
+        Escalates from PLAYOUTS to PLAYOUTS_VERIFY playouts and plays both the
+        winning and losing lines to the end. On success returns the deep-read
+        best move (the final, highest-playout iteration's best_move); returns
+        None on any failure. The caller's cheap 10-playout best_move is only a
+        pre-filter — it can disagree with this deep-read move, which is precisely
+        the case we want to keep (a policy-tempting move refuted by reading), so
+        the validated move, not the shallow one, becomes the solution.
+        """
+        best_move = None
         steps = 20
         for i in range(steps):
             p = (i + 1) / steps
@@ -84,7 +95,7 @@ class ProblemFinder:
             debug(f"verify: {i}/{steps} {(100 * best_winrate):.1f}%, {(100 * second_winrate):.1f}%, {best_score:.1f}, {second_score:.1f}")
             if best_winrate < min_winrate_correct or second_winrate > max_winrate_alternative or second_score > 0:
                 debug("looked promising, but failed after more playouts")
-                return False
+                return None
 
         # and lets play the game to the end, just to make sure we arrive at the same conclusion..
         winning_game_moves = moves.copy()
@@ -93,14 +104,14 @@ class ProblemFinder:
             move, winrate, score, _ = self.queries.get_best_move(self.queries.query(winning_game_moves, playouts=PLAYOUTS_GAME))
             if winrate < 0.5 or score < 0:
                 debug(f"looked promising, but black fell behind after {len(winning_game_moves) - len(moves)} moves.")
-                return False
+                return None
             winning_game_moves.append(move)
 
         score,winrate = self.queries.get_position_info(winning_game_moves)
         debug(f"playing correct move to the end : {(100 * winrate):.1f}% {score:.1f}")
         if winrate < 0.5 or score < 0:
             debug("looked promising, but playing to the end didnt give conclusive win")
-            return False
+            return None
 
         losing_game_moves = moves.copy()
         losing_game_moves.append(second_move)
@@ -108,16 +119,18 @@ class ProblemFinder:
             move, winrate, score, _ = self.queries.get_best_move(self.queries.query(losing_game_moves, playouts=PLAYOUTS_GAME))
             if winrate > 0.5 or score > 0:
                 debug(f"looked promising, but despite wrong move black got ahead after {len(losing_game_moves) - len(moves)} moves.")
-                return False
+                return None
             losing_game_moves.append(move)
 
         score,winrate = self.queries.get_position_info(losing_game_moves)
         debug(f"playing incorrect move to the end : {(100 * winrate):.1f}% {score:.1f}")
         if winrate > 0.5 or score > 0:
             debug("looked promising, but playing to the end didnt give conclusive loss despite second best move")
-            return False
+            return None
 
-        return True
+        # best_move here is the final (highest-playout) iteration's value — the move
+        # deep reading is confident wins, which may differ from the shallow policy move.
+        return best_move
 
     def _rebalance_game(self, moves):
         response = self.queries.query_children(moves)
@@ -167,14 +180,18 @@ class ProblemFinder:
                 debug("terminating due to pass")
                 return None, None
 
-            # do we meet all criteria?
+            # do we meet all criteria? The 10-playout best_move/second_move here are a
+            # cheap pre-filter; is_valid re-reads to PLAYOUTS_VERIFY and returns the move
+            # it actually validated to the end, which is the solution we keep — even when
+            # it differs from the shallow policy move (the case we want: a tempting move
+            # refuted by deeper reading).
             if best_winrate > MIN_WINRATE_CORRECT and second_winrate < MAX_WINRATE_ALTERNATIVE and best_score > 0 and second_score < 0:
-                if self.is_valid(moves):
+                solution = self.is_valid(moves)
+                if solution:
                     debug("found tsumego!")
                     debug(moves)
                     debug(str(policies))
-                    # potential[(len(moves))] = best_move
-                    return moves, best_move
+                    return moves, solution
 
             if second_winrate > MIN_WINRATE_CORRECT_VERIFY and second_score > 0.5:  # we are winning too much, need to lose points..
                 balanced_move, balanced_score, balanced_winrate, balanced_policy = self._rebalance_game(moves)
