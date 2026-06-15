@@ -37,18 +37,58 @@ export function getWinrateFromComment(comment) {
 }
 
 /**
- * Finds the best move from a list of child nodes (assumes first child is best if it has winrate/score comment).
- * @param {Array} children - Array of SGF nodes.
- * @returns {object|null} - The best move node, or null if not found.
+ * Finds the winning move among a node's children by their actual evaluation —
+ * NOT by SGF child order. Comments are "<winrate>%/<score>" with both numbers
+ * reported from BLACK's perspective (bots/analysis.cfg sets
+ * reportAnalysisWinratesAs = BLACK), so the best move for the side to play is:
+ *   - Black to play -> the HIGHEST winrate (score breaks exact ties)
+ *   - White to play -> the LOWEST  winrate (score breaks exact ties)
+ *
+ * Almost every generated problem happens to list its solution first, but a few
+ * generator misfires don't (e.g. 13a38a3f: the listed-first move loses at 0.4%
+ * while the real answer wins at 99.2%). Selecting by evaluation makes the
+ * correctness check robust to ordering instead of trusting children[0].
+ *
+ * Falls back to the first child only when NO sibling carries a parseable
+ * winrate/score comment (preserving the legacy behavior for such nodes).
+ * @param {Array} children - Array of SGF nodes (all the same side to move).
+ * @returns {object|null} - The winning move node, or null if there are none.
  */
 export function findBestMoveFromChildren(children) {
     if (!children || children.length === 0) {
         return null;
     }
-    if (children[0].comment && children[0].comment.match(/%\//)) {
-        return children[0];
+
+    // All children of a decision node share the side to move; read it off the
+    // first child that carries a colored move.
+    const sideToPlay = children.find(c => c.move && (c.move.c === WGo.B || c.move.c === WGo.W))?.move.c;
+    const blackToPlay = sideToPlay === WGo.B;
+
+    let best = null;
+    let bestWinrate = blackToPlay ? -Infinity : Infinity;
+    let bestScore = blackToPlay ? -Infinity : Infinity;
+    for (const child of children) {
+        const winrate = getWinrateFromComment(child.comment);
+        if (winrate === null) continue;
+        const score = getScoreFromComment(child.comment);
+        // Higher winrate/score is better for Black, lower for White (comments
+        // are Black-perspective). Score only matters on an exact winrate tie.
+        const tieScore = score ?? (blackToPlay ? -Infinity : Infinity);
+        const better = blackToPlay
+            ? (winrate > bestWinrate || (winrate === bestWinrate && tieScore > bestScore))
+            : (winrate < bestWinrate || (winrate === bestWinrate && tieScore < bestScore));
+        if (better) {
+            best = child;
+            bestWinrate = winrate;
+            bestScore = tieScore;
+        }
     }
-    return null;
+
+    if (best) {
+        return best;
+    }
+    // No sibling had a parseable evaluation: preserve the legacy first-child behavior.
+    return (children[0].comment && children[0].comment.match(/%\//)) ? children[0] : null;
 }
 
 // Standard Go board notation: column letters skip 'I', row is 1-based from the
