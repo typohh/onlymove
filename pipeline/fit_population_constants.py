@@ -401,7 +401,7 @@ def _weighted_spearman(pairs, alpha):
     return acc / w if w else np.nan
 
 
-def fit_time_adjust(by_user, params, surveys, apply_m):
+def fit_time_adjust(by_user, params, surveys, apply_m, survey_recenter=True):
     """Returns (alpha, time_vs_rank_intercept, time_vs_rank_slope, info); any numeric
     is None when too sparse to fit (caller keeps the default block).
 
@@ -412,7 +412,16 @@ def fit_time_adjust(by_user, params, surveys, apply_m):
     g0/g1 and the user's own rank index, reproducing the identical feature, so the
     fitted alpha (the rank-controlled partial time effect, rating units per log10-min)
     is valid as applied. alpha is still refit by the cross-validated survey Spearman
-    sweep, clamped ≤0; g0/g1 come from the OLS time-vs-rank line."""
+    sweep, clamped ≤0; g1 (the per-rank slope) comes from the OLS time-vs-rank line.
+
+    The intercept g0 is, by default, RE-ANCHORED to the survey cohort (survey_recenter):
+    the OLS line is fleet-fit, so its mean residual over survey users is non-zero, which
+    leaks a uniform downward rank bias into the dock (measured ~0.25 rank — mean mapped
+    error our−declared −0.29→−0.54 with the fleet g0; verified with
+    check_mapped_vs_declared_rank --time-adjust). Shifting g0 by that mean residual zeroes
+    the dock's mean over the calibration cohort while leaving alpha unchanged (weighted
+    Spearman is invariant to a constant feature shift, so the fit below is unaffected) and
+    g1 untouched. --no-survey-recenter keeps the raw fleet intercept."""
     raw_ratings = {k: v[0] for k, v in params.items()}
     slopes = {k: v[1] for k, v in params.items()}
 
@@ -458,6 +467,12 @@ def fit_time_adjust(by_user, params, surveys, apply_m):
     sweep = [_weighted_spearman(pairs, a) for a in TA_ALPHA_GRID]
     a_best = float(TA_ALPHA_GRID[int(np.nanargmax(sweep))])
 
+    # Re-anchor the intercept to the survey cohort (default; see the docstring).
+    # One residual per UNIQUE survey user (resid[u] is constant across that user's
+    # declarations); adding its mean to g0 demeans the dock over the cohort.
+    surv_mbar = float(np.mean(list({p[0]: p[4] for p in pairs}.values())))
+    g0_out = g0 + surv_mbar if survey_recenter else g0
+
     # Cross-fitted guard: alpha picked on train folds only, applied to held-out
     # users; ship the refit alpha only if the assembled score beats alpha=0. (The
     # g0/g1 line is a population nuisance fit on the full pop, not cross-validated.)
@@ -476,13 +491,17 @@ def fit_time_adjust(by_user, params, surveys, apply_m):
                for u, server, rating, sc, f in pairs]
         cv.append(_weighted_spearman(adj, 0.0))
     cv_mean = float(np.mean(cv))
+    recenter_note = (f"survey-recenter ON (mean resid {surv_mbar:+.4f} → g0 "
+                     f"{g0:+.3f}→{g0_out:+.3f})" if survey_recenter
+                     else "survey-recenter OFF (fleet g0)")
     info = (f"{len(pairs)} pairs, {len(pop)}-user time-vs-rank line "
-            f"(g0={g0:+.3f}, g1={g1:+.4f}); weighted Spearman base={base:.4f} "
-            f"best={max(sweep):.4f} @ alpha={a_best:+.3f}; cross-fitted {cv_mean:.4f}")
+            f"(g0={g0:+.3f}, g1={g1:+.4f}); {recenter_note}; weighted Spearman "
+            f"base={base:.4f} best={max(sweep):.4f} @ alpha={a_best:+.3f}; "
+            f"cross-fitted {cv_mean:.4f}")
     if cv_mean <= base:
-        return None, g0, g1, info + " — no held-out gain, keeping default alpha"
+        return None, g0_out, g1, info + " — no held-out gain, keeping default alpha"
     # Never adjust in the implausible direction (slow-for-rank ⇒ rated higher).
-    return min(a_best, 0.0), g0, g1, info
+    return min(a_best, 0.0), g0_out, g1, info
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +579,13 @@ def main():
     ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
     ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings_v2", "population_constants.json"))
+    ap.add_argument("--no-survey-recenter", dest="survey_recenter", action="store_false",
+                    help="Anchor the time-dock intercept g0 on the FLEET instead of the "
+                         "survey cohort. Default re-anchors g0 to the survey cohort's mean "
+                         "residual so the dock is mean-unbiased on the calibration set "
+                         "(alpha + slope g1 unchanged). See the time-adjust note in "
+                         "auxiliary/check_mapped_vs_declared_rank.py.")
+    ap.set_defaults(survey_recenter=True)
     args = ap.parse_args()
 
     print(f"Loading attempts from {args.db} ...")
@@ -629,7 +655,7 @@ def main():
         print("  WARNING: ratings_v2/rating_to_rank.json missing (run map_rating_v2_to_egf "
               "first) — keeping default time_adjust block")
     ta_alpha, ta_g0, ta_g1, ta_info = fit_time_adjust(
-        by_user, params, load_surveys(args.db), apply_m)
+        by_user, params, load_surveys(args.db), apply_m, args.survey_recenter)
     print(f"  {ta_info}")
     if ta_alpha is not None and ta_g0 is not None and ta_g1 is not None:
         out["time_adjust"] = {
