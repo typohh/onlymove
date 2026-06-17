@@ -76,6 +76,7 @@ if PROJECT_ROOT not in sys.path:
 # promote load_joint_*/build_profiles + the activation-cache helpers into utils/.
 from auxiliary.compare_rating_models import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate,
+    load_joint_move_features,
 )
 from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
 from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
@@ -187,7 +188,84 @@ def load_anchor_winrates(keys, ranks):
     return out
 
 
-def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4):
+def _user_log10_median_solve_min(sql_path, prefixes, afk_cap_ms, min_timed):
+    """{user_prefix8: log10(median solving minutes)} over each user's NON-REPEAT, AFK-capped timed
+    attempts (the same feature the client and fit_population_constants compute). Built from the
+    canonical D1 .sql dump (parsing ~289k rows costs a few seconds — fine for a once-per-run eval,
+    and correct even when the sibling .sqlite is stale). Users below `min_timed` timed attempts are
+    omitted (no reliable time feature)."""
+    import sqlite3
+    from collections import defaultdict
+    con = sqlite3.connect(":memory:")
+    with open(sql_path) as f:
+        con.executescript(f.read())
+    rows = con.execute(
+        "SELECT user_id, time_used FROM tsumego_reports "
+        "WHERE is_repeat=0 AND time_used>0 AND time_used<=?", (afk_cap_ms,)).fetchall()
+    con.close()
+    buckets = defaultdict(list)
+    for uid, t in rows:
+        p = str(uid)[:8]
+        if p in prefixes:
+            buckets[p].append(t)
+    return {p: float(np.log10(np.median(ts) / 60000.0))
+            for p, ts in buckets.items() if len(ts) >= min_timed}
+
+
+def _time_adjusted_rho(surveys, user_rating, sql_path):
+    """Time-adjusted survey rho with EVERY coefficient fit on the CURRENT run — never the stale
+    ratings_v2/population_constants.json `time_adjust` block (its alpha/g0/g1 were fit on a prior
+    run's ratings, which a fresh train invalidates). Each survey user's median solving time
+    (log10 min) is residualized on THIS run's 80%-clear rating R (t = g0 + g1·R), so only solve
+    time UNEXPLAINED by skill drives the adjustment — and the residualization needs no rating→rank
+    curve M (also stale for a fresh run). A single alpha (rating units per log10-minute, clamped
+    ≤0 so slow-for-skill is never rated higher) is picked by a per-server survey-Spearman sweep,
+    cross-fitted (alpha chosen on train folds, scored on held-out users) so the reported number is
+    not optimistically self-tuned. Returns a dict (rho_base/rho/rho_insample/alpha/g1/n_users/
+    n_pairs) or {note} when too sparse to fit."""
+    from collections import defaultdict
+    from pipeline.fit_population_constants import (
+        AFK_CAP_S, TA_MIN_TIMED, TA_MIN_PAIRS, TA_ALPHA_GRID, TA_CV_FOLDS, TA_CV_SEEDS,
+        _weighted_spearman)
+    tfeat = _user_log10_median_solve_min(sql_path, set(user_rating), AFK_CAP_S * 1000.0,
+                                         TA_MIN_TIMED)
+    common = [p for p in user_rating if p in tfeat]
+    if len(common) < TA_MIN_PAIRS:
+        return {"note": f"only {len(common)} survey users with rating+time (<{TA_MIN_PAIRS})"}
+    # Residualize the time feature on THIS run's rating (no stale M): t = g0 + g1·R.
+    R = np.array([user_rating[p] for p in common])
+    T = np.array([tfeat[p] for p in common])
+    g1, g0 = (float(x) for x in np.polyfit(R, T, 1))
+    resid = {p: tfeat[p] - (g0 + g1 * user_rating[p]) for p in common}
+    pairs = []
+    for _, row in surveys.iterrows():
+        pref = str(row["user_id"])[:8]
+        g = row["rank_scalar"]
+        if pref in resid and g is not None and not (isinstance(g, float) and np.isnan(g)):
+            pairs.append((pref, row["server"], user_rating[pref], float(g), resid[pref]))
+    if len(pairs) < TA_MIN_PAIRS:
+        return {"note": f"only {len(pairs)} timed survey pairs (<{TA_MIN_PAIRS})"}
+    base = _weighted_spearman(pairs, 0.0)
+    sweep = [_weighted_spearman(pairs, a) for a in TA_ALPHA_GRID]
+    a_best = float(TA_ALPHA_GRID[int(np.nanargmax(sweep))])
+    users_list = sorted({p[0] for p in pairs})
+    cv = []
+    for seed in range(TA_CV_SEEDS):
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(users_list))
+        fold = {users_list[j]: i % TA_CV_FOLDS for i, j in enumerate(order)}
+        a_fold = []
+        for kf in range(TA_CV_FOLDS):
+            train = [p for p in pairs if fold[p[0]] != kf]
+            sw = [_weighted_spearman(train, a) for a in TA_ALPHA_GRID]
+            a_fold.append(float(TA_ALPHA_GRID[int(np.nanargmax(sw))]))
+        adj = [(u, srv, rt + a_fold[fold[u]] * f, sc, 0.0) for u, srv, rt, sc, f in pairs]
+        cv.append(_weighted_spearman(adj, 0.0))
+    return {"rho_base": base, "rho": float(np.mean(cv)), "rho_insample": float(max(sweep)),
+            "alpha": min(a_best, 0.0), "g1": g1, "n_users": len(users_list), "n_pairs": len(pairs)}
+
+
+def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_adjust=True):
     """Composite survey objective (calibration to real ranks). For each survey user, fit their MLE
     80%-clear rating (fit_user_rating over their attempts with these per-problem ratings/slopes); then,
     PER SERVER, the Spearman against the declared rank, and the n-weighted average over servers.
@@ -195,8 +273,12 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4):
     Per-server Spearman is offset- AND scale-invariant, so it is robust to server-population imbalance
     (EGF skews strong, OGS skews weak) — unlike mean-centered pooling, which only removes a server's
     offset and still mixes their differing within-server spread. The surveys are NEVER used in
-    training; they enter only here, as an external validation signal. Returns (weighted_rho,
-    {server: (n, rho)})."""
+    training; they enter only here, as an external validation signal.
+
+    When `time_adjust` (default), ALSO computes a TIME-ADJUSTED survey rho via _time_adjusted_rho —
+    each user's median solve time residualized on THIS run's rating and a cross-fitted alpha, all
+    coefficients fit on the current run (the shipped population_constants.json alpha is stale for a
+    fresh train). Returns (weighted_rho, {server: (n, rho)}, time_adjust_dict | None)."""
     from collections import defaultdict
     from auxiliary.compare_rank_surveys import (
         load_rank_surveys, latest_per_user_server, load_attempts_for_users, SQL_PATH_DEFAULT)
@@ -225,9 +307,11 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4):
         return float(np.corrcoef(np.argsort(np.argsort(x)), np.argsort(np.argsort(y)))[0, 1])
     per = {s: (len(p), spear(p)) for s, p in serv.items() if len(p) >= min_server}
     if not per:
-        return float("nan"), {}
+        return float("nan"), {}, None
     wn = sum(n for n, _ in per.values())
-    return sum(n * r for n, r in per.values()) / wn, per
+    wrho = sum(n * r for n, r in per.values()) / wn
+    ta = _time_adjusted_rho(surveys, user_rating, SQL_PATH_DEFAULT) if time_adjust else None
+    return wrho, per, ta
 
 
 class RatingNet(nn.Module):
@@ -246,7 +330,8 @@ class RatingNet(nn.Module):
                  global_slope_fixed=None,
                  mech_floor_botf=None, mech_floor_scale_fixed=None,
                  floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
-                 lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0):
+                 lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0,
+                 move_dropout=0.0, move_dim=0):
         super().__init__()
         self.slope_floor = float(slope_floor)
         self.floor_cap = float(floor_cap)   # hard upper bound on the guessing floor c_p
@@ -274,6 +359,14 @@ class RatingNet(nn.Module):
         # the net from leaning on any single rung's idiosyncratic value and pushes it toward
         # ladder consensus.
         self.bw_dropout, self.bw_dim = float(bw_dropout), int(bw_dim)
+        # --move-dropout: elementwise dropout on the candidate-move-eval columns (train only,
+        # scaled). The winning-move + 9-alt (logit-winrate, score) block is largely redundant with
+        # the bot-winrate ladder and the activation PCs, so unregularized it adds residual-head
+        # capacity that overfits attempted problems and worsens unseen-problem transfer (measured:
+        # held-out-problem logloss and new-problem flatness both regress). Column dropout forces the
+        # prior to treat it as corroborating, not load-bearing. Block sits at cols
+        # [act_dim+bw_dim : act_dim+bw_dim+move_dim] (before the trailing size indicator).
+        self.move_dropout, self.move_dim = float(move_dropout), int(move_dim)
         # --global-slope: ONE learned discrimination for the whole corpus (3PL+lapse reference
         # model). Motivated by an (accidental but clean) finding: a constant-slope fit had the
         # best held-out-problem transfer and honest-val calibration of any healthy run — much of
@@ -404,6 +497,12 @@ class RatingNet(nn.Module):
                         >= self.bw_dropout).float() / (1.0 - self.bw_dropout)
                 feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.bw_dim] * keep,
                                   feat[:, d0 + self.bw_dim:]], dim=1)
+            if self.training and self.move_dropout > 0 and self.move_dim > 0:
+                d0 = self.act_dim + self.bw_dim
+                keep = (torch.rand(len(feat), self.move_dim, device=feat.device)
+                        >= self.move_dropout).float() / (1.0 - self.move_dropout)
+                feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.move_dim] * keep,
+                                  feat[:, d0 + self.move_dim:]], dim=1)
             o = self.net(feat)
         if self.global_slope is not None:
             # substitute the single global slope into the raw-slope column so per-problem slope
@@ -534,6 +633,17 @@ def main():
                          "the bot floor available), bw = bot columns only (attribution "
                          "reference). The scorable problem set stays the SAME intersection in "
                          "all modes — only the fed columns change.")
+    ap.add_argument("--move-features", action=argparse.BooleanOptionalAction, default=False,
+                    help="Append the candidate-move evaluation block to the --features set: for "
+                         "each problem the winning move's win-prob+score plus those of its 9 best "
+                         "alternatives, oriented to the side to move (logit win-prob + clipped "
+                         "score per move, 20 cols). A sharp gap to the alternatives = an obvious "
+                         "best move (easy); many near-solution rivals = ambiguous (hard) — a "
+                         "difficulty signal orthogonal to the activations and bot ladder. Cache "
+                         "it first with `python -m pipeline.cache_move_features`. The block sits "
+                         "between the bot-winrate columns and the size indicator, so --act-dropout "
+                         "/ --bw-dropout are unaffected. The scorable problem set is unchanged "
+                         "(problems missing a move-feature row are mean-imputed).")
     ap.add_argument("--diff-hidden", type=int, nargs="*", default=[128, 64])
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--act-dropout", type=float, default=0.0,
@@ -552,6 +662,14 @@ def main():
                          "overdispersed vs human difficulty, so this regularizes reliance on "
                          "any single rung's idiosyncratic value toward ladder consensus. "
                          "No-op for --features act. 0 = off.")
+    ap.add_argument("--move-dropout", type=float, default=0.0,
+                    help="Elementwise dropout on the candidate-move-eval columns (--move-features) "
+                         "during training (scaled 1/(1−p); eval uses all). The winning-move + 9-alt "
+                         "(winrate, score) block is largely redundant with the bot-winrate ladder "
+                         "and activations, so unregularized it overfits attempted problems and "
+                         "worsens unseen-problem transfer; column dropout forces the prior to treat "
+                         "it as corroborating, not load-bearing. No-op without --move-features. "
+                         "0 = off.")
     ap.add_argument("--head-pin-dropout", type=float, default=0.0,
                     help="Per-batch head-level dropout (user compensation-learning test): with "
                          "this probability, ONE head from --head-pin-heads is pinned to an EMA "
@@ -892,7 +1010,8 @@ def main():
     if args.mech_floor:
         assert not args.hier_floor, "--mech-floor replaces the floor head; no hier-floor prior"
 
-    # --- features (joint-PCA correct-move activations ⊕ common-column bot winrate) ---
+    # --- features (joint-PCA correct-move activations ⊕ common-column bot winrate
+    #     [⊕ candidate-move evaluations]) ---
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
     act, k = load_joint_activations(SIZES, tids_by_size, args.pca_dim, args.seed)
     bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
@@ -900,14 +1019,26 @@ def main():
     key_idx = {key: i for i, key in enumerate(keys)}
     use_act = args.features in ("bw_act", "act")
     use_bw = args.features in ("bw_act", "bw")
-    fdim = (k if use_act else 0) + (nb if use_bw else 0) + 1  # + size_is_13 board indicator
+    use_mv = args.move_features
+    # The move block is appended AFTER the bot columns and BEFORE the size indicator, so the
+    # [act | bw | move | size] layout keeps --act-dropout (cols :k) and --bw-dropout (cols
+    # k:k+nb) valid. Move features don't gate the scorable set (it stays act∩bw — see --features);
+    # a problem missing a row is mean-imputed (zero after the pooled z-score).
+    mv, nmv = (load_joint_move_features(SIZES, tids_by_size) if use_mv else ({}, 0))
+    zero_mv = np.zeros(nmv, dtype=np.float32)
+    fdim = (k if use_act else 0) + (nb if use_bw else 0) + nmv + 1  # + size_is_13 board indicator
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
         blocks = ([act[key]] if use_act else []) + ([bw[key]] if use_bw else [])
+        if use_mv:
+            blocks.append(mv.get(key, zero_mv))
         feat[i] = np.concatenate(blocks + [[1.0 if key[0] == 13 else 0.0]])
+    n_mv_miss = sum(1 for key in keys if key not in mv) if use_mv else 0
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
           f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
-          f"[{args.features}] (act {k if use_act else 0} + bot {nb if use_bw else 0} + size_is_13)")
+          f"[{args.features}{'+move' if use_mv else ''}] (act {k if use_act else 0} + bot "
+          f"{nb if use_bw else 0}{f' + move {nmv} ({n_mv_miss} imputed)' if use_mv else ''} "
+          f"+ size_is_13)")
 
     botf_t = None
     if args.mech_floor:
@@ -1116,7 +1247,9 @@ def main():
                       act_dropout=args.act_dropout,
                       act_dim=k if use_act else 0,
                       bw_dropout=args.bw_dropout,
-                      bw_dim=nb if use_bw else 0).to(device)
+                      bw_dim=nb if use_bw else 0,
+                      move_dropout=args.move_dropout,
+                      move_dim=nmv if use_mv else 0).to(device)
         if args.floor_residual:
             ci = {"diff": 0, "slope": 1, "floor": 2}
             with torch.no_grad():
@@ -1703,7 +1836,7 @@ def main():
                       f"{_sp(e_res[r_], c[prob_idx[sel][r_]]):+.3f}")
         ratemap = {keys[i][1]: float(rating[i]) for i in range(len(keys))}
         slopemap = {keys[i][1]: float(a[i]) for i in range(len(keys))}
-        wrho, per = survey_weighted_rho(ratemap, slopemap)
+        wrho, per, ta = survey_weighted_rho(ratemap, slopemap)
         print(f"\n=== OBJECTIVES | slope_floor {args.slope_floor} | feat {fdim} | "
               f"holdout {args.holdout_problem_frac} | seed {args.seed} ===")
         print(f"  1. by-row val logloss      : {byrow_ll:.4f}  "
@@ -1720,6 +1853,14 @@ def main():
                         key=lambda t: t[1])
         if worst_srv is not None:
             print(f"     worst server (n≥12)     : {worst_srv[2]} ρ={worst_srv[1]:.2f} (n{worst_srv[0]})")
+        if ta is not None:
+            if "rho" in ta:
+                print(f"     time-adjusted (fit THIS run): ρ {ta['rho']:.4f} cross-fitted vs base "
+                      f"{ta['rho_base']:.4f} (Δ {ta['rho'] - ta['rho_base']:+.4f}; in-sample "
+                      f"{ta['rho_insample']:.4f}) | alpha {ta['alpha']:+.2f}/log10-min | "
+                      f"{ta['n_users']} timed users, {ta['n_pairs']} pairs")
+            else:
+                print(f"     time-adjusted: skipped ({ta['note']})")
         if flat_v is not None:
             print(f"  4. held-out Δskill flatness : VAL(seen) std {flat_v[0]:.4f} worst {flat_v[1]:+.4f} "
                   f"spread {flat_v[2]:.4f}"

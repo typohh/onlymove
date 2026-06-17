@@ -265,6 +265,34 @@ def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, int(keep.sum())
 
 
+def load_joint_move_features(sizes, tids_by_size):
+    """Candidate-move evaluation features (the winning move + its 9 best alternatives), pooled
+    and z-scored across boards (a feature means the same on 9×9 and 13×13). Reads the per-size
+    RAW caches written by pipeline.cache_move_features and applies the pooled column z-score
+    here — so the cache is reusable across tid subsets, like load_joint_bot_winrate. Returns
+    {(size, tid): vec}, n_cols. Raises with a build hint if a cache is missing."""
+    from auxiliary.inspect_activation_signals import CACHE_DIR
+    keys, rows, ncol = [], [], None
+    for size in sizes:
+        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"move-feature cache {path} missing — run "
+                f"`./.venv/bin/python3 -m pipeline.cache_move_features` first")
+        d = np.load(path, allow_pickle=False)
+        feats = d["feats"]                                # decompress ONCE (NpzFile re-reads per access)
+        ncol = int(feats.shape[1])
+        row = {t: i for i, t in enumerate(d["tids"].tolist())}
+        for t in tids_by_size[size]:
+            i = row.get(t)
+            if i is not None:
+                keys.append((size, t))
+                rows.append(feats[i].copy())              # detach from `feats`'s base so it can free
+    X = np.array(rows, dtype=np.float64)
+    X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
+    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, ncol
+
+
 def run_pooled(args, device):
     """ONE model for BOTH boards. Shared per-user ability θ (profile = user_YYYY-MM,
     no size — a user has one skill), shared feature space (joint-PCA activations ⊕
