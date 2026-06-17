@@ -213,6 +213,12 @@ export async function updateUserStats(isCorrect, {
 
     updateUserRank(rank);
     updateMomentum(momentum);
+    // Mark the served problem consumed. The head is advanced to a fresh problem
+    // asynchronously (post-solve fade → loadTsumego), so a reload/app-close in
+    // that window leaves this just-answered problem at history[0]; the reload
+    // path checks `answered` and skips re-serving it (see loadTsumego), which
+    // otherwise lets the user re-solve the same problem on every restart.
+    currentProblem.answered = true;
     updateProblemHistory(history);
     updateAllUI();
 

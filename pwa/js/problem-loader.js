@@ -363,7 +363,16 @@ const RELOAD_COOLDOWN_MS = 30000;
 export async function loadTsumego(isUpdate) {
     setAcceptClicks(false);
 
-    if (!isUpdate && state.problemHistory.length > 0) {
+    // On initial load / reload (isUpdate=false) we re-serve the problem at
+    // history[0] so an in-progress problem survives a refresh. But a problem
+    // that has already been answered must NOT be re-served: completion advances
+    // history[0] to a fresh problem asynchronously (inside the post-solve fade —
+    // fire-and-forget), so a reload or app-close in that window leaves the
+    // just-answered problem at history[0]. Re-serving it would let the user
+    // solve the same problem again on every restart. updateUserStats marks the
+    // head `answered`; skip the shortcut for it and fall through to a fresh
+    // selection (which also excludes it via the recent-answer filter).
+    if (!isUpdate && state.problemHistory.length > 0 && !state.problemHistory[0].answered) {
         // On initial load, just load the last problem from history.
         try {
             loadSgf(state.problemHistory[0].sgf);
