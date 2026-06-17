@@ -682,6 +682,24 @@ def main():
                     help="Comma subset of {diff,slope,floor} eligible for --head-pin-dropout.")
     ap.add_argument("--epochs", type=int, default=300)
     ap.add_argument("--lr", type=float, default=0.01)
+    ap.add_argument("--lr-schedule", choices=["constant", "cosine"], default="constant",
+                    help="Per-epoch LR schedule for the MAIN fit (the detached δ group rides the "
+                         "same multiplicative factor, preserving its lr ratio). constant = the "
+                         "historical flat Adam lr (default, behavior-preserving). cosine = linear "
+                         "warmup for --warmup-epochs from lr·--lr-warmup-init-frac up to lr, then "
+                         "cosine anneal to 0 over the remaining epochs. The frozen residual pass "
+                         "(--floor-resid-mode frozen) is unaffected.")
+    ap.add_argument("--warmup-epochs", type=int, default=10,
+                    help="Linear-warmup length (epochs) for --lr-schedule cosine. Stabilizes the "
+                         "early high-lr Adam steps before the cosine decay (the LR was the DRO "
+                         "instability knob — see docs); 0 = straight into cosine.")
+    ap.add_argument("--lr-warmup-init-frac", type=float, default=0.1,
+                    help="Warmup starts at lr·this fraction (cosine schedule).")
+    ap.add_argument("--eval-every", type=int, default=0,
+                    help="Diagnostic (holdout mode only): every N epochs print held-out-PROBLEM "
+                         "logloss (the unseen-problem backbone-transfer metric) so convergence vs "
+                         "epoch is visible in ONE run — used to pick a reasonable --epochs / cosine "
+                         "horizon. 0 = off (no per-epoch eval cost).")
     ap.add_argument("--batch", type=int, default=65536)
     ap.add_argument("--min", type=int, default=5,
                     help="Min first-time correct AND incorrect to keep a user.")
@@ -1267,6 +1285,27 @@ def main():
         if detached:
             groups.append({"params": [m.floor_resid.weight], "lr": 0.05})
         opt = torch.optim.Adam(groups, lr=args.lr)
+
+        def _lr_factor(ep):
+            """Per-epoch multiplicative LR factor, applied to ALL param groups (so the detached-δ
+            group's 0.05/0.01 lr ratio is preserved). constant ⇒ 1.0 every epoch (the historical
+            flat Adam lr, behavior-preserving). cosine ⇒ linear warmup from --lr-warmup-init-frac
+            up to 1.0 over --warmup-epochs, then a half-cosine anneal to 0 across the remaining
+            epochs (no min floor — cosine is already flat at the tail, so a floor saves nothing)."""
+            if args.lr_schedule != "cosine":
+                return 1.0
+            w = max(args.warmup_epochs, 0)
+            if w > 0 and ep < w:
+                f0 = args.lr_warmup_init_frac
+                return f0 + (1.0 - f0) * (ep + 1) / w
+            prog = min(max((ep - w + 1) / max(args.epochs - w, 1), 0.0), 1.0)
+            return 0.5 * (1.0 + np.cos(np.pi * prog))
+
+        sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=_lr_factor)
+        # held-out-PROBLEM rows (unseen-problem transfer) for the --eval-every convergence trace
+        ho_idx_t = (torch.tensor(np.where(ho_mask_h)[0], device=device)
+                    if (args.eval_every and args.holdout_problem_frac > 0 and ho_mask_h.any())
+                    else None)
         pass_tag = 1 if dro is None else 2
         if dro is not None:
             rbt, base_g, G, eta = dro
@@ -1377,7 +1416,16 @@ def main():
             if ep % args.log_every == 0 or ep == args.epochs - 1:
                 tag = "dro" if dro is not None else "mean"
                 print(f"  [{tag}] epoch {ep:4d}  human train BCE {ll:.4f}  λ {lam_ep:.5f}"
-                      + (f"  max_q {maxq:.3f}" if dro is not None else ""))
+                      + (f"  max_q {maxq:.3f}" if dro is not None else "")
+                      + (f"  lr {opt.param_groups[0]['lr']:.5f}"
+                         if args.lr_schedule != "constant" else ""))
+            if ho_idx_t is not None and (ep % args.eval_every == 0 or ep == args.epochs - 1):
+                with torch.no_grad():                            # m already in eval mode here
+                    php = m(thu[ho_idx_t], tfeat[thp[ho_idx_t]], thp[ho_idx_t])
+                    ho_bce = torch.nn.functional.binary_cross_entropy(php, thy[ho_idx_t]).item()
+                print(f"  [eval] {'dro' if dro is not None else 'mean'} epoch {ep:4d}  "
+                      f"held-out-PROBLEM logloss {ho_bce:.4f}  lr {opt.param_groups[0]['lr']:.5f}")
+            sched.step()
         return m
 
     # --hier-slope-mu/sigma: a FIXED shrinkage target makes the free pass-1 fit unnecessary —
