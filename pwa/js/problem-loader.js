@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, embeddingsIndexCache, setAcceptClicks, updateProblemHistory, updateNextTsumego, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
+import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -35,70 +35,56 @@ function weightedRandomSelect(items, weightFn) {
     return items[0]; // fallback
 }
 
-async function selectProblem() {
-    if (state.allProblems.length === 0) return null;
-
-    // Due recalls are served before the stashed nextTsumego: nextTsumego is
-    // the challenge problem that was interrupted by a deep-linked/recall solve
-    // (stashed in loadTsumegoById), and it should come back only once ALL due
-    // recalls are done — not between recall #1 and recall #2.
+// Picks the most-due recall candidate (a raw pool problem, no SGF yet), or null
+// when none is due / available. Tries the in-memory pool, then loads the
+// candidate's zip; gives up on a candidate by marking it unavailable and
+// recursing. Recall problems must belong to the active size (answerHistory is
+// per-size) — cross-size matches are skipped defensively.
+async function selectRecallCandidate() {
     const recallCandidates = getRecallCandidates();
+    if (recallCandidates.length === 0) return null;
 
-    if (recallCandidates.length > 0) {
-        recallCandidates.sort((a, b) => a.recallRate - b.recallRate);
-        const chosenProblemInfo = recallCandidates[0];
-        let problem = state.allProblems.find(p => p.filename === `${chosenProblemInfo.problemId}.sgf`);
+    recallCandidates.sort((a, b) => a.recallRate - b.recallRate);
+    const chosen = recallCandidates[0];
 
-        if (problem) {
-            return { ...problem, isRepeat: true };
+    let problem = state.allProblems.find(p => p.filename === `${chosen.problemId}.sgf`);
+    if (problem) return problem;
+
+    console.warn(`Recall problem ${chosen.problemId} not in pool. Loading its zip.`);
+    const lookupResult = await findZipIdForTsumegoId(chosen.problemId);
+    if (lookupResult && (lookupResult.size === null || lookupResult.size === state.boardSize)) {
+        await loadZipMetadata();
+        const zipInfo = state.zipMetadata.find(zip => zip.filename.startsWith(lookupResult.zipId));
+        if (zipInfo) {
+            await loadZipProblems(zipInfo.filename);
+            problem = state.allProblems.find(p => p.filename === `${chosen.problemId}.sgf`);
+            if (problem) return problem;
         }
-
-        // If problem is not in memory, load its zip file
-        console.warn(`Problem ${chosenProblemInfo.problemId} not found in allProblems. Attempting to load it.`);
-
-        const lookupResult = await findZipIdForTsumegoId(chosenProblemInfo.problemId);
-        // Recall problems must belong to the active size (answerHistory is per-size).
-        // Skip cross-size matches defensively rather than load the wrong pool.
-        if (lookupResult && (lookupResult.size === null || lookupResult.size === state.boardSize)) {
-            await loadZipMetadata(); // Ensure metadata is loaded
-            const zipInfo = state.zipMetadata.find(zip => zip.filename.startsWith(lookupResult.zipId));
-            if (zipInfo) {
-                await loadZipProblems(zipInfo.filename);
-                // Try to find the problem again
-                problem = state.allProblems.find(p => p.filename === `${chosenProblemInfo.problemId}.sgf`);
-                if (problem) {
-                    return { ...problem, isRepeat: true };
-                }
-            }
-        }
-        
-        // If we still can't find it, log an error and mark it unavailable for this session.
-        // Next session we'll try again — files may come back, or the user may update the app.
-        console.error(`Failed to load recall problem ${chosenProblemInfo.problemId}.`);
-        state.unavailableProblemIds.add(chosenProblemInfo.problemId);
-        return await selectProblem();
     }
 
-    // No recalls due — resume the stashed (interrupted) challenge problem.
-    if (state.nextTsumego) {
-        const problem = state.nextTsumego;
-        updateNextTsumego(null);
-        return problem;
-    }
+    console.error(`Failed to load recall problem ${chosen.problemId}.`);
+    state.unavailableProblemIds.add(chosen.problemId);
+    return await selectRecallCandidate();
+}
 
-    // Default selection logic (fallback)
+// Picks a fresh (novel) challenge candidate near the user's rank — a raw pool
+// problem, no SGF yet — or null when none is available (caller loads a closer
+// zip and retries). Excludes recently-answered problems and any blacklisted by
+// the session's load-failure retry loop.
+function selectChallengeCandidate() {
     const recentAnswers = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
-    const historyFilenames = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
-    let availableProblems = state.allProblems.filter(p => !historyFilenames.has(p.filename));
+    const excluded = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
+    const available = state.allProblems.filter(p =>
+        !excluded.has(p.filename) &&
+        !state.unavailableProblemIds.has(p.filename.replace(/\.sgf$/, '')));
 
-    if (availableProblems.length === 0) {
-        return null;
-    }
+    if (available.length === 0) return null;
 
-    availableProblems.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
-    const candidateProblems = availableProblems.slice(0, 50);
+    available.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
+    const candidateProblems = available.slice(0, 50);
 
-    // Check if we need to start background loading
+    // Kick off background loading of a closer zip if our candidate pool is thin
+    // or a not-yet-loaded shard sits nearer the user's rank.
     if (candidateProblems.length < 50) {
         backgroundLoadCloserZip();
     } else {
@@ -107,21 +93,45 @@ async function selectProblem() {
             const userRank = state.userRank;
             const candidateDiff = Math.abs(candidateProblems[49].rank - userRank);
             const zipDiff = Math.min(Math.abs(userRank - closestZip.minRank), Math.abs(userRank - closestZip.maxRank));
-            if (zipDiff < candidateDiff) {
-                backgroundLoadCloserZip();
-            }
+            if (zipDiff < candidateDiff) backgroundLoadCloserZip();
         }
     }
 
     // Weight by quality, modulated by alignment with the user's weakness vector.
-    // weaknessScore returns 0 until the per-component model has trained, so
-    // the cold-start path here matches the prior pure-quality selection.
-    const problem = weightedRandomSelect(candidateProblems, p => {
+    // weaknessScore returns 0 until the per-component model has trained, so the
+    // cold-start path here matches the prior pure-quality selection.
+    return weightedRandomSelect(candidateProblems, p => {
         const q = Math.max(0, p.quality || 0);
         const w = weaknessScore(p);
         return q * Math.exp(WEAKNESS_TEMPERATURE * w);
     });
-    return { ...problem, isRepeat: false };
+}
+
+// Turns a raw pool candidate into a ready-to-display problem object: fetches the
+// SGF (from the cached zip) and reorients it. Novel/challenge problems are served
+// at identity orientation 0 (the share-link contract / picked-embedding indexing
+// assume it); recalls are randomly reoriented so the visual pattern can't be
+// recognized. Throws on a missing/invalid SGF so callers can blacklist + retry.
+async function buildProblem(raw, { isRepeat, linked }) {
+    const sgfContent = raw.sgf || await fetchSgfFromZip(raw.filename, raw.zipFilename);
+    if (!sgfContent || !sgfContent.trim()) throw new Error('Invalid or empty SGF');
+    const reoriented = reorientSgf(sgfContent, isRepeat ? null : 0);
+    return {
+        filename: raw.filename,
+        sgf: reoriented.sgf,
+        linked,
+        // `rating` is the raw black-box rating; `rank` is its normalized 0..1
+        // rank under the current curve M (derived at ingest).
+        rating: raw.rating,
+        rank: raw.rank,
+        quality: raw.quality || 0,
+        slope: raw.slope,
+        embedding: raw.embedding,
+        isRepeat,
+        orientation: reoriented.orientation,
+        // Retained so picked-embedding can locate the sidecar .embeddings.bin.
+        zipFilename: raw.zipFilename,
+    };
 }
 
 async function fetchSgfFromZip(filename, zipFilename) {
@@ -268,176 +278,50 @@ function loadNextZip() {
     }
 }
 
-// One pass through select → fetch SGF → install. Throws on any failure so the
-// outer retry loop can mark the offending candidate unavailable and try again.
-async function loadOneTsumego() {
-    let selectedProblem = null;
-    let rawSgf = null;
-    let reorientedSgf = null;
-    let chosenOrientation = null;
-    try {
-        await loadZipMetadata();
-
-        selectedProblem = await selectProblem();
-        if (!selectedProblem) {
-            const closestZip = findClosestUnloadedZip();
-            if (!closestZip) throw new Error("No zip files found in metadata.");
-            await loadZipProblems(closestZip.filename);
-            selectedProblem = await selectProblem();
-            if (!selectedProblem) throw new Error("Failed to select a problem after loading zip.");
-        }
-
-        let sgfContent = selectedProblem.sgf || await fetchSgfFromZip(selectedProblem.filename, selectedProblem.zipFilename);
-        if (!sgfContent || !sgfContent.trim()) {
-            throw new Error('Invalid or empty SGF');
-        }
-        // Stash for the catch-block diagnostics — when the kifu fails to play
-        // back, the actual SGF (with reorientation) is the only useful clue.
-        rawSgf = sgfContent;
-
-        const isRepeat = selectedProblem.isRepeat;
-        const orientationParam = isRepeat ? null : 0;
-        const reoriented = reorientSgf(sgfContent, orientationParam);
-        const sgf = reoriented.sgf;
-        const orientation = reoriented.orientation;
-        reorientedSgf = sgf;
-        chosenOrientation = orientation;
-
-        const history = state.problemHistory;
-        const filename = selectedProblem.filename;
-        const indicesToRemove = [];
-        for (let i = 0; i < history.length; i++) {
-            if (history[i].filename === filename) indicesToRemove.push(i);
-        }
-        for (let i = indicesToRemove.length - 1; i >= 0; i--) {
-            history.splice(indicesToRemove[i], 1);
-        }
-
-        history.unshift({
-            filename: selectedProblem.filename,
-            sgf: sgf,
-            linked: false,
-            // `rating` is the raw black-box rating; `rank` is its normalized
-            // 0..1 rank under the current curve M (derived at ingest). The stats
-            // decomposition works in rating space; serving/UI use `rank`.
-            rating: selectedProblem.rating,
-            rank: selectedProblem.rank,
-            quality: selectedProblem.quality || 0,
-            slope: selectedProblem.slope,
-            embedding: selectedProblem.embedding,
-            isRepeat: selectedProblem.isRepeat || false,
-            orientation: orientation,
-            // Retained so picked-embedding can locate the sidecar .embeddings.bin.
-            zipFilename: selectedProblem.zipFilename
-        });
-
-        if (history.length > 2) history.length = 2;
-        updateProblemHistory(history);
-
-        try {
-            loadSgf(sgf);
-        } catch (error) {
-            throw new Error('Invalid SGF: ' + error.message);
-        }
-
-        setCurrentSolvingStartTime(Date.now());
-        resetAccumulatedSolvingTime();
-        updateAllUI();
-    } catch (error) {
-        // Tag the offending candidate so the retry loop can blacklist it,
-        // and attach the SGF (raw + reoriented) so the debug log shows what
-        // we actually fed into the kifu reader when it choked.
-        if (selectedProblem && selectedProblem.filename) {
-            error.failedProblemId = selectedProblem.filename.replace(/\.sgf$/, '');
-        }
-        if (rawSgf !== null) error.rawSgf = rawSgf;
-        if (reorientedSgf !== null) error.reorientedSgf = reorientedSgf;
-        if (chosenOrientation !== null) error.chosenOrientation = chosenOrientation;
-        throw error;
-    }
-}
-
 const MAX_LOAD_ATTEMPTS = 5;
 const RELOAD_COOLDOWN_MS = 30000;
 
-export async function loadTsumego(isUpdate) {
-    setAcceptClicks(false);
-
-    // On initial load / reload (isUpdate=false) we re-serve the problem at
-    // history[0] so an in-progress problem survives a refresh. But a problem
-    // that has already been answered must NOT be re-served: completion advances
-    // history[0] to a fresh problem asynchronously (inside the post-solve fade —
-    // fire-and-forget), so a reload or app-close in that window leaves the
-    // just-answered problem at history[0]. Re-serving it would let the user
-    // solve the same problem again on every restart. updateUserStats marks the
-    // head `answered`; skip the shortcut for it and fall through to a fresh
-    // selection (which also excludes it via the recent-answer filter).
-    if (!isUpdate && state.problemHistory.length > 0 && !state.problemHistory[0].answered) {
-        // On initial load, just load the last problem from history.
-        try {
-            loadSgf(state.problemHistory[0].sgf);
-            setCurrentSolvingStartTime(Date.now());
-            resetAccumulatedSolvingTime();
-            setAcceptClicks(true);
-            return;
-        } catch (error) {
-            console.error('Error loading cached tsumego, falling through to new selection:', error);
-            try { Sentry.captureException(error); } catch (_) {}
-            // Fall through to a fresh selection.
-        }
+// Installs a ready (SGF-carrying) problem as the on-screen problem: sets it as
+// currentProblem, paints the board, resets the solve timer, re-enables clicks.
+// Throws if the SGF won't load so the caller can blacklist + reselect.
+function displayProblem(problem, appMode) {
+    setCurrentProblem(problem);
+    setAppMode(appMode);
+    try {
+        loadSgf(problem.sgf);
+    } catch (error) {
+        const e = new Error('Invalid SGF: ' + error.message);
+        e.failedProblemId = problem.filename.replace(/\.sgf$/, '');
+        throw e;
     }
+    setCurrentSolvingStartTime(Date.now());
+    resetAccumulatedSolvingTime();
+    setAcceptClicks(true);
+    updateAllUI();
+}
 
-    let lastError = null;
-    for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+function reportLoadError(error, attempt) {
+    console.error(`Tsumego load attempt ${attempt + 1}/${MAX_LOAD_ATTEMPTS} failed:`, error);
+    // An AbortError from navigating away mid-fetch is benign noise — skip Sentry.
+    if (!error.aborted) {
         try {
-            await loadOneTsumego();
-            setAcceptClicks(true);
-            // loadOneTsumego already called updateAllUI(), but acceptClicks was
-            // still false then — repaint so button1's disabled state matches.
-            updateAllUI();
-            return;
-        } catch (error) {
-            lastError = error;
-            console.error(`Tsumego load attempt ${attempt + 1}/${MAX_LOAD_ATTEMPTS} failed:`, error);
-            if (error.rawSgf) {
-                console.error(`  raw SGF: ${error.rawSgf}`);
-            }
-            if (error.reorientedSgf) {
-                console.error(`  reoriented SGF (orientation=${error.chosenOrientation}): ${error.reorientedSgf}`);
-            }
-            // An AbortError from the user navigating away mid-fetch (tagged by
-            // loadZipProblems) is benign noise — skip the Sentry report for it.
-            if (!error.aborted) try {
-                Sentry.captureException(error, {
-                    extra: {
-                        attempt: attempt + 1,
-                        failedProblemId: error.failedProblemId,
-                        boardSize: state.boardSize,
-                        rawSgf: error.rawSgf,
-                        reorientedSgf: error.reorientedSgf,
-                        chosenOrientation: error.chosenOrientation,
-                    },
-                });
-            } catch (_) {}
-            // Blacklist the failed candidate for this session so selectProblem
-            // picks a different one on the next iteration.
-            if (error.failedProblemId) {
-                state.unavailableProblemIds.add(error.failedProblemId);
-            }
-        }
+            Sentry.captureException(error, {
+                extra: { attempt: attempt + 1, failedProblemId: error.failedProblemId, boardSize: state.boardSize },
+            });
+        } catch (_) {}
     }
+    if (error.failedProblemId) state.unavailableProblemIds.add(error.failedProblemId);
+}
 
-    // All retries exhausted. Restore clicks so the user is never frozen, then
-    // try one cooled-down reload — fresh metadata may unblock us. If we already
-    // reloaded recently, give up gracefully with a visible error.
+// All loads failed. Restore clicks so the user is never frozen, then try one
+// cooled-down reload (fresh metadata may unblock us); otherwise show an error.
+function handleLoadFailure(lastError) {
     setAcceptClicks(true);
     console.error(`Tsumego load failed after ${MAX_LOAD_ATTEMPTS} attempts; last error:`, lastError);
     const lastReload = parseInt(localStorage.getItem('lastReloadTime') || '0', 10);
     const recentlyReloaded = Date.now() - lastReload < RELOAD_COOLDOWN_MS;
     if (state.userHasInteracted && !recentlyReloaded) {
-        try {
-            Sentry.captureMessage('Reloading after repeated tsumego load failures', { level: 'warning' });
-        } catch (_) {}
+        try { Sentry.captureMessage('Reloading after repeated tsumego load failures', { level: 'warning' }); } catch (_) {}
         localStorage.setItem('lastReloadTime', String(Date.now()));
         displayOverlay('Error loading problem. Reloading…', 1500);
         setTimeout(() => location.reload(), 1500);
@@ -446,10 +330,143 @@ export async function loadTsumego(isUpdate) {
     }
 }
 
+// Selects + builds a fresh challenge and stores it in state.challengeProblem.
+// Does NOT display it. This is the single point where the standing challenge is
+// (re)assigned: on first load, and whenever the challenge itself is attempted
+// (completeCurrentProblem). Retries past bad SGFs, blacklisting each.
+export async function assignNewChallenge() {
+    await loadZipMetadata();
+    let lastError = null;
+    for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+        let raw = selectChallengeCandidate();
+        if (!raw) {
+            const closestZip = findClosestUnloadedZip();
+            if (!closestZip) { lastError = new Error('No zip files found in metadata.'); break; }
+            await loadZipProblems(closestZip.filename);
+            raw = selectChallengeCandidate();
+            if (!raw) { lastError = new Error('Failed to select a challenge after loading zip.'); break; }
+        }
+        try {
+            const problem = await buildProblem(raw, { isRepeat: false, linked: false });
+            setChallengeProblem(problem);
+            return problem;
+        } catch (error) {
+            lastError = error;
+            error.failedProblemId = raw.filename.replace(/\.sgf$/, '');
+            reportLoadError(error, attempt);
+        }
+    }
+    console.error('assignNewChallenge exhausted retries:', lastError);
+    return state.challengeProblem; // possibly null — advanceToNextProblem handles it
+}
+
+// True if the stored challenge has already been answered (it sits in the recent
+// answer window). Guards the tiny window where the app is killed after an attempt
+// is recorded but before completeCurrentProblem reassigns the challenge: on the
+// next load we must NOT re-serve that already-solved problem as a novel challenge.
+function challengeAlreadyAnswered() {
+    const c = state.challengeProblem;
+    if (!c) return false;
+    const id = c.filename.replace(/\.sgf$/, '');
+    return state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH).some(a => a.problemId === id);
+}
+
+// Builds the most-due recall as a ready problem, or null when none is due or it
+// can't be loaded (caller falls back to the challenge).
+async function getDueRecallProblem() {
+    let raw;
+    try {
+        raw = await selectRecallCandidate();
+    } catch (error) {
+        console.error('recall selection failed:', error);
+        return null;
+    }
+    if (!raw) return null;
+    try {
+        return await buildProblem(raw, { isRepeat: true, linked: false });
+    } catch (error) {
+        console.error('recall build failed; falling back to challenge:', error);
+        state.unavailableProblemIds.add(raw.filename.replace(/\.sgf$/, ''));
+        return null;
+    }
+}
+
+// Shows the next problem the user should work on: a due recall if one exists,
+// otherwise the standing challenge (assigned first if absent). The single entry
+// point for "I need a problem on screen" — used on load, after a solve, on
+// notification-with-no-recall, etc. Recalls never disturb challengeProblem.
+export async function advanceToNextProblem() {
+    setAcceptClicks(false);
+    try {
+        await loadZipMetadata();
+    } catch (_) { /* fall through; empty-challenge path handles total failure */ }
+
+    // A challenge is ALWAYS assigned — even when a recall is what we show, the
+    // challenge stays off-screen, ready for when recalls are exhausted. (This
+    // also reselects a stale challenge left by a kill mid-completion; see
+    // challengeAlreadyAnswered.)
+    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+
+    const recall = await getDueRecallProblem();
+    if (recall) {
+        try { displayProblem(recall, APP_MODES.SOLVING); return; }
+        catch (error) { reportLoadError(error, 0); /* fall back to challenge */ }
+    }
+
+    let lastError = null;
+    for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+        const challenge = state.challengeProblem;
+        if (!challenge) { lastError = lastError || new Error('No challenge available.'); break; }
+        try { displayProblem(challenge, APP_MODES.SOLVING); return; }
+        catch (error) {
+            lastError = error;
+            reportLoadError(error, attempt);
+            // The stored challenge's SGF is bad — drop it and reselect a fresh one.
+            setChallengeProblem(null);
+            await assignNewChallenge();
+        }
+    }
+
+    handleLoadFailure(lastError);
+}
+
+// Re-shows the current problem (it's already loaded underneath) — used when
+// leaving review (which painted the previous problem). The mode follows the
+// current problem: a linked/shared problem returns to LINKED view, otherwise
+// SOLVING. Falls forward to a fresh advance if there's nothing to redisplay.
+export async function redisplayCurrentProblem() {
+    if (!state.currentProblem) return advanceToNextProblem();
+    const mode = state.currentProblem.linked ? APP_MODES.LINKED : APP_MODES.SOLVING;
+    try { displayProblem(state.currentProblem, mode); }
+    catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
+}
+
+// Exits a linked/shared view back to the user's standing challenge.
+export async function returnToChallenge() {
+    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+    if (!state.challengeProblem) return advanceToNextProblem();
+    try { displayProblem(state.challengeProblem, APP_MODES.SOLVING); }
+    catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
+}
+
+// Called once the current problem's attempt has been recorded. Moves it into the
+// previous slot (for review/share/ignore) and, if it was the standing challenge,
+// assigns a fresh one immediately — so the just-answered challenge is replaced
+// in persisted state before any reopen can re-serve it. Recalls and linked
+// problems leave the challenge untouched.
+export async function completeCurrentProblem() {
+    const done = state.currentProblem;
+    setPreviousProblem(done);
+    if (done && !done.isRepeat && !done.linked) {
+        await assignNewChallenge();
+    }
+}
+
 export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall = false } = {}) {
     try {
-        if (state.problemHistory.length > 0 && state.problemHistory[0].filename === `${tsumegoId}.sgf` &&
-           (orientation === null || state.problemHistory[0].orientation === orientation)) {
+        const showing = state.currentProblem;
+        if (showing && showing.filename === `${tsumegoId}.sgf` &&
+           (orientation === null || showing.orientation === orientation)) {
             return false;
         }
 
@@ -494,13 +511,16 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
         const problemEmbedding = problem ? problem.embedding : undefined;
 
         let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
-        
+
         const reoriented = reorientSgf(sgfContent, orientation);
         sgfContent = reoriented.sgf;
         const actualOrientation = reoriented.orientation;
 
-        const history = state.problemHistory;
-
+        // A deep-linked share is a `linked` problem (view-only, never recorded);
+        // a notification recall is a normal recall. Either way this becomes the
+        // on-screen currentProblem WITHOUT touching the standing challengeProblem
+        // (which stays assigned and persisted, shown when the user exits this
+        // detour — see returnToChallenge / advanceToNextProblem).
         const newProblem = {
             filename: `${tsumegoId}.sgf`,
             sgf: sgfContent,
@@ -516,30 +536,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
             zipFilename: zipFilename
         };
 
-        // If current problem is linked, replace it instead of shifting
-        if (history.length > 0 && history[0].linked) {
-            history[0] = newProblem;
-        } else {
-            // Move current to nextTsumego if not already set
-            if (!state.nextTsumego && history.length > 0) {
-                updateNextTsumego({ ...history[0], linked: false });
-            }
-            history.unshift(newProblem);
-        }
-        if (history.length > 2) {
-            history.length = 2;
-        }
-
-        updateProblemHistory(history);
-
-        setAppMode(asRecall ? APP_MODES.SOLVING : APP_MODES.LINKED);
-
-        loadSgf(sgfContent);
-        
-        setAcceptClicks(true);
-        setCurrentSolvingStartTime(Date.now());
-        resetAccumulatedSolvingTime();
-        updateAllUI();
+        displayProblem(newProblem, asRecall ? APP_MODES.SOLVING : APP_MODES.LINKED);
 
         return true;
     } catch (error) {

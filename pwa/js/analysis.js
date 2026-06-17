@@ -42,7 +42,7 @@ export function enterAnalysisMode() {
         setAnalysisHintMove(null); // Clear stale hint from a prior analysis session
         setCandidateMoves([]);
 
-        if (!state.problemHistory || state.problemHistory.length < 2 || !state.problemHistory[1].sgf ) {
+        if (!state.previousProblem || !state.previousProblem.sgf) {
             setAppMode(APP_MODES.SOLVING);
             // Nothing to review — stay clickable in solving mode so a button1
             // lock taken by the caller (see main.js) is always released.
@@ -55,7 +55,7 @@ export function enterAnalysisMode() {
         setAppMode(APP_MODES.ANALYZING);
         setAcceptClicks(true);
         setReviewStartTime(Date.now());
-        loadSgf(state.problemHistory[1].sgf);
+        loadSgf(state.previousProblem.sgf);
 
         // Defer the rest of the initialization to the next event loop tick.
         // This is a workaround for a subtle timing issue in the wgo.js library where
@@ -65,9 +65,9 @@ export function enterAnalysisMode() {
         setTimeout(() => {
             setInitialAnalysisNode(getCurrentNode());
             updateAllUI();
-            // Surface the correct move's motifs for this problem (index 1 is the
-            // problem under review, same entry whose SGF was loaded above).
-            populateMotifBubble(state.problemHistory[1]);
+            // Surface the correct move's motifs for the problem under review
+            // (the previous problem, same entry whose SGF was loaded above).
+            populateMotifBubble(state.previousProblem);
             requestAndDisplayAnalysis();
             resolve();
         }, 0);

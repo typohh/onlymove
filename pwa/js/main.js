@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, updateProblemHistory, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, updateNextTsumego, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
 import { runMigrations } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -85,7 +85,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-import { loadTsumego, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
+import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
@@ -155,12 +155,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         setAppMode(APP_MODES.SOLVING);
         showLoading();
         try {
-            await loadTsumego(false);
+            await advanceToNextProblem();
         } catch (err) {
             console.error('Failed to load tsumego after size switch:', err);
-        }
-        if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
-            setAppMode(APP_MODES.LINKED);
         }
         updateAllUI();
         hideLoading();
@@ -261,21 +258,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         if (state.appMode === APP_MODES.LINKED) {
-            // In view mode, button1 exits back to the challenge tsumego
-            if (state.nextTsumego) {
-                const history = state.problemHistory;
-                // Remove the linked problem from history — the challenge problem
-                // is already at history[1] (it was pushed there when the linked
-                // problem was loaded), so after the shift it becomes history[0].
-                if (history.length > 0 && history[0].linked) {
-                    history.shift();
-                }
-                updateProblemHistory(history);
-                updateNextTsumego(null);
-                setAppMode(APP_MODES.SOLVING);
-                loadTsumego(false);
-                updateAllUI();
-            }
+            // In view mode, button1 exits the shared problem back to the user's
+            // standing challenge (which was never disturbed by the detour).
+            returnToChallenge();
+            updateAllUI();
         } else if (state.appMode === APP_MODES.SOLVING) {
             // acceptClicks is false during the post-solve transition (fadeOverlay
             // → loadTsumego). Without this guard, a fast Previous-click races
@@ -307,12 +293,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 setReviewStartTime(null);
             }
-            if (state.nextTsumego) {
-                setAppMode(APP_MODES.LINKED);
-            } else {
-                setAppMode(APP_MODES.SOLVING);
-            }
-            loadTsumego(false);
+            // Reveal the current problem (loaded underneath while reviewing the
+            // previous one); redisplay sets the mode from currentProblem.linked.
+            redisplayCurrentProblem();
             updateAllUI();
         }
     });
@@ -352,7 +335,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Ignore is reachable from the analysis-mode hamburger menu.
     const performIgnore = async () => {
         if (!await showConfirm(getTerm('ignoreConfirm'))) return;
-        const problem = state.problemHistory[1];
+        const problem = state.previousProblem;
         if (!problem) return;
 
         const problemId = problem.filename.replace('.sgf', '');
@@ -371,13 +354,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
 
-        // Exit analysis mode and load next problem
-        if (state.nextTsumego) {
-            setAppMode(APP_MODES.LINKED);
-        } else {
-            setAppMode(APP_MODES.SOLVING);
-        }
-        loadTsumego(false);
+        // Exit analysis mode and reveal the current problem (loaded underneath).
+        redisplayCurrentProblem();
         updateAllUI();
     };
 
@@ -525,53 +503,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     showLoading();
     try {
         if (tsumegoId && tsumegoId.length > 0) {
-            const history = state.problemHistory;
-
-            // Case 1: Review mode
-            if (history.length > 1 && history[1].filename.startsWith(tsumegoId)) {
-                setAppMode(APP_MODES.ANALYZING);
-                enterAnalysisMode();
+            // Arrived via a shared link. If this problem is in the user's current
+            // recall window, route it as a recall solve (randomize orientation so
+            // the pattern can't be recognized); otherwise it's a view-only linked
+            // problem. Either way the standing challenge is untouched and resumes
+            // when the user exits (returnToChallenge). An explicit ?o=N still wins
+            // (the share-link contract). Record the open with referrer for
+            // analytics — but skip internal stats-panel example links
+            // (close_on_next=1) so they don't inflate the share 'open' count.
+            if (urlParams.get('close_on_next') !== '1') {
+                recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
             }
-            // Case 2: Refresh of existing problem (solving or linked)
-            else if (history.length > 0 && history[0].filename.startsWith(tsumegoId)) {
-                if (history[0].linked) {
-                    setAppMode(APP_MODES.LINKED);
-                } else {
-                    setAppMode(APP_MODES.SOLVING);
-                }
-                await loadTsumego(false); // In both refresh cases, we just load what's at history[0]
-            }
-            // Case 3: Default - new linked problem. If this problem is in
-            // the user's current recall window, route it as a recall solve
-            // instead — randomize orientation so the user can't just
-            // recognize the visual pattern. An explicit ?o=N URL parameter
-            // still wins (the share-link contract).
-            else {
-                // The user arrived via a shared link — record the open with the
-                // referrer (where the link was clicked from) for analytics.
-                // Skip stats-panel example links (close_on_next=1): those are
-                // internal, same-origin navigations and would inflate the
-                // share_events 'open' count indistinguishably from real inbound
-                // shared-link traffic.
-                if (urlParams.get('close_on_next') !== '1') {
-                    recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
-                }
-                const explicitOrientation = orientationParam !== null;
-                const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
-                const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;
-                await loadTsumegoById(tsumegoId, effectiveOrientation, { asRecall: isRecall });
-            }
+            const explicitOrientation = orientationParam !== null;
+            const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
+            const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;
+            const loaded = await loadTsumegoById(tsumegoId, effectiveOrientation, { asRecall: isRecall });
+            if (!loaded) await advanceToNextProblem();
         } else if (wantsRecall) {
-            // Notification click: pick the due recall problem ourselves and
-            // route it through loadTsumegoById's asRecall path — the same one
-            // ?id= recalls use — which stashes the current challenge problem
-            // into nextTsumego; selectProblem hands it back once all due
-            // recalls are exhausted. Prefer the active board; recalls can only
-            // be re-shown on their own board, so if the active size has none
-            // due, take one from the other size (the uploaded schedule spans
-            // both) and let loadTsumegoById switch boards via the lookup
-            // column. If nothing is due anywhere (already reviewed since the
-            // push, or recall is paused), fall back to the normal flow.
+            // Notification click: pick the due recall ourselves and show it via
+            // loadTsumegoById's asRecall path (the standing challenge stays
+            // assigned and returns once recalls are exhausted). Prefer the active
+            // board; recalls can only be re-shown on their own board, so if the
+            // active size has none due, take one from the other size (the uploaded
+            // schedule spans both) and let loadTsumegoById switch boards via the
+            // lookup column. If nothing is due anywhere (already reviewed since the
+            // push, or recall paused), fall back to the normal challenge/recall flow.
             let candidates = getRecallCandidates();
             if (candidates.length === 0) {
                 for (const size of SUPPORTED_BOARD_SIZES) {
@@ -585,18 +541,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 candidates.sort((a, b) => a.recallRate - b.recallRate);
                 loaded = await loadTsumegoById(candidates[0].problemId, null, { asRecall: true });
             }
-            if (!loaded) {
-                await loadTsumego(false);
-                if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
-                    setAppMode(APP_MODES.LINKED);
-                }
-            }
+            if (!loaded) await advanceToNextProblem();
         } else {
-            // No ID in URL
-            await loadTsumego(false);
-            if (state.problemHistory.length > 0 && state.problemHistory[0].linked) {
-                setAppMode(APP_MODES.LINKED);
-            }
+            // Plain open (no URL id, no notification): show a due recall or the
+            // standing challenge.
+            await advanceToNextProblem();
         }
 
     } catch (error) {

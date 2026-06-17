@@ -70,7 +70,7 @@ const DEFAULT_BOARD_SIZE = 9;
 // values: rank = max of the two (a strong 9x9 player should immediately see
 // hard 13x13 problems), momentum follows the higher-ranked size, and the model
 // buckets are dropped so the shared models retrain from scratch on next load.
-// answerHistory / problemHistory / nextTsumego stay per-size.
+// answerHistory and challengeProblem stay per-size.
 (function mergeSharedAcrossSizes_v2() {
     if (localStorage.getItem('sharedAcrossSizesMigrated_v2')) return;
 
@@ -155,6 +155,23 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.setItem('momentumCorruptionRepaired_v3', 'true');
 })();
 
+// --- Challenge-model migration ---
+// The "which problem is shown" state used to be a 2-slot `problemHistory` array
+// ([current, previous]) plus a `nextTsumego` stash for an interrupted challenge.
+// That conflated three distinct things and let an already-answered problem be
+// re-served (via the nextTsumego resume and the reload shortcut). The model is
+// now three explicit variables: `challengeProblem` (the always-assigned
+// challenge, persisted per-size), `currentProblem` (what's on screen),
+// `previousProblem` (last completed). Drop the old keys — challengeProblem is
+// reselected fresh on next load, so existing users lose at most one in-progress
+// problem; the review slot repopulates after their next solve.
+(function migrateToChallengeModel_v1() {
+    if (localStorage.getItem('challengeModelMigrated_v1')) return;
+    localStorage.removeItem('problemHistory');
+    localStorage.removeItem('nextTsumego');
+    localStorage.setItem('challengeModelMigrated_v1', 'true');
+})();
+
 // --- Board size + per-size backing buckets ---
 
 function readPerSize(key, fallback) {
@@ -219,9 +236,12 @@ function writePerSize(key, obj) {
 }
 
 const perSize = {
-    problemHistory: readPerSize('problemHistory'),
     answerHistory: readPerSize('answerHistory'),
-    nextTsumego: readPerSize('nextTsumego'),
+    // The always-assigned challenge problem (full object incl. sgf), persisted
+    // so a reopen restores the user's standing challenge. currentProblem and
+    // previousProblem are NOT persisted — they're recomputed on load (reopen
+    // shows a due recall or this challenge; see problem-loader.advanceToNextProblem).
+    challengeProblem: readPerSize('challengeProblem'),
 };
 
 // --- Shared-across-sizes state (single values, not bucketed). ---
@@ -320,6 +340,15 @@ const DEFAULT_USER_RANK = 0;
 export const state = {
     appMode: APP_MODES.SOLVING,
 
+    // --- The three problem slots (see migrateToChallengeModel_v1). ---
+    // currentProblem: what's displayed/interacted with now (challenge, recall,
+    //   or a linked/shared problem). In-memory only — recomputed on load.
+    // previousProblem: the last completed problem; review/share/ignore act on it.
+    //   In-memory only — a reopen lands on the challenge/recall, not on review.
+    // challengeProblem is a per-size persisted getter/setter further down.
+    currentProblem: null,
+    previousProblem: null,
+
     // Board and Game state
     board: null,
     game: null,
@@ -411,15 +440,12 @@ export const state = {
         writeShared('userRank', v);
     },
 
-    get problemHistory() {
-        if (!Array.isArray(perSize.problemHistory[_boardSize])) {
-            perSize.problemHistory[_boardSize] = [];
-        }
-        return perSize.problemHistory[_boardSize];
+    get challengeProblem() {
+        return perSize.challengeProblem[_boardSize] ?? null;
     },
-    set problemHistory(v) {
-        perSize.problemHistory[_boardSize] = v;
-        writePerSize('problemHistory', perSize.problemHistory);
+    set challengeProblem(v) {
+        perSize.challengeProblem[_boardSize] = v;
+        writePerSize('challengeProblem', perSize.challengeProblem);
     },
 
     get answerHistory() {
@@ -431,14 +457,6 @@ export const state = {
     set answerHistory(v) {
         perSize.answerHistory[_boardSize] = v;
         writePerSize('answerHistory', perSize.answerHistory);
-    },
-
-    get nextTsumego() {
-        return perSize.nextTsumego[_boardSize] ?? null;
-    },
-    set nextTsumego(v) {
-        perSize.nextTsumego[_boardSize] = v;
-        writePerSize('nextTsumego', perSize.nextTsumego);
     },
 
     get momentum() {
@@ -611,12 +629,16 @@ export function updateMomentum(momentum) {
     state.momentum = momentum;
 }
 
-export function updateProblemHistory(history) {
-    state.problemHistory = history;
+export function setChallengeProblem(problem) {
+    state.challengeProblem = problem;
 }
 
-export function updateNextTsumego(nextTsumego) {
-    state.nextTsumego = nextTsumego;
+export function setCurrentProblem(problem) {
+    state.currentProblem = problem;
+}
+
+export function setPreviousProblem(problem) {
+    state.previousProblem = problem;
 }
 
 export function updateAnswerHistory(history) {
@@ -691,6 +713,12 @@ export function setBoardSize(size) {
     state.allProblems = [];
     zipCache.clear();
     embeddingsIndexCache.clear();
+
+    // current/previous are in-memory display slots for the old size; the caller
+    // reloads (advanceToNextProblem) and repopulates them. challengeProblem is
+    // per-size and switches automatically.
+    state.currentProblem = null;
+    state.previousProblem = null;
 }
 
 export { SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE };

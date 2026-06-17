@@ -15,15 +15,15 @@ let isSharing = false;
 
 export function performShare() {
     if (isSharing) return;
-    if (!state.problemHistory[1]) {
+    if (!state.previousProblem) {
         console.error('No current problem to share');
         return;
     }
     isSharing = true;
     const releaseGuard = () => { isSharing = false; };
 
-    const tsumegoId = state.problemHistory[1].filename.replace('.sgf', '');
-    const orientation = state.problemHistory[1].orientation;
+    const tsumegoId = state.previousProblem.filename.replace('.sgf', '');
+    const orientation = state.previousProblem.orientation;
     let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
     if (typeof orientation === 'number' && orientation !== 0) {
         shareUrl += `&o=${orientation}`;

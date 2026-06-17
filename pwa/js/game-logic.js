@@ -9,7 +9,7 @@ import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './user-stats.js';
-import { loadTsumego } from './problem-loader.js';
+import { completeCurrentProblem, advanceToNextProblem } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { fetchPickedEmbedding } from './picked-embedding.js';
 import { clearShownNotifications } from './notifications.js';
@@ -48,7 +48,7 @@ const toBoardNotation = (x, y, size) => {
 };
 
 const buildReportPayload = (success, x, y) => {
-    const currentProblem = state.problemHistory[0];
+    const currentProblem = state.currentProblem;
     const timeUsed = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     const problemId = currentProblem?.filename?.replace(/\.sgf$/, '') ?? null;
     const prevs = problemId ? state.answerHistory.filter(a => a.problemId === problemId) : [];
@@ -67,10 +67,16 @@ const handleCorrectAnswer = async (x, y) => {
     sendReport(buildReportPayload(true, x, y));
     const stats = await updateUserStats(true);
 
+    // Move the solved problem into the previous slot and — if it was the standing
+    // challenge — reselect one NOW. challengeProblem is persisted, so once it's
+    // replaced a reopen can never re-serve the just-answered problem (the bug the
+    // old `answered` flag tried and failed to patch).
+    await completeCurrentProblem();
+
     // Return the load promise so fadeOverlay holds the white screen up until
     // the next problem is actually loaded (never lifting onto an empty board).
     fadeOverlay(1000, () => {
-        return loadTsumego(true).catch(error => console.error("Error loading next tsumego:", error));
+        return advanceToNextProblem().catch(error => console.error("Error loading next tsumego:", error));
     }, stats);
 }
 
@@ -88,7 +94,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     // and updateUserStats attaches a defer-patch handler. Embedding-backfill
     // also re-fetches missing pickedEmbeddings on the next app load, so a
     // failed/slow live fetch is recoverable.
-    const currentProblem = state.problemHistory[0];
+    const currentProblem = state.currentProblem;
     const tsumegoId = currentProblem?.filename?.replace(/\.sgf$/, '');
     const zipFilename = currentProblem?.zipFilename;
     let pickedEmbeddingPromise = null;
@@ -122,7 +128,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     const statsResults = state.statsResults ? state.statsResults.results : null;
     const statsAreAvailable = statsResults && statsResults.length > 0;
 
-    if (state.problemHistory[0]?.isRepeat) {
+    if (state.currentProblem?.isRepeat) {
         let reviewConf = 0;
         let medianReviewTime = 0;
         let previousReviewTime = 0;
@@ -132,7 +138,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
             medianReviewTime = median(reviewTimeValues);
 
             // Get accumulated review time for this problem
-            const currentProblem = state.problemHistory[0];
+            const currentProblem = state.currentProblem;
             const problemId = currentProblem.filename.replace('.sgf', '');
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
             if (previousAnswers.length > 0) {
@@ -171,11 +177,14 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
 
     await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats, buttonText));
 
-    await loadTsumego(true);
-    // loadTsumego re-enabled clicks while appMode is still SOLVING; keep them
-    // disabled across the SOLVING→ANALYZING flip so a tap landing in that window
-    // can't be mis-routed as a solving-mode action. enterAnalysisMode re-enables
-    // once it has switched to ANALYZING.
+    // Move the failed problem into the previous slot (reselecting the challenge
+    // if it was one), then load the NEXT problem underneath as currentProblem.
+    await completeCurrentProblem();
+    await advanceToNextProblem();
+    // advanceToNextProblem re-enabled clicks while appMode is still SOLVING; keep
+    // them disabled across the SOLVING→ANALYZING flip so a tap landing in that
+    // window can't be mis-routed as a solving-mode action. enterAnalysisMode
+    // re-enables once it has switched to ANALYZING and paints the previous problem.
     setAcceptClicks(false);
     await enterAnalysisMode();
 }

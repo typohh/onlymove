@@ -155,7 +155,7 @@ const updateSolvingModeUI = () => {
         document.getElementById('title').textContent = getTerm('viewMode');
         document.getElementById('title-h').textContent = getTerm('viewMode');
     } else {
-        const currentProblem = state.problemHistory[0];
+        const currentProblem = state.currentProblem;
         const titleKey = (currentProblem && currentProblem.isRepeat) ? 'recallMode' : 'tsumegoMode';
         document.getElementById('title').textContent = getTerm(titleKey);
         document.getElementById('title-h').textContent = getTerm(titleKey);
@@ -206,9 +206,9 @@ const updateSolvingModeUI = () => {
         // In solving mode, button1 is review
         prevTsumegoLink.textContent = getTerm('review');
 
-        // Enable review button if there is a problem to review in the history
-        // and we are not in the middle of a post-solve load.
-        if (state.problemHistory.length > 1 && state.problemHistory[1].sgf && state.acceptClicks) {
+        // Enable review button if there is a previous problem to review and we
+        // are not in the middle of a post-solve load.
+        if (state.previousProblem && state.previousProblem.sgf && state.acceptClicks) {
             prevTsumegoLink.classList.remove('disabled');
         } else {
             prevTsumegoLink.classList.add('disabled');
@@ -236,7 +236,7 @@ const updateAnalysisModeUI = () => {
     const text1Elements = [document.getElementById('text1'), document.getElementById('text1-h')];
     if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
         // At starting position, show rank
-        const problem = state.problemHistory[1];
+        const problem = state.previousProblem;
         if (problem && problem.rank !== undefined) {
             const rank = getDescriptiveRank(problem.rank);
             text1Elements.forEach(element => element.textContent = rank);
@@ -330,7 +330,7 @@ const updateMenuItems = () => {
         // Ignore: enabled only when there's a current problem and it's a
         // retry/recall (matches the analysis-mode ignore-button rule).
         ignoreItem.textContent = getTerm('ignore');
-        const problem = state.problemHistory[1];
+        const problem = state.previousProblem;
         if (problem) {
             const lastAnswer = state.answerHistory[state.answerHistory.length - 1];
             const wasFailure = lastAnswer && lastAnswer.problemId === problem.filename.replace('.sgf', '') && !lastAnswer.correct;
@@ -396,7 +396,7 @@ export function updateAnalysisUI(score, bestMove) {
     if (state.appMode === APP_MODES.ANALYZING) {
         if (state.kifuReader && state.kifuReader.node === state.initialAnalysisNode) {
             // At starting position, show rank
-            const problem = state.problemHistory[1];
+            const problem = state.previousProblem;
             if (problem && problem.rank !== undefined) {
                 const rank = getDescriptiveRank(problem.rank);
                 document.getElementById('text1').textContent = rank;

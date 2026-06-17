@@ -403,7 +403,7 @@ function feedAttemptsThroughLoop(entries) {
 export function switchAccount(newId) {
     if (!isValidAccountCode(newId) || newId === state.userId) return false;
     const wipeKeys = [
-        'answerHistory', 'problemHistory', 'nextTsumego',
+        'answerHistory', 'challengeProblem',
         'userRank', 'momentum',
         'modelParams', 'adamState',
         'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',

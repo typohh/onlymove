@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateProblemHistory, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateUserRank, updateMomentum, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
@@ -18,9 +18,9 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     // should count toward the corpus or anyone's stats). Gate on the SAME flag so
     // "report to D1" and "enter local history" stay in lockstep — one source of
     // truth for "don't record this attempt".
-    if (state.problemHistory[0]?.linked) return;
+    if (state.currentProblem?.linked) return;
     try {
-        const problemFilename = state.problemHistory[0].filename;
+        const problemFilename = state.currentProblem.filename;
         const problemId = problemFilename.replace(/\.[^/.]+$/, "");
         const res = await fetch('/report', {
             method: 'POST',
@@ -124,11 +124,12 @@ export async function updateUserStats(isCorrect, {
     pickedEmbedding = null,
     pickedEmbeddingPromise = null,
 } = {}) {
-    const history = state.problemHistory;
-    const currentProblem = history[0];
+    const currentProblem = state.currentProblem;
 
+    // Linked-mode (shared-link) attempts are never recorded — not to D1 (see
+    // sendReport) and not to local history here. Keep both guards on the same
+    // flag so "don't record this attempt" has one source of truth.
     if (!currentProblem || currentProblem.linked) {
-        if (currentProblem && currentProblem.linked) updateProblemHistory(history);
         return {};
     }
 
@@ -213,13 +214,11 @@ export async function updateUserStats(isCorrect, {
 
     updateUserRank(rank);
     updateMomentum(momentum);
-    // Mark the served problem consumed. The head is advanced to a fresh problem
-    // asynchronously (post-solve fade → loadTsumego), so a reload/app-close in
-    // that window leaves this just-answered problem at history[0]; the reload
-    // path checks `answered` and skips re-serving it (see loadTsumego), which
-    // otherwise lets the user re-solve the same problem on every restart.
-    currentProblem.answered = true;
-    updateProblemHistory(history);
+    // The just-answered problem is moved into the previous slot, and the
+    // challenge reselected if it was one, by completeCurrentProblem() in the
+    // caller (game-logic) — recording the attempt and rotating the slots are
+    // kept separate. No `answered` flag is needed anymore: a reselected
+    // challenge is never the just-answered problem.
     updateAllUI();
 
     const oldRankInfo = getRankInfo(oldRank);
