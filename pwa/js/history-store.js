@@ -35,8 +35,9 @@ function idbAvailable() {
 }
 
 // Lazily open (and create) the DB. Resolves to the IDBDatabase, or null if IDB
-// is unavailable / the open failed. Requests durable storage once on success
-// (best-effort — the tail holds the expensive-to-re-pull deep history).
+// is unavailable / the open failed. Durable-storage is NOT requested here — see
+// requestPersist(), which state.evictColdTail calls only once there is actually
+// a tail worth protecting (avoids a permission prompt for users with no tail).
 function openDB() {
     if (!idbAvailable()) return Promise.resolve(null);
     if (dbPromise) return dbPromise;
@@ -54,10 +55,7 @@ function openDB() {
                 db.createObjectStore(STORE, { autoIncrement: true });
             }
         };
-        req.onsuccess = () => {
-            try { navigator.storage?.persist?.(); } catch {}
-            resolve(req.result);
-        };
+        req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
         req.onblocked = () => resolve(null);
     });
@@ -87,6 +85,35 @@ export async function appendTail(rows) {
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
     });
+}
+
+// Number of rows currently in the tail (cheap — does not load the rows).
+// Used to detect silent browser eviction against the expected high-water mark.
+// 0 if unavailable/empty.
+export async function countTail() {
+    const db = await openDB();
+    if (!db) return 0;
+    return new Promise((resolve) => {
+        let req;
+        try {
+            req = db.transaction(STORE, 'readonly').objectStore(STORE).count();
+        } catch {
+            resolve(0);
+            return;
+        }
+        req.onsuccess = () => resolve(req.result || 0);
+        req.onerror = () => resolve(0);
+    });
+}
+
+// Request durable (non-evictable) storage. Best-effort: resolves to the
+// browser's decision (true/false) or false if unsupported. Called once, gated
+// on the tail being non-empty, so users with no cold tail are never prompted.
+export async function requestPersist() {
+    try {
+        if (navigator.storage?.persist) return await navigator.storage.persist();
+    } catch {}
+    return false;
 }
 
 // All tail rows, oldest→newest. [] if unavailable/empty.

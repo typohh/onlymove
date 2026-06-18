@@ -448,6 +448,14 @@ const localization = {
     statsFailed: 'No stats available right now, try completing another problem.',
     statsConstructing: 'Loading your stats…',
 
+    historyEvictedConfirm: 'Your browser removed {count} older attempts from this device to free space. Restore them from the server so your charts cover your full history? ({left} of {max} refreshes left today)',
+    historyEvictedNoRefreshLeft: 'Your browser removed {count} older attempts from this device to free space. You\'ve used all {max} history refreshes for today — they can be restored tomorrow. Everything else still shows.',
+    historyRefreshing: 'Restoring your history from the server…',
+    historyRefreshDone: 'Restored {count} attempts. {left} refreshes left today.',
+    historyRefreshCapReached: 'You\'ve used all {max} history refreshes for today. Try again tomorrow.',
+    historyRefreshFailed: 'Couldn\'t reach the server to restore your history. Check your connection and try again.',
+    accountHistoryCapped: 'You\'ve reached today\'s limit for loading full history from the server, so this device started without it. The rest will sync in automatically over the next day.',
+
     statsSolvingTimeNatural: 'There is a {percent_change}% probability that using more time solving also makes you more likely to choose the correct move.',
     statsReviewTimeNatural: 'There is a {percent_change}% probability that using more time reviewing also makes you more likely to choose the correct move next time you see the problem.',
     statsFailures: 'You have {count_recent} recent failures, each which will be repeated after a {hours} hour delay.',

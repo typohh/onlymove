@@ -113,8 +113,21 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runRecallNotifications(env));
     ctx.waitUntil(maybeComputeServerStats(env));
+    ctx.waitUntil(pruneHistoryRefreshLog(env));
   },
 };
+
+// Drop history_refresh_log rows older than a small window — only the current
+// UTC day's counts matter for the cap, so anything older is dead weight.
+async function pruneHistoryRefreshLog(env) {
+  if (!env.DB) return;
+  try {
+    const cutoff = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    await env.DB.prepare(`DELETE FROM history_refresh_log WHERE day < ?`).bind(cutoff).run();
+  } catch (e) {
+    console.error('pruneHistoryRefreshLog failed:', e);
+  }
+}
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -244,6 +257,13 @@ async function handleReport(request, env) {
 // with it an up-to-date device's poll reads ~0 rows; without it every poll is
 // a scan (the read-quota failure mode the server-stats index fixed).
 const SYNC_PAGE_LIMIT = 1000;
+// Server-enforced cap on full-history pulls (POST /sync with since='' — the
+// from-the-beginning scan) per user per UTC day: the stats eviction-recovery
+// refresh, account adoption, and the backfill/enrich reconciles all count.
+// Each is a full per-user table scan; client-side counting is bypassable by
+// clearing localStorage, so the cap lives here. Incremental syncs (real cursor)
+// and existence probes (limit:1) are not full pulls and don't count.
+const HISTORY_REFRESH_DAILY_CAP = 3;
 
 async function handleSync(request, env) {
   const syncHeaders = {
@@ -270,6 +290,36 @@ async function handleSync(request, env) {
 
     if (!env.DB) {
       return new Response('Database not configured', { status: 500, headers: syncHeaders });
+    }
+
+    // Full-history pull (since the beginning): the expensive full per-user scan.
+    // ALL of them are capped per UTC day server-side — the stats eviction-recovery
+    // refresh, account adoption (switchAccount resets the cursor to ''), and the
+    // one-off backfill/enrich reconciles all land here. Capping the query itself
+    // (since === '') rather than a client flag means it can't be bypassed: a
+    // capped adoption that leaves the cursor at '' can't then sneak a free full
+    // scan through the next "normal" pull. Probes (limit:1) and incremental
+    // syncs (since = a real cursor) are not full pulls and skip this. Page 2+ of
+    // a multi-page full pull carries a real cursor, so one pull counts once.
+    const isFullPull = since === '' && limit > 1;
+    let refreshesLeft;
+    if (isFullPull) {
+      const day = new Date().toISOString().slice(0, 10);
+      const row = await env.DB.prepare(
+        `SELECT count FROM history_refresh_log WHERE user_id = ? AND day = ?`
+      ).bind(data.userId, day).first();
+      const used = row ? row.count : 0;
+      if (used >= HISTORY_REFRESH_DAILY_CAP) {
+        return new Response(
+          JSON.stringify({ reports: [], cursor: since, hasMore: false, capExceeded: true, refreshesLeft: 0 }),
+          { status: 200, headers: syncHeaders }
+        );
+      }
+      await env.DB.prepare(
+        `INSERT INTO history_refresh_log (user_id, day, count) VALUES (?, ?, 1)
+         ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1`
+      ).bind(data.userId, day).run();
+      refreshesLeft = HISTORY_REFRESH_DAILY_CAP - (used + 1);
     }
 
     // Fetch one row past the page limit to detect truncation.
@@ -305,7 +355,9 @@ async function handleSync(request, env) {
       createdAt: r.created_at,
     }));
     const cursor = rows.length > 0 ? rows[rows.length - 1].created_at : since;
-    return new Response(JSON.stringify({ reports, cursor, hasMore }), {
+    const payload = { reports, cursor, hasMore };
+    if (refreshesLeft !== undefined) payload.refreshesLeft = refreshesLeft;
+    return new Response(JSON.stringify(payload), {
       status: 200,
       headers: syncHeaders,
     });

@@ -404,12 +404,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         // The full-history pull + shard field fill + retrain can take on the
         // order of a minute; say so instead of showing a bare spinner.
         showLoading(getTerm('accountRestoring'));
+        let switchResult = null;
         try {
-            await maybeFinishAccountSwitch();
+            switchResult = await maybeFinishAccountSwitch();
         } catch (e) {
             console.error('account switch pull failed:', e);
         } finally {
             hideLoading();
+        }
+        // Adoption counts against the daily full-history cap; if it was exceeded
+        // the device adopted the account but pulled no history (it fills via
+        // incremental sync once the cap resets). Tell the user rather than show a
+        // silently empty profile.
+        if (switchResult && switchResult.capExceeded) {
+            alert(getTerm('accountHistoryCapped'));
         }
     }
 

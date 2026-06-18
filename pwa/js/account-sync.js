@@ -34,10 +34,9 @@ import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateMomentum,
-    evictColdTail,
+    evictColdTail, clearHistoryTail, syncTailExpectedToActual,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
-import { clearTail } from './history-store.js';
 import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
@@ -253,6 +252,8 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
 
         let since = fromStart ? '' : sync.cursor;
         let complete = false;
+        let capExceeded = false;
+        let refreshesLeft;
         const insertedEntries = [];
         const touchedSizes = new Set();
         for (let page = 0; page < MAX_PAGES; page++) {
@@ -264,6 +265,11 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             if (!res.ok) break;
             const body = await res.json().catch(() => null);
             if (!body || !Array.isArray(body.reports)) break;
+            // The server caps full-from-beginning pulls (since='') per day; page 0
+            // of such a pull may come back capExceeded. (Pages 2+ carry a real
+            // cursor and are never capped.) refreshesLeft rides those responses.
+            if (typeof body.refreshesLeft === 'number') refreshesLeft = body.refreshesLeft;
+            if (body.capExceeded) { capExceeded = true; break; }
 
             const bySize = new Map();
             for (const row of body.reports) {
@@ -308,7 +314,7 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             }
             retrainAfterMerge(insertedEntries, mode);
         }
-        return { inserted: insertedEntries.length, complete };
+        return { inserted: insertedEntries.length, complete, capExceeded, refreshesLeft };
     } catch (e) {
         console.warn('account-sync: pull failed:', e);
         return { inserted: 0, complete: false };
@@ -452,17 +458,75 @@ export function hasPendingAccountSwitch() {
 // device serves problems matched to the pulled rank instead of rank 0.
 // Returns true if a switch was completed (caller may want a spinner around it).
 export async function maybeFinishAccountSwitch() {
-    if (!localStorage.getItem(SWITCH_FLAG_KEY)) return false;
+    if (!localStorage.getItem(SWITCH_FLAG_KEY)) return { switched: false };
     // The IndexedDB cold tail belongs to the adopted-away account (switchAccount
     // wipes localStorage but can't await an async IDB clear before reload), so
-    // drop it before pulling the new account's history.
-    await clearTail();
-    await pullReports({ force: true, mode: 'adopt' });
+    // drop it (and its eviction tracking) before pulling the new account's history.
+    await clearHistoryTail();
+    // Adoption is a since='' full pull, so it counts against the daily cap. If
+    // the account has already used its full pulls today the server returns
+    // capExceeded and no rows — the device adopts the account but stays empty
+    // until incremental sync fills it (next day, when the cap resets). Surface
+    // that to the caller so init can tell the user.
+    const result = await pullReports({ force: true, mode: 'adopt' });
+    if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
     await evictColdTail();
     localStorage.removeItem(SWITCH_FLAG_KEY);
-    return true;
+    return { switched: true, capExceeded: !!result.capExceeded };
+}
+
+// --- Daily-capped full-history refresh (cap ENFORCED server-side) ---
+// Recovers attempts the browser silently evicted from the IndexedDB tail by
+// re-pulling the full server history. Each refresh is a full per-user D1 scan
+// (the read-cost the rest of the app fights), so it is hard-capped per UTC day
+// by the Worker (client counting is bypassable by clearing localStorage). The
+// value below is for DISPLAY only — it mirrors the cap the server enforces.
+export const HISTORY_REFRESH_DAILY_CAP = 3;
+// Cached "refreshes left" from the server's last response, for the prompt's
+// hint only — never the authority. { day: 'YYYY-MM-DD', left }.
+const HISTORY_REFRESH_LEFT_KEY = 'historyRefreshLeft';
+
+function cacheRefreshesLeft(left) {
+    if (typeof left !== 'number') return;
+    const day = new Date().toISOString().slice(0, 10);
+    localStorage.setItem(HISTORY_REFRESH_LEFT_KEY, JSON.stringify({ day, left }));
+}
+
+// Display hint: the server-reported remaining count if we have one for today,
+// else assume the full cap (the server is the real gate either way).
+export function historyRefreshesLeftToday() {
+    try {
+        const c = JSON.parse(localStorage.getItem(HISTORY_REFRESH_LEFT_KEY) || 'null');
+        const today = new Date().toISOString().slice(0, 10);
+        if (c && c.day === today && typeof c.left === 'number') return Math.max(0, c.left);
+    } catch {}
+    return HISTORY_REFRESH_DAILY_CAP;
+}
+
+// Pull the full server history (fromStart) to restore evicted tail rows, then
+// re-split into working set + tail and resync the eviction high-water mark. The
+// daily cap is enforced by the Worker on the since='' full pull (shared with
+// account adoption) — if exceeded it returns capExceeded and serves no rows.
+// `mode: 'reconcile'` retrains the
+// models but leaves the rank loop untouched (the restored rows are ancient,
+// already reflected in the user's rank). Returns { ok, reason, restored, left }.
+export async function refreshHistoryFromServer() {
+    const result = await pullReports({ force: true, fromStart: true, mode: 'reconcile' });
+    if (result.capExceeded) {
+        cacheRefreshesLeft(0);
+        return { ok: false, reason: 'cap', left: 0 };
+    }
+    // A network failure (no full pass, nothing served) — the server didn't count
+    // it, so don't report it as a spent refresh.
+    if (!result.complete && result.inserted === 0 && result.refreshesLeft === undefined) {
+        return { ok: false, reason: 'failed', left: historyRefreshesLeftToday() };
+    }
+    cacheRefreshesLeft(result.refreshesLeft);
+    await evictColdTail();
+    await syncTailExpectedToActual();
+    return { ok: true, restored: result.inserted, left: historyRefreshesLeftToday() };
 }
 
 // Piggyback signal: every /report response carries prevCreatedAt — the user's

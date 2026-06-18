@@ -7,7 +7,7 @@
 // helpers; model.js never reaches back into the UI.
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, getMergedFullAnswerHistory } from './state.js';
+import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS, MIN_STATS_ATTEMPTS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
@@ -19,7 +19,12 @@ import {
 } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
-import { showLoading, hideLoading } from './overlays.js';
+import { showLoading, hideLoading, showConfirm } from './overlays.js';
+import {
+    refreshHistoryFromServer,
+    historyRefreshesLeftToday,
+    HISTORY_REFRESH_DAILY_CAP,
+} from './account-sync.js';
 import { normCdf } from './math-utils.js';
 import {
     getRecallCandidates,
@@ -58,7 +63,46 @@ function hGridLine(y, W) {
     });
 }
 
+// If the browser silently evicted history-tail rows, tell the user how many are
+// missing and offer a server refresh (subject to the daily cap). No-op when the
+// tail is intact, IDB is unavailable, or the user declines.
+async function maybeOfferHistoryRefresh() {
+    let ev;
+    try { ev = await getTailEvictionStatus(); } catch { return; }
+    if (!ev || ev.missing <= 0) return;
+
+    const left = historyRefreshesLeftToday();
+    if (left <= 0) {
+        alert(getTerm('historyEvictedNoRefreshLeft', { count: ev.missing, max: HISTORY_REFRESH_DAILY_CAP }));
+        return;
+    }
+    if (!await showConfirm(getTerm('historyEvictedConfirm', { count: ev.missing, left, max: HISTORY_REFRESH_DAILY_CAP }))) {
+        return;
+    }
+    showLoading(getTerm('historyRefreshing'));
+    try {
+        const r = await refreshHistoryFromServer();
+        if (r.ok) {
+            alert(getTerm('historyRefreshDone', { count: r.restored, left: r.left }));
+        } else if (r.reason === 'cap') {
+            alert(getTerm('historyRefreshCapReached', { max: HISTORY_REFRESH_DAILY_CAP }));
+        } else {
+            alert(getTerm('historyRefreshFailed'));
+        }
+    } catch {
+        alert(getTerm('historyRefreshFailed'));
+    } finally {
+        hideLoading();
+    }
+}
+
 export async function showDetailedStats() {
+    // Silent-eviction recovery: if the browser dropped tail rows since our last
+    // write, offer to restore them from the server (capped per day — each is a
+    // full per-user D1 scan). Done before building so the charts use the
+    // recovered history.
+    await maybeOfferHistoryRefresh();
+
     // The stats panel merges both board sizes: one rank, one recall model, one
     // weakness model. Build the union once and thread it through every block.
     // Full career here (working set + IndexedDB cold tail) so the charts and

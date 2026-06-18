@@ -122,3 +122,17 @@ CREATE TABLE IF NOT EXISTS server_stats (
     data        TEXT NOT NULL,
     computed_at TEXT NOT NULL
 );
+
+-- Per-user daily counter for full-history pulls (POST /sync with since='' — the
+-- from-the-beginning scan: the stats "restore evicted history" refresh, account
+-- adoption, and the backfill/enrich reconciles all count). Each is a full
+-- per-user table scan, so it is server-capped per UTC day (client enforcement is
+-- bypassable by clearing localStorage). One row per (user, day); the hourly cron
+-- prunes days older than a small window. The (user_id, day) primary key makes
+-- the check a point lookup.
+CREATE TABLE IF NOT EXISTS history_refresh_log (
+    user_id TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
+);

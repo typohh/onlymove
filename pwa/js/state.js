@@ -1,6 +1,6 @@
 // js/state.js
 import { APP_MODES, ANSWER_HISTORY_WORKING_SET } from './constants.js';
-import { appendTail, getTail } from './history-store.js';
+import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 // The momentum-rank loop constants/guards live in momentum-rank.js (the pure
 // step function shared by user-stats.js and the account-sync replay);
 // re-exported here for the existing importers.
@@ -305,6 +305,15 @@ function scheduleEvict() {
     evictTimer = setTimeout(() => { evictTimer = null; evictColdTail(); }, 2000);
 }
 
+// High-water mark of how many rows we've written to the IndexedDB tail (since
+// the last clear). The actual tail count dropping below this means the browser
+// silently evicted history — surfaced to the user on the stats panel. Updated
+// only on append (monotonic) and reset by a clear or a server refresh.
+const TAIL_EXPECTED_KEY = 'historyTailExpected';
+// Set once we've asked for durable storage (so we ask at most once, and only
+// when there is actually a tail worth protecting).
+const PERSIST_REQUESTED_KEY = 'historyPersistRequested';
+
 // Move attempts beyond the cap into the IndexedDB tail, OLDEST first.
 // Crash-safe: append to IDB and confirm BEFORE trimming the in-memory /
 // localStorage working set, so a kill mid-evict leaves a (de-duped) copy in
@@ -322,6 +331,15 @@ export async function evictColdTail() {
         unifiedHistory = unifiedHistory.filter(a => !overflowSet.has(a));
         invalidateActiveView();
         persistUnifiedHistory();
+        // Bump the eviction high-water mark and, the first time a tail exists,
+        // request durable storage (so the browser won't silently evict the
+        // expensive-to-re-pull deep history out from under us).
+        const expected = (parseInt(localStorage.getItem(TAIL_EXPECTED_KEY), 10) || 0) + overflow.length;
+        localStorage.setItem(TAIL_EXPECTED_KEY, String(expected));
+        if (!localStorage.getItem(PERSIST_REQUESTED_KEY)) {
+            localStorage.setItem(PERSIST_REQUESTED_KEY, '1');
+            requestPersist().catch(() => {});
+        }
     } finally {
         evicting = false;
     }
@@ -349,6 +367,35 @@ export async function getMergedFullAnswerHistory() {
 export async function initHistoryStorage() {
     await evictColdTail();
     persistUnifiedHistory();
+    // Baseline the eviction high-water mark for devices whose tail predates this
+    // tracking (first boot under this code, or a tail that needed no eviction
+    // this boot): assume the tail is intact now and start watching from here.
+    if (localStorage.getItem(TAIL_EXPECTED_KEY) === null) {
+        try { localStorage.setItem(TAIL_EXPECTED_KEY, String(await countTail())); } catch {}
+    }
+}
+
+// Silent-eviction check for the stats panel: `missing` is how many tail rows the
+// browser dropped since our last write (expected high-water mark − actual count).
+export async function getTailEvictionStatus() {
+    const expected = parseInt(localStorage.getItem(TAIL_EXPECTED_KEY), 10) || 0;
+    const actual = await countTail();
+    return { expected, actual, missing: Math.max(0, expected - actual) };
+}
+
+// Clear the IndexedDB tail AND its tracking (account switch). The new account
+// re-establishes its own high-water mark + persist request on first eviction.
+export async function clearHistoryTail() {
+    await clearTail();
+    localStorage.removeItem(TAIL_EXPECTED_KEY);
+    localStorage.removeItem(PERSIST_REQUESTED_KEY);
+}
+
+// After a server refresh has rebuilt the tail, reset the high-water mark to the
+// restored actual count so the recovered rows aren't double-counted and the
+// missing-row signal clears.
+export async function syncTailExpectedToActual() {
+    try { localStorage.setItem(TAIL_EXPECTED_KEY, String(await countTail())); } catch {}
 }
 
 // --- Shared-across-sizes state (single values, not bucketed). ---
