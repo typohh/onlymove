@@ -213,10 +213,15 @@ function writePerSize(key, obj) {
 
 const perSize = {
     // The always-assigned challenge problem (full object incl. sgf), persisted
-    // so a reopen restores the user's standing challenge. currentProblem and
-    // previousProblem are NOT persisted — they're recomputed on load (reopen
-    // shows a due recall or this challenge; see problem-loader.advanceToNextProblem).
+    // so a reopen restores the user's standing challenge. currentProblem is NOT
+    // persisted — it's recomputed on load (reopen shows a due recall or this
+    // challenge; see problem-loader.advanceToNextProblem).
     challengeProblem: readPerSize('challengeProblem'),
+    // The last-completed problem (full object incl. sgf), persisted so a reopen
+    // keeps the Review button live — review/share/ignore act on it, and it is
+    // never re-served as a problem to solve, so persisting it can't re-serve an
+    // already-answered problem.
+    previousProblem: readPerSize('previousProblem'),
 };
 
 // --- Unified answer history (the synchronous working set) ---
@@ -498,10 +503,11 @@ export const state = {
     // currentProblem: what's displayed/interacted with now (challenge, recall,
     //   or a linked/shared problem). In-memory only — recomputed on load.
     // previousProblem: the last completed problem; review/share/ignore act on it.
-    //   In-memory only — a reopen lands on the challenge/recall, not on review.
-    // challengeProblem is a per-size persisted getter/setter further down.
+    //   Per-size persisted (getter/setter further down) so the Review button
+    //   survives a reopen. A reopen still lands on the challenge/recall, not on
+    //   review — but the previous slot stays reviewable.
+    // challengeProblem is also a per-size persisted getter/setter further down.
     currentProblem: null,
-    previousProblem: null,
 
     // Board and Game state
     board: null,
@@ -600,6 +606,14 @@ export const state = {
     set challengeProblem(v) {
         perSize.challengeProblem[_boardSize] = v;
         writePerSize('challengeProblem', perSize.challengeProblem);
+    },
+
+    get previousProblem() {
+        return perSize.previousProblem[_boardSize] ?? null;
+    },
+    set previousProblem(v) {
+        perSize.previousProblem[_boardSize] = v;
+        writePerSize('previousProblem', perSize.previousProblem);
     },
 
     // Active-size view, derived from the unified working set and cached until a
@@ -872,11 +886,10 @@ export function setBoardSize(size) {
     zipCache.clear();
     embeddingsIndexCache.clear();
 
-    // current/previous are in-memory display slots for the old size; the caller
-    // reloads (advanceToNextProblem) and repopulates them. challengeProblem is
-    // per-size and switches automatically.
+    // currentProblem is an in-memory display slot for the old size; the caller
+    // reloads (advanceToNextProblem) and repopulates it. challengeProblem and
+    // previousProblem are per-size and switch automatically.
     state.currentProblem = null;
-    state.previousProblem = null;
 }
 
 export { SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE };
