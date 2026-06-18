@@ -5,6 +5,7 @@
 // and offers link / image / both via the Web Share API with clipboard and
 // toast fallbacks. Pulled out of main.js so the entry point stays wiring-only.
 
+import * as Sentry from "@sentry/browser";
 import { state } from './state.js';
 import { getTerm } from './i18n.js';
 import { recordShareEvent } from './user-stats.js';
@@ -12,6 +13,48 @@ import { getBoardImageBlob } from './board.js';
 import { showModal, showToast } from './overlays.js';
 
 let isSharing = false;
+
+// Legacy synchronous copy (works in insecure contexts and old browsers where
+// navigator.clipboard is unavailable). Requires the active user gesture we
+// already have from the share click. Returns whether the copy succeeded.
+function legacyCopy(text) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch (_) {
+        return false;
+    }
+}
+
+// Last resort when no clipboard path works: show the URL pre-selected so the
+// user can long-press/copy it by hand. Never throws.
+function showShareUrlFallback(url) {
+    showModal({
+        build: (modal) => {
+            const p = document.createElement('p');
+            p.textContent = getTerm('copyLinkManually');
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.readOnly = true;
+            input.value = url;
+            input.style.width = '100%';
+            input.addEventListener('focus', () => input.select());
+            modal.appendChild(p);
+            modal.appendChild(input);
+            setTimeout(() => { input.focus(); input.select(); }, 0);
+        },
+    });
+}
 
 export function performShare() {
     if (isSharing) return;
@@ -24,7 +67,15 @@ export function performShare() {
 
     const tsumegoId = state.previousProblem.filename.replace('.sgf', '');
     const orientation = state.previousProblem.orientation;
-    let shareUrl = `${window.location.origin}${window.location.pathname}?id=${tsumegoId}`;
+    // Web Share + the async Clipboard API are secure-context only, and a link
+    // generated while on plain http propagates that insecure origin to whoever
+    // opens it (which then breaks *their* share too). Pin generated links to
+    // https — localhost dev aside — so an http session can't poison the link.
+    const h = window.location.hostname;
+    const isLocalhost = h === 'localhost' || h === '::1' || h.startsWith('127.');
+    const origin = isLocalhost ? window.location.origin
+                               : window.location.origin.replace(/^http:/, 'https:');
+    let shareUrl = `${origin}${window.location.pathname}?id=${tsumegoId}`;
     if (typeof orientation === 'number' && orientation !== 0) {
         shareUrl += `&o=${orientation}`;
     }
@@ -33,12 +84,20 @@ export function performShare() {
     recordShareEvent({ type: 'create', problemId: tsumegoId });
 
     const copyToClipboard = () => {
-        return navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast(getTerm('linkCopied'));
-        }).catch(err => {
-            console.error('Failed to copy URL: ', err);
-            showToast(getTerm('error'), { isError: true });
-        });
+        // navigator.clipboard is undefined in an insecure context (plain http)
+        // and on some older browsers, so it can't be the only path or the whole
+        // share throws (JAVASCRIPT-2G). Degrade gracefully: async clipboard ->
+        // legacy execCommand copy -> surface the URL for manual copy.
+        const copied = () => showToast(getTerm('linkCopied'));
+        const fallback = () => { if (!legacyCopy(shareUrl)) showShareUrlFallback(shareUrl); else copied(); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(shareUrl).then(copied).catch(err => {
+                console.error('Failed to copy URL: ', err);
+                fallback();
+            });
+        }
+        fallback();
+        return Promise.resolve();
     };
 
     const shareLink = () => {
@@ -46,6 +105,7 @@ export function performShare() {
             return navigator.share({ url: shareUrl }).catch(err => {
                 if (err.name === 'AbortError') return;
                 console.error('Share link failed: ', err);
+                reportShareRefusal('link', err);
                 showToast(getTerm('shareFailed'), { isError: true });
                 return copyToClipboard();
             });
@@ -53,21 +113,81 @@ export function performShare() {
         return copyToClipboard();
     };
 
-    // Generate the board image with a visible "preparing…" toast and a
-    // hard timeout so canvas/render hangs surface as an error rather than
-    // a silent forever-spinner.
+    // Board-image and Web Share failures are otherwise invisible (we swallow them
+    // and fall back to a clipboard copy), so log enough to tell an expired-
+    // activation refusal (NotAllowedError with userActivation.isActive === false)
+    // apart from other causes (share-in-progress lock, OS sheet state). One source
+    // of truth for the three share() catch handlers; the activation hypothesis is
+    // still under investigation via this telemetry, not yet confirmed.
+    let captureMs = null; // wall-clock of the board-image capture, for telemetry
+    const reportShareRefusal = (action, err) => {
+        try {
+            const act = navigator.userActivation;
+            Sentry.captureMessage('Web Share refused', {
+                level: 'warning',
+                extra: {
+                    action,
+                    errName: err && err.name,
+                    errMessage: err && err.message,
+                    captureMs,
+                    activeAtShare: act ? act.isActive : null,
+                    hasBeenActive: act ? act.hasBeenActive : null,
+                },
+            });
+        } catch (_) {}
+    };
+
+    // If share() is refused specifically for lack of transient user activation
+    // (NotAllowedError) — i.e. the image capture ran long enough that the tap's
+    // ~5s activation expired — we STILL hold the ready File. Re-offer it behind an
+    // explicit button: that tap is a fresh activation and the File is already in
+    // hand, so share() fires straight from the handler (no await between) and the
+    // native sheet opens. Reached only on the real too-slow-capture failure, so no
+    // image is ever generated for a share the user didn't ask for.
+    const offerReadyShare = (data) => {
+        showModal({
+            onDismiss: releaseGuard,
+            build: (modal, close) => {
+                const p = document.createElement('p');
+                p.textContent = getTerm('imageReady');
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.textContent = getTerm('share');
+                btn.addEventListener('click', () => {
+                    close();
+                    navigator.share(data).catch(err => {
+                        if (err.name === 'AbortError') return;
+                        console.error('Re-share failed: ', err);
+                        reportShareRefusal('retry', err);
+                        showToast(getTerm('shareFailed'), { isError: true });
+                        return copyToClipboard();
+                    });
+                });
+                modal.appendChild(p);
+                modal.appendChild(btn);
+            },
+        });
+    };
+
+    // Generate the board image — lazily, only when an image-bearing option is
+    // chosen (never for a link-only share). Visible "preparing…" toast + a hard
+    // timeout so a canvas/render hang surfaces as an error rather than a silent
+    // forever-spinner.
     const generateImageFile = async () => {
         const toast = showToast(getTerm('preparingImage'), { autoDismiss: false });
         const cleanup = () => { if (toast.parentNode) toast.parentNode.removeChild(toast); };
+        const t0 = performance.now();
         try {
             const blob = await Promise.race([
                 getBoardImageBlob(),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('image generation timed out')), 10000))
             ]);
+            captureMs = Math.round(performance.now() - t0);
             cleanup();
             if (!blob) throw new Error('No blob returned from getBoardImageBlob');
             return new File([blob], 'tsumego.png', { type: 'image/png' });
         } catch (err) {
+            captureMs = Math.round(performance.now() - t0);
             cleanup();
             console.error('Failed to capture image: ', err);
             showToast(getTerm('imageCaptureFailed'), { isError: true });
@@ -87,6 +207,8 @@ export function performShare() {
             return navigator.share(data).catch(err => {
                 if (err.name === 'AbortError') return;
                 console.error('Share image failed: ', err);
+                reportShareRefusal('image', err);
+                if (err.name === 'NotAllowedError') return offerReadyShare(data);
                 showToast(getTerm('shareFailed'), { isError: true });
                 return shareLink();
             });
@@ -106,6 +228,8 @@ export function performShare() {
             return navigator.share(data).catch(err => {
                 if (err.name === 'AbortError') return;
                 console.error('Share both failed: ', err);
+                reportShareRefusal('both', err);
+                if (err.name === 'NotAllowedError') return offerReadyShare(data);
                 showToast(getTerm('shareFailed'), { isError: true });
                 return copyToClipboard();
             });
