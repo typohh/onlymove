@@ -320,31 +320,52 @@ export function modalRankGrid() {
     return grid;
 }
 
+// Shared centered container that STACKS toasts vertically. Toasts used to each
+// be position:fixed at top/left:50% — so any two alive at once (e.g. the
+// "preparing…" toast plus a result, or rapid retries) rendered on the exact
+// same spot and overlapped into garbled text. One flex column centers the group
+// and lays them out instead.
+let toastContainer = null;
+function getToastContainer() {
+    if (toastContainer && toastContainer.isConnected) return toastContainer;
+    toastContainer = document.createElement('div');
+    Object.assign(toastContainer.style, {
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '1vmin',
+        zIndex: '10000',
+        pointerEvents: 'none',
+    });
+    document.body.appendChild(toastContainer);
+    return toastContainer;
+}
+
 /**
  * A small centered toast. Auto-dismisses after 2s unless `autoDismiss` is
  * false (the caller then removes the returned element itself, e.g. to keep a
  * "preparing…" message up across an async op). Returns the toast element.
+ * Multiple live toasts stack vertically rather than overlapping.
  */
 export function showToast(text, { isError = false, autoDismiss = true } = {}) {
     const message = document.createElement('div');
     message.textContent = text;
     Object.assign(message.style, {
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
         backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
         color: 'white',
         padding: '1vmin 2vmin',
         borderRadius: '0.5vmin',
         fontWeight: 'bold',
         fontSize: '3vmin',
-        zIndex: isError ? '10000' : '9999',
         pointerEvents: 'none',
         whiteSpace: 'nowrap',
         textAlign: 'center',
     });
-    document.body.appendChild(message);
+    getToastContainer().appendChild(message);
     if (autoDismiss) {
         setTimeout(() => {
             if (message.parentNode) message.parentNode.removeChild(message);
