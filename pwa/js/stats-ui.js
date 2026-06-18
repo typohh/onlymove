@@ -8,7 +8,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, getMergedAnswerHistory } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS, MIN_STATS_ATTEMPTS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
@@ -62,8 +62,8 @@ export async function showDetailedStats() {
     // The stats panel merges both board sizes: one rank, one recall model, one
     // weakness model. Build the union once and thread it through every block.
     const merged = getMergedAnswerHistory();
-    if (merged.length < 10) {
-        alert(getTerm('statsNotEnough', { count: merged.length }));
+    if (merged.length < MIN_STATS_ATTEMPTS) {
+        alert(getTerm('statsNotEnough', { count: merged.length, needed: MIN_STATS_ATTEMPTS }));
         return;
     }
 

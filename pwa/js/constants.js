@@ -27,3 +27,9 @@ export const MODEL_INPUT_HISTORY_LENGTH = 500;
 // because ui.js reads it too and account-sync already imports ui.
 export const HISTORY_BACKFILL_DONE_KEY = 'historyBackfillDone_v1';
 export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
+
+// Minimum merged answer-history entries (both sizes, repeats included) before
+// the detailed-stats panel will open. The `statsNotEnough` copy interpolates
+// this same value, so they can't drift apart (the string used to hardcode "5"
+// while the gate already required 10).
+export const MIN_STATS_ATTEMPTS = 10;
