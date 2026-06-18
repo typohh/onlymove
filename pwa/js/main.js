@@ -20,6 +20,10 @@ try {
         // Worker stamps on X-App-Version), so errors bucket by deploy. APP_VERSION
         // is substituted at build time by esbuild's `define`.
         release: APP_VERSION,
+        // Drop third-party browser-extension noise we don't control and can't
+        // fix — e.g. the Zalo extension injects a script that throws
+        // "zaloJSV2 is not defined" (was Sentry JAVASCRIPT-1Y).
+        ignoreErrors: [/zaloJSV2/],
     });
     window.Sentry = Sentry; // Make Sentry globally available
     Sentry.setUser({ id: state.userId });
