@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
 import { runMigrations } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -363,6 +363,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // board-size bucket migrations already ran at state.js import time, so
     // these operate through state.answerHistory (the active size's view).
     runMigrations();
+
+    // Normalize answer-history storage to the unified working set + IndexedDB
+    // tail (history-store.js). Runs AFTER runMigrations so the legacy {9,13}
+    // buckets are migrated in full first, then everything beyond the cap is
+    // evicted to IDB — freeing localStorage before the embedding backfill below
+    // writes through the (now bounded) working set. Awaited so a quota-stressed
+    // device is relieved before any further write; cheap on already-split state.
+    await initHistoryStorage();
 
     // M (rating→rank) is REQUIRED: package_for_pwa ships only raw ratings, so
     // the client cannot rank a single problem (selection, UI, recall) without it.

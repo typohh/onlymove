@@ -33,6 +33,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
+import { updateTail } from './history-store.js';
 import { boardNotationToXy } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
@@ -307,6 +308,33 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             if (curveRankUpdated > 0) {
                 persistAnswerHistory(size, history);
                 console.log(`embedding-backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
+            }
+        }
+
+        // The IndexedDB cold tail (attempts beyond the working set) feeds only
+        // the full-history rank chart — it carries no embeddings and no model
+        // reads it. On a curve change, recompute its problemRank from the stored
+        // raw rating so the deep-history part of the chart stays on the current
+        // curve. We deliberately do NOT fetch shards for the tail (the walk below
+        // is working-set only), so the tail keeps its attempt-time raw rating and
+        // only the rating→rank mapping is refreshed. Runs whenever the curve
+        // changed — including alongside a ratings change, since the tail can't
+        // get fresh ratings from shards.
+        if (curveChanged) {
+            let tailUpdated = 0;
+            await updateTail((entry) => {
+                if (!entry || entry.size !== size) return null;
+                if (typeof entry.problemRating !== 'number') return null;
+                const newRank = normalizedRankForSize(entry.problemRating, size);
+                if (newRank !== null && entry.problemRank !== newRank) {
+                    entry.problemRank = newRank;
+                    tailUpdated++;
+                    return entry;
+                }
+                return null;
+            });
+            if (tailUpdated > 0) {
+                console.log(`embedding-backfill[${size}]: recomputed problemRank for ${tailUpdated} cold-tail entries (curve change)`);
             }
         }
 

@@ -1,5 +1,6 @@
 // js/state.js
-import { APP_MODES } from './constants.js';
+import { APP_MODES, ANSWER_HISTORY_WORKING_SET } from './constants.js';
+import { appendTail, getTail } from './history-store.js';
 // The momentum-rank loop constants/guards live in momentum-rank.js (the pure
 // step function shared by user-stats.js and the account-sync replay);
 // re-exported here for the existing importers.
@@ -193,56 +194,162 @@ function readPerSize(key, fallback) {
 // the trainers actually use.
 const ANSWER_HISTORY_EMBEDDING_KEEP_LAST = 500;
 
+function isQuotaError(e) {
+    return e && (
+        e.name === 'QuotaExceededError' ||
+        e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        e.code === 22 || e.code === 1014
+    );
+}
+
 function writePerSize(key, obj) {
     try {
         localStorage.setItem(key, JSON.stringify(obj));
-        return;
     } catch (e) {
-        const isQuota = e && (
-            e.name === 'QuotaExceededError' ||
-            e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-            e.code === 22 || e.code === 1014
-        );
-        if (!isQuota) throw e;
-    }
-    if (key !== 'answerHistory' || !obj || typeof obj !== 'object') {
+        if (!isQuotaError(e)) throw e;
         console.error(`localStorage quota exceeded for ${key}; write skipped`);
-        return;
-    }
-    // Strip the heavy `embedding` field from entries beyond the keep-last
-    // window. Preserve the entry shape otherwise so stats and the recall
-    // model still see the full history.
-    let stripped = 0;
-    for (const sz of Object.keys(obj)) {
-        const arr = obj[sz];
-        if (!Array.isArray(arr)) continue;
-        const cutoff = Math.max(0, arr.length - ANSWER_HISTORY_EMBEDDING_KEEP_LAST);
-        for (let i = 0; i < cutoff; i++) {
-            const entry = arr[i];
-            if (entry && entry.embedding !== undefined) {
-                delete entry.embedding;
-                stripped++;
-            }
-        }
-    }
-    try {
-        localStorage.setItem(key, JSON.stringify(obj));
-        if (stripped > 0) {
-            console.warn(`localStorage quota relieved by stripping embedding from ${stripped} old answerHistory entries`);
-        }
-    } catch (e2) {
-        console.error(`localStorage still over quota after stripping ${stripped} embeddings; write skipped to keep play flow alive`);
     }
 }
 
 const perSize = {
-    answerHistory: readPerSize('answerHistory'),
     // The always-assigned challenge problem (full object incl. sgf), persisted
     // so a reopen restores the user's standing challenge. currentProblem and
     // previousProblem are NOT persisted — they're recomputed on load (reopen
     // shows a due recall or this challenge; see problem-loader.advanceToNextProblem).
     challengeProblem: readPerSize('challengeProblem'),
 };
+
+// --- Unified answer history (the synchronous working set) ---
+// One date-ordered array across both board sizes, each entry tagged with
+// `size`. This is the WORKING SET — the most recent ANSWER_HISTORY_WORKING_SET
+// attempts, kept in localStorage so the hot path never awaits. Older attempts
+// are evicted to IndexedDB (history-store.js) and merged back only for the
+// full-history charts via getMergedFullAnswerHistory(). The active-size view
+// that most consumers read (state.answerHistory, getAnswerHistoryForSize) is
+// derived by filtering on `size`.
+
+function loadUnifiedHistory() {
+    const raw = localStorage.getItem('answerHistory');
+    if (raw === null) return [];
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { return []; }
+    if (Array.isArray(parsed)) return parsed;
+    // Legacy {9:[...], 13:[...]} bucket shape (left by the board-size migrations
+    // above): flatten, tag each entry with its bucket's size, sort by date.
+    // initHistoryStorage() rewrites localStorage as the unified array + evicts
+    // the tail on this same boot.
+    if (parsed && typeof parsed === 'object') {
+        const merged = [];
+        for (const sz of Object.keys(parsed)) {
+            const arr = parsed[sz];
+            if (!Array.isArray(arr)) continue;
+            const size = Number(sz);
+            for (const a of arr) merged.push(a && a.size != null ? a : { ...a, size });
+        }
+        merged.sort((x, y) => (x.date || 0) - (y.date || 0));
+        return merged;
+    }
+    return [];
+}
+
+let unifiedHistory = loadUnifiedHistory();
+let activeView = null;        // cached state.answerHistory (filtered by active size)
+let activeViewSize = null;
+
+function invalidateActiveView() { activeView = null; }
+
+// Persist the working set. On quota pressure, strip the heavy embedding fields
+// from entries beyond the keep-last window and retry — a belt-and-suspenders
+// that effectively never fires now that the working set is capped.
+function persistUnifiedHistory() {
+    try {
+        localStorage.setItem('answerHistory', JSON.stringify(unifiedHistory));
+        return;
+    } catch (e) {
+        if (!isQuotaError(e)) { console.error('answerHistory write failed', e); return; }
+    }
+    let stripped = 0;
+    const cutoff = Math.max(0, unifiedHistory.length - ANSWER_HISTORY_EMBEDDING_KEEP_LAST);
+    for (let i = 0; i < cutoff; i++) {
+        const a = unifiedHistory[i];
+        if (a && a.embedding !== undefined) { delete a.embedding; stripped++; }
+        if (a && a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; stripped++; }
+    }
+    try {
+        localStorage.setItem('answerHistory', JSON.stringify(unifiedHistory));
+        if (stripped > 0) console.warn(`answerHistory quota relieved by stripping ${stripped} old embeddings`);
+    } catch {
+        console.error('answerHistory still over quota after stripping; write skipped');
+    }
+}
+
+// Single reconciliation point: replace every entry of `size` in the unified
+// array with `history` (tagged `size`), keep date order, persist, schedule
+// eviction. Entries already carrying the right `size` keep their object
+// identity, so in-place mutations elsewhere (e.g. the refit) survive.
+function reconcileSize(size, history) {
+    const next = [];
+    for (const a of unifiedHistory) if (a.size !== size) next.push(a);
+    for (const a of history) next.push(a && a.size === size ? a : { ...a, size });
+    next.sort((x, y) => (x.date || 0) - (y.date || 0));
+    unifiedHistory = next;
+    invalidateActiveView();
+    persistUnifiedHistory();
+    scheduleEvict();
+}
+
+let evictTimer = null;
+let evicting = false;
+function scheduleEvict() {
+    if (evictTimer) return;
+    evictTimer = setTimeout(() => { evictTimer = null; evictColdTail(); }, 2000);
+}
+
+// Move attempts beyond the cap into the IndexedDB tail, OLDEST first.
+// Crash-safe: append to IDB and confirm BEFORE trimming the in-memory /
+// localStorage working set, so a kill mid-evict leaves a (de-duped) copy in
+// both rather than a gap. Removes exactly the appended rows by reference, so a
+// concurrent append during the await is preserved.
+export async function evictColdTail() {
+    if (evicting) return;
+    if (unifiedHistory.length <= ANSWER_HISTORY_WORKING_SET) return;
+    evicting = true;
+    try {
+        const overflow = unifiedHistory.slice(0, unifiedHistory.length - ANSWER_HISTORY_WORKING_SET);
+        const ok = await appendTail(overflow);
+        if (!ok) return; // IDB unavailable — keep the rows in the working set
+        const overflowSet = new Set(overflow);
+        unifiedHistory = unifiedHistory.filter(a => !overflowSet.has(a));
+        invalidateActiveView();
+        persistUnifiedHistory();
+    } finally {
+        evicting = false;
+    }
+}
+
+// Full career = IDB tail (older) ⧺ working set (newer), de-duped by
+// (problemId, date) with the working set winning, in date order. Returns
+// shallow copies (read-only). Used only by the full-history charts.
+export async function getMergedFullAnswerHistory() {
+    const tail = await getTail();
+    const seen = new Set(unifiedHistory.map(a => `${a.problemId}|${a.date}`));
+    const merged = [];
+    for (const a of tail) {
+        if (seen.has(`${a.problemId}|${a.date}`)) continue;
+        merged.push(a.size != null ? { ...a } : { ...a, size: 9 });
+    }
+    for (const a of unifiedHistory) merged.push({ ...a });
+    merged.sort((x, y) => (x.date || 0) - (y.date || 0));
+    return merged;
+}
+
+// One-time at boot (after runMigrations): normalize localStorage to the unified
+// array and push anything beyond the cap into the tail, freeing localStorage.
+// Idempotent — safe to call every boot.
+export async function initHistoryStorage() {
+    await evictColdTail();
+    persistUnifiedHistory();
+}
 
 // --- Shared-across-sizes state (single values, not bucketed). ---
 // rank + momentum are one control loop over a single shared rank; the recall
@@ -448,15 +555,19 @@ export const state = {
         writePerSize('challengeProblem', perSize.challengeProblem);
     },
 
+    // Active-size view, derived from the unified working set and cached until a
+    // write or a board-size switch (the size check below picks up switches with
+    // no explicit invalidation). Read a few times per attempt, never in a tight
+    // loop, so the filter cost is negligible.
     get answerHistory() {
-        if (!Array.isArray(perSize.answerHistory[_boardSize])) {
-            perSize.answerHistory[_boardSize] = [];
+        if (activeView === null || activeViewSize !== _boardSize) {
+            activeView = unifiedHistory.filter(a => a.size === _boardSize);
+            activeViewSize = _boardSize;
         }
-        return perSize.answerHistory[_boardSize];
+        return activeView;
     },
     set answerHistory(v) {
-        perSize.answerHistory[_boardSize] = v;
-        writePerSize('answerHistory', perSize.answerHistory);
+        reconcileSize(_boardSize, v);
     },
 
     get momentum() {
@@ -649,27 +760,27 @@ export function updateAnswerHistory(history) {
 // non-active size's data without mutating state.boardSize (which would clear
 // the in-memory zip pool). Use sparingly.
 export function getAnswerHistoryForSize(size) {
-    return Array.isArray(perSize.answerHistory[size]) ? perSize.answerHistory[size] : [];
+    // Entry references (filter preserves identity), so in-place mutation by the
+    // refit lands in the unified array; persist via setAnswerHistoryForSize.
+    return unifiedHistory.filter(a => a.size === size);
 }
 
 export function setAnswerHistoryForSize(size, history) {
-    perSize.answerHistory[size] = history;
-    writePerSize('answerHistory', perSize.answerHistory);
+    reconcileSize(size, history);
 }
 
-// Read-only union of every size's answerHistory, each entry tagged with its
-// `size` and sorted by date. The shared recall + weakness models train on this,
-// and the stats panel renders from it. Entries are shallow copies, so callers
-// must not expect mutations to persist — use the per-size setters for that.
+// Read-only WORKING-SET union (both sizes), each entry tagged with its `size`
+// and sorted by date. The shared recall + weakness models train on this (they
+// slice the last ≤MODEL_INPUT_HISTORY_LENGTH, so the working set suffices). The
+// stats panel uses getMergedFullAnswerHistory() instead for whole-career charts.
+// Entries are shallow copies, so callers must not expect mutations to persist —
+// use the per-size setters for that.
 export function getMergedAnswerHistory() {
-    const merged = [];
-    for (const size of SUPPORTED_BOARD_SIZES) {
-        const arr = perSize.answerHistory[size];
-        if (!Array.isArray(arr)) continue;
-        for (const a of arr) merged.push({ ...a, size });
-    }
-    merged.sort((x, y) => (x.date || 0) - (y.date || 0));
-    return merged;
+    // The unified array IS the merged view (already tagged with size and date-
+    // ordered); this is the WORKING SET only. Charts that need the full career
+    // use getMergedFullAnswerHistory(). Shallow copies preserve the existing
+    // no-mutation contract.
+    return unifiedHistory.map(a => (a.size != null ? { ...a } : { ...a, size: 9 }));
 }
 
 export function setReviewStartTime(time) {

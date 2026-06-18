@@ -34,8 +34,10 @@ import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateMomentum,
+    evictColdTail,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
+import { clearTail } from './history-store.js';
 import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
@@ -451,7 +453,14 @@ export function hasPendingAccountSwitch() {
 // Returns true if a switch was completed (caller may want a spinner around it).
 export async function maybeFinishAccountSwitch() {
     if (!localStorage.getItem(SWITCH_FLAG_KEY)) return false;
+    // The IndexedDB cold tail belongs to the adopted-away account (switchAccount
+    // wipes localStorage but can't await an async IDB clear before reload), so
+    // drop it before pulling the new account's history.
+    await clearTail();
     await pullReports({ force: true, mode: 'adopt' });
+    // The full pull lands the whole career in the working set; split it into the
+    // working set + tail now, before the first problem load, freeing localStorage.
+    await evictColdTail();
     localStorage.removeItem(SWITCH_FLAG_KEY);
     return true;
 }

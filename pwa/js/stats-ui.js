@@ -7,7 +7,7 @@
 // helpers; model.js never reaches back into the UI.
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, getMergedAnswerHistory } from './state.js';
+import { state, setStatsResults, getMergedFullAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS, MIN_STATS_ATTEMPTS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
@@ -61,7 +61,10 @@ function hGridLine(y, W) {
 export async function showDetailedStats() {
     // The stats panel merges both board sizes: one rank, one recall model, one
     // weakness model. Build the union once and thread it through every block.
-    const merged = getMergedAnswerHistory();
+    // Full career here (working set + IndexedDB cold tail) so the charts and
+    // lifetime totals span the whole history, not just the synchronous working
+    // set; degrades to the working set if IDB is unavailable.
+    const merged = await getMergedFullAnswerHistory();
     if (merged.length < MIN_STATS_ATTEMPTS) {
         alert(getTerm('statsNotEnough', { count: merged.length, needed: MIN_STATS_ATTEMPTS }));
         return;

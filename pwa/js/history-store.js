@@ -1,0 +1,157 @@
+// js/history-store.js
+//
+// IndexedDB backing for the answer-history COLD TAIL — the attempts older than
+// the unified working set that state.js keeps in localStorage. The working set
+// (most recent ANSWER_HISTORY_WORKING_SET attempts, see constants.js) stays in
+// synchronous localStorage so the hot path never awaits; everything older lives
+// here and is read back only when the full-history charts, a model refit, or an
+// account switch needs it.
+//
+// Design notes:
+//   - Single object store with OUT-OF-LINE autoincrement keys, so stored
+//     records are the answer-history entries verbatim (each carries its `size`)
+//     — no synthetic key field leaks back into the history array.
+//   - Insertion order == eviction order == date order (state.evictColdTail
+//     always appends the OLDEST overflow first), so getTail() returns the tail
+//     oldest→newest with no index needed.
+//   - Every method is defensive: if IndexedDB is missing (private mode, old
+//     browser) or a transaction errors, reads resolve to [] and writes resolve
+//     to false. A false from appendTail tells the caller NOT to trim the
+//     working set, so an unavailable tail degrades to "charts show the working
+//     set only" rather than losing attempts.
+
+const DB_NAME = 'onlymove';
+const DB_VERSION = 1;
+const STORE = 'answerHistoryTail';
+
+let dbPromise = null;
+
+function idbAvailable() {
+    try {
+        return typeof indexedDB !== 'undefined' && indexedDB !== null;
+    } catch {
+        return false;
+    }
+}
+
+// Lazily open (and create) the DB. Resolves to the IDBDatabase, or null if IDB
+// is unavailable / the open failed. Requests durable storage once on success
+// (best-effort — the tail holds the expensive-to-re-pull deep history).
+function openDB() {
+    if (!idbAvailable()) return Promise.resolve(null);
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve) => {
+        let req;
+        try {
+            req = indexedDB.open(DB_NAME, DB_VERSION);
+        } catch {
+            resolve(null);
+            return;
+        }
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE)) {
+                db.createObjectStore(STORE, { autoIncrement: true });
+            }
+        };
+        req.onsuccess = () => {
+            try { navigator.storage?.persist?.(); } catch {}
+            resolve(req.result);
+        };
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+    });
+    return dbPromise;
+}
+
+// Append rows to the tail (oldest first). Resolves true once durably written
+// (or trivially for an empty batch), false if IDB is unavailable or the write
+// failed — the caller must keep those rows in the working set on a false.
+export async function appendTail(rows) {
+    if (!rows || rows.length === 0) return true;
+    const db = await openDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+        let tx;
+        try {
+            tx = db.transaction(STORE, 'readwrite');
+        } catch {
+            resolve(false);
+            return;
+        }
+        const store = tx.objectStore(STORE);
+        for (const r of rows) {
+            try { store.add(r); } catch {}
+        }
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+    });
+}
+
+// All tail rows, oldest→newest. [] if unavailable/empty.
+export async function getTail() {
+    const db = await openDB();
+    if (!db) return [];
+    return new Promise((resolve) => {
+        let req;
+        try {
+            req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        } catch {
+            resolve([]);
+            return;
+        }
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+    });
+}
+
+// Cursor walk for a model refit. `transform(entry)` may mutate and return the
+// entry to persist the change, or return null/undefined to leave it untouched.
+// Resolves true when the walk completes, false on unavailability/error.
+export async function updateTail(transform) {
+    const db = await openDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+        let tx, req;
+        try {
+            tx = db.transaction(STORE, 'readwrite');
+            req = tx.objectStore(STORE).openCursor();
+        } catch {
+            resolve(false);
+            return;
+        }
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) return; // walk done — tx.oncomplete resolves
+            let updated;
+            try { updated = transform(cursor.value); } catch { updated = null; }
+            if (updated !== undefined && updated !== null) {
+                try { cursor.update(updated); } catch {}
+            }
+            cursor.continue();
+        };
+        req.onerror = () => resolve(false);
+        tx.oncomplete = () => resolve(true);
+        tx.onabort = () => resolve(false);
+    });
+}
+
+// Drop the whole tail (account switch). Resolves true on success.
+export async function clearTail() {
+    const db = await openDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+        let tx;
+        try {
+            tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).clear();
+        } catch {
+            resolve(false);
+            return;
+        }
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+    });
+}

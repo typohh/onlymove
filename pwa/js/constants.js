@@ -28,6 +28,14 @@ export const MODEL_INPUT_HISTORY_LENGTH = 500;
 export const HISTORY_BACKFILL_DONE_KEY = 'historyBackfillDone_v1';
 export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
 
+// Number of most-recent attempts (unified across board sizes) kept in
+// localStorage as the synchronous working set. Everything older is evicted to
+// IndexedDB (see history-store.js + state.evictColdTail) and read back only for
+// the full-history charts. Set equal to the largest hot window the app uses on
+// the *merged* history (the momentum/recall replay warms over the last 3000),
+// so the working set is a superset of every synchronous read.
+export const ANSWER_HISTORY_WORKING_SET = 3000;
+
 // Minimum merged answer-history entries (both sizes, repeats included) before
 // the detailed-stats panel will open. The `statsNotEnough` copy interpolates
 // this same value, so they can't drift apart (the string used to hardcode "5"
