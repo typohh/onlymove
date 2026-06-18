@@ -110,6 +110,49 @@ function showDialog() {
             copyBtn.textContent = 'Copy failed';
         }
     };
+    // Dump the entire localStorage as a JSON file. On mobile we prefer the
+    // share sheet (navigator.share with a File) so the user can send it straight
+    // from their phone; otherwise we fall back to a normal blob download.
+    const dumpBtn = document.createElement('button');
+    dumpBtn.textContent = 'Download LS';
+    Object.assign(dumpBtn.style, { marginRight: '10px', padding: '6px 12px', cursor: 'pointer' });
+    dumpBtn.onclick = async () => {
+        try {
+            const dump = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                dump[k] = localStorage.getItem(k);
+            }
+            const json = JSON.stringify(dump, null, 2);
+            const uid = localStorage.getItem('userId') || 'unknown';
+            const fname = `onlymove-ls-${uid}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            // Try the native share sheet with a file first (best on mobile).
+            try {
+                const file = new File([json], fname, { type: 'application/json' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file], title: fname });
+                    dumpBtn.textContent = 'Shared';
+                    setTimeout(() => { dumpBtn.textContent = 'Download LS'; }, 1500);
+                    return;
+                }
+            } catch (_) { /* share unavailable/cancelled — fall through to download */ }
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+            dumpBtn.textContent = 'Saved';
+            setTimeout(() => { dumpBtn.textContent = 'Download LS'; }, 1500);
+        } catch (e) {
+            record('error', [e]);
+            dumpBtn.textContent = 'Dump failed';
+        }
+    };
+
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear';
     Object.assign(clearBtn.style, { marginRight: '10px', padding: '6px 12px', cursor: 'pointer' });
@@ -119,6 +162,7 @@ function showDialog() {
     Object.assign(closeBtn.style, { padding: '6px 12px', cursor: 'pointer' });
     closeBtn.onclick = () => overlay.remove();
     buttons.appendChild(copyBtn);
+    buttons.appendChild(dumpBtn);
     buttons.appendChild(clearBtn);
     buttons.appendChild(closeBtn);
     header.appendChild(title);
