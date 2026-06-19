@@ -21,9 +21,9 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 R="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached"
-$P -m pipeline.train_rating_v2 $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --mech-floor > experiments_4pl/m0_A_mechfloor.log 2>&1
-$P -m pipeline.train_rating_v2 $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 > experiments_4pl/m1_minimal.log 2>&1
-$P -m pipeline.train_rating_v2 $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --no-anchors > experiments_4pl/m2_minimal_noanchor.log 2>&1
-$P -m pipeline.train_rating_v2 $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --features bw > experiments_4pl/m3_minimal_bw.log 2>&1
-$P -m pipeline.train_rating_v2 $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --features bw --no-anchors > experiments_4pl/m4_minimal_bw_noanchor.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --mech-floor > experiments_4pl/m0_A_mechfloor.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 > experiments_4pl/m1_minimal.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --no-anchors > experiments_4pl/m2_minimal_noanchor.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --features bw > experiments_4pl/m3_minimal_bw.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --global-slope-fixed 2.2 --mech-floor --lapse-fixed 0.02 --features bw --no-anchors > experiments_4pl/m4_minimal_bw_noanchor.log 2>&1
 echo CHAIN25_DONE

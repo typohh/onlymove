@@ -6,6 +6,6 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 M="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --mech-floor --mech-floor-scale-fixed 0.70 --lapse-fixed 0.02"
-$P -m pipeline.train_rating_v2 $M --seed 1 > experiments_4pl/m0b_seed1.log 2>&1
-$P -m pipeline.train_rating_v2 $M --seed 2 > experiments_4pl/m0b_seed2.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --seed 1 > experiments_4pl/m0b_seed1.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --seed 2 > experiments_4pl/m0b_seed2.log 2>&1
 echo CHAIN28_DONE

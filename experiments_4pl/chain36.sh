@@ -18,6 +18,6 @@ cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 KATA="kata1-b18c384nbt-s9996604416-d4316597426_t0.02"
 J="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --hier-slope --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --mech-floor --mech-floor-scale-fixed 0.70 --lapse-fixed 0.02 --features act"
-$P -m pipeline.train_rating_v2 $J                                      > experiments_4pl/j1_m0b_act.log 2>&1
-$P -m pipeline.train_rating_v2 $J --anchor-ranks "20k,9d,$KATA"        > experiments_4pl/j2_m0b_act_kata.log 2>&1
+$P -m auxiliary.train_rating_v2_research $J                                      > experiments_4pl/j1_m0b_act.log 2>&1
+$P -m auxiliary.train_rating_v2_research $J --anchor-ranks "20k,9d,$KATA"        > experiments_4pl/j2_m0b_act_kata.log 2>&1
 echo CHAIN36_DONE

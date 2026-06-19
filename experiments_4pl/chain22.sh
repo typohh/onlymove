@@ -7,6 +7,6 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 R="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --features bw --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8"
-$P -m pipeline.train_rating_v2 $R > experiments_4pl/onestage_bwonly_mu08.log 2>&1
-$P -m pipeline.train_rating_v2 $R --bw-dropout 0.2 > experiments_4pl/onestage_bwonly_mu08_bwdrop.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R > experiments_4pl/onestage_bwonly_mu08.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --bw-dropout 0.2 > experiments_4pl/onestage_bwonly_mu08_bwdrop.log 2>&1
 echo CHAIN22_DONE

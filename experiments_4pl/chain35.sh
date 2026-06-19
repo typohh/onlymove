@@ -12,6 +12,6 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 B="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --mech-floor --mech-floor-scale-fixed 0.70 --lapse-fixed 0.02 --no-anchors --mixed-only --features bw"
-$P -m pipeline.train_rating_v2 $B --global-slope-fixed 2.2 > experiments_4pl/i3_mixed_noanchor_bw_pin22.log 2>&1
-$P -m pipeline.train_rating_v2 $B                          > experiments_4pl/i4_mixed_noanchor_bw_free.log 2>&1
+$P -m auxiliary.train_rating_v2_research $B --global-slope-fixed 2.2 > experiments_4pl/i3_mixed_noanchor_bw_pin22.log 2>&1
+$P -m auxiliary.train_rating_v2_research $B                          > experiments_4pl/i4_mixed_noanchor_bw_free.log 2>&1
 echo CHAIN35_DONE

@@ -13,8 +13,8 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 M="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-mode detached --mech-floor --mech-floor-scale-fixed 0.70 --lapse-fixed 0.02"
-$P -m pipeline.train_rating_v2 $M --floor-resid-l2 4.0 --global-slope-fixed 2.2 --seed 1 > experiments_4pl/m1b_seed1.log 2>&1
-$P -m pipeline.train_rating_v2 $M --floor-resid-l2 4.0 --global-slope-fixed 2.2 --seed 2 > experiments_4pl/m1b_seed2.log 2>&1
-$P -m pipeline.train_rating_v2 $M --floor-resid-l2 4.0 --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 > experiments_4pl/m0b_hier_sfix.log 2>&1
-$P -m pipeline.train_rating_v2 $M --floor-resid-l2 1.0 --global-slope-fixed 2.2 --features bw > experiments_4pl/m3c_bw_l2loose.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --floor-resid-l2 4.0 --global-slope-fixed 2.2 --seed 1 > experiments_4pl/m1b_seed1.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --floor-resid-l2 4.0 --global-slope-fixed 2.2 --seed 2 > experiments_4pl/m1b_seed2.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --floor-resid-l2 4.0 --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 > experiments_4pl/m0b_hier_sfix.log 2>&1
+$P -m auxiliary.train_rating_v2_research $M --floor-resid-l2 1.0 --global-slope-fixed 2.2 --features bw > experiments_4pl/m3c_bw_l2loose.log 2>&1
 echo CHAIN27_DONE

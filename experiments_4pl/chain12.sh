@@ -5,7 +5,7 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 A="--per-problem --lapse-human-only --anchor-ranks all --batch 262144 --no-dro-skill"
-$P -m pipeline.train_rating_v2 $A --holdout-problem-frac 0.1 > experiments_4pl/erm_perproblem.log 2>&1
-$P -m pipeline.train_rating_v2 $A --out-dir ratings_v2_perproblem > experiments_4pl/full_perproblem.log 2>&1
+$P -m auxiliary.train_rating_v2_research $A --holdout-problem-frac 0.1 > experiments_4pl/erm_perproblem.log 2>&1
+$P -m auxiliary.train_rating_v2_research $A --out-dir ratings_v2_perproblem > experiments_4pl/full_perproblem.log 2>&1
 $P -m auxiliary.diag_4pl_structure --dir ratings_v2_perproblem > experiments_4pl/diag_perproblem.log 2>&1
 echo CHAIN12_DONE

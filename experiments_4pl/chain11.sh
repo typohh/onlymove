@@ -6,7 +6,7 @@
 cd /home/ootakamoku/Repositories/onlymove
 KATA="kata1-b18c384nbt-s9996604416-d4316597426"
 P=./.venv/bin/python3; E="--no-dro-skill --holdout-problem-frac 0.1"
-$P -m pipeline.train_rating_v2 $E --anchor-ranks "20k,${KATA}_t0.02" > experiments_4pl/erm_20k_kata002.log 2>&1
-$P -m pipeline.train_rating_v2 $E --anchor-ranks "20k,9d,${KATA}_t0.02" > experiments_4pl/erm_20k9d_kata002.log 2>&1
-$P -m pipeline.train_rating_v2 $E --anchor-ranks "20k,${KATA}_t1" > experiments_4pl/erm_20k_kata1.log 2>&1
+$P -m auxiliary.train_rating_v2_research $E --anchor-ranks "20k,${KATA}_t0.02" > experiments_4pl/erm_20k_kata002.log 2>&1
+$P -m auxiliary.train_rating_v2_research $E --anchor-ranks "20k,9d,${KATA}_t0.02" > experiments_4pl/erm_20k9d_kata002.log 2>&1
+$P -m auxiliary.train_rating_v2_research $E --anchor-ranks "20k,${KATA}_t1" > experiments_4pl/erm_20k_kata1.log 2>&1
 echo CHAIN11_DONE

@@ -15,7 +15,7 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 R="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached"
-$P -m pipeline.train_rating_v2 $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 > experiments_4pl/onestage_hier_ratingslice.log 2>&1
-$P -m pipeline.train_rating_v2 $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors > experiments_4pl/onestage_noanchor_ratingslice.log 2>&1
-$P -m pipeline.train_rating_v2 $R --features bw --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --head-pin-dropout 0.3 --head-pin-heads floor > experiments_4pl/onestage_bwonly_floorpin03.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 > experiments_4pl/onestage_hier_ratingslice.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors > experiments_4pl/onestage_noanchor_ratingslice.log 2>&1
+$P -m auxiliary.train_rating_v2_research $R --features bw --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --head-pin-dropout 0.3 --head-pin-heads floor > experiments_4pl/onestage_bwonly_floorpin03.log 2>&1
 echo CHAIN24_DONE
