@@ -27,6 +27,6 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 G="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --anchor-ranks const0.95,const0.65,const0.35,const0.05 --no-anchor-fixed-mass"
-$P -m auxiliary.train_rating_v2_research $G --anchor-weight 0.1   > experiments_4pl/g1_const4_w10.log 2>&1
-$P -m auxiliary.train_rating_v2_research $G --anchor-weight 0.025 > experiments_4pl/g2_const4_w025.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $G --anchor-weight 0.1   > experiments_4pl/g1_const4_w10.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $G --anchor-weight 0.025 > experiments_4pl/g2_const4_w025.log 2>&1
 echo CHAIN32_DONE

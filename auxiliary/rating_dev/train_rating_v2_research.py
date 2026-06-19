@@ -68,7 +68,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -188,130 +188,8 @@ def load_anchor_winrates(keys, ranks):
     return out
 
 
-def _user_log10_median_solve_min(sql_path, prefixes, afk_cap_ms, min_timed):
-    """{user_prefix8: log10(median solving minutes)} over each user's NON-REPEAT, AFK-capped timed
-    attempts (the same feature the client and fit_population_constants compute). Built from the
-    canonical D1 .sql dump (parsing ~289k rows costs a few seconds — fine for a once-per-run eval,
-    and correct even when the sibling .sqlite is stale). Users below `min_timed` timed attempts are
-    omitted (no reliable time feature)."""
-    import sqlite3
-    from collections import defaultdict
-    con = sqlite3.connect(":memory:")
-    with open(sql_path) as f:
-        con.executescript(f.read())
-    rows = con.execute(
-        "SELECT user_id, time_used FROM tsumego_reports "
-        "WHERE is_repeat=0 AND time_used>0 AND time_used<=?", (afk_cap_ms,)).fetchall()
-    con.close()
-    buckets = defaultdict(list)
-    for uid, t in rows:
-        p = str(uid)[:8]
-        if p in prefixes:
-            buckets[p].append(t)
-    return {p: float(np.log10(np.median(ts) / 60000.0))
-            for p, ts in buckets.items() if len(ts) >= min_timed}
-
-
-def _time_adjusted_rho(surveys, user_rating, sql_path):
-    """Time-adjusted survey rho with EVERY coefficient fit on the CURRENT run — never the stale
-    ratings_v2/population_constants.json `time_adjust` block (its alpha/g0/g1 were fit on a prior
-    run's ratings, which a fresh train invalidates). Each survey user's median solving time
-    (log10 min) is residualized on THIS run's 80%-clear rating R (t = g0 + g1·R), so only solve
-    time UNEXPLAINED by skill drives the adjustment — and the residualization needs no rating→rank
-    curve M (also stale for a fresh run). A single alpha (rating units per log10-minute, clamped
-    ≤0 so slow-for-skill is never rated higher) is picked by a per-server survey-Spearman sweep,
-    cross-fitted (alpha chosen on train folds, scored on held-out users) so the reported number is
-    not optimistically self-tuned. Returns a dict (rho_base/rho/rho_insample/alpha/g1/n_users/
-    n_pairs) or {note} when too sparse to fit."""
-    from collections import defaultdict
-    from pipeline.fit_population_constants import (
-        AFK_CAP_S, TA_MIN_TIMED, TA_MIN_PAIRS, TA_ALPHA_GRID, TA_CV_FOLDS, TA_CV_SEEDS,
-        _weighted_spearman)
-    tfeat = _user_log10_median_solve_min(sql_path, set(user_rating), AFK_CAP_S * 1000.0,
-                                         TA_MIN_TIMED)
-    common = [p for p in user_rating if p in tfeat]
-    if len(common) < TA_MIN_PAIRS:
-        return {"note": f"only {len(common)} survey users with rating+time (<{TA_MIN_PAIRS})"}
-    # Residualize the time feature on THIS run's rating (no stale M): t = g0 + g1·R.
-    R = np.array([user_rating[p] for p in common])
-    T = np.array([tfeat[p] for p in common])
-    g1, g0 = (float(x) for x in np.polyfit(R, T, 1))
-    resid = {p: tfeat[p] - (g0 + g1 * user_rating[p]) for p in common}
-    pairs = []
-    for _, row in surveys.iterrows():
-        pref = str(row["user_id"])[:8]
-        g = row["rank_scalar"]
-        if pref in resid and g is not None and not (isinstance(g, float) and np.isnan(g)):
-            pairs.append((pref, row["server"], user_rating[pref], float(g), resid[pref]))
-    if len(pairs) < TA_MIN_PAIRS:
-        return {"note": f"only {len(pairs)} timed survey pairs (<{TA_MIN_PAIRS})"}
-    base = _weighted_spearman(pairs, 0.0)
-    sweep = [_weighted_spearman(pairs, a) for a in TA_ALPHA_GRID]
-    a_best = float(TA_ALPHA_GRID[int(np.nanargmax(sweep))])
-    users_list = sorted({p[0] for p in pairs})
-    cv = []
-    for seed in range(TA_CV_SEEDS):
-        rng = np.random.default_rng(seed)
-        order = rng.permutation(len(users_list))
-        fold = {users_list[j]: i % TA_CV_FOLDS for i, j in enumerate(order)}
-        a_fold = []
-        for kf in range(TA_CV_FOLDS):
-            train = [p for p in pairs if fold[p[0]] != kf]
-            sw = [_weighted_spearman(train, a) for a in TA_ALPHA_GRID]
-            a_fold.append(float(TA_ALPHA_GRID[int(np.nanargmax(sw))]))
-        adj = [(u, srv, rt + a_fold[fold[u]] * f, sc, 0.0) for u, srv, rt, sc, f in pairs]
-        cv.append(_weighted_spearman(adj, 0.0))
-    return {"rho_base": base, "rho": float(np.mean(cv)), "rho_insample": float(max(sweep)),
-            "alpha": min(a_best, 0.0), "g1": g1, "n_users": len(users_list), "n_pairs": len(pairs)}
-
-
-def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_adjust=True):
-    """Composite survey objective (calibration to real ranks). For each survey user, fit their MLE
-    80%-clear rating (fit_user_rating over their attempts with these per-problem ratings/slopes); then,
-    PER SERVER, the Spearman against the declared rank, and the n-weighted average over servers.
-
-    Per-server Spearman is offset- AND scale-invariant, so it is robust to server-population imbalance
-    (EGF skews strong, OGS skews weak) — unlike mean-centered pooling, which only removes a server's
-    offset and still mixes their differing within-server spread. The surveys are NEVER used in
-    training; they enter only here, as an external validation signal.
-
-    When `time_adjust` (default), ALSO computes a TIME-ADJUSTED survey rho via _time_adjusted_rho —
-    each user's median solve time residualized on THIS run's rating and a cross-fitted alpha, all
-    coefficients fit on the current run (the shipped population_constants.json alpha is stale for a
-    fresh train). Returns (weighted_rho, {server: (n, rho)}, time_adjust_dict | None)."""
-    from collections import defaultdict
-    from auxiliary.compare_rank_surveys import (
-        load_rank_surveys, latest_per_user_server, load_attempts_for_users, SQL_PATH_DEFAULT)
-    from utils.fit_rank_curves import fit_user_rating
-    surveys = latest_per_user_server(load_rank_surveys(SQL_PATH_DEFAULT))
-    attempts = load_attempts_for_users(SQL_PATH_DEFAULT, set(surveys["user_id"].unique()))
-    user_rating = {}
-    for uid in surveys["user_id"].unique():
-        pooled = []
-        for s in SIZES:
-            pooled.extend(attempts.get((uid[:8], s), []))
-        if len(pooled) < min_attempts:
-            continue
-        R, nj = fit_user_rating(pooled, ratemap, min_n=min_attempts, slopes=slopemap)
-        if R is not None and nj >= min_attempts:
-            user_rating[uid[:8]] = R
-    serv = defaultdict(list)
-    for _, row in surveys.iterrows():
-        g = row["rank_scalar"]; pref = str(row["user_id"])[:8]
-        if g is None or (isinstance(g, float) and np.isnan(g)) or pref not in user_rating:
-            continue
-        serv[row["server"]].append((user_rating[pref], float(g)))
-
-    def spear(pairs):
-        x = np.array([p[0] for p in pairs]); y = np.array([p[1] for p in pairs])
-        return float(np.corrcoef(np.argsort(np.argsort(x)), np.argsort(np.argsort(y)))[0, 1])
-    per = {s: (len(p), spear(p)) for s, p in serv.items() if len(p) >= min_server}
-    if not per:
-        return float("nan"), {}, None
-    wn = sum(n for n, _ in per.values())
-    wrho = sum(n * r for n, r in per.values()) / wn
-    ta = _time_adjusted_rho(surveys, user_rating, SQL_PATH_DEFAULT) if time_adjust else None
-    return wrho, per, ta
+# The survey-ρ / time-adjusted-ρ metrics moved to auxiliary.validate_ratings (the single home of
+# rating validation). This file trains + writes; run_validation (the bench) judges the output.
 
 
 class RatingNet(nn.Module):
@@ -716,8 +594,15 @@ def main():
                          "rating tail through it (Finding UU).")
     ap.add_argument("--holdout-problem-frac", type=float, default=0.0,
                     help="If >0, hold out this fraction of ATTEMPTED problems (and their anchor "
-                         "rows) from training and report held-out-PROBLEM logloss — the feature "
-                         "prior's generalization to unseen problems. Eval mode: skips writing CSVs.")
+                         "rows) from training (via auxiliary.holdout_set, seed-keyed, hash-printed) "
+                         "so the feature prior's generalization to those UNSEEN problems can be "
+                         "measured. Writes the (subset-trained) CSVs to --out-dir (refuses the "
+                         "production ratings_v2/); validate with auxiliary.validate_ratings or "
+                         "--validate.")
+    ap.add_argument("--validate", action="store_true",
+                    help="After writing, run auxiliary.validate_ratings.run_validation on --out-dir "
+                         "for the same (seed, held-out frac) — held-out logloss + Δskill flatness + "
+                         "survey-ρ, hash-confirmed — so you needn't chain the bench by hand.")
     ap.add_argument("--mixed-only", action=argparse.BooleanOptionalAction, default=False,
                     help="Train only on human rows whose problem has BOTH successes and failures "
                          "and whose user does too (iterated to a fixed point; eval rows are not "
@@ -1113,17 +998,22 @@ def main():
 
     # --- optional held-out PROBLEM set: the feature prior's generalization to UNSEEN problems
     #     (held-out problems are excluded from BOTH human and anchor training rows, so the model
-    #     has zero signal on them — its b/a/c there come purely from features). ---
+    #     has zero signal on them — its b/a/c there come purely from features). The set + its hash
+    #     come from the SHARED generator (auxiliary.holdout_set) so a held-out training run and the
+    #     validation bench (auxiliary.validate_ratings) provably assume the identical set; the hash
+    #     is printed for cross-confirmation. Held-out runs WRITE CSVs (see the eval block) so the
+    #     bench can score them. ---
     ho_mask_h = np.zeros(len(y), bool)
     ho_problems = set()
+    ho_hash = None
     if args.holdout_problem_frac > 0:
-        att_probs = np.unique(prob_idx)
-        rng = np.random.default_rng(args.seed)
-        n_ho = int(round(args.holdout_problem_frac * len(att_probs)))
-        ho_problems = set(rng.choice(att_probs, size=n_ho, replace=False).tolist())
+        from auxiliary.rating_dev.holdout_set import held_out_keys
+        ho_keys, ho_hash = held_out_keys(args.seed, args.holdout_problem_frac)
+        ho_problems = set(key_idx[k] for k in ho_keys if k in key_idx)  # scorable subset, as indices
         ho_mask_h = np.isin(prob_idx, list(ho_problems))
-        print(f"HELD-OUT eval: {len(ho_problems)}/{len(att_probs)} attempted problems held out "
-              f"({int(ho_mask_h.sum())} human rows) — feature-prior generalization test")
+        print(f"HELD-OUT eval: held-out-set hash {ho_hash} | {len(ho_keys)} attempted problems held "
+              f"out ({len(ho_problems)} scorable, {int(ho_mask_h.sum())} human rows) — feature-prior "
+              f"generalization test (confirm via auxiliary.validate_ratings --expect-hash {ho_hash})")
 
     # --- bot 'anchor users': extra examinees (learned ability) with soft-target responses on every
     #     problem. Coverage is the prior; each rung is a point on every problem's success curve, so
@@ -1159,18 +1049,10 @@ def main():
               f"per-rung weight {per_bot_weight:.4f} (total bot mass "
               f"{'FIXED' if args.anchor_fixed_mass else 'grows'}) | abilities LEARNED")
 
-    # by-row val (only in eval mode): among the kept human rows, hold out 15% of ATTEMPTS on
-    # SEEN problems — generalization to new attempts, distinct from the new-problem held-out set.
-    byrow_val = np.zeros(len(y), bool)
-    if args.holdout_problem_frac > 0:
-        kept_idx = np.where(~ho_mask_h)[0]
-        rng2 = np.random.default_rng(args.seed + 1)
-        sel = rng2.choice(len(kept_idx), size=int(0.15 * len(kept_idx)), replace=False)
-        byrow_val[kept_idx[sel]] = True
-
     # --- assemble training rows: human (w=1) ⊕ anchor (w=anchor_weight), MINUS held-out problems
-    #     and the by-row val rows ---
-    train_h = (~ho_mask_h) & (~byrow_val)
+    #     (held-out PROBLEMS get NO training rows, so the bench measures pure feature-prior transfer;
+    #     held-out VALIDATION itself now lives in auxiliary.validate_ratings, not here). ---
+    train_h = ~ho_mask_h
     if args.mixed_only:
         # Conditional-MLE-style filter (user direction): train only on rows whose PROBLEM has both
         # outcomes and whose USER has both outcomes among the kept training rows. One-sided score
@@ -1194,11 +1076,9 @@ def main():
                 break
             train_h = ok
         trained_users = np.unique(prof_idx[train_h])
-        orphan_val = int((byrow_val & ~np.isin(prof_idx, trained_users)).sum())
         print(f"mixed-only filter: train rows {before} → {int(train_h.sum())} "
               f"({int(train_h.sum()) / before:.1%}) | problems "
-              f"{len(np.unique(prob_idx[train_h]))} | profiles {len(trained_users)}/{n_profiles} "
-              f"| by-row-val rows from untrained users: {orphan_val}")
+              f"{len(np.unique(prob_idx[train_h]))} | profiles {len(trained_users)}/{n_profiles}")
     u_all = [prof_idx[train_h]]; p_all = [prob_idx[train_h]]; t_all = [y[train_h]]
     w_all = [np.ones(int(train_h.sum()), np.float32)]
     if n_anchor:
@@ -1790,7 +1670,7 @@ def main():
     # realized curve, over-stating "model too sharp"). For ≥100-train-row profiles both effects
     # shrink; if heavy-train and heavy-val converge, that shared table is the honest curve shape.
     train_mask = (np.ones(len(y), bool) if args.holdout_problem_frac == 0
-                  else ~(ho_mask_h | byrow_val))
+                  else ~ho_mask_h)
     prof_cnt = np.bincount(prof_idx[train_mask], minlength=n_profiles)
     heavy_row = prof_cnt[prof_idx] >= 100
     gap_calibration(train_mask, "train rows")
@@ -1798,124 +1678,12 @@ def main():
     gap_rating_calibration(train_mask & heavy_row,
                            "train rows, heavy users — outcome-contaminated, read A/B diffs only")
 
-    if args.holdout_problem_frac > 0:
-        # --- objective eval (no CSVs written): three independent objectives ---
-        def _ll(mask):
-            with torch.no_grad():
-                tpi = torch.tensor(prob_idx[mask], device=device)
-                pp = m(torch.tensor(prof_idx[mask], device=device), tfeat[tpi], tpi).cpu().numpy()
-            yy = y[mask]; pp = np.clip(pp, EPS, 1 - EPS)
-            return float(-(yy * np.log(pp) + (1 - yy) * np.log(1 - pp)).mean())
-
-        def _bin_flatness(mask, nbins=10):
-            """HELD-OUT per-rating-bin Δskill (bin LL − bin base-rate entropy), the even-error
-            target evaluated OUT OF SAMPLE (the pass-1 'excess-over-base' table is on TRAIN rows).
-            Returns (std, worst, spread, per_bin) over equal-count rating bins; flat = even error,
-            and `worst` is the worst-bin held-out skill the user weights above overall LL."""
-            idx = np.where(mask)[0]
-            if len(idx) == 0:
-                return None
-            with torch.no_grad():
-                tpi = torch.tensor(prob_idx[idx], device=device)
-                pp = m(torch.tensor(prof_idx[idx], device=device), tfeat[tpi], tpi).cpu().numpy()
-            pp = np.clip(pp, EPS, 1 - EPS); yy = y[idx]; rr = rating[prob_idx[idx]]
-            edges = np.quantile(rr, np.linspace(0, 1, nbins + 1)); edges[-1] += 1e-6
-            b = np.clip(np.searchsorted(edges, rr, side="right") - 1, 0, nbins - 1)
-            d = []
-            for i in range(nbins):
-                s = b == i
-                if s.sum() < 50:
-                    continue
-                base = min(max(float(yy[s].mean()), EPS), 1 - EPS)
-                bll = -(base * np.log(base) + (1 - base) * np.log(1 - base))
-                d.append(float(-(yy[s] * np.log(pp[s]) + (1 - yy[s]) * np.log(1 - pp[s])).mean()) - bll)
-            d = np.array(d)
-            return float(d.std()), float(d.max()), float(d.max() - d.min()), d
-
-        byrow_ll = _ll(byrow_val)                    # new attempts on SEEN problems
-        ho_ll = _ll(ho_mask_h)                       # new (UNSEEN) problems — feature-prior transfer
-        flat_v = _bin_flatness(byrow_val)            # held-out per-bin even-error (seen problems)
-        flat_h = _bin_flatness(ho_mask_h)            # held-out per-bin even-error (unseen problems)
-        gap_calibration(byrow_val, "by-row VAL (held-out attempts, seen problems)")
-        gap_calibration(byrow_val & heavy_row, "by-row VAL, heavy users (≥100 train rows)")
-        gap_rating_calibration(byrow_val, "by-row VAL, all users")
-        gap_rating_calibration(byrow_val & heavy_row, "by-row VAL, heavy users — the honest table")
-        # Posthoc plateau λ (the regime-conditioned external anchor aux/test_lapse.py called for):
-        # on heavy-user val rows the model places far above rank (z = a·(θ−b) > 3), the 4PL gives
-        # realized = P0 − λ·σ(z) with P0 = c + (1−c)·σ(z) the lapse-free prediction, so
-        # λ̂ = Σ(P0 − y) / Σ σ(z). Replaces gap-balance's λ identification without its collateral
-        # damage (Finding H). Mildly biased UP by gap-estimation noise (attenuation) — read as an
-        # upper bracket against the trained λ's lower one.
-        sel = np.where(byrow_val & heavy_row)[0]
-        if len(sel):
-            zb = a[prob_idx[sel]] * (theta[prof_idx[sel]] - b_arr[prob_idx[sel]])
-            far = zb > 3.0
-            if far.sum() >= 200:
-                cc = c[prob_idx[sel][far]]
-                sig = 1.0 / (1.0 + np.exp(-zb[far]))
-                p0 = cc + (1.0 - cc) * sig
-                lam_hat = float((p0 - y[sel][far]).sum() / sig.sum())
-                print(f"  posthoc plateau λ̂ (heavy-val, z>3, n {int(far.sum())}): {lam_hat:.4f}  "
-                      f"(trained λ {lam:.4f})")
-        # Residual-association test (user idea, held-out form): for a well-specified model the
-        # held-out error e = y − P̂ is unpredictable from ANYTHING, so within user-ability bins
-        # Spearman(e, rating/slope/floor) ≈ 0. A nonzero association pinpoints WHICH head is
-        # misassigned, with the outputs left entirely free (only θ — user-side — conditions the
-        # bins; conditioning on e itself would be outcome selection, the Finding-B trap).
-        if len(sel) >= 600:
-            with torch.no_grad():
-                tpi = torch.tensor(prob_idx[sel], device=device)
-                pv = m(torch.tensor(prof_idx[sel], device=device), tfeat[tpi], tpi).cpu().numpy()
-            e_res = y[sel] - pv
-            th_u = theta[prof_idx[sel]]
-
-            def _sp(x, yv):
-                xr = np.argsort(np.argsort(x)); yr = np.argsort(np.argsort(yv))
-                return float(np.corrcoef(xr, yr)[0, 1])
-
-            ter = np.searchsorted(np.quantile(th_u, [1 / 3, 2 / 3]), th_u)
-            print("  residual association (heavy-val; want ≈0; noise ≈ ±"
-                  f"{1.96 / np.sqrt(len(sel) / 3):.3f}):")
-            for t, lab in enumerate(["weak θ", "mid θ", "strong θ"]):
-                r_ = ter == t
-                print(f"    {lab:>9} (n {int(r_.sum()):>6}): e↔rating "
-                      f"{_sp(e_res[r_], rating[prob_idx[sel][r_]]):+.3f} | e↔slope "
-                      f"{_sp(e_res[r_], a[prob_idx[sel][r_]]):+.3f} | e↔floor "
-                      f"{_sp(e_res[r_], c[prob_idx[sel][r_]]):+.3f}")
-        ratemap = {keys[i][1]: float(rating[i]) for i in range(len(keys))}
-        slopemap = {keys[i][1]: float(a[i]) for i in range(len(keys))}
-        wrho, per, ta = survey_weighted_rho(ratemap, slopemap)
-        print(f"\n=== OBJECTIVES | slope_floor {args.slope_floor} | feat {fdim} | "
-              f"holdout {args.holdout_problem_frac} | seed {args.seed} ===")
-        print(f"  1. by-row val logloss      : {byrow_ll:.4f}  "
-              f"({int(byrow_val.sum())} held-out attempts, seen problems)")
-        print(f"  2. held-out-PROBLEM logloss: {ho_ll:.4f}  "
-              f"({int(ho_mask_h.sum())} attempts on {len(ho_problems)} "
-              + ("problems with BOT rows kept (bot→human transfer)"
-                 if args.holdout_keep_anchors else "UNSEEN problems") + ")")
-        print(f"  3. survey rho (weighted)   : {wrho:.4f}  "
-              f"(per-server Spearman, n-weighted: "
-              + " ".join(f"{s}:{r:.2f}(n{n})" for s, (n, r) in sorted(per.items(), key=lambda kv: -kv[1][0]))
-              + ")")
-        worst_srv = min(((n, r, s) for s, (n, r) in per.items() if n >= 12), default=None,
-                        key=lambda t: t[1])
-        if worst_srv is not None:
-            print(f"     worst server (n≥12)     : {worst_srv[2]} ρ={worst_srv[1]:.2f} (n{worst_srv[0]})")
-        if ta is not None:
-            if "rho" in ta:
-                print(f"     time-adjusted (fit THIS run): ρ {ta['rho']:.4f} cross-fitted vs base "
-                      f"{ta['rho_base']:.4f} (Δ {ta['rho'] - ta['rho_base']:+.4f}; in-sample "
-                      f"{ta['rho_insample']:.4f}) | alpha {ta['alpha']:+.2f}/log10-min | "
-                      f"{ta['n_users']} timed users, {ta['n_pairs']} pairs")
-            else:
-                print(f"     time-adjusted: skipped ({ta['note']})")
-        if flat_v is not None:
-            print(f"  4. held-out Δskill flatness : VAL(seen) std {flat_v[0]:.4f} worst {flat_v[1]:+.4f} "
-                  f"spread {flat_v[2]:.4f}"
-                  + (f" | new-prob std {flat_h[0]:.4f} worst {flat_h[1]:+.4f} spread {flat_h[2]:.4f}"
-                     if flat_h is not None else "")
-                  + "  (rating bins; lower = flatter held-out error)")
-        return
+    # Held-out runs train on a SUBSET, so refuse to overwrite the production ratings_v2/ — pass an
+    # explicit --out-dir (e.g. a temp dir). The standalone bench (auxiliary.validate_ratings) scores
+    # the written CSVs; --validate runs it automatically after the write below.
+    if args.holdout_problem_frac > 0 and os.path.abspath(args.out_dir) == os.path.join(PROJECT_ROOT, "ratings_v2"):
+        sys.exit("--holdout-problem-frac writes a SUBSET-trained model; refusing to overwrite the "
+                 "production ratings_v2/. Pass an explicit --out-dir (e.g. /tmp/rv2_holdout).")
 
     # --- write outputs ---
     os.makedirs(args.out_dir, exist_ok=True)
@@ -1952,6 +1720,14 @@ def main():
         os.path.join(args.out_dir, "epoch_log.csv"), index=False)
     print(f"wrote user_theta.csv ({n_profiles} profiles) + rating_constants.json "
           f"(fat_finger_rate λ={lam:.5f}) + model_v2.pt to {args.out_dir}")
+
+    if args.validate:
+        # Convenience: run the standalone bench on what we just wrote (no manual chaining). It
+        # re-derives the held-out set from (seed, frac) and confirms it matches the hash we trained
+        # on (ho_hash), so a mismatch — e.g. an attempts-DB drift mid-run — fails loud.
+        from auxiliary.rating_dev.validate_ratings import run_validation
+        print("\n--validate: scoring the written ratings via auxiliary.validate_ratings ...")
+        run_validation(args.out_dir, args.seed, args.holdout_problem_frac, expect_hash=ho_hash)
 
 
 if __name__ == "__main__":

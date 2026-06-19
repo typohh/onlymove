@@ -4,5 +4,5 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 A="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8"
-$P -m auxiliary.train_rating_v2_research $A --act-dropout 0.25 > experiments_4pl/onestage_actdrop025.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $A --act-dropout 0.25 > experiments_4pl/onestage_actdrop025.log 2>&1
 echo CHAIN23_DONE

@@ -16,6 +16,6 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 M="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached --mech-floor --mech-floor-scale-fixed 0.70 --lapse-fixed 0.02"
-$P -m auxiliary.train_rating_v2_research $M > experiments_4pl/f1_freeslope_mech.log 2>&1
-$P -m auxiliary.train_rating_v2_research $M --global-slope > experiments_4pl/f2_globalslope_mech.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $M > experiments_4pl/f1_freeslope_mech.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $M --global-slope > experiments_4pl/f2_globalslope_mech.log 2>&1
 echo CHAIN30_DONE

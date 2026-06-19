@@ -7,7 +7,7 @@
 cd /home/ootakamoku/Repositories/onlymove
 P=./.venv/bin/python3
 R="--no-dro-skill --holdout-problem-frac 0.1 --slope-floor 0.01 --floor-residual --resid-cols diff,slope,floor --floor-resid-l2 4.0 --floor-resid-mode detached"
-$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors > experiments_4pl/onestage_hier_noanchor_mu063.log 2>&1
-$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors --lapse-fixed 0.0225 > experiments_4pl/onestage_hier_noanchor_mu063_lfix.log 2>&1
-$P -m auxiliary.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --lapse-fixed 0.02 > experiments_4pl/onestage_hier_lfix.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors > experiments_4pl/onestage_hier_noanchor_mu063.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.63 --hier-slope-sigma 0.65 --no-anchors --lapse-fixed 0.0225 > experiments_4pl/onestage_hier_noanchor_mu063_lfix.log 2>&1
+$P -m auxiliary.rating_dev.train_rating_v2_research $R --hier-slope --hier-slope-mu 0.8 --hier-slope-sigma 0.8 --lapse-fixed 0.02 > experiments_4pl/onestage_hier_lfix.log 2>&1
 echo CHAIN17B_DONE
