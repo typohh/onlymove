@@ -714,7 +714,7 @@ async function maybeComputeServerStats(env) {
 
 
 // Aggregate the preceding 7 days into the cached JSON blob the PWA renders.
-// Everything is a cheap GROUP BY; time histograms cap at 600s (10s buckets) so
+// Everything is a cheap GROUP BY; time histograms cap at 600s (5s buckets) so
 // idle-tab outliers don't blow out the distribution.
 async function computeServerStats(env) {
   const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
@@ -806,15 +806,21 @@ async function computeServerStats(env) {
     }
   }
 
-  // Per-user median time → 10s bucket; the histogram then counts USERS per
-  // bucket, so binHist (client) reads it unchanged with "users" as the y-axis.
+  // Per-user median time → fine bucket; the histogram then counts USERS per
+  // bucket, so binHist (client) reads it with "users" as the y-axis. Solving
+  // time is log-normal and most of the mass sits under ~30s, so a coarse 10s
+  // bucket lumped the whole hump into one bar; SOLVE_BUCKET_SEC=5 keeps the
+  // low-end detail (bucketSec ships in the blob so the client can decode it,
+  // and any future width change stays self-describing). Capped at 600s.
+  const SOLVE_BUCKET_SEC = 5;
+  const SOLVE_BUCKET_CAP = Math.round(600 / SOLVE_BUCKET_SEC);
   const median = (arr) => {
     if (!arr.length) return null;
     const s = arr.slice().sort((a, b) => a - b);
     const mid = s.length >> 1;
     return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
   };
-  const timeBucket = (ms) => Math.min(Math.floor(ms / 10000), 60);
+  const timeBucket = (ms) => Math.min(Math.floor(ms / (SOLVE_BUCKET_SEC * 1000)), SOLVE_BUCKET_CAP);
   const solveB = new Map();    // 10s bucket → user count
   const reviewB = new Map();
   for (const arr of userSolve.values()) {
@@ -832,7 +838,7 @@ async function computeServerStats(env) {
 
   // Recall time, one sample per user: the SHORTEST failure→next-attempt gap
   // across all their problems. Pre-binned server-side (the spans run minutes to
-  // days, so the 10s solving/review buckets don't apply) and rendered with
+  // days, so the fine solving/review buckets don't apply) and rendered with
   // makeBarList like attemptsPerUserDist. Only gaps where the earlier attempt
   // FAILED count (see userProblemSeq note); the 7-day window naturally bounds
   // how long a gap we can observe, which is fine since we take the minimum.
@@ -899,6 +905,7 @@ async function computeServerStats(env) {
     computedAt: new Date().toISOString(),
     windowDays: 7,
     totals: totals || { attempts: 0, wins: 0, users: 0 },
+    bucketSec: SOLVE_BUCKET_SEC,
     daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks,
   };
 

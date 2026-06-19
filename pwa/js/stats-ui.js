@@ -522,7 +522,7 @@ function probit(p) {
 // Worker's per-user bucketing (computeServerStats in src/index.js) on the
 // client's own last-7-day merged history. Returns a bin index per bar-list
 // category (-1 when not determinable) plus an answer-derived rank label.
-// `timeBins` is the coarse 10s-bucket → display-bin table from the caller.
+// `timeBins` is the seconds-based display-bin table from the caller (TIME_BINS).
 function computeUserCommunityBuckets(history, timeBins) {
     const out = { attemptsPerDay: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
     if (!Array.isArray(history) || !history.length) return out;
@@ -537,8 +537,10 @@ function computeUserCommunityBuckets(history, timeBins) {
         const m = s.length >> 1;
         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     };
-    const timeBucket = (ms) => Math.min(Math.floor(ms / 10000), 60);   // matches server
-    const coarseTimeBin = (bucket) => timeBins.findIndex(b => bucket >= b.lo && bucket < b.hi);
+    // timeBins are in SECONDS now (see TIME_BINS in buildServerStatsPane); the
+    // edges align to the server's bucket width, so binning the median directly
+    // lands in the same bin the server would have bucketed it into.
+    const binSeconds = (ms) => timeBins.findIndex(b => (ms / 1000) >= b.lo && (ms / 1000) < b.hi);
 
     // Attempts per active (UTC) day — every attempt counts, repeats included.
     const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
@@ -550,7 +552,7 @@ function computeUserCommunityBuckets(history, timeBins) {
 
     // Solving time: median of per-attempt solve times (ms), then coarse-binned.
     const solveMed = median(recent.map(a => a.timeTaken).filter(t => typeof t === 'number' && t > 0));
-    if (solveMed != null) out.solve = coarseTimeBin(timeBucket(solveMed));
+    if (solveMed != null) out.solve = binSeconds(solveMed);
 
     // Review time: per distinct problem the cumulative review of its LAST
     // attempt (the running total, as the server keeps), median across problems.
@@ -563,7 +565,7 @@ function computeUserCommunityBuckets(history, timeBins) {
     const reviewMed = median([...lastByProblem.values()]
         .map(a => (a.accumulatedReview || 0) + (a.reviewTime || 0))
         .filter(t => t > 0));
-    if (reviewMed != null) out.review = coarseTimeBin(timeBucket(reviewMed));
+    if (reviewMed != null) out.review = binSeconds(reviewMed);
 
     // Recall time: shortest failure→next-attempt gap that is ≥12h, per problem.
     const RECALL_MIN_MS = 12 * 3600e3;
@@ -619,22 +621,31 @@ async function buildServerStatsPane(history = []) {
     }
     if (!data || !data.totals || !(data.totals.attempts > 0)) return null;
 
-    // Coarse display bins over the server's 10s-bucket histogram (bucket b spans
-    // [b·10, (b+1)·10)s; bucket 60 is the ≥600s cap). Returns [{label, value}].
+    // Display bins in SECONDS over the server's fine-bucket histogram. Solving
+    // time is log-normal (the hump sits at ~5–20s), so the low end is split
+    // finely and the long tail coarsely — this reveals the bell instead of
+    // collapsing it into one tall "0–10s" bar. Every edge is a multiple of the
+    // server's bucket width, so a bucket maps cleanly to exactly one display bin.
+    const bucketSec = data.bucketSec || 10;
     const TIME_BINS = [
-        { lo: 0, hi: 1, label: '0–10s' },
-        { lo: 1, hi: 2, label: '10–20s' },
-        { lo: 2, hi: 3, label: '20–30s' },
-        { lo: 3, hi: 6, label: '30–60s' },
-        { lo: 6, hi: 12, label: '1–2m' },
-        { lo: 12, hi: 30, label: '2–5m' },
-        { lo: 30, hi: 60, label: '5–10m' },
-        { lo: 60, hi: Infinity, label: '10m+' },
+        { lo: 0, hi: 5, label: '0–5s' },
+        { lo: 5, hi: 10, label: '5–10s' },
+        { lo: 10, hi: 15, label: '10–15s' },
+        { lo: 15, hi: 20, label: '15–20s' },
+        { lo: 20, hi: 30, label: '20–30s' },
+        { lo: 30, hi: 45, label: '30–45s' },
+        { lo: 45, hi: 60, label: '45–60s' },
+        { lo: 60, hi: 90, label: '1–1.5m' },
+        { lo: 90, hi: 120, label: '1.5–2m' },
+        { lo: 120, hi: 180, label: '2–3m' },
+        { lo: 180, hi: 300, label: '3–5m' },
+        { lo: 300, hi: Infinity, label: '5m+' },
     ];
     const binHist = (hist) => {
         const rows = TIME_BINS.map(b => ({ label: b.label, value: 0 }));
         for (const r of (hist || [])) {
-            const i = TIME_BINS.findIndex(b => r.bucket >= b.lo && r.bucket < b.hi);
+            const sec = r.bucket * bucketSec;   // lower edge of the server bucket
+            const i = TIME_BINS.findIndex(b => sec >= b.lo && sec < b.hi);
             if (i >= 0) rows[i].value += r.n;
         }
         return rows;
@@ -650,14 +661,21 @@ async function buildServerStatsPane(history = []) {
     // `highlightIndex` (optional) marks the bucket the current user falls into
     // by recolouring that row. The legend explaining the colour is shown once
     // for the whole pane (see below), not per chart.
-    const makeBarList = (rows, highlightIndex = -1) => {
-        const max = Math.max(1, ...rows.map(r => r.value));
+    // `dropEmpty` (default on) hides zero-count bins so a fixed bin table never
+    // renders dead bars — except the user's own bin, which is kept even when no
+    // one else lands there so the "you" marker doesn't vanish. Ranks opt out
+    // (their empty rungs are a meaningful gap in the ladder, kept on purpose).
+    const makeBarList = (rows, highlightIndex = -1, dropEmpty = true) => {
+        let display = rows.map((r, i) => ({ ...r, _orig: i }));
+        if (dropEmpty) display = display.filter(r => r.value > 0 || r._orig === highlightIndex);
+        const hi = display.findIndex(r => r._orig === highlightIndex);
+        const max = Math.max(1, ...display.map(r => r.value));
         const wrap = document.createElement('div');
         wrap.className = 'server-bars';
-        rows.forEach((r, i) => {
+        display.forEach((r, i) => {
             const row = document.createElement('div');
             row.className = 'server-bar-row';
-            if (i === highlightIndex) row.classList.add('server-bar-row--you');
+            if (i === hi) row.classList.add('server-bar-row--you');
             const label = document.createElement('span');
             label.className = 'server-bar-label';
             label.textContent = r.label;
@@ -753,7 +771,7 @@ async function buildServerStatsPane(history = []) {
         const rankIdx = you.rankLabel != null
             ? data.ranks.findIndex(r => r.rank === you.rankLabel)
             : -1;
-        pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n })), rankIdx));
+        pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n })), rankIdx, false));
     }
 
     // One legend for the whole pane explaining the highlighted bar, at the very
