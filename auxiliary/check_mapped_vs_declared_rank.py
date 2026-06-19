@@ -46,7 +46,7 @@ import json
 import os
 import sqlite3
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
@@ -111,8 +111,12 @@ def apply_M(R, m_ratings, m_internal):
 # pwa/js/population-constants.js (timeAdjustDeltaRating) + rank-decomposition.js
 # (rankIndexAfterRatingDelta). Feature must match user_median_log10_minutes in
 # fit_population_constants: non-repeat, time_used in (0, AFK cap], ≥MIN_TIMED.
+# The client takes this median over its WORKING SET — the unified most-recent
+# ANSWER_HISTORY_WORKING_SET attempts across both sizes (getMergedAnswerHistory),
+# repeats included — NOT whole history, so we mirror that window here.
 TIME_ADJUST_AFK_CAP_MS = 180000
 TIME_ADJUST_MIN_TIMED = 20
+WORKING_SET = 3000  # ANSWER_HISTORY_WORKING_SET in pwa/js/constants.js
 
 
 def load_time_adjust(v2_dir):
@@ -126,22 +130,34 @@ def load_time_adjust(v2_dir):
             float(ta["time_vs_rank_slope"]))
 
 
-def load_user_median_solve_minutes(sqlite_path):
-    """{user_prefix8: median novel solve minutes}, reproducing the client's
-    medianNovelSolveMinutes() so the alpha is applied to the same feature."""
+def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
+    """{user_prefix8: median novel solve minutes} over each user's WORKING-SET
+    window — the most-recent `working_set` attempts unified across both sizes —
+    reproducing the client's medianNovelSolveMinutes() on getMergedAnswerHistory().
+
+    The window is taken over ALL attempts (repeats included, like the client's
+    working set), ordered by created_at so backfilled rows land at their true
+    historical position, and ONLY THEN filtered to non-repeat + timed (0, AFK cap]
+    before the median — matching the client, which slices the last `working_set`
+    raw attempts first and filters inside that slice."""
     con = sqlite3.connect(sqlite_path)
     try:
+        # created_at is ISO-8601 TEXT (sorts chronologically); id breaks ties.
+        # Order by id, not created_at, would pull backfilled-historical rows
+        # (recent id, old timestamp) into the recent window — see the fetch
+        # cursor note in CLAUDE.md.
         cur = con.execute(
-            "SELECT user_id, time_used FROM tsumego_reports "
-            "WHERE is_repeat=0 AND time_used>0 AND time_used<=?",
-            (TIME_ADJUST_AFK_CAP_MS,))
-        buckets = defaultdict(list)
-        for uid, t in cur:
-            buckets[uid[:8]].append(float(t))
+            "SELECT user_id, is_repeat, time_used FROM tsumego_reports "
+            "ORDER BY created_at, id")
+        windows = defaultdict(lambda: deque(maxlen=working_set))
+        for uid, is_repeat, t in cur:
+            windows[uid[:8]].append((is_repeat, t))
     finally:
         con.close()
     out = {}
-    for pref, ts in buckets.items():
+    for pref, rows in windows.items():
+        ts = [float(t) for (rep, t) in rows
+              if not rep and t is not None and 0 < float(t) <= TIME_ADJUST_AFK_CAP_MS]
         if len(ts) >= TIME_ADJUST_MIN_TIMED:
             out[pref] = float(np.median(ts)) / 60000.0
     return out
@@ -225,9 +241,11 @@ def main():
     ap.add_argument("--csv", default=None,
                     help="If set, write the per-declaration error table here.")
     ap.add_argument("--time-adjust", action="store_true",
-                    help="Apply the client's whole-history time adjustment to the "
-                         "displayed (server) rank — docks solvers slower than "
-                         "typical for their rank, the same correction the PWA shows.")
+                    help="Apply the client's time adjustment to the displayed "
+                         "(server) rank — docks solvers slower than typical for "
+                         "their rank, the same correction the PWA shows. Median "
+                         f"solve time is taken over the working set (last {WORKING_SET} "
+                         "attempts), matching getMergedAnswerHistory.")
     ap.add_argument("--time-recenter", action="store_true",
                     help="With --time-adjust: demean the time-dock over the survey "
                          "cohort (the fleet-fit g0,g1 line has a non-zero mean "
