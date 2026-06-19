@@ -84,19 +84,26 @@ export function performShare() {
     recordShareEvent({ type: 'create', problemId: tsumegoId });
 
     const copyToClipboard = () => {
-        // navigator.clipboard is undefined in an insecure context (plain http)
-        // and on some older browsers, so it can't be the only path or the whole
-        // share throws (JAVASCRIPT-2G). Degrade gracefully: async clipboard ->
-        // legacy execCommand copy -> surface the URL for manual copy.
         const copied = () => showToast(getTerm('linkCopied'));
-        const fallback = () => { if (!legacyCopy(shareUrl)) showShareUrlFallback(shareUrl); else copied(); };
+        const localFallback = () => { if (legacyCopy(shareUrl)) copied(); else showShareUrlFallback(shareUrl); };
+        // Only touch the clipboard while we still hold transient user activation.
+        // Calling navigator.clipboard.writeText() WITHOUT it makes Android Chrome
+        // raise the clipboard *permission* prompt ("see text and images copied to
+        // the clipboard") — hit on the post-share copy fallback, where the tap's
+        // activation has already lapsed. With no activation, skip the clipboard
+        // API entirely and show the URL for manual copy: no API call, no prompt.
+        // (execCommand copy is gesture-gated too, so it sits behind the same check.)
+        // navigator.clipboard is also undefined in an insecure context / older
+        // browsers (was JAVASCRIPT-2G), which the manual modal covers as well.
+        const active = !navigator.userActivation || navigator.userActivation.isActive;
+        if (!active) { showShareUrlFallback(shareUrl); return Promise.resolve(); }
         if (navigator.clipboard && navigator.clipboard.writeText) {
             return navigator.clipboard.writeText(shareUrl).then(copied).catch(err => {
                 console.error('Failed to copy URL: ', err);
-                fallback();
+                localFallback();
             });
         }
-        fallback();
+        localFallback();
         return Promise.resolve();
     };
 
@@ -169,25 +176,49 @@ export function performShare() {
         });
     };
 
-    // Generate the board image — lazily, only when an image-bearing option is
-    // chosen (never for a link-only share). Visible "preparing…" toast + a hard
-    // timeout so a canvas/render hang surfaces as an error rather than a silent
-    // forever-spinner.
-    const generateImageFile = async () => {
-        const toast = showToast(getTerm('preparingImage'), { autoDismiss: false });
-        const cleanup = () => { if (toast.parentNode) toast.parentNode.removeChild(toast); };
-        const t0 = performance.now();
+    // Warm the board-image capture as soon as the chooser opens, while the user
+    // is still reading the options. getBoardImageBlob() is async and yields at
+    // its awaits (image load, a 50ms tick, toBlob encode), so it doesn't freeze
+    // the chooser — only brief synchronous WGo-render bursts. The head start
+    // shrinks the gap between the user's pick and the navigator.share() call, so
+    // share() is far more likely to land inside the ~5s transient-activation
+    // window (the gap shrinks by the reading time even when capture isn't done
+    // by the pick; if it IS done, the gap is ~0). Cached so the open-time warm
+    // and the pick-time resolve share a single capture.
+    let imageFilePromise = null;
+    const warmImageFile = () => {
+        if (!imageFilePromise) {
+            const t0 = performance.now();
+            imageFilePromise = (async () => {
+                const blob = await getBoardImageBlob();
+                if (!blob) throw new Error('No blob returned from getBoardImageBlob');
+                return new File([blob], 'tsumego.png', { type: 'image/png' });
+            })();
+            const stamp = () => { captureMs = Math.round(performance.now() - t0); };
+            imageFilePromise.then(stamp, stamp);
+            imageFilePromise.catch(() => {}); // avoid an unhandled rejection if unused
+        }
+        return imageFilePromise;
+    };
+
+    // Resolve the warmed File for an image-bearing pick: show a "preparing…"
+    // toast only if it isn't ready yet, with a hard timeout so a hung capture
+    // surfaces as an error rather than a silent forever-spinner.
+    const resolveImageFile = async () => {
+        const p = warmImageFile();
+        let ready = false;
+        p.then(() => { ready = true; }, () => { ready = true; });
+        await Promise.resolve();
+        const toast = ready ? null : showToast(getTerm('preparingImage'), { autoDismiss: false });
+        const cleanup = () => { if (toast && toast.parentNode) toast.parentNode.removeChild(toast); };
         try {
-            const blob = await Promise.race([
-                getBoardImageBlob(),
+            const file = await Promise.race([
+                p,
                 new Promise((_, reject) => setTimeout(() => reject(new Error('image generation timed out')), 10000))
             ]);
-            captureMs = Math.round(performance.now() - t0);
             cleanup();
-            if (!blob) throw new Error('No blob returned from getBoardImageBlob');
-            return new File([blob], 'tsumego.png', { type: 'image/png' });
+            return file;
         } catch (err) {
-            captureMs = Math.round(performance.now() - t0);
             cleanup();
             console.error('Failed to capture image: ', err);
             showToast(getTerm('imageCaptureFailed'), { isError: true });
@@ -198,7 +229,7 @@ export function performShare() {
     const shareImage = async () => {
         let file;
         try {
-            file = await generateImageFile();
+            file = await resolveImageFile();
         } catch {
             return shareLink();
         }
@@ -219,7 +250,7 @@ export function performShare() {
     const shareBoth = async () => {
         let file;
         try {
-            file = await generateImageFile();
+            file = await resolveImageFile();
         } catch {
             return shareLink();
         }
@@ -238,6 +269,9 @@ export function performShare() {
     };
 
     const showShareChooser = () => {
+        // Start the board-image capture now, while the user reads the options —
+        // the head start keeps the eventual share() inside the activation window.
+        warmImageFile();
         // Full-width stacked .btn buttons (not .btn-inline) — the chooser
         // intentionally presents three equal-width options.
         const mkBtn = (term, action) => {
