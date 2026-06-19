@@ -35,9 +35,3 @@ export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
 // the *merged* history (the momentum/recall replay warms over the last 3000),
 // so the working set is a superset of every synchronous read.
 export const ANSWER_HISTORY_WORKING_SET = 3000;
-
-// Minimum merged answer-history entries (both sizes, repeats included) before
-// the detailed-stats panel will open. The `statsNotEnough` copy interpolates
-// this same value, so they can't drift apart (the string used to hardcode "5"
-// while the gate already required 10).
-export const MIN_STATS_ATTEMPTS = 10;

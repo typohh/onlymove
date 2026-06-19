@@ -8,7 +8,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS, MIN_STATS_ATTEMPTS } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
@@ -109,15 +109,6 @@ export async function showDetailedStats() {
     // lifetime totals span the whole history, not just the synchronous working
     // set; degrades to the working set if IDB is unavailable.
     const merged = await getMergedFullAnswerHistory();
-    if (merged.length < MIN_STATS_ATTEMPTS) {
-        alert(getTerm('statsNotEnough', { count: merged.length, needed: MIN_STATS_ATTEMPTS }));
-        return;
-    }
-
-    if (!state.modelParams) {
-        alert(getTerm('statsFailed'));
-        return;
-    }
 
     // Static explanatory text (not just a spinner): the synchronous chart build
     // below freezes any animation, so a plain "constructing…" line is the
@@ -128,20 +119,25 @@ export async function showDetailedStats() {
     // Chart, …) take over the main thread.
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-        if (!state.statsResults) {
+        // The recall model (modelParams) and its derived statsResults drive only
+        // the timing-probability text and the freshly-failed window summary; they
+        // need a trained model + attempts. When they're missing (a brand-new
+        // device with few/no attempts) we skip those blocks and still render
+        // whatever panes have data: Community is server-wide and always
+        // available, and every chart builder returns null below its own data
+        // threshold, so showStatsModal just drops the now-empty tabs. No gate —
+        // opening stats with very few or zero attempts is a no-op-safe path.
+        if (state.modelParams && !state.statsResults) {
             const validHistory = merged.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
-            const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
-            const trainingData = prepareTrainingData(history, validHistory);
-            const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
-            setStatsResults(finalResults);
+            if (validHistory.length) {
+                const history = validHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
+                const trainingData = prepareTrainingData(history, validHistory);
+                const finalResults = calculateResultsAndStdErrors(state.modelParams, trainingData);
+                setStatsResults(finalResults);
+            }
         }
 
-        if (!state.statsResults) {
-            alert(getTerm('statsFailed'));
-            return;
-        }
-
-        const { results, varCovarMatrix } = state.statsResults;
+        const { results = [], varCovarMatrix } = state.statsResults || {};
         const finalParams = state.modelParams;
         // The old single "overview" pane is now split across tabs: timing
         // probabilities ride with the Time chart, the rank decomposition rides
