@@ -165,15 +165,18 @@ function writeScheduleSnapshot(rows) {
 // to the Worker. Fails silently because losing one upload just delays the
 // next notification by one tick.
 //
-// Skips the POST when the schedule is empty: a transient empty result (e.g.
-// the recent slice happens to contain only high-streak successes) must not
-// wipe a previously-good schedule and silently disable reminders. Stale rows
-// the client never explicitly removes age out server-side anyway — the cron
-// sweeps exit_at < now.
-//
-// A no-change call still POSTs an empty diff (throttled) — the Worker bumps
-// the user's last_seen_at watermark, which is what defers reminders while
-// they're actively in the app.
+// The schedule is a pure projection of the account's synced answer history, so
+// the latest upload from any device is authoritative — there's no per-device row
+// ownership. Init awaits the full-history pull (initHistoryStorage +
+// maybeFinishAccountSwitch) before the first upload, so by the time we run the
+// history is complete and an empty recompute genuinely means "caught up." We
+// therefore ALWAYS upload, empty or not, and let latest win: a diff removes our
+// now-stale rows; a snapshot-less replace-all clears all and re-seeds. No
+// empty-skip — that older guard defeated the empty-diff watermark heartbeat for
+// caught-up users, was asymmetric with the removal path, and masked bugs by
+// making "empty because nothing's due" indistinguishable from "empty because the
+// inputs broke" (a buildRecallSchedule shape bug once froze the schedule
+// invisibly).
 export async function uploadSchedule({ force = false } = {}) {
     if (pendingUpload) return;
     pendingUpload = true;
@@ -184,7 +187,6 @@ export async function uploadSchedule({ force = false } = {}) {
                 schedule.push(row);
             }
         }
-        if (schedule.length === 0) return;
 
         const current = {};
         for (const r of schedule) {

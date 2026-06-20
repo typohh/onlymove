@@ -1,7 +1,7 @@
 // js/model.js
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory } from './state.js';
+import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
@@ -414,25 +414,19 @@ export function getRecallCandidates(options = {}) {
 export function buildRecallSchedule(size) {
     // The recall model and rank are shared (single keys); only the answer
     // history is per-size — a recall reminder must point at a problem in `size`.
+    // answerHistory is now ONE unified cross-size array (working-set split), so
+    // slice it per-size via getAnswerHistoryForSize rather than indexing a
+    // {9,13} bucket object (which silently returned undefined and emptied every
+    // schedule, freezing the server's recall_schedule table).
     const readSharedKey = (key) => {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
         try { return JSON.parse(raw); } catch { return null; }
     };
-    const readPerSizeKey = (key) => {
-        const raw = localStorage.getItem(key);
-        if (!raw) return null;
-        try {
-            const parsed = JSON.parse(raw);
-            return parsed?.[String(size)] ?? null;
-        } catch {
-            return null;
-        }
-    };
 
     const params = readSharedKey('modelParams');
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return [];
-    const answerHistory = readPerSizeKey('answerHistory');
+    const answerHistory = getAnswerHistoryForSize(size);
     if (!Array.isArray(answerHistory) || answerHistory.length === 0) return [];
     const userRank = readSharedKey('userRank');
     if (typeof userRank !== 'number') return [];
