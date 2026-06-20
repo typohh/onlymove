@@ -41,27 +41,48 @@ CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_created ON tsumego_reports(u
 --  before dropping.)
 -- (Not idempotent in SQLite, so it's not part of the schema script itself.)
 
--- One push subscription per user (single-device assumption — see CLAUDE.md /
--- pwa/README.md notification design notes). On userId collision the loser
--- silently stops getting notifications; acceptable at current scale.
+-- One row PER DEVICE (endpoint), not per account: a single user_id can hold
+-- several push subscriptions (phone + laptop + …) and the recall cron fans each
+-- reminder out to all of them. The push endpoint URL is globally unique per push
+-- channel, so it is the natural PK; user_id is indexed for the cron's per-user
+-- lookups and the /schedule activity-watermark update. A device that adopts a
+-- different account (account switch) re-subscribes the SAME endpoint, so the
+-- ON CONFLICT(endpoint) upsert in handleSubscribe just re-points user_id — no
+-- stale row, and no device ever belongs to two accounts at once.
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-    user_id           TEXT PRIMARY KEY,
-    endpoint          TEXT NOT NULL,
+    endpoint          TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL,
     p256dh            TEXT NOT NULL,
     auth              TEXT NOT NULL,
-    last_notified_at  INTEGER,
+    last_notified_at  INTEGER,         -- per-device anti-spam floor
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
-    -- Activity watermark for the recall cron's mid-session suppression:
-    -- bumped by every /schedule call (one row write, even when the schedule
-    -- diff is empty). Replaces relying on recall_schedule.updated_at, which
-    -- diff-mode uploads no longer refresh across the board.
+    -- Activity watermark for the recall cron's mid-session suppression: bumped
+    -- by every /schedule call (across the account's device rows), even when the
+    -- schedule diff is empty. Replaces relying on recall_schedule.updated_at,
+    -- which diff-mode uploads no longer refresh across the board.
     last_seen_at      INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 
--- For an existing deployment, run once against the live D1:
---   ALTER TABLE push_subscriptions ADD COLUMN last_seen_at INTEGER;
--- (Not idempotent in SQLite, so it's not part of the schema script itself.)
+-- MIGRATIONS for an existing deployment (run once each against the live D1;
+-- not idempotent, so kept out of the CREATE above):
+--   1. last_seen_at column (predates multi-device):
+--        ALTER TABLE push_subscriptions ADD COLUMN last_seen_at INTEGER;
+--   2. Single-row (user_id PK) -> per-device (endpoint PK). SQLite can't drop a
+--      PK in place, so rebuild, preserving existing subscriptions:
+--        ALTER TABLE push_subscriptions RENAME TO push_subscriptions_old;
+--        CREATE TABLE push_subscriptions (
+--          endpoint TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+--          p256dh TEXT NOT NULL, auth TEXT NOT NULL, last_notified_at INTEGER,
+--          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+--          last_seen_at INTEGER);
+--        INSERT OR IGNORE INTO push_subscriptions
+--          (endpoint, user_id, p256dh, auth, last_notified_at, created_at, updated_at, last_seen_at)
+--          SELECT endpoint, user_id, p256dh, auth, last_notified_at,
+--                 created_at, updated_at, last_seen_at FROM push_subscriptions_old;
+--        DROP TABLE push_subscriptions_old;
+--        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 
 -- Per-(user, problem) recall window. enter_at / exit_at are unix ms epochs at
 -- which the client-side logistic model predicts P(recall) crosses 0.80 and

@@ -494,23 +494,37 @@ async function handleSubscribe(request, env) {
     return jsonResponse({ error: 'Invalid body' }, 400);
   }
   const now = Date.now();
+  // Keyed by endpoint (one row per device). On conflict the same physical push
+  // channel is re-registering — re-point user_id (it may have switched accounts)
+  // and refresh keys, but keep last_notified_at so a spurious re-subscribe can't
+  // reset the anti-spam floor and re-nag. last_seen_at is set on insert and left
+  // alone on conflict (the schedule upload that follows enableNotifications
+  // bumps it immediately).
   await env.DB.prepare(
-    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, last_notified_at, created_at, updated_at)
-     VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)
-     ON CONFLICT(user_id) DO UPDATE SET
-       endpoint = excluded.endpoint,
+    `INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, last_notified_at, created_at, updated_at, last_seen_at)
+     VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5, ?5)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       user_id = excluded.user_id,
        p256dh = excluded.p256dh,
        auth = excluded.auth,
-       last_notified_at = NULL,
        updated_at = excluded.updated_at`
-  ).bind(data.userId, sub.endpoint, sub.keys.p256dh, sub.keys.auth, now).run();
+  ).bind(sub.endpoint, data.userId, sub.keys.p256dh, sub.keys.auth, now).run();
   return jsonResponse({ ok: true });
 }
 
 async function handleUnsubscribe(request, env) {
   const data = await request.json();
   if (!isValidUserId(data?.userId)) return jsonResponse({ error: 'Invalid body' }, 400);
-  await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(data.userId).run();
+  // Multi-device: remove only THIS device's subscription (scoped to the account
+  // so an endpoint can't be deleted out from under another user). A legacy
+  // client that doesn't send its endpoint falls back to the old clear-the-whole-
+  // account behavior.
+  if (typeof data.endpoint === 'string' && data.endpoint) {
+    await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?')
+      .bind(data.endpoint, data.userId).run();
+  } else {
+    await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(data.userId).run();
+  }
   return jsonResponse({ ok: true });
 }
 
@@ -524,10 +538,12 @@ async function handleUnsubscribe(request, env) {
 //     dominant D1 write consumer to the handful of rows an attempt actually
 //     changes. An EMPTY diff is still a valid call — it lands only the
 //     activity-watermark bump below.
-// Either way the call bumps push_subscriptions.last_seen_at (one row, no-op
-// for users without a subscription): the cron's mid-session suppression reads
-// it, since with diff uploads recall_schedule.updated_at no longer refreshes
-// across the board on every upload.
+// Either way the call bumps push_subscriptions.last_seen_at for the account's
+// device row(s) (no-op for users without a subscription): the cron's
+// mid-session suppression is per-user (active on any device defers the whole
+// account), so bumping all of them by user_id is correct, and it reads this
+// watermark since with diff uploads recall_schedule.updated_at no longer
+// refreshes across the board on every upload.
 const SCHEDULE_MAX_ROWS = 1000;
 
 async function handleSchedule(request, env) {
@@ -1011,14 +1027,18 @@ async function runRecallNotifications(env) {
 
   const now = Date.now();
 
+  // Due problems for users that have at least one push subscription. No join to
+  // push_subscriptions here: a user can now have several device rows, which
+  // would multiply each problem row — we read the problems once (per user) and
+  // fan out to that user's devices below. The IN-subquery scopes the
+  // recall_schedule read to subscribed users (matching the old JOIN's filter).
   const due = await env.DB.prepare(
-    `SELECT s.user_id, s.problem_id, s.enter_at, s.exit_at,
-            s.enter_notified_at, s.exit_notified_at, s.updated_at,
-            p.endpoint, p.p256dh, p.auth, p.last_notified_at, p.last_seen_at
-     FROM recall_schedule s
-     JOIN push_subscriptions p ON p.user_id = s.user_id
-     WHERE (s.enter_notified_at IS NULL AND s.enter_at <= ?1)
-        OR (s.exit_notified_at  IS NULL AND s.exit_at - ?2 <= ?1 AND s.exit_at > ?1)`
+    `SELECT user_id, problem_id, enter_at, exit_at,
+            enter_notified_at, exit_notified_at, updated_at
+     FROM recall_schedule
+     WHERE ((enter_notified_at IS NULL AND enter_at <= ?1)
+         OR (exit_notified_at  IS NULL AND exit_at - ?2 <= ?1 AND exit_at > ?1))
+       AND user_id IN (SELECT user_id FROM push_subscriptions)`
   ).bind(now, TWO_HOURS_MS).all();
 
   // Full per-user backlog of problems currently inside the review window,
@@ -1039,21 +1059,13 @@ async function runRecallNotifications(env) {
   for (const row of (due.results || [])) {
     let u = byUser.get(row.user_id);
     if (!u) {
-      u = {
-        endpoint: row.endpoint,
-        p256dh: row.p256dh,
-        auth: row.auth,
-        lastNotifiedAt: row.last_notified_at,
-        lastActiveAt: 0,
-        enteredIds: [],
-        exitingIds: [],
-      };
+      u = { lastActiveAt: 0, enteredIds: [], exitingIds: [], subs: [] };
       byUser.set(row.user_id, u);
     }
-    // Activity watermark: push_subscriptions.last_seen_at is bumped on every
-    // /schedule call (including empty diffs); per-row updated_at still covers
-    // legacy replace-all clients, so take the max of both.
-    u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0, row.last_seen_at || 0);
+    // Activity watermark from the schedule side: recall_schedule.updated_at
+    // still covers legacy replace-all clients. push_subscriptions.last_seen_at
+    // (bumped on every /schedule call) is folded in per-device below.
+    u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0);
     if (row.enter_notified_at === null && row.enter_at <= now) {
       u.enteredIds.push(row.problem_id);
     }
@@ -1062,63 +1074,92 @@ async function runRecallNotifications(env) {
     }
   }
 
-  const vapid = {
-    subject: env.VAPID_SUBJECT,
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-  };
+  if (byUser.size > 0) {
+    // Attach every device of each due user. push_subscriptions is small (one row
+    // per opted-in device), so read it whole and bucket in JS rather than
+    // building an IN-list over the variable due-user set.
+    const subsAll = await env.DB.prepare(
+      `SELECT endpoint, user_id, p256dh, auth, last_notified_at, last_seen_at
+       FROM push_subscriptions`
+    ).all();
+    for (const s of (subsAll.results || [])) {
+      const u = byUser.get(s.user_id);
+      if (!u) continue;
+      u.subs.push(s);
+      u.lastActiveAt = Math.max(u.lastActiveAt, s.last_seen_at || 0);
+    }
 
-  for (const [userId, u] of byUser) {
-    if (u.lastNotifiedAt && (now - u.lastNotifiedAt) < MIN_NOTIFY_INTERVAL_MS) continue;
-    // Active since the previous tick — they're already in the app, so defer the
-    // reminder to a later tick rather than nagging mid-session.
-    if (u.lastActiveAt && (now - u.lastActiveAt) < ACTIVE_SUPPRESS_MS) continue;
-    if (u.enteredIds.length === 0 && u.exitingIds.length === 0) continue;
-
-    const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlogByUser.get(userId) || 0);
-    const subscription = {
-      endpoint: u.endpoint,
-      expirationTime: null,
-      keys: { p256dh: u.p256dh, auth: u.auth },
+    const vapid = {
+      subject: env.VAPID_SUBJECT,
+      publicKey: env.VAPID_PUBLIC_KEY,
+      privateKey: env.VAPID_PRIVATE_KEY,
     };
 
-    let res;
-    try {
-      const init = await buildPushPayload(
-        { data: JSON.stringify(message), options: { ttl: 6 * 3600 } },
-        subscription,
-        vapid,
-      );
-      res = await fetch(subscription.endpoint, init);
-    } catch (err) {
-      console.error(`Push send threw for ${userId}:`, err);
-      continue;
-    }
-
-    if (res.status === 404 || res.status === 410) {
-      await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(userId).run();
-      continue;
-    }
-    if (!res.ok) {
-      console.error(`Push failed for ${userId}: HTTP ${res.status}`);
-      continue;
-    }
-
     const updates = [];
-    for (const id of u.enteredIds) {
-      updates.push(env.DB.prepare(
-        'UPDATE recall_schedule SET enter_notified_at = ? WHERE user_id = ? AND problem_id = ?'
-      ).bind(now, userId, id));
+    for (const [userId, u] of byUser) {
+      if (u.subs.length === 0) continue;
+      if (u.enteredIds.length === 0 && u.exitingIds.length === 0) continue;
+      // Active on SOME device since the previous tick — they're already
+      // practicing, so defer the reminder for the whole account (suppression is
+      // per-user, not per-device) rather than nagging mid-session.
+      if (u.lastActiveAt && (now - u.lastActiveAt) < ACTIVE_SUPPRESS_MS) continue;
+
+      const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlogByUser.get(userId) || 0);
+      const payload = { data: JSON.stringify(message), options: { ttl: 6 * 3600 } };
+
+      // Fan out to every device. Throttle is per-device (last_notified_at lives
+      // on the row); dead endpoints are pruned individually.
+      let deliveredToAny = false;
+      for (const sub of u.subs) {
+        if (sub.last_notified_at && (now - sub.last_notified_at) < MIN_NOTIFY_INTERVAL_MS) continue;
+
+        const subscription = {
+          endpoint: sub.endpoint,
+          expirationTime: null,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        };
+        let res;
+        try {
+          const init = await buildPushPayload(payload, subscription, vapid);
+          res = await fetch(sub.endpoint, init);
+        } catch (err) {
+          console.error(`Push send threw for ${userId}:`, err);
+          continue;
+        }
+        if (res.status === 404 || res.status === 410) {
+          updates.push(env.DB.prepare(
+            'DELETE FROM push_subscriptions WHERE endpoint = ?'
+          ).bind(sub.endpoint));
+          continue;
+        }
+        if (!res.ok) {
+          console.error(`Push failed for ${userId}: HTTP ${res.status}`);
+          continue;
+        }
+        deliveredToAny = true;
+        updates.push(env.DB.prepare(
+          'UPDATE push_subscriptions SET last_notified_at = ? WHERE endpoint = ?'
+        ).bind(now, sub.endpoint));
+      }
+
+      // The notified flags are per (user, problem), not per device. Mark them
+      // only if at least one device got the push, so a user whose every device
+      // was throttled/failed simply retries next tick.
+      if (deliveredToAny) {
+        for (const id of u.enteredIds) {
+          updates.push(env.DB.prepare(
+            'UPDATE recall_schedule SET enter_notified_at = ? WHERE user_id = ? AND problem_id = ?'
+          ).bind(now, userId, id));
+        }
+        for (const id of u.exitingIds) {
+          updates.push(env.DB.prepare(
+            'UPDATE recall_schedule SET exit_notified_at = ? WHERE user_id = ? AND problem_id = ?'
+          ).bind(now, userId, id));
+        }
+      }
     }
-    for (const id of u.exitingIds) {
-      updates.push(env.DB.prepare(
-        'UPDATE recall_schedule SET exit_notified_at = ? WHERE user_id = ? AND problem_id = ?'
-      ).bind(now, userId, id));
-    }
-    updates.push(env.DB.prepare(
-      'UPDATE push_subscriptions SET last_notified_at = ? WHERE user_id = ?'
-    ).bind(now, userId));
-    await env.DB.batch(updates);
+
+    if (updates.length) await env.DB.batch(updates);
   }
 
   // Purge rows whose window expired long enough ago that no useful

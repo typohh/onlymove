@@ -115,6 +115,9 @@ export async function enableNotifications() {
 
 export async function disableNotifications() {
     const sub = await getCurrentSubscription();
+    // Capture the endpoint before unsubscribe so the server removes only THIS
+    // device's row (subscriptions are per-device now), not the whole account.
+    const endpoint = sub?.endpoint;
     if (sub) {
         try { await sub.unsubscribe(); } catch {}
     }
@@ -122,7 +125,7 @@ export async function disableNotifications() {
         await fetch('/push/unsubscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: state.userId }),
+            body: JSON.stringify({ userId: state.userId, endpoint }),
         });
     } catch {}
 }
