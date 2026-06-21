@@ -39,7 +39,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.compare_rank_surveys import SERVERS  # noqa: E402
+from utils.rank_surveys import SERVERS  # noqa: E402
 
 
 def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,

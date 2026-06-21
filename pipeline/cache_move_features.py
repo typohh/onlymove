@@ -13,7 +13,7 @@ rivals — a difficulty signal orthogonal to the trunk activations and the bot-l
 that train_rating_v2 already feeds.
 
 Output (one per board size), consumed by train_rating_v2 --move-features through
-auxiliary.compare_rating_models.load_joint_move_features:
+utils.rating_features.load_joint_move_features:
   activations/_signal_cache/move_evals_<size>.npz
       tids   (n,)      <U8   canonical problem id (orientation-invariant hash)
       feats  (n, 20)   f32   RAW [logit win-prob, score] × 10 moves (solution, then 9 alts)
@@ -41,7 +41,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.inspect_activation_signals import CACHE_DIR, _cache_ids_path  # noqa: E402
+from utils.rating_features import CACHE_DIR, _cache_ids_path  # noqa: E402
 from pipeline.benchmark_bots import parse_tsumego_sgf  # noqa: E402
 
 # Feature layout: the winning move + N_ALT best alternatives, each as (logit win-prob, score).

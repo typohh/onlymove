@@ -31,7 +31,7 @@ Model (internal rank ≡ EGF rank is the hub / identity), estimated TOGETHER:
   * R = the v2-rating at which a user clears 80% (fit_user_rating, pooled).
   * m: the EGF statistics.txt cubic SHAPE with a 2-param affine fit to surveys —
     rating-thresholds `a_g = α + β·S(g)`, S = the ΔAIC-best fit to the even-game
-    win-rate table (auxiliary.fit_statistics_shapes). The shape is NOT a magic
+    win-rate table (utils.statistics_shapes). The shape is NOT a magic
     constant: EGF data rejects a linear rank↔rating link (ΔAIC 1652 vs cubic 0),
     and the bot Elo ladder + our human R(rank) independently show the same convex
     acceleration. A linear/free curve over-rates kyu (+4 ranks) and under-rates
@@ -65,11 +65,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.compare_rank_surveys import (  # noqa: E402
+from utils.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys, scalar_to_rank,
 )
-from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
+from utils.statistics_shapes import fit_shape  # noqa: E402
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, build_server_curves, fit_user_rating, interp_extrap_vec,
     ordinal_nll_vec, _unpack_thresholds,

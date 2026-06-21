@@ -53,7 +53,6 @@ Usage:
 import argparse
 import os
 import sys
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -66,36 +65,16 @@ if PROJECT_ROOT not in sys.path:
 
 from auxiliary.predict_user_results_from_activations import (  # noqa: E402
     load_problem_features,
-    _cache_ids_path,
-    _cache_vecs_path,
 )
-from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
+from utils.rating_features import (  # noqa: E402
+    build_profiles,
+    load_first_time_attempts,
+    load_joint_activations,
+    load_joint_bot_winrate,
+    load_joint_move_features,
+)
 
 EPS = 1e-6
-
-
-def build_profiles(df):
-    """Explode first-time attempts into 2-month overlapping profile rows.
-
-    Each attempt at month M contributes to profile M and profile M-1, so
-    profile K holds months {K, K+1} — a 2-month window overlapping its
-    neighbour by one month (identical to evaluate_rating_model). Returns the
-    same df with one row per (profile, attempt); `profile` replaces the raw
-    user as the ability unit."""
-    out = []
-    for uid, tid, succ, ts in zip(df["user_id"], df["problem"],
-                                  df["success"], df["created_at"]):
-        try:
-            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        pm, py = dt.month - 1, dt.year
-        if pm == 0:
-            pm, py = 12, py - 1
-        u8 = uid[:8]
-        for prof in (f"{u8}_{dt.year}-{dt.month:02d}", f"{u8}_{py}-{pm:02d}"):
-            out.append((prof, tid, int(succ)))
-    return pd.DataFrame(out, columns=["profile", "problem", "success"])
 
 
 def load_bot_winrate(size, tids, clip=1e-4):
@@ -149,148 +128,6 @@ def load_bot_winrate(size, tids, clip=1e-4):
     X = X[:, keep]
     X = (X - X.mean(0)) / X.std(0)              # z-score columns
     return {t: X[i].astype(np.float32) for i, t in enumerate(usable)}, int(keep.sum())
-
-
-def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed):
-    """Deterministic cache file for the joint-PCA reduction. Keyed on (sizes, pca_dim, seed),
-    the raw activation-cache file fingerprints (basename+size+mtime — so a re-extraction
-    invalidates it), AND the exact tid subset requested (a caller fitting on a different subset
-    gets a different basis, hence a different file). Lives beside the raw activation cache."""
-    import hashlib
-    h = hashlib.sha256()
-    h.update(repr((list(sizes), int(pca_dim), int(seed))).encode())
-    for size in sizes:
-        for p in (_cache_ids_path(size), _cache_vecs_path(size)):
-            st = os.stat(p)
-            h.update(f"{os.path.basename(p)}:{st.st_size}:{st.st_mtime_ns}".encode())
-        h.update("\x00".join(tids_by_size[size]).encode())
-    cdir = os.path.dirname(_cache_vecs_path(sizes[0]))
-    return os.path.join(cdir, f"joint_pca_{h.hexdigest()[:16]}.npz")
-
-
-def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
-    """ONE PCA basis shared across boards (so a pooled model's activation weights mean
-    the same thing on 9×9 and 13×13). Loads each board's raw correct-move activation
-    cache for its attempted problems, stacks, fits a single StandardScaler+randomized
-    PCA, z-scores. Returns {(size, tid): vec}, k. (Distinct from embeddings/joint, which
-    residualises rating OUT — useless as a difficulty feature.)
-
-    The randomized-PCA fit over the stacked ~N×6912 activation matrix is the dominant
-    startup cost and is fully determined by its inputs, so the reduced output is memoized to
-    joint_pca_<hash>.npz (atomic write, fingerprinted on the raw-cache files). cache=False
-    forces a recompute (e.g. to rebuild a corrupt cache)."""
-    import json as _json
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-    cpath = _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed) if cache else None
-    if cpath and os.path.exists(cpath):
-        d = np.load(cpath, allow_pickle=False)
-        Z, k = d["Z"], int(d["k"])
-        keys = list(zip(d["key_size"].tolist(), d["key_tid"].tolist()))
-        print(f"  joint-PCA: cache hit {os.path.basename(cpath)} ({Z.shape[0]} problems, k={k})")
-        return {key: Z[i] for i, key in enumerate(keys)}, k
-    Xparts, keys = [], []
-    for size in sizes:
-        ids = _json.load(open(_cache_ids_path(size)))
-        row = {t: i for i, t in enumerate(ids)}
-        vecs = np.load(_cache_vecs_path(size), mmap_mode="r")
-        usable = [t for t in tids_by_size[size] if t in row]
-        rows = np.array([row[t] for t in usable])
-        X = np.asarray(vecs[rows], dtype=np.float32)
-        finite = np.isfinite(X).all(axis=1)
-        usable = [t for t, f in zip(usable, finite) if f]
-        Xparts.append(X[finite])
-        keys += [(size, t) for t in usable]
-    X = np.vstack(Xparts)
-    X = StandardScaler().fit_transform(X)
-    k = min(pca_dim, X.shape[1], X.shape[0])
-    Z = PCA(n_components=k, random_state=seed, svd_solver="randomized").fit_transform(X)
-    Z = StandardScaler().fit_transform(Z).astype(np.float32)
-    if cpath:
-        tmp = f"{cpath}.tmp{os.getpid()}.npz"
-        np.savez(tmp, Z=Z, k=k,
-                 key_size=np.array([s for s, _ in keys], dtype=np.int16),
-                 key_tid=np.array([t for _, t in keys]))
-        os.replace(tmp, cpath)
-        print(f"  joint-PCA: computed + cached {os.path.basename(cpath)} "
-              f"({Z.shape[0]} problems, k={k})")
-    return {key: Z[i] for i, key in enumerate(keys)}, k
-
-
-def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
-    """Bot winrate in a shared column layout across boards (the bots are the same;
-    a bot's logit pass-rate means the same thing on either board). Common file set =
-    intersection across boards; clip→logit→pooled mean-impute→drop pooled-zero-var→
-    pooled z-score. Returns {(size, tid): vec}, n_cols."""
-    import glob
-    filesets = []
-    for size in sizes:
-        adir = os.path.join(PROJECT_ROOT, "attempts", str(size))
-        filesets.append({os.path.basename(f)
-                         for f in glob.glob(os.path.join(adir, "*.txt"))})
-    common = sorted(set.intersection(*filesets))
-    lo, hi = clip, 1.0 - clip
-    keys, mat = [], []
-    for size in sizes:
-        adir = os.path.join(PROJECT_ROOT, "attempts", str(size))
-        tidset = set(tids_by_size[size])
-        cols = []
-        for fn in common:
-            d = {}
-            with open(os.path.join(adir, fn)) as fh:
-                for line in fh:
-                    p = line.split()
-                    if len(p) != 2:
-                        continue
-                    t, v = p
-                    if t not in tidset:
-                        continue
-                    try:
-                        pv = min(max(float(v), lo), hi)
-                    except ValueError:
-                        continue
-                    d[t] = float(np.log(pv / (1.0 - pv)))
-            cols.append(d)
-        usable = [t for t in tids_by_size[size] if any(t in c for c in cols)]
-        for t in usable:
-            keys.append((size, t))
-            mat.append([cols[j].get(t, np.nan) for j in range(len(common))])
-    X = np.array(mat, dtype=np.float64)
-    colmean = np.nanmean(X, axis=0)
-    nan = np.where(np.isnan(X))
-    X[nan] = np.take(colmean, nan[1])
-    keep = np.nanstd(X, axis=0) > 1e-9
-    X = X[:, keep]
-    X = (X - X.mean(0)) / X.std(0)
-    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, int(keep.sum())
-
-
-def load_joint_move_features(sizes, tids_by_size):
-    """Candidate-move evaluation features (the winning move + its 9 best alternatives), pooled
-    and z-scored across boards (a feature means the same on 9×9 and 13×13). Reads the per-size
-    RAW caches written by pipeline.cache_move_features and applies the pooled column z-score
-    here — so the cache is reusable across tid subsets, like load_joint_bot_winrate. Returns
-    {(size, tid): vec}, n_cols. Raises with a build hint if a cache is missing."""
-    from auxiliary.inspect_activation_signals import CACHE_DIR
-    keys, rows, ncol = [], [], None
-    for size in sizes:
-        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
-        if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"move-feature cache {path} missing — run "
-                f"`./.venv/bin/python3 -m pipeline.cache_move_features` first")
-        d = np.load(path, allow_pickle=False)
-        feats = d["feats"]                                # decompress ONCE (NpzFile re-reads per access)
-        ncol = int(feats.shape[1])
-        row = {t: i for i, t in enumerate(d["tids"].tolist())}
-        for t in tids_by_size[size]:
-            i = row.get(t)
-            if i is not None:
-                keys.append((size, t))
-                rows.append(feats[i].copy())              # detach from `feats`'s base so it can free
-    X = np.array(rows, dtype=np.float64)
-    X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
-    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, ncol
 
 
 def run_pooled(args, device):

@@ -90,18 +90,14 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-# NOTE (prototype tech-debt): these live in auxiliary/ today. When this backend stabilizes,
-# promote load_joint_*/build_profiles + the activation-cache helpers into utils/.
-from auxiliary.compare_rating_models import (  # noqa: E402
-    build_profiles, load_joint_activations, load_joint_bot_winrate,
-    load_joint_move_features,
+from utils.rating_features import (  # noqa: E402
+    _cache_ids_path, build_profiles, load_first_time_attempts,
+    load_joint_activations, load_joint_bot_winrate, load_joint_move_features,
 )
-from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
-from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6

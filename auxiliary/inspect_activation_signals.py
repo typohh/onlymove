@@ -49,22 +49,18 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.board_render import load_lookup, render_problem  # noqa: E402
 from pipeline.build_embedding import _load_correct_vec  # noqa: E402
+# CACHE_DIR + the correct-vector cache path helpers are the shared rating-feature cache;
+# _build_cache below writes the cache those helpers point at.
+from utils.rating_features import (  # noqa: E402
+    CACHE_DIR, _cache_ids_path, _cache_vecs_path,
+)
 
 N_LAYERS = 18
 CHANNELS_PER_LAYER = 384
 N_FEATS = N_LAYERS * CHANNELS_PER_LAYER  # 6912
-CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
 # ---- correct-vector cache ---------------------------------------------
-
-def _cache_vecs_path(size):
-    return os.path.join(CACHE_DIR, f"correct_vecs_{size}.npy")
-
-
-def _cache_ids_path(size):
-    return os.path.join(CACHE_DIR, f"correct_ids_{size}.json")
-
 
 def _load_chunk(task):
     """Worker: load the correct-move vectors for a chunk of problems.

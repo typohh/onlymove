@@ -78,7 +78,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.compare_rank_surveys import rank_to_scalar  # noqa: E402
+from utils.rank_surveys import rank_to_scalar  # noqa: E402
 from utils.fit_rank_curves import fit_user_rating, interp_extrap_vec  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---

@@ -35,8 +35,6 @@ import argparse
 import os
 import re
 import sys
-from collections import defaultdict
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -47,103 +45,22 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.calibrate_handicap_ranks import RANK_PRIOR as CALIBRATED_RANK  # noqa: E402
-
-SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
-RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
-
-SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA"]
-
-# INSERT INTO "rank_surveys" ("id","user_id","server","rank","created_at")
-#   VALUES(123,'<redacted-user-id>…','OGS','5k','2025-09-12T…');
-RANK_SURVEY_RE = re.compile(
-    r"INSERT INTO [\"`]?rank_surveys[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
-    r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'\);"
+# Survey/attempts loaders, the rank↔scalar convention, and the SQL row regexes are shared with
+# the pipeline; they live in utils.rank_surveys and are re-exported here for this module's
+# other callers.
+from utils.rank_surveys import (  # noqa: E402
+    FULL_ATTEMPT_RE, RANK_SURVEY_RE, SERVERS, SQL_PATH_DEFAULT,
+    latest_per_user_server, load_attempts_for_users, load_rank_surveys,
+    rank_to_scalar, scalar_to_rank,
 )
+
+RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 
 HUMANV0_RE = re.compile(r"humanv0_(\d{1,2})([kd])$")
 # Strong-net (kata1 b18c384nbt) at fixed temperature corresponds to spec_t<temp>
 # in calibrate_handicap_ranks BOT_CONFIGS. user_profiles_final.csv writes the
 # temp without trailing zeros ("_t1" not "_t1.0"), so we normalize on lookup.
 SPECNET_RE = re.compile(r"kata1-b18c384nbt-.*_t([\d.]+)$")
-
-
-# ---------------------------------------------------------------------------
-# Rank string ↔ scalar
-# ---------------------------------------------------------------------------
-
-def rank_to_scalar(s):
-    """1k=0, 2k=-1, ..., 25k=-24; 1d=1, 2d=2, ..., 9d=9. No zero gap."""
-    if not isinstance(s, str):
-        return None
-    s = s.strip().lower()
-    m = re.fullmatch(r"(\d{1,2})([kd])", s)
-    if not m:
-        return None
-    n = int(m.group(1))
-    return (1 - n) if m.group(2) == "k" else n
-
-
-def scalar_to_rank(v):
-    if v is None or not np.isfinite(v):
-        return "?"
-    # Nearest-integer kyu/dan label.
-    k = int(round(v))
-    if k <= 0:
-        return f"{1 - k}k"
-    return f"{k}d"
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-
-def load_rank_surveys(sql_path):
-    """Return DataFrame [user_id, server, rank, rank_scalar, created_at].
-    Survey duplicates per (user, server) are kept; downstream code picks
-    the most recent."""
-    if not os.path.exists(sql_path):
-        raise FileNotFoundError(
-            f"{sql_path} not found. Run `./.venv/bin/python3 "
-            f"-m pipeline.fetch_database` first.")
-    rows = []
-    with open(sql_path, "r") as f:
-        for line in f:
-            m = RANK_SURVEY_RE.match(line)
-            if not m:
-                continue
-            user_id, server, rank, created_at = m.groups()
-            rows.append({
-                "user_id": user_id,
-                "server": server,
-                "rank": rank,
-                "rank_scalar": rank_to_scalar(rank),
-                "created_at": created_at,
-            })
-    return pd.DataFrame(rows)
-
-
-FULL_ATTEMPT_RE = re.compile(
-    r"INSERT INTO [\"`]?tsumego_reports[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
-    r"\d+,'([^']+)','([^']+)',([01]),'[^']+'(?:,(\d+))?"
-)
-
-
-def load_attempts_for_users(sql_path, user_ids):
-    """Parse all tsumego_reports rows belonging to a set of full user_ids.
-    Returns dict (user_prefix8, size) -> list of (tsumego_id, success)."""
-    targets = set(user_ids)
-    out = defaultdict(list)
-    with open(sql_path, "r") as f:
-        for line in f:
-            m = FULL_ATTEMPT_RE.match(line)
-            if not m:
-                continue
-            user_id, tid, success_str, size_str = m.groups()
-            if user_id not in targets:
-                continue
-            size = int(size_str) if size_str else 9
-            out[(user_id[:8], size)].append((tid, int(success_str)))
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -324,16 +241,6 @@ def fit_theta(attempts, params, theta_lo=-3.0, theta_hi=10.0):
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
-
-def latest_per_user_server(surveys):
-    """Pick the latest declaration per (user, server) so multi-month
-    re-surveys collapse to the user's current self-assessment."""
-    if surveys.empty:
-        return surveys
-    surveys = surveys.sort_values("created_at")
-    return (surveys.groupby(["user_id", "server"], as_index=False)
-            .tail(1).reset_index(drop=True))
-
 
 def build_per_user_table(surveys, attempts_by_user_size, params_by_size,
                          sizes, min_attempts):

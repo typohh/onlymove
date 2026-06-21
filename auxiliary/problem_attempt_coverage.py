@@ -28,7 +28,6 @@ Usage:
 
 import argparse
 import os
-import sqlite3
 import sys
 
 import pandas as pd
@@ -37,28 +36,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
-
-
-def load_first_time_attempts():
-    """Return a DataFrame of first-time attempts: one row per (user_id, problem),
-    columns [user_id, problem, success, size]."""
-    if not os.path.exists(SQL_PATH):
-        sys.exit(f"Missing {SQL_PATH}. Run `python -m pipeline.fetch_database` first.")
-    con = sqlite3.connect(":memory:")
-    with open(SQL_PATH, "r") as f:
-        con.executescript(f.read())
-    df = pd.read_sql_query(
-        "SELECT user_id, problem, success, size, created_at "
-        "FROM tsumego_reports WHERE is_repeat = 0",
-        con)
-    con.close()
-    # Deduplicate to the earliest attempt per (user, problem).
-    df = (df.sort_values("created_at")
-            .drop_duplicates(["user_id", "problem"], keep="first")
-            .reset_index(drop=True))
-    df["success"] = df["success"].astype(int)
-    return df
+from utils.rating_features import load_first_time_attempts  # noqa: E402
 
 
 def qualified_users(df, y):
