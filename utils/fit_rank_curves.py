@@ -1,7 +1,7 @@
 """Shared survey-calibration helpers for the rank-curve / rating→EGF fits.
 
 This is a stateless helper library (no CLI / no `main`): it provides the pieces
-the production v2 rank-mapping (`pipeline.map_rating_v2_to_egf`) and a couple of
+the production v2 rank-mapping (`pipeline.map_rating_to_egf`) and a couple of
 auxiliary survey tools share.
 
 Concepts (internal rank = EGF rank is the hub / common unit):

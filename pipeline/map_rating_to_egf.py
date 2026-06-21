@@ -1,7 +1,7 @@
 """Map the v2 combined rating (b_p, in ability-θ units) to EGF rank space, and
 fit the server↔EGF rank couplings — SELF-CONTAINED, no v1 artifacts required.
 
-The v2 model (pipeline.train_rating_v2) puts problem difficulty b_p and user
+The v2 model (pipeline.train_rating) puts problem difficulty b_p and user
 ability on ONE shared logit scale across both boards, so the rating→rank curve
 is a SINGLE shared curve. This step produces, from rank_surveys alone:
 
@@ -274,7 +274,7 @@ def main():
         merged_ratings.update(ratings_by_size[s])   # b_p is one shared scale
         merged_slopes.update(slopes_by_size[s])     # a_p, same shared scale
     if not merged_ratings:
-        sys.exit("No v2 per-problem ratings found — run train_rating_v2 first.")
+        sys.exit("No v2 per-problem ratings found — run train_rating first.")
 
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
 

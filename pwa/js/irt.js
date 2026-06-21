@@ -17,7 +17,7 @@ import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 // The margin the PWA serves and anchors at: a problem's "rating" is the ability
 // at which the user clears it CALIBRATION_P of the time (matches the backend
-// fit_user_rating / fit_rank_curves and map_rating_v2_to_egf).
+// fit_user_rating / fit_rank_curves and map_rating_to_egf).
 export const CALIBRATION_P = 0.8;
 
 // Guessing floors are shipped raw by package_for_pwa. Clamp below CALIBRATION_P

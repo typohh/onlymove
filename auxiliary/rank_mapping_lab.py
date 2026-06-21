@@ -37,7 +37,7 @@ from auxiliary.fit_statistics_shapes import fit_shape  # noqa: E402
 from utils.fit_rank_curves import (  # noqa: E402
     fit_user_rating, build_server_curves,
     ordinal_nll_vec, interp_extrap_vec, _unpack_thresholds)
-from pipeline.map_rating_v2_to_egf import load_v2_ratings  # noqa: E402
+from pipeline.map_rating_to_egf import load_v2_ratings  # noqa: E402
 
 SIZES = [9, 13]
 EGF_LO, EGF_HI = -20, 10

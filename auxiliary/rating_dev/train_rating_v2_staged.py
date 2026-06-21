@@ -67,10 +67,10 @@ Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships
 Defaults are the production config (even-error DRO on); the other knobs are for experiments.
 
 Usage:
-  ./.venv/bin/python3 -m pipeline.train_rating_v2 [--epochs 300] [--anchor-weight 0.2] ...
-  ./.venv/bin/python3 -m pipeline.train_rating_v2 --no-dro-skill   # plain-BCE ERM baseline
+  ./.venv/bin/python3 -m pipeline.train_rating [--epochs 300] [--anchor-weight 0.2] ...
+  ./.venv/bin/python3 -m pipeline.train_rating --no-dro-skill   # plain-BCE ERM baseline
   # compare objectives without writing CSVs (per-bin logloss + held-out + survey ρ):
-  ./.venv/bin/python3 -m pipeline.train_rating_v2 --holdout-problem-frac 0.1 [--no-dro-skill]
+  ./.venv/bin/python3 -m pipeline.train_rating --holdout-problem-frac 0.1 [--no-dro-skill]
 """
 
 import argparse
@@ -106,7 +106,7 @@ SIZES = [9, 13]
 # total bot mass and drowning the human attempts.
 ANCHOR_REF_RUNGS = 2
 # logit of the serving/anchoring success rate (80%): rating = the ability θ at which
-# P(clear) = CALIBRATION_P. Single source of truth shared with the PWA + map_rating_v2_to_egf.
+# P(clear) = CALIBRATION_P. Single source of truth shared with the PWA + map_rating_to_egf.
 CLEAR_LOGIT = float(np.log(CALIBRATION_P / (1.0 - CALIBRATION_P)))
 # Effective support of the success curve in gap (= slope·(ability−rating)) logits: past ±ZCLIP the
 # sigmoid is within ~0.7% of its asymptote, so a larger gap carries no curve information (and extreme

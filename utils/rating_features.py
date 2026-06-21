@@ -8,7 +8,7 @@ helpers those feature loaders read.
 
 These functions used to live in auxiliary/ (the research area) and were imported back into the
 pipeline; they are leaf utilities (no auxiliary/ or pipeline/ imports), so both the production
-trainer (pipeline.train_rating_v2) and the experiment scripts (auxiliary.rating_dev.*) import
+trainer (pipeline.train_rating) and the experiment scripts (auxiliary.rating_dev.*) import
 them from here. The auxiliary modules that historically defined them now re-export from here so
 their other callers are unaffected.
 """

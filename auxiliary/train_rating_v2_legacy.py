@@ -1,6 +1,6 @@
 """LEGACY combined cross-board MLP-2PL difficulty model (per-problem residual + even-error DRO +
 fixed bot floor). PRESERVED for future development — the live rating pipeline is now the anchored
-feature→4PL net in pipeline/train_rating_v2.py (no per-problem residuals; validated to match this
+feature→4PL net in pipeline/train_rating.py (no per-problem residuals; validated to match this
 model's survey-rank accuracy). Run with `python -m auxiliary.train_rating_v2_legacy`.
 
 Writes under ratings_v2/ in the same format package_for_pwa ships (output format matches what
@@ -38,7 +38,7 @@ The slope-dependent 80% correction is load-bearing: under it a user clears exact
 problems whose rating == their ability theta for EVERY problem regardless of slope (a flat
 low-discrimination problem genuinely needs more ability to clear at 80% than its 50%-point
 implies). A monotone rating->rank map cannot recover this per-problem reordering, so it has
-to be built here. The EGF mapping (pipeline.map_rating_v2_to_egf) then anchors each user's
+to be built here. The EGF mapping (pipeline.map_rating_to_egf) then anchors each user's
 80%-clear rating -> EGF against these ratings (self-consistent — it re-derives the curve
 from whatever scalar we ship).
 
@@ -83,7 +83,7 @@ EPS = 1e-6
 SIZES = [9, 13]
 # logit of the serving/anchoring success rate (80%): the rating is the ability θ at which
 # P(clear) = CALIBRATION_P, i.e. (CLEAR_LOGIT − d)/a, NOT the 50%-point −d/a. Single source
-# of truth shared with the PWA + map_rating_v2_to_egf via fit_rank_curves.CALIBRATION_P.
+# of truth shared with the PWA + map_rating_to_egf via fit_rank_curves.CALIBRATION_P.
 CLEAR_LOGIT = float(np.log(CALIBRATION_P / (1.0 - CALIBRATION_P)))
 # Max per-problem guessing floor. Must stay < CALIBRATION_P so the 80%-clear anchor
 # logit((P*-c)/(1-c)) is finite; 0.78 leaves headroom below 0.80.

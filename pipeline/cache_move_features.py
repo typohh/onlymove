@@ -10,9 +10,9 @@ colour), sorts the moves by win probability, and keeps the WINNING move plus the
 alternatives. For each of those 10 moves it stores (logit win-prob, clipped score): a fixed
 20-dim raw feature vector per problem describing how sharply the best move stands out from its
 rivals — a difficulty signal orthogonal to the trunk activations and the bot-ladder win rates
-that train_rating_v2 already feeds.
+that train_rating already feeds.
 
-Output (one per board size), consumed by train_rating_v2 --move-features through
+Output (one per board size), consumed by train_rating --move-features through
 utils.rating_features.load_joint_move_features:
   activations/_signal_cache/move_evals_<size>.npz
       tids   (n,)      <U8   canonical problem id (orientation-invariant hash)
@@ -20,7 +20,7 @@ utils.rating_features.load_joint_move_features:
 
 The npz stores RAW features; the loader pools + z-scores them across boards at train time, so
 the cache is reusable across tid subsets. The tid set is the activation id cache for the size
-(activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_rating_v2 can
+(activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_rating can
 score. Run once per size (both cached by default):
 
   ./.venv/bin/python3 -m pipeline.cache_move_features [--sizes 9,13] [--workers N] [--force]

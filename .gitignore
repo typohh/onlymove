@@ -82,7 +82,7 @@ embeddings/joint/ica_stability.json
 /attempts/database.sql
 /attempts/database.sqlite
 
-# v2 rating pipeline output (pipeline.train_rating_v2 / map_rating_v2_to_egf):
+# v2 rating pipeline output (pipeline.train_rating / map_rating_to_egf):
 # regenerable, and model_v2.pt is a multi-MB binary. The v2 code is tracked; its
 # outputs are not (mirrors how the heavy inputs stay but packaged outputs don't).
 /ratings_v2/

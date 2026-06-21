@@ -4,7 +4,7 @@
 whole EGF cohort and compares several rating backends side by side, with the focus on
 the strong tail where the 4PL rewrite over-rates (see the project memory).
 
-For each `label=dir` config it reproduces EXACTLY what `pipeline.map_rating_v2_to_egf`
+For each `label=dir` config it reproduces EXACTLY what `pipeline.map_rating_to_egf`
 does, end to end, so the comparison includes the rating→rank mapping (NOT a stale
 shipped curve):
   1. load that config's per-problem ratings/slopes from <dir>/<size>/*.csv,
@@ -42,14 +42,14 @@ from auxiliary.compare_rank_surveys import (  # noqa: E402
     SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys,
 )
-from pipeline.map_rating_v2_to_egf import (  # noqa: E402
+from pipeline.map_rating_to_egf import (  # noqa: E402
     SIZES, fit_joint_shared, load_v2_ratings, load_v2_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 
-# map_rating_v2_to_egf argparse defaults — keep in lockstep so this scores the
+# map_rating_to_egf argparse defaults — keep in lockstep so this scores the
 # SAME curve the pipeline would ship for each config.
 MAP_DEFAULTS = dict(egf_lo=-20, egf_hi=10, lam=5.0, rank_padding=2,
                     extend_to=9, min_server_samples=3)
@@ -87,7 +87,7 @@ def user_ratings_for_config(v2_dir, surveys, attempts):
 
 
 def evaluate(v2_dir, surveys, attempts):
-    """Reproduce map_rating_v2_to_egf and return per-EGF-declaration predicted vs
+    """Reproduce map_rating_to_egf and return per-EGF-declaration predicted vs
     declared as a DataFrame, plus the fitted curve span."""
     user_rating = user_ratings_for_config(v2_dir, surveys, attempts)
     if user_rating is None:

@@ -1,10 +1,10 @@
 """How closely does our mapped rank match each user's self-declared rank?
 
 This is the end-to-end calibration check on the SHIPPED v2 mapping (NOT a refit):
-it takes the curves `map_rating_v2_to_egf` already wrote and asks, per survey
+it takes the curves `map_rating_to_egf` already wrote and asks, per survey
 user, "does the rank we'd show them line up with what they say they are?".
 
-Pipeline mirrored from the PWA / map_rating_v2_to_egf (so the numbers are what a
+Pipeline mirrored from the PWA / map_rating_to_egf (so the numbers are what a
 user actually sees):
 
   1. R = the user's 80%-clear v2-rating, pooled across boards
@@ -59,7 +59,7 @@ from auxiliary.compare_rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys, scalar_to_rank,
 )
-from pipeline.map_rating_v2_to_egf import (  # noqa: E402
+from pipeline.map_rating_to_egf import (  # noqa: E402
     SIZES, load_v2_ratings, load_v2_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
@@ -276,7 +276,7 @@ def main():
         merged_ratings.update(load_v2_ratings(args.v2_dir, s))
         merged_slopes.update(load_v2_slopes(args.v2_dir, s))
     if not merged_ratings:
-        sys.exit("No v2 per-problem ratings — run train_rating_v2 first.")
+        sys.exit("No v2 per-problem ratings — run train_rating first.")
 
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
 

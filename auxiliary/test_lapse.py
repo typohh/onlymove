@@ -1,4 +1,4 @@
-"""Held-out A/B for a GLOBAL 4PL lapse (fat-finger) rate fit INSIDE train_rating_v2's
+"""Held-out A/B for a GLOBAL 4PL lapse (fat-finger) rate fit INSIDE train_rating's
 RatingV2, vs the current pure-3PL fit (lapse off).
 
 Two questions (the ones the user asked):
@@ -8,7 +8,7 @@ Two questions (the ones the user asked):
   2. Does it IMPROVE held-out prediction — overall, and specifically in the saturated regime
      (problems trivially easy for the user) where the cap is supposed to act?
 
-Same data prep + regularization as pipeline.train_rating_v2.main(); the ONLY difference between
+Same data prep + regularization as pipeline.train_rating.main(); the ONLY difference between
 arms is RatingV2(learn_lapse=...). Single-pass mean-BCE (no DRO) for speed — the lapse is
 identified by the data term, present in both passes. Held out by attempt ROW (85/15), evaluated
 on val rows whose profile is in train (so ability is estimable; identical disadvantage to both
@@ -32,7 +32,7 @@ from auxiliary.compare_rating_models import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate)
 from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
 from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
-from pipeline.train_rating_v2 import (  # noqa: E402
+from pipeline.train_rating import (  # noqa: E402
     CALIBRATION_P, EPS, SIZES, clear_logit_vec)
 from auxiliary.train_rating_v2_legacy import (  # noqa: E402  (the preserved residual+DRO model)
     MAX_FLOOR, ZCLIP, RatingV2, dyadic_tail_bins, load_bot_floor)
@@ -207,7 +207,7 @@ def fit(data, args, device, learn_lapse, lapse_init, seed, trace=False, freeze=F
     of learning it. free_floor_scale=True replaces the prior-anchored floor head with a FREE
     global floor scale γ (init floor_scale_init) — the 'does the floor collapse?' test.
     With args.dro the human term is the production two-pass base-rate-centered 2D group-DRO
-    (rating × relative-gap dyadic bins) ported from train_rating_v2.main — the objective that
+    (rating × relative-gap dyadic bins) ported from train_rating.main — the objective that
     up-weights the saturated far-above-rank cells where the lapse acts (the fair test)."""
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -314,7 +314,7 @@ def fit(data, args, device, learn_lapse, lapse_init, seed, trace=False, freeze=F
     m = train_one(None, "mean")
     if args.dro:
         # Bin TRAIN rows by pass-1 80%-clear rating (dyadic) × relative-gap z (dyadic), exactly
-        # like train_rating_v2.main; base-rate loss per cell on TRAIN rows only (no val leak).
+        # like train_rating.main; base-rate loss per cell on TRAIN rows only (no val leak).
         m.eval()
         with torch.no_grad():
             allk = torch.arange(data["n_keys"], device=device)

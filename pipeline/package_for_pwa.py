@@ -29,7 +29,7 @@ EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
 
 # Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
-# pipeline.train_rating_v2 + pipeline.map_rating_v2_to_egf) is the only rating
+# pipeline.train_rating + pipeline.map_rating_to_egf) is the only rating
 # backend — package_for_pwa is the single writer of pwa/tsumegos/ and always
 # reads ratings_v2/. RATING_MODEL_TAG is stamped into embedding_meta.json as
 # `rating_model` for provenance (the PWA does not branch on it).
@@ -37,7 +37,7 @@ RATINGS_ROOT = "ratings_v2"
 RATING_MODEL_TAG = "v2"
 
 # Rating-to-rank mapping. Each problem's raw rating r (the v2 model's 80%-clear
-# rating, from pipeline.train_rating_v2) is mapped to a true-handicap-stones
+# rating, from pipeline.train_rating) is mapped to a true-handicap-stones
 # axis via r = A·exp(k·x_handi) + C, then linearly to the PWA's 0..1 axis
 # where x = -17 (true 20k) -> 0 and x = +11 (true 9d) -> 1. The PWA axis is
 # thus linear in handicap stones, which is the underlying definition of rank.
@@ -74,7 +74,7 @@ RATING_FLOOR_MARGIN = 0.1
 
 # package_for_pwa is rank-agnostic: it ships one raw black-box rating per
 # problem and never converts to ranks. The rating→rank curve (M) is fitted and
-# written into ratings_v2/rating_to_rank.json by pipeline.map_rating_v2_to_egf
+# written into ratings_v2/rating_to_rank.json by pipeline.map_rating_to_egf
 # (and copied across by this script); the client fetches it and does all
 # rating→rank conversion itself.
 
@@ -594,7 +594,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
 def copy_curve(output_dir):
     """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
     backend RATINGS_ROOT into the served pwa/tsumegos/. package_for_pwa is the
-    SINGLE writer of pwa/tsumegos/: map_rating_v2_to_egf writes the curve into
+    SINGLE writer of pwa/tsumegos/: map_rating_to_egf writes the curve into
     ratings_v2/, and this copies it across. Returns the list of copied filenames.
     Every source is REQUIRED — the client cannot rank a problem without the curve and
     aborts boot without the population constants — so a missing source aborts the run
@@ -604,11 +604,11 @@ def copy_curve(output_dir):
     os.makedirs(served, exist_ok=True)
     copied = []
     # rating_to_rank.json + rank_map.json: the survey-calibrated rating→rank curve M
-    # (map_rating_v2_to_egf). population_constants.json: the fitted model constants the
+    # (map_rating_to_egf). population_constants.json: the fitted model constants the
     # client requires (fit_population_constants). All three are mandatory.
     required = {
-        "rating_to_rank.json": "map_rating_v2_to_egf",
-        "rank_map.json": "map_rating_v2_to_egf",
+        "rating_to_rank.json": "map_rating_to_egf",
+        "rank_map.json": "map_rating_to_egf",
         "population_constants.json": "fit_population_constants",
     }
     for name, producer in required.items():
@@ -652,7 +652,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         raise FileNotFoundError(f"no tsumegos dir at {TSUMEGOS_DIR}")
     ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
     if not os.path.exists(ratings_csv):
-        raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating_v2")
+        raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating")
 
     inputs_hash = size_inputs_hash(board_size, reorder_by_sgf)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
@@ -689,7 +689,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
 
     # 1. Ratings map: one raw black-box rating per problem. package_for_pwa is
     # rank-agnostic — the client converts each rating to a rank with the
-    # survey-calibrated curve map_rating_v2_to_egf writes to
+    # survey-calibrated curve map_rating_to_egf writes to
     # pwa/tsumegos/rating_to_rank.json (no rank_index, no /29 here).
     tsumego_ratings_df = pd.read_csv(ratings_csv)
     tsumego_ratings_df = tsumego_ratings_df.sort_values(
@@ -705,19 +705,19 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # its rank estimator AND as the selection weight (∝ Fisher information a_p²).
     quality_csv = os.path.join(RATINGS_DIR, "tsumego_quality_final.csv")
     if not os.path.exists(quality_csv):
-        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating_v2")
+        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating")
     tsumego_slope_df = pd.read_csv(quality_csv)
     tsumego_slope_map = dict(zip(tsumego_slope_df['tsumego_id'],
                                  tsumego_slope_df['quality'].astype(float)))
 
     # 2b. Floor map: the per-problem 3PL guessing floor c_p (the `floor` column in
-    # tsumego_floor_final.csv, written by train_rating_v2 from the bot ladder).
+    # tsumego_floor_final.csv, written by train_rating from the bot ladder).
     # Shipped RAW as `floor`; the client uses it as the lower asymptote of the
     # per-attempt success curve: P = floor + (1-floor)·σ(slope·(R-rank)+κ(floor)).
     # Required: v2 is the only backend and always writes it.
     floor_csv = os.path.join(RATINGS_DIR, "tsumego_floor_final.csv")
     if not os.path.exists(floor_csv):
-        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating_v2")
+        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating")
     tsumego_floor_df = pd.read_csv(floor_csv)
     tsumego_floor_map = dict(zip(tsumego_floor_df['tsumego_id'],
                                  tsumego_floor_df['floor'].astype(float)))

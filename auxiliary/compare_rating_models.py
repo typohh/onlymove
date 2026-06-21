@@ -476,7 +476,7 @@ def main():
     ap.add_argument("--ee-bins", type=int, default=10,
                     help="Number of equal-count rank bins the robust objectives group over.")
     ap.add_argument("--ee-slope", action="store_true",
-                    help="Use a 2PL slope head in --even-error (matches train_rating_v2; "
+                    help="Use a 2PL slope head in --even-error (matches train_rating; "
                          "default is 1PL difficulty-only, which is seed-invariant for lin).")
     ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"),
                     help="Backend rating dir (the old mixture-of-sigmoids 'ratings/' was "

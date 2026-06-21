@@ -47,7 +47,7 @@ All constants are board-INDEPENDENT (the cold-solve scale is shared across sizes
 so a single JSON serves both boards.
 
 Needs the backend ratings_v2/<size>/ 3PL params (tsumego_ratings_final.csv,
-tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating_v2)
+tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating)
 and attempts/database.sqlite. It reads the backend directly, NOT the served
 pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
 upstream of it depends on the dist artifacts. No GPU, not part of the in-order
@@ -228,13 +228,13 @@ def cold_solve_logit(theta, rating, slope, floor):
 
 
 # Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is no longer fit here.
-# pipeline.train_rating_v2 LEARNS it jointly with the rating model (a single global ceiling on
+# pipeline.train_rating LEARNS it jointly with the rating model (a single global ceiling on
 # the success curve) and writes it to ratings_v2/rating_constants.json; main() reads it through
 # into population_constants.json so the JS-bundle contract is unchanged (see read_rating_lapse).
 
 
 def read_rating_lapse(ratings_dir):
-    """The global ceiling λ produced by the rating model (train_rating_v2 →
+    """The global ceiling λ produced by the rating model (train_rating →
     ratings_v2/rating_constants.json: {"fat_finger_rate": λ}). Returns float or None."""
     path = os.path.join(ratings_dir, "rating_constants.json")
     if not os.path.exists(path):
@@ -617,14 +617,14 @@ def main():
     out = dict(DEFAULTS)
     out["retention"] = dict(DEFAULTS["retention"])
 
-    # --- Fat-finger (lapse) rate: PRODUCED by the rating model (train_rating_v2), read through ---
+    # --- Fat-finger (lapse) rate: PRODUCED by the rating model (train_rating), read through ---
     lam = read_rating_lapse(args.ratings_dir)
     if lam is not None:
         out["fat_finger_rate"] = round(lam, 4)
         print(f"Fat-finger (lapse) rate from the rating model: {out['fat_finger_rate']} "
-              f"(ratings_v2/rating_constants.json — train_rating_v2 learns it jointly)")
+              f"(ratings_v2/rating_constants.json — train_rating learns it jointly)")
     else:
-        print(f"No rating_constants.json (run train_rating_v2 first); "
+        print(f"No rating_constants.json (run train_rating first); "
               f"keeping default fat_finger_rate {out['fat_finger_rate']}")
 
     # --- Time / review bias ---
@@ -652,7 +652,7 @@ def main():
     print("Fitting time-adjusted-rank constants (survey-validated, rank-residualized) ...")
     apply_m = load_rating_to_rank(args.ratings_dir)
     if apply_m is None:
-        print("  WARNING: ratings_v2/rating_to_rank.json missing (run map_rating_v2_to_egf "
+        print("  WARNING: ratings_v2/rating_to_rank.json missing (run map_rating_to_egf "
               "first) — keeping default time_adjust block")
     ta_alpha, ta_g0, ta_g1, ta_info = fit_time_adjust(
         by_user, params, load_surveys(args.db), apply_m, args.survey_recenter)

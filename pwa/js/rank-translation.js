@@ -23,7 +23,7 @@ import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } fro
 // rank_map.json is inlined at build time (like rating_to_rank.json in
 // rank-decomposition.js / src/index.js), so it's never fetched at runtime —
 // build.mjs drops the served copy from dist. A curve re-fit
-// (map_rating_v2_to_egf) is published by rebuilding + deploying, same as the
+// (map_rating_to_egf) is published by rebuilding + deploying, same as the
 // rating→rank curve it ships alongside.
 import RANK_MAP from '../tsumegos/rank_map.json';
 
