@@ -613,8 +613,12 @@ def main():
     args.floor_resid_l2 = 4.0; args.floor_resid_epochs = 100; args.resid_cols = "diff,slope,floor"
     args.global_slope = False; args.global_slope_fixed = None
     args.per_problem = False; args.lapse_human_only = False
-    # humanv0 bot-anchor coverage examinees ON
-    args.anchors = True; args.anchor_ranks = "20k,9d"; args.anchor_weight = 0.2
+    # bot-anchor coverage examinees OFF: the 20k/9d anchors STEEPEN the per-problem slope (mean
+    # ~1.38 vs ~1.23 human-only) without any held-out-logloss benefit (Δ ~+0.003, within seed
+    # noise) — i.e. they impose a bot-derived slope bias the human data doesn't support. They do
+    # prop up the survey-ρ rank metric (~+0.028) via that steeper slope, but the honest
+    # generalization metric is indifferent, so the model is fit on human attempts alone.
+    args.anchors = False; args.anchor_ranks = "20k,9d"; args.anchor_weight = 0.2
     args.anchor_fixed_mass = True; args.anchor_slope_discount = False
     # production: no held-out, no eval, plain ERM (all research objectives OFF)
     args.holdout_problem_frac = 0.0; args.holdout_keep_anchors = False
