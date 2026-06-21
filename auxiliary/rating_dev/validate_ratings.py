@@ -277,11 +277,11 @@ def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
                       f"spread {flat[2]:.4f}  (rating bins; lower = flatter held-out error)")
 
     if not no_survey:
+        # weighted (non-time-adjusted) survey rho is still computed + returned in `out` (and the
+        # per-server breakdown drives the time-adjustment), but no longer PRINTED — the time-adjusted
+        # rho is the metric that matters; the raw weighted number was misleading noise next to it.
         wrho, per, ta = survey_weighted_rho(rat, slp)
         out.update(survey_rho=wrho, survey_per_server=per, time_adjust=ta)
-        print(f"  survey rho (weighted)    : {wrho:.4f}  (per-server: "
-              + " ".join(f"{s}:{r:.2f}(n{n})" for s, (n, r) in sorted(per.items(), key=lambda kv: -kv[1][0]))
-              + ")")
         if ta is not None and "rho" in ta:
             print(f"  survey rho (time-adjusted): {ta['rho']:.4f} cross-fitted vs base {ta['rho_base']:.4f} "
                   f"(Δ {ta['rho'] - ta['rho_base']:+.4f}; in-sample {ta['rho_insample']:.4f}) | "

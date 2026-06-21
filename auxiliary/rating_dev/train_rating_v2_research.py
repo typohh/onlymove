@@ -502,15 +502,17 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
-    ap.add_argument("--features", choices=["bw_act", "act", "bw"], default="bw_act",
+    ap.add_argument("--features", choices=["bw_act", "act", "bw", "move"], default="bw_act",
                     help="Feature ablation: bw_act = activations ⊕ bot-winrate columns (the "
                          "validated production set), act = activations only (tests whether the "
                          "bot ladder columns are a convenient-but-flawed SHORTCUT for the shape "
                          "heads — bot per-problem signals are ~50%% overdispersed vs humans, and "
                          "a free floor head loses to f(rating) on unseen problems despite having "
                          "the bot floor available), bw = bot columns only (attribution "
-                         "reference). The scorable problem set stays the SAME intersection in "
-                         "all modes — only the fed columns change.")
+                         "reference), move = candidate-move-eval columns only (implies "
+                         "--move-features; the all-combinations singleton). The scorable problem "
+                         "set stays the SAME act∩bw intersection in all modes — only the fed "
+                         "columns change.")
     ap.add_argument("--move-features", action=argparse.BooleanOptionalAction, default=False,
                     help="Append the candidate-move evaluation block to the --features set: for "
                          "each problem the winning move's win-prob+score plus those of its 9 best "
@@ -922,7 +924,7 @@ def main():
     key_idx = {key: i for i, key in enumerate(keys)}
     use_act = args.features in ("bw_act", "act")
     use_bw = args.features in ("bw_act", "bw")
-    use_mv = args.move_features
+    use_mv = args.move_features or args.features == "move"   # --features move = move block only
     # The move block is appended AFTER the bot columns and BEFORE the size indicator, so the
     # [act | bw | move | size] layout keeps --act-dropout (cols :k) and --bw-dropout (cols
     # k:k+nb) valid. Move features don't gate the scorable set (it stays act∩bw — see --features);
