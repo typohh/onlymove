@@ -866,7 +866,8 @@ async function computeServerStats(env) {
     { hi: 24 * 3600e3, label: '<1d' },
     { hi: 48 * 3600e3, label: '1–2d' },
     { hi: 72 * 3600e3, label: '2–3d' },
-    { hi: 120 * 3600e3, label: '3–5d' },
+    { hi: 96 * 3600e3, label: '3–4d' },
+    { hi: 120 * 3600e3, label: '4–5d' },
     { hi: Infinity, label: '5d+' },
   ];
   const recallDist = RECALL_BINS.map(b => ({ label: b.label, value: 0 }));
@@ -899,8 +900,8 @@ async function computeServerStats(env) {
   // Per-user attempts-per-active-day, binned: "how many users average ~5/day,
   // ~10/day, …". One sample per user (attempts ÷ distinct active days), so it
   // counts users, not user-days.
-  const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
-  const PER_USER_LABELS = ['1–5', '5–10', '10–20', '20–40', '40–80', '80+'];
+  const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 160], [160, Infinity]];
+  const PER_USER_LABELS = ['1–5', '5–10', '10–20', '20–40', '40–80', '80–160', '160+'];
   const attemptsPerUserDist = PER_USER_LABELS.map(label => ({ label, value: 0 }));
   for (const u of perUserActivity.values()) {
     const rate = u.attempts / u.days.size;

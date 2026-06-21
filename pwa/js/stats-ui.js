@@ -539,7 +539,7 @@ function computeUserCommunityBuckets(history, timeBins) {
     const binSeconds = (ms) => timeBins.findIndex(b => (ms / 1000) >= b.lo && (ms / 1000) < b.hi);
 
     // Attempts per active (UTC) day — every attempt counts, repeats included.
-    const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, Infinity]];
+    const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 160], [160, Infinity]];
     const days = new Set(recent.map(a => new Date(a.date).toISOString().slice(0, 10)));
     if (days.size) {
         const rate = recent.length / days.size;
@@ -565,7 +565,7 @@ function computeUserCommunityBuckets(history, timeBins) {
 
     // Recall time: shortest failure→next-attempt gap that is ≥12h, per problem.
     const RECALL_MIN_MS = 12 * 3600e3;
-    const RECALL_HI = [24, 48, 72, 120, Infinity].map(h => h * 3600e3);
+    const RECALL_HI = [24, 48, 72, 96, 120, Infinity].map(h => h * 3600e3);
     const seqByProblem = new Map();
     for (const a of recent) {
         if (!a.problemId) continue;
