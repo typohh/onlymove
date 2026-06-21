@@ -20,8 +20,9 @@ Gaussian; a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
 There are NO per-problem residuals: the shared net IS the model, so every problem — including the
 never-attempted and the one-sided — gets its 4PL straight from features. The only training target is
 the HUMAN first-time attempts (bot data enters only through the features). The feature trunk uses 0.3
-block dropout on the activation columns and 0.3 column dropout on each of the bot-winrate and
-candidate-move-eval columns (the backbone-overfit fix).
+block dropout on the activation columns, 0.3 column dropout on each of the bot-winrate and
+candidate-move-eval columns, and 0.3 dropout between the trunk's own hidden layers (the
+backbone-overfit fix — 0.3 dropout uniformly, blocks and trunk alike).
 
 The fit is a TWO-PHASE coordinate descent on the shared trunk:
   phase 1 — fit the per-problem difficulty (rating) and simultaneously LEARN a single global slope +
@@ -83,7 +84,7 @@ OUT_DIR = os.path.join(PROJECT_ROOT, "ratings_v2")
 SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
 DIFF_HIDDEN = (128, 64)          # shared feature→4PL trunk hidden layers
-DROPOUT = 0.1                    # trunk dropout
+DROPOUT = 0.3                    # trunk dropout (swept 0.0–0.5: 0.3 peaks survey-ρ + held-out flatness and sits at the held-out-LL floor; 0.1 was undertuned, costing ~0.011 held-out LL)
 ACT_DROPOUT = 0.3                # block dropout on the activation feature block (train only)
 BW_DROPOUT = 0.3                 # column dropout on the bot-winrate columns (train only)
 MOVE_DROPOUT = 0.3               # column dropout on the candidate-move-eval columns (train only)
