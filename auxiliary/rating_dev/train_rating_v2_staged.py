@@ -322,6 +322,14 @@ class RatingNet(nn.Module):
         self.free_heads = set()     # heads trainable this stage (live, data BCE)
         self.const_a = 1.0          # global slope before the slope stage
         self.const_c = 1.0 / 3.0    # global floor before the floor stage (0.333)
+        # --global-stage1: instead of HOLDING a not-yet-individualized head at a fixed constant,
+        # hold it at a LEARNABLE GLOBAL scalar that trains in phase 1 (jointly with the per-problem
+        # rating + the global ceiling). This auto-finds the self-consistent global slope/floor that
+        # the fixed-point search did by hand; phase 2 then frees the per-problem heads (which start
+        # from the net's own output, not the global). Gated by --global-stage1.
+        self.global_stage1 = False
+        self.gslope_raw = nn.Parameter(torch.tensor(float(np.log(np.expm1(self.const_a)))))
+        self.gfloor_raw = nn.Parameter(torch.tensor(float(np.log(self.const_c / (1 - self.const_c)))))
         if n_problems > 0:
             self.register_buffer("pin_b", torch.zeros(n_problems))
             self.register_buffer("pin_a", torch.ones(n_problems))
@@ -469,10 +477,15 @@ class RatingNet(nn.Module):
             # produced; the frozen ones are held at their stored per-problem values by a consistency
             # penalty in the LOSS (not here), so the final model is ONE coherent forward pass.
             not_yet = {1, 2} - self.trained_heads - self.free_heads
-            if 1 in not_yet:                                          # slope not yet trained
-                a = torch.full_like(a, self.const_a)
-            if 2 in not_yet:                                          # floor not yet trained
-                c = torch.full_like(c, self.const_c)
+            # held at a LEARNABLE GLOBAL scalar (--global-stage1, trains in phase 1) or a fixed const
+            g_a = (torch.nn.functional.softplus(self.gslope_raw) if self.global_stage1
+                   else b.new_tensor(self.const_a))
+            g_c = (torch.sigmoid(self.gfloor_raw) if self.global_stage1
+                   else b.new_tensor(self.const_c))
+            if 1 in not_yet:                                          # slope not yet individualized
+                a = g_a.expand_as(a)
+            if 2 in not_yet:                                          # floor not yet individualized
+                c = g_c.expand_as(c)
         return b, a, c
 
     def slope_unclamped(self, feat):
@@ -659,6 +672,13 @@ def main():
                     help="--staged variant: TWO phases instead of three — phase 1 trains rating "
                          "(slope/floor const), phase 2 frees slope AND floor TOGETHER (rating frozen). "
                          "Pair with --free-lapse to also train the ceiling in phase 2.")
+    ap.add_argument("--global-stage1", action="store_true",
+                    help="--staged: hold a not-yet-individualized head at a LEARNABLE GLOBAL scalar "
+                         "(trained) instead of a fixed const. With phase 1 = rating(+ceiling) and "
+                         "phase 2 = slope+floor, this trains a global slope + global floor + global "
+                         "ceiling jointly with the per-problem rating in phase 1 (auto-finding the "
+                         "self-consistent globals the fixed-point search did by hand), then phase 2 "
+                         "individualizes slope/floor. Use with --stage-plan 'rating+ceiling,slope+floor'.")
     ap.add_argument("--stage-plan", default=None,
                     help="--staged: explicit phase ORDER, overriding the default/--two-stage plan. "
                          "Comma-separated phases, each a '+'-joined subset of "
@@ -1272,6 +1292,11 @@ def main():
         m.staged = True
         m.const_a = float(args.stage_slope_const)
         m.const_c = float(args.stage_floor_const)
+        m.global_stage1 = args.global_stage1
+        if args.global_stage1:                                    # init the global scalars at the consts
+            with torch.no_grad():
+                m.gslope_raw.fill_(float(np.log(np.expm1(m.const_a))))
+                m.gfloor_raw.fill_(float(np.log(m.const_c / (1 - m.const_c))))
         print(f"\n=== STAGED | {'SEPARATE per-head trunks' if m.separate else 'SHARED trunk + pin-weight ' + str(args.stage_pin_weight)}"
               f" | plan {[sorted(HN[h] for h in s) + (['ceiling'] if tl else []) for s, _, tl in plan]}"
               f" | slope const {m.const_a:g} floor const {m.const_c:g} | {args.stage_epochs} ep/stage"
@@ -1354,7 +1379,13 @@ def main():
         for free_set, tag, train_lapse in plan:
             hb = train_stage(free_set, train_lapse, args.stage_epochs)
             freed = sorted(HN[h] for h in free_set) + (["ceiling"] if train_lapse else [])
+            if args.global_stage1:
+                freed += ["GLOBAL-slope", "GLOBAL-floor"] if any(h in ({1, 2} - m.trained_heads - free_set)
+                                                                  for h in (1, 2)) else []
             print(f"\n--- {tag} trained (free {freed}); human train BCE {hb:.4f} ---")
+            if args.global_stage1:
+                print(f"    learned globals: slope {float(torch.nn.functional.softplus(m.gslope_raw)):.3f}"
+                      f"  floor {float(torch.sigmoid(m.gfloor_raw)):.3f}")
             write_stage(tag)
             with torch.no_grad():                                # store the just-trained heads' LIVE
                 b_all, a_all, c_all = m.params(tfeat)            # per-problem values for the penalty

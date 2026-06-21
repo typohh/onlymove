@@ -8,14 +8,16 @@ auxiliary/rating_dev/train_rating_v2_staged.py (and …_research.py). Do experim
 so a test tweak can never break the shipped ratings.
 
 The shipped model is a TWO-PHASE coordinate-descent fit on a SHARED feature→4PL trunk (act ⊕ bw,
-0.3 dropout): phase 1 fits the per-problem difficulty (rating) with slope/floor/ceiling HELD at the
-self-consistent constants (slope 1.80, floor 0.25, lapse 0.031); phase 2 frees the per-problem slope
-+ per-problem floor + the GLOBAL ceiling together while the difficulty is held at its phase-1 values
-by a consistency penalty. Those constants are the FIXED POINT of the fit — the converged head means
-equal the inits — which is why this replaces the legacy mechanistic floor (0.70·bot_floor) and the
-hierarchical-slope prior with self-consistency (no externally-imposed floor, no slope shrinkage).
-Re-derive the constants (sweep --stage-slope-const / --stage-floor-const / --lapse-init in the
-staged research trainer until final == init) whenever the corpus or features change.
+0.3 dropout): phase 1 fits the per-problem difficulty (rating) and simultaneously LEARNS a single
+GLOBAL slope + GLOBAL floor + GLOBAL ceiling (`--global-stage1`); phase 2 then individualizes the
+per-problem slope + per-problem floor and keeps refitting the global ceiling, while the difficulty is
+held at its phase-1 values by a consistency penalty. Learning the globals jointly with the rating
+AUTO-FINDS the self-consistent anchors (no hand fixed-point search), so it stays calibrated as the
+corpus drifts — replacing the legacy mechanistic floor (0.70·bot_floor) and the hierarchical-slope
+prior with self-consistency (no externally-imposed floor, no slope shrinkage). The learned globals
+land near slope ~1.3 / floor ~0.15-0.20 / ceiling ~0.97; the `--stage-*-const`/`--lapse-init` values
+are only the (barely-relevant) inits. Difficulty↔slope coupling means the per-problem slope mean ends
+~0.1 above the learned global (an intrinsic residual, not a bug).
 
 ONE model for 9x9 AND 13x13. A SHARED feature→4PL network maps each problem's features
 to (difficulty b_p, slope a_p, floor c_p); per-(user, 2-month) ability θ_u is hard-gauged
@@ -326,6 +328,12 @@ class RatingNet(nn.Module):
         self.free_heads = set()     # heads trainable this stage (live, data BCE)
         self.const_a = 1.0          # global slope before the slope stage
         self.const_c = 1.0 / 3.0    # global floor before the floor stage (0.333)
+        # global_stage1: hold a not-yet-individualized head at a LEARNABLE GLOBAL scalar (trains in
+        # phase 1, jointly with rating + the global ceiling) instead of a fixed const — auto-finds
+        # the self-consistent global slope/floor; phase 2 then individualizes the per-problem heads.
+        self.global_stage1 = False
+        self.gslope_raw = nn.Parameter(torch.tensor(float(np.log(np.expm1(self.const_a)))))
+        self.gfloor_raw = nn.Parameter(torch.tensor(float(np.log(self.const_c / (1 - self.const_c)))))
         if n_problems > 0:
             self.register_buffer("pin_b", torch.zeros(n_problems))
             self.register_buffer("pin_a", torch.ones(n_problems))
@@ -473,10 +481,14 @@ class RatingNet(nn.Module):
             # produced; the frozen ones are held at their stored per-problem values by a consistency
             # penalty in the LOSS (not here), so the final model is ONE coherent forward pass.
             not_yet = {1, 2} - self.trained_heads - self.free_heads
-            if 1 in not_yet:                                          # slope not yet trained
-                a = torch.full_like(a, self.const_a)
-            if 2 in not_yet:                                          # floor not yet trained
-                c = torch.full_like(c, self.const_c)
+            g_a = (torch.nn.functional.softplus(self.gslope_raw) if self.global_stage1
+                   else b.new_tensor(self.const_a))
+            g_c = (torch.sigmoid(self.gfloor_raw) if self.global_stage1
+                   else b.new_tensor(self.const_c))
+            if 1 in not_yet:                                          # slope not yet individualized
+                a = g_a.expand_as(a)
+            if 2 in not_yet:                                          # floor not yet individualized
+                c = g_c.expand_as(c)
         return b, a, c
 
     def slope_unclamped(self, feat):
@@ -582,13 +594,17 @@ def main():
     args.lr = 0.01; args.batch = 65536; args.log_every = 50; args.epochs = 300
     args.min = 5; args.min_profile = 8; args.winsor = 1.0; args.slope_floor = 0.01
     args.lapse_cap = 0.05; args.lapse_fixed = 0.02; args.floor_cap = 1.0
-    # staged 2-phase + the self-consistent fixed-point constants (the shipped config)
-    args.staged = True; args.two_stage = True; args.stage_plan = None
+    # staged 2-phase, with --global-stage1: phase 1 LEARNS a global slope + global floor + global
+    # ceiling jointly with the per-problem rating (auto-finding the self-consistent globals — no hand
+    # fixed-point search, so it stays calibrated as the corpus drifts); phase 2 individualizes the
+    # per-problem slope + floor and keeps training the ceiling.
+    args.staged = True; args.two_stage = False; args.global_stage1 = True
+    args.stage_plan = "rating+ceiling,slope+floor+ceiling"
     args.free_lapse = True; args.separate_trunks = False
     args.stage_epochs = 100; args.stage_pin_weight = 10.0
-    # self-consistent fixed point on the FULL corpus (converged head means ≈ these inits, within
-    # the run-to-run noise; slope is the fuzziest, ~±0.08). Re-derive on a corpus/feature change.
-    args.stage_slope_const = 1.78; args.stage_floor_const = 0.28; args.lapse_init = 0.046
+    # INITS for the learned globals (auto-tuned to ≈ slope 1.26 / floor 0.20 / ceiling 0.98); the
+    # exact init barely matters since phase 1 trains them.
+    args.stage_slope_const = 1.0; args.stage_floor_const = 0.25; args.lapse_init = 0.02
     # priors OFF (replaced by the self-consistent fixed point)
     args.mech_floor = False; args.mech_floor_scale_fixed = 0.70
     args.hier_slope = False; args.hier_slope_mu = 0.8; args.hier_slope_sigma = 0.8
@@ -893,6 +909,11 @@ def main():
         m.staged = True
         m.const_a = float(args.stage_slope_const)
         m.const_c = float(args.stage_floor_const)
+        m.global_stage1 = args.global_stage1
+        if args.global_stage1:                                    # init the learned globals at the consts
+            with torch.no_grad():
+                m.gslope_raw.fill_(float(np.log(np.expm1(m.const_a))))
+                m.gfloor_raw.fill_(float(np.log(m.const_c / (1 - m.const_c))))
         print(f"\n=== STAGED | {'SEPARATE per-head trunks' if m.separate else 'SHARED trunk + pin-weight ' + str(args.stage_pin_weight)}"
               f" | plan {[sorted(HN[h] for h in s) + (['ceiling'] if tl else []) for s, _, tl in plan]}"
               f" | slope const {m.const_a:g} floor const {m.const_c:g} | {args.stage_epochs} ep/stage"
