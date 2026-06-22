@@ -568,9 +568,43 @@ class RatingNet(nn.Module):
         return (c + (1.0 - c - lam) * praw).clamp(EPS, 1 - EPS)
 
 
+# Model-defining flags that reproduce the shipped pipeline.train_rating output (its hardcoded
+# module constants, mapped to this trainer's argparse dests). --production-flags installs these as
+# DEFAULTS, so any explicitly-passed flag still wins (e.g. `--production-flags --dropout 0.5`).
+# Experiment-control flags (seed, holdout-problem-frac, out-dir, validate, eval-every, log-every)
+# are deliberately NOT included — layer them on top. Keep in sync with pipeline/train_rating.py.
+PRODUCTION_FLAGS = {
+    "staged": True,                      # two-phase coordinate descent over the per-problem heads
+    "global_stage1": True,               # phase 1 learns the global slope/floor jointly with rating
+    "stage_plan": "rating+ceiling,slope+floor+ceiling",  # ceiling both phases ⇒ lapse LEARNED
+    "stage_epochs": 100,
+    "stage_pin_weight": 10.0,
+    "stage_slope_const": 1.0,            # GLOBAL_SLOPE_INIT
+    "stage_floor_const": 0.25,           # GLOBAL_FLOOR_INIT
+    "features": "bw_act",
+    "move_features": True,               # bw_act ⊕ candidate-move-eval block
+    "pca_dim": 128,
+    "diff_hidden": [128, 64],
+    "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,  # uniform 0.3
+    "anchors": False,                    # no bot-anchor examinees
+    "lr": 0.01, "batch": 65536,
+    "min": 5, "min_profile": 8,
+    "winsor": 1.0, "slope_floor": 0.01,
+    "lapse_cap": 0.05, "lapse_init": 0.02, "floor_cap": 1.0,
+}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--production-flags", action="store_true",
+                    help="Set every model-defining flag to the shipped pipeline.train_rating "
+                         "production config (staged 2-phase plan + --global-stage1, bw_act+move "
+                         "features, uniform 0.3 dropout, no anchors, learned ceiling, floor const "
+                         "0.25, pin-weight 10). Installed as DEFAULTS so explicit flags still "
+                         "override; experiment-control flags (--seed, --holdout-problem-frac, "
+                         "--out-dir, ...) are NOT touched. Typical: `--production-flags "
+                         "--holdout-problem-frac 0.1 --seed 1 --out-dir /tmp/rv2_ho/s1`.")
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
     ap.add_argument("--features", choices=["bw_act", "act", "bw", "move"], default="bw_act",
@@ -1014,6 +1048,10 @@ def main():
                          "can be compared bin-for-bin). 0 disables the report.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--log-every", type=int, default=50)
+    # --production-flags: install the shipped config as defaults BEFORE the real parse, so any
+    # explicitly-passed flag still overrides it (argparse: CLI args beat set_defaults).
+    if ap.parse_known_args()[0].production_flags:
+        ap.set_defaults(**PRODUCTION_FLAGS)
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # The M0b production config is the DEFAULT (zero flags = ship config). Flags that replace a

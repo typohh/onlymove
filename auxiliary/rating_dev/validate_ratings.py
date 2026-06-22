@@ -212,17 +212,30 @@ def load_ratings(ratings_dir):
 
 
 def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
-    """(held-out logloss, (flatness std, worst, spread)|None, n_rows, n_problems) over first-time
-    attempts on held-out problems, restricted to scorable problems (in `rat`) and trained profiles
-    (in `theta`) — exactly the held-out rows the trainer's prof_df eval saw. Predictions are
-    reconstructed from the shipped CSVs (see the module docstring on winsorization)."""
+    """Dict of held-out metrics over first-time attempts on held-out problems, restricted to scorable
+    problems (in `rat`) and trained profiles (in `theta`) — exactly the held-out rows the trainer's
+    prof_df eval saw. Predictions are reconstructed from the shipped CSVs (see the module docstring on
+    winsorization). Returns None if no scorable held-out attempts. Keys:
+      logloss          model 4PL held-out-problem logloss (the backbone-transfer metric)
+      constant_logloss the BEST CONSTANT predictor's logloss = H(p), p = held-out solve rate. p is the
+                       optimal constant on this set, so this is the lowest logloss reachable WITHOUT
+                       per-problem information; the gap below is purely the model's discrimination.
+                       NB p is itself shaped by difficulty-matched serving (served ≈80%-clear via the
+                       PRIOR ratings), so the served stream is range-restricted and the achievable gap
+                       is compressed — read `improvement` as a within-served-band, version-over-version
+                       discrimination figure, not an absolute accuracy. See module docstring.
+      base_rate        p (held-out solve rate)
+      improvement      constant_logloss − logloss (≥0 ⇒ model beats the best constant; in nats)
+      flatness         (std, worst, spread) of per-rating-bin even-error, or None
+      n_rows/n_problems counts
+    """
     df = load_first_time_attempts()
     df = df[df["size"].isin(SIZES)]
     prof = build_profiles(df)                       # (profile, problem, success), exploded into windows
     prof = prof[prof["problem"].isin(rat) & prof["profile"].astype(str).isin(theta)]
     sub = prof[prof["problem"].isin(ho_tids)]
     if len(sub) == 0:
-        return None, None, 0, 0
+        return None
     tids = sub["problem"].to_numpy()
     a = np.array([slp[t] for t in tids])
     c = np.array([flr[t] for t in tids])
@@ -232,6 +245,11 @@ def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
     P = np.clip(c + (1 - c - lam) / (1 + np.exp(-(a * (th - b)))), EPS, 1 - EPS)
     yy = sub["success"].to_numpy(float)
     ho_ll = float(-(yy * np.log(P) + (1 - yy) * np.log(1 - P)).mean())
+    # constant-rate reference: predict p (the held-out solve rate) for EVERY row. The constant that
+    # minimizes logloss is the label mean, and its logloss equals the Bernoulli entropy H(p), so this
+    # is the no-per-problem-information floor; model `improvement` = H(p) − ho_ll.
+    base_rate = float(np.clip(yy.mean(), EPS, 1 - EPS))
+    const_ll = float(-(base_rate * np.log(base_rate) + (1 - base_rate) * np.log(1 - base_rate)))
     # held-out Δskill flatness: per equal-count rating bin, bin LL − bin base-rate entropy.
     edges = np.quantile(r, np.linspace(0, 1, nbins + 1)); edges[-1] += 1e-6
     bk = np.clip(np.searchsorted(edges, r, side="right") - 1, 0, nbins - 1)
@@ -245,7 +263,9 @@ def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
         d.append(float(-(yy[sm] * np.log(P[sm]) + (1 - yy[sm]) * np.log(1 - P[sm])).mean()) - bll)
     d = np.array(d)
     flat = (float(d.std()), float(d.max()), float(d.max() - d.min())) if len(d) else None
-    return ho_ll, flat, len(sub), int(np.unique(tids).size)
+    return {"logloss": ho_ll, "constant_logloss": const_ll, "base_rate": base_rate,
+            "improvement": const_ll - ho_ll, "flatness": flat,
+            "n_rows": len(sub), "n_problems": int(np.unique(tids).size)}
 
 
 def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
@@ -265,16 +285,22 @@ def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
     print(f"\n=== validation | {ratings_dir} | seed {seed} | holdout {frac:g} ===")
     if frac > 0:
         ho_tids = {t for _, t in ho_keys}
-        ho_ll, flat, n_rows, n_probs = heldout_metrics(rat, slp, flr, lam, theta, ho_tids)
-        out.update(holdout_logloss=ho_ll, flatness=flat, n_rows=n_rows, n_problems=n_probs)
-        if ho_ll is None:
+        hm = heldout_metrics(rat, slp, flr, lam, theta, ho_tids)
+        if hm is None:
+            out.update(holdout_logloss=None, flatness=None, n_rows=0, n_problems=0)
             print("  held-out: no scorable held-out attempts found (check ratings dir / seed / frac)")
         else:
-            print(f"  held-out-PROBLEM logloss : {ho_ll:.4f}  ({n_rows} attempt-rows on {n_probs} "
-                  f"scorable held-out problems)")
-            if flat is not None:
-                print(f"  held-out Δskill flatness : std {flat[0]:.4f} worst {flat[1]:+.4f} "
-                      f"spread {flat[2]:.4f}  (rating bins; lower = flatter held-out error)")
+            out.update(holdout_logloss=hm["logloss"], holdout_constant_logloss=hm["constant_logloss"],
+                       holdout_base_rate=hm["base_rate"], holdout_improvement=hm["improvement"],
+                       flatness=hm["flatness"], n_rows=hm["n_rows"], n_problems=hm["n_problems"])
+            print(f"  held-out-PROBLEM logloss : {hm['logloss']:.4f}  ({hm['n_rows']} attempt-rows on "
+                  f"{hm['n_problems']} scorable held-out problems)")
+            print(f"  constant-rate baseline   : {hm['constant_logloss']:.4f}  (predict the {hm['base_rate']:.3f} "
+                  f"held-out solve rate; model improvement {hm['improvement']:+.4f} nats)")
+            if hm["flatness"] is not None:
+                fl = hm["flatness"]
+                print(f"  held-out Δskill flatness : std {fl[0]:.4f} worst {fl[1]:+.4f} "
+                      f"spread {fl[2]:.4f}  (rating bins; lower = flatter held-out error)")
 
     if not no_survey:
         # weighted (non-time-adjusted) survey rho is still computed + returned in `out` (and the
