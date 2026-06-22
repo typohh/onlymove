@@ -569,7 +569,7 @@
     "1": {
       "positive": "split your own eyespace in two",
       "motif_id": "m0001",
-      "anchor_cos": 0.9854,
+      "anchor_cos": 0.9845,
       "positive_i18n": {
         "zh": "将自己的眼位一分为二",
         "ja": "自分の眼形を二つに割る",
@@ -579,7 +579,7 @@
     "2": {
       "positive": "capture stones to gain liberties",
       "motif_id": "m0003",
-      "anchor_cos": 0.9691,
+      "anchor_cos": 0.9769,
       "positive_i18n": {
         "zh": "提子获得气",
         "ja": "石を取って手数を稼ぐ",
@@ -587,29 +587,29 @@
       }
     },
     "3": {
-      "positive": "play a throw-in",
-      "motif_id": "m0002",
-      "anchor_cos": 0.9546,
-      "positive_i18n": {
-        "zh": "扑入",
-        "ja": "放り込み",
-        "ko": "먹여치기"
-      }
-    },
-    "4": {
       "positive": "play a ko threat",
       "motif_id": "m0004",
-      "anchor_cos": 0.9884,
+      "anchor_cos": 0.9866,
       "positive_i18n": {
         "zh": "寻找劫材",
         "ja": "コウ立てを打つ",
         "ko": "팻감 쓰기"
       }
     },
+    "4": {
+      "positive": "play a throw-in",
+      "motif_id": "m0002",
+      "anchor_cos": 0.962,
+      "positive_i18n": {
+        "zh": "扑入",
+        "ja": "放り込み",
+        "ko": "먹여치기"
+      }
+    },
     "5": {
       "positive": "fill ko",
       "motif_id": "m0005",
-      "anchor_cos": 0.9858,
+      "anchor_cos": 0.9872,
       "positive_i18n": {
         "zh": "粘劫",
         "ja": "コウを継ぐ",
@@ -619,7 +619,7 @@
     "6": {
       "positive": "play endgame ko",
       "motif_id": "m0006",
-      "anchor_cos": 0.9518,
+      "anchor_cos": 0.944,
       "positive_i18n": {
         "zh": "走官子劫",
         "ja": "ヨセコウを打つ",
@@ -629,7 +629,7 @@
     "7": {
       "positive": "take ko to kill",
       "motif_id": "m0007",
-      "anchor_cos": 0.9379,
+      "anchor_cos": 0.9559,
       "positive_i18n": {
         "zh": "提劫杀棋",
         "ja": "コウに取って殺す",
@@ -639,7 +639,7 @@
     "8": {
       "positive": "take a liberty",
       "motif_id": "m0008",
-      "anchor_cos": 0.9779,
+      "anchor_cos": 0.9775,
       "positive_i18n": {
         "zh": "紧气",
         "ja": "ダメを詰める",
@@ -649,7 +649,7 @@
     "9": {
       "positive": "play center of big eye to prevent two eyes",
       "motif_id": "m0012",
-      "anchor_cos": 0.9129,
+      "anchor_cos": 0.921,
       "positive_i18n": {
         "zh": "点大眼中心阻止做活",
         "ja": "大眼の中心に打って二眼を防ぐ",
@@ -657,29 +657,29 @@
       }
     },
     "10": {
-      "positive": "take ko to make dead shape",
-      "motif_id": "m0009",
-      "anchor_cos": 0.9187,
-      "positive_i18n": {
-        "zh": "提劫造成死形",
-        "ja": "コウに取って死形にする",
-        "ko": "패를 따서 죽음의 모양 만들기"
-      }
-    },
-    "11": {
       "positive": "connect on the first line",
       "motif_id": "m0010",
-      "anchor_cos": 0.9545,
+      "anchor_cos": 0.9548,
       "positive_i18n": {
         "zh": "第一线连接",
         "ja": "一線で繋ぐ",
         "ko": "1선에서 잇기"
       }
     },
+    "11": {
+      "positive": "take ko to make dead shape",
+      "motif_id": "m0009",
+      "anchor_cos": 0.9243,
+      "positive_i18n": {
+        "zh": "提劫造成死形",
+        "ja": "コウに取って死形にする",
+        "ko": "패를 따서 죽음의 모양 만들기"
+      }
+    },
     "12": {
       "positive": "take ko to gain a liberty when your group is in atari",
       "motif_id": "m0011",
-      "anchor_cos": 0.914,
+      "anchor_cos": 0.9229,
       "positive_i18n": {
         "zh": "自己被打吃时提劫长气",
         "ja": "自分がアタリの時にコウに取って一手稼ぐ",
@@ -689,7 +689,7 @@
     "13": {
       "positive": "capture a group",
       "motif_id": "m0013",
-      "anchor_cos": 0.9607,
+      "anchor_cos": 0.9731,
       "positive_i18n": {
         "zh": "吃掉一块棋",
         "ja": "一団を取る",
@@ -699,7 +699,7 @@
     "14": {
       "positive": "extend a single stone under threat",
       "motif_id": "m0014",
-      "anchor_cos": 0.939,
+      "anchor_cos": 0.9484,
       "positive_i18n": {
         "zh": "将被打吃的单子长出",
         "ja": "アタリの一子を伸びる",
@@ -709,7 +709,7 @@
     "15": {
       "positive": "connect stones short on liberties solidly",
       "motif_id": "m0016",
-      "anchor_cos": 0.8971,
+      "anchor_cos": 0.8889,
       "positive_i18n": {
         "zh": "把紧气的棋牢固连接",
         "ja": "ダメの詰まった石を固く繋ぐ",
@@ -719,7 +719,7 @@
     "16": {
       "positive": "prevent a second eye",
       "motif_id": "m0017",
-      "anchor_cos": 0.9716,
+      "anchor_cos": 0.9666,
       "positive_i18n": {
         "zh": "阻止做出第二只眼",
         "ja": "二つ目の眼を防ぐ",
@@ -733,7 +733,7 @@
     "18": {
       "positive": "connect tail",
       "motif_id": "m0018",
-      "anchor_cos": 0.9751,
+      "anchor_cos": 0.9455,
       "positive_i18n": {
         "zh": "接回尾部的棋子",
         "ja": "シッポを繋ぐ",
@@ -741,29 +741,29 @@
       }
     },
     "19": {
-      "positive": "play from weak group in semeai",
-      "motif_id": "m0021",
-      "anchor_cos": 0.9101,
-      "positive_i18n": {
-        "zh": "对杀时从弱方入手",
-        "ja": "攻め合いで弱い方から打つ",
-        "ko": "수상전에서 약한 쪽에서 두기"
-      }
-    },
-    "20": {
       "positive": "block on the first line",
       "motif_id": "m0022",
-      "anchor_cos": 0.9809,
+      "anchor_cos": 0.9707,
       "positive_i18n": {
         "zh": "一路挡",
         "ja": "一線で押さえる",
         "ko": "1선에서 막기"
       }
     },
+    "20": {
+      "positive": "play from weak group in semeai",
+      "motif_id": "m0021",
+      "anchor_cos": 0.9123,
+      "positive_i18n": {
+        "zh": "对杀时从弱方入手",
+        "ja": "攻め合いで弱い方から打つ",
+        "ko": "수상전에서 약한 쪽에서 두기"
+      }
+    },
     "21": {
       "positive": "save cutting stones",
       "motif_id": "m0019",
-      "anchor_cos": 0.984,
+      "anchor_cos": 0.9803,
       "positive_i18n": {
         "zh": "救出断开的棋子",
         "ja": "切り石を助ける",
@@ -771,39 +771,39 @@
       }
     },
     "22": {
-      "positive": "capture a stone to gain a liberty",
-      "motif_id": "m0027",
-      "anchor_cos": 0.8794,
-      "positive_i18n": {
-        "zh": "提子获得一气",
-        "ja": "石を取って一手稼ぐ",
-        "ko": "한 점 따내서 수 늘리기"
-      }
-    },
-    "23": {
       "positive": "connect under on the 2nd line",
       "motif_id": "m0020",
-      "anchor_cos": 0.9713,
+      "anchor_cos": 0.973,
       "positive_i18n": {
         "zh": "二路渡过",
         "ja": "二線で渡る",
         "ko": "2선에서 건넘"
       }
     },
-    "24": {
+    "23": {
       "positive": "play on the first line to make the second eye",
       "motif_id": "m0023",
-      "anchor_cos": 0.9633,
+      "anchor_cos": 0.9499,
       "positive_i18n": {
         "zh": "走一路做出第二只眼",
         "ja": "一線に打って二つ目の眼を作る",
         "ko": "1선에 두어 두 번째 집 만들기"
       }
     },
+    "24": {
+      "positive": "capture a stone to gain a liberty",
+      "motif_id": "m0027",
+      "anchor_cos": 0.8806,
+      "positive_i18n": {
+        "zh": "提子获得一气",
+        "ja": "石を取って一手稼ぐ",
+        "ko": "한 점 따내서 수 늘리기"
+      }
+    },
     "25": {
       "positive": "cut with atari",
       "motif_id": "m0024",
-      "anchor_cos": 0.9674,
+      "anchor_cos": 0.9696,
       "positive_i18n": {
         "zh": "边打吃边切断",
         "ja": "アタリで切る",
@@ -811,49 +811,43 @@
       }
     },
     "26": {
-      "positive": "take a liberty when a fuseki fight starts",
-      "motif_id": "m0026",
-      "anchor_cos": 0.9265,
-      "positive_i18n": {
-        "zh": "布局战斗开始时收气",
-        "ja": "布石の競り合いでダメを詰める",
-        "ko": "포석 싸움이 시작될 때 수 줄이기"
-      }
-    },
-    "27": {
-      "positive": "kill a big group",
-      "motif_id": "m0030",
-      "anchor_cos": 0.9606,
-      "positive_i18n": {
-        "zh": "杀掉大块",
-        "ja": "大石を殺す",
-        "ko": "대마 잡기"
-      }
-    },
-    "28": {
       "positive": "remove ko threats",
       "motif_id": "m0028",
-      "anchor_cos": 0.9519,
+      "anchor_cos": 0.96,
       "positive_i18n": {
         "zh": "消除劫材",
         "ja": "コウ立てを消す",
         "ko": "팻감 없애기"
       }
     },
-    "29": {
-      "positive": "save stones by connecting or capturing",
-      "motif_id": "m0025",
-      "anchor_cos": 0.8943,
+    "27": {
+      "positive": "take a liberty when a fuseki fight starts",
+      "motif_id": "m0026",
+      "anchor_cos": 0.9331,
       "positive_i18n": {
-        "zh": "靠连接或提子救子",
-        "ja": "繋ぐか取るかで石を助ける",
-        "ko": "잇거나 따내서 돌 살리기"
+        "zh": "布局战斗开始时收气",
+        "ja": "布石の競り合いでダメを詰める",
+        "ko": "포석 싸움이 시작될 때 수 줄이기"
       }
+    },
+    "28": {
+      "positive": "kill a big group",
+      "motif_id": "m0030",
+      "anchor_cos": 0.9629,
+      "positive_i18n": {
+        "zh": "杀掉大块",
+        "ja": "大石を殺す",
+        "ko": "대마 잡기"
+      }
+    },
+    "29": {
+      "positive": null,
+      "motif_id": null
     },
     "30": {
       "positive": "cut",
       "motif_id": "m0029",
-      "anchor_cos": 0.9326,
+      "anchor_cos": 0.9283,
       "positive_i18n": {
         "zh": "切断",
         "ja": "切る",
@@ -861,49 +855,49 @@
       }
     },
     "31": {
-      "positive": "solidly connect a weak shape",
-      "motif_id": "m0032",
-      "anchor_cos": 0.9235,
-      "positive_i18n": {
-        "zh": "把薄形牢牢连接",
-        "ja": "薄い形を固く繋ぐ",
-        "ko": "엷은 모양을 단단히 잇기"
-      }
-    },
-    "32": {
       "positive": "atari single stone on the second line towards the edge",
       "motif_id": "m0033",
-      "anchor_cos": 0.8786,
+      "anchor_cos": 0.8881,
       "positive_i18n": {
         "zh": "二路朝边上打吃单子",
         "ja": "二線で一子を辺に向かってアタリ",
         "ko": "2선에서 한 점을 가장자리 쪽으로 단수"
       }
     },
-    "33": {
-      "positive": "play a reverse sente",
-      "motif_id": "m0035",
-      "anchor_cos": 0.9159,
+    "32": {
+      "positive": "solidly connect a weak shape",
+      "motif_id": "m0032",
+      "anchor_cos": 0.898,
       "positive_i18n": {
-        "zh": "走逆先手",
-        "ja": "逆先手を打つ",
-        "ko": "역선수 두기"
+        "zh": "把薄形牢牢连接",
+        "ja": "薄い形を固く繋ぐ",
+        "ko": "엷은 모양을 단단히 잇기"
       }
     },
-    "34": {
+    "33": {
       "positive": "push through to introduce a cut",
       "motif_id": "m0036",
-      "anchor_cos": 0.9681,
+      "anchor_cos": 0.9632,
       "positive_i18n": {
         "zh": "冲出制造断点",
         "ja": "突き出して切りを狙う",
         "ko": "밀고 나가 끊을 자리 만들기"
       }
     },
+    "34": {
+      "positive": "play a reverse sente",
+      "motif_id": "m0035",
+      "anchor_cos": 0.9375,
+      "positive_i18n": {
+        "zh": "走逆先手",
+        "ja": "逆先手を打つ",
+        "ko": "역선수 두기"
+      }
+    },
     "35": {
       "positive": "play a magic liberty",
       "motif_id": "m0034",
-      "anchor_cos": 0.9582,
+      "anchor_cos": 0.9634,
       "positive_i18n": {
         "zh": "妙手长气",
         "ja": "妙手で手数を稼ぐ",
@@ -911,79 +905,79 @@
       }
     },
     "36": {
-      "positive": "block on the second line",
-      "motif_id": "m0038",
-      "anchor_cos": 0.9659,
-      "positive_i18n": {
-        "zh": "二路挡",
-        "ja": "二線で押さえる",
-        "ko": "2선에서 막기"
-      }
-    },
-    "37": {
-      "positive": "play a 1-point sente endgame",
-      "motif_id": "m0037",
-      "anchor_cos": 0.9419,
-      "positive_i18n": {
-        "zh": "走一目先手官子",
-        "ja": "一目の先手ヨセを打つ",
-        "ko": "1집짜리 선수 끝내기"
-      }
-    },
-    "38": {
-      "positive": "play inside",
-      "motif_id": "m0040",
-      "anchor_cos": 0.9052,
-      "positive_i18n": {
-        "zh": "向内部下子",
-        "ja": "内側に打つ",
-        "ko": "안쪽에 두기"
-      }
-    },
-    "39": {
-      "positive": "solid connection",
-      "motif_id": "m0044",
-      "anchor_cos": 0.8821,
-      "positive_i18n": {
-        "zh": "实连",
-        "ja": "固く継ぐ",
-        "ko": "단단히 잇기"
-      }
-    },
-    "40": {
-      "positive": "connect to protect shape",
-      "motif_id": "m0043",
-      "anchor_cos": 0.9587,
-      "positive_i18n": {
-        "zh": "连接以保护棋形",
-        "ja": "繋いで形を守る",
-        "ko": "이어서 모양 지키기"
-      }
-    },
-    "41": {
-      "positive": "atari the cutting group while you still can",
-      "motif_id": "m0039",
-      "anchor_cos": 0.8858,
-      "positive_i18n": {
-        "zh": "趁早打吃断开的一方",
-        "ja": "切った石を打てるうちにアタリする",
-        "ko": "가능할 때 끊은 돌을 단수치기"
-      }
-    },
-    "42": {
       "positive": "connect tigers mouth",
       "motif_id": "m0031",
-      "anchor_cos": 0.8307,
+      "anchor_cos": 0.9176,
       "positive_i18n": {
         "zh": "虎口连接",
         "ja": "虎口で繋ぐ",
         "ko": "호구로 잇기"
       }
     },
+    "37": {
+      "positive": "block on the second line",
+      "motif_id": "m0038",
+      "anchor_cos": 0.9681,
+      "positive_i18n": {
+        "zh": "二路挡",
+        "ja": "二線で押さえる",
+        "ko": "2선에서 막기"
+      }
+    },
+    "38": {
+      "positive": "play a 1-point sente endgame",
+      "motif_id": "m0037",
+      "anchor_cos": 0.9423,
+      "positive_i18n": {
+        "zh": "走一目先手官子",
+        "ja": "一目の先手ヨセを打つ",
+        "ko": "1집짜리 선수 끝내기"
+      }
+    },
+    "39": {
+      "positive": "play inside",
+      "motif_id": "m0040",
+      "anchor_cos": 0.9019,
+      "positive_i18n": {
+        "zh": "向内部下子",
+        "ja": "内側に打つ",
+        "ko": "안쪽에 두기"
+      }
+    },
+    "40": {
+      "positive": "atari the cutting group while you still can",
+      "motif_id": "m0039",
+      "anchor_cos": 0.8232,
+      "positive_i18n": {
+        "zh": "趁早打吃断开的一方",
+        "ja": "切った石を打てるうちにアタリする",
+        "ko": "가능할 때 끊은 돌을 단수치기"
+      }
+    },
+    "41": {
+      "positive": "solid connection",
+      "motif_id": "m0044",
+      "anchor_cos": 0.8876,
+      "positive_i18n": {
+        "zh": "实连",
+        "ja": "固く継ぐ",
+        "ko": "단단히 잇기"
+      }
+    },
+    "42": {
+      "positive": "hane",
+      "motif_id": "m0064",
+      "anchor_cos": 0.9854,
+      "positive_i18n": {
+        "zh": "扳",
+        "ja": "ハネ",
+        "ko": "젖힘"
+      }
+    },
     "43": {
       "positive": "connect and cut with a single move",
       "motif_id": "m0042",
-      "anchor_cos": 0.9665,
+      "anchor_cos": 0.969,
       "positive_i18n": {
         "zh": "一手既连又断",
         "ja": "一手で繋ぎと切りを兼ねる",
@@ -991,78 +985,73 @@
       }
     },
     "44": {
-      "positive": "atari 2nd line stone towards the edge",
-      "motif_id": "m0041",
-      "anchor_cos": 0.937,
-      "positive_i18n": {
-        "zh": "朝边上打吃二路之子",
-        "ja": "二線の石を辺に向かってアタリ",
-        "ko": "2선 돌을 가장자리 쪽으로 단수"
-      }
-    },
-    "45": {
       "positive": "capture stone to create a false eye",
       "motif_id": "m0065",
-      "anchor_cos": 0.9941,
+      "anchor_cos": 0.9446,
       "positive_i18n": {
         "zh": "提子制造假眼",
         "ja": "石を取って欠け眼にする",
         "ko": "돌을 따내 거짓눈 만들기"
       }
     },
+    "45": {
+      "positive": "atari 2nd line stone towards the edge",
+      "motif_id": "m0041",
+      "anchor_cos": 0.9245,
+      "positive_i18n": {
+        "zh": "朝边上打吃二路之子",
+        "ja": "二線の石を辺に向かってアタリ",
+        "ko": "2선 돌을 가장자리 쪽으로 단수"
+      }
+    },
     "46": {
-      "positive": "hane",
-      "motif_id": "m0064",
-      "anchor_cos": 0.9881,
-      "positive_i18n": {
-        "zh": "扳",
-        "ja": "ハネ",
-        "ko": "젖힘"
-      }
-    },
-    "47": {
-      "positive": "connect under",
-      "motif_id": "m0047",
-      "anchor_cos": 0.9478,
-      "positive_i18n": {
-        "zh": "渡过",
-        "ja": "渡る",
-        "ko": "건넘"
-      }
-    },
-    "48": {
       "positive": "prevent semedori",
       "motif_id": "m0045",
-      "anchor_cos": 0.8708,
+      "anchor_cos": 0.828,
       "positive_i18n": {
         "zh": "防止对杀中的提还",
         "ja": "セメドリを防ぐ",
         "ko": "수상전 되따냄 막기"
       }
     },
-    "49": {
-      "positive": "squeeze",
-      "motif_id": null,
+    "47": {
+      "positive": "connect to protect shape",
+      "motif_id": "m0043",
+      "anchor_cos": 0.9135,
       "positive_i18n": {
-        "zh": "滚打",
-        "ja": "シボリ",
-        "ko": "조이기"
+        "zh": "连接以保护棋形",
+        "ja": "繋いで形を守る",
+        "ko": "이어서 모양 지키기"
+      }
+    },
+    "48": {
+      "positive": "connect under",
+      "motif_id": "m0047",
+      "anchor_cos": 0.9541,
+      "positive_i18n": {
+        "zh": "渡过",
+        "ja": "渡る",
+        "ko": "건넘"
+      }
+    },
+    "49": {
+      "positive": "play a defensive fix",
+      "motif_id": "m0049",
+      "anchor_cos": 0.9237,
+      "positive_i18n": {
+        "zh": "防守性补棋",
+        "ja": "守りの一手を打つ",
+        "ko": "수비로 보강하기"
       }
     },
     "50": {
-      "positive": "play a simple endgame move",
-      "motif_id": "m0048",
-      "anchor_cos": 0.9194,
-      "positive_i18n": {
-        "zh": "走简单官子",
-        "ja": "単純なヨセを打つ",
-        "ko": "간단한 끝내기 두기"
-      }
+      "positive": null,
+      "motif_id": null
     },
     "51": {
       "positive": "take ko to gain a liberty",
       "motif_id": "m0050",
-      "anchor_cos": 0.9564,
+      "anchor_cos": 0.9654,
       "positive_i18n": {
         "zh": "提劫长一气",
         "ja": "コウに取って手数を稼ぐ",
@@ -1070,101 +1059,85 @@
       }
     },
     "52": {
-      "positive": "sente before fix",
-      "motif_id": "m0053",
-      "anchor_cos": 0.9214,
+      "positive": "play a simple endgame move",
+      "motif_id": "m0048",
+      "anchor_cos": 0.9267,
       "positive_i18n": {
-        "zh": "先手后补棋",
-        "ja": "継ぐ前に先手を利かす",
-        "ko": "잇기 전에 선수 활용"
+        "zh": "走简单官子",
+        "ja": "単純なヨセを打つ",
+        "ko": "간단한 끝내기 두기"
       }
     },
     "53": {
-      "positive": "play a defensive fix",
-      "motif_id": "m0049",
-      "anchor_cos": 0.9042,
-      "positive_i18n": {
-        "zh": "防守性补棋",
-        "ja": "守りの一手を打つ",
-        "ko": "수비로 보강하기"
-      }
-    },
-    "54": {
-      "positive": "extend cutting stone",
-      "motif_id": "m0066",
-      "anchor_cos": 0.9851,
-      "positive_i18n": {
-        "zh": "长出断的棋子",
-        "ja": "切りの石をノビる",
-        "ko": "끊은 돌을 뻗기"
-      }
-    },
-    "55": {
       "positive": "save cutting stones",
       "motif_id": "m0054",
-      "anchor_cos": 0.9389,
+      "anchor_cos": 0.9064,
       "positive_i18n": {
         "zh": "救出断开的棋子",
         "ja": "切り石を助ける",
         "ko": "끊는 돌 살리기"
       }
     },
-    "56": {
+    "54": {
+      "positive": "read carefully",
+      "motif_id": "m0060",
+      "anchor_cos": 0.8962,
+      "positive_i18n": {
+        "zh": "仔细读棋",
+        "ja": "慎重に読む",
+        "ko": "신중하게 수읽기"
+      }
+    },
+    "55": {
       "positive": "back off loosely",
       "motif_id": "m0055",
-      "anchor_cos": 0.9367,
+      "anchor_cos": 0.9117,
       "positive_i18n": {
         "zh": "松缓地退让",
         "ja": "緩く引く",
         "ko": "느슨하게 물러서기"
       }
     },
-    "57": {
-      "positive": "increase liberties",
-      "motif_id": "m0067",
-      "anchor_cos": 0.9115,
-      "positive_i18n": {
-        "zh": "增加气",
-        "ja": "ダメを増やす",
-        "ko": "활로 늘리기"
-      }
-    },
-    "58": {
+    "56": {
       "positive": null,
       "motif_id": null
     },
-    "59": {
-      "positive": "cut for aji",
-      "motif_id": "m0057",
-      "anchor_cos": 0.9169,
-      "positive_i18n": {
-        "zh": "切断利用味道",
-        "ja": "味を求めて切る",
-        "ko": "뒷맛을 노려 끊기"
-      }
+    "57": {
+      "positive": null,
+      "motif_id": null
     },
-    "60": {
-      "positive": "capture stones",
-      "motif_id": null,
-      "positive_i18n": {
-        "zh": "提子",
-        "ja": "石を取る",
-        "ko": "따내기"
-      }
-    },
-    "61": {
+    "58": {
       "positive": "throwin ko",
-      "motif_id": null,
+      "motif_id": "m0046",
+      "anchor_cos": 0.8892,
       "positive_i18n": {
         "zh": "扑入打劫",
         "ja": "放り込んでコウにする",
         "ko": "먹여쳐서 패 만들기"
       }
     },
+    "59": {
+      "positive": null,
+      "motif_id": null
+    },
+    "60": {
+      "positive": "cut for aji",
+      "motif_id": "m0057",
+      "anchor_cos": 0.8992,
+      "positive_i18n": {
+        "zh": "切断利用味道",
+        "ja": "味を求めて切る",
+        "ko": "뒷맛을 노려 끊기"
+      }
+    },
+    "61": {
+      "positive": null,
+      "motif_id": null
+    },
     "62": {
       "positive": "prevent cut",
       "motif_id": "m0068",
-      "anchor_cos": 0.9807,
+      "anchor_cos": 0.9405,
       "positive_i18n": {
         "zh": "防止切断",
         "ja": "切りを防ぐ",
