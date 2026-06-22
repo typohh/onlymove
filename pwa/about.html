@@ -116,10 +116,19 @@
         <li>To turn ratings into ranks, players are occasionally asked their rank on the servers they play on. These declarations anchor the rating-to-rank curve to the European Go Database scale and calibrate how each server's ranks line up with ours, so the rank you see corresponds to a real-world rank rather than an abstract number.</li>
     </ul>
 
+    <h2>How accurate are the ratings?</h2>
+    <p>The rating model is checked a few ways — most stringently by holding 10% of the problems out of training entirely, so the model never sees a single human result on them (figures below with a ± are averaged over three independent training runs on such a hold-out).</p>
+    <ul>
+        <li><strong>Rank vs. real-world rank.</strong> Comparing each player's model rating against the rank they declared on other servers gives a Spearman rank correlation of about <strong>0.83</strong> (± 0.01), across roughly 200 declarations from about 110 players. In plain terms: order players by our rating and you get very nearly the same order as their actual rank.</li>
+        <li><strong>Reading difficulty from the position.</strong> Because the app only ever serves problems matched to your rank (around an 80% clear rate), that narrow band hides how much the model really knows — almost anything predicts well there. Judged across the full range of difficulties instead, from trivial to far too hard, the difficulty it reads from KataGo's view of a position lets it put, on average, a <strong>61%</strong> probability on the outcome that actually happens — solve or fail — versus <strong>55%</strong> for a baseline that knows only the overall solve rate (roughly an 18% reduction in prediction error). That gap is its real value for placing brand-new problems nobody has ever attempted.</li>
+        <li><strong>Even across the difficulty range.</strong> That prediction quality stays roughly constant from the easiest problems to the hardest, rather than being accurate in the middle and off at the extremes.</li>
+    </ul>
+
     <h2>Ranking System</h2>
     <ul>
         <li>Your rank changes quickly at first, but rank change based on each tsumego result slows with each problem you fail and speeds up when you answer correctly. With a cap at how stable a rank can get, which means there is a limit how fast your rank can decrease but not how fast it can increase.</li>
         <li>Once your rank stabilizes, it will take roughly 10 wins to go up a rank or 10 losses to go down one.</li>
+        <li>The rank on the front page is your <em>live</em> rank, nudged up and down by that momentum as you solve. The stats screen's Rank tab also plots a separate <strong>historical</strong> rank curve, computed differently: a maximum-likelihood estimate of your strength over time, fitted across your whole solving history at once rather than carried forward result-by-result. Because it is not path-dependent, it reads your trajectory cleanly in hindsight (with a band showing how precisely each point is known), so the two can differ — most visibly during onboarding, when the live rank is still catching up.</li>
         <li>Even high rank problems can be guessed correctly, but not frequently enough (4/5) to maintain your rank.</li>
         <li>To help you learn, problems you fail are shown again later, whenever the system thinks you have 80% chance of remembering the solution.</li>
         <li>Answering problems that are from links and not part of your own progression does not affect your rank.</li>
@@ -137,12 +146,21 @@
         <li>Push notifications can be enabled to remind you when failed problems are due for review.</li>
         <li>A Community tab shows anonymous server-wide statistics over the past week — overall activity, the rank distribution, time usage, and how quickly players return to failed problems — with your own position highlighted.</li>
         <li>The statistics page tracks factors influencing your problem-solving probability. Ideally, time-related metrics should be close to zero, while a positive trend in the "per problem solved" metric indicates learning. It also shows a per-attempt rating-history chart, a smoothed long-term skill estimate with a 95% confidence band, a session-to-session form variance metric, and a sorted list of motifs you tend to misplay described in plain sentences.</li>
+        <li>You can see your estimated rank on various Go servers — how your strength would read on each server's own scale, adjusted for your typical solving speed — from the Rank tab's server selector or by tapping your front-page rank.</li>
     </ul>
 
 
 
     <h2>Changelog</h2>
     <ul>
+        <li><strong>2026-06-22:</strong> Rebuilt the problem-rating model again. It now learns its overall difficulty scale, easy-guess floor, and reliability ceiling automatically instead of having them set by hand, and it reads the strongest candidate moves in each position as an extra signal. Problem ratings have been refreshed across both board sizes, and the weakness-motif labels were refreshed to match the rebuilt model.</li>
+        <li><strong>2026-06-21:</strong> Finer-grained bins on two Community charts — "how quickly players return to failed problems" and problems solved per day — so the busiest ranges read more clearly.</li>
+        <li><strong>2026-06-20:</strong> Review reminders now reach every device signed in to your account, not just the most recently used one. Fixed a recall-scheduling bug so failed problems reliably come back for review on the right board.</li>
+        <li><strong>2026-06-19:</strong> The detailed stats page now opens at any attempt count, instead of waiting until you had solved several problems. The Community time charts switched to a clearer log-scaled layout with empty buckets dropped. Sharing now starts preparing the image the moment you open the share chooser, so it feels snappier.</li>
+        <li><strong>2026-06-18:</strong> Multiple pop-up messages now stack instead of overlapping. Review mode survives closing and reopening the app — the problem you were reviewing is restored. Made sharing more reliable after the app has been idle or when running in a less-secure context. Long solving histories are now stored more durably for heavy users, so they no longer risk hitting the browser's storage limit. Fixed a bug that could occasionally serve the same new problem twice in a row.</li>
+        <li><strong>2026-06-17:</strong> Fixed a bug where reloading right after solving could re-serve the problem you had just completed.</li>
+        <li><strong>2026-06-16:</strong> Corrected a handful of problems whose stored solution did not match KataGo's best move — the genuinely winning move is now always marked correct.</li>
+        <li><strong>2026-06-14:</strong> Refined the time-adjusted rank so your solving speed is compared fairly against players of a similar rank. Problems opened from shared links are now fully excluded from the server logs as well as your own stats. Made problem downloads more resilient to flaky network connections.</li>
         <li><strong>2026-06-13:</strong> Your progress is now a portable account. Open Account (menu → More) to see your personal code, then enter it on another device to sync your full solving history and rank across all your devices. The Rank tab's chart also gained a server selector — switch between OnlyMove's own rank and how your strength would read on each Go server, adjusted for your typical solving speed. Tapping your front-page rank shows the same per-server, time-adjusted ranks.</li>
         <li><strong>2026-06-12:</strong> Added a sound on/off toggle to the menu. Tapping a review reminder now always opens whichever problem is actually due, rather than one you may have already cleared. Corrected several details in the stats and rank math for more accurate recall difficulty, weakness trends, time comparisons, and confidence bands.</li>
         <li><strong>2026-06-07:</strong> Added a link to the community Discord, both in the menu and at the bottom of this page. A rare misclick on an easy problem no longer dents your rank, problem difficulty is now centered so you clear about 80% of the problems you are served, and some front-page ranks that had drifted were re-anchored.</li>
