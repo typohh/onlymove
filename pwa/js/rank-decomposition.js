@@ -482,9 +482,8 @@ function globalPerformanceSigma(resid) {
 }
 
 // Core decomposition from an already-flattened, time-sorted attempt array — the
-// heavy lifting (wide skill grid, form residuals, global swing, summary). Both
-// the near-rank filter's seed pass and the final official pass route through
-// here. Returns null below MIN_ATTEMPTS.
+// heavy lifting (wide skill grid, form residuals, global swing, summary).
+// Returns null below MIN_ATTEMPTS.
 function decompose(attempts) {
     if (attempts.length < MIN_ATTEMPTS) return null;
 
@@ -529,57 +528,26 @@ function decompose(attempts) {
 }
 
 // The official skill decomposition — skill line, 95% measurement CI and the
-// daily-variance band — computed from NEAR-RANK attempts only. Attempts taken
-// far from the user's rank carry systematic bias: a strong user's lucky
-// above-rank clears over-credit skill, and the guessing floor inflates far-below
-// clears, both of which distort the level AND fatten the residual that feeds the
-// daily-variance band. So we drop them before estimating. This is a seeded
-// one-pass fixed point, NOT a circular filter:
-//   1. Seed S0(t): the wide-kernel skill over the FULL history, from the win/loss
-//      sequence alone (independent of any distance filter). Only S0 is needed to
-//      measure distance, so the seed skips the resid/σ machinery.
-//   2. Each attempt is scored against the CONTEMPORANEOUS seed rank S0(t_attempt)
-//      — not the user's current rank — so "what counts as far" tracks the rank as
-//      it moved.
-//   3. The decomposition is re-run on the survivors → the official curve + bands.
-// One pass suffices: the filter drops exactly the low-Fisher-information attempts
-// the estimator already down-weights, so the result moves from the full-history
-// estimate only where far-from-rank attempts were genuinely biasing it.
+// daily-variance band — over the user's FULL first-time history.
 //
-// "Far" is measured in the SUCCESS-CURVE'S OWN LATENT z = slope·(S0 − x), NOT in
-// probability. z = 0 ⟺ problem exactly at rank ⟺ P = 0.8 (κ is defined to make
-// that so), so a band symmetric in z is symmetric around the 80% serving target.
-// Probability is the wrong space for symmetry: it's bounded at 1 (0.8 sits near
-// the ceiling, so equal ΔP means unequal rank gaps up vs down) and the floor c
-// squashes the low end (P→c, not 0) per-problem. z is floor-independent (c only
-// rescales P, it doesn't move z=0) and slope-aware (a sharp problem decides at a
-// smaller rank gap than a flat one — genuinely "farther" at equal Δrank). We take
-// the easy-side edge as a single probability knob pHi and MIRROR it in z: keep
-//   |slope·(S0 − x)| ≤ L,   L = logit(pHi) − logit(0.8)
-// pHi = 0.95 ⇒ L ≈ 1.56.
-//
-// If too few attempts survive the filter (a short or very erratic history), fall
-// back to the unfiltered decomposition rather than blanking the chart.
-const NEAR_RANK_P_HI = 0.95;
-const LOGIT_80 = Math.log(0.8 / 0.2);
+// Far-from-rank attempts carry systematic bias (a strong user's lucky above-rank
+// clears over-credit skill; the guessing floor inflates far-below clears), but
+// the 4PL MLE in poolLogistic now absorbs that WITHIN the estimate rather than
+// needing a hard pre-filter: the per-problem guessing floor c discounts far-below
+// clears (P→c there, so a clear is weak evidence of skill) and the LAPSE upper
+// asymptote caps the score of a far-above slip (P(1−P)→LAPSE·(1−LAPSE) while the
+// gradient →0). An earlier seeded near-rank pre-filter (drop |slope·(S0−x)| > L)
+// was removed once the filtered and unfiltered curves were shown to agree to
+// within the measurement band across users — the floor+lapse handling makes it
+// redundant. (Reproduce the comparison with auxiliary/recreate_rank_graph.py
+// --both-filters.)
 export function computeRankDecomposition(answerHistory) {
     // flattenAttempts maps each attempt through its own size's M, so a merged
     // 9x9+13x13 history pools on the internal-rank axis. Attempts whose size curve
     // is missing are dropped there.
     const all = flattenAttempts(answerHistory);
     if (all.length < MIN_ATTEMPTS) return null;
-
-    // Seed: only the wide-kernel skill S0(t) is needed to measure each attempt's
-    // contemporaneous distance from rank, so the seed carries no resid track
-    // (evaluateAt's variance terms fall back to 0 on an empty resid).
-    const seed = { attempts: all, resid: [] };
-    const L = Math.log(NEAR_RANK_P_HI / (1 - NEAR_RANK_P_HI)) - LOGIT_80;
-    const near = all.filter(a => {
-        const e = evaluateAt(seed, a.t);
-        return e && Number.isFinite(e.S) && Math.abs(a.slope * (e.S - a.x)) <= L;
-    });
-
-    return decompose(near.length >= MIN_ATTEMPTS ? near : all);
+    return decompose(all);
 }
 
 // Continuous evaluation at arbitrary t (no buckets). The wide kernel is
