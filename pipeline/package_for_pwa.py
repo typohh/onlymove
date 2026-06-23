@@ -20,6 +20,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_queries import gtp_to_xy
+from utils.ratings_io import FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_value_map
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 
 
@@ -622,31 +623,22 @@ def load_rating_artifacts(ratings_dir, ratings_csv):
         selection weight ∝ a_p²).
       - floor_map   ← tsumego_floor_final.csv `floor`: the raw 3PL guessing floor
         c_p (lower asymptote of the per-attempt success curve).
-    Read with pandas (NOT utils.ratings_io) on purpose: these floats are shipped
-    into metadata.json, so the values must stay bit-identical to what clients have
-    cached — a 1-ULP reparse would change the shard content hash and needlessly
-    re-ship every shard."""
-    tsumego_ratings_df = pd.read_csv(ratings_csv)
-    tsumego_ratings_df = tsumego_ratings_df.sort_values(
-        by='rating', ascending=True).reset_index(drop=True)
-    ratings_map = dict(zip(
-        tsumego_ratings_df['tsumego_id'],
-        tsumego_ratings_df['rating'].astype(float),
-    ))
+    Uses the shared utils.ratings_io reader, so the shipped floats are
+    correctly-rounded and consistent with the rest of the pipeline's loaders.
+    (These values can differ from an older pandas-parsed bundle by ≤1 ULP, which
+    re-hashes the shards — fine: this only runs when the shard set is rebuilt
+    anyway, i.e. when a new ratings/SGF set has changed size_inputs_hash.)"""
+    ratings_map = load_value_map(ratings_csv, "rating")
 
-    quality_csv = os.path.join(ratings_dir, "tsumego_quality_final.csv")
+    quality_csv = os.path.join(ratings_dir, QUALITY_CSV)
     if not os.path.exists(quality_csv):
         raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating")
-    slope_df = pd.read_csv(quality_csv)
-    slope_map = dict(zip(slope_df['tsumego_id'],
-                         slope_df['quality'].astype(float)))
+    slope_map = load_value_map(quality_csv, "quality")
 
-    floor_csv = os.path.join(ratings_dir, "tsumego_floor_final.csv")
+    floor_csv = os.path.join(ratings_dir, FLOOR_CSV)
     if not os.path.exists(floor_csv):
         raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating")
-    floor_df = pd.read_csv(floor_csv)
-    floor_map = dict(zip(floor_df['tsumego_id'],
-                         floor_df['floor'].astype(float)))
+    floor_map = load_value_map(floor_csv, "floor")
 
     print(f"  ratings: {len(ratings_map)}, slopes: {len(slope_map)}, "
           f"floors: {len(floor_map)}")
@@ -727,7 +719,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # missing one is a misconfigured run, not something to skip past.
     if not os.path.isdir(TSUMEGOS_DIR):
         raise FileNotFoundError(f"no tsumegos dir at {TSUMEGOS_DIR}")
-    ratings_csv = os.path.join(RATINGS_DIR, "tsumego_ratings_final.csv")
+    ratings_csv = os.path.join(RATINGS_DIR, RATINGS_CSV)
     if not os.path.exists(ratings_csv):
         raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating")
 
