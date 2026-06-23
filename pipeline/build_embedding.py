@@ -577,6 +577,121 @@ def write_per_cell_projections(parts, pca_path, n_workers=8):
           f"{n_err} errored  ({time.time() - t0:.0f}s total)", flush=True)
 
 
+def rotate_with_ica(scores, args, pca, keep_feat, component_stds,
+                    prior_components, prior_mask):
+    """FastICA rotation within the whitened K-dim PCA subspace (the
+    args.rotation == 'ica' path). Preserves the linear span but seeks maximally
+    non-Gaussian axes, then canonicalizes their order + sign and restandardizes
+    to unit variance. Returns (scores, ica_unmixing, ica_stds, ica_excess_kurt,
+    ica_skewness) with `scores` replaced by the rotated scores."""
+    fun = _skew_contrast if args.ica_fun == "skew" else args.ica_fun
+    print(f"\nFitting FastICA n_components={scores.shape[1]} on whitened PCA scores "
+          f"(fun={args.ica_fun!r}, whiten=False)...", flush=True)
+    # Warm-start from the prior fit's unmixing (mapped into the new PCA basis)
+    # so axes converge back to the same directions unless the data moved —
+    # reproducible refits + far less PWA cache churn. Random init otherwise.
+    w_init = None
+    if args.ica_warm_start == "auto" and prior_components is not None:
+        w_init = compute_ica_warm_start(
+            prior_components, prior_mask,
+            pca.components_, keep_feat, component_stds, len(keep_feat),
+        )
+        print("  warm-start: seeded FastICA from prior unmixing"
+              if w_init is not None else
+              "  warm-start: prior fit shape-incompatible; using random init")
+    # n_components is intentionally omitted: with whiten=False sklearn
+    # ignores it and uses the input dim, which is already K from PCA.
+    ica = FastICA(
+        whiten=False,
+        fun=fun,
+        max_iter=args.ica_max_iter,
+        tol=args.ica_tol,
+        w_init=w_init,
+        random_state=args.seed,
+    )
+    ica_raw = ica.fit_transform(scores.astype(np.float64))  # (N, K)
+    if ica.n_iter_ >= args.ica_max_iter:
+        print(f"  WARNING: FastICA hit max_iter={args.ica_max_iter}; "
+              "consider raising --ica-max-iter or changing --seed.", flush=True)
+
+    # Canonicalize order and sign so re-runs at the same seed produce
+    # stable axes. Sort by whichever non-Gaussianity moment ICA actually
+    # maximized (skewness for fun='skew', kurtosis otherwise), then flip
+    # each component so its skewness is non-negative — heavy tail on +.
+    centered = ica_raw - ica_raw.mean(axis=0)
+    var = (centered ** 2).mean(axis=0)
+    sd = np.sqrt(np.maximum(var, 1e-12))
+    skew = (centered ** 3).mean(axis=0) / (sd ** 3 + 1e-12)
+    excess_kurt = (centered ** 4).mean(axis=0) / (var ** 2 + 1e-12) - 3.0
+
+    sort_score = np.abs(skew) if args.ica_fun == "skew" else np.abs(excess_kurt)
+    order = np.argsort(-sort_score)
+    signs = np.where(skew[order] < 0, -1.0, 1.0)
+    W_ica = (signs[:, None] * ica.components_[order]).astype(np.float64)
+    ica_raw = ica_raw[:, order] * signs[None, :]
+    excess_kurt = excess_kurt[order]
+    skew = skew[order] * signs
+
+    # FastICA may converge to slightly off-unit variance; restandardize so
+    # downstream regression coefficients stay comparable across components.
+    ica_stds = ica_raw.std(axis=0)
+    ica_stds[ica_stds < 1e-9] = 1.0
+    scores = (ica_raw / ica_stds).astype(np.float32)
+    primary = skew if args.ica_fun == "skew" else excess_kurt
+    primary_name = "|skewness|" if args.ica_fun == "skew" else "|excess kurt|"
+    print(f"  ICA converged in {ica.n_iter_} iterations; "
+          f"{primary_name} range: {np.abs(primary).min():.3f}.."
+          f"{np.abs(primary).max():.3f}")
+    if args.ica_fun == "skew":
+        print("  (negative tails are baseline by construction — only the "
+              "positive tail carries a motif, so labels are positive-only)")
+    return scores, W_ica, ica_stds, excess_kurt, skew
+
+
+def write_score_artifacts(out_dir, scores, all_ids, sizes_col, K, args,
+                          pca, cumvar, ica_excess_kurt, ica_skewness):
+    """Write the score-derived output files: per_problem.csv (consumed by
+    packaging + fit_population_constants), explained_variance.csv and
+    extreme_problems.json (inspection)."""
+    df = pd.DataFrame(scores, columns=[f"embed_{i}" for i in range(K)])
+    df.insert(0, "tsumego_id", all_ids)
+    df.insert(1, "size", sizes_col)
+    df.to_csv(os.path.join(out_dir, "per_problem.csv"), index=False)
+
+    pd.DataFrame({
+        "component": np.arange(K),
+        "explained_variance_ratio": pca.explained_variance_ratio_,
+        "cumulative_explained_variance_ratio": cumvar,
+    }).to_csv(os.path.join(out_dir, "explained_variance.csv"), index=False)
+
+    extremes = {}
+    for k in range(K):
+        col = scores[:, k]
+        top_idx = np.argsort(col)[-args.top_k_extreme:][::-1]
+        bot_idx = np.argsort(col)[:args.top_k_extreme]
+        entry = {
+            "high": [
+                {"tsumego_id": all_ids[i], "size": int(sizes_col[i]), "score": float(col[i])}
+                for i in top_idx
+            ],
+            "low": [
+                {"tsumego_id": all_ids[i], "size": int(sizes_col[i]), "score": float(col[i])}
+                for i in bot_idx
+            ],
+        }
+        if args.rotation == "ica":
+            # Per-component variance ratio is meaningless after rotation
+            # (scores standardized to unit variance); record non-Gaussianity
+            # stats instead — these are what ICA actually optimized for.
+            entry["excess_kurtosis"] = float(ica_excess_kurt[k])
+            entry["skewness"] = float(ica_skewness[k])
+        else:
+            entry["explained_variance_ratio"] = float(pca.explained_variance_ratio_[k])
+        extremes[f"component_{k}"] = entry
+    with open(os.path.join(out_dir, "extreme_problems.json"), "w") as f:
+        json.dump(extremes, f, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--n-components", type=int, default=64,
@@ -762,74 +877,11 @@ def main():
     # linear span (so any downstream linear model gets identical predictive power)
     # but seeks axes whose projected scores are maximally non-Gaussian — useful
     # when one motif is split across several PCs.
-    W_ica = None
-    ica_stds = None
-    ica_excess_kurt = None
-    ica_skewness = None
+    W_ica = ica_stds = ica_excess_kurt = ica_skewness = None
     if args.rotation == "ica":
-        fun = _skew_contrast if args.ica_fun == "skew" else args.ica_fun
-        print(f"\nFitting FastICA n_components={K} on whitened PCA scores "
-              f"(fun={args.ica_fun!r}, whiten=False)...", flush=True)
-        # Warm-start from the prior fit's unmixing (mapped into the new PCA basis)
-        # so axes converge back to the same directions unless the data moved —
-        # reproducible refits + far less PWA cache churn. Random init otherwise.
-        w_init = None
-        if args.ica_warm_start == "auto" and prior_components is not None:
-            w_init = compute_ica_warm_start(
-                prior_components, prior_mask,
-                pca.components_, keep_feat, component_stds, len(keep_feat),
-            )
-            print("  warm-start: seeded FastICA from prior unmixing"
-                  if w_init is not None else
-                  "  warm-start: prior fit shape-incompatible; using random init")
-        # n_components is intentionally omitted: with whiten=False sklearn
-        # ignores it and uses the input dim, which is already K from PCA.
-        ica = FastICA(
-            whiten=False,
-            fun=fun,
-            max_iter=args.ica_max_iter,
-            tol=args.ica_tol,
-            w_init=w_init,
-            random_state=args.seed,
-        )
-        ica_raw = ica.fit_transform(scores.astype(np.float64))  # (N, K)
-        if ica.n_iter_ >= args.ica_max_iter:
-            print(f"  WARNING: FastICA hit max_iter={args.ica_max_iter}; "
-                  "consider raising --ica-max-iter or changing --seed.", flush=True)
-
-        # Canonicalize order and sign so re-runs at the same seed produce
-        # stable axes. Sort by whichever non-Gaussianity moment ICA actually
-        # maximized (skewness for fun='skew', kurtosis otherwise), then flip
-        # each component so its skewness is non-negative — heavy tail on +.
-        centered = ica_raw - ica_raw.mean(axis=0)
-        var = (centered ** 2).mean(axis=0)
-        sd = np.sqrt(np.maximum(var, 1e-12))
-        skew = (centered ** 3).mean(axis=0) / (sd ** 3 + 1e-12)
-        excess_kurt = (centered ** 4).mean(axis=0) / (var ** 2 + 1e-12) - 3.0
-
-        sort_score = np.abs(skew) if args.ica_fun == "skew" else np.abs(excess_kurt)
-        order = np.argsort(-sort_score)
-        signs = np.where(skew[order] < 0, -1.0, 1.0)
-        W_ica = (signs[:, None] * ica.components_[order]).astype(np.float64)
-        ica_raw = ica_raw[:, order] * signs[None, :]
-        excess_kurt = excess_kurt[order]
-        skew = skew[order] * signs
-
-        # FastICA may converge to slightly off-unit variance; restandardize so
-        # downstream regression coefficients stay comparable across components.
-        ica_stds = ica_raw.std(axis=0)
-        ica_stds[ica_stds < 1e-9] = 1.0
-        scores = (ica_raw / ica_stds).astype(np.float32)
-        ica_excess_kurt = excess_kurt
-        ica_skewness = skew
-        primary = skew if args.ica_fun == "skew" else excess_kurt
-        primary_name = "|skewness|" if args.ica_fun == "skew" else "|excess kurt|"
-        print(f"  ICA converged in {ica.n_iter_} iterations; "
-              f"{primary_name} range: {np.abs(primary).min():.3f}.."
-              f"{np.abs(primary).max():.3f}")
-        if args.ica_fun == "skew":
-            print("  (negative tails are baseline by construction — only the "
-                  "positive tail carries a motif, so labels are positive-only)")
+        scores, W_ica, ica_stds, ica_excess_kurt, ica_skewness = rotate_with_ica(
+            scores, args, pca, keep_feat, component_stds,
+            prior_components, prior_mask)
 
     # Persist model state (everything needed to project a new problem).
     save_kwargs = dict(
@@ -884,43 +936,8 @@ def main():
     # activation reads at packaging time.
     write_per_cell_projections(parts, pca_path=os.path.join(out_dir, "pca.npz"))
 
-    df = pd.DataFrame(scores, columns=[f"embed_{i}" for i in range(K)])
-    df.insert(0, "tsumego_id", all_ids)
-    df.insert(1, "size", sizes_col)
-    df.to_csv(os.path.join(out_dir, "per_problem.csv"), index=False)
-
-    pd.DataFrame({
-        "component": np.arange(K),
-        "explained_variance_ratio": pca.explained_variance_ratio_,
-        "cumulative_explained_variance_ratio": cumvar,
-    }).to_csv(os.path.join(out_dir, "explained_variance.csv"), index=False)
-
-    extremes = {}
-    for k in range(K):
-        col = scores[:, k]
-        top_idx = np.argsort(col)[-args.top_k_extreme:][::-1]
-        bot_idx = np.argsort(col)[:args.top_k_extreme]
-        entry = {
-            "high": [
-                {"tsumego_id": all_ids[i], "size": int(sizes_col[i]), "score": float(col[i])}
-                for i in top_idx
-            ],
-            "low": [
-                {"tsumego_id": all_ids[i], "size": int(sizes_col[i]), "score": float(col[i])}
-                for i in bot_idx
-            ],
-        }
-        if args.rotation == "ica":
-            # Per-component variance ratio is meaningless after rotation
-            # (scores standardized to unit variance); record non-Gaussianity
-            # stats instead — these are what ICA actually optimized for.
-            entry["excess_kurtosis"] = float(ica_excess_kurt[k])
-            entry["skewness"] = float(ica_skewness[k])
-        else:
-            entry["explained_variance_ratio"] = float(pca.explained_variance_ratio_[k])
-        extremes[f"component_{k}"] = entry
-    with open(os.path.join(out_dir, "extreme_problems.json"), "w") as f:
-        json.dump(extremes, f, indent=2)
+    write_score_artifacts(out_dir, scores, all_ids, sizes_col, K, args,
+                          pca, cumvar, ica_excess_kurt, ica_skewness)
 
     full_d = len(keep_feat)  # full feature dim before dropping dead channels
     if args.rotation == "ica":
