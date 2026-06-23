@@ -110,6 +110,25 @@ def interp_extrap_vec(x, xs, ys):
     return y
 
 
+def interp_extrap(x, xs, ys):
+    """Scalar linear interp with end-slope extrapolation; mirrors the PWA's
+    rank-decomposition.js interpExtrap so client and offline tools agree exactly.
+    xs ascending, len ≥ 2; x a scalar; xs/ys may be plain lists or arrays."""
+    n = len(xs)
+    if x <= xs[0]:
+        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
+    if x >= xs[n - 1]:
+        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        m = (lo + hi) >> 1
+        if xs[m] <= x:
+            lo = m
+        else:
+            hi = m
+    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
+
+
 def _unpack_thresholds(block, baseline):
     """[α, log_e...] + baseline spacings → ascending thresholds (length
     len(baseline)+1).  τ_0 = α; τ_j = α + Σ_{≤j} baseline·exp(log_e)."""

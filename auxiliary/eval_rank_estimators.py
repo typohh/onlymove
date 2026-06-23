@@ -79,6 +79,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.fit_rank_curves import interp_extrap  # noqa: E402
+
 # --- client constants (kept in sync with pwa/js/*.js; see module docstring) ---
 TOTAL_RANKS = 29
 CALIBRATION_P = 0.8
@@ -133,22 +135,6 @@ def p_clear(R, x, slope, floor, kappa, lapse=0.0):
     praw = sigmoid(slope * (R - x) + kappa)
     p = floor + (1 - floor - lapse) * praw
     return min(max(p, 1e-9), 1 - 1e-9)
-
-
-def interp_extrap(x, xs, ys):
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[n - 1]:
-        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
-    lo, hi = 0, n - 1
-    while hi - lo > 1:
-        m = (lo + hi) >> 1
-        if xs[m] <= x:
-            lo = m
-        else:
-            hi = m
-    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
 
 
 def rank_label_to_scalar(label):

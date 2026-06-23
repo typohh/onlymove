@@ -70,6 +70,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.fit_rank_curves import interp_extrap  # noqa: E402
+
 # --- client constants (ports of pwa/js/{irt,rank-decomposition,rank-translation}.js) ---
 SIZES = ("9", "13")
 TOTAL_RANKS = 29
@@ -134,22 +136,6 @@ def clear_kappa(c, lapse):
     cc = max(c, 0.0)
     q = min(max((CALIBRATION_P - cc) / (1 - cc - lapse), 1e-6), 1 - 1e-6)
     return math.log(q / (1 - q))
-
-
-def interp_extrap(x, xs, ys):
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[n - 1]:
-        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
-    lo, hi = 0, n - 1
-    while hi - lo > 1:
-        m = (lo + hi) >> 1
-        if xs[m] <= x:
-            lo = m
-        else:
-            hi = m
-    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
 
 
 def scalar_to_label(v):

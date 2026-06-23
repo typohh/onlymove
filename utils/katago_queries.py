@@ -297,6 +297,20 @@ def sgf_to_katago_coords(sgf_move, board_size):
     return col_str + row_str
 
 
+GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matching KataGo / GTP convention
+
+
+def gtp_to_xy(gtp_coord):
+    """Convert a GTP/KataGo coordinate (e.g. 'D4') to (x, y) with the GTP row 1
+    at the bottom (y=0). Returns None for a pass."""
+    if gtp_coord.lower() == "pass":
+        return None
+    col_letter = gtp_coord[0].upper()
+    x = GTP_COLS.index(col_letter)
+    y = int(gtp_coord[1:]) - 1  # GTP row 1 -> y=0 (bottom)
+    return x, y
+
+
 def _get_rank_str(rank):
     return _SUPPORTED_RANKS[max(0, min(int(rank * len(_SUPPORTED_RANKS)), len(_SUPPORTED_RANKS) - 1))]
 

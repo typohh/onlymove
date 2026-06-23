@@ -17,25 +17,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.board_render import render_problem  # noqa: E402
+from utils.fit_rank_curves import interp_extrap  # noqa: E402
 
 
 # ---- rank label (mirrors rank-decomposition.js + i18n.getDescriptiveRank) ----
-
-def interp_extrap(x, xs, ys):
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[-1]:
-        return ys[-1] + (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) * (x - xs[-1])
-    lo, hi = 0, n - 1
-    while hi - lo > 1:
-        md = (lo + hi) // 2
-        if xs[md] <= x:
-            lo = md
-        else:
-            hi = md
-    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
-
 
 def load_curve():
     with open(os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json")) as f:

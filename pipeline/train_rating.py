@@ -74,9 +74,10 @@ from utils.rating_features import (  # noqa: E402
     load_joint_activations, load_joint_bot_winrate, load_joint_move_features,
 )
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 
 EPS = 1e-6
-SIZES = [9, 13]
+SIZES = list(ALL_BOARD_SIZES)
 
 # ── PRODUCTION configuration (the shipped staged self-consistent fixed point) ─────────────────────
 # To re-derive or experiment with any of these, use auxiliary/rating_dev/train_rating_staged.py.

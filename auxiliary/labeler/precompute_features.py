@@ -31,6 +31,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.fit_rank_curves import interp_extrap  # noqa: E402
+
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 
 
@@ -83,18 +85,6 @@ def load_lookup():
             if len(parts) >= 3:
                 out[parts[0]] = parts[1]
     return out
-
-
-def interp_extrap(x, xs, ys):
-    """Linear interp with end-slope extrapolation; mirrors rank-decomposition.js
-    interpExtrap so the rank filter matches the PWA exactly. xs ascending."""
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[-1]:
-        return ys[-1] + (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) * (x - xs[-1])
-    i = int(np.searchsorted(xs, x)) - 1
-    return ys[i] + (ys[i + 1] - ys[i]) * (x - xs[i]) / (xs[i + 1] - xs[i])
 
 
 def parse_rank(label):

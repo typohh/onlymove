@@ -19,6 +19,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.configurations import ALL_BOARD_SIZES
+from utils.katago_queries import gtp_to_xy
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 
 
@@ -119,17 +120,6 @@ def fit_rating_curve(ratings_dir):
     )
     rmse = float(np.sqrt(np.mean((ys - (A * np.exp(k * xs) + C)) ** 2)))
     return float(A), float(k), float(C), rmse
-
-GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matches KataGo / GTP convention
-
-
-def gtp_to_xy(gtp_coord):
-    if gtp_coord.lower() == "pass":
-        return None
-    col_letter = gtp_coord[0].upper()
-    x = GTP_COLS.index(col_letter)
-    y = int(gtp_coord[1:]) - 1
-    return x, y
 
 
 def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):

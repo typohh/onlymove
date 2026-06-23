@@ -44,7 +44,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-SIZES = [9, 13]
+from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
+
+SIZES = list(ALL_BOARD_SIZES)
 
 
 def _chunked_mean_std(X, chunk_rows):

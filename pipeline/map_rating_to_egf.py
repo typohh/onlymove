@@ -74,8 +74,9 @@ from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, build_server_curves, fit_user_rating, interp_extrap_vec,
     ordinal_nll_vec, _unpack_thresholds,
 )
+from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 
-SIZES = [9, 13]
+SIZES = list(ALL_BOARD_SIZES)
 
 # stats-shape rank_index axis: 20k=0 … 1k=19 … 1d=20. EGF scalar g: 1k=0, 1d=1.
 # So rank_index(g) = g + 19. The rating→EGF curve uses the EGF statistics.txt

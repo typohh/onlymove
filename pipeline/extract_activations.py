@@ -49,23 +49,13 @@ from katago.train.model_pytorch import ExtraOutputs
 
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 from utils.configurations import ALL_BOARD_SIZES
+from utils.katago_queries import gtp_to_xy
 
 DEFAULT_CKPT = os.path.join(
     PROJECT_ROOT, "models",
     "kata1-b18c384nbt-s9996604416-d4316597426",
     "model.ckpt",
 )
-
-GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matching KataGo / GTP convention
-
-
-def gtp_to_xy(gtp_coord: str):
-    if gtp_coord.lower() == "pass":
-        return None
-    col_letter = gtp_coord[0].upper()
-    x = GTP_COLS.index(col_letter)
-    y = int(gtp_coord[1:]) - 1  # GTP row 1 -> y=0 (bottom)
-    return x, y
 
 
 def build_state(setup_moves, size: int) -> GameState:
