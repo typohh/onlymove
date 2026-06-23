@@ -98,39 +98,46 @@ class ProblemFinder:
                 return None
 
         # and lets play the game to the end, just to make sure we arrive at the same conclusion..
-        winning_game_moves = moves.copy()
-        winning_game_moves.append(best_move)
-        while winning_game_moves[-1] != 'pass' or winning_game_moves[-2] != 'pass':
-            move, winrate, score, _ = self.queries.get_best_move(self.queries.query(winning_game_moves, playouts=PLAYOUTS_GAME))
-            if winrate < 0.5 or score < 0:
-                debug(f"looked promising, but black fell behind after {len(winning_game_moves) - len(moves)} moves.")
-                return None
-            winning_game_moves.append(move)
-
-        score,winrate = self.queries.get_position_info(winning_game_moves)
-        debug(f"playing correct move to the end : {(100 * winrate):.1f}% {score:.1f}")
-        if winrate < 0.5 or score < 0:
-            debug("looked promising, but playing to the end didnt give conclusive win")
+        if not self._play_line_to_end(moves, best_move, expect_win=True):
             return None
-
-        losing_game_moves = moves.copy()
-        losing_game_moves.append(second_move)
-        while losing_game_moves[-1] != 'pass' or losing_game_moves[-2] != 'pass':
-            move, winrate, score, _ = self.queries.get_best_move(self.queries.query(losing_game_moves, playouts=PLAYOUTS_GAME))
-            if winrate > 0.5 or score > 0:
-                debug(f"looked promising, but despite wrong move black got ahead after {len(losing_game_moves) - len(moves)} moves.")
-                return None
-            losing_game_moves.append(move)
-
-        score,winrate = self.queries.get_position_info(losing_game_moves)
-        debug(f"playing incorrect move to the end : {(100 * winrate):.1f}% {score:.1f}")
-        if winrate > 0.5 or score > 0:
-            debug("looked promising, but playing to the end didnt give conclusive loss despite second best move")
+        if not self._play_line_to_end(moves, second_move, expect_win=False):
             return None
 
         # best_move here is the final (highest-playout) iteration's value — the move
         # deep reading is confident wins, which may differ from the shallow policy move.
         return best_move
+
+    def _play_line_to_end(self, moves, first_move, expect_win):
+        """Play `first_move`, then best-move responses to the double-pass end, and
+        confirm black stays on the expected side at every step AND at the final
+        position. expect_win=True requires black to stay ahead (bail if
+        winrate < 0.5 or score < 0); expect_win=False requires black to stay
+        behind (bail if winrate > 0.5 or score > 0). Returns True iff the whole
+        line confirms the expectation (the caller maps False → None)."""
+        game_moves = moves.copy()
+        game_moves.append(first_move)
+        while game_moves[-1] != 'pass' or game_moves[-2] != 'pass':
+            move, winrate, score, _ = self.queries.get_best_move(self.queries.query(game_moves, playouts=PLAYOUTS_GAME))
+            fell_off = (winrate < 0.5 or score < 0) if expect_win else (winrate > 0.5 or score > 0)
+            if fell_off:
+                n = len(game_moves) - len(moves)
+                if expect_win:
+                    debug(f"looked promising, but black fell behind after {n} moves.")
+                else:
+                    debug(f"looked promising, but despite wrong move black got ahead after {n} moves.")
+                return False
+            game_moves.append(move)
+
+        score, winrate = self.queries.get_position_info(game_moves)
+        debug(f"playing {'correct' if expect_win else 'incorrect'} move to the end : {(100 * winrate):.1f}% {score:.1f}")
+        fell_off = (winrate < 0.5 or score < 0) if expect_win else (winrate > 0.5 or score > 0)
+        if fell_off:
+            if expect_win:
+                debug("looked promising, but playing to the end didnt give conclusive win")
+            else:
+                debug("looked promising, but playing to the end didnt give conclusive loss despite second best move")
+            return False
+        return True
 
     def _rebalance_game(self, moves):
         response = self.queries.query_children(moves)
