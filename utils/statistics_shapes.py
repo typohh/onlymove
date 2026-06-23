@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 from scipy.special import expit
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATS_PATH = os.path.join(PROJECT_ROOT, "statistics.txt")
+STATS_PATH = os.path.join(PROJECT_ROOT, "data", "statistics.txt")
 
 KNEE_6K = 14.0  # 6k  (rank_index for the 6k/5k boundary)
 KNEE_1D = 20.0  # 1d  (rank_index for the 1k/1d boundary)

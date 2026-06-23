@@ -112,4 +112,5 @@ auxiliary/time_benefit_users.csv
 
 # Raw user data pulled for analysis: localStorage dumps contain the user's
 # account credential (userId) and full history — never version-control these.
-/data/
+# They live under data/test/; the rest of data/ (survey CSVs, statistics) is tracked.
+/data/test/
