@@ -53,8 +53,8 @@ There is no external ground truth, so two reference families are reported:
 
 Data sources (all gitignored, produced by the pipeline):
   attempts/database.sqlite        first-time attempts + rank_surveys
-  ratings_v2/<size>/tsumego_{ratings,quality,floor}_final.csv
-  ratings_v2/rating_to_rank.json  M (per size), ratings_v2/rank_map.json (survey)
+  ratings/<size>/tsumego_{ratings,quality,floor}_final.csv
+  ratings/rating_to_rank.json  M (per size), ratings/rank_map.json (survey)
 
 Usage:
   ./.venv/bin/python3 -m auxiliary.eval_rank_estimators
@@ -170,9 +170,9 @@ class Corpus:
         self.slopes = {}    # size -> {tid: a_p}
         self.floors = {}    # size -> {tid: floor}
         self.curve = {}     # size -> (ratings[], rank_indices[])
-        rr = json.load(open(os.path.join(root, "ratings_v2", "rating_to_rank.json")))
+        rr = json.load(open(os.path.join(root, "ratings", "rating_to_rank.json")))
         for size in ("9", "13"):
-            d = os.path.join(root, "ratings_v2", size)
+            d = os.path.join(root, "ratings", size)
             self.ratings[size] = _read_csv(os.path.join(d, "tsumego_ratings_final.csv"), "rating")
             self.slopes[size] = _read_csv(os.path.join(d, "tsumego_quality_final.csv"), "quality")
             self.floors[size] = _read_csv(os.path.join(d, "tsumego_floor_final.csv"), "floor")
@@ -235,7 +235,7 @@ def load_survey_priors(conn, corpus):
     (index 19 == 1k, matching rankIndexToKey in rank-translation.js). EGF is the
     identity hub. Users with no usable survey are absent (caller falls back to the
     population prior)."""
-    rmap = json.load(open(os.path.join(PROJECT_ROOT, "ratings_v2", "rank_map.json")))
+    rmap = json.load(open(os.path.join(PROJECT_ROOT, "ratings", "rank_map.json")))
     rows = conn.execute(
         "SELECT user_id, server, rank, created_at FROM rank_surveys ORDER BY created_at"
     ).fetchall()
@@ -1077,7 +1077,7 @@ def main():
         run_shock(args.strong_rank, args.lapse)
         return
 
-    print(f"loading corpus from {os.path.join(PROJECT_ROOT, 'ratings_v2')} ...", file=sys.stderr)
+    print(f"loading corpus from {os.path.join(PROJECT_ROOT, 'ratings')} ...", file=sys.stderr)
     corpus = Corpus(PROJECT_ROOT)
 
     if args.simulate:                    # closed loop; corpus only, no DB

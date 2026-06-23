@@ -1,6 +1,6 @@
 # `auxiliary/`
 
-One-off diagnostics and dev tools — recurring helpers for debugging the live rank/rating system, inspecting the embedding, and sanity-checking data. They read the artifacts the pipeline produces (`attempts/database.sqlite` / `database.sql`, `ratings_v2/<size>/`, `activations/<size>/`, `embeddings/joint/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML, or PNGs. Nothing here is part of the in-order pipeline.
+One-off diagnostics and dev tools — recurring helpers for debugging the live rank/rating system, inspecting the embedding, and sanity-checking data. They read the artifacts the pipeline produces (`attempts/database.sqlite` / `database.sql`, `ratings/<size>/`, `activations/<size>/`, `embeddings/joint/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML, or PNGs. Nothing here is part of the in-order pipeline.
 
 **Import direction.** `pipeline/` and the `rating_dev/` sub-package never import these top-level scripts — they depend only on `utils/`. The genuinely shared helpers (the activation-cache contract, attempt/survey loaders, profile/feature builders) live in `utils/rating_features.py` and `utils/rank_surveys.py`. So everything at this top level is a leaf: deletable without touching production or research code.
 
@@ -16,15 +16,15 @@ Board size follows the usual `--size` / `BOARD_SIZE` convention (9 or 13). `auxi
 
 ## Rank & rating QA
 
-- **`check_mapped_vs_declared_rank.py`** — end-to-end QA of the production rating→rank map: fits each survey user's 80%-clear v2-rating, runs it through `rank_map.json`, compares to their declared server rank, and buckets the error. Reads `ratings_v2/` + `rank_map.json`; flags include `--time-adjust`, `--time-recenter`. Run after every `map_rating_to_egf` refit.
+- **`check_mapped_vs_declared_rank.py`** — end-to-end QA of the production rating→rank map: fits each survey user's 80%-clear v2-rating, runs it through `rank_map.json`, compares to their declared server rank, and buckets the error. Reads `ratings/` + `rank_map.json`; flags include `--time-adjust`, `--time-recenter`. Run after every `map_rating_to_egf` refit.
 - **`eval_strong_user_error.py`** — per-account rank error for strong (EGF 4d+) survey users across rating configs; for each `label=dir` config it reproduces `pipeline.map_rating_to_egf` exactly (joint curve + per-server couplings) and maps each EGF declaration through the fresh curve.
-- **`diag_4pl_structure.py`** — structural diagnostics for 4PL rating artifacts: per-decile clamp %, slope/floor percentiles, and Spearman correlations against the empirical bot-ladder floor/steepness. `--dir` points at any `ratings_v2*`-shaped directory (repeatable for side-by-side).
+- **`diag_4pl_structure.py`** — structural diagnostics for 4PL rating artifacts: per-decile clamp %, slope/floor percentiles, and Spearman correlations against the empirical bot-ladder floor/steepness. `--dir` points at any `ratings*`-shaped directory (repeatable for side-by-side).
 - **`eval_rank_estimators.py`** — offline bake-off of live (causal) rank estimators (momentum, causal-kernel, state-space, info-window) replaying real users' attempt streams, plus a shock test and a closed-loop forward simulation. Uses the exact client rank-index math. Modes: `--shock`, `--simulate`, `--misclick`, `--only`, `--by-cohort`, `--csv`.
 
 ## Per-user rank debugging
 
-- **`estimate_user_rank.py`** — replicates the client's MLE rank estimate for one user from first-time attempts (`fit_user_rating` @ `CALIBRATION_P`) and maps it to a rank label. Reads `attempts/database.sqlite` + `ratings_v2/`. Args: `user_id`, `--recent-days`/`--last-n`/`--include-repeats`.
-- **`recreate_rank_graph.py`** — offline port of the client Rank-tab skill curve (`pwa/js/rank-decomposition.js`): 30-day Gaussian-pooled 4PL MLE in internal-rank space, optional near-rank filter + server display. Reads `ratings_v2/` + `pwa/tsumegos/population_constants.json`. `recreate_rank_graph USER_ID [--server …] [--csv] [--plot out.png]`.
+- **`estimate_user_rank.py`** — replicates the client's MLE rank estimate for one user from first-time attempts (`fit_user_rating` @ `CALIBRATION_P`) and maps it to a rank label. Reads `attempts/database.sqlite` + `ratings/`. Args: `user_id`, `--recent-days`/`--last-n`/`--include-repeats`.
+- **`recreate_rank_graph.py`** — offline port of the client Rank-tab skill curve (`pwa/js/rank-decomposition.js`): 30-day Gaussian-pooled 4PL MLE in internal-rank space, optional near-rank filter + server display. Reads `ratings/` + `pwa/tsumegos/population_constants.json`. `recreate_rank_graph USER_ID [--server …] [--csv] [--plot out.png]`.
 
 ## Fleet & dataset stats
 
@@ -46,8 +46,8 @@ Board size follows the usual `--size` / `BOARD_SIZE` convention (9 or 13). `auxi
 
 The rating-model research/experiment package. The production trainer (`pipeline/train_rating.py`) is intentionally CLI-free with config baked in; all experimentation happens here so a test tweak can't perturb the shipped ratings. It imports only `utils/` and its own modules — never the top-level scripts above.
 
-- **`train_rating_v2_staged.py`** — the live experiment surface (the production superset). Staged coordinate-descent trainer: `--staged`, `--global-stage1` (learnable global slope/floor/ceiling in phase 1), `--separate-trunks`, `--two-stage`, arbitrary `--stage-plan`, the full eval suite, and the alternative objectives. Writes per-stage `ratings_v2/`-shaped artifacts and runs validation per stage.
-- **`train_rating_v2_research.py`** — the pre-staged surface (joint-fit feature→4PL net with the same ablation/objective flags); the historical baseline.
+- **`train_rating_staged.py`** — the live experiment surface (the production superset). Staged coordinate-descent trainer: `--staged`, `--global-stage1` (learnable global slope/floor/ceiling in phase 1), `--separate-trunks`, `--two-stage`, arbitrary `--stage-plan`, the full eval suite, and the alternative objectives. Writes per-stage `ratings/`-shaped artifacts and runs validation per stage.
+- **`train_rating_research.py`** — the pre-staged surface (joint-fit feature→4PL net with the same ablation/objective flags); the historical baseline.
 - **`holdout_set.py`** — deterministic held-out problem-set generator: `(seed, fraction)` → a reproducible subset plus a 16-hex content hash, so trainer and validator can prove they used the same set. `--seed --frac [--out file]`.
 - **`validate_ratings.py`** — the single home of rating validation. Scores a ratings directory on a hash-confirmed holdout for held-out-problem logloss, held-out Δskill flatness, and survey-ρ (base + time-adjusted). `--ratings-dir --seed --holdout-problem-frac [--expect-hash]`.
 - **`model_comparison.py`** — shared rating-model data/feature loaders for the harness. Provides `build_profiles`, `load_joint_activations`, `load_joint_bot_winrate`, `load_joint_move_features` (re-exported from `utils.rating_features`) plus `load_problem_features` (activation-PCA features for a problem set). No CLI.

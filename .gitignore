@@ -82,14 +82,10 @@ embeddings/joint/ica_stability.json
 /attempts/database.sql
 /attempts/database.sqlite
 
-# v2 rating pipeline output (pipeline.train_rating / map_rating_to_egf):
-# regenerable, and model_v2.pt is a multi-MB binary. The v2 code is tracked; its
-# outputs are not (mirrors how the heavy inputs stay but packaged outputs don't).
-/ratings_v2/
-# Bot-only rating/quality refits (rank_tsumegos_and_bots --no-users), used to
-# measure human-outcome leakage. Analysis artifacts, NOT production ratings.
-ratings/*/tsumego_ratings_botonly.csv
-ratings/*/tsumego_quality_botonly.csv
+# Rating pipeline output (pipeline.train_rating / map_rating_to_egf): regenerable,
+# and model.pt is a multi-MB binary. The training code is tracked; its outputs
+# are not (mirrors how the heavy inputs stay but packaged outputs don't).
+/ratings/
 
 # Vast.ai orchestration
 orchestration_state.json
@@ -111,7 +107,7 @@ auxiliary/time_value_per_user.csv
 auxiliary/time_benefit_users.csv
 
 # Rating-model experiment artifacts (4PL investigation; full-run outputs per config)
-/ratings_v2_*/
+/ratings_*/
 /experiments_4pl/*.log
 
 # Raw user data pulled for analysis: localStorage dumps contain the user's

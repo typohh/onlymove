@@ -8,7 +8,7 @@ is a SINGLE shared curve. This step produces, from rank_surveys alone:
   rating_to_rank.json   per-board (identical) {ratings, rank_indices}
   rank_map.json         per-server internal(EGF)↔server rank couplings
 
-written to ratings_v2/ (the backend). package_for_pwa is the SINGLE writer of the
+written to ratings/ (the backend). package_for_pwa is the SINGLE writer of the
 served pwa/tsumegos/ — it copies these two curve files across (and change-detects
 the rest). Both come out of ONE joint fit (fit_joint_shared) — v2 no longer reads
 v1's rank_map.
@@ -43,7 +43,7 @@ Model (internal rank ≡ EGF rank is the hub / identity), estimated TOGETHER:
     free ordinal thresholds, uniform-spacing prior (--lambda). EGF feeds the
     rating curve directly (the identity hub); other servers couple in on top.
 
-Deploying v2 = run this (writes the curve to ratings_v2/), then package_for_pwa
+Deploying v2 = run this (writes the curve to ratings/), then package_for_pwa
 (now defaults to v2) — package_for_pwa is the single PWA writer: it copies the
 curve across and change-detects ratings/embeddings. No manual copy.
 
@@ -84,8 +84,8 @@ SIZES = [9, 13]
 RATING_SHAPE = "cubic"
 
 
-def load_v2_ratings(v2_dir, size):
-    """{tsumego_id: b_p rating} from ratings_v2/<size>/tsumego_ratings_final.csv
+def load_ratings(v2_dir, size):
+    """{tsumego_id: b_p rating} from ratings/<size>/tsumego_ratings_final.csv
     — the same shared-scale black-box scalar package_for_pwa ships for v2."""
     path = os.path.join(v2_dir, str(size), "tsumego_ratings_final.csv")
     if not os.path.exists(path):
@@ -94,8 +94,8 @@ def load_v2_ratings(v2_dir, size):
     return dict(zip(df["tsumego_id"], df["rating"].astype(float)))
 
 
-def load_v2_slopes(v2_dir, size):
-    """{tsumego_id: a_p} from ratings_v2/<size>/tsumego_quality_final.csv — the raw
+def load_slopes(v2_dir, size):
+    """{tsumego_id: a_p} from ratings/<size>/tsumego_quality_final.csv — the raw
     2PL discrimination (the `quality` column). fit_user_rating uses these as the
     per-problem success-curve slope so the survey-user 80%-clear ratings (and thus
     M) are anchored with the SAME per-problem a_p the PWA's estimator uses."""
@@ -233,7 +233,7 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--v2-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
+    ap.add_argument("--dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
     ap.add_argument("--min-attempts", type=int, default=20,
                     help="Drop survey users with fewer pooled attempts.")
@@ -264,13 +264,13 @@ def main():
     print(f"  {len(surveys)} latest declarations from "
           f"{surveys['user_id'].nunique()} users")
 
-    ratings_by_size = {s: load_v2_ratings(args.v2_dir, s) for s in SIZES}
-    slopes_by_size = {s: load_v2_slopes(args.v2_dir, s) for s in SIZES}
+    ratings_by_size = {s: load_ratings(args.dir, s) for s in SIZES}
+    slopes_by_size = {s: load_slopes(args.dir, s) for s in SIZES}
     merged_ratings = {}
     merged_slopes = {}
     for s in SIZES:
         if not ratings_by_size[s]:
-            print(f"  size {s}: no v2 ratings at {args.v2_dir}/{s}/ (skipped)")
+            print(f"  size {s}: no v2 ratings at {args.dir}/{s}/ (skipped)")
         merged_ratings.update(ratings_by_size[s])   # b_p is one shared scale
         merged_slopes.update(slopes_by_size[s])     # a_p, same shared scale
     if not merged_ratings:
@@ -337,13 +337,13 @@ def main():
     rr = {str(s): curve for s in SIZES}
     server_curves = build_server_curves(server_fits)   # server↔EGF couplings, built here
 
-    # Write ONLY to the backend (ratings_v2/). package_for_pwa is the single writer of
+    # Write ONLY to the backend (ratings/). package_for_pwa is the single writer of
     # the served pwa/tsumegos/ — run `python -m pipeline.package_for_pwa` to publish
     # (it copies these two curve files across and change-detects the rest).
-    os.makedirs(args.v2_dir, exist_ok=True)
-    with open(os.path.join(args.v2_dir, "rating_to_rank.json"), "w") as f:
+    os.makedirs(args.dir, exist_ok=True)
+    with open(os.path.join(args.dir, "rating_to_rank.json"), "w") as f:
         json.dump(rr, f, indent=2)
-    with open(os.path.join(args.v2_dir, "rank_map.json"), "w") as f:
+    with open(os.path.join(args.dir, "rank_map.json"), "w") as f:
         json.dump(server_curves, f, indent=2)
 
     # report
@@ -351,7 +351,7 @@ def main():
           f"{rating_knots[0]:.2f} ... {scalar_to_rank(gs[-1])}→rating "
           f"{rating_knots[-1]:.2f}")
     fitted = [s for s in SERVERS if s in server_curves and s != "EGF"]
-    print(f"wrote {args.v2_dir}/rating_to_rank.json (shared 9≡13) + rank_map.json "
+    print(f"wrote {args.dir}/rating_to_rank.json (shared 9≡13) + rank_map.json "
           f"({len(fitted)} servers + EGF identity: {', '.join(fitted)})\n"
           f"  → publish with: python -m pipeline.package_for_pwa  (defaults to v2)")
 

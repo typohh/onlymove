@@ -1,7 +1,7 @@
 """Validation bench — score a directory of rating outputs on a hash-confirmed held-out set.
 
 THE single home of rating validation: held-out-problem logloss, held-out Δskill flatness, and
-survey-ρ (base + time-adjusted). The rating tests (auxiliary.train_rating_v2_research) carry NO
+survey-ρ (base + time-adjusted). The rating tests (auxiliary.train_rating_research) carry NO
 inbuilt validation; they either chain this bench afterward or pass --validate to call run_validation
 on the just-written CSVs (same code, no duplication).
 
@@ -93,7 +93,7 @@ def _user_log10_median_solve_min(sql_path, prefixes, afk_cap_ms, min_timed):
 
 def _time_adjusted_rho(surveys, user_rating, sql_path):
     """Time-adjusted survey rho with EVERY coefficient fit on the CURRENT run — never the stale
-    ratings_v2/population_constants.json `time_adjust` block (its alpha/g0/g1 were fit on a prior
+    ratings/population_constants.json `time_adjust` block (its alpha/g0/g1 were fit on a prior
     run's ratings, which a fresh train invalidates). Each survey user's median solving time
     (log10 min) is residualized on THIS run's 80%-clear rating R (t = g0 + g1·R), so only solve
     time UNEXPLAINED by skill drives the adjustment — and the residualization needs no rating→rank
@@ -271,7 +271,7 @@ def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
 def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
     """Derive the held-out set (seed, frac), confirm/print its hash, and report held-out logloss +
     Δskill flatness (frac>0) and survey-ρ. Prints results and returns a dict. Shared by the CLI and
-    by auxiliary.train_rating_v2_research --validate (one definition, no duplicated validation)."""
+    by auxiliary.train_rating_research --validate (one definition, no duplicated validation)."""
     ho_keys, ho_hash = held_out_keys(seed, frac)
     print(f"held-out set: {len(ho_keys)} problems | seed {seed} | frac {frac:g} | hash {ho_hash}")
     if expect_hash and expect_hash != ho_hash:

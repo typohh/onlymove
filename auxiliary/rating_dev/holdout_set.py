@@ -3,7 +3,7 @@
 The universe is every problem with >=1 first-time user attempt — the only problems that carry
 a training/eval signal (unattempted problems get a feature-prior rating but no held-out
 measurement). Given a (seed, fraction) it draws a held-out subset and a short content hash, so a
-training run that EXCLUDES the set (auxiliary.train_rating_v2_research --holdout-problem-frac) and a
+training run that EXCLUDES the set (auxiliary.train_rating_research --holdout-problem-frac) and a
 validation bench that EVALUATES on it (auxiliary.validate_ratings) can confirm, by hash, that they
 assumed the IDENTICAL set. The hash also implicitly guards against attempts-DB drift between the two
 (a changed universe → changed set → changed hash).

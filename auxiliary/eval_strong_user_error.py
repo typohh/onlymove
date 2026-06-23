@@ -19,11 +19,11 @@ So each config is scored against ITS OWN freshly-fit mapping — re-run a model 
 fresh --out-dir and point a config at it; no separate map step needed.
 
 Reads the LOCAL DB (`attempts/database.sql` via utils.rank_surveys) + each config's
-`ratings_v2*` dir. No network, no GPU.
+`ratings`-shaped dir. No network, no GPU.
 
 Usage:
   ./.venv/bin/python3 -m auxiliary.eval_strong_user_error \
-      legacy=ratings_v2_legacy 5k=ratings_v2_5k no-anchor=ratings_v2_noanchor
+      legacy=ratings_legacy 5k=ratings_5k no-anchor=ratings_noanchor
   # --min-declared 4 = 4d (default); --min-declared 3 widens to 3d+.
 """
 
@@ -43,7 +43,7 @@ from utils.rank_surveys import (  # noqa: E402
     load_rank_surveys,
 )
 from pipeline.map_rating_to_egf import (  # noqa: E402
-    SIZES, fit_joint_shared, load_v2_ratings, load_v2_slopes,
+    SIZES, fit_joint_shared, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
@@ -67,8 +67,8 @@ def user_ratings_for_config(v2_dir, surveys, attempts):
     pooled attempts, using this config's per-problem ratings/slopes."""
     merged_ratings, merged_slopes = {}, {}
     for s in SIZES:
-        merged_ratings.update(load_v2_ratings(v2_dir, s))
-        merged_slopes.update(load_v2_slopes(v2_dir, s))
+        merged_ratings.update(load_ratings(v2_dir, s))
+        merged_slopes.update(load_slopes(v2_dir, s))
     if not merged_ratings:
         return None
     out = {}
@@ -137,7 +137,7 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("configs", nargs="+",
-                    help="label=dir pairs, e.g. legacy=ratings_v2_legacy")
+                    help="label=dir pairs, e.g. legacy=ratings_legacy")
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
     ap.add_argument("--min-declared", type=float, default=4.0,
                     help="strong-cohort threshold in rank scalar (4 = 4d).")

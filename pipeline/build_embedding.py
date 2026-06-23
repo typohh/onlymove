@@ -3,7 +3,7 @@ per-problem KataGo trunk activations across all configured board sizes.
 
 Inputs (loads from each size that has data):
   activations/<size>/<id>.npy
-  ratings_v2/<size>/tsumego_ratings_final.csv
+  ratings/<size>/tsumego_ratings_final.csv
 
 Outputs (single shared model — embeddings/joint/):
   pca.npz                 — full model state, sufficient to project a new problem
@@ -122,10 +122,9 @@ def _load_correct_vec(act_dir: str, tid: str, by_ext: dict) -> np.ndarray:
 def load_size(size: int):
     """Returns (ids, X, ratings) for a single size, or (None, None, None) if no data."""
     act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
-    # ratings_v2/ is the only rating backend (the legacy ratings/ is stale and does
-    # not cover the current corpus); the embedding residualizes on these v2 ratings so
+    # ratings/ is the rating backend; the embedding residualizes on these ratings so
     # it stays on the same scale as packaging/the client.
-    ratings_path = os.path.join(PROJECT_ROOT, "ratings_v2", str(size), "tsumego_ratings_final.csv")
+    ratings_path = os.path.join(PROJECT_ROOT, "ratings", str(size), "tsumego_ratings_final.csv")
     if not os.path.isdir(act_dir):
         print(f"  [size {size}] no activations dir; skipping")
         return None, None, None

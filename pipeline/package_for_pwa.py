@@ -31,9 +31,9 @@ EMBEDDING_BYTES_PER_FLOAT = 2
 # Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
 # pipeline.train_rating + pipeline.map_rating_to_egf) is the only rating
 # backend — package_for_pwa is the single writer of pwa/tsumegos/ and always
-# reads ratings_v2/. RATING_MODEL_TAG is stamped into embedding_meta.json as
+# reads ratings/. RATING_MODEL_TAG is stamped into embedding_meta.json as
 # `rating_model` for provenance (the PWA does not branch on it).
-RATINGS_ROOT = "ratings_v2"
+RATINGS_ROOT = "ratings"
 RATING_MODEL_TAG = "v2"
 
 # Rating-to-rank mapping. Each problem's raw rating r (the v2 model's 80%-clear
@@ -74,7 +74,7 @@ RATING_FLOOR_MARGIN = 0.1
 
 # package_for_pwa is rank-agnostic: it ships one raw black-box rating per
 # problem and never converts to ranks. The rating→rank curve (M) is fitted and
-# written into ratings_v2/rating_to_rank.json by pipeline.map_rating_to_egf
+# written into ratings/rating_to_rank.json by pipeline.map_rating_to_egf
 # (and copied across by this script); the client fetches it and does all
 # rating→rank conversion itself.
 
@@ -595,7 +595,7 @@ def copy_curve(output_dir):
     """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
     backend RATINGS_ROOT into the served pwa/tsumegos/. package_for_pwa is the
     SINGLE writer of pwa/tsumegos/: map_rating_to_egf writes the curve into
-    ratings_v2/, and this copies it across. Returns the list of copied filenames.
+    ratings/, and this copies it across. Returns the list of copied filenames.
     Every source is REQUIRED — the client cannot rank a problem without the curve and
     aborts boot without the population constants — so a missing source aborts the run
     rather than shipping a partial bundle."""
@@ -640,7 +640,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
-    # The backend rating set is always ratings_v2/ (combined MLP-2PL). Output
+    # The backend rating set is always ratings/ (combined MLP-2PL). Output
     # lands in the served pwa/tsumegos/ structure.
     RATINGS_DIR = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     PER_CELL_DIR = os.path.join(
@@ -843,7 +843,7 @@ if __name__ == "__main__":
             size_manifest[str(size)] = {
                 "inputs_hash": inputs_hash, "ratings_hash": ratings_hash}
 
-    # Copy the rating→rank curve from the backend ratings_v2/ into the served path
+    # Copy the rating→rank curve from the backend ratings/ into the served path
     # (single-writer rule). Cheap; always refreshed so a curve-only edit ships even
     # when every size's shards were skipped above.
     print("\n--- curve ---")

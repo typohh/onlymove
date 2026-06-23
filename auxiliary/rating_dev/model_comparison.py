@@ -2,8 +2,8 @@
 
 Re-exports the cross-board profile/feature builders from `utils.rating_features`
 (`build_profiles`, `load_joint_activations`, `load_joint_bot_winrate`,
-`load_joint_move_features`) that `rating_dev/{train_rating_v2_research,
-train_rating_v2_staged,validate_ratings}.py` import, plus `load_problem_features`
+`load_joint_move_features`) that `rating_dev/{train_rating_research,
+train_rating_staged,validate_ratings}.py` import, plus `load_problem_features`
 (unsupervised activation-PCA features for a problem set).
 
 History: this was `auxiliary/compare_rating_models.py`, the held-out human-outcome

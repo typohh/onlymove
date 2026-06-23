@@ -10,11 +10,11 @@ user actually sees):
   1. R = the user's 80%-clear v2-rating, pooled across boards
      (`utils.fit_rank_curves.fit_user_rating` @ CALIBRATION_P, with each
      problem's own a_p slope) — the same estimator the client uses.
-  2. our_internal = applyM(R): interpolate R through ratings_v2/rating_to_rank.json
+  2. our_internal = applyM(R): interpolate R through ratings/rating_to_rank.json
      (rank_index axis 20k=0..1k=19..1d=20), shifted to the internal/EGF scalar
      (1k=0, 1d=1) by −19.
   3. For each declared (server, rank), invert that server's coupling in
-     ratings_v2/rank_map.json (interp the declared SERVER scalar back through the
+     ratings/rank_map.json (interp the declared SERVER scalar back through the
      {server→our} knots) to get declared_internal — the internal rank the user is
      claiming. EGF is the identity hub, so declared_internal = declared scalar.
 
@@ -30,10 +30,10 @@ on-screen discrepancy.
 
 Inputs (run `pipeline.fetch_database` first to refresh the dump):
   attempts/database.sql                         rank_surveys + tsumego_reports
-  ratings_v2/<size>/tsumego_ratings_final.csv   b_p (shipped rating)
-  ratings_v2/<size>/tsumego_quality_final.csv   a_p (shipped slope)
-  ratings_v2/rating_to_rank.json                M  (shared rating→rank curve)
-  ratings_v2/rank_map.json                      per-server internal↔server knots
+  ratings/<size>/tsumego_ratings_final.csv   b_p (shipped rating)
+  ratings/<size>/tsumego_quality_final.csv   a_p (shipped slope)
+  ratings/rating_to_rank.json                M  (shared rating→rank curve)
+  ratings/rank_map.json                      per-server internal↔server knots
 
 Usage:
   ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank
@@ -60,13 +60,13 @@ from utils.rank_surveys import (  # noqa: E402
     load_rank_surveys, scalar_to_rank,
 )
 from pipeline.map_rating_to_egf import (  # noqa: E402
-    SIZES, load_v2_ratings, load_v2_slopes,
+    SIZES, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 
-V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings_v2")
+V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
 # rank_index axis (rating_to_rank.json) is 20k=0 .. 1k=19 .. 1d=20; the internal
 # (EGF) rank scalar is 1k=0, 1d=1. So internal_scalar = rank_index − 19.
@@ -235,7 +235,7 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
-    ap.add_argument("--v2-dir", default=V2_DIR_DEFAULT)
+    ap.add_argument("--dir", default=V2_DIR_DEFAULT)
     ap.add_argument("--min-attempts", type=int, default=20,
                     help="Drop survey users with fewer pooled attempts.")
     ap.add_argument("--csv", default=None,
@@ -264,8 +264,8 @@ def main():
     print(f"  {len(surveys)} latest declarations from "
           f"{surveys['user_id'].nunique()} users")
 
-    m_ratings, m_internal = load_M(args.v2_dir)
-    server_curves = load_server_curves(args.v2_dir)
+    m_ratings, m_internal = load_M(args.dir)
+    server_curves = load_server_curves(args.dir)
     print(f"  M: {len(m_ratings)} knots, rating "
           f"[{m_ratings[0]:.2f},{m_ratings[-1]:.2f}] → internal "
           f"[{m_internal[0]:.1f},{m_internal[-1]:.1f}]")
@@ -273,8 +273,8 @@ def main():
 
     merged_ratings, merged_slopes = {}, {}
     for s in SIZES:
-        merged_ratings.update(load_v2_ratings(args.v2_dir, s))
-        merged_slopes.update(load_v2_slopes(args.v2_dir, s))
+        merged_ratings.update(load_ratings(args.dir, s))
+        merged_slopes.update(load_slopes(args.dir, s))
     if not merged_ratings:
         sys.exit("No v2 per-problem ratings — run train_rating first.")
 
@@ -300,7 +300,7 @@ def main():
           f"(≥{args.min_attempts} attempts)")
 
     if args.time_adjust:
-        ta = load_time_adjust(args.v2_dir)
+        ta = load_time_adjust(args.dir)
         if ta is None:
             sys.exit("--time-adjust: no time_adjust block in population_constants.json")
         alpha, g0, g1 = ta

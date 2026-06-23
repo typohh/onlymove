@@ -1,20 +1,4 @@
-"""STAGED (coordinate-descent) fork of the rating trainer — an experiment harness.
-
-Copy of auxiliary/rating_dev/train_rating_v2_research.py with ONE addition: a `--staged` mode that
-fits the per-problem 4PL heads ONE AT A TIME (rating → slope → floor) instead of jointly. Each stage
-frees a single head (still backbone/feature-predicted, with 0.3 act/bw dropout), trains it, then
-FREEZES it at its learned PER-PROBLEM values (stored in pin_b/pin_a/pin_c buffers, not reverted to a
-global mean) before the next head is freed. Slope/floor start pinned to constants (1.0 / 0.333). The
-backbone trunk is shared, so a frozen head is held by substituting its stored per-problem value in
-(b,a,c) space — the trunk's gradient reaches only the free head each stage. After every stage it
-writes per-size CSVs + runs auxiliary.validate_ratings, so each head's MARGINAL contribution (1PL →
-2PL → 3PL ladder) is visible. Everything else (data prep, anchors, eval) is identical to the research
-trainer; the non-staged path is byte-for-byte the original. Run: `--staged --stage-epochs 100
---no-mech-floor --act-dropout 0.3 --bw-dropout 0.3 --holdout-problem-frac 0.1 --out-dir /tmp/...`.
-
-Original docstring follows.
-======================================================================================================
-Cross-board anchored feature→4PL rating model — the rating pipeline.
+"""Cross-board anchored feature→4PL rating model — the rating pipeline.
 
 ONE model for 9x9 AND 13x13. A SHARED feature→4PL network maps each problem's features
 to (difficulty b_p, slope a_p, floor c_p); per-(user, 2-month) ability θ_u is hard-gauged
@@ -31,7 +15,7 @@ the never-attempted and the one-sided — gets its 4PL straight from features. T
 empty / one-sided regions the sparse, ~80%-clear-served human attempts cannot identify
 (two strengths ⇒ two points on each problem's curve). Validated to match the previous
 residual+DRO pipeline's survey-rank accuracy with none of the per-problem human fitting —
-see auxiliary/test_lapse.py (research sandbox) and auxiliary/train_rating_v2_legacy.py
+see auxiliary/test_lapse.py (research sandbox) and auxiliary/train_rating_legacy.py
 (the preserved residual+DRO+fixed-bot-floor model, for future development).
 
 Ability is hard-gauged (θ whitened to mean 0 / std 1 each step): the population genuinely
@@ -42,7 +26,7 @@ needs more ability to clear at 80% than its midpoint implies:
 
     rating_p = b_p + logit((0.8 − c_p) / (1 − c_p − λ)) / a_p
 
-The global ceiling λ is produced HERE (written to ratings_v2/rating_constants.json);
+The global ceiling λ is produced HERE (written to ratings/rating_constants.json);
 pipeline.fit_population_constants reads it through and no longer fits it posthoc.
 
 OBJECTIVE — base-rate-centered even-error group-DRO (ON by default, ported from the legacy
@@ -54,15 +38,15 @@ EXCESS over each bin's base-rate entropy (the aleatoric floor — centering is l
 DRO chases that floor and loses to ERM). The bot-anchor coverage rows keep their flat weighted BCE.
 `--no-dro-skill` reverts to plain weighted BCE (ERM). A per-bin train-logloss table prints under
 either objective (`--report-bins`) so a DRO and an ERM run compare bin-for-bin. See
-docs/rating_model_comparison_results.md (--even-error) and auxiliary/train_rating_v2_legacy.py.
+docs/rating_model_comparison_results.md (--even-error) and auxiliary/train_rating_legacy.py.
 
 Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
-  ratings_v2/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
-  ratings_v2/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
-  ratings_v2/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
-  ratings_v2/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
-  ratings_v2/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
-  ratings_v2/model_v2.pt                        weights + run metadata
+  ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
+  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
+  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
+  ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
+  ratings/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
+  ratings/model.pt                        weights + run metadata
 
 Defaults are the production config (even-error DRO on); the other knobs are for experiments.
 
@@ -224,7 +208,7 @@ class RatingNet(nn.Module):
                  mech_floor_botf=None, mech_floor_scale_fixed=None,
                  floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
                  lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0,
-                 move_dropout=0.0, move_dim=0, separate_trunks=False):
+                 move_dropout=0.0, move_dim=0):
         super().__init__()
         self.slope_floor = float(slope_floor)
         self.floor_cap = float(floor_cap)   # hard upper bound on the guessing floor c_p
@@ -306,33 +290,6 @@ class RatingNet(nn.Module):
             self.floor_resid = nn.Embedding(n_problems, 3)
             nn.init.zeros_(self.floor_resid.weight)
             self.register_buffer("resid_mask", torch.zeros(3))
-        # --staged: coordinate-descent over the per-problem 4PL heads (rating b → slope a → floor c).
-        # The backbone still produces all three from the shared trunk, but at any stage only ONE head
-        # is FREE; the others are pinned in (b, a, c) output space — to a global CONSTANT before that
-        # head has been trained (slope const_a, floor const_c), and to its STORED PER-PROBLEM value
-        # once it has (pin_b/pin_a/pin_c, snapshotted over the whole corpus at the stage that trained
-        # it). So when the trunk is freed to fit floor, rating and slope hold the per-problem values
-        # they were trained to — not a global mean. Inert unless self.staged (set by the driver).
-        self.staged = False
-        # head indices: 0=rating/b, 1=slope/a, 2=floor/c. A stage frees a SET of heads; already-
-        # trained heads are frozen (held at pin_b/pin_a/pin_c by the loss penalty), and not-yet-
-        # trained heads sit at their global constant (const_a / const_c) until their stage.
-        self.trained_heads = set()  # heads frozen at their stored per-problem values (penalty-held)
-        self.free_heads = set()     # heads trainable this stage (live, data BCE)
-        self.const_a = 1.0          # global slope before the slope stage
-        self.const_c = 1.0 / 3.0    # global floor before the floor stage (0.333)
-        # --global-stage1: instead of HOLDING a not-yet-individualized head at a fixed constant,
-        # hold it at a LEARNABLE GLOBAL scalar that trains in phase 1 (jointly with the per-problem
-        # rating + the global ceiling). This auto-finds the self-consistent global slope/floor that
-        # the fixed-point search did by hand; phase 2 then frees the per-problem heads (which start
-        # from the net's own output, not the global). Gated by --global-stage1.
-        self.global_stage1 = False
-        self.gslope_raw = nn.Parameter(torch.tensor(float(np.log(np.expm1(self.const_a)))))
-        self.gfloor_raw = nn.Parameter(torch.tensor(float(np.log(self.const_c / (1 - self.const_c)))))
-        if n_problems > 0:
-            self.register_buffer("pin_b", torch.zeros(n_problems))
-            self.register_buffer("pin_a", torch.ones(n_problems))
-            self.register_buffer("pin_c", torch.full((n_problems,), 1.0 / 3.0))
         # --per-problem: a unique FREE 3PL per tsumego (no feature net at all) — the maximal-
         # local reference model. Identification rests entirely on examinee coverage (run with
         # --anchor-ranks all = the full 61-bot battery, down-weighted); without it this is the
@@ -367,27 +324,17 @@ class RatingNet(nn.Module):
         if slope_discount and n_anchor > 0:
             self.slope_discount = nn.Parameter(
                 torch.full((n_anchor,), float(np.log(np.expm1(1.0)))))  # softplus⁻¹(1)
-        def _trunk(out_dim):
+        if per_problem:
+            self.net = None                                    # no feature net at all
+        else:
             layers, d = [], fdim
             for h in hidden:                                   # decreasing layers, ReLU between
                 layers += [nn.Linear(d, h), nn.ReLU()]
                 if dropout > 0:
                     layers += [nn.Dropout(dropout)]
                 d = h
-            layers += [nn.Linear(d, out_dim)]
-            return nn.Sequential(*layers)
-        # --separate-trunks (staged only): an INDEPENDENT trunk per output (b, a, c) instead of one
-        # shared trunk → Linear(·,3). With separate trunks, freezing a head = freezing ITS trunk's
-        # params, so its output is maintained EXACTLY (zero drift) while the other heads train — the
-        # shared-trunk leak (a moving trunk drags the frozen readout) is gone by construction.
-        self.separate = bool(separate_trunks)
-        self.net = self.net_b = self.net_a = self.net_c = None
-        if per_problem:
-            pass                                               # no feature net at all
-        elif self.separate:
-            self.net_b, self.net_a, self.net_c = _trunk(1), _trunk(1), _trunk(1)
-        else:
-            self.net = _trunk(3)                               # → (difficulty b, slope a, floor c)
+            layers += [nn.Linear(d, 3)]                        # → (difficulty b, slope a, floor c)
+            self.net = nn.Sequential(*layers)
         self.lapse_cap = float(lapse_cap)
         # --lapse-fixed: freeze the global ceiling at an externally calibrated value (the
         # posthoc plateau λ̂) instead of trusting the trained MLE, which under-estimates λ
@@ -433,10 +380,7 @@ class RatingNet(nn.Module):
                         >= self.move_dropout).float() / (1.0 - self.move_dropout)
                 feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.move_dim] * keep,
                                   feat[:, d0 + self.move_dim:]], dim=1)
-            if self.separate:                                  # one independent trunk per output
-                o = torch.cat([self.net_b(feat), self.net_a(feat), self.net_c(feat)], dim=1)
-            else:
-                o = self.net(feat)
+            o = self.net(feat)
         if self.global_slope is not None:
             # substitute the single global slope into the raw-slope column so per-problem slope
             # residuals (and the detach below) compose with it like with the net's slope head
@@ -470,21 +414,6 @@ class RatingNet(nn.Module):
             lam = lam.detach()
         cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=self.floor_cap)
         c = cap * torch.sigmoid(o[:, 2])
-        if self.staged:
-            # NOT-YET-TRAINED heads (neither frozen nor free this stage) → global constant, kept out
-            # of the prediction until their stage. Frozen (trained) and free heads stay LIVE/backbone-
-            # produced; the frozen ones are held at their stored per-problem values by a consistency
-            # penalty in the LOSS (not here), so the final model is ONE coherent forward pass.
-            not_yet = {1, 2} - self.trained_heads - self.free_heads
-            # held at a LEARNABLE GLOBAL scalar (--global-stage1, trains in phase 1) or a fixed const
-            g_a = (torch.nn.functional.softplus(self.gslope_raw) if self.global_stage1
-                   else b.new_tensor(self.const_a))
-            g_c = (torch.sigmoid(self.gfloor_raw) if self.global_stage1
-                   else b.new_tensor(self.const_c))
-            if 1 in not_yet:                                          # slope not yet individualized
-                a = g_a.expand_as(a)
-            if 2 in not_yet:                                          # floor not yet individualized
-                c = g_c.expand_as(c)
         return b, a, c
 
     def slope_unclamped(self, feat):
@@ -567,44 +496,10 @@ class RatingNet(nn.Module):
         return (c + (1.0 - c - lam) * praw).clamp(EPS, 1 - EPS)
 
 
-# Model-defining flags that reproduce the shipped pipeline.train_rating output (its hardcoded
-# module constants, mapped to this trainer's argparse dests). --production-flags installs these as
-# DEFAULTS, so any explicitly-passed flag still wins (e.g. `--production-flags --dropout 0.5`).
-# Experiment-control flags (seed, holdout-problem-frac, out-dir, validate, eval-every, log-every)
-# are deliberately NOT included — layer them on top. Keep in sync with pipeline/train_rating.py.
-PRODUCTION_FLAGS = {
-    "staged": True,                      # two-phase coordinate descent over the per-problem heads
-    "global_stage1": True,               # phase 1 learns the global slope/floor jointly with rating
-    "stage_plan": "rating+ceiling,slope+floor+ceiling",  # ceiling both phases ⇒ lapse LEARNED
-    "stage_epochs": 100,
-    "stage_pin_weight": 10.0,
-    "stage_slope_const": 1.0,            # GLOBAL_SLOPE_INIT
-    "stage_floor_const": 0.25,           # GLOBAL_FLOOR_INIT
-    "features": "bw_act",
-    "move_features": True,               # bw_act ⊕ candidate-move-eval block
-    "pca_dim": 128,
-    "diff_hidden": [128, 64],
-    "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,  # uniform 0.3
-    "anchors": False,                    # no bot-anchor examinees
-    "lr": 0.01, "batch": 65536,
-    "min": 5, "min_profile": 8,
-    "winsor": 1.0, "slope_floor": 0.01,
-    "lapse_cap": 0.05, "lapse_init": 0.02, "floor_cap": 1.0,
-}
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--production-flags", action="store_true",
-                    help="Set every model-defining flag to the shipped pipeline.train_rating "
-                         "production config (staged 2-phase plan + --global-stage1, bw_act+move "
-                         "features, uniform 0.3 dropout, no anchors, learned ceiling, floor const "
-                         "0.25, pin-weight 10). Installed as DEFAULTS so explicit flags still "
-                         "override; experiment-control flags (--seed, --holdout-problem-frac, "
-                         "--out-dir, ...) are NOT touched. Typical: `--production-flags "
-                         "--holdout-problem-frac 0.1 --seed 1 --out-dir /tmp/rv2_ho/s1`.")
-    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
+    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
     ap.add_argument("--features", choices=["bw_act", "act", "bw", "move"], default="bw_act",
                     help="Feature ablation: bw_act = activations ⊕ bot-winrate columns (the "
@@ -665,66 +560,6 @@ def main():
     ap.add_argument("--head-pin-heads", default="slope,floor",
                     help="Comma subset of {diff,slope,floor} eligible for --head-pin-dropout.")
     ap.add_argument("--epochs", type=int, default=300)
-    ap.add_argument("--staged", action="store_true",
-                    help="Coordinate-descent fit of the per-problem 4PL heads instead of the joint "
-                         "fit. Order rating→slope→floor: free one head (backbone-predicted, 0.3 "
-                         "dropout), train --stage-epochs, then FREEZE it at its learned PER-PROBLEM "
-                         "values (not a global mean) and free the next. Slope/floor start pinned to "
-                         "--stage-slope-const / --stage-floor-const. Implies no mech-floor / no hier "
-                         "/ no floor-residual (the heads are governed by the staging). Writes + "
-                         "validates after EACH stage (out-dir/stage{1,2,3}_*) so each head's marginal "
-                         "contribution is visible. Honors --act-dropout/--bw-dropout, --seed, "
-                         "--holdout-problem-frac, --anchors.")
-    ap.add_argument("--stage-epochs", type=int, default=100,
-                    help="Epochs per coordinate-descent stage (--staged). Default 100 (the new "
-                         "single-stage budget); 3 stages ⇒ 300 backbone-epochs total.")
-    ap.add_argument("--stage-slope-const", type=float, default=1.0,
-                    help="Global slope a the model is pinned to before the slope stage (--staged).")
-    ap.add_argument("--stage-floor-const", type=float, default=1.0 / 3.0,
-                    help="Global floor c the model is pinned to before the floor stage (--staged).")
-    ap.add_argument("--lapse-init", type=float, default=0.02,
-                    help="Initial global lapse (1−ceiling) — the value the ceiling is held at before "
-                         "it is freed (the ceiling analogue of --stage-slope-const/--stage-floor-const "
-                         "for the fixed-point search). Default 0.02.")
-    ap.add_argument("--stage-pin-weight", type=float, default=1.0,
-                    help="Weight on the consistency penalty that holds each FROZEN head's live output "
-                         "at its stored per-problem value while a later head trains (--staged). The "
-                         "frozen heads are detached from the data BCE, so this is their ONLY signal — "
-                         "it forces the shared trunk to keep emitting the learned rating/slope as it "
-                         "fits floor. Higher = stricter maintenance (less trunk capacity for the new "
-                         "head). The per-stage drift readout shows how well it held. (With "
-                         "--separate-trunks this is vacuous — freezing the head's own trunk maintains "
-                         "it exactly, so the penalty term is ~0.)")
-    ap.add_argument("--separate-trunks", action="store_true",
-                    help="--staged variant: give EACH output (rating/slope/floor) its OWN independent "
-                         "trunk instead of one shared trunk → Linear(·,3). Freezing a trained head "
-                         "then just freezes its trunk's params, maintaining its output EXACTLY (zero "
-                         "drift) while the other heads train — removes the shared-trunk leak. Triples "
-                         "the trunk parameters.")
-    ap.add_argument("--two-stage", action="store_true",
-                    help="--staged variant: TWO phases instead of three — phase 1 trains rating "
-                         "(slope/floor const), phase 2 frees slope AND floor TOGETHER (rating frozen). "
-                         "Pair with --free-lapse to also train the ceiling in phase 2.")
-    ap.add_argument("--global-stage1", action="store_true",
-                    help="--staged: hold a not-yet-individualized head at a LEARNABLE GLOBAL scalar "
-                         "(trained) instead of a fixed const. With phase 1 = rating(+ceiling) and "
-                         "phase 2 = slope+floor, this trains a global slope + global floor + global "
-                         "ceiling jointly with the per-problem rating in phase 1 (auto-finding the "
-                         "self-consistent globals the fixed-point search did by hand), then phase 2 "
-                         "individualizes slope/floor. Use with --stage-plan 'rating+ceiling,slope+floor'.")
-    ap.add_argument("--stage-plan", default=None,
-                    help="--staged: explicit phase ORDER, overriding the default/--two-stage plan. "
-                         "Comma-separated phases, each a '+'-joined subset of "
-                         "{rating,slope,floor,ceiling}, e.g. 'rating,slope,floor+ceiling' (default 3-"
-                         "stage with a learned ceiling) or 'rating,floor+ceiling,slope' (floor+ceiling "
-                         "before slope). A phase containing 'ceiling' trains the global lapse that "
-                         "phase; the lapse is freed automatically if any phase trains it.")
-    ap.add_argument("--free-lapse", action="store_true",
-                    help="Train the global ceiling (lapse λ, upper asymptote 1−λ) instead of pinning "
-                         "it at --lapse-fixed. Under --staged it is trained only in the phase(s) that "
-                         "free a head other than rating (so phase 1 keeps it at init 0.02). Without "
-                         "--staged it is free for the whole joint fit. (Expect it to drift low — the "
-                         "asymptote-free-fit collapse; this flag is to MEASURE that.)")
     ap.add_argument("--lr", type=float, default=0.01)
     ap.add_argument("--lr-schedule", choices=["constant", "cosine"], default="constant",
                     help="Per-epoch LR schedule for the MAIN fit (the detached δ group rides the "
@@ -763,7 +598,7 @@ def main():
                          "rows) from training (via auxiliary.holdout_set, seed-keyed, hash-printed) "
                          "so the feature prior's generalization to those UNSEEN problems can be "
                          "measured. Writes the (subset-trained) CSVs to --out-dir (refuses the "
-                         "production ratings_v2/); validate with auxiliary.validate_ratings or "
+                         "production ratings/); validate with auxiliary.validate_ratings or "
                          "--validate.")
     ap.add_argument("--validate", action="store_true",
                     help="After writing, run auxiliary.validate_ratings.run_validation on --out-dir "
@@ -1047,10 +882,6 @@ def main():
                          "can be compared bin-for-bin). 0 disables the report.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--log-every", type=int, default=50)
-    # --production-flags: install the shipped config as defaults BEFORE the real parse, so any
-    # explicitly-passed flag still overrides it (argparse: CLI args beat set_defaults).
-    if ap.parse_known_args()[0].production_flags:
-        ap.set_defaults(**PRODUCTION_FLAGS)
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # The M0b production config is the DEFAULT (zero flags = ship config). Flags that replace a
@@ -1287,155 +1118,6 @@ def main():
         return (b_all.cpu().numpy(), a_all.cpu().numpy(), c_all.cpu().numpy(),
                 theta_full, lam)
 
-    if args.staged:
-        # ---- coordinate-descent over the per-problem 4PL heads (rating → slope → floor) ----
-        if args.holdout_problem_frac > 0 and os.path.abspath(args.out_dir) == os.path.join(
-                PROJECT_ROOT, "ratings_v2"):
-            sys.exit("--staged + --holdout writes SUBSET-trained ratings; pass a temp --out-dir.")
-        from auxiliary.rating_dev.validate_ratings import run_validation
-        HN = {0: "rating", 1: "slope", 2: "floor"}
-        HEAD_TOK = {"rating": 0, "slope": 1, "floor": 2}
-        # stage plan: list of (free-head set, tag, train-ceiling?). --stage-plan gives an explicit
-        # ordering, comma-separated phases of "+"-joined tokens from {rating,slope,floor,ceiling},
-        # e.g. "rating,slope,floor+ceiling" or "rating,floor+ceiling,slope". Else --two-stage =
-        # rating then slope+floor; else default rating → slope → floor (ceiling in the floor phase
-        # if --free-lapse). A phase containing "ceiling" trains the global lapse that phase; the
-        # lapse is a free parameter whenever ANY phase trains it (or --free-lapse).
-        if args.stage_plan:
-            plan = []
-            for i, phase in enumerate(args.stage_plan.split(",")):
-                toks = [t.strip() for t in phase.split("+")]
-                heads = {HEAD_TOK[t] for t in toks if t in HEAD_TOK}
-                plan.append((heads, f"stage{i + 1}_" + "+".join(toks), "ceiling" in toks))
-        elif args.two_stage:
-            plan = [({0}, "stage1_rating", False), ({1, 2}, "stage2_slope+floor", args.free_lapse)]
-        else:
-            plan = [({0}, "stage1_rating", False), ({1}, "stage2_slope", False),
-                    ({2}, "stage3_floor", args.free_lapse)]
-        free_lapse = args.free_lapse or any(tl for _, _, tl in plan)
-        torch.manual_seed(args.seed)
-        m = RatingNet(fdim, n_profiles + n_anchor, tuple(args.diff_hidden),
-                      dropout=args.dropout, lapse_cap=args.lapse_cap,
-                      slope_floor=args.slope_floor, floor_cap=args.floor_cap, n_anchor=n_anchor,
-                      hier_slope=False, hier_floor=False, global_slope=False,
-                      global_slope_fixed=None, mech_floor_botf=None, mech_floor_scale_fixed=None,
-                      floor_resid=False, n_problems=len(keys), per_problem=False,
-                      lapse_human_only=args.lapse_human_only, lapse_init=args.lapse_init,
-                      lapse_fixed=(None if free_lapse else args.lapse_fixed),
-                      act_dropout=args.act_dropout, act_dim=k if use_act else 0,
-                      bw_dropout=args.bw_dropout, bw_dim=nb if use_bw else 0,
-                      move_dropout=args.move_dropout, move_dim=nmv if use_mv else 0,
-                      separate_trunks=args.separate_trunks).to(device)
-        m.staged = True
-        m.const_a = float(args.stage_slope_const)
-        m.const_c = float(args.stage_floor_const)
-        m.global_stage1 = args.global_stage1
-        if args.global_stage1:                                    # init the global scalars at the consts
-            with torch.no_grad():
-                m.gslope_raw.fill_(float(np.log(np.expm1(m.const_a))))
-                m.gfloor_raw.fill_(float(np.log(m.const_c / (1 - m.const_c))))
-        print(f"\n=== STAGED | {'SEPARATE per-head trunks' if m.separate else 'SHARED trunk + pin-weight ' + str(args.stage_pin_weight)}"
-              f" | plan {[sorted(HN[h] for h in s) + (['ceiling'] if tl else []) for s, _, tl in plan]}"
-              f" | slope const {m.const_a:g} floor const {m.const_c:g} | {args.stage_epochs} ep/stage"
-              f" | dropout {args.act_dropout}/{args.bw_dropout} | ceiling "
-              f"{'LEARNED' if free_lapse else 'fixed ' + str(args.lapse_fixed)} ===")
-
-        def train_stage(free_set, train_lapse, epochs):
-            """Free a SET of heads (data BCE) while already-trained heads are held at their stored
-            per-problem values by a consistency penalty. Frozen heads stay LIVE in the prediction but
-            are DETACHED from the BCE — their only gradient is the penalty (head→pin buffer), forcing
-            the shared trunk to keep emitting them. train_lapse frees the ceiling this stage."""
-            m.free_heads = set(free_set)
-            # FROZEN = trained but NOT free this phase. A head re-freed in a later phase (e.g. a
-            # rating REFIT after slope/floor/ceiling are in place) is in both trained_heads and
-            # free_heads → it is treated as FREE (re-fit on the BCE), not held by the penalty.
-            frozen = m.trained_heads - m.free_heads
-            if free_lapse:
-                m.lapse_raw.requires_grad_(bool(train_lapse))
-            opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=args.lr)
-            for ep in range(epochs):
-                m.train()
-                perm = torch.randperm(n, device=device)
-                for i in range(0, n, args.batch):
-                    bi = perm[i:i + args.batch]
-                    pid = tp[bi]
-                    b, a, c = m.params(tfeat[pid], pid)          # live (not-yet heads already const)
-                    th = m.ability(tu[bi]); lam = m.lapse()
-                    b_p = b.detach() if 0 in frozen else b       # frozen heads: used live, no BCE grad
-                    a_p = a.detach() if 1 in frozen else a
-                    c_p = c.detach() if 2 in frozen else c
-                    pred = (c_p + (1.0 - c_p - lam) * torch.sigmoid(a_p * (th - b_p))).clamp(EPS, 1 - EPS)
-                    bce = (torch.nn.functional.binary_cross_entropy(pred, tt[bi], reduction="none")
-                           * tw[bi]).sum() / tw[bi].sum()
-                    pen = torch.zeros((), device=device)
-                    if 0 in frozen:                              # frozen heads → maintain pin buffer
-                        pen = pen + ((b - m.pin_b[pid]) ** 2).mean()
-                    if 1 in frozen:
-                        pen = pen + ((a - m.pin_a[pid]) ** 2).mean()
-                    if 2 in frozen:
-                        pen = pen + ((c - m.pin_c[pid]) ** 2).mean()
-                    loss = bce + args.stage_pin_weight * pen
-                    opt.zero_grad(); loss.backward(); opt.step()
-            with torch.no_grad():                                # human train BCE for the trace
-                m.eval()
-                hb = float(torch.nn.functional.binary_cross_entropy(m(thu, tfeat[thp], thp), thy))
-            return hb
-
-        def write_stage(tag):
-            b_all, a_all, c_all, theta_full, lam = score_corpus(m)
-            # drift readout: how far the LIVE frozen heads ended from their stored per-problem values
-            # (small = the penalty held them, so the single coherent forward still reflects each stage)
-            for h, live, buf in [(0, b_all, m.pin_b), (1, a_all, m.pin_a), (2, c_all, m.pin_c)]:
-                if h in m.trained_heads:
-                    print(f"   {HN[h]}-maintain drift: mean|Δ| "
-                          f"{np.abs(live - buf.cpu().numpy()).mean():.4f}")
-            rating = b_all + clear_logit_vec(c_all, lam) / a_all
-            lo, hi = np.percentile(rating, [args.winsor, 100 - args.winsor])
-            rating = np.clip(rating, lo, hi)
-            theta = theta_full[:n_profiles]
-            sdir0 = os.path.join(args.out_dir, tag)
-            for s in SIZES:
-                sel = [i for i, (sz, _) in enumerate(keys) if sz == s]
-                tids = [keys[i][1] for i in sel]
-                d = os.path.join(sdir0, str(s)); os.makedirs(d, exist_ok=True)
-                pd.DataFrame({"tsumego_id": tids, "rating": rating[sel]}).to_csv(
-                    os.path.join(d, "tsumego_ratings_final.csv"), index=False)
-                pd.DataFrame({"tsumego_id": tids, "quality": a_all[sel]}).to_csv(
-                    os.path.join(d, "tsumego_quality_final.csv"), index=False)
-                pd.DataFrame({"tsumego_id": tids, "floor": c_all[sel]}).to_csv(
-                    os.path.join(d, "tsumego_floor_final.csv"), index=False)
-            pd.DataFrame({"profile": list(profiles.categories), "theta": theta}).to_csv(
-                os.path.join(sdir0, "user_theta.csv"), index=False)
-            with open(os.path.join(sdir0, "rating_constants.json"), "w") as f:
-                json.dump({"fat_finger_rate": round(lam, 4)}, f)
-            print(f"  [{tag}] ceiling 1−λ {1 - lam:.4f} (λ {lam:.4f}) | "
-                  f"rating [{rating.min():.2f},{rating.max():.2f}] "
-                  f"slope [{a_all.min():.2f},{a_all.max():.2f}] floor mean {c_all.mean():.3f}")
-            run_validation(sdir0, args.seed, args.holdout_problem_frac, expect_hash=ho_hash)
-
-        for free_set, tag, train_lapse in plan:
-            hb = train_stage(free_set, train_lapse, args.stage_epochs)
-            freed = sorted(HN[h] for h in free_set) + (["ceiling"] if train_lapse else [])
-            if args.global_stage1:
-                freed += ["GLOBAL-slope", "GLOBAL-floor"] if any(h in ({1, 2} - m.trained_heads - free_set)
-                                                                  for h in (1, 2)) else []
-            print(f"\n--- {tag} trained (free {freed}); human train BCE {hb:.4f} ---")
-            if args.global_stage1:
-                print(f"    learned globals: slope {float(torch.nn.functional.softplus(m.gslope_raw)):.3f}"
-                      f"  floor {float(torch.sigmoid(m.gfloor_raw)):.3f}")
-            write_stage(tag)
-            with torch.no_grad():                                # store the just-trained heads' LIVE
-                b_all, a_all, c_all = m.params(tfeat)            # per-problem values for the penalty
-                for h, buf, live in [(0, m.pin_b, b_all), (1, m.pin_a, a_all), (2, m.pin_c, c_all)]:
-                    if h in free_set:
-                        buf.copy_(live)
-            if m.separate:                                       # freeze the freed heads' own trunks →
-                for h in free_set:
-                    [m.net_b, m.net_a, m.net_c][h].requires_grad_(False)  # exact maintenance, no leak
-            m.trained_heads |= set(free_set)
-        print("\n=== STAGED complete ===")
-        return
-
     def fit_model(dro=None, hier_target=None, cond_div=None):
         """Train one RatingNet. dro=(bin_per_row, base_g, G, eta) swaps the HUMAN mean-BCE term for
         a base-rate-centered online group-DRO over rating(/gap) bins (Sagawa et al.): each minibatch
@@ -1460,8 +1142,7 @@ def main():
                       floor_resid=args.floor_residual, n_problems=len(keys),
                       per_problem=args.per_problem,
                       lapse_human_only=args.lapse_human_only,
-                      lapse_init=args.lapse_init,
-                      lapse_fixed=(None if args.free_lapse else args.lapse_fixed),
+                      lapse_fixed=args.lapse_fixed,
                       act_dropout=args.act_dropout,
                       act_dim=k if use_act else 0,
                       bw_dropout=args.bw_dropout,
@@ -1998,12 +1679,12 @@ def main():
     gap_rating_calibration(train_mask & heavy_row,
                            "train rows, heavy users — outcome-contaminated, read A/B diffs only")
 
-    # Held-out runs train on a SUBSET, so refuse to overwrite the production ratings_v2/ — pass an
+    # Held-out runs train on a SUBSET, so refuse to overwrite the production ratings/ — pass an
     # explicit --out-dir (e.g. a temp dir). The standalone bench (auxiliary.validate_ratings) scores
     # the written CSVs; --validate runs it automatically after the write below.
-    if args.holdout_problem_frac > 0 and os.path.abspath(args.out_dir) == os.path.join(PROJECT_ROOT, "ratings_v2"):
+    if args.holdout_problem_frac > 0 and os.path.abspath(args.out_dir) == os.path.join(PROJECT_ROOT, "ratings"):
         sys.exit("--holdout-problem-frac writes a SUBSET-trained model; refusing to overwrite the "
-                 "production ratings_v2/. Pass an explicit --out-dir (e.g. /tmp/rv2_holdout).")
+                 "production ratings/. Pass an explicit --out-dir (e.g. /tmp/rv2_holdout).")
 
     # --- write outputs ---
     os.makedirs(args.out_dir, exist_ok=True)
@@ -2035,11 +1716,11 @@ def main():
     torch.save({"state_dict": m.state_dict(), "keys": keys, "fdim": fdim, "k": k,
                 "n_bot_cols": nb, "n_anchor": n_anchor, "anchor_ranks": ranks,
                 "lapse": lam, "args": vars(args)},
-               os.path.join(args.out_dir, "model_v2.pt"))
+               os.path.join(args.out_dir, "model.pt"))
     pd.DataFrame(epoch_records, columns=["pass", "epoch", "train_bce", "lapse"]).to_csv(
         os.path.join(args.out_dir, "epoch_log.csv"), index=False)
     print(f"wrote user_theta.csv ({n_profiles} profiles) + rating_constants.json "
-          f"(fat_finger_rate λ={lam:.5f}) + model_v2.pt to {args.out_dir}")
+          f"(fat_finger_rate λ={lam:.5f}) + model.pt to {args.out_dir}")
 
     if args.validate:
         # Convenience: run the standalone bench on what we just wrote (no manual chaining). It

@@ -1,4 +1,4 @@
-"""Structural diagnostics for a ratings_v2-style 4PL artifact (docs/rating_4pl_structure_log.md).
+"""Structural diagnostics for a ratings-style 4PL artifact (docs/rating_4pl_structure_log.md).
 
 Reads <dir>/<size>/tsumego_{ratings,quality,floor}_final.csv (rating / slope a_p / floor c_p)
 and compares against bot-ladder ground truth from attempts/<size>/b18c384nbt-humanv0_<rank>.txt:
@@ -14,7 +14,7 @@ within-decile floor↔bot-floor and slope↔steepness Spearmans) plus the global
 the motivating two-candidate hard case (bot floor 0.4–0.6, hardest decile).
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.diag_4pl_structure --dir ratings_v2_20k9d_erm [--dir B ...]
+  ./.venv/bin/python3 -m auxiliary.diag_4pl_structure --dir ratings_20k9d_erm [--dir B ...]
 """
 
 import argparse
@@ -106,14 +106,14 @@ def load_artifact(d):
         rows.append(df)
     df = pd.concat(rows, ignore_index=True).rename(columns={"quality": "slope"})
     sf = float("nan")
-    pt = os.path.join(PROJECT_ROOT, d, "model_v2.pt")
+    pt = os.path.join(PROJECT_ROOT, d, "model.pt")
     if os.path.exists(pt):
         try:
             import torch
             sf = float(torch.load(pt, map_location="cpu",
                                   weights_only=False)["args"].get("slope_floor", float("nan")))
         except Exception as e:                                   # diagnostics-only, stay soft
-            print(f"  (could not read slope_floor from model_v2.pt: {e})")
+            print(f"  (could not read slope_floor from model.pt: {e})")
     return df, sf
 
 

@@ -11,12 +11,12 @@ It reproduces the SAME two steps the production client does on the front page:
      restricted to recent attempts (`--recent-days` / `--last-n`) since the live
      front-page rank is a recency-weighted estimate.
   2. Rank        — that rating mapped through the shipped rating→rank curve
-     (`ratings_v2/rating_to_rank.json`, the M the client interpolates), reported
+     (`ratings/rating_to_rank.json`, the M the client interpolates), reported
      as a rank index, a kyu/dan scalar (1k=0, 1d=1) and a label.
 
 It reads the LOCAL DB copy (`attempts/database.sqlite` by default — the binary is
 far faster than re-parsing the .sql dump; see CLAUDE.md) and the backend
-`ratings_v2/` artifacts. No network, no GPU.
+`ratings/` artifacts. No network, no GPU.
 
 Usage:
   ./.venv/bin/python3 -m auxiliary.estimate_user_rank <redacted-user-id>
@@ -44,7 +44,7 @@ from utils.fit_rank_curves import (  # noqa: E402
 
 SIZES = [9, 13]
 DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
-V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings_v2")
+V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
 
 def _parse_ts(ts):
@@ -147,7 +147,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("user_id", help="user id (prefix-matched against the DB)")
     ap.add_argument("--db", default=DB_DEFAULT, help="local sqlite DB copy")
-    ap.add_argument("--v2-dir", default=V2_DIR_DEFAULT)
+    ap.add_argument("--dir", default=V2_DIR_DEFAULT)
     ap.add_argument("--recent-days", type=int, default=None,
                     help="only attempts within this many days of the user's "
                          "latest attempt")
@@ -161,10 +161,10 @@ def main():
     if not os.path.exists(args.db):
         sys.exit(f"{args.db} not found — run pipeline.fetch_database first.")
 
-    ratings, slopes = load_problem_maps(args.v2_dir)
+    ratings, slopes = load_problem_maps(args.dir)
     if not ratings:
-        sys.exit(f"No v2 ratings under {args.v2_dir} — run train_rating.")
-    xs, ys = load_curve(args.v2_dir)
+        sys.exit(f"No v2 ratings under {args.dir} — run train_rating.")
+    xs, ys = load_curve(args.dir)
 
     rows, surveys = load_user_attempts(args.db, args.user_id,
                                        args.include_repeats)

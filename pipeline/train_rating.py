@@ -5,7 +5,7 @@ artifacts, and does NOTHING else. It takes NO options (CLI or internal) — the 
 is hardcoded as module constants below — and carries no eval, held-out, DRO, anchor, hierarchical,
 per-problem, or other experiment machinery. The full experiment + evaluation surface (every knob,
 the held-out / survey-ρ eval suite, alternative objectives) lives in
-auxiliary/rating_dev/train_rating_v2_staged.py, which can replicate this output. Do experiments
+auxiliary/rating_dev/train_rating_staged.py, which can replicate this output. Do experiments
 THERE, so a test tweak can never break the shipped ratings.
 
 ONE model for 9x9 AND 13x13. A SHARED feature→4PL network maps each problem's features to
@@ -39,16 +39,16 @@ implies:
 
     rating_p = b_p + logit((0.8 − c_p) / (1 − c_p − λ)) / a_p
 
-The global ceiling λ is produced HERE (written to ratings_v2/rating_constants.json);
+The global ceiling λ is produced HERE (written to ratings/rating_constants.json);
 pipeline.fit_population_constants reads it through.
 
 Outputs (nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
-  ratings_v2/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
-  ratings_v2/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
-  ratings_v2/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
-  ratings_v2/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
-  ratings_v2/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
-  ratings_v2/model_v2.pt                        weights + run metadata
+  ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
+  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
+  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
+  ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
+  ratings/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
+  ratings/model.pt                        weights + run metadata
 
 Usage (run pipeline.cache_move_features first — it builds the candidate-move-eval cache the
 feature trunk reads):
@@ -79,8 +79,8 @@ EPS = 1e-6
 SIZES = [9, 13]
 
 # ── PRODUCTION configuration (the shipped staged self-consistent fixed point) ─────────────────────
-# To re-derive or experiment with any of these, use auxiliary/rating_dev/train_rating_v2_staged.py.
-OUT_DIR = os.path.join(PROJECT_ROOT, "ratings_v2")
+# To re-derive or experiment with any of these, use auxiliary/rating_dev/train_rating_staged.py.
+OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
 DIFF_HIDDEN = (128, 64)          # shared feature→4PL trunk hidden layers
@@ -368,9 +368,9 @@ def main():
               "seed": SEED}
     torch.save({"state_dict": m.state_dict(), "keys": keys, "fdim": fdim, "k": k,
                 "n_bot_cols": nb, "n_move_cols": nmv, "n_anchor": 0, "anchor_ranks": [],
-                "lapse": lam, "args": config}, os.path.join(OUT_DIR, "model_v2.pt"))
+                "lapse": lam, "args": config}, os.path.join(OUT_DIR, "model.pt"))
     print(f"\n=== STAGED complete === wrote ratings + user_theta.csv ({n_profiles} profiles) + "
-          f"rating_constants.json (λ={lam:.5f}) + model_v2.pt to {OUT_DIR}")
+          f"rating_constants.json (λ={lam:.5f}) + model.pt to {OUT_DIR}")
 
 
 if __name__ == "__main__":

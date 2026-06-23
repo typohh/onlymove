@@ -1,5 +1,5 @@
 """Fit the PWA's population-level model constants from the local D1 log and write
-them to ratings_v2/population_constants.json, which package_for_pwa copies into
+them to ratings/population_constants.json, which package_for_pwa copies into
 the served pwa/tsumegos/. The client fetches it at boot and uses these in place
 of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
@@ -52,9 +52,9 @@ Four groups of constants:
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
 
-Needs the backend ratings_v2/<size>/ 3PL params (tsumego_ratings_final.csv,
+Needs the backend ratings/<size>/ 3PL params (tsumego_ratings_final.csv,
 tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating)
-ratings_v2/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
+ratings/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
 embeddings/joint/per_problem.csv (the weakness ridge's correct-move embeddings),
 and attempts/database.sqlite. It reads the backend directly, NOT the served
 pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
@@ -63,7 +63,7 @@ pipeline.
 
 Run:
   ./.venv/bin/python3 -m pipeline.fetch_database --rebuild-sqlite   # refresh first
-  ./.venv/bin/python3 -m pipeline.fit_population_constants          # reads ratings_v2/
+  ./.venv/bin/python3 -m pipeline.fit_population_constants          # reads ratings/
   ./.venv/bin/python3 -m pipeline.package_for_pwa                   # publishes the JSON
 """
 
@@ -198,7 +198,7 @@ def _read_id_value(path, value_col, keep):
 
 
 def load_problem_params(ratings_dir, needed):
-    """{(size, tid): (rating, slope, floor)} from the backend ratings_v2/<size>/
+    """{(size, tid): (rating, slope, floor)} from the backend ratings/<size>/
     CSVs — the SAME source package_for_pwa ships into the shard metadata
     (rating ← tsumego_ratings_final, slope ← tsumego_quality_final's `quality`,
     floor ← tsumego_floor_final). Reading the backend directly keeps the pipeline
@@ -257,13 +257,13 @@ def cold_solve_logit(theta, rating, slope, floor):
 
 # Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is no longer fit here.
 # pipeline.train_rating LEARNS it jointly with the rating model (a single global ceiling on
-# the success curve) and writes it to ratings_v2/rating_constants.json; main() reads it through
+# the success curve) and writes it to ratings/rating_constants.json; main() reads it through
 # into population_constants.json so the JS-bundle contract is unchanged (see read_rating_lapse).
 
 
 def read_rating_lapse(ratings_dir):
     """The global ceiling λ produced by the rating model (train_rating →
-    ratings_v2/rating_constants.json: {"fat_finger_rate": λ}). Returns float or None."""
+    ratings/rating_constants.json: {"fat_finger_rate": λ}). Returns float or None."""
     path = os.path.join(ratings_dir, "rating_constants.json")
     if not os.path.exists(path):
         return None
@@ -376,7 +376,7 @@ def load_surveys(db_path):
 
 
 def load_rating_to_rank(ratings_dir):
-    """rating→rank-index interpolator M from ratings_v2/rating_to_rank.json (one
+    """rating→rank-index interpolator M from ratings/rating_to_rank.json (one
     shared curve; the size-9 key stands in for either board). None if absent/bad —
     the caller then keeps the default time_adjust block."""
     path = os.path.join(ratings_dir, "rating_to_rank.json")
@@ -734,8 +734,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
-    ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings_v2"))
-    ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings_v2", "population_constants.json"))
+    ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
+    ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings", "population_constants.json"))
     ap.add_argument("--no-survey-recenter", dest="survey_recenter", action="store_false",
                     help="Anchor the time-dock intercept g0 on the FLEET instead of the "
                          "survey cohort. Default re-anchors g0 to the survey cohort's mean "
@@ -779,7 +779,7 @@ def main():
     if lam is not None:
         out["fat_finger_rate"] = round(lam, 4)
         print(f"Fat-finger (lapse) rate from the rating model: {out['fat_finger_rate']} "
-              f"(ratings_v2/rating_constants.json — train_rating learns it jointly)")
+              f"(ratings/rating_constants.json — train_rating learns it jointly)")
     else:
         print(f"No rating_constants.json (run train_rating first); "
               f"keeping default fat_finger_rate {out['fat_finger_rate']}")
@@ -809,7 +809,7 @@ def main():
     print("Fitting time-adjusted-rank constants (survey-validated, rank-residualized) ...")
     apply_m = load_rating_to_rank(args.ratings_dir)
     if apply_m is None:
-        print("  WARNING: ratings_v2/rating_to_rank.json missing (run map_rating_to_egf "
+        print("  WARNING: ratings/rating_to_rank.json missing (run map_rating_to_egf "
               "first) — keeping default time_adjust block")
     ta_alpha, ta_g0, ta_g1, ta_info = fit_time_adjust(
         by_user, params, load_surveys(args.db), apply_m, args.survey_recenter)

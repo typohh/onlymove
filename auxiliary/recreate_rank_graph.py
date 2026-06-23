@@ -35,7 +35,7 @@ curves on one graph / in the monthly table, so the filter's effect is visible.
 "With a given ranking system"
 -----------------------------
 Every per-attempt feature (x = M(rating), slope = a_p/|M'|, floor) is looked up
-from a ranking-system dir (`--v2-dir`, default `ratings_v2/`) + its
+from a ranking-system dir (`--dir`, default `ratings/`) + its
 `rating_to_rank.json` + `rank_map.json`, and the fat-finger LAPSE from
 `pwa/tsumegos/population_constants.json`. Point them elsewhere to re-render the
 same user under a different ranking system.
@@ -103,7 +103,7 @@ TIME_ADJUST_SHRINK_ESS = 8
 
 ONLYMOVE = "OnlyMove"
 DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
-V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings_v2")
+V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 POP_DEFAULT = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "population_constants.json")
 
 
@@ -453,7 +453,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("user_id")
     ap.add_argument("--db", default=DB_DEFAULT)
-    ap.add_argument("--v2-dir", default=V2_DIR_DEFAULT)
+    ap.add_argument("--dir", default=V2_DIR_DEFAULT)
     ap.add_argument("--pop-constants", default=POP_DEFAULT)
     ap.add_argument("--server", default=ONLYMOVE,
                     help="OnlyMove (default), EGF, or a rank_map.json server")
@@ -468,7 +468,7 @@ def main():
 
     pc = load_pop_constants(args.pop_constants)
     lapse = lapse_from(pc)
-    rs = RankingSystem(args.v2_dir, lapse)
+    rs = RankingSystem(args.dir, lapse)
     server = args.server
     if server != ONLYMOVE and server != "EGF" and server not in rs.rank_map:
         sys.exit(f"Unknown server '{server}'. Known: OnlyMove, EGF, "
@@ -504,7 +504,7 @@ def main():
     n_rows_all, n_rep = int(n_all[0]), int(n_all[1] or 0)
     print(f"User '{args.user_id}'  —  recreated client Rank-tab graph  "
           f"[server = {server}]")
-    print(f"  ranking system: {os.path.relpath(args.v2_dir, PROJECT_ROOT)}   LAPSE={lapse:.4f}")
+    print(f"  ranking system: {os.path.relpath(args.dir, PROJECT_ROOT)}   LAPSE={lapse:.4f}")
     if server != ONLYMOVE:
         if ta and med_at:
             print(f"  time-adjust: alpha={ta['alpha']:+.3f}/log10min  "
