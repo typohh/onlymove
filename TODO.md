@@ -1,1 +1,1 @@
-- fix how weaknses are categorized, there seems to be a bug there, as they are always classified as inconsistent.
+
