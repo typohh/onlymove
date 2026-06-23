@@ -74,7 +74,7 @@ if PROJECT_ROOT not in sys.path:
 
 # NOTE (prototype tech-debt): these live in auxiliary/ today. When this backend stabilizes,
 # promote load_joint_*/build_profiles + the activation-cache helpers into utils/.
-from auxiliary.compare_rating_models import (  # noqa: E402
+from auxiliary.rating_dev.model_comparison import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate,
     load_joint_move_features,
 )

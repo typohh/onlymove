@@ -50,7 +50,7 @@ if PROJECT_ROOT not in sys.path:
 
 from auxiliary.rating_dev.holdout_set import held_out_keys  # noqa: E402
 from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
-from auxiliary.compare_rating_models import build_profiles  # noqa: E402
+from auxiliary.rating_dev.model_comparison import build_profiles  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6
