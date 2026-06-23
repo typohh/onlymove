@@ -25,14 +25,12 @@ Usage (USER_ID is the account code, prefix-matched against the DB):
 """
 
 import argparse
-import json
 import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
-import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -40,6 +38,9 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
+)
+from utils.ratings_io import (  # noqa: E402
+    QUALITY_CSV, RATINGS_CSV, load_rating_rank_curve, load_value_map,
 )
 
 SIZES = [9, 13]
@@ -58,25 +59,17 @@ def load_problem_maps(v2_dir):
     and the merge is lossless."""
     ratings, slopes = {}, {}
     for size in SIZES:
-        rpath = os.path.join(v2_dir, str(size), "tsumego_ratings_final.csv")
-        qpath = os.path.join(v2_dir, str(size), "tsumego_quality_final.csv")
-        if os.path.exists(rpath):
-            df = pd.read_csv(rpath)
-            ratings.update(zip(df["tsumego_id"], df["rating"].astype(float)))
-        if os.path.exists(qpath):
-            df = pd.read_csv(qpath)
-            slopes.update(zip(df["tsumego_id"], df["quality"].astype(float)))
+        ratings.update(load_value_map(
+            os.path.join(v2_dir, str(size), RATINGS_CSV), "rating", missing_ok=True))
+        slopes.update(load_value_map(
+            os.path.join(v2_dir, str(size), QUALITY_CSV), "quality", missing_ok=True))
     return ratings, slopes
 
 
 def load_curve(v2_dir):
     """The shared rating→rank curve (both board keys identical). Returns
     (ratings_knots, rank_index_knots)."""
-    path = os.path.join(v2_dir, "rating_to_rank.json")
-    with open(path) as f:
-        m = json.load(f)
-    c = m["9"]
-    return np.asarray(c["ratings"], float), np.asarray(c["rank_indices"], float)
+    return load_rating_rank_curve(v2_dir)
 
 
 def rating_to_rank(R, xs, ys):

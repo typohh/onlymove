@@ -75,6 +75,7 @@ from utils.fit_rank_curves import (  # noqa: E402
     ordinal_nll_vec, _unpack_thresholds,
 )
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
+from utils.ratings_io import QUALITY_CSV, RATINGS_CSV, load_value_map  # noqa: E402
 
 SIZES = list(ALL_BOARD_SIZES)
 
@@ -88,11 +89,8 @@ RATING_SHAPE = "cubic"
 def load_ratings(v2_dir, size):
     """{tsumego_id: b_p rating} from ratings/<size>/tsumego_ratings_final.csv
     — the same shared-scale black-box scalar package_for_pwa ships for v2."""
-    path = os.path.join(v2_dir, str(size), "tsumego_ratings_final.csv")
-    if not os.path.exists(path):
-        return {}
-    df = pd.read_csv(path)
-    return dict(zip(df["tsumego_id"], df["rating"].astype(float)))
+    return load_value_map(
+        os.path.join(v2_dir, str(size), RATINGS_CSV), "rating", missing_ok=True)
 
 
 def load_slopes(v2_dir, size):
@@ -100,11 +98,8 @@ def load_slopes(v2_dir, size):
     2PL discrimination (the `quality` column). fit_user_rating uses these as the
     per-problem success-curve slope so the survey-user 80%-clear ratings (and thus
     M) are anchored with the SAME per-problem a_p the PWA's estimator uses."""
-    path = os.path.join(v2_dir, str(size), "tsumego_quality_final.csv")
-    if not os.path.exists(path):
-        return {}
-    df = pd.read_csv(path)
-    return dict(zip(df["tsumego_id"], df["quality"].astype(float)))
+    return load_value_map(
+        os.path.join(v2_dir, str(size), QUALITY_CSV), "quality", missing_ok=True)
 
 
 def _shape_at(ys):

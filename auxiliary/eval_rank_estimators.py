@@ -80,6 +80,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.fit_rank_curves import interp_extrap  # noqa: E402
+from utils.ratings_io import load_size_value_maps  # noqa: E402
 
 # --- client constants (kept in sync with pwa/js/*.js; see module docstring) ---
 TOTAL_RANKS = 29
@@ -156,12 +157,11 @@ class Corpus:
         self.slopes = {}    # size -> {tid: a_p}
         self.floors = {}    # size -> {tid: floor}
         self.curve = {}     # size -> (ratings[], rank_indices[])
-        rr = json.load(open(os.path.join(root, "ratings", "rating_to_rank.json")))
+        rdir = os.path.join(root, "ratings")
+        rr = json.load(open(os.path.join(rdir, "rating_to_rank.json")))
         for size in ("9", "13"):
-            d = os.path.join(root, "ratings", size)
-            self.ratings[size] = _read_csv(os.path.join(d, "tsumego_ratings_final.csv"), "rating")
-            self.slopes[size] = _read_csv(os.path.join(d, "tsumego_quality_final.csv"), "quality")
-            self.floors[size] = _read_csv(os.path.join(d, "tsumego_floor_final.csv"), "floor")
+            self.ratings[size], self.slopes[size], self.floors[size] = \
+                load_size_value_maps(rdir, size)
             self.curve[size] = (rr[size]["ratings"], rr[size]["rank_indices"])
 
     def apply_m(self, rating, size):
@@ -195,17 +195,6 @@ class Corpus:
         slope = min(SLOPE_HI, max(SLOPE_LO, slope))
         floor = clamp_floor(self.floors[sz].get(tid))
         return x, slope, floor, clear_kappa(floor), a_p
-
-
-def _read_csv(path, value_col):
-    out = {}
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            try:
-                out[row["tsumego_id"]] = float(row[value_col])
-            except (KeyError, ValueError):
-                pass
-    return out
 
 
 def parse_ts(s):

@@ -88,6 +88,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rank_surveys import rank_to_scalar  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P, fit_user_rating, interp_extrap_vec  # noqa: E402
+from utils.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
 # CALIBRATION_P (the 80%-clear margin) is the single source in utils.fit_rank_curves.
@@ -178,25 +179,6 @@ def load_rows(db_path):
     return rows
 
 
-def _read_id_value(path, value_col, keep):
-    """{tid: float(value_col)} for tids in `keep` from a 2-col `tsumego_id,<value>`
-    CSV. Missing file → empty (the caller treats absent params as unresolvable)."""
-    out = {}
-    if not os.path.exists(path):
-        return out
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        id_col = reader.fieldnames[0]
-        for row in reader:
-            tid = row[id_col]
-            if tid in keep:
-                try:
-                    out[tid] = float(row[value_col])
-                except (TypeError, ValueError):
-                    pass
-    return out
-
-
 def load_problem_params(ratings_dir, needed):
     """{(size, tid): (rating, slope, floor)} from the backend ratings/<size>/
     CSVs — the SAME source package_for_pwa ships into the shard metadata
@@ -213,9 +195,8 @@ def load_problem_params(ratings_dir, needed):
         if not os.path.isdir(size_dir):
             print(f"  WARNING: {size_dir} missing; skipping size {size}")
             continue
-        ratings = _read_id_value(os.path.join(size_dir, "tsumego_ratings_final.csv"), "rating", tids)
-        slopes = _read_id_value(os.path.join(size_dir, "tsumego_quality_final.csv"), "quality", tids)
-        floors = _read_id_value(os.path.join(size_dir, "tsumego_floor_final.csv"), "floor", tids)
+        ratings, slopes, floors = load_size_value_maps(
+            ratings_dir, size, keep=tids, missing_ok=True)
         for tid in tids:
             r, s = ratings.get(tid), slopes.get(tid)
             if s is None or r is None or not np.isfinite(s) or s <= 0 or not np.isfinite(r):
@@ -379,19 +360,10 @@ def load_rating_to_rank(ratings_dir):
     """rating→rank-index interpolator M from ratings/rating_to_rank.json (one
     shared curve; the size-9 key stands in for either board). None if absent/bad —
     the caller then keeps the default time_adjust block."""
-    path = os.path.join(ratings_dir, "rating_to_rank.json")
-    if not os.path.exists(path):
-        return None
     try:
-        with open(path) as f:
-            m = json.load(f)
-    except (ValueError, OSError):
+        xs, ys = load_rating_rank_curve(ratings_dir)
+    except (ValueError, OSError, KeyError, StopIteration):
         return None
-    c = m.get("9") or next(iter(m.values()), None)
-    if not c:
-        return None
-    xs = np.asarray(c.get("ratings", []), float)
-    ys = np.asarray(c.get("rank_indices", []), float)
     if xs.size < 2 or ys.size != xs.size:
         return None
     return lambda r: float(interp_extrap_vec(np.asarray([r], float), xs, ys)[0])

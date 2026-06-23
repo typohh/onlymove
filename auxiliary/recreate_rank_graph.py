@@ -71,6 +71,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.fit_rank_curves import interp_extrap  # noqa: E402
+from utils.ratings_io import load_size_value_maps  # noqa: E402
 
 # --- client constants (ports of pwa/js/{irt,rank-decomposition,rank-translation}.js) ---
 SIZES = ("9", "13")
@@ -166,10 +167,8 @@ class RankingSystem:
         self.ratings, self.slopes, self.floors, self.curve = {}, {}, {}, {}
         rr = json.load(open(os.path.join(v2_dir, "rating_to_rank.json")))
         for size in SIZES:
-            d = os.path.join(v2_dir, size)
-            self.ratings[size] = _read_csv(os.path.join(d, "tsumego_ratings_final.csv"), "rating")
-            self.slopes[size] = _read_csv(os.path.join(d, "tsumego_quality_final.csv"), "quality")
-            self.floors[size] = _read_csv(os.path.join(d, "tsumego_floor_final.csv"), "floor")
+            self.ratings[size], self.slopes[size], self.floors[size] = \
+                load_size_value_maps(v2_dir, size, missing_ok=True)
             if size in rr:
                 self.curve[size] = (rr[size]["ratings"], rr[size]["rank_indices"])
         # one shared curve (both keys identical); used for the time-adjust remap
@@ -231,19 +230,6 @@ class RankingSystem:
 
     def display_label(self, val, server):
         return index_to_label(val) if server == ONLYMOVE else scalar_to_label(val)
-
-
-def _read_csv(path, value_col):
-    out = {}
-    if not os.path.exists(path):
-        return out
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            try:
-                out[row["tsumego_id"]] = float(row[value_col])
-            except (KeyError, ValueError):
-                pass
-    return out
 
 
 # ---------------------------------------------------------------------------

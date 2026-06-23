@@ -32,6 +32,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.fit_rank_curves import interp_extrap  # noqa: E402
+from utils.ratings_io import RATINGS_CSV, load_value_map  # noqa: E402
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 
@@ -71,9 +72,8 @@ def load_correct_vec(act_dir, tid):
 
 
 def load_ratings(size):
-    path = os.path.join(PROJECT_ROOT, "ratings", str(size), "tsumego_ratings_final.csv")
-    df = pd.read_csv(path)[["tsumego_id", "rating"]]
-    return dict(zip(df["tsumego_id"], df["rating"]))
+    return load_value_map(
+        os.path.join(PROJECT_ROOT, "ratings", str(size), RATINGS_CSV), "rating")
 
 
 def load_lookup():

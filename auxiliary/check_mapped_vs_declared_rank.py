@@ -65,6 +65,7 @@ from pipeline.map_rating_to_egf import (  # noqa: E402
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
+from utils.ratings_io import load_rating_rank_curve  # noqa: E402
 
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
@@ -76,11 +77,8 @@ RANK_INDEX_OFFSET = 19.0
 def load_M(v2_dir):
     """Shared rating→internal-rank-scalar knots (both board keys are identical).
     Returns (ratings_asc, internal_scalars_asc) for interp_extrap_vec."""
-    with open(os.path.join(v2_dir, "rating_to_rank.json")) as f:
-        rr = json.load(f)
-    curve = rr[str(SIZES[0])]
-    ratings = np.asarray(curve["ratings"], dtype=float)
-    internal = np.asarray(curve["rank_indices"], dtype=float) - RANK_INDEX_OFFSET
+    ratings, internal = load_rating_rank_curve(
+        v2_dir, size=SIZES[0], offset=RANK_INDEX_OFFSET)
     order = np.argsort(ratings)
     return ratings[order], internal[order]
 

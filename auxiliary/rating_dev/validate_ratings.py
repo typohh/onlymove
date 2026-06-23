@@ -52,6 +52,7 @@ from auxiliary.rating_dev.holdout_set import held_out_keys  # noqa: E402
 from utils.rating_features import load_first_time_attempts  # noqa: E402
 from auxiliary.rating_dev.model_comparison import build_profiles  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.ratings_io import load_size_value_maps  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
@@ -198,13 +199,10 @@ def load_ratings(ratings_dir):
     symmetry-canonical hash differs across board sizes), so a flat per-tid dict is unambiguous."""
     rat, slp, flr = {}, {}, {}
     for s in SIZES:
-        sd = os.path.join(ratings_dir, str(s))
-        r = pd.read_csv(os.path.join(sd, "tsumego_ratings_final.csv"))
-        q = pd.read_csv(os.path.join(sd, "tsumego_quality_final.csv"))
-        fl = pd.read_csv(os.path.join(sd, "tsumego_floor_final.csv"))
-        rat.update(zip(r["tsumego_id"].astype(str), r["rating"].astype(float)))
-        slp.update(zip(q["tsumego_id"].astype(str), q["quality"].astype(float)))
-        flr.update(zip(fl["tsumego_id"].astype(str), fl["floor"].astype(float)))
+        r, q, fl = load_size_value_maps(ratings_dir, s)
+        rat.update(r)
+        slp.update(q)
+        flr.update(fl)
     lam = float(json.load(open(os.path.join(ratings_dir, "rating_constants.json")))["fat_finger_rate"])
     ut = pd.read_csv(os.path.join(ratings_dir, "user_theta.csv"))
     theta = dict(zip(ut["profile"].astype(str), ut["theta"].astype(float)))
