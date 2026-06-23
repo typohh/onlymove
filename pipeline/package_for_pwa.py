@@ -611,6 +611,93 @@ def copy_curve(output_dir):
     return copied
 
 
+def load_rating_artifacts(ratings_dir, ratings_csv):
+    """The three raw per-problem rating artifacts package_for_pwa ships into each
+    shard's metadata.json — returns (ratings_map, slope_map, floor_map):
+      - ratings_map ← tsumego_ratings_final.csv `rating`: the raw black-box rating
+        (the client converts it to a rank via the survey-calibrated curve; no rank
+        baked in here).
+      - slope_map   ← tsumego_quality_final.csv `quality`: the raw 2PL slope a_p,
+        shipped RAW (the client uses it as the success-curve slope and as the
+        selection weight ∝ a_p²).
+      - floor_map   ← tsumego_floor_final.csv `floor`: the raw 3PL guessing floor
+        c_p (lower asymptote of the per-attempt success curve).
+    Read with pandas (NOT utils.ratings_io) on purpose: these floats are shipped
+    into metadata.json, so the values must stay bit-identical to what clients have
+    cached — a 1-ULP reparse would change the shard content hash and needlessly
+    re-ship every shard."""
+    tsumego_ratings_df = pd.read_csv(ratings_csv)
+    tsumego_ratings_df = tsumego_ratings_df.sort_values(
+        by='rating', ascending=True).reset_index(drop=True)
+    ratings_map = dict(zip(
+        tsumego_ratings_df['tsumego_id'],
+        tsumego_ratings_df['rating'].astype(float),
+    ))
+
+    quality_csv = os.path.join(ratings_dir, "tsumego_quality_final.csv")
+    if not os.path.exists(quality_csv):
+        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating")
+    slope_df = pd.read_csv(quality_csv)
+    slope_map = dict(zip(slope_df['tsumego_id'],
+                         slope_df['quality'].astype(float)))
+
+    floor_csv = os.path.join(ratings_dir, "tsumego_floor_final.csv")
+    if not os.path.exists(floor_csv):
+        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating")
+    floor_df = pd.read_csv(floor_csv)
+    floor_map = dict(zip(floor_df['tsumego_id'],
+                         floor_df['floor'].astype(float)))
+
+    print(f"  ratings: {len(ratings_map)}, slopes: {len(slope_map)}, "
+          f"floors: {len(floor_map)}")
+    return ratings_map, slope_map, floor_map
+
+
+def assemble_metadata(sgf_files, board_size, ratings_map, slope_map, floor_map,
+                      embedding_map):
+    """Join each SGF to its (rating, slope, floor, correct-cell embedding) into the
+    per-problem metadata list. Every SGF must resolve all four; any gap means the
+    corpus and the rating/embedding artifacts are out of sync, which aborts (rather
+    than shipping a partial bundle) with a per-field tally of the orphans."""
+    all_metadata = []
+    missing_rating, missing_slope, missing_floor, missing_emb = [], [], [], []
+    for filename in sgf_files:
+        tsumego_id = filename.split('.')[0]
+        if tsumego_id not in ratings_map:
+            missing_rating.append(tsumego_id)
+            continue
+        if tsumego_id not in slope_map:
+            missing_slope.append(tsumego_id)
+            continue
+        if tsumego_id not in floor_map:
+            missing_floor.append(tsumego_id)
+            continue
+        emb = embedding_map.get(tsumego_id)
+        if emb is None:
+            missing_emb.append(tsumego_id)
+            continue
+        all_metadata.append({
+            "filename": filename,
+            "rating": ratings_map[tsumego_id],
+            "slope": slope_map[tsumego_id],
+            "floor": floor_map[tsumego_id],
+            "embedding": emb,
+        })
+
+    def _sample(ids, n=5):
+        return ", ".join(ids[:n]) + (" ..." if len(ids) > n else "")
+    gaps = []
+    for label, ids in (("rating", missing_rating), ("slope", missing_slope),
+                       ("floor", missing_floor), ("embedding", missing_emb)):
+        if ids:
+            gaps.append(f"{len(ids)} without a {label} ({_sample(ids)})")
+    if gaps:
+        raise RuntimeError(
+            f"[size {board_size}] corpus/artifact mismatch — " + "; ".join(gaps)
+            + ". Re-run the rating + embedding pipeline (or remove the orphan SGFs).")
+    return all_metadata
+
+
 def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
                  prev=None, force=False):
     """Run the full per-size packaging — ratings load, metadata assembly, zip +
@@ -677,89 +764,20 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
         _, embedding_meta = load_embeddings(board_size, meta_only=True)
         return embedding_meta, prev["ratings_hash"], inputs_hash
 
-    # 1. Ratings map: one raw black-box rating per problem. package_for_pwa is
-    # rank-agnostic — the client converts each rating to a rank with the
-    # survey-calibrated curve map_rating_to_egf writes to
-    # pwa/tsumegos/rating_to_rank.json (no rank_index, no /29 here).
-    tsumego_ratings_df = pd.read_csv(ratings_csv)
-    tsumego_ratings_df = tsumego_ratings_df.sort_values(
-        by='rating', ascending=True).reset_index(drop=True)
-    tsumego_ratings_map = dict(zip(
-        tsumego_ratings_df['tsumego_id'],
-        tsumego_ratings_df['rating'].astype(float),
-    ))
-
-    # 2. Slope map: the raw 2PL discrimination a_p per problem (the `quality`
-    # column in tsumego_quality_final.csv). Shipped RAW as `slope` — no
-    # normalization. The client uses it as the per-attempt success-curve slope in
-    # its rank estimator AND as the selection weight (∝ Fisher information a_p²).
-    quality_csv = os.path.join(RATINGS_DIR, "tsumego_quality_final.csv")
-    if not os.path.exists(quality_csv):
-        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating")
-    tsumego_slope_df = pd.read_csv(quality_csv)
-    tsumego_slope_map = dict(zip(tsumego_slope_df['tsumego_id'],
-                                 tsumego_slope_df['quality'].astype(float)))
-
-    # 2b. Floor map: the per-problem 3PL guessing floor c_p (the `floor` column in
-    # tsumego_floor_final.csv, written by train_rating from the bot ladder).
-    # Shipped RAW as `floor`; the client uses it as the lower asymptote of the
-    # per-attempt success curve: P = floor + (1-floor)·σ(slope·(R-rank)+κ(floor)).
-    # Required: v2 is the only backend and always writes it.
-    floor_csv = os.path.join(RATINGS_DIR, "tsumego_floor_final.csv")
-    if not os.path.exists(floor_csv):
-        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating")
-    tsumego_floor_df = pd.read_csv(floor_csv)
-    tsumego_floor_map = dict(zip(tsumego_floor_df['tsumego_id'],
-                                 tsumego_floor_df['floor'].astype(float)))
-
-    print(f"  ratings: {len(tsumego_ratings_map)}, slopes: {len(tsumego_slope_map)}, "
-          f"floors: {len(tsumego_floor_map)}")
+    # Raw per-problem rating/slope/floor maps shipped into metadata.json (read
+    # bit-stably with pandas — see load_rating_artifacts).
+    ratings_map, slope_map, floor_map = load_rating_artifacts(RATINGS_DIR, ratings_csv)
     print(f"  loading joint embeddings (correct-cell field for metadata.json) ...")
     embedding_map, embedding_meta = load_embeddings(board_size)
 
-    # 3. Final per-problem metadata. Every SGF must have a rating, slope, floor, and
-    # correct-cell embedding; any gap means the corpus and the rating/embedding
-    # artifacts are out of sync, which aborts rather than shipping a partial bundle.
-    all_metadata = []
+    # Final per-problem metadata — every SGF joined to its rating, slope, floor and
+    # correct-cell embedding (aborts on any gap; see assemble_metadata).
     sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
     print(f"  found {len(sgf_files)} SGFs in {TSUMEGOS_DIR}")
     if not sgf_files:
         raise RuntimeError(f"no SGFs in {TSUMEGOS_DIR}")
-    missing_rating, missing_slope, missing_floor, missing_emb = [], [], [], []
-    for filename in sgf_files:
-        tsumego_id = filename.split('.')[0]
-        if tsumego_id not in tsumego_ratings_map:
-            missing_rating.append(tsumego_id)
-            continue
-        if tsumego_id not in tsumego_slope_map:
-            missing_slope.append(tsumego_id)
-            continue
-        if tsumego_id not in tsumego_floor_map:
-            missing_floor.append(tsumego_id)
-            continue
-        emb = embedding_map.get(tsumego_id)
-        if emb is None:
-            missing_emb.append(tsumego_id)
-            continue
-        all_metadata.append({
-            "filename": filename,
-            "rating": tsumego_ratings_map[tsumego_id],
-            "slope": tsumego_slope_map[tsumego_id],
-            "floor": tsumego_floor_map[tsumego_id],
-            "embedding": emb,
-        })
-
-    def _sample(ids, n=5):
-        return ", ".join(ids[:n]) + (" ..." if len(ids) > n else "")
-    gaps = []
-    for label, ids in (("rating", missing_rating), ("slope", missing_slope),
-                       ("floor", missing_floor), ("embedding", missing_emb)):
-        if ids:
-            gaps.append(f"{len(ids)} without a {label} ({_sample(ids)})")
-    if gaps:
-        raise RuntimeError(
-            f"[size {board_size}] corpus/artifact mismatch — " + "; ".join(gaps)
-            + ". Re-run the rating + embedding pipeline (or remove the orphan SGFs).")
+    all_metadata = assemble_metadata(
+        sgf_files, board_size, ratings_map, slope_map, floor_map, embedding_map)
     print(f"  metadata built for all {len(all_metadata)} tsumegos (no gaps)")
 
     if not os.path.isdir(PER_CELL_DIR):
