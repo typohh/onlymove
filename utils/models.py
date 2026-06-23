@@ -33,9 +33,9 @@ def get_model(filename):
                 print(f"Failed to download {filename}: {e}")
 
 
-        if filename is MODEL_9X9:
+        if filename == MODEL_9X9:
             url = "https://github.com/lightvector/KataGo/releases/download/v1.13.2-kata9x9/kata9x9-b18c384nbt-20231025.bin.gz"
-        elif filename is MODEL_HUMAN:
+        elif filename == MODEL_HUMAN:
             url = "https://github.com/lightvector/KataGo/releases/download/v1.15.0/b18c384nbt-humanv0.bin.gz"
         else:
             url = URL + filename

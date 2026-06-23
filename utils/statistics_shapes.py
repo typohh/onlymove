@@ -19,6 +19,8 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit
 
+from utils.rank_surveys import rank_to_scalar
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATS_PATH = os.path.join(PROJECT_ROOT, "data", "statistics.txt")
 
@@ -27,11 +29,9 @@ KNEE_1D = 20.0  # 1d  (rank_index for the 1k/1d boundary)
 
 
 def rank_index(label):
-    """20k → 0, 1k → 19, 1d → 20, 6d → 25 (the PWA rank_index axis)."""
-    m = re.fullmatch(r"(\d{1,2})([kd])", label)
-    n = int(m.group(1))
-    scalar = (1 - n) if m.group(2) == "k" else n
-    return scalar + 19
+    """20k → 0, 1k → 19, 1d → 20, 6d → 25 (the PWA rank_index axis). The axis is
+    the internal-rank scalar (1k=0, 1d=1; see rank_surveys.rank_to_scalar) + 19."""
+    return rank_to_scalar(label) + 19
 
 
 def parse_even_table(path):

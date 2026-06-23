@@ -437,15 +437,6 @@ def get_bot_configs():
             filename
         ))
     
-    # Human rank bots with temperature 0.5, they are better players, but much worse at predicting human play.
-    if False:
-        for human_rank in get_all_ranks():
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}_t0.5.txt")
-            configs.append((
-                lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), 1, human_rank=hr, temperature=0.5),
-                filename
-            ))
-    
     # Model + temperature combinations
     for model in [MODEL_FULL]:
         for temperature in [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:

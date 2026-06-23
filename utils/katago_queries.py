@@ -89,20 +89,6 @@ class KatagoQueries:
         return self.get_move_from_idx(chosen_index)
 
     def get_rank_temperature(self, human_rank):
-
-        # ratings = [
-        #     0, # 20k
-        #     get_rank_number('12k'),
-        #     get_rank_number('1d'),
-        #     1, # 9d
-        # ]
-        # temperatures = [
-        #     0.1,
-        #     1.0,
-        #     1.6,
-        #     0.1,
-        # ]
-
         ratings = [
             0,  # 20k
             get_rank_number('3d'),

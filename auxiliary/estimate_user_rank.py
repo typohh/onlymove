@@ -42,6 +42,7 @@ from utils.fit_rank_curves import (  # noqa: E402
 from utils.ratings_io import (  # noqa: E402
     QUALITY_CSV, RATINGS_CSV, load_rating_rank_curve, load_value_map,
 )
+from utils.rank_surveys import scalar_to_rank  # noqa: E402
 
 SIZES = [9, 13]
 DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
@@ -77,8 +78,7 @@ def rating_to_rank(R, xs, ys):
     rank_index 19). Returns (rank_index, scalar, label)."""
     rank_index = float(interp_extrap_vec(np.array([R], float), xs, ys)[0])
     scalar = rank_index - 19.0
-    k = int(round(scalar))
-    label = f"{1 - k}k" if k <= 0 else f"{k}d"
+    label = scalar_to_rank(scalar)
     return rank_index, scalar, label
 
 
