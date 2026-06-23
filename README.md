@@ -1,15 +1,17 @@
 # YoseTsumego / onlymove.net
 
-This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, rates them against a stable of bots, and serves the result through a PWA at [onlymove.net](https://onlymove.net). Both 9×9 and 13×13 are supported.
+This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, rates each by difficulty using a model trained on human attempts (with bot benchmarks and KataGo neural-network features as inputs), and serves the result through a PWA at [onlymove.net](https://onlymove.net). Both 9×9 and 13×13 are supported.
 
 ## Project structure
 
-- **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, ranking, packaging).
+- **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
 - **`utils/`** — core logic, shared helpers, and the KataGo controller.
-- **`auxiliary/`** — analysis tools, diagnostic scripts, and legacy code.
+- **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
+
+For deeper architecture, `CLAUDE.md` documents the subsystems and cross-file invariants, and `pwa/README.md` covers the front-end.
 
 ## Board size
 
@@ -17,42 +19,77 @@ This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, r
 
 ## Pipeline execution
 
-Run each step through the venv's Python so imports resolve:
+Run each step through the venv's Python so imports resolve.
 
 ### 1. Fetch database
-Downloads the latest tsumego attempt data from Cloudflare D1.
+Pulls the latest tsumego attempts and rank surveys from Cloudflare D1 into `attempts/`.
 ```bash
 ./.venv/bin/python3 -m pipeline.fetch_database
 ```
 
 ### 2. Tune engine
-Optimizes KataGo batch sizes for your hardware (rewrites `bots/analysis.cfg` in place).
+Optimizes KataGo batch sizes for the current hardware (rewrites `bots/analysis.cfg` in place).
 ```bash
 ./.venv/bin/python3 -m pipeline.tune_engine
 ```
 
 ### 3. Generate tsumegos
-Continuously generates new tsumego positions.
+Continuously generates new tsumego positions into `tsumegos/<size>/`.
 ```bash
 ./.venv/bin/python3 -m pipeline.generate_tsumegos
 ```
 
 ### 4. Benchmark bots
-Runs various bots against the generated tsumegos to collect performance data.
+Runs a stable of bots against the generated tsumegos to collect performance data into `attempts/<size>/`.
 ```bash
 ./.venv/bin/python3 -m pipeline.benchmark_bots
 ```
 
-### 5. Rank tsumegos and bots
-Trains the rating model based on the benchmark results.
+### 5. Extract activations
+Captures KataGo trunk activations per problem into `activations/<size>/` (GPU; resumable). Feeds both the rating model and the embedding recommender.
 ```bash
-./.venv/bin/python3 -m pipeline.rank_tsumegos_and_bots
+./.venv/bin/python3 -m pipeline.extract_activations
 ```
 
-### 6. Package for PWA
-Groups tsumegos and ratings into ZIP files for the web app.
+### 6. Cache move features
+Builds the candidate-move-eval cache the rating trainer reads.
+```bash
+./.venv/bin/python3 -m pipeline.cache_move_features
+```
+
+### 7. Train rating
+Fits the cross-board rating model on human attempts (using activation, bot-winrate, and move-eval features) into `ratings/<size>/`.
+```bash
+./.venv/bin/python3 -m pipeline.train_rating
+```
+
+### 8. Build embedding
+Fits the joint embedding over activations for the per-component weakness recommender into `embeddings/`.
+```bash
+./.venv/bin/python3 -m pipeline.build_embedding
+```
+
+### 9. Package for PWA
+The single writer of `pwa/tsumegos/`: bundles tsumegos, ratings, and embeddings into the ZIP archives the web app serves.
 ```bash
 ./.venv/bin/python3 -m pipeline.package_for_pwa
+```
+
+### Rank calibration (board-independent)
+
+These two steps are board-independent and run outside the in-order pipeline. They need `ratings/` and the `attempts/` database (no GPU), and write only to the backend `ratings/`; `package_for_pwa` then publishes their outputs into `pwa/tsumegos/`.
+
+```bash
+./.venv/bin/python3 -m pipeline.map_rating_to_egf          # survey-anchored rating→rank curve
+./.venv/bin/python3 -m pipeline.fit_population_constants   # retention / time-bias / weakness-ridge constants
+```
+
+### Remote execution
+
+The heavy generation steps can run on a rented Vast.ai GPU:
+
+```bash
+python vast_orchestration.py      # no args prints subcommands; tune / generate / benchmark are remoted, the rest stay local
 ```
 
 ## PWA
@@ -70,12 +107,14 @@ npm run build       # esbuild → pwa/dist/
 ### Local dev
 
 ```bash
-npm run dev         # build + wrangler dev
+npm run dev         # build + wrangler dev → http://localhost:8787
 ```
+
+Local testing must go through `npm run dev`: the Worker runs the `/report` endpoint and the SPA fallback (URL-based size hints), so opening the static bundle alone will misbehave.
 
 ### Deploy
 
-Deployment is manual:
+Deployment is manual — there is no git-triggered auto-deploy:
 
 ```bash
 npm run deploy      # build + wrangler deploy
