@@ -18,10 +18,10 @@ It reads the LOCAL DB copy (`attempts/database.sqlite` by default — the binary
 far faster than re-parsing the .sql dump; see CLAUDE.md) and the backend
 `ratings/` artifacts. No network, no GPU.
 
-Usage:
-  ./.venv/bin/python3 -m auxiliary.estimate_user_rank <redacted-user-id>
-  ./.venv/bin/python3 -m auxiliary.estimate_user_rank <redacted-user-id> --recent-days 90
-  ./.venv/bin/python3 -m auxiliary.estimate_user_rank <redacted-user-id> --last-n 500
+Usage (USER_ID is the account code, prefix-matched against the DB):
+  ./.venv/bin/python3 -m auxiliary.estimate_user_rank USER_ID
+  ./.venv/bin/python3 -m auxiliary.estimate_user_rank USER_ID --recent-days 90
+  ./.venv/bin/python3 -m auxiliary.estimate_user_rank USER_ID --last-n 500
 """
 
 import argparse
