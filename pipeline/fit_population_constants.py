@@ -5,7 +5,7 @@ of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
 drifting from a one-off manual fit.
 
-Three groups of constants:
+Four groups of constants:
 
 1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
    overlays gate on a per-user solving/review-time coefficient that is biased
@@ -43,11 +43,19 @@ Three groups of constants:
    unknown hidden reviews, so only post-cutoff chains give trustworthy gaps/r).
    Z0 = logit(0.7) is a fixed reference (LN_C is the base stability at p=0.7).
 
-All constants are board-INDEPENDENT (the cold-solve scale is shared across sizes),
-so a single JSON serves both boards.
+4. WEAKNESS_RIDGE_LAMBDA (weakness.js): the L2 precision on each per-embedding-axis
+   beta of the client's weakness logistic. Fit by the SAME held-out-CV recipe the
+   model is regularized under: per-user 60d/30d chunks, 5-fold CV over a lambda grid
+   (embedding betas penalized, intercept + problemRank free), shipping the
+   per-attempt-NLL-minimizing lambda. The embedding axes are joint across boards.
+
+All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
+are shared across sizes), so a single JSON serves both boards.
 
 Needs the backend ratings_v2/<size>/ 3PL params (tsumego_ratings_final.csv,
 tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating)
+ratings_v2/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
+embeddings/joint/per_problem.csv (the weakness ridge's correct-move embeddings),
 and attempts/database.sqlite. It reads the backend directly, NOT the served
 pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
 upstream of it depends on the dist artifacts. No GPU, not part of the in-order
@@ -68,7 +76,7 @@ import os
 import sqlite3
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 from scipy.optimize import minimize
@@ -102,6 +110,10 @@ DEFAULTS = {
     # the fresh fit when it validates.
     "time_adjust": {"alpha_per_log10_min": -0.45, "time_vs_rank_intercept": -0.7719,
                     "time_vs_rank_slope": 0.005826},
+    # L2 precision on each per-embedding-axis beta of the client's weakness logistic
+    # (pwa/js/weakness.js RIDGE_LAMBDA). Fallback when the population is too sparse
+    # to refit; main() overwrites with the held-out-CV fit when it lands.
+    "weakness_ridge_lambda": 200.0,
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
@@ -114,6 +126,22 @@ TA_MIN_ATTEMPTS = 10       # novel rated attempts needed for a survey user's rat
 TA_ALPHA_GRID = np.linspace(-1.5, 0.5, 81)   # rating units per log10-minute
 TA_CV_FOLDS = 5
 TA_CV_SEEDS = 10
+
+# --- Weakness-model ridge prior (pwa/js/weakness.js RIDGE_LAMBDA) ---
+# L2 precision on the per-embedding-axis betas of the client's weakness logistic,
+# fit by the SAME held-out-CV recipe the model is regularized under: per-user
+# 60d/30d chunks, 5-fold CV over a lambda grid, ship the per-attempt-NLL-minimizing
+# lambda. Board-independent (9x9+13x13 pooled), the embedding axes being joint.
+WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
+WEAKNESS_K_EMBED = 64
+WEAKNESS_TOTAL_RANKS = 29.0          # problemRank = M(rating) / TOTAL_RANKS (matches the client)
+WEAKNESS_WINDOW_DAYS = 60
+WEAKNESS_STRIDE_DAYS = 30
+WEAKNESS_MIN_ATTEMPTS_PER_CHUNK = 100
+WEAKNESS_CV_FOLDS = 5
+WEAKNESS_LAMBDA_GRID = [30.0, 60.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0]
+WEAKNESS_SEED = 0
+MIN_WEAKNESS_CHUNKS = 20             # below this, keep the default ridge lambda
 
 
 def sigmoid(x):
@@ -573,6 +601,135 @@ def fit_retention(events):
 
 
 # ---------------------------------------------------------------------------
+# Weakness-model ridge prior (embedding-axis L2, held-out CV).
+# ---------------------------------------------------------------------------
+def load_problem_embeddings(needed):
+    """{(size, tid): np.ndarray(K)} correct-move joint-ICA embedding from
+    embeddings/joint/per_problem.csv, restricted to the attempted problems.
+    Empty if the CSV is absent — the caller then keeps the default lambda."""
+    if not os.path.exists(WEAKNESS_EMBED_CSV):
+        return {}
+    cols = [f"embed_{i}" for i in range(WEAKNESS_K_EMBED)]
+    out = {}
+    with open(WEAKNESS_EMBED_CSV, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                key = (int(row["size"]), row["tsumego_id"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if key not in needed:
+                continue
+            try:
+                vec = np.array([float(row[c]) for c in cols], float)
+            except (TypeError, ValueError, KeyError):
+                continue
+            if vec.shape[0] == WEAKNESS_K_EMBED and np.all(np.isfinite(vec)):
+                out[key] = vec
+    return out
+
+
+def _ridge_logistic(X, y, lam_vec, beta0=None):
+    """L-BFGS fit of an L2-penalized logistic regression. lam_vec is the per-
+    coefficient precision (0 = unpenalized). Returns (beta, success)."""
+    def nll_grad(beta):
+        z = X @ beta
+        nll = -np.sum(y * (-np.logaddexp(0.0, -z)) + (1 - y) * (-np.logaddexp(0.0, z)))
+        grad = X.T @ (sigmoid(z) - y) + lam_vec * beta
+        return nll + 0.5 * float(np.sum(lam_vec * beta * beta)), grad
+    if beta0 is None:
+        beta0 = np.zeros(X.shape[1])
+    res = minimize(nll_grad, beta0, jac=True, method="L-BFGS-B",
+                   options={"maxiter": 300, "ftol": 1e-10, "gtol": 1e-7})
+    return res.x, res.success
+
+
+def _weakness_chunks(by_user, rank_feat, embeddings):
+    """Yield (rank_vec, embed_matrix, y) for each per-user 60d/30d window holding
+    >= WEAKNESS_MIN_ATTEMPTS_PER_CHUNK novel rated+embedded attempts (mirrors the
+    chunking the ridge was historically calibrated under)."""
+    window = timedelta(days=WEAKNESS_WINDOW_DAYS)
+    stride = timedelta(days=WEAKNESS_STRIDE_DAYS)
+    for urows in by_user.values():
+        ev = []
+        for r in urows:
+            if r["is_repeat"]:
+                continue
+            key = (r["size"], r["problem"])
+            if key not in rank_feat or key not in embeddings:
+                continue
+            ev.append((datetime.fromisoformat(r["created_at"].replace("Z", "+00:00")),
+                       1.0 if r["success"] else 0.0, rank_feat[key], embeddings[key]))
+        if len(ev) < WEAKNESS_MIN_ATTEMPTS_PER_CHUNK:
+            continue
+        ev.sort(key=lambda e: e[0])
+        ts = [e[0] for e in ev]
+        start, end_all = ts[0], ts[-1]
+        while start <= end_all:
+            end = start + window
+            idx = [i for i, t in enumerate(ts) if start <= t < end]
+            if len(idx) >= WEAKNESS_MIN_ATTEMPTS_PER_CHUNK:
+                yield (np.array([ev[i][2] for i in idx], float),
+                       np.vstack([ev[i][3] for i in idx]),
+                       np.array([ev[i][1] for i in idx], float))
+            start += stride
+
+
+def fit_weakness_ridge(by_user, params, embeddings, apply_m):
+    """CV-best L2 precision for the weakness model's per-embedding-axis betas.
+    Per chunk a 5-fold CV scores a grid of ridge strengths (embedding betas
+    penalized; intercept + problemRank free) and the per-attempt-NLL-minimizing
+    lambda summed across chunks is returned. (lambda, info); lambda is None when
+    inputs are missing or the population is too sparse (caller keeps the default)."""
+    if apply_m is None:
+        return None, "no rating_to_rank.json (run map_rating_to_egf first) — keeping default"
+    if not embeddings:
+        rel = os.path.relpath(WEAKNESS_EMBED_CSV, PROJECT_ROOT)
+        return None, f"no embeddings at {rel} (run build_embedding) — keeping default"
+    rank_feat = {k: apply_m(v[0]) / WEAKNESS_TOTAL_RANKS for k, v in params.items()}
+    rng = np.random.default_rng(WEAKNESS_SEED)
+    total_nll = {lam: 0.0 for lam in WEAKNESS_LAMBDA_GRID}
+    total_n = {lam: 0 for lam in WEAKNESS_LAMBDA_GRID}
+    n_chunks = 0
+    for rank_vec, emb, y in _weakness_chunks(by_user, rank_feat, embeddings):
+        if y.std() < 1e-3:
+            continue
+        n_chunks += 1
+        n = len(y)
+        X = np.column_stack([np.ones(n), rank_vec, emb])   # [1, problemRank, embed_0..K-1]
+        d = X.shape[1]
+        idx = np.arange(n)
+        rng.shuffle(idx)
+        folds = np.array_split(idx, WEAKNESS_CV_FOLDS)
+        beta_ws = {k: np.zeros(d) for k in range(WEAKNESS_CV_FOLDS)}
+        for lam in sorted(WEAKNESS_LAMBDA_GRID, reverse=True):   # warm-start as lambda loosens
+            lam_vec = np.zeros(d)
+            lam_vec[2:] = lam                                    # penalize embedding betas only
+            for k in range(WEAKNESS_CV_FOLDS):
+                te = folds[k]
+                if len(te) == 0:
+                    continue
+                tr = np.ones(n, dtype=bool)
+                tr[te] = False
+                if y[tr].std() < 1e-3:
+                    continue
+                beta, ok = _ridge_logistic(X[tr], y[tr], lam_vec, beta0=beta_ws[k])
+                if not ok or not np.all(np.isfinite(beta)):
+                    continue
+                beta_ws[k] = beta
+                z = X[te] @ beta
+                total_nll[lam] += -float(np.sum(
+                    y[te] * (-np.logaddexp(0.0, -z)) + (1 - y[te]) * (-np.logaddexp(0.0, z))))
+                total_n[lam] += len(te)
+    if n_chunks < MIN_WEAKNESS_CHUNKS:
+        return None, f"only {n_chunks} chunks (<{MIN_WEAKNESS_CHUNKS}) — keeping default"
+    per = {lam: total_nll[lam] / max(1, total_n[lam]) for lam in WEAKNESS_LAMBDA_GRID}
+    best = min(WEAKNESS_LAMBDA_GRID, key=lambda lam: per[lam])
+    grid = "  ".join(f"{lam:g}:{per[lam]:.5f}" for lam in WEAKNESS_LAMBDA_GRID)
+    return float(best), f"{n_chunks} chunks; per-attempt NLL [{grid}] → lambda={best:g}"
+
+
+# ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -670,6 +827,16 @@ def main():
           f"time-vs-rank g0={ta['time_vs_rank_intercept']:+.3f} "
           f"g1={ta['time_vs_rank_slope']:+.5f} log10-min/rank"
           f"{' (defaults)' if ta_alpha is None else ''}")
+
+    # --- Weakness-model ridge prior (embedding-axis L2; held-out CV) ---
+    print("Fitting weakness-model ridge prior (embedding-axis L2, held-out CV) ...")
+    embeddings = load_problem_embeddings(needed)
+    wl, w_info = fit_weakness_ridge(by_user, params, embeddings, apply_m)
+    if wl is not None:
+        out["weakness_ridge_lambda"] = float(wl)
+    print(f"  {w_info}")
+    print(f"  shipped weakness_ridge_lambda = {out['weakness_ridge_lambda']:g}"
+          f"{' (default)' if wl is None else ''}")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")

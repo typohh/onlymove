@@ -32,7 +32,6 @@ Board size follows the usual `--size` / `BOARD_SIZE` convention (9 or 13). `auxi
 - **`rank_mapping_lab.py`** — experiment harness comparing rating→EGF curve families (free/linear/cubic/exp/quadratic) with grouped 5-fold CV, bootstrap CIs, and per-rank-band RMSE. Reads `ratings_v2/` + surveys; uses the coupling-shape fit from `fit_2018_couplings.py`.
 - **`fit_2018_couplings.py`** ⚠ — fits server↔EGF coupling shapes from the 2018 cross-server survey (with a 2024 variant); imported by `rank_mapping_lab.py`. Its default input path points at `rank_survey_2018.csv` in the repo root, but the surveys live in `data/`.
 - **`fit_statistics_shapes.py`** — fits candidate rank→rating shapes (linear/exp/cubic/piecewise) to the EGF even-game win-rate table in `statistics.txt` by binomial likelihood, and holds the `CubicRatingCurve` used in packaging. `--plot` writes `statistics_shape_fit.png`.
-- **`calibrate_priors.py`** ⚠ — calibrates the PWA weakness-logistic priors (difficulty slope, embedding L2, floor) via 5-fold CV over 60-day user windows. Its output `calibrate_priors.json` is the documented source of the PWA's `RIDGE_LAMBDA = 200` (cited in CLAUDE.md). One input still reads the old `ratings/` path.
 
 ## User-rank estimation (client-equivalent)
 
@@ -114,8 +113,6 @@ These are regenerable outputs of the scripts above, not inputs. A few are commit
 
 | File | Produced by | Note |
 |---|---|---|
-| `calibrate_priors.json` | `calibrate_priors.py` | the documented source of the PWA's `RIDGE_LAMBDA = 200` |
-| `calibrate_priors_min100.json`, `calibrate_priors_min200.json` | `calibrate_priors.py` | alternate `--min-attempts` snapshots |
 | `bot_prediction_accuracy.csv`, `bot_prediction_by_profile_count.csv` | `analyze_bot_prediction_accuracy.py` | |
 | `rank_map_v2.json`, `rank_map_v2_reweighted.json` | `joint_rank_model_v2.py` | prototype output (not the shipped `rank_map.json`) |
 | `statistics_shape_fit.png` | `fit_statistics_shapes.py` | |

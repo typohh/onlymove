@@ -29,6 +29,9 @@ import { state, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { sigmoid } from './math-utils.js';
 import { adamUpdate } from './optimizer.js';
+// Baked into the bundle at build time; population-constants.js is the validated
+// loader for the rest of this blob. We read only the weakness ridge prior here.
+import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 // Recommender temperature for weight = quality * exp(T * weaknessScore).
 // Higher T = more aggressive mining of weak directions. Owned here because
@@ -37,11 +40,12 @@ import { adamUpdate } from './optimizer.js';
 export const WEAKNESS_TEMPERATURE = 0.5;
 
 const MIN_TRAINING_ATTEMPTS = 20;
-// Prior precision on each per-PC beta_k. Calibrated against the production
-// attempts DB by held-out CV (auxiliary/calibrate_priors.py): the basin of
-// equivalent NLL spans 100-300; 200 is the point estimate. Translates to
-// beta_k ~ N(0, 1/200), i.e. prior sigma ~0.07.
-const RIDGE_LAMBDA = 200.0;
+// Prior precision on each per-PC beta_k (beta_k ~ N(0, 1/RIDGE_LAMBDA)). Fit
+// against the production attempts DB by held-out CV in
+// pipeline.fit_population_constants and shipped in population_constants.json,
+// which is inlined at build time and mandatory (main.js aborts boot if it's
+// missing), so we read it straight — never a hardcoded value.
+const RIDGE_LAMBDA = POPULATION_CONSTANTS.weakness_ridge_lambda;
 const MAX_EPOCHS = 200;
 const MAX_TRAINING_TIME_MS = 1000;
 const LEARNING_RATE = 0.05;
@@ -125,8 +129,8 @@ export async function trainWeakness() {
             let l2 = 0;
             // Ridge over all β coefficients (correct and picked alike), not
             // the intercept or rating. Same RIDGE_LAMBDA on every β; the
-            // calibrate_priors.py output already targets per-axis precision
-            // and we honor that uniformly across the two coefficient blocks.
+            // fit_population_constants CV targets per-axis precision and we
+            // honor that uniformly across the two coefficient blocks.
             for (let j = 2; j < numParams; j++) l2 += params[j] * params[j];
             loss = loss / N + (RIDGE_LAMBDA / (2 * N)) * l2;
 
