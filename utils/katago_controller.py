@@ -14,6 +14,9 @@ CONFIG_FILE = os.path.join(PROJECT_ROOT, "bots", "analysis.cfg")
 # (e.g. bots/katago_cuda on a vast.ai NVIDIA instance).
 KATAGO_PATH = os.environ.get("KATAGO_PATH") or os.path.join(PROJECT_ROOT, "bots", "katago")
 
+# How long a single send_query blocks before giving up on a stuck/crashed engine.
+QUERY_TIMEOUT_SECONDS = 60 * 60
+
 
 class KatagoController:
     """
@@ -128,8 +131,8 @@ class KatagoController:
                 self.process.stdin.flush()
 
             # Release lock and wait for the response event from the master reader
-            if not event.wait(timeout=60 * 60):
-                raise TimeoutError(f"KataGo query {query_id} timed out after {timeout} seconds. KataGo may be stuck or crashed.")
+            if not event.wait(timeout=QUERY_TIMEOUT_SECONDS):
+                raise TimeoutError(f"KataGo query {query_id} timed out after {QUERY_TIMEOUT_SECONDS} seconds. KataGo may be stuck or crashed.")
 
             response = self.responses.get(query_id)
             if not response:

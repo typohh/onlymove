@@ -18,7 +18,7 @@ if PROJECT_ROOT not in sys.path:
 from utils.configurations import BOARD_SIZE
 from utils.katago_controller import KatagoController
 from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_number, get_rank_str, _get_rank_str
-from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_corrupted_model, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
+from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
 
 TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
 ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts", str(BOARD_SIZE))

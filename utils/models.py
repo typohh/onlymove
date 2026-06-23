@@ -45,64 +45,6 @@ def get_model(filename):
     return os.path.join(MODEL_DIRECTORY, filename)
 
 
-def get_corrupted_model(scale):
-    """Creates a corrupted version of WEIGHT_BEST_SMALL model by multiplying values
-    with random samples from log normal distribution.
-
-    Args:
-        scale: Float value controlling the amount of corruption
-    """
-    import numpy as np
-    import gzip
-
-    if scale > 1 or scale < 0:
-        raise ValueError("scale must be between 0 and 1")
-
-    # seed it based on scale, so minor changes in scale alter the "personality"
-    np.random.seed(round(1000 * scale))
-    os.makedirs(MODEL_DIRECTORY, exist_ok=True)
-
-    input_path = get_model(MODEL_BEST_SMALL)
-    output_filename = get_filename_without_extension(input_path) + f'_corrupt{str(scale)[2:]}.txt.gz'
-    output_path = os.path.join(MODEL_DIRECTORY, output_filename)
-
-    if not os.path.exists(input_path):
-        raise FileNotFoundError(f"Model file not found: {input_path}")
-
-    if os.path.exists(output_path):
-        return output_path
-
-    print("creating model", output_filename)
-
-    # Parameters for log normal distribution
-    sigma = np.sqrt(np.log(1 + scale ** 2))
-    mu = -np.log(1 + scale ** 2) / 2
-
-    with gzip.open(input_path, 'rt') as f_in, gzip.open(output_path, 'wt') as f_out:
-        for line in f_in:
-
-            # Split line into parts
-            parts = line.strip().split()
-
-            def is_float(string):
-                try:
-                    float(string)
-                    return '.' in string
-                except ValueError:
-                    return False
-
-            # Process only lines containing float numbers
-            if len(parts) > 1 and is_float(parts[0]):
-                # Multiply each number by random sample
-                corrupted = [str(float(x) * np.random.lognormal(mu, sigma))
-                             for x in parts]
-                f_out.write(' '.join(corrupted) + '\n')
-            else:
-                f_out.write(line)
-
-    return output_path
-
-
 def get_filename_without_extension(path):
     """Extract filename without any extensions from a given path.
 
