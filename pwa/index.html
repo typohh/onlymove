@@ -4,7 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#000000">
+  <!-- Standalone hints. `mobile-web-app-capable` is the modern, cross-browser
+       key (Chrome/Samsung Internet); the `apple-*` pair is the iOS equivalent.
+       These make even a legacy "Add to Home screen" shortcut (the fallback
+       Samsung Internet creates on non-Samsung devices, where it can't mint a
+       WebAPK) open chrome-less rather than in a framed browser tab. -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Only Move">
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title id="app-title">Only Move</title>
   <link rel="stylesheet" type="text/css" href="style.css">
   <!-- Critical, self-contained boot-splash CSS: inlined so the loading state

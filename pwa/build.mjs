@@ -13,6 +13,8 @@ const STATIC_ASSETS = [
     'favicon.ico',
     'icon-192.png',
     'icon-512.png',
+    'icon-maskable-192.png',
+    'icon-maskable-512.png',
     'horizontal.png',
     'vertical.png',
 ];
