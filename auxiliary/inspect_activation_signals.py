@@ -49,15 +49,13 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.board_render import load_lookup, render_problem  # noqa: E402
 from pipeline.build_embedding import _load_correct_vec  # noqa: E402
-# CACHE_DIR + the correct-vector cache path helpers are the shared rating-feature cache;
-# _build_cache below writes the cache those helpers point at.
+# The activation layout (N_LAYERS/CHANNELS_PER_LAYER/N_FEATS) + signal-cache contract
+# (CACHE_DIR + path helpers) live in utils.rating_features; _build_cache below writes
+# the cache those path helpers point at.
 from utils.rating_features import (  # noqa: E402
-    CACHE_DIR, _cache_ids_path, _cache_vecs_path,
+    CACHE_DIR, CHANNELS_PER_LAYER, N_FEATS, N_LAYERS,
+    _cache_ids_path, _cache_vecs_path,
 )
-
-N_LAYERS = 18
-CHANNELS_PER_LAYER = 384
-N_FEATS = N_LAYERS * CHANNELS_PER_LAYER  # 6912
 
 
 # ---- correct-vector cache ---------------------------------------------

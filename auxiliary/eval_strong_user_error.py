@@ -18,7 +18,7 @@ shipped curve):
 So each config is scored against ITS OWN freshly-fit mapping — re-run a model into a
 fresh --out-dir and point a config at it; no separate map step needed.
 
-Reads the LOCAL DB (`attempts/database.sql` via compare_rank_surveys) + each config's
+Reads the LOCAL DB (`attempts/database.sql` via utils.rank_surveys) + each config's
 `ratings_v2*` dir. No network, no GPU.
 
 Usage:
@@ -38,7 +38,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.compare_rank_surveys import (  # noqa: E402
+from utils.rank_surveys import (  # noqa: E402
     SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys,
 )

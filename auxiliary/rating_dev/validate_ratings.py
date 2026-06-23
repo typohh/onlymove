@@ -49,7 +49,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.rating_dev.holdout_set import held_out_keys  # noqa: E402
-from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
+from utils.rating_features import load_first_time_attempts  # noqa: E402
 from auxiliary.rating_dev.model_comparison import build_profiles  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
@@ -159,7 +159,7 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
     coefficients fit on the current run (the shipped population_constants.json alpha is stale for a
     fresh train). Returns (weighted_rho, {server: (n, rho)}, time_adjust_dict | None)."""
     from collections import defaultdict
-    from auxiliary.compare_rank_surveys import (
+    from utils.rank_surveys import (
         load_rank_surveys, latest_per_user_server, load_attempts_for_users, SQL_PATH_DEFAULT)
     from utils.fit_rank_curves import fit_user_rating
     surveys = latest_per_user_server(load_rank_surveys(SQL_PATH_DEFAULT))

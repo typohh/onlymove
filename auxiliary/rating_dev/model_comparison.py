@@ -24,13 +24,12 @@ PROJECT_ROOT = os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.inspect_activation_signals import (  # noqa: E402
-    N_FEATS, _cache_ids_path, _cache_vecs_path,
-)
-from auxiliary.predict_rating_from_activations import (  # noqa: E402
-    N_CONTRAST_BLOCKS, _contrastive_cache_path,
-)
-from utils.rating_features import (  # noqa: F401,E402  (re-exported for the rating-dev trainers/validator)
+from utils.rating_features import (  # noqa: F401,E402  (build_profiles/load_joint_* re-exported for the trainers/validator)
+    N_CONTRAST_BLOCKS,
+    N_FEATS,
+    _cache_ids_path,
+    _cache_vecs_path,
+    _contrastive_cache_path,
     build_profiles,
     load_joint_activations,
     load_joint_bot_winrate,

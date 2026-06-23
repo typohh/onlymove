@@ -24,8 +24,20 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 
+# Raw KataGo trunk activation layout (18 residual blocks × 384 channels), captured at
+# the correct move by pipeline.extract_activations. Feature index = layer*384 + channel.
+N_LAYERS = 18
+CHANNELS_PER_LAYER = 384
+N_FEATS = N_LAYERS * CHANNELS_PER_LAYER  # 6912
+
+# Number of contrastive blocks: per-channel [mean, std, max, zscore] aggregates over the
+# OTHER legal moves (N_CONTRAST_BLOCKS × N_FEATS), id-aligned with the correct-vec cache.
+N_CONTRAST_BLOCKS = 4
+
 # The activation "signal cache": correct-move trunk vectors written once per board by
 # auxiliary.inspect_activation_signals._build_cache and read directly by load_joint_activations.
+# The optional contrastive cache (the other-move aggregates) is written by
+# auxiliary.predict_rating_from_activations --contrastive into the same directory.
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
@@ -35,6 +47,10 @@ def _cache_vecs_path(size):
 
 def _cache_ids_path(size):
     return os.path.join(CACHE_DIR, f"correct_ids_{size}.json")
+
+
+def _contrastive_cache_path(size):
+    return os.path.join(CACHE_DIR, f"contrastive_vecs_{size}.npy")
 
 
 def load_first_time_attempts():

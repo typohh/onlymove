@@ -78,8 +78,7 @@ from auxiliary.rating_dev.model_comparison import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate,
     load_joint_move_features,
 )
-from auxiliary.inspect_activation_signals import _cache_ids_path  # noqa: E402
-from auxiliary.problem_attempt_coverage import load_first_time_attempts  # noqa: E402
+from utils.rating_features import _cache_ids_path, load_first_time_attempts  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6

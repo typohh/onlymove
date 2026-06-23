@@ -55,7 +55,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from auxiliary.compare_rank_surveys import (  # noqa: E402
+from utils.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys, scalar_to_rank,
 )
