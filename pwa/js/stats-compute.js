@@ -6,7 +6,7 @@
 // weakness-example selector) sits with the rest of the model math.
 
 import { TOTAL_RANKS } from './constants.js';
-import { rankScalarToLabel } from '../shared/rank-math.js';
+import { rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 import { TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { normCdf, weightedQuantile } from './math-utils.js';
 
@@ -85,7 +85,6 @@ export function computeUserCommunityBuckets(history, timeBins) {
     // problems → EGF scalar → label (the server's recipe, minus shard rounding;
     // problemRank is already the per-problem M index normalized to 0..1).
     const MIN_RANK_PROBLEMS = 10;
-    const RANK_INDEX_OFFSET = 19;
     const firstByProblem = new Map();
     for (const a of recent) {
         if (a.isRepeat || typeof a.problemRank !== 'number') continue;

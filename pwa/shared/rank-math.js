@@ -31,3 +31,17 @@ export function rankScalarToLabel(v) {
     const k = Math.round(v);
     return k <= 0 ? `${1 - k}k` : `${k}d`;
 }
+
+// Internal rank INDEX → rank scalar. The index is the floor(rating·TOTAL_RANKS)
+// scale where 1k = 19 (what getDescriptiveRank, the Rank chart, and the server
+// histogram use); the scalar is the 1k = 0 convention rankScalarToLabel speaks,
+// so index = scalar + RANK_INDEX_OFFSET.
+export const RANK_INDEX_OFFSET = 19;
+
+/**
+ * Internal rank INDEX → kyu/dan label. Delegates to rankScalarToLabel so the
+ * kyu/dan ladder lives in exactly one place. Callers pass an integer index.
+ */
+export function rankIndexToLabel(rankIndex) {
+    return rankScalarToLabel(rankIndex - RANK_INDEX_OFFSET);
+}

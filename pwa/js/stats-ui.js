@@ -14,7 +14,7 @@ import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
 import { getPopulationConstants } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
-import { rankScalarToLabel } from '../shared/rank-math.js';
+import { rankScalarToLabel, rankIndexToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading, showConfirm } from './overlays.js';
 import {
     refreshHistoryFromServer,
@@ -786,13 +786,6 @@ function showStatsModal(tabs) {
     renderBody();
 }
 
-// Internal rank INDEX (0-based, 1k = 19) → kyu/dan label. Delegates to the
-// shared rank-scalar labeller (1k = 0) so the kyu/dan ladder lives in one place.
-const RANK_INDEX_OFFSET = 19;
-function rankLabelFromIndex(rankIndex) {
-    return rankScalarToLabel(rankIndex - RANK_INDEX_OFFSET);
-}
-
 // Pick a viewBox height (for a fixed width W) so the chart's aspect ratio
 // approximates the modal's visible area. The SVG renders at width:100% /
 // height:auto with uniform scaling, so a W×H viewBox paints at
@@ -924,7 +917,7 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // Integer display value (rank-band floor) → label: an internal index uses the
     // kyu/dan index labeller; a server scalar uses the shared scalar labeller.
     const displayLabel = (intVal) =>
-        selectedServer === ONLYMOVE ? rankLabelFromIndex(intVal) : rankScalarToLabel(intVal);
+        selectedServer === ONLYMOVE ? rankIndexToLabel(intVal) : rankScalarToLabel(intVal);
 
     // The plot (y-axis + svg + x-date) is rebuilt into this holder on every
     // server change; the title, readout and legend persist around it.

@@ -1,4 +1,4 @@
-import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
+import { interpExtrap, rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 // M (rating→rank curve) is inlined at build time — same source the client bundles
 // (pwa/tsumegos/rating_to_rank.json) — so the Community rank histogram needs no
 // asset fetch for it. Other tsumego assets (lookup.txt, metadata.json) stay served.
@@ -324,7 +324,6 @@ async function computeAnswerRankHist(env, userFirstProblems, neededProblems) {
   };
 
   // 4. Per user: mean internal-rank index → EGF scalar (index 19 == 1k == 0).
-  const RANK_INDEX_OFFSET = 19;
   const rankHist = new Map();
   for (const pm of userFirstProblems.values()) {
     let sum = 0, n = 0;

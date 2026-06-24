@@ -16,7 +16,7 @@
 import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
-import { interpExtrap, rankScalarToLabel } from '../shared/rank-math.js';
+import { interpExtrap, rankScalarToLabel, rankIndexToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 import { rankIndexAfterRatingDelta } from './rank-decomposition.js';
 import { timeAdjustDeltaRating } from './population-constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
@@ -27,14 +27,10 @@ import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } fro
 // rating→rank curve it ships alongside.
 import RANK_MAP from '../tsumegos/rank_map.json';
 
-// The same integer index getDescriptiveRank uses (floor(rating · 29)), in the
-// kyu/dan label format (k/d suffix, not localized).
-function rankIndexToKey(rankIndex) {
-    return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
-}
+// rankIndexToLabel (internal index → kyu/dan label) and RANK_INDEX_OFFSET (the
+// index↔scalar offset) are imported from shared/rank-math.js — one kyu/dan
+// ladder, shared with the Worker and the stats UI.
 
-// internal-rank index → rank scalar (1k=0 convention): rank_index = scalar + 19.
-const RANK_INDEX_OFFSET = 19;
 // Clamp translated server ranks to the real rank range (30k..9d) so extreme
 // extrapolation can't print impossible labels like "15 dan" (matches the
 // our_lo/our_hi clamp the fit used to apply server-side).
@@ -89,7 +85,7 @@ export async function showRankTranslation() {
 
     const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
     const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
-    const key = rankIndexToKey(rankIndex);
+    const key = rankIndexToLabel(rankIndex);
 
     // The header keeps the raw, untimed onlymove rank; the server translations
     // are TIME-ADJUSTED — practice here is untimed while server ranks reflect
@@ -125,7 +121,7 @@ export async function showRankTranslation() {
             progress.textContent = getTerm('rankProgressFormat', {
                 rank: key,
                 percent: Math.round((rankValue - rankIndex) * 100),
-                nextRank: rankIndexToKey(rankIndex + 1),
+                nextRank: rankIndexToLabel(rankIndex + 1),
             });
             modal.appendChild(progress);
 
