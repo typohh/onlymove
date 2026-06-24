@@ -241,6 +241,35 @@ async function mapWithConcurrency(items, limit, fn) {
     await Promise.all(workers);
 }
 
+// Fetch + open one shard zip and parse its metadata.json. Returns { zip, items }
+// or null on any fetch/parse miss, so a caller can skip the shard. Shared by all
+// three shard walks below (version-driven refresh, synced-entry fill, cold-tail
+// fill) — the per-shard processing differs, but the fetch+open+parse prologue is
+// identical.
+async function loadShard(size, zipFilename) {
+    const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
+    if (!resp.ok) return null;
+    const zip = await new JSZip().loadAsync(await resp.arrayBuffer());
+    const metaFile = zip.file('metadata.json');
+    if (!metaFile) return null;
+    const items = JSON.parse(await metaFile.async('text'));
+    return { zip, items };
+}
+
+// Group problem ids by the shard zip that holds them, via the locator's
+// id → zip-hash map. Ids absent from the corpus are dropped (the problem left
+// the set — the entry stays a skeleton). Returns Map(zipHash → id[]).
+function groupIdsByZip(lookupMap, ids) {
+    const zipToIds = new Map();
+    for (const id of ids) {
+        const zipHash = lookupMap.get(id);
+        if (!zipHash) continue;
+        if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
+        zipToIds.get(zipHash).push(id);
+    }
+    return zipToIds;
+}
+
 async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
     const storedEmbeddingVersion = localStorage.getItem(VERSION_KEY(size));
     const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
@@ -391,13 +420,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
         if (!locator) return 0;
         const { lookupMap, zipFilenameByHash } = locator;
 
-        const zipToIds = new Map();
-        for (const id of allNeedIds) {
-            const zipHash = lookupMap.get(id);
-            if (!zipHash) continue;
-            if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
-            zipToIds.get(zipHash).push(id);
-        }
+        const zipToIds = groupIdsByZip(lookupMap, allNeedIds);
 
         let totalFilled = 0;
         let totalFilledPicked = 0;
@@ -406,67 +429,36 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             const zipFilename = zipFilenameByHash.get(zipHash);
             if (!zipFilename) return;
             try {
-                const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
-                if (!resp.ok) return;
-                const buf = await resp.arrayBuffer();
-                const zip = await new JSZip().loadAsync(buf);
-                const metaFile = zip.file('metadata.json');
-                if (!metaFile) return;
-                const items = JSON.parse(await metaFile.async('text'));
+                const shard = await loadShard(size, zipFilename);
+                if (!shard) return;
+                const { zip, items } = shard;
                 const embeddingByProblem = new Map();
-                const ratingByProblem = new Map();
-                const slopeByProblem = new Map();
-                const floorByProblem = new Map();
+                const itemByProblem = new Map();
                 for (const item of items) {
                     const tid = item.filename.replace(/\.sgf$/, '');
+                    itemByProblem.set(tid, item);
                     if (Array.isArray(item.embedding)) {
                         // Quantize to 2 decimals to keep localStorage small.
                         embeddingByProblem.set(tid, item.embedding.map(v => Math.round(v * 100) / 100));
                     }
-                    if (typeof item.rating === 'number') {
-                        ratingByProblem.set(tid, item.rating);
-                    }
-                    if (typeof item.slope === 'number') {
-                        slopeByProblem.set(tid, item.slope);
-                    }
-                    if (typeof item.floor === 'number') {
-                        floorByProblem.set(tid, item.floor);
-                    }
                 }
 
                 // Ratings: rewrite across the full history. Cheap (just a map
-                // lookup per entry) and the chart needs old entries updated.
+                // lookup per entry) and the chart needs old entries updated. The
+                // field writes go through applyRatingFields (rating + derived
+                // rank + slope/quality + floor) — the same writer the synced and
+                // cold-tail fills use.
                 if (ratingsChanged) {
                     for (let i = 0; i < history.length; i++) {
                         const a = history[i];
                         if (!a.problemId) continue;
-                        if (!ratingByProblem.has(a.problemId)) continue;
-                        const newRating = ratingByProblem.get(a.problemId);
-                        if (a.problemRating !== newRating) {
-                            a.problemRating = newRating;
-                            totalRatingsUpdated++;
-                        }
-                        // Refresh the derived rank, and migrate legacy entries:
-                        // problemRating now holds the raw value, so the separate
-                        // problemRawRating field is redundant.
-                        const newRank = normalizedRankForSize(newRating, size);
-                        if (newRank !== null && a.problemRank !== newRank) a.problemRank = newRank;
+                        const item = itemByProblem.get(a.problemId);
+                        if (!item || typeof item.rating !== 'number') continue;
+                        if (a.problemRating !== item.rating) totalRatingsUpdated++;
+                        applyRatingFields(a, item, size);
+                        // problemRating now holds the raw value, so the legacy
+                        // separate problemRawRating field is redundant.
                         if (a.problemRawRating !== undefined) delete a.problemRawRating;
-                        // Raw 2PL slope a_p (the rank estimator's per-attempt
-                        // success-curve slope) + its derived [0,1] quality. Fills
-                        // pre-existing entries the first time `slope` ships.
-                        if (slopeByProblem.has(a.problemId)) {
-                            const newSlope = slopeByProblem.get(a.problemId);
-                            if (a.problemSlope !== newSlope) a.problemSlope = newSlope;
-                            a.problemQuality = slopeToQuality(newSlope);
-                        }
-                        // Per-problem 3PL guessing floor c_p (rank estimator's
-                        // success-curve lower asymptote). Fills pre-existing entries
-                        // the first time `floor` ships.
-                        if (floorByProblem.has(a.problemId)) {
-                            const newFloor = floorByProblem.get(a.problemId);
-                            if (a.problemFloor !== newFloor) a.problemFloor = newFloor;
-                        }
                     }
                 }
 
@@ -595,26 +587,16 @@ async function fillSyncedForSize(size) {
     if (!locator) return 0;
     const { lookupMap, zipFilenameByHash } = locator;
 
-    const zipToIds = new Map();
-    for (const id of needIds) {
-        const zipHash = lookupMap.get(id);
-        if (!zipHash) continue;  // problem left the corpus — entry stays a skeleton
-        if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
-        zipToIds.get(zipHash).push(id);
-    }
+    const zipToIds = groupIdsByZip(lookupMap, needIds);
 
     let filled = 0;
     await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, ids]) => {
         const zipFilename = zipFilenameByHash.get(zipHash);
         if (!zipFilename) return;
         try {
-            const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
-            if (!resp.ok) return;
-            const buf = await resp.arrayBuffer();
-            const zip = await new JSZip().loadAsync(buf);
-            const metaFile = zip.file('metadata.json');
-            if (!metaFile) return;
-            const items = JSON.parse(await metaFile.async('text'));
+            const shard = await loadShard(size, zipFilename);
+            if (!shard) return;
+            const { zip, items } = shard;
             const itemByProblem = new Map();
             for (const item of items) {
                 itemByProblem.set(item.filename.replace(/\.sgf$/, ''), item);
@@ -635,14 +617,7 @@ async function fillSyncedForSize(size) {
                 const inWindow = i >= startIdx;
 
                 if (typeof a.problemRating !== 'number' && typeof item.rating === 'number') {
-                    a.problemRating = item.rating;
-                    const rank = normalizedRankForSize(item.rating, size);
-                    if (rank !== null) a.problemRank = rank;
-                    if (typeof item.slope === 'number') {
-                        a.problemSlope = item.slope;
-                        a.problemQuality = slopeToQuality(item.slope);
-                    }
-                    if (typeof item.floor === 'number') a.problemFloor = item.floor;
+                    applyRatingFields(a, item, size);
                     filled++;
                 }
 
@@ -743,25 +718,15 @@ async function fetchShardItems(size, ids) {
     const locator = await buildShardLocator(size);
     if (!locator) return { items: out, ok: false };
     const { lookupMap, zipFilenameByHash } = locator;
-    const zipToIds = new Map();
-    for (const id of ids) {
-        const zipHash = lookupMap.get(id);
-        if (!zipHash) continue;  // not in the corpus
-        if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
-        zipToIds.get(zipHash).push(id);
-    }
+    const zipToIds = groupIdsByZip(lookupMap, ids);
     await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, idList]) => {
         const zipFilename = zipFilenameByHash.get(zipHash);
         if (!zipFilename) return;
         try {
-            const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
-            if (!resp.ok) return;
-            const zip = await new JSZip().loadAsync(await resp.arrayBuffer());
-            const metaFile = zip.file('metadata.json');
-            if (!metaFile) return;
-            const items = JSON.parse(await metaFile.async('text'));
+            const shard = await loadShard(size, zipFilename);
+            if (!shard) return;
             const want = new Set(idList);
-            for (const item of items) {
+            for (const item of shard.items) {
                 const id = item.filename.replace(/\.sgf$/, '');
                 if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
             }
