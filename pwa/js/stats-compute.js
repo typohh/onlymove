@@ -34,13 +34,12 @@ export function computeUserCommunityBuckets(history, timeBins) {
     // lands in the same bin the server would have bucketed it into.
     const binSeconds = (ms) => timeBins.findIndex(b => (ms / 1000) >= b.lo && (ms / 1000) < b.hi);
 
-    // Attempts per active (UTC) day — every attempt counts, repeats included.
-    const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 160], [160, Infinity]];
-    const days = new Set(recent.map(a => new Date(a.date).toISOString().slice(0, 10)));
-    if (days.size) {
-        const rate = recent.length / days.size;
-        out.attemptsPerDay = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
-    }
+    // Attempts per day — the week's attempts averaged over the full 7-day window
+    // (÷ 7, NOT ÷ distinct active days); every attempt counts, repeats included.
+    // Bins must mirror PER_USER_BINS in computeServerStats (src/server-stats.js).
+    const PER_USER_BINS = [[0, 1], [1, 2], [2, 5], [5, 10], [10, 20], [20, 50], [50, Infinity]];
+    const rate = recent.length / 7;
+    out.attemptsPerDay = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
 
     // Solving time: median of per-attempt solve times (ms), then coarse-binned.
     const solveMed = median(recent.map(a => a.timeTaken).filter(t => typeof t === 'number' && t > 0));

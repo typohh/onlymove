@@ -83,7 +83,7 @@ async function computeServerStats(env) {
   // and earlier repeats are dropped to avoid massive double counting.
   const userSolve = new Map();   // user → number[] of time_used (ms)
   const userReview = new Map();  // user → Map<problem, { t, at }> last cumulative review_time
-  const perUserActivity = new Map(); // user → { attempts, days:Set }
+  const perUserActivity = new Map(); // user → { attempts }
   // Recall time: how soon a user comes back to a problem they FAILED. Collect
   // each (user, problem)'s attempt timeline; below we measure the gap from a
   // failure to the very next attempt on that problem (the "first recall after a
@@ -128,8 +128,8 @@ async function computeServerStats(env) {
     }
 
     let u = perUserActivity.get(r.user_id);
-    if (!u) { u = { attempts: 0, days: new Set() }; perUserActivity.set(r.user_id, u); }
-    u.attempts++; u.days.add(r.day);
+    if (!u) { u = { attempts: 0 }; perUserActivity.set(r.user_id, u); }
+    u.attempts++;
 
     const ts = Date.parse(r.created_at);
     if (Number.isFinite(ts)) {
@@ -223,14 +223,16 @@ async function computeServerStats(env) {
   const solveHist = [...solveB.entries()].map(([bucket, n]) => ({ bucket, n })).sort((a, b) => a.bucket - b.bucket);
   const reviewHist = [...reviewB.entries()].map(([bucket, n]) => ({ bucket, n })).sort((a, b) => a.bucket - b.bucket);
 
-  // Per-user attempts-per-active-day, binned: "how many users average ~5/day,
-  // ~10/day, …". One sample per user (attempts ÷ distinct active days), so it
-  // counts users, not user-days.
-  const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 160], [160, Infinity]];
-  const PER_USER_LABELS = ['1–5', '5–10', '10–20', '20–40', '40–80', '80–160', '160+'];
+  // Per-user attempts-per-day, binned: "how many users average ~2/day, ~5/day,
+  // …". One sample per user — the week's attempts averaged over the full 7-day
+  // window (attempts ÷ 7, NOT ÷ distinct active days), so a user who burst-solves
+  // on one day reads as their true daily average, not their per-session count.
+  // The lowest bin is sub-1 so low-activity users (< 7 attempts/week) still count.
+  const PER_USER_BINS = [[0, 1], [1, 2], [2, 5], [5, 10], [10, 20], [20, 50], [50, Infinity]];
+  const PER_USER_LABELS = ['<1', '1–2', '2–5', '5–10', '10–20', '20–50', '50+'];
   const attemptsPerUserDist = PER_USER_LABELS.map(label => ({ label, value: 0 }));
   for (const u of perUserActivity.values()) {
-    const rate = u.attempts / u.days.size;
+    const rate = u.attempts / 7;
     const i = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
     if (i >= 0) attemptsPerUserDist[i].value += 1;
   }

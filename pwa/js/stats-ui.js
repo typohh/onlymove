@@ -554,8 +554,9 @@ async function buildServerStatsPane(history = []) {
     summary.textContent = txt.trimEnd();
     pane.append(summary);
 
-    // Distribution of users by their attempts-per-active-day (binned server-side):
-    // how many users average ~5/day, ~10/day, etc. x = attempts/day bin, y = users.
+    // Distribution of users by their attempts-per-day (binned server-side): the
+    // week's attempts averaged over 7 days, so how many users average ~2/day,
+    // ~5/day, etc. x = attempts/day bin, y = users.
     if (data.attemptsPerUserDist && data.attemptsPerUserDist.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
