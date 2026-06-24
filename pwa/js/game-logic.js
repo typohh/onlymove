@@ -4,7 +4,7 @@ import { state, setAcceptClicks, setAppMode } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
-import { isCorrectMove, tsumegoIdOf } from './sgf.js';
+import { isCorrectMove, tsumegoIdOf, toBoardNotation } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
 import { getTerm } from './i18n.js';
@@ -39,13 +39,6 @@ const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show th
 // population confound) and setTimeBias now live in model.js, alongside the L2
 // prior the same coefficient is shrunk toward — they must stay in lockstep.
 
-// Standard Go column letters skip 'I' (so A..H, J..T). Row number is 1-based
-// from the bottom; WGo's y=0 is at the top, so row = boardSize - y.
-const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
-const toBoardNotation = (x, y, size) => {
-    if (x < 0 || y < 0 || x >= size || y >= size || x >= COL_LETTERS.length) return null;
-    return COL_LETTERS[x] + (size - y);
-};
 
 const buildReportPayload = (success, x, y) => {
     const currentProblem = state.currentProblem;

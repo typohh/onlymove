@@ -102,11 +102,22 @@ export function findBestMoveFromChildren(children) {
     return (children[0].comment && children[0].comment.match(/%\//)) ? children[0] : null;
 }
 
-// Standard Go board notation: column letters skip 'I', row is 1-based from the
-// bottom (WGo's y=0 is the top row). Inverse of game-logic's toBoardNotation —
-// used by account-sync's field fill to map a reported move (e.g. "C3") back to
-// WGo {x, y} coordinates.
+// Standard Go board notation: column letters skip 'I' (A..H, J..T), row is
+// 1-based from the BOTTOM while WGo's y=0 is the TOP row (so row = size - y).
+// toBoardNotation and boardNotationToXy are exact inverses over this alphabet;
+// they live together here so the COL_LETTERS table and the row flip can't drift.
 const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
+
+// WGo {x, y} → board notation (e.g. {x:2,y:6} on 9x9 → "C3"); null for an
+// off-board coordinate. Used by the live click path to report the picked move.
+export function toBoardNotation(x, y, size) {
+    if (x < 0 || y < 0 || x >= size || y >= size || x >= COL_LETTERS.length) return null;
+    return COL_LETTERS[x] + (size - y);
+}
+
+// Board notation → WGo {x, y}; the inverse of toBoardNotation. Used by
+// account-sync's field fill to map a reported move (e.g. "C3") back to WGo
+// coordinates. null for a malformed or off-board move.
 export function boardNotationToXy(move, size) {
     if (typeof move !== 'string') return null;
     const m = move.toUpperCase().match(/^([A-HJ-T])(\d{1,2})$/);
