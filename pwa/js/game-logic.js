@@ -4,7 +4,7 @@ import { state, setAcceptClicks, setAppMode } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
-import { isCorrectMove } from './sgf.js';
+import { isCorrectMove, tsumegoIdOf } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
 import { getTerm } from './i18n.js';
@@ -50,7 +50,7 @@ const toBoardNotation = (x, y, size) => {
 const buildReportPayload = (success, x, y) => {
     const currentProblem = state.currentProblem;
     const timeUsed = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
-    const problemId = currentProblem?.filename?.replace(/\.sgf$/, '') ?? null;
+    const problemId = tsumegoIdOf(currentProblem?.filename) ?? null;
     const prevs = problemId ? state.answerHistory.filter(a => a.problemId === problemId) : [];
     const reviewTime = prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
     return {
@@ -95,7 +95,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     // also re-fetches missing pickedEmbeddings on the next app load, so a
     // failed/slow live fetch is recoverable.
     const currentProblem = state.currentProblem;
-    const tsumegoId = currentProblem?.filename?.replace(/\.sgf$/, '');
+    const tsumegoId = tsumegoIdOf(currentProblem?.filename);
     const zipFilename = currentProblem?.zipFilename;
     let pickedEmbeddingPromise = null;
     if (tsumegoId && zipFilename && state.appMode === APP_MODES.SOLVING) {
@@ -139,7 +139,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
 
             // Get accumulated review time for this problem
             const currentProblem = state.currentProblem;
-            const problemId = currentProblem.filename.replace('.sgf', '');
+            const problemId = tsumegoIdOf(currentProblem.filename);
             const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
             if (previousAnswers.length > 0) {
                 const lastAnswer = previousAnswers[previousAnswers.length - 1];

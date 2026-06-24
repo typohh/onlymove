@@ -2,6 +2,17 @@
 import { SGF_COMMENTS } from './constants.js';
 
 /**
+ * Tsumego id from its SGF filename: strips the trailing `.sgf` extension. The
+ * id is the symmetry-canonical 8-hex hash the corpus, shards, and reports all
+ * key on. Centralized so the ~15 `filename.replace('.sgf', '')` call sites
+ * can't drift (some used the unanchored form). Null-tolerant: a falsy filename
+ * (e.g. an optional-chained `problem?.filename`) is returned unchanged.
+ */
+export function tsumegoIdOf(filename) {
+  return filename ? filename.replace(/\.sgf$/, '') : filename;
+}
+
+/**
  * Parses the score from an SGF comment.
  * @param {string} comment - The comment string.
  * @returns {number|null} - The score as a float, or null if not found.

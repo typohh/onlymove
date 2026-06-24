@@ -35,7 +35,7 @@ import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
 import { getTail, updateTail } from './history-store.js';
-import { boardNotationToXy } from './sgf.js';
+import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -433,7 +433,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 const embeddingByProblem = new Map();
                 const itemByProblem = new Map();
                 for (const item of items) {
-                    const tid = item.filename.replace(/\.sgf$/, '');
+                    const tid = tsumegoIdOf(item.filename);
                     itemByProblem.set(tid, item);
                     if (Array.isArray(item.embedding)) {
                         // Quantize to 2 decimals to keep localStorage small.
@@ -597,7 +597,7 @@ async function fillSyncedForSize(size) {
             const { zip, items } = shard;
             const itemByProblem = new Map();
             for (const item of items) {
-                itemByProblem.set(item.filename.replace(/\.sgf$/, ''), item);
+                itemByProblem.set(tsumegoIdOf(item.filename), item);
             }
             let indexPayload = null;
             const idxFile = zip.file('embeddings_index.json');
@@ -725,7 +725,7 @@ async function fetchShardItems(size, ids) {
             if (!shard) return;
             const want = new Set(idList);
             for (const item of shard.items) {
-                const id = item.filename.replace(/\.sgf$/, '');
+                const id = tsumegoIdOf(item.filename);
                 if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
             }
         } catch (err) {

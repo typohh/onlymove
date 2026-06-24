@@ -37,6 +37,7 @@ import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule } from './notifications.js';
 import { recordShareEvent } from './user-stats.js';
 import { loadSgf, redraw, initializeBoard } from './board.js';
+import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
 
 import { initAudio } from './audio.js';
@@ -167,7 +168,7 @@ async function performIgnore() {
     const problem = state.previousProblem;
     if (!problem) return;
 
-    const problemId = problem.filename.replace('.sgf', '');
+    const problemId = tsumegoIdOf(problem.filename);
     const answerHistory = [...state.answerHistory];
     const lastAnswer = answerHistory[answerHistory.length - 1];
 

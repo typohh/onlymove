@@ -7,6 +7,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state } from './state.js';
+import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
 import { recordShareEvent } from './user-stats.js';
 import { getBoardImageBlob } from './board.js';
@@ -65,7 +66,7 @@ export function performShare() {
     isSharing = true;
     const releaseGuard = () => { isSharing = false; };
 
-    const tsumegoId = state.previousProblem.filename.replace('.sgf', '');
+    const tsumegoId = tsumegoIdOf(state.previousProblem.filename);
     const orientation = state.previousProblem.orientation;
     // Web Share + the async Clipboard API are secure-context only, and a link
     // generated while on plain http propagates that insecure origin to whoever

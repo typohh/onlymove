@@ -1,6 +1,7 @@
 // js/ui.js
 
 import { state, setDeferredInstallPrompt, SUPPORTED_BOARD_SIZES } from './state.js';
+import { tsumegoIdOf } from './sgf.js';
 import {
     supportsNotifications,
     notificationPermission,
@@ -333,7 +334,7 @@ const updateMenuItems = () => {
         const problem = state.previousProblem;
         if (problem) {
             const lastAnswer = state.answerHistory[state.answerHistory.length - 1];
-            const wasFailure = lastAnswer && lastAnswer.problemId === problem.filename.replace('.sgf', '') && !lastAnswer.correct;
+            const wasFailure = lastAnswer && lastAnswer.problemId === tsumegoIdOf(problem.filename) && !lastAnswer.correct;
             const isRepeat = problem.isRepeat;
             if (!problem.linked && (isRepeat || wasFailure)) {
                 ignoreItem.classList.remove('disabled');

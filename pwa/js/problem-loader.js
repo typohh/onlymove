@@ -4,7 +4,7 @@ import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengePro
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
-import { reorientSgf } from './sgf.js';
+import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
@@ -76,7 +76,7 @@ function selectChallengeCandidate() {
     const excluded = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
     const available = state.allProblems.filter(p =>
         !excluded.has(p.filename) &&
-        !state.unavailableProblemIds.has(p.filename.replace(/\.sgf$/, '')));
+        !state.unavailableProblemIds.has(tsumegoIdOf(p.filename)));
 
     if (available.length === 0) return null;
 
@@ -291,7 +291,7 @@ function displayProblem(problem, appMode) {
         loadSgf(problem.sgf);
     } catch (error) {
         const e = new Error('Invalid SGF: ' + error.message);
-        e.failedProblemId = problem.filename.replace(/\.sgf$/, '');
+        e.failedProblemId = tsumegoIdOf(problem.filename);
         throw e;
     }
     setCurrentSolvingStartTime(Date.now());
@@ -352,7 +352,7 @@ export async function assignNewChallenge() {
             return problem;
         } catch (error) {
             lastError = error;
-            error.failedProblemId = raw.filename.replace(/\.sgf$/, '');
+            error.failedProblemId = tsumegoIdOf(raw.filename);
             reportLoadError(error, attempt);
         }
     }
@@ -367,7 +367,7 @@ export async function assignNewChallenge() {
 function challengeAlreadyAnswered() {
     const c = state.challengeProblem;
     if (!c) return false;
-    const id = c.filename.replace(/\.sgf$/, '');
+    const id = tsumegoIdOf(c.filename);
     return state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH).some(a => a.problemId === id);
 }
 
@@ -386,7 +386,7 @@ async function getDueRecallProblem() {
         return await buildProblem(raw, { isRepeat: true, linked: false });
     } catch (error) {
         console.error('recall build failed; falling back to challenge:', error);
-        state.unavailableProblemIds.add(raw.filename.replace(/\.sgf$/, ''));
+        state.unavailableProblemIds.add(tsumegoIdOf(raw.filename));
         return null;
     }
 }

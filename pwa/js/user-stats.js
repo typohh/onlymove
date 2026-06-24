@@ -2,6 +2,7 @@
 
 import { state, updateUserRank, updateMomentum, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
+import { tsumegoIdOf } from './sgf.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
@@ -20,8 +21,7 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     // truth for "don't record this attempt".
     if (state.currentProblem?.linked) return;
     try {
-        const problemFilename = state.currentProblem.filename;
-        const problemId = problemFilename.replace(/\.[^/.]+$/, "");
+        const problemId = tsumegoIdOf(state.currentProblem.filename);
         const res = await fetch('/report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -137,7 +137,7 @@ export async function updateUserStats(isCorrect, {
     addToAccumulatedSolvingTime(currentSessionTime);
     const timeTaken = state.accumulatedSolvingTime;
 
-    const problemId = currentProblem.filename.replace('.sgf', '');
+    const problemId = tsumegoIdOf(currentProblem.filename);
     let successSinceFailure;
     if (currentProblem.isRepeat) {
         const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
