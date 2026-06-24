@@ -5,6 +5,8 @@
 // a user hits an intermittent issue on mobile (no devtools) and we need to
 // see what happened.
 
+import { getTail } from './history-store.js';
+
 const BUFFER_LIMIT = 300;
 const TRIGGER_TAPS = 5;
 const TRIGGER_WINDOW_MS = 2000;
@@ -75,6 +77,38 @@ function patchConsole() {
     });
 }
 
+// Hand a JSON string to the user as a file. On mobile we prefer the share
+// sheet (navigator.share with a File) so it can go straight to another app;
+// otherwise fall back to a normal blob download. Restores `btn`'s label after
+// success; surfaces failures on the button. Shared by the LS and tail dumps.
+async function shareOrDownloadJson(json, fname, btn, label) {
+    try {
+        try {
+            const file = new File([json], fname, { type: 'application/json' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: fname });
+                btn.textContent = 'Shared';
+                setTimeout(() => { btn.textContent = label; }, 1500);
+                return;
+            }
+        } catch (_) { /* share unavailable/cancelled — fall through to download */ }
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fname;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        btn.textContent = 'Saved';
+        setTimeout(() => { btn.textContent = label; }, 1500);
+    } catch (e) {
+        record('error', [e]);
+        btn.textContent = 'Dump failed';
+    }
+}
+
 function showDialog() {
     const existing = document.getElementById('debug-log-dialog');
     if (existing) { existing.remove(); return; }
@@ -110,46 +144,41 @@ function showDialog() {
             copyBtn.textContent = 'Copy failed';
         }
     };
-    // Dump the entire localStorage as a JSON file. On mobile we prefer the
-    // share sheet (navigator.share with a File) so the user can send it straight
-    // from their phone; otherwise we fall back to a normal blob download.
+    // Dump the entire localStorage as a JSON file (share sheet first, download
+    // fallback — see shareOrDownloadJson).
     const dumpBtn = document.createElement('button');
     dumpBtn.textContent = 'Download LS';
     Object.assign(dumpBtn.style, { marginRight: '10px', padding: '6px 12px', cursor: 'pointer' });
-    dumpBtn.onclick = async () => {
+    dumpBtn.onclick = () => {
+        const dump = {};
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            dump[k] = localStorage.getItem(k);
+        }
+        const json = JSON.stringify(dump, null, 2);
+        const uid = localStorage.getItem('userId') || 'unknown';
+        const fname = `onlymove-ls-${uid}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        shareOrDownloadJson(json, fname, dumpBtn, 'Download LS');
+    };
+
+    // Dump the IndexedDB answer-history cold tail (the deep history that
+    // localStorage's working set doesn't hold) as a JSON array of entries.
+    const tailBtn = document.createElement('button');
+    tailBtn.textContent = 'Download Tail';
+    Object.assign(tailBtn.style, { marginRight: '10px', padding: '6px 12px', cursor: 'pointer' });
+    tailBtn.onclick = async () => {
+        const prev = tailBtn.textContent;
+        tailBtn.textContent = 'Reading…';
         try {
-            const dump = {};
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                dump[k] = localStorage.getItem(k);
-            }
-            const json = JSON.stringify(dump, null, 2);
+            const rows = await getTail();  // [] if IndexedDB unavailable/empty
+            const json = JSON.stringify(rows);
             const uid = localStorage.getItem('userId') || 'unknown';
-            const fname = `onlymove-ls-${uid}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            // Try the native share sheet with a file first (best on mobile).
-            try {
-                const file = new File([json], fname, { type: 'application/json' });
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    await navigator.share({ files: [file], title: fname });
-                    dumpBtn.textContent = 'Shared';
-                    setTimeout(() => { dumpBtn.textContent = 'Download LS'; }, 1500);
-                    return;
-                }
-            } catch (_) { /* share unavailable/cancelled — fall through to download */ }
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fname;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-            dumpBtn.textContent = 'Saved';
-            setTimeout(() => { dumpBtn.textContent = 'Download LS'; }, 1500);
+            const fname = `onlymove-tail-${uid}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            await shareOrDownloadJson(json, fname, tailBtn, 'Download Tail');
         } catch (e) {
             record('error', [e]);
-            dumpBtn.textContent = 'Dump failed';
+            tailBtn.textContent = 'Dump failed';
+            setTimeout(() => { tailBtn.textContent = prev; }, 1500);
         }
     };
 
@@ -163,6 +192,7 @@ function showDialog() {
     closeBtn.onclick = () => overlay.remove();
     buttons.appendChild(copyBtn);
     buttons.appendChild(dumpBtn);
+    buttons.appendChild(tailBtn);
     buttons.appendChild(clearBtn);
     buttons.appendChild(closeBtn);
     header.appendChild(title);
