@@ -3,6 +3,7 @@
 import { state, updateUserRank, updateMomentum, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
+import { quantizeEmbedding } from './math-utils.js';
 import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
@@ -112,7 +113,7 @@ function patchPickedEmbedding(problemId, attemptDate, embedding) {
         const a = history[i];
         if (a.problemId === problemId && a.date === attemptDate) {
             if (a.pickedEmbedding) return;
-            a.pickedEmbedding = embedding.map(v => Math.round(v * 100) / 100);
+            a.pickedEmbedding = quantizeEmbedding(embedding);
             updateAnswerHistory(history);
             return;
         }
@@ -182,7 +183,7 @@ export async function updateUserStats(isCorrect, {
         // PCA scores are unit-variance per component; 2 decimals = ±0.005
         // resolution, which is well under the noise floor for the ridge-
         // regularized weakness regression.
-        answer.embedding = currentProblem.embedding.map(v => Math.round(v * 100) / 100);
+        answer.embedding = quantizeEmbedding(currentProblem.embedding);
     }
     if (typeof pickedCellIndex === 'number' && pickedCellIndex >= 0) {
         // Record the SGF variation index the user picked so embedding-backfill
@@ -191,7 +192,7 @@ export async function updateUserStats(isCorrect, {
         answer.pickedCellIndex = pickedCellIndex;
     }
     if (Array.isArray(pickedEmbedding)) {
-        answer.pickedEmbedding = pickedEmbedding.map(v => Math.round(v * 100) / 100);
+        answer.pickedEmbedding = quantizeEmbedding(pickedEmbedding);
     }
 
     updateAnswerHistory([...state.answerHistory, answer]);

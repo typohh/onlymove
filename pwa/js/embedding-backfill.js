@@ -34,6 +34,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
+import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail } from './history-store.js';
 import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
 
@@ -437,7 +438,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                     itemByProblem.set(tid, item);
                     if (Array.isArray(item.embedding)) {
                         // Quantize to 2 decimals to keep localStorage small.
-                        embeddingByProblem.set(tid, item.embedding.map(v => Math.round(v * 100) / 100));
+                        embeddingByProblem.set(tid, quantizeEmbedding(item.embedding));
                     }
                 }
 
@@ -499,7 +500,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                                     indexEntry,
                                 });
                                 if (Array.isArray(emb)) {
-                                    a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
+                                    a.pickedEmbedding = quantizeEmbedding(emb);
                                     totalFilledPicked++;
                                 }
                             }
@@ -620,7 +621,7 @@ async function fillSyncedForSize(size) {
                 }
 
                 if (inWindow && !a.embedding && Array.isArray(item.embedding)) {
-                    a.embedding = item.embedding.map(v => Math.round(v * 100) / 100);
+                    a.embedding = quantizeEmbedding(item.embedding);
                     filled++;
                 }
 
@@ -646,7 +647,7 @@ async function fillSyncedForSize(size) {
                             indexEntry,
                         });
                         if (Array.isArray(emb)) {
-                            a.pickedEmbedding = emb.map(v => Math.round(v * 100) / 100);
+                            a.pickedEmbedding = quantizeEmbedding(emb);
                             filled++;
                         }
                     }

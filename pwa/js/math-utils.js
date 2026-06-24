@@ -22,6 +22,14 @@ export function normCdf(z) {
     return 0.5 * (1 + math.erf(z / Math.SQRT2));
 }
 
+// Round an embedding's floats to 2 decimals before persisting it on an
+// answerHistory entry — the localStorage footprint of K floats × many entries
+// matters and 2dp is ample for the weakness model. Used everywhere an embedding
+// (correct-move or picked) is stored.
+export function quantizeEmbedding(arr) {
+    return arr.map(v => Math.round(v * 100) / 100);
+}
+
 // Kernel-weighted empirical quantile over a window. `pairs` is ascending by
 // value with `{ v, w }` entries; `total` is Σw. Walk the cumulative weight to
 // p·total and linearly interpolate between the two bracketing samples, so the
