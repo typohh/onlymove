@@ -26,14 +26,14 @@ import * as Sentry from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
-    SUPPORTED_BOARD_SIZES,
+    SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
 import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
-import { updateTail } from './history-store.js';
+import { getTail, updateTail } from './history-store.js';
 import { boardNotationToXy } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
@@ -548,7 +548,12 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
 //     root variations are the same order extraction/packaging use, so the
 //     index addresses the per-cell sidecar directly.
 //   - `pickedEmbedding` via the sidecar, same as the version-driven walk.
-export async function fillSyncedHistoryFields(sizes) {
+//
+// `includeTail` (set on a full pull) also fills synced skeletons that landed in
+// the IndexedDB cold tail — a full pull evicts its old rows there mid-pull, out
+// of reach of the working-set walk. Incremental pulls only merge recent rows
+// (working set), so they leave it false and skip the tail scan.
+export async function fillSyncedHistoryFields(sizes, { includeTail = false } = {}) {
     let total = 0;
     for (const size of sizes) {
         if (!SUPPORTED_BOARD_SIZES.includes(size)) continue;
@@ -559,6 +564,7 @@ export async function fillSyncedHistoryFields(sizes) {
             try { Sentry.captureException(err); } catch (_) {}
         }
     }
+    if (includeTail) total += (await fillSyncedTailFields(sizes)).filled;
     return total;
 }
 
@@ -700,4 +706,118 @@ async function cellIndexForMove(zip, problemId, move, size) {
     } catch (_) {
         return null;
     }
+}
+
+// --- Cold-tail synced fill (steady state) ---
+// History spans the localStorage working set AND the IndexedDB cold tail. A
+// from-the-beginning pull (adoption / full refresh) evicts its old rows to the
+// tail mid-pull, so the working-set fill (fillSyncedForSize) can't reach them.
+// This completes the sync there: synced skeletons in the tail get their
+// problem-level rating fields filled from the shards (one fetch per problem
+// fills every attempt of it). Incremental pulls never reach the tail, so the
+// caller opts in (includeTail) only on a full pull.
+
+function entrySize(e) {
+    return SUPPORTED_BOARD_SIZES.includes(e.size) ? e.size : DEFAULT_BOARD_SIZE;
+}
+
+// Apply a shard metadata.json item's problem-level fields to a history entry.
+function applyRatingFields(e, item, size) {
+    e.problemRating = item.rating;
+    const rank = normalizedRankForSize(item.rating, size);
+    if (rank !== null && rank !== undefined) e.problemRank = rank;
+    if (typeof item.slope === 'number') {
+        e.problemSlope = item.slope;
+        e.problemQuality = slopeToQuality(item.slope);
+    }
+    if (typeof item.floor === 'number') e.problemFloor = item.floor;
+}
+
+// Walk `size`'s shards for the given problem ids → Map(id → metadata item). Ids
+// absent from the corpus are omitted. `ok` is false only when the shard locator
+// couldn't be built (offline), so a caller can retry rather than treat the fill
+// as complete.
+async function fetchShardItems(size, ids) {
+    const out = new Map();
+    if (!ids || ids.size === 0) return { items: out, ok: true };
+    const locator = await buildShardLocator(size);
+    if (!locator) return { items: out, ok: false };
+    const { lookupMap, zipFilenameByHash } = locator;
+    const zipToIds = new Map();
+    for (const id of ids) {
+        const zipHash = lookupMap.get(id);
+        if (!zipHash) continue;  // not in the corpus
+        if (!zipToIds.has(zipHash)) zipToIds.set(zipHash, []);
+        zipToIds.get(zipHash).push(id);
+    }
+    await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, idList]) => {
+        const zipFilename = zipFilenameByHash.get(zipHash);
+        if (!zipFilename) return;
+        try {
+            const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
+            if (!resp.ok) return;
+            const zip = await new JSZip().loadAsync(await resp.arrayBuffer());
+            const metaFile = zip.file('metadata.json');
+            if (!metaFile) return;
+            const items = JSON.parse(await metaFile.async('text'));
+            const want = new Set(idList);
+            for (const item of items) {
+                const id = item.filename.replace(/\.sgf$/, '');
+                if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
+            }
+        } catch (err) {
+            console.warn(`synced-tail-fill[${size}]: shard ${zipFilename} failed:`, err);
+        }
+    });
+    return { items: out, ok: true };
+}
+
+// Fill one size's cold-tail synced skeletons. Returns { filled, ok }.
+async function fillSyncedTailForSize(size) {
+    const tail = await getTail();
+    if (!tail || tail.length === 0) return { filled: 0, ok: true };
+    const need = new Set();
+    for (const e of tail) {
+        if (!e || !e.synced || !e.problemId) continue;
+        if (entrySize(e) !== size) continue;
+        if (typeof e.problemRating !== 'number') need.add(e.problemId);
+    }
+    if (need.size === 0) return { filled: 0, ok: true };
+
+    const { items, ok } = await fetchShardItems(size, need);
+    if (items.size === 0) return { filled: 0, ok };
+
+    let filled = 0;
+    await updateTail((entry) => {
+        if (!entry || typeof entry.problemRating === 'number') return null;
+        if (entrySize(entry) !== size) return null;
+        const item = items.get(entry.problemId);
+        if (!item) return null;
+        applyRatingFields(entry, item, size);
+        filled++;
+        return entry;
+    });
+    if (filled > 0) console.log(`synced-tail-fill[${size}]: filled ${filled} cold-tail entries`);
+    return { filled, ok };
+}
+
+// Fill the cold tail's synced skeletons across sizes. Returns { filled, ok }
+// (ok=false if any needed size's shards couldn't be fetched). Exported so the
+// one-time tail migration can reuse it on already-damaged tails.
+export async function fillSyncedTailFields(sizes) {
+    let filled = 0;
+    let ok = true;
+    for (const size of sizes) {
+        if (!SUPPORTED_BOARD_SIZES.includes(size)) continue;
+        try {
+            const r = await fillSyncedTailForSize(size);
+            filled += r.filled;
+            ok = ok && r.ok;
+        } catch (err) {
+            console.warn(`synced-tail-fill[${size}] failed:`, err);
+            try { Sentry.captureException(err); } catch (_) {}
+            ok = false;
+        }
+    }
+    return { filled, ok };
 }

@@ -133,6 +133,33 @@ export async function getTail() {
     });
 }
 
+// Just the serverCreatedAt values present in the tail (cheap cursor scan — no
+// full row array). The sync merge dedups against this so a re-pull of rows long
+// since evicted to the tail can't re-insert them as duplicates. Empty set if
+// unavailable.
+export async function getTailServerCreatedAtSet() {
+    const db = await openDB();
+    const set = new Set();
+    if (!db) return set;
+    return new Promise((resolve) => {
+        let req;
+        try {
+            req = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+        } catch {
+            resolve(set);
+            return;
+        }
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) { resolve(set); return; }
+            const v = cursor.value;
+            if (v && v.serverCreatedAt) set.add(v.serverCreatedAt);
+            cursor.continue();
+        };
+        req.onerror = () => resolve(set);
+    });
+}
+
 // Cursor walk for a model refit. `transform(entry)` may mutate and return the
 // entry to persist the change, or return null/undefined to leave it untouched.
 // Resolves true when the walk completes, false on unavailability/error.
@@ -173,6 +200,32 @@ export async function clearTail() {
         try {
             tx = db.transaction(STORE, 'readwrite');
             tx.objectStore(STORE).clear();
+        } catch {
+            resolve(false);
+            return;
+        }
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+    });
+}
+
+// Replace the ENTIRE tail with `rows` (oldest→newest) in ONE transaction, so a
+// crash can't leave it empty between a clear and a refill. Used by the one-time
+// tail repair (de-dup + rating reconstruction). Resolves true on success, false
+// on unavailability/error (caller should not treat the repair as done).
+export async function replaceTail(rows) {
+    const db = await openDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+        let tx;
+        try {
+            tx = db.transaction(STORE, 'readwrite');
+            const store = tx.objectStore(STORE);
+            store.clear();
+            for (const r of (rows || [])) {
+                try { store.add(r); } catch {}
+            }
         } catch {
             resolve(false);
             return;

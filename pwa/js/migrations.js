@@ -12,7 +12,9 @@
 // through state.answerHistory (the active size's view, already wrapped under
 // the size bucket by the state.js migrations) and updateAnswerHistory().
 
-import { state, updateAnswerHistory } from './state.js';
+import { state, updateAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
+import { getTail, replaceTail } from './history-store.js';
+import { fillSyncedTailFields } from './embedding-backfill.js';
 
 // Backfill accumulatedReview: the total reviewTime spent on a problem across all
 // PRIOR attempts (strictly before this entry's date).
@@ -194,4 +196,78 @@ export function runMigrations() {
     migrateClearIgnoredFlag();
     migrateAnswerHistory();
     migrateModelArch3pl();
+}
+
+const TAIL_MIGRATION_KEY = 'tailMigration_v1';
+
+/**
+ * ONE-TIME cold-tail cleanup. Async and run separately from the synchronous
+ * runMigrations() above (it needs the IndexedDB tail, which only exists after
+ * initHistoryStorage). Repairs damage from the pre-tail-aware sync:
+ *   - a second full pull used to re-insert already-evicted rows as
+ *     (problemId,date) DUPLICATES (the merge deduped only against the working
+ *     set), and
+ *   - full-pull eviction left synced skeletons in the tail with NO rating, so
+ *     they dropped off the full-history Rank chart.
+ * Steady state now prevents both — mergeRowsForSize dedups against the tail, and
+ * fillSyncedHistoryFields fills the tail on a full pull — so this only fixes
+ * EXISTING tails, then never runs again. Migration code, deliberately specific.
+ *
+ * Must run BEFORE the backfill's curve-recompute touches the tail (main.js
+ * sequences them).
+ */
+export async function runTailMigration() {
+    if (localStorage.getItem(TAIL_MIGRATION_KEY)) return;
+    // A superseded in-place repair (tailRepaired*) shipped briefly; it removed
+    // duplicate rows WITHOUT updating the silent-eviction high-water mark, so any
+    // device that ran it has a stale mark even if its tail is now dup-free.
+    const ranSupersededRepair = !!(localStorage.getItem('tailRepairedV1') ||
+        localStorage.getItem('tailRepairedV2'));
+    localStorage.removeItem('tailRepairedV1');
+    localStorage.removeItem('tailRepairedV2');
+
+    let reconstructOk = true;
+    try {
+        const tail = await getTail();
+        if (Array.isArray(tail) && tail.length > 0) {
+            // De-dup by (problemId,date), keeping the richest copy in first
+            // position (so the tail stays oldest→newest).
+            const richness = (e) =>
+                (typeof e.problemRank === 'number' ? 4 : 0) +
+                (typeof e.problemRating === 'number' ? 2 : 0) +
+                (e.embedding !== undefined ? 1 : 0);
+            const best = new Map();
+            const order = [];
+            for (const e of tail) {
+                if (!e) continue;
+                const k = `${e.problemId}|${e.date}`;
+                if (!best.has(k)) { best.set(k, e); order.push(k); }
+                else if (richness(e) > richness(best.get(k))) best.set(k, e);
+            }
+            const dedupedCount = tail.length - order.length;
+            if (dedupedCount > 0) {
+                await replaceTail(order.map((k) => best.get(k)));
+                console.log(`tail-migration: removed ${dedupedCount} duplicate rows`);
+            }
+
+            // Re-establish the silent-eviction high-water mark when this migration
+            // (or the superseded repair) shrank the tail — otherwise the next stats
+            // open reads the smaller tail as the BROWSER dropping rows and pops the
+            // "restore from server?" prompt. Skipped on untouched tails so a REAL
+            // browser eviction is still detected.
+            if (dedupedCount > 0 || ranSupersededRepair) {
+                try { await syncTailExpectedToActual(); } catch {}
+            }
+
+            // Reconstruct ratings for the surviving synced skeletons, reusing the
+            // clean steady-state tail fill. ok=false ⇒ a shard fetch failed
+            // (offline) ⇒ leave the migration unflagged so it retries next load.
+            const r = await fillSyncedTailFields(SUPPORTED_BOARD_SIZES);
+            reconstructOk = r.ok;
+        }
+    } catch (e) {
+        console.warn('tail-migration failed (will retry next load):', e);
+        return;
+    }
+    if (reconstructOk) localStorage.setItem(TAIL_MIGRATION_KEY, '1');
 }

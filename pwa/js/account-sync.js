@@ -43,6 +43,7 @@ import { trainWeakness } from './weakness.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { momentumRankStep, replayMomentumRank, RANK_REPLAY_WINDOW } from './momentum-rank.js';
 import { fillSyncedHistoryFields } from './embedding-backfill.js';
+import { getTailServerCreatedAtSet } from './history-store.js';
 import { updateAllUI } from './ui.js';
 
 const SYNC_STATE_KEY = 'accountSyncState';
@@ -108,12 +109,17 @@ export function recordReportAck(problemId, createdAt) {
 // bucket, so a concurrent solve can't be clobbered. Returns the inserted
 // entry objects (live references — the field fill mutates them in place, and
 // the momentum-loop feed reads them afterwards).
-function mergeRowsForSize(size, rows) {
+// `tailKnown` carries the serverCreatedAt values already in the IndexedDB cold
+// tail (read once per pull). Without it the dedup would only see the working
+// set, so a re-pull (re-adopt / "refresh history") would re-insert every row
+// long since evicted to the tail as a fresh duplicate.
+function mergeRowsForSize(size, rows, tailKnown = null) {
     const history = getAnswerHistoryForSize(size);
     const known = new Set();
     for (const a of history) {
         if (a.serverCreatedAt) known.add(a.serverCreatedAt);
     }
+    if (tailKnown) for (const sc of tailKnown) known.add(sc);
 
     let claimed = 0;
     const newEntries = [];
@@ -251,11 +257,22 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
         }
 
         let since = fromStart ? '' : sync.cursor;
+        // A from-the-beginning pull (adoption or a full refresh) evicts old rows
+        // to the cold tail mid-pull; only then must the synced fill cover the
+        // tail. Incremental pulls only ever merge recent rows (working set), so
+        // they skip the tail scan.
+        const startedFromBeginning = since === '';
         let complete = false;
         let capExceeded = false;
         let refreshesLeft;
         const insertedEntries = [];
         const touchedSizes = new Set();
+        // Dedup also against the cold tail, not just the working set. Snapshot it
+        // once up front: rows evicted DURING this pull were merged this pull (so
+        // already in the working-set known-set), and /sync pages are disjoint by
+        // cursor, so no row re-arrives within one pull.
+        let tailKnown = null;
+        try { tailKnown = await getTailServerCreatedAtSet(); } catch (_) { tailKnown = null; }
         for (let page = 0; page < MAX_PAGES; page++) {
             const res = await fetch('/sync', {
                 method: 'POST',
@@ -283,7 +300,7 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
                 // them (it needs every server row, incl. the already-claimed
                 // pre-era originals the merge skips).
                 if (rowSink) rowSink(size, rows);
-                const inserted = mergeRowsForSize(size, rows);
+                const inserted = mergeRowsForSize(size, rows, tailKnown);
                 if (inserted.length > 0) {
                     insertedEntries.push(...inserted);
                     touchedSizes.add(size);
@@ -307,8 +324,9 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             console.log(`account-sync: merged ${insertedEntries.length} foreign attempts (sizes: ${[...touchedSizes].join(', ')})`);
             try {
                 // Fill model fields (incl. problemQuality, which the loop feed
-                // below reads) before touching the loop state.
-                await fillSyncedHistoryFields([...touchedSizes]);
+                // below reads) before touching the loop state. A full pull also
+                // fills the cold tail (its old rows were just evicted there).
+                await fillSyncedHistoryFields([...touchedSizes], { includeTail: startedFromBeginning });
             } catch (e) {
                 console.warn('account-sync: field fill failed (next app load retries):', e);
             }
@@ -472,6 +490,8 @@ export async function maybeFinishAccountSwitch() {
     if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
+    // The synced fill above already filled the tail too (includeTail on a full
+    // pull), so the evicted rows carry their ratings.
     await evictColdTail();
     localStorage.removeItem(SWITCH_FLAG_KEY);
     return { switched: true, capExceeded: !!result.capExceeded };

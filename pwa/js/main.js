@@ -7,7 +7,7 @@ import { initDebugLog } from './debug-log.js';
 initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
-import { runMigrations } from './migrations.js';
+import { runMigrations, runTailMigration } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
@@ -430,7 +430,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // zips and the now-cached curve, so returning users don't need to solve 20+
     // new problems before the weakness model has data. Curve must be cached
     // first (above) so the rank refresh can run.
-    backfillMissingEmbeddings();
+    //
+    // The one-time cold-tail migration (de-dup + reconstruct + eviction-baseline
+    // fix) settles the tail FIRST, so the backfill's curve-recompute doesn't race
+    // its writes. Both are background — the first problem load doesn't wait.
+    runTailMigration().catch(() => {}).then(() => backfillMissingEmbeddings());
 
     // One-time front-page (momentum) rank re-anchor to the maximum-likelihood
     // estimate. The a_p² scalingFactor bug (see repairCorruptedMomentum_v3 in
