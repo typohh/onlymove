@@ -25,7 +25,7 @@
 // signal the scorer returns 0 (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
 
 import * as Sentry from "@sentry/browser";
-import { state, getMergedAnswerHistory } from './state.js';
+import { state, getMergedAnswerHistory, clearWeaknessModel } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { sigmoid } from './math-utils.js';
 import { adamUpdate } from './optimizer.js';
@@ -149,10 +149,7 @@ export async function trainWeakness() {
 
         if (!params.every(p => Number.isFinite(p))) {
             console.warn(`weakness: non-finite params; resetting`);
-            state.weaknessParams = null;
-            state.weaknessAdam = null;
-            state.weaknessSe = null;
-            state.weaknessAxisCov = null;
+            clearWeaknessModel();
             return;
         }
         state.weaknessParams = params;

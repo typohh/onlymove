@@ -1,6 +1,7 @@
 // js/state.js
 import { APP_MODES, ANSWER_HISTORY_WORKING_SET } from './constants.js';
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
+import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
 // The momentum-rank loop constants/guards live in momentum-rank.js (the pure
 // step function shared by user-stats.js and the account-sync replay);
 // re-exported here for the existing importers.
@@ -75,23 +76,14 @@ const DEFAULT_BOARD_SIZE = 9;
 (function mergeSharedAcrossSizes_v2() {
     if (localStorage.getItem('sharedAcrossSizesMigrated_v2')) return;
 
-    const readBucket = (key) => {
-        const raw = localStorage.getItem(key);
-        if (raw === null) return {};
-        try {
-            const parsed = JSON.parse(raw);
-            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-        } catch { return {}; }
-    };
-
-    const rankBucket = readBucket('userRank');
+    const rankBucket = readJSONObject('userRank');
     let maxRank = 0, maxRankSize = null;
     for (const [sz, v] of Object.entries(rankBucket)) {
         if (typeof v === 'number' && v > maxRank) { maxRank = v; maxRankSize = sz; }
     }
     localStorage.setItem('userRank', JSON.stringify(maxRank));
 
-    const momentumBucket = readBucket('momentum');
+    const momentumBucket = readJSONObject('momentum');
     const momentum = (maxRankSize !== null && typeof momentumBucket[maxRankSize] === 'number')
         ? momentumBucket[maxRankSize]
         : 30;
@@ -175,18 +167,6 @@ const DEFAULT_BOARD_SIZE = 9;
 
 // --- Board size + per-size backing buckets ---
 
-function readPerSize(key, fallback) {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return {};
-    try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            return parsed;
-        }
-    } catch {}
-    return {};
-}
-
 // Number of most-recent entries that should keep their `embedding` field.
 // Older entries get their embedding stripped on quota pressure (the entry
 // itself stays — preserving stats like novel-problem count and the recall
@@ -194,34 +174,17 @@ function readPerSize(key, fallback) {
 // the trainers actually use.
 const ANSWER_HISTORY_EMBEDDING_KEEP_LAST = 500;
 
-function isQuotaError(e) {
-    return e && (
-        e.name === 'QuotaExceededError' ||
-        e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-        e.code === 22 || e.code === 1014
-    );
-}
-
-function writePerSize(key, obj) {
-    try {
-        localStorage.setItem(key, JSON.stringify(obj));
-    } catch (e) {
-        if (!isQuotaError(e)) throw e;
-        console.error(`localStorage quota exceeded for ${key}; write skipped`);
-    }
-}
-
 const perSize = {
     // The always-assigned challenge problem (full object incl. sgf), persisted
     // so a reopen restores the user's standing challenge. currentProblem is NOT
     // persisted — it's recomputed on load (reopen shows a due recall or this
     // challenge; see problem-loader.advanceToNextProblem).
-    challengeProblem: readPerSize('challengeProblem'),
+    challengeProblem: readJSONObject('challengeProblem'),
     // The last-completed problem (full object incl. sgf), persisted so a reopen
     // keeps the Review button live — review/share/ignore act on it, and it is
     // never re-served as a problem to solve, so persisting it can't re-serve an
     // already-answered problem.
-    previousProblem: readPerSize('previousProblem'),
+    previousProblem: readJSONObject('previousProblem'),
 };
 
 // --- Unified answer history (the synchronous working set) ---
@@ -407,37 +370,30 @@ export async function syncTailExpectedToActual() {
 // rank + momentum are one control loop over a single shared rank; the recall
 // (modelParams/adamState) and weakness (weaknessParams/Adam/Se/AxisCov) models
 // train on the union of both sizes' histories. See mergeSharedAcrossSizes_v2.
-function readShared(key, fallback) {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return fallback;
-    try {
-        const parsed = JSON.parse(raw);
-        return parsed === null ? fallback : parsed;
-    } catch { return fallback; }
-}
-
-function writeShared(key, value) {
-    try {
-        localStorage.setItem(key, JSON.stringify(value));
-    } catch (e) {
-        console.error(`localStorage write failed for shared key ${key}`, e);
-    }
-}
-
 const shared = {
-    userRank: readShared('userRank', null),
-    momentum: readShared('momentum', null),
-    modelParams: readShared('modelParams', null),
-    adamState: readShared('adamState', null),
-    weaknessParams: readShared('weaknessParams', null),
-    weaknessAdam: readShared('weaknessAdam', null),
-    weaknessSe: readShared('weaknessSe', null),
+    userRank: readJSON('userRank', null),
+    momentum: readJSON('momentum', null),
+    modelParams: readJSON('modelParams', null),
+    adamState: readJSON('adamState', null),
+    weaknessParams: readJSON('weaknessParams', null),
+    weaknessAdam: readJSON('weaknessAdam', null),
+    weaknessSe: readJSON('weaknessSe', null),
     // Per-axis cov(β_correct[k], β_picked[k]) for the augmented model.
     // Flat array of K floats. Combined with weaknessSe (for the diagonals)
     // and weaknessParams, this is the minimum state needed to compute
     // sign-quadrant probabilities per axis without retraining.
-    weaknessAxisCov: readShared('weaknessAxisCov', null),
+    weaknessAxisCov: readJSON('weaknessAxisCov', null),
 };
+
+// The 6 model/weakness shared values below share an identical accessor pair —
+// `get` returns the stored value or null, `set` assigns and persists. They're
+// defined on `state` via a loop after the object literal (see defineSharedNull)
+// to avoid six copies of the same template. userRank and momentum differ (they
+// have numeric defaults), so they keep explicit accessors in the literal.
+const NULLABLE_SHARED_KEYS = [
+    'modelParams', 'adamState',
+    'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
+];
 
 // Per-size session state — not persisted, but bucketed so it doesn't bleed
 // across sizes if the user switches mid-session.
@@ -597,7 +553,7 @@ export const state = {
     },
     set userRank(v) {
         shared.userRank = v;
-        writeShared('userRank', v);
+        writeJSON('userRank', v);
     },
 
     get challengeProblem() {
@@ -605,7 +561,7 @@ export const state = {
     },
     set challengeProblem(v) {
         perSize.challengeProblem[_boardSize] = v;
-        writePerSize('challengeProblem', perSize.challengeProblem);
+        writeJSON('challengeProblem', perSize.challengeProblem, { rethrowNonQuota: true });
     },
 
     get previousProblem() {
@@ -613,7 +569,7 @@ export const state = {
     },
     set previousProblem(v) {
         perSize.previousProblem[_boardSize] = v;
-        writePerSize('previousProblem', perSize.previousProblem);
+        writeJSON('previousProblem', perSize.previousProblem, { rethrowNonQuota: true });
     },
 
     // Active-size view, derived from the unified working set and cached until a
@@ -636,56 +592,12 @@ export const state = {
     },
     set momentum(v) {
         shared.momentum = v;
-        writeShared('momentum', v);
+        writeJSON('momentum', v);
     },
 
-    get modelParams() {
-        return shared.modelParams ?? null;
-    },
-    set modelParams(v) {
-        shared.modelParams = v;
-        writeShared('modelParams', v);
-    },
-
-    get adamState() {
-        return shared.adamState ?? null;
-    },
-    set adamState(v) {
-        shared.adamState = v;
-        writeShared('adamState', v);
-    },
-
-    get weaknessParams() {
-        return shared.weaknessParams ?? null;
-    },
-    set weaknessParams(v) {
-        shared.weaknessParams = v;
-        writeShared('weaknessParams', v);
-    },
-
-    get weaknessAdam() {
-        return shared.weaknessAdam ?? null;
-    },
-    set weaknessAdam(v) {
-        shared.weaknessAdam = v;
-        writeShared('weaknessAdam', v);
-    },
-
-    get weaknessSe() {
-        return shared.weaknessSe ?? null;
-    },
-    set weaknessSe(v) {
-        shared.weaknessSe = v;
-        writeShared('weaknessSe', v);
-    },
-
-    get weaknessAxisCov() {
-        return shared.weaknessAxisCov ?? null;
-    },
-    set weaknessAxisCov(v) {
-        shared.weaknessAxisCov = v;
-        writeShared('weaknessAxisCov', v);
-    },
+    // modelParams / adamState / weakness{Params,Adam,Se,AxisCov} accessors are
+    // generated from NULLABLE_SHARED_KEYS just below the literal (identical
+    // get-or-null + set-and-persist template).
 
     get unavailableProblemIds() { return getOrCreateSessionSet('unavailableProblemIds'); },
 
@@ -703,6 +615,18 @@ export const state = {
         sessionPerSize.currentSolvingStartTime[_boardSize] = v;
     },
 };
+
+// Generate the identical get-or-null + set-and-persist accessors for the
+// nullable shared values (the recall + weakness model state), so the template
+// lives once rather than as six copies in the object literal above.
+for (const key of NULLABLE_SHARED_KEYS) {
+    Object.defineProperty(state, key, {
+        get() { return shared[key] ?? null; },
+        set(v) { shared[key] = v; writeJSON(key, v); },
+        enumerable: true,
+        configurable: true,
+    });
+}
 
 // Cache for loaded zip files. Cleared on size switch.
 export const zipCache = new Map();
@@ -870,6 +794,16 @@ export function setModelParams(params) {
 
 export function setAdamState(adamState) {
     state.adamState = adamState;
+}
+
+// Drop the shared weakness model entirely (params + Adam state + posterior
+// SE/cov). Used by the trainer on a non-finite blow-up and by the embedding
+// backfill when an embedding refit invalidates the trained axes.
+export function clearWeaknessModel() {
+    state.weaknessParams = null;
+    state.weaknessAdam = null;
+    state.weaknessSe = null;
+    state.weaknessAxisCov = null;
 }
 
 // Switch to another supported size. Resets the in-memory problem pool so the

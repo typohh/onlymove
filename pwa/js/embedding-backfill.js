@@ -26,6 +26,7 @@ import * as Sentry from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
+    clearWeaknessModel,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
 import { trainWeakness } from './weakness.js';
@@ -305,10 +306,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             if (cleared > 0) {
                 // Wipe the single shared weakness model — it was trained on this
                 // size's now-stale embeddings (jointly with the other size's).
-                state.weaknessParams = null;
-                state.weaknessAdam = null;
-                state.weaknessSe = null;
-                state.weaknessAxisCov = null;
+                clearWeaknessModel();
                 persistAnswerHistory(size, history);
                 console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedEmbeddingVersion || 'first run'} -> ${serverEmbeddingVersion})`);
             }
