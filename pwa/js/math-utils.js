@@ -21,3 +21,23 @@ export function sigmoid(z) {
 export function normCdf(z) {
     return 0.5 * (1 + math.erf(z / Math.SQRT2));
 }
+
+// Kernel-weighted empirical quantile over a window. `pairs` is ascending by
+// value with `{ v, w }` entries; `total` is Σw. Walk the cumulative weight to
+// p·total and linearly interpolate between the two bracketing samples, so the
+// edge moves smoothly as the window slides instead of stepping from one sample
+// value to the next. Used by the stats charts' kernel smoothers (the centre
+// line at p=0.5 and the spread band at 0.25/0.75).
+export function weightedQuantile(pairs, total, p) {
+    const target = p * total;
+    let cum = 0;
+    for (let i = 0; i < pairs.length; i++) {
+        const next = cum + pairs[i].w;
+        if (next >= target) {
+            if (i === 0) return pairs[0].v;
+            return pairs[i - 1].v + (pairs[i].v - pairs[i - 1].v) * ((target - cum) / pairs[i].w);
+        }
+        cum = next;
+    }
+    return pairs[pairs.length - 1].v;
+}

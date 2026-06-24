@@ -12,11 +12,7 @@ import { MODEL_INPUT_HISTORY_LENGTH, TOTAL_RANKS } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { quadrantProbs } from './bivariate-normal.js';
 import { computeRankDecomposition, evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
-import {
-    getPopulationConstants,
-    TIME_ADJUST_AFK_CAP_MS,
-    TIME_ADJUST_MIN_TIMED,
-} from './population-constants.js';
+import { getPopulationConstants } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel } from '../shared/rank-math.js';
 import { showLoading, hideLoading, showConfirm } from './overlays.js';
@@ -25,7 +21,17 @@ import {
     historyRefreshesLeftToday,
     HISTORY_REFRESH_DAILY_CAP,
 } from './account-sync.js';
-import { normCdf } from './math-utils.js';
+import { weightedQuantile } from './math-utils.js';
+import {
+    svgEl, makeChartSvg, hGridLine, buildLegend,
+    hideOverlappingYTicks, observeResize,
+} from './chart-svg.js';
+import {
+    computeUserCommunityBuckets,
+    makeMedianSolveMinutesAt,
+    findExamplesForIssue,
+    probit,
+} from './stats-compute.js';
 import {
     getRecallCandidates,
     getLogitPerRank,
@@ -37,31 +43,10 @@ import {
     MODEL_INDICES,
 } from './model.js';
 
-// --- SVG chart primitives --------------------------------------------------
-// The three charts below all build raw SVG nodes; these helpers replace the
-// repeated createElementNS + per-attribute setAttribute boilerplate.
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-/** Create an SVG element, applying `attrs` via setAttribute. */
-function svgEl(tag, attrs) {
-    const el = document.createElementNS(SVG_NS, tag);
-    if (attrs) for (const k in attrs) el.setAttribute(k, attrs[k]);
-    return el;
-}
-
-/** An <svg> chart canvas with a `0 0 W H` viewBox. */
-function makeChartSvg(W, H) {
-    return svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-}
-
-/** A faint horizontal gridline at `y` spanning the full chart width. */
-function hGridLine(y, W) {
-    return svgEl('line', {
-        x1: 0, x2: W, y1: y, y2: y,
-        stroke: 'rgba(128,128,128,0.35)', 'stroke-width': '0.5',
-        'vector-effect': 'non-scaling-stroke',
-    });
-}
+// SVG chart primitives (svgEl, makeChartSvg, hGridLine, buildLegend, …) live in
+// chart-svg.js; the pure-numeric stats helpers (computeUserCommunityBuckets,
+// makeMedianSolveMinutesAt, findExamplesForIssue, probit) live in
+// stats-compute.js. Both are imported above; this module is rendering-only.
 
 // If the browser silently evicted history-tail rows, tell the user how many are
 // missing and offer a server refresh (subject to the daily cap). No-op when the
@@ -441,170 +426,13 @@ function formatSignalStrength(quadrant, ec, ep) {
     return `${fmt(ec)} vs ${fmt(ep)}`;
 }
 
-// Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
-// issue. Each quadrant requires BOTH axes to land on the side the quadrant's
-// joint sign demands — a one-sided gate would include attempts that only
-// support one axis, which is misleading for the both-negative `badAt` case
-// (and for the off-diagonals it lets same-sign-ordered attempts slip through).
-//
-// The minimum |ec|, |ep| per attempt scales with the issue's posterior
-// probability via `threshold = probit(p)` — so a 90%-confident issue needs
-// ~1.28σ-strong evidence per axis, while a 50%-confident issue collapses to
-// the pure sign constraint. Without this scaling, a 51%-borderline issue and
-// a 95%-certain one would surface the same attempts, even though the latter
-// should be backed by stronger per-attempt evidence.
-//
-// After the gate, per-attempt evidence strength is the sum of the two relevant
-// signed σ contributions — monotone in either axis so a 5σ-on-one + threshold-
-// on-the-other attempt ranks above one that just clears the threshold on both.
-// (The earlier `min` tied any two attempts at the weaker axis regardless of
-// the other one, which made the ordering look arbitrary on the panel.)
-// Embeddings are unit-variance per component (skew-ICA standardized), so
-// z-scale thresholds and sums are directly interpretable as σ above/below
-// baseline.
-function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0) {
-    const t = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
-    const byId = new Map();
-    for (const a of answerHistory) {
-        if (!a || a.correct) continue;
-        if (a.isRepeat) continue;  // mirror weakness.js training filter — repeats are excluded there
-        if (a.ignored) continue;
-        if (!a.problemId) continue;
-        if (excludedIds && excludedIds.has(a.problemId)) continue;
-        if (!Array.isArray(a.embedding) || a.embedding.length <= k) continue;
-        if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length <= k) continue;
-        const ec = a.embedding[k];
-        const ep = a.pickedEmbedding[k];
-        if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
-        let score;
-        if (quadrant === 'tooMuch') {
-            if (!(ep > t) || !(-ec > t)) continue;
-            score = ep + (-ec);
-        } else if (quadrant === 'notEnough') {
-            if (!(ec > t) || !(-ep > t)) continue;
-            score = ec + (-ep);
-        } else {  // badAt
-            if (!(ec > t) || !(ep > t)) continue;
-            score = ec + ep;
-        }
-        const prev = byId.get(a.problemId);
-        if (!prev || score > prev.score) {
-            byId.set(a.problemId, { problemId: a.problemId, date: a.date, score, ec, ep, size: a.size });
-        }
-    }
-    return Array.from(byId.values()).sort((a, b) => b.score - a.score);
-}
-
-// Inverse standard-normal CDF via bisection over `normCdf`. ~50 iterations
-// converges to ≪ 1e-9; cheap once per issue at panel-open time. Returns 0 for
-// p ≤ 0.5 since callers only ever pass posterior probabilities in [0.5, 1).
-function probit(p) {
-    if (!(p > 0.5)) return 0;
-    if (p >= 1) return Infinity;
-    let lo = 0, hi = 8;
-    for (let i = 0; i < 50; i++) {
-        const mid = (lo + hi) / 2;
-        const cdf = normCdf(mid);
-        if (cdf < p) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-}
+// findExamplesForIssue (weakness-example selection) and probit (inverse normal
+// CDF) live in stats-compute.js; imported above.
 
 // Community pane: server-wide stats over the preceding 7 days (computed by the
 // Worker cron, served from /server-stats). Returns null on any failure or when
 // there's no activity, so showStatsModal drops the tab. Labels are localized
 // via getTerm (stats* keys in i18n.js).
-// Locate the current user within each Community distribution, reproducing the
-// Worker's per-user bucketing (computeServerStats in src/index.js) on the
-// client's own last-7-day merged history. Returns a bin index per bar-list
-// category (-1 when not determinable) plus an answer-derived rank label.
-// `timeBins` is the seconds-based display-bin table from the caller (TIME_BINS).
-function computeUserCommunityBuckets(history, timeBins) {
-    const out = { attemptsPerDay: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
-    if (!Array.isArray(history) || !history.length) return out;
-
-    const cutoff = Date.now() - 7 * 24 * 3600e3;
-    const recent = history.filter(a => typeof a.date === 'number' && a.date >= cutoff);
-    if (!recent.length) return out;
-
-    const median = (arr) => {
-        if (!arr.length) return null;
-        const s = arr.slice().sort((a, b) => a - b);
-        const m = s.length >> 1;
-        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-    };
-    // timeBins are in SECONDS now (see TIME_BINS in buildServerStatsPane); the
-    // edges align to the server's bucket width, so binning the median directly
-    // lands in the same bin the server would have bucketed it into.
-    const binSeconds = (ms) => timeBins.findIndex(b => (ms / 1000) >= b.lo && (ms / 1000) < b.hi);
-
-    // Attempts per active (UTC) day — every attempt counts, repeats included.
-    const PER_USER_BINS = [[1, 5], [5, 10], [10, 20], [20, 40], [40, 80], [80, 160], [160, Infinity]];
-    const days = new Set(recent.map(a => new Date(a.date).toISOString().slice(0, 10)));
-    if (days.size) {
-        const rate = recent.length / days.size;
-        out.attemptsPerDay = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
-    }
-
-    // Solving time: median of per-attempt solve times (ms), then coarse-binned.
-    const solveMed = median(recent.map(a => a.timeTaken).filter(t => typeof t === 'number' && t > 0));
-    if (solveMed != null) out.solve = binSeconds(solveMed);
-
-    // Review time: per distinct problem the cumulative review of its LAST
-    // attempt (the running total, as the server keeps), median across problems.
-    const lastByProblem = new Map();
-    for (const a of recent) {
-        if (!a.problemId) continue;
-        const prev = lastByProblem.get(a.problemId);
-        if (!prev || a.date > prev.date) lastByProblem.set(a.problemId, a);
-    }
-    const reviewMed = median([...lastByProblem.values()]
-        .map(a => (a.accumulatedReview || 0) + (a.reviewTime || 0))
-        .filter(t => t > 0));
-    if (reviewMed != null) out.review = binSeconds(reviewMed);
-
-    // Recall time: shortest failure→next-attempt gap that is ≥12h, per problem.
-    const RECALL_MIN_MS = 12 * 3600e3;
-    const RECALL_HI = [24, 48, 72, 96, 120, Infinity].map(h => h * 3600e3);
-    const seqByProblem = new Map();
-    for (const a of recent) {
-        if (!a.problemId) continue;
-        let seq = seqByProblem.get(a.problemId);
-        if (!seq) { seq = []; seqByProblem.set(a.problemId, seq); }
-        seq.push({ t: a.date, success: !!a.correct });
-    }
-    let recallMin = Infinity;
-    for (const seq of seqByProblem.values()) {
-        if (seq.length < 2) continue;
-        seq.sort((x, y) => x.t - y.t);
-        for (let i = 1; i < seq.length; i++) {
-            if (seq[i - 1].success) continue;            // recall after a success — skip
-            const gap = seq[i].t - seq[i - 1].t;
-            if (gap >= RECALL_MIN_MS && gap < recallMin) recallMin = gap;
-        }
-    }
-    if (recallMin < Infinity) out.recall = RECALL_HI.findIndex(hi => recallMin < hi);
-
-    // Answer-derived rank: mean internal-rank index of distinct first-time
-    // problems → EGF scalar → label (the server's recipe, minus shard rounding;
-    // problemRank is already the per-problem M index normalized to 0..1).
-    const MIN_RANK_PROBLEMS = 10;
-    const RANK_INDEX_OFFSET = 19;
-    const firstByProblem = new Map();
-    for (const a of recent) {
-        if (a.isRepeat || typeof a.problemRank !== 'number') continue;
-        if (!firstByProblem.has(a.problemId)) firstByProblem.set(a.problemId, a.problemRank);
-    }
-    if (firstByProblem.size >= MIN_RANK_PROBLEMS) {
-        let sum = 0;
-        for (const r of firstByProblem.values()) sum += r * TOTAL_RANKS;
-        const scalar = Math.max(-29, Math.min(9, Math.round(sum / firstByProblem.size) - RANK_INDEX_OFFSET));
-        out.rankLabel = rankScalarToLabel(scalar);
-    }
-
-    return out;
-}
-
 async function buildServerStatsPane(history = []) {
     let data;
     try {
@@ -692,7 +520,7 @@ async function buildServerStatsPane(history = []) {
 
     // Where the current user lands in each distribution, computed from their own
     // last-7-day history with the SAME bucket boundaries the Worker uses
-    // server-side (see computeServerStats in src/index.js), so the highlighted
+    // server-side (see computeServerStats in src/server-stats.js), so the highlighted
     // bar is consistent with the community bars around it.
     const you = computeUserCommunityBuckets(history, TIME_BINS);
 
@@ -789,70 +617,9 @@ async function buildServerStatsPane(history = []) {
 }
 
 // medianNovelSolveMinutes + the TIME_ADJUST_* feature constants + the scalar
-// timeAdjustDeltaRating now live in population-constants.js (one definition,
-// shared with the rank-translation modal). They are imported above.
-
-// A TIME-VARYING version of medianNovelSolveMinutes: the kernel-weighted median
-// (in minutes) of the SAME capped-novel timed series the population time-adjust
-// alpha was fit against, evaluated at any t. Smoothed at the skill kernel's
-// ~30-day scale so the correction tracks the slow skill line, not session noise.
-// Where a window has thin timed support the estimate is shrunk toward the
-// whole-history median (empirical Bayes in log-minute space) — so the adjusted
-// line stays CONTINUOUS, degrading smoothly to today's single-scalar correction
-// rather than breaking. NB the inclusion rule (non-repeat, >0, AFK-capped) must
-// match user_median_log10_minutes in fit_population_constants — the Time tab's
-// solving series is broader (repeats, no AFK cap), so we reuse the SMOOTHER idea
-// here, not that series. Returns null (no time adjustment possible) when the
-// whole history has fewer than TIME_ADJUST_MIN_TIMED timed attempts.
-const TIME_ADJUST_TAU_MS = 30 * 24 * 3600 * 1000;   // matches TAU_S_MS (skill kernel)
-const TIME_ADJUST_SHRINK_ESS = 8;                   // log-space shrink prior, in attempts
-function makeMedianSolveMinutesAt(history) {
-    const pts = history
-        .filter(p => !p.isRepeat && Number.isFinite(p.timeTaken)
-            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS
-            && typeof p.date === 'number')
-        .map(p => ({ t: p.date, v: p.timeTaken }))
-        .sort((a, b) => a.t - b.t);
-    if (pts.length < TIME_ADJUST_MIN_TIMED) return null;
-    const ts = pts.map(p => p.t);
-    const sortedAll = pts.map(p => p.v).slice().sort((a, b) => a - b);
-    const gm = sortedAll.length % 2 ? sortedAll[sortedAll.length >> 1]
-        : (sortedAll[(sortedAll.length >> 1) - 1] + sortedAll[sortedAll.length >> 1]) / 2;
-    const globalLog = Math.log10(gm / 60000);
-
-    const wMedian = (pairs, total) => {
-        const target = 0.5 * total;
-        let cum = 0;
-        for (let i = 0; i < pairs.length; i++) {
-            const next = cum + pairs[i].w;
-            if (next >= target) {
-                return i === 0 ? pairs[0].v
-                    : pairs[i - 1].v + (pairs[i].v - pairs[i - 1].v) * ((target - cum) / pairs[i].w);
-            }
-            cum = next;
-        }
-        return pairs[pairs.length - 1].v;
-    };
-
-    return (t) => {
-        let W = 0, sumW2 = 0;
-        const pairs = [];
-        for (let i = 0; i < pts.length; i++) {
-            const d = (t - ts[i]) / TIME_ADJUST_TAU_MS;
-            if (Math.abs(d) > 4) continue;
-            const w = Math.exp(-0.5 * d * d);
-            W += w; sumW2 += w * w;
-            pairs.push({ v: pts[i].v, w });
-        }
-        if (W <= 0 || pairs.length < 2) return Math.pow(10, globalLog);
-        const ess = (W * W) / sumW2;
-        pairs.sort((a, b) => a.v - b.v);
-        const localLog = Math.log10(wMedian(pairs, W) / 60000);
-        // Shrink the local median toward the global one by effective sample size.
-        const wl = ess / (ess + TIME_ADJUST_SHRINK_ESS);
-        return Math.pow(10, wl * localLog + (1 - wl) * globalLog);
-    };
-}
+// timeAdjustDeltaRating live in population-constants.js (one definition, shared
+// with the rank-translation modal); the time-varying makeMedianSolveMinutesAt
+// smoother lives in stats-compute.js. Both are imported above.
 
 // The rank decomposition text (long-term skill + drift + session swing) and
 // the relative 13x13 readout that used to sit on the summary pane. Built as
@@ -1019,8 +786,11 @@ function showStatsModal(tabs) {
     renderBody();
 }
 
+// Internal rank INDEX (0-based, 1k = 19) → kyu/dan label. Delegates to the
+// shared rank-scalar labeller (1k = 0) so the kyu/dan ladder lives in one place.
+const RANK_INDEX_OFFSET = 19;
 function rankLabelFromIndex(rankIndex) {
-    return rankIndex < 20 ? `${20 - rankIndex}k` : `${rankIndex - 19}d`;
+    return rankScalarToLabel(rankIndex - RANK_INDEX_OFFSET);
 }
 
 // Pick a viewBox height (for a fixed width W) so the chart's aspect ratio
@@ -1174,8 +944,6 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
     const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
-    const legend = document.createElement('div');
-    legend.className = 'stats-chart-legend';
     const legendItems = [
         { kind: 'dot', color: DOT_CORRECT, text: getTerm('statsLegendCorrect') },
         { kind: 'dot', color: DOT_WRONG, text: getTerm('statsLegendWrong') },
@@ -1187,15 +955,7 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             { kind: 'band', color: SKILL_FILL_OUTER, text: getTerm('statsLegendDailyVariance') },
         );
     }
-    for (const item of legendItems) {
-        const el = document.createElement('span');
-        el.className = `legend-item legend-${item.kind}`;
-        const swatch = document.createElement('span');
-        swatch.className = 'legend-swatch';
-        swatch.style.background = item.color;
-        el.append(swatch, document.createTextNode(item.text));
-        legend.append(el);
-    }
+    const legend = buildLegend(legendItems);
 
     // Rebuild the plot for the current selectedServer. Everything below is in
     // DISPLAY space (internal index for onlymove, that server's rank scalar
@@ -1334,26 +1094,8 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
         // Greedy-hide y-axis labels that would physically overlap; re-runs on
         // resize. Re-created per render, so disconnect the prior observer first.
-        const updateLabelVisibility = () => {
-            const h = svg.getBoundingClientRect().height;
-            if (h === 0) return;
-            const tickEls = [...yaxis.querySelectorAll('.y-tick')]
-                .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-            const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
-            let lastShownPx = -Infinity;
-            for (const el of tickEls) {
-                const topPx = (parseFloat(el.style.top) / 100) * h;
-                if (topPx - lastShownPx >= minSepPx) { el.style.visibility = ''; lastShownPx = topPx; }
-                else el.style.visibility = 'hidden';
-            }
-        };
         if (labelObserver) { labelObserver.disconnect(); labelObserver = null; }
-        if (typeof ResizeObserver !== 'undefined') {
-            labelObserver = new ResizeObserver(updateLabelVisibility);
-            labelObserver.observe(svg);
-        } else {
-            queueMicrotask(updateLabelVisibility);
-        }
+        labelObserver = observeResize(svg, () => hideOverlappingYTicks(svg, yaxis));
 
         plotHolder.replaceChildren(plotRow);
     };
@@ -1467,28 +1209,7 @@ function buildProblemsPerDayChart(history = state.answerHistory) {
     container.append(plotRow);
 
     // Collapse overlapping y-tick labels, mirroring the Time chart.
-    const updateLabelVisibility = () => {
-        const h = svg.getBoundingClientRect().height;
-        if (h === 0) return;
-        const tickEls = [...yaxis.querySelectorAll('.y-tick')]
-            .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
-        const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
-        let lastShownPx = -Infinity;
-        for (const el of tickEls) {
-            const topPx = (parseFloat(el.style.top) / 100) * h;
-            if (topPx - lastShownPx >= minSepPx) {
-                el.style.visibility = '';
-                lastShownPx = topPx;
-            } else {
-                el.style.visibility = 'hidden';
-            }
-        }
-    };
-    if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(updateLabelVisibility).observe(svg);
-    } else {
-        queueMicrotask(updateLabelVisibility);
-    }
+    observeResize(svg, () => hideOverlappingYTicks(svg, yaxis));
 
     return container;
 }
@@ -1547,24 +1268,6 @@ function buildTimeUsageChart(history = state.answerHistory) {
         while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < target) lo = m + 1; else hi = m; }
         return lo;
     };
-    // Kernel-WEIGHTED empirical quantile over a window. `pairs` is ascending by
-    // value; `total` is Σw. Walk the cumulative weight to p·total and linearly
-    // interpolate between the two bracketing samples, so the edge moves smoothly
-    // as the window slides instead of stepping from one sample value to the next.
-    const wQuantile = (pairs, total, p) => {
-        const target = p * total;
-        let cum = 0;
-        for (let i = 0; i < pairs.length; i++) {
-            const next = cum + pairs[i].w;
-            if (next >= target) {
-                if (i === 0) return pairs[0].v;
-                return pairs[i - 1].v + (pairs[i].v - pairs[i - 1].v) * ((target - cum) / pairs[i].w);
-            }
-            cum = next;
-        }
-        return pairs[pairs.length - 1].v;
-    };
-
     // Kernel-weighted median line + a weighted-quantile spread band on a regular
     // t-grid. Returns an array of {t, mean, lo, hi}, or null at grid points with
     // too little nearby data (those break the line).
@@ -1611,9 +1314,9 @@ function buildTimeUsageChart(history = state.answerHistory) {
             // distribution — no normal assumption).
             grid[g] = {
                 t,
-                mid: wQuantile(pairs, W, 0.5),
-                lo: wQuantile(pairs, W, 0.25),
-                hi: wQuantile(pairs, W, 0.75),
+                mid: weightedQuantile(pairs, W, 0.5),
+                lo: weightedQuantile(pairs, W, 0.25),
+                hi: weightedQuantile(pairs, W, 0.75),
             };
         }
         return grid;
@@ -1818,22 +1521,11 @@ function buildTimeUsageChart(history = state.answerHistory) {
     plotRow.append(plotMain, xaxis);
     container.append(plotRow);
 
-    const legend = document.createElement('div');
-    legend.className = 'stats-chart-legend';
-    const legendItems = [
+    const legend = buildLegend([
         { kind: 'line', color: '#2e9e5b', text: getTerm('statsLegendSolving') },
         { kind: 'line', color: '#d98a2b', text: getTerm('statsLegendReviewing') },
         { kind: 'band', color: 'rgba(128,128,128,0.30)', text: getTerm('statsLegend50Spread') },
-    ];
-    for (const item of legendItems) {
-        const el = document.createElement('span');
-        el.className = `legend-item legend-${item.kind}`;
-        const swatch = document.createElement('span');
-        swatch.className = 'legend-swatch';
-        swatch.style.background = item.color;
-        el.append(swatch, document.createTextNode(item.text));
-        legend.append(el);
-    }
+    ]);
     container.append(legend);
 
     // Keep as many ticks as physically fit, coarse tier first. Walk ticks by
@@ -1856,11 +1548,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
             if (show) kept.push(px);
         }
     };
-    if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(updateLabelVisibility).observe(svg);
-    } else {
-        queueMicrotask(updateLabelVisibility);
-    }
+    observeResize(svg, updateLabelVisibility);
 
     return container;
 }
