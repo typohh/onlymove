@@ -46,8 +46,13 @@ The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shippe
 │   └── constants.js         # Shared constants (incl. APP_MODES)
 ├── shared/
 │   └── rank-math.js         # Rank interp/label helpers shared by worker + client
-├── src/
-│   └── index.js             # Cloudflare Worker entry: /report + SPA fallback
+├── src/                     # Cloudflare Worker: index.js router + scheduled()
+│   ├── index.js             # thin router + cron; http/guards + handlers/ + server-stats + recall-notifications alongside
+│   ├── http.js              # CORS + JSON response helpers
+│   ├── guards.js            # id/user validation + per-IP rate limiting
+│   ├── handlers/            # one module per route (report, sync, push, schedule, …)
+│   ├── server-stats.js      # /server-stats compute + cache
+│   └── recall-notifications.js  # the Web Push recall cron
 ├── lib/                     # Bundled third-party libs (WGo.js, JSZip)
 ├── sound/                   # UI sound effects
 ├── tsumegos/<size>/         # Per-size zip archives + metadata.json
@@ -81,11 +86,10 @@ Each branch comment in a problem SGF is `"<winrate>%/<score>"` (e.g. `"86.4%/3.1
 
 ### 4.4. Problem selection (`js/problem-loader.js` + `js/model.js`)
 
-`selectProblem()` picks the next problem in three tiers:
+The displayed problem lives in three slots on `state` (see the challenge-model migration in `state.js`): `challengeProblem` (the always-assigned standing challenge, persisted per-size), `currentProblem` (what's on screen), and `previousProblem` (the last completed problem, kept reviewable). `advanceToNextProblem()` picks what to show next:
 
-1. **`nextTsumego`** — if a problem was queued (e.g. by linked-mode hand-off), it is returned immediately.
-2. **Recall candidate** — `getRecallCandidates()` runs a per-user logistic regression (Adam-trained, persisted) over recent history. Features: solving time, review time, problem difficulty, novelty, and a recall-formula term `log(1 + t · 0.5^r)` where `t` is days since last attempt and `r` is successes since the most recent failure. Problems whose predicted recall probability falls in `[0.60, 0.80]` are candidates; the lowest-probability one wins. The model is clipped so predicted "due" intervals stay within 18 h – 7 d.
-3. **Fresh problem** — exclude the recent history window, sort the remaining pool by closeness to the user's rank, take the 50 nearest, and weighted-sample by the SGF's `quality` attribute.
+1. **Due recall** — `getRecallCandidates()` runs a per-user logistic regression (Adam-trained, persisted) over recent history. Features: solving time, review time, problem difficulty, novelty, and a recall-formula term `log(1 + t · 0.5^r)` where `t` is days since last attempt and `r` is successes since the most recent failure. Problems whose predicted recall probability falls in `[0.60, 0.80]` are candidates; the lowest-probability one wins. The model is clipped so predicted "due" intervals stay within 18 h – 7 d. If one is due it is served as a recall solve.
+2. **Standing challenge** — otherwise the persisted `challengeProblem` is shown. `assignNewChallenge()` selects a fresh one: exclude the recent history window, sort the remaining pool by closeness to the user's rank, take the 50 nearest, and weighted-sample by the problem's `quality` (∝ aₚ²). Solving the challenge moves it to `previousProblem` and reselects a new challenge immediately, so an already-answered problem can't be re-served.
 
 When the candidate pool is thin, `backgroundLoadCloserZip()` proactively fetches the closest unloaded archive so the next selection has fresher options.
 
@@ -93,9 +97,9 @@ When the candidate pool is thin, `backgroundLoadCloserZip()` proactively fetches
 
 Wraps WGo.js for rendering, stone placement, markers, and analysis hints. Routes click events to `game-logic.js` or `analysis.js` based on `state.appMode`. Implements a "ghost stone" double-click confirmation for mobile.
 
-### 4.6. Cloudflare Worker (`src/index.js`)
+### 4.6. Cloudflare Worker (`src/index.js` + `src/`)
 
-Two responsibilities:
+`src/index.js` is a thin router (a route table over the rate-limited write endpoints) plus a `scheduled()` cron handler; the handlers and aggregation live in sibling modules (`src/http.js`, `src/guards.js`, `src/handlers/*`, `src/server-stats.js`, `src/recall-notifications.js`). Beyond the headline two responsibilities below, it also serves account sync (`/sync`), Web Push (`/push/*`), the recall schedule (`/schedule`), surveys/analytics (`/rank-survey`, `/share-event`), and the cached community stats (`/server-stats`) — see CLAUDE.md for the full route + D1-schema reference.
 
 - **`POST /report`** — validates and inserts an attempt row into the D1 `tsumego_reports` table (binding: `DB`). `OPTIONS` returns CORS headers.
 - **SPA fallback** — for navigation requests that don't match a static asset, serves `index.html` while preserving the URL so the front-end can read the size hint (`/9`, `/13`) from `window.location.pathname`. Non-navigation misses return a real 404 so a stale Service Worker cache can invalidate cleanly.
