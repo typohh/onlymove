@@ -69,55 +69,33 @@ export function initializeBoard(size) {
     updateBoardSize();
 }
 
-const drawAnalysisHintMarker = (move) => {
+// Draw a hollow "outline" stone marker in the side-to-move's color at `move` —
+// used identically for the analysis hint, a candidate move, and the ghost-stone
+// confirmation. No-op for a missing or off-board coordinate.
+const drawOutlineMarker = (move) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
-
-    const x = move.x;
-    const y = move.y;
-
-    if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
-
-    const currentPlayer = state.kifuReader.game.turn;
-
-    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
+    if (move.x < 0 || move.x >= state.board.size || move.y < 0 || move.y >= state.board.size) return;
+    state.board.addObject({ x: move.x, y: move.y, c: state.kifuReader.game.turn, type: 'outline' });
 }
 
-const drawCandidateMarker = (candidate) => {
-    if (!candidate || typeof candidate.x === 'undefined' || typeof candidate.y === 'undefined') return;
-    if (candidate.x < 0 || candidate.x >= state.board.size || candidate.y < 0 || candidate.y >= state.board.size) return;
-
-    const currentPlayer = state.kifuReader.game.turn;
-    state.board.addObject({ x: candidate.x, y: candidate.y, c: currentPlayer, type: 'outline' });
-}
-
-const drawGhostMarker = (move) => {
-    if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
-    
-    const x = move.x;
-    const y = move.y;
-    
-    if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
-    
-    const currentPlayer = state.kifuReader.game.turn;
-    
-    state.board.addObject({ x, y, c: currentPlayer, type: 'outline' });
+// Mark (as 'SQ') the points adjacent to `move` that are illegal to play due to
+// ko — a `game.play(..., true) === 4` probe per orthogonal neighbour. Shared by
+// the live redraw and the off-screen share-image render (different game/board).
+const markKoPoints = (game, move, board) => {
+    if (!move) return;
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (const [dx, dy] of directions) {
+        const adjX = move.x + dx;
+        const adjY = move.y + dy;
+        if (game.play(adjX, adjY, game.turn, true) === 4) { // illegal due to ko
+            board.addObject({ x: adjX, y: adjY, type: 'SQ' });
+        }
+    }
 }
 
 const drawIllegalDueToKoMarker = () => {
     if (!state.kifuReader || !state.kifuReader.node.move) return;
-    
-    const game = state.kifuReader.game;
-    
-    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-
-    for (const [dx, dy] of directions) {
-        const adjX = state.kifuReader.node.move.x + dx;
-        const adjY = state.kifuReader.node.move.y + dy;
-        const adjResult = game.play(adjX, adjY, game.turn, true);
-        if (adjResult === 4) { // illegal due to ko
-            state.board.addObject({ x: adjX, y: adjY, type: 'SQ' });
-        }
-    }
+    markKoPoints(state.kifuReader.game, state.kifuReader.node.move, state.board);
 }
 
 export function redraw() {
@@ -146,15 +124,15 @@ export function redraw() {
 
     if (state.appMode === APP_MODES.ANALYZING) {
         for (const candidate of state.candidateMoves) {
-            drawCandidateMarker(candidate);
+            drawOutlineMarker(candidate);
         }
         if (state.analysisHintMove && !state.candidateMoves.some(c => c.x === state.analysisHintMove.x && c.y === state.analysisHintMove.y)) {
-            drawAnalysisHintMarker(state.analysisHintMove);
+            drawOutlineMarker(state.analysisHintMove);
         }
     }
 
     if (state.ghostMove) {
-        drawGhostMarker(state.ghostMove);
+        drawOutlineMarker(state.ghostMove);
     }
     updateCapturesUI();
 }
@@ -298,18 +276,7 @@ export async function getBoardImageBlob() {
         // Add markers for the latest move and ko
         if (cloneReader && cloneReader.node.move) {
             tempBoard.addObject({ x: cloneReader.node.move.x, y: cloneReader.node.move.y, type: 'CR' });
-            
-            const game = cloneReader.game;
-            const move = cloneReader.node.move;
-            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-            for (const [dx, dy] of directions) {
-                const adjX = move.x + dx;
-                const adjY = move.y + dy;
-                const adjResult = game.play(adjX, adjY, game.turn, true);
-                if (adjResult === 4) { // illegal due to ko
-                    tempBoard.addObject({ x: adjX, y: adjY, type: 'SQ' });
-                }
-            }
+            markKoPoints(cloneReader.game, cloneReader.node.move, tempBoard);
         }
 
         // Wait a small tick to ensure WGo has asynchronously rendered to the canvas layers
