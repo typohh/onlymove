@@ -619,14 +619,12 @@ export async function refreshHistoryFromServer() {
     return { ok: true, restored: result.inserted, left: historyRefreshesLeftToday() };
 }
 
-// Piggyback signal: every /report response carries prevCreatedAt — the user's
-// latest report BEFORE the one just made. If this device doesn't recognize
-// that timestamp (not pulled past it, not one of its own acks), another device
-// wrote it → pull now. This is what keeps an ACTIVE session in sync without
-// any polling; idle devices are covered by the load/visibility pulls below.
-// A debounce absorbs the benign in-flight race (own report's ack not yet
-// recorded when the next response arrives — the pull then merges nothing,
-// the fuzzy claim adopts the row).
+// Seq sync signal (see checkSyncSignal): a /report whose userSeq jumps past the
+// device's expected next value means another device wrote → pull now. This is
+// what keeps an ACTIVE session in sync without any polling; idle devices are
+// covered by the load/visibility pulls below. A debounce absorbs the benign
+// in-flight race (the pull merges nothing if it's our own row, and the seq
+// baseline self-corrects on the next report).
 const SIGNAL_DEBOUNCE_MS = 60 * 1000;
 let lastSignalPullAt = 0;
 
@@ -637,33 +635,20 @@ function maybeSignalPull() {
     pullReports({ force: true });
 }
 
-// Called from sendReport with the /report response. Two signals, seq preferred:
-//   - userSeq (the server's per-profile attempt count incl. this report): if it
-//     lands past lastSeq+1, another device wrote in between → pull. lastSeq is
-//     advanced to it either way (and also from /sync's serverSeq). This is the
-//     in-sync signal that lets an active session need no polling.
-//   - prevCreatedAt (legacy, for Workers that don't return userSeq): the user's
-//     latest report before this one; unrecognized → another device wrote → pull.
-export function checkSyncSignal(prevCreatedAt, userSeq) {
+// Called from sendReport with the /report response's userSeq — the server's
+// per-profile attempt count including this report. If it lands past the device's
+// expected lastSeq+1, another device wrote in between → pull. lastSeq advances to
+// it either way (and is also kept current from /sync's serverSeq). This is the
+// in-sync signal that lets an active session need no polling.
+export function checkSyncSignal(userSeq) {
+    if (!Number.isFinite(userSeq)) return;
     const sync = readSyncState();
-    if (sync && Number.isFinite(userSeq)) {
-        const expected = Number.isFinite(sync.lastSeq) ? sync.lastSeq + 1 : userSeq;
-        const foreign = userSeq > expected;
-        sync.lastSeq = userSeq;
-        writeSyncState(sync);
-        if (foreign) maybeSignalPull();
-        return;
-    }
-    // Legacy fallback.
-    if (typeof prevCreatedAt !== 'string' || !prevCreatedAt) return;
-    if (sync && sync.cursor && prevCreatedAt <= sync.cursor) return;
-    for (const size of SUPPORTED_BOARD_SIZES) {
-        const history = getAnswerHistoryForSize(size);
-        for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].serverCreatedAt === prevCreatedAt) return;
-        }
-    }
-    maybeSignalPull();
+    if (!sync) return;
+    const expected = Number.isFinite(sync.lastSeq) ? sync.lastSeq + 1 : userSeq;
+    const foreign = userSeq > expected;
+    sync.lastSeq = userSeq;
+    writeSyncState(sync);
+    if (foreign) maybeSignalPull();
 }
 
 // --- Durable offline outbox --------------------------------------------------

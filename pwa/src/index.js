@@ -2,7 +2,7 @@ import { CORS_HEADERS, tooManyRequests } from './http.js';
 import { rateLimited } from './guards.js';
 import { handleReport } from './handlers/report.js';
 import { handleSync } from './handlers/sync.js';
-import { handleReportBackfill, handleReportEnrich } from './handlers/backfill.js';
+import { handleReportBackfill } from './handlers/backfill.js';
 import { handleSubscribe, handleUnsubscribe } from './handlers/push.js';
 import { handleSchedule } from './handlers/schedule.js';
 import { handleRankSurvey } from './handlers/rank-survey.js';
@@ -20,7 +20,6 @@ const WRITE_ROUTES = [
   { path: '/report', method: 'POST', limiter: 'RL_REPORT', handler: handleReport },
   { path: '/sync', method: 'POST', limiter: 'RL_WRITE', handler: handleSync },
   { path: '/report-backfill', method: 'POST', limiter: 'RL_WRITE', handler: handleReportBackfill },
-  { path: '/report-enrich', method: 'POST', limiter: 'RL_WRITE', handler: handleReportEnrich },
   { path: '/push/subscribe', method: 'POST', limiter: 'RL_WRITE', handler: handleSubscribe },
   { path: '/push/unsubscribe', method: 'POST', limiter: 'RL_WRITE', handler: handleUnsubscribe },
   { path: '/schedule', method: 'POST', limiter: 'RL_WRITE', handler: handleSchedule },

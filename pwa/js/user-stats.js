@@ -46,15 +46,13 @@ export async function sendReport({ success, move = null, timeUsed = null, review
         // recognize this device's own rows (serverCreatedAt = dedup key,
         // serverId = id-cursor/digest key). userSeq is the per-profile attempt
         // count: if it jumps past what this device expects, another device
-        // wrote → pull (the seq signal, replacing/superseding the prevCreatedAt
-        // piggyback). Older Workers return plain text or omit the new fields —
-        // tolerate that (checkSyncSignal still covers prevCreatedAt).
+        // wrote → pull (the seq sync signal).
         if (res.ok) {
             const body = await res.json().catch(() => null);
             if (body && typeof body.createdAt === 'string') {
                 recordReportAck(problemId, body.createdAt, body.serverId);
             }
-            if (body) checkSyncSignal(body.prevCreatedAt, body.userSeq);
+            if (body) checkSyncSignal(body.userSeq);
         }
     } catch (error) {
         console.error('Failed to send report:', error);

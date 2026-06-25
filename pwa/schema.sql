@@ -35,12 +35,11 @@ CREATE INDEX IF NOT EXISTS idx_tsumego_reports_created ON tsumego_reports(create
 -- gap-free cursor — see the redesign doc.
 CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_id ON tsumego_reports(user_id, id);
 
--- LEGACY per-user created_at cursor, used by the pre-redesign /sync path and
--- the /report prevCreatedAt piggyback. Both migrate to idx_tsumego_reports_user_id;
--- drop this in the same change that removes the report-backfill/report-enrich
--- handlers (the enrich UPDATE is its last reader):
---   DROP INDEX IF EXISTS idx_tsumego_reports_user_created;
-CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_created ON tsumego_reports(user_id, created_at);
+-- (The legacy per-user created_at index idx_tsumego_reports_user_created was
+-- dropped with the created_at /sync path + the prevCreatedAt piggyback + the
+-- /report-enrich handler. On the live D1, drop it AFTER deploying the new
+-- Worker, never before — the still-live old Worker uses it until the deploy:
+--   DROP INDEX IF EXISTS idx_tsumego_reports_user_created;)
 
 -- One row per attempt (including repeats). There is no UNIQUE constraint on
 -- (user_id, problem) anymore — the client is expected to send a report for

@@ -2,25 +2,21 @@ import { versionedJsonHeaders } from '../http.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
 import { ID_HASH_SQL } from '../../shared/sync-digest.js';
 
-// --- One-off historical report backfill (TEMPORARY — remove after rollout) ---
-// Before 2026-05-15 clients reported only one row per problem (no repeats, no
-// move/time fields), so the server log is missing ~36% of real attempts that
-// still live in clients' localStorage. account-sync.maybeBackfillLocalHistory
-// uploads those once per device: it first pulls the full server history and
-// fuzzy-claims matches, then posts the provably-absent entries here WITH THEIR
-// CLIENT TIMESTAMPS (created_at far in the past, so the rows never enter the
-// server-stats 7-day window). The client staggers itself by hash(userId) over
-// 14 days; fleet-wide volume ≈ 49k rows total vs the ~3.2k/day live write
-// rate (measured June 2026). Once actives have run it (~2 stagger cycles,
-// say August 2026), delete this handler, the route, and the client one-off.
-//
-// This whole module is the temporary surface: both handlers, the route entries
-// in src/index.js, and the client one-offs go together when the rollout is done.
+// --- Historical report upload (the durable outbox's upload path) -------------
+// PERMANENT endpoint for the client's offline outbox (account-sync.flushOutbox):
+// any attempt recorded locally but never acked — an offline / failed /report,
+// or a pre-2026-05-15 one-row-per-problem gap — is uploaded here WITH ITS
+// RECORDED EVENT TIMESTAMP (a client-supplied historical created_at, distinct
+// from /report which stamps `now`). The client first reconciles a full pull and
+// fuzzy-claims rows the server already has, so only provably-absent entries land
+// here. Rows lazy-seed user_seq/running_sum exactly like /report (shared
+// ID_HASH_SQL) and RETURN their ids so the client can stamp serverId; an old
+// created_at keeps the row out of the server-stats 7-day window, and the id
+// cursor still propagates it to other devices.
 const BACKFILL_MAX_BATCH = 500;
 // Backfilled timestamps must be historical: after the site could plausibly
 // have data, and old enough not to collide with live reporting.
 const BACKFILL_MIN_CREATED = '2024-01-01T00:00:00.000Z';
-const ENRICH_MAX_BATCH = 500;
 
 export async function handleReportBackfill(request, env) {
   const headers = versionedJsonHeaders();
@@ -71,64 +67,6 @@ export async function handleReportBackfill(request, env) {
     return new Response(JSON.stringify({ inserted: stmts.length, ids }), { status: 201, headers });
   } catch (error) {
     console.error('Error handling report backfill:', error);
-    return new Response('Internal server error', { status: 500, headers });
-  }
-}
-
-// --- One-off historical detail enrichment (TEMPORARY — remove after rollout) --
-// /report-backfill (round 1) was INSERT-only: it added the repeat attempts the
-// server was missing but left the pre-era skeleton rows (one-per-problem, from
-// the legacy one-row-per-problem era) without time_used/review_time, because the
-// reconcile CLAIMED those rows (fuzzy-matched, not re-uploaded) and there was no
-// UPDATE path. This fills them: the client soft-matches its detail-bearing local
-// entries to the server rows on a fresh full pull (same proven matcher as round
-// 1) and posts (problem, created_at, time, review) keyed on the AUTHORITATIVE
-// pulled created_at — never a stored local field. COALESCE + the NULL guard make
-// every write fill-only (it can't overwrite a real value) and idempotent; the
-// created_at is months old, so the row's server-stats window membership and its
-// /sync cursor position are both unchanged. Same staggered ramp + RL_WRITE limit
-// as round 1. Once actives have run it, delete this handler, the route, and the
-// client one-off (account-sync.maybeEnrichServerHistory).
-export async function handleReportEnrich(request, env) {
-  const headers = versionedJsonHeaders();
-  try {
-    const data = await request.json();
-    if (!isValidUserId(data.userId) || !Array.isArray(data.updates) ||
-        data.updates.length === 0 || data.updates.length > ENRICH_MAX_BATCH) {
-      return new Response('Invalid request body', { status: 400, headers });
-    }
-    if (!env.DB) {
-      return new Response('Database not configured', { status: 500, headers });
-    }
-    // Only ever touch historical rows (old enough not to be in flight), so a
-    // malformed/spoofed payload can't disturb live reporting.
-    const maxCreated = new Date(Date.now() - 3600 * 1000).toISOString();
-    const stmts = [];
-    for (const u of data.updates) {
-      const createdAt = (typeof u.createdAt === 'string' &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(u.createdAt) &&
-          u.createdAt > BACKFILL_MIN_CREATED && u.createdAt < maxCreated)
-        ? u.createdAt : null;
-      const timeUsed = (Number.isFinite(u.timeUsed) && u.timeUsed >= 0) ? Math.round(u.timeUsed) : null;
-      const reviewTime = (Number.isFinite(u.reviewTime) && u.reviewTime >= 0) ? Math.round(u.reviewTime) : null;
-      // Nothing to fill ⇒ reject the whole batch (the client never sends such a
-      // row; a payload that does is malformed).
-      if (!isValidProblemId(u.problem) || !createdAt || (timeUsed === null && reviewTime === null)) {
-        return new Response('Invalid request body', { status: 400, headers });
-      }
-      stmts.push(env.DB.prepare(
-        `UPDATE tsumego_reports
-            SET time_used = COALESCE(time_used, ?), review_time = COALESCE(review_time, ?)
-          WHERE user_id = ? AND problem = ? AND created_at = ?
-            AND (time_used IS NULL OR review_time IS NULL)`
-      ).bind(timeUsed, reviewTime, data.userId, u.problem, createdAt));
-    }
-    const results = await env.DB.batch(stmts);
-    let updated = 0;
-    for (const r of results) updated += (r && r.meta && Number.isFinite(r.meta.changes)) ? r.meta.changes : 0;
-    return new Response(JSON.stringify({ updated }), { status: 200, headers });
-  } catch (error) {
-    console.error('Error handling report enrich:', error);
     return new Response('Internal server error', { status: 500, headers });
   }
 }
