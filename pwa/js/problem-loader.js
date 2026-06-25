@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize } from './state.js';
+import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay } from './overlays.js';
@@ -439,6 +439,35 @@ export async function redisplayCurrentProblem() {
     const mode = state.currentProblem.linked ? APP_MODES.LINKED : APP_MODES.SOLVING;
     try { displayProblem(state.currentProblem, mode); }
     catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
+}
+
+// On a same-session reload (notably the version-driven graceful reload, but also
+// a missing-zip reload or a manual refresh), restore the exact problem that was on
+// screen — at its stored orientation — instead of re-running the pick/orient flow.
+// Recalls are served at a random orientation; re-running advanceToNextProblem would
+// re-randomize it and visibly rotate the board, which confused users. Returns true
+// if it restored a problem; false (no resume slot — i.e. a fresh session, or a bad
+// SGF) so the caller falls through to advanceToNextProblem.
+export async function resumeCurrentProblem() {
+    const resumed = getResumeProblem();
+    if (!resumed) return false;
+    try {
+        // Make the resumed problem fully first-class: load its shard so the
+        // picked-move embedding sidecar is available if the user gets it wrong
+        // (matches what the normal load path guarantees). Best-effort — the
+        // problem still displays from its stored SGF if the zip can't load.
+        await loadZipMetadata();
+        if (resumed.zipFilename) await loadZipProblems(resumed.zipFilename);
+    } catch (error) {
+        reportLoadError(error, 0);
+    }
+    try {
+        displayProblem(resumed, APP_MODES.SOLVING);
+        return true;
+    } catch (error) {
+        reportLoadError(error, 0);
+        return false;
+    }
 }
 
 // Exits a linked/shared view back to the user's standing challenge.

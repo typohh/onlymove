@@ -90,7 +90,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems } from './problem-loader.js';
+import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems, resumeCurrentProblem } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
 import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
@@ -548,9 +548,13 @@ async function loadInitialProblem({ urlParams, tsumegoId, wantsRecall, orientati
             }
             if (!loaded) await advanceToNextProblem();
         } else {
-            // Plain open (no URL id, no notification): show a due recall or the
-            // standing challenge.
-            await advanceToNextProblem();
+            // Plain open (no URL id, no notification). On a same-session reload
+            // (most importantly the version-driven graceful reload) restore the
+            // exact problem that was on screen at its stored orientation, so a
+            // recall doesn't visibly rotate. On a genuine fresh session there's no
+            // resume slot and we fall through to the normal due-recall / standing-
+            // challenge flow.
+            if (!await resumeCurrentProblem()) await advanceToNextProblem();
         }
     } catch (error) {
         console.error("Failed to load initial tsumego:", error);

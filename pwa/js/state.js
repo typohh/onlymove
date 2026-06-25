@@ -729,8 +729,49 @@ export function setChallengeProblem(problem) {
     state.challengeProblem = problem;
 }
 
+// sessionStorage slot holding the on-screen problem (with its exact orientation)
+// so a same-session reload can restore it verbatim. sessionStorage is the right
+// scope: it survives location.reload() (the version-driven graceful reload, a
+// missing-zip reload, a manual F5) but is cleared on a genuine reopen, so a fresh
+// session still runs advanceToNextProblem and can surface a newly-due recall.
+const RESUME_PROBLEM_KEY = 'resumeProblem';
+
 export function setCurrentProblem(problem) {
     state.currentProblem = problem;
+    // Persist the on-screen problem so a same-session reload restores the SAME
+    // problem at the SAME orientation instead of re-picking/re-orienting it.
+    // Recall problems get a random orientation (the pattern can't be recognized),
+    // so a reload that silently re-randomized it visibly rotated the board and
+    // confused users. Linked/shared detours (and a cleared slot) are intentionally
+    // not resumable — clear the slot so a reload falls back to the normal flow.
+    // Best-effort: sessionStorage can throw in private mode.
+    try {
+        if (problem && !problem.linked) {
+            sessionStorage.setItem(RESUME_PROBLEM_KEY, JSON.stringify({ size: _boardSize, problem }));
+        } else {
+            sessionStorage.removeItem(RESUME_PROBLEM_KEY);
+        }
+    } catch (_) { /* sessionStorage unavailable — resume simply won't fire */ }
+}
+
+// Reads the resume slot written by setCurrentProblem. Returns the stored problem
+// (with its exact orientation and already-transformed SGF) when it's resumable on
+// THIS load — same board size, well-formed, non-linked — else null. The boot path
+// uses it to restore the on-screen problem after a same-session reload without
+// re-picking/re-orienting it; see problem-loader.resumeCurrentProblem.
+export function getResumeProblem() {
+    try {
+        const raw = sessionStorage.getItem(RESUME_PROBLEM_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        const problem = parsed && parsed.problem;
+        if (!problem || typeof problem.sgf !== 'string' || !problem.filename) return null;
+        if (problem.linked) return null;
+        if (parsed.size !== _boardSize) return null;
+        return problem;
+    } catch (_) {
+        return null;
+    }
 }
 
 export function setPreviousProblem(problem) {
