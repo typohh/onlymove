@@ -110,9 +110,9 @@ LOG_FILENAME_PREFIX = "pipeline"
 # model without measuring. Instead, ramp up incrementally and watch GPU util:
 #  * keep adding while util increases by ≥ TUNE_THRESHOLD
 #  * stop when it plateaus or drops (the N=7 collapse case)
-# Result is cached per GPU model in state["_gpu_cache"], so subsequent runs
-# on a same-GPU host (or even a brand-new vast.ai instance with the same GPU)
-# skip the ramp.
+# Result is cached per (GPU model, board size) in state["_gpu_cache"], so
+# subsequent runs on a same-GPU host (or even a brand-new vast.ai instance with
+# the same GPU) at that board size skip the ramp.
 TUNE_WARMUP_SECS = 90    # KataGo b18c384nbt cold start on a fast GPU
 TUNE_SAMPLE_SECS = 30    # window over which GPU util is averaged
 TUNE_SAMPLE_INTERVAL = 2 # seconds between nvidia-smi samples
@@ -512,8 +512,8 @@ def tune_parallelism(base_ssh, module, extra=""):
 
 def determine_parallelism(base_ssh, step, module, extra=""):
     """Resolve N for `step`. For non-generate, always 1. For generate, look in
-    the per-GPU-model cache and use it (with a CPU floor); else run the ramp,
-    cache the result.
+    the per-(GPU model, board size) cache and use it (with a CPU floor); else
+    run the ramp, cache the result.
 
     On return, if `step == 'generate'` and we ran the tune, the chosen N
     instances are already running on the remote. If we used the cache, they
@@ -530,31 +530,38 @@ def determine_parallelism(base_ssh, step, module, extra=""):
         if cores else None
     )
 
+    # Key the cache by (GPU model, board size): per-query GPU cost differs by
+    # board size, so a 9x9 ramp shouldn't dictate 13x13's N. The size is the
+    # first forwarded step arg (cmd_run validated it for generate).
+    size = extra.split()[0] if extra else None
+    cache_key = f"{gpu_model}|{size}" if gpu_model else None
+    desc = f"'{gpu_model}' size {size}"
+
     state = load_state()
     cache = state.get("_gpu_cache", {})
-    cached = cache.get(gpu_model) if gpu_model else None
+    cached = cache.get(cache_key) if cache_key else None
     if cached:
         n = cached
         if cpu_floor is not None and cpu_floor < n:
-            print(f"  cached N={cached} for '{gpu_model}' but CPU caps at "
+            print(f"  cached N={cached} for {desc} but CPU caps at "
                   f"{cpu_floor}; using {cpu_floor}")
             n = cpu_floor
         else:
-            print(f"  using cached N={n} for '{gpu_model}'")
+            print(f"  using cached N={n} for {desc}")
         return n, False
 
-    print(f"  no cached N for '{gpu_model}'; running ramp tune...")
+    print(f"  no cached N for {desc}; running ramp tune...")
     n = tune_parallelism(base_ssh, module, extra)
     if cpu_floor is not None and cpu_floor < n:
         print(f"  capping {n} → {cpu_floor} due to CPU floor")
         n = cpu_floor
 
-    if gpu_model:
-        cache[gpu_model] = n
+    if cache_key:
+        cache[cache_key] = n
         state = load_state()  # re-read in case other writes happened
         state["_gpu_cache"] = cache
         save_state(state)
-        print(f"  cached N={n} for '{gpu_model}'")
+        print(f"  cached N={n} for {desc}")
     return n, True
 
 
