@@ -81,6 +81,9 @@ embeddings/joint/ica_stability.json
 # local analysis without re-importing the .sql each session); also regenerable.
 /attempts/database.sql
 /attempts/database.sqlite
+# Timestamped pre-change backups of the production DB (manual `cp` snapshots);
+# local insurance only, never committed.
+/attempts/database.backup-*.sqlite
 
 # Rating pipeline output (pipeline.train_rating / map_rating_to_egf): regenerable,
 # and model.pt is a multi-MB binary. The training code is tracked; its outputs
