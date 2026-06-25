@@ -1,5 +1,6 @@
 import { versionedJsonHeaders } from '../http.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
+import { ID_HASH_SQL } from '../../shared/sync-digest.js';
 
 // --- One-off historical report backfill (TEMPORARY — remove after rollout) ---
 // Before 2026-05-15 clients reported only one row per problem (no repeats, no
@@ -42,15 +43,32 @@ export async function handleReportBackfill(request, env) {
       const size = (r.size === 9 || r.size === 13) ? r.size : 9;
       const timeUsed = (Number.isFinite(r.timeUsed) && r.timeUsed >= 0) ? Math.round(r.timeUsed) : null;
       const reviewTime = (Number.isFinite(r.reviewTime) && r.reviewTime >= 0) ? Math.round(r.reviewTime) : null;
+      // Same lazy-seeded user_seq/running_sum INSERT as /report (one source of
+      // truth: shared ID_HASH_SQL), so a backfilled/outbox-flushed row keeps the
+      // per-profile digest consistent — without it the latest row would be
+      // unseeded and the client's sync check would stall. Batches run
+      // sequentially in one transaction, so each statement's subquery sees the
+      // prior insert and the seq advances across the batch. RETURNING id lets
+      // the client stamp serverId on the flushed entry.
       stmts.push(env.DB.prepare(
-        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+        `INSERT INTO tsumego_reports
+           (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat, user_seq, running_sum)
+         SELECT ?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8,
+           COALESCE((SELECT user_seq FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
+                    (SELECT COUNT(*) FROM tsumego_reports WHERE user_id = ?1)) + 1,
+           COALESCE((SELECT running_sum + ${ID_HASH_SQL} FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
+                    (SELECT COALESCE(SUM(${ID_HASH_SQL}), 0) FROM tsumego_reports WHERE user_id = ?1))
+         RETURNING id`
       ).bind(data.userId, r.problem, r.success ? 1 : 0, createdAt, size, timeUsed, reviewTime, r.isRepeat ? 1 : 0));
     }
     if (!env.DB) {
       return new Response('Database not configured', { status: 500, headers });
     }
-    await env.DB.batch(stmts);
-    return new Response(JSON.stringify({ inserted: stmts.length }), { status: 201, headers });
+    const results = await env.DB.batch(stmts);
+    // Inserted ids in request order, so the client can stamp serverId on each
+    // flushed entry (the digest key).
+    const ids = results.map((res) => (res && res.results && res.results[0]) ? res.results[0].id : null);
+    return new Response(JSON.stringify({ inserted: stmts.length, ids }), { status: 201, headers });
   } catch (error) {
     console.error('Error handling report backfill:', error);
     return new Response('Internal server error', { status: 500, headers });

@@ -688,61 +688,31 @@ export function checkSyncSignal(prevCreatedAt, userSeq) {
     maybeSignalPull();
 }
 
-// --- One-off historical backfill (TEMPORARY — remove with /report-backfill) --
-// Clients hold richer history than the server log: before PER_ATTEMPT_ERA_MS
-// the client reported only one row per problem (no repeats, no times), so a
-// device switch would lose ~36% of real attempts. This one-off pushes the
-// missing attempts up, once per device:
-//   1. Full-history reconcile pull ('' cursor): every local entry that DOES
-//      have a server row gets claimed (serverCreatedAt stamped) by the merge's
-//      fuzzy matcher — verified to align at median 1.5s / p99 4.7s on the
-//      worst-case real user.
-//   2. Entries still un-acked after a COMPLETE pull are provably absent
-//      server-side → uploaded with their client timestamps (historical
-//      created_at, so they never enter the server-stats 7-day window).
-//   3. serverCreatedAt is stamped per uploaded batch (idempotent under
-//      partial failure), the done-flag set only when everything landed.
-// Fleet cost is bounded by a per-user ramp: hash(userId) assigns each user a
-// slot 0..4, eligible from BACKFILL_RAMP_START + slot days ON and forever
-// after (no cycles — once your day has passed you run on the next open).
-// Spreads the measured ~49k total rows (834 actives, worst user ~5.7k) to
-// ~10k/day during the ramp — far under the 100k/day D1 write quota.
-const BACKFILL_DONE_KEY = HISTORY_BACKFILL_DONE_KEY;
-const BACKFILL_SPREAD_DAYS = 5;
-// Anchor of the ramp. Set to (or just after) the deploy date: if the deploy
-// lands later, the slots whose days already passed simply bunch onto the
-// first day — still comfortably inside quota.
-const BACKFILL_RAMP_START_MS = Date.parse('2026-06-14T00:00:00Z');
-const BACKFILL_BATCH = 500;
-
-// Round 2 — historical detail enrichment. Round 1 was insert-only, so the
-// pre-era skeleton rows it CLAIMED (the legacy one-row-per-problem originals)
-// still lack time_used/review_time on the server. This fills them via
-// /report-enrich (UPDATE, fill-only). Its own done-key + ramp so it runs once
-// per device independently of round 1; remove with the Worker handler once
-// actives have run it. NB: the gap is time/review only — the picked move never
-// existed for pre-era attempts (the feature shipped ~the per-attempt era), so
-// there is nothing to enrich there. See the round-2 note in src/index.js.
-const ENRICH_DONE_KEY = 'historyEnrichDone_v1';
-// Anchor of the round-2 ramp — set to (or just after) the deploy date; if the
-// deploy slips later, the already-passed slots simply bunch onto day 0 (still
-// well inside quota), same as round 1.
-const ENRICH_RAMP_START_MS = Date.parse('2026-06-16T00:00:00Z');
-const ENRICH_BATCH = 500;
-
-// hash(userId) % BACKFILL_SPREAD_DAYS assigns each user a slot 0..4, eligible
-// from rampStart + slot days ON and forever after (no cycles). Shared by both
-// one-off rollouts so each spreads its fleet write volume across 5 days.
-function rampEligibleToday(rampStartMs) {
-    let h = 0;
-    for (const ch of state.userId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    const slot = h % BACKFILL_SPREAD_DAYS;
-    return (Date.now() - rampStartMs) / 86400000 >= slot;
-}
-
-function backfillEligibleToday() {
-    return rampEligibleToday(BACKFILL_RAMP_START_MS);
-}
+// --- Durable offline outbox --------------------------------------------------
+// Any attempt recorded locally but never acked (an offline / failed /report, or
+// a pre-PER_ATTEMPT_ERA one-row-per-problem gap) is eventually uploaded so it
+// reaches the server and every other device. Permanent (not a one-off): runs on
+// load, on tab-visible, and on the `online` event whenever un-acked entries
+// exist — a cheap no-op otherwise, self-throttled, bounded by the server daily
+// full-pull cap.
+//   1. Claim-before-upload — a COMPLETE reconcile pull first, so the fuzzy
+//      matcher in mergeRowsForSize claims any row the server ALREADY has (an
+//      ack-lost report, or a pre-era one-row-per-problem original) instead of
+//      re-uploading it as a duplicate.
+//   2. Entries still un-acked after a complete pull are provably absent
+//      server-side → uploaded via /report-backfill WITH THEIR RECORDED event
+//      timestamps (historical created_at: the id cursor still propagates them to
+//      other devices, and old ones stay out of the server-stats 7-day window).
+//      The response's row ids are stamped as serverId.
+//   3. HISTORY_BACKFILL_DONE_KEY is set whenever the device has no un-acked
+//      backlog — the signal (read in ui.js) that the device's history is fully
+//      server-side and safe to adopt on another device.
+const OUTBOX_DONE_KEY = HISTORY_BACKFILL_DONE_KEY;
+const OUTBOX_BATCH = 500;
+// Don't run the (full-pull) flush more than ~twice an hour; the server daily
+// cap is the hard bound. A no-op (no un-acked entries) is never throttled.
+const OUTBOX_MIN_INTERVAL_MS = 30 * 60 * 1000;
+let lastOutboxRunAt = 0;
 
 // Local entries provably reportable but never acked: real problem id, a sane
 // historical date (≥1h old, so nothing in-flight), and no serverCreatedAt.
@@ -761,25 +731,25 @@ function collectUnackedEntries() {
     return out;
 }
 
-export async function maybeBackfillLocalHistory() {
-    if (localStorage.getItem(BACKFILL_DONE_KEY)) return;
+export async function flushOutbox({ force = false } = {}) {
     if (collectUnackedEntries().length === 0) {
-        // Nothing to reconcile (fresh device / already-synced account) —
-        // don't burn a full-history pull on it.
-        localStorage.setItem(BACKFILL_DONE_KEY, '1');
+        // Nothing to flush — the device's history is fully server-side, so it's
+        // safe to adopt elsewhere (ui.js reads this to reveal the Account menu).
+        localStorage.setItem(OUTBOX_DONE_KEY, '1');
         return;
     }
-    if (!backfillEligibleToday()) return;
+    if (!force && Date.now() - lastOutboxRunAt < OUTBOX_MIN_INTERVAL_MS) return;
+    lastOutboxRunAt = Date.now();
 
     try {
         // Claim everything the server already has. Uploading is only safe
         // against a COMPLETE view of the server's rows.
         const { complete } = await pullReports({ force: true, mode: 'reconcile', fromStart: true });
-        if (!complete) return;  // retry on a later eligible day
+        if (!complete) return;  // incomplete view (network / daily cap) — retry later
 
         const candidates = collectUnackedEntries();
         if (candidates.length === 0) {
-            localStorage.setItem(BACKFILL_DONE_KEY, '1');
+            localStorage.setItem(OUTBOX_DONE_KEY, '1');
             return;
         }
 
@@ -814,173 +784,55 @@ export async function maybeBackfillLocalHistory() {
             };
         });
 
-        for (let i = 0; i < rows.length; i += BACKFILL_BATCH) {
-            const batch = rows.slice(i, i + BACKFILL_BATCH);
+        for (let i = 0; i < rows.length; i += OUTBOX_BATCH) {
+            const batch = rows.slice(i, i + OUTBOX_BATCH);
             const res = await fetch('/report-backfill', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: state.userId, reports: batch.map(b => b.report) }),
             });
             if (!res.ok) {
-                console.warn(`account-sync: backfill batch failed (${res.status}); will retry on a later eligible day`);
+                console.warn(`account-sync: outbox batch failed (${res.status}); will retry`);
                 return;
             }
-            // Stamp + persist per batch so a later failure never re-uploads
-            // what already landed.
+            const body = await res.json().catch(() => null);
+            const ids = (body && Array.isArray(body.ids)) ? body.ids : [];
+            // Stamp serverCreatedAt (dedup key) + serverId (digest / id-cursor
+            // key) per batch so a later failure never re-uploads what landed.
             const sizesTouched = new Set();
-            for (const b of batch) {
+            batch.forEach((b, j) => {
                 b.entry.serverCreatedAt = b.report.createdAt;
+                if (Number.isFinite(ids[j])) b.entry.serverId = ids[j];
                 sizesTouched.add(b.size);
-            }
+            });
             for (const size of sizesTouched) {
                 setAnswerHistoryForSize(size, getAnswerHistoryForSize(size));
             }
         }
 
-        localStorage.setItem(BACKFILL_DONE_KEY, '1');
-        console.log(`account-sync: backfilled ${rows.length} historical attempts to the server`);
+        localStorage.setItem(OUTBOX_DONE_KEY, '1');
+        console.log(`account-sync: outbox flushed ${rows.length} attempts to the server`);
     } catch (e) {
-        console.warn('account-sync: history backfill failed (will retry):', e);
+        console.warn('account-sync: outbox flush failed (will retry):', e);
     }
 }
 
-// --- Round 2: enrich existing server rows with their missing detail ----------
-// Round 1 uploaded the attempts the server was MISSING; it left the pre-era
-// rows it had to CLAIM (the legacy one-row-per-problem originals) without
-// time_used/review_time, because /report-backfill only INSERTs. This fills
-// them. It re-runs the SAME soft match as round 1 (problemId + correctness +
-// nearest date within ±10 min, is_repeat relaxed pre-era) against a fresh full
-// pull, and keys each UPDATE on the matched server row's AUTHORITATIVE pulled
-// created_at — never a stored serverCreatedAt. The server side is fill-only
-// (COALESCE), so re-runs, races, and over-sends are all harmless.
-
-// Pre-era entries this device solved FIRST-HAND that hold detail the server's
-// skeleton rows may lack. Synced entries (pulled from the server on a device
-// adoption, flagged by mergeRowsForSize) are excluded: their time/review came
-// FROM the server, so re-reporting it is circular, and across a multi-attempt
-// problem the fuzzy match could paste one attempt's time onto another row. Only
-// the device that actually recorded a solve contributes it — multi-device safe
-// (the server-side COALESCE fill-only guard is the second line of defense, and
-// this mirrors round 1, which also uploads only un-acked first-hand entries).
-function enrichableLocalsForSize(size) {
-    const out = [];
-    for (const a of getAnswerHistoryForSize(size)) {
-        if (!a || a.synced || typeof a.problemId !== 'string') continue;
-        if (typeof a.date !== 'number' || a.date >= PER_ATTEMPT_ERA_MS) continue;
-        const hasTime = typeof a.timeTaken === 'number' && a.timeTaken > 0;
-        const hasReview = typeof a.accumulatedReview === 'number' && a.accumulatedReview > 0;
-        if (hasTime || hasReview) out.push(a);
-    }
-    return out;
-}
-
-function hasEnrichableLocalEntries() {
-    for (const size of SUPPORTED_BOARD_SIZES) {
-        if (enrichableLocalsForSize(size).length > 0) return true;
-    }
-    return false;
-}
-
-// Soft-match this size's detail-bearing pre-era locals to the pulled server
-// rows that are MISSING that detail; append {problem, createdAt, timeUsed,
-// reviewTime} items keyed on the pulled created_at. Greedy nearest-date 1-1,
-// the same matcher as the round-1 claim.
-function collectEnrichUpdates(size, rows, out) {
-    const locals = enrichableLocalsForSize(size);
-    if (locals.length === 0) return;
-    const used = new Set();
-    for (const row of rows) {
-        if (typeof row.createdAt !== 'string' || typeof row.problem !== 'string') continue;
-        const rowTs = Date.parse(row.createdAt);
-        if (!Number.isFinite(rowTs) || rowTs >= PER_ATTEMPT_ERA_MS) continue;
-        const needTime = row.timeUsed === null || row.timeUsed === undefined;
-        const needReview = row.reviewTime === null || row.reviewTime === undefined;
-        if (!needTime && !needReview) continue;  // row already complete
-
-        let best = null;
-        let bestGap = FUZZY_WINDOW_MS;
-        for (const a of locals) {
-            if (used.has(a) || a.problemId !== row.problem) continue;
-            if (!!a.correct !== !!row.success) continue;
-            const gap = Math.abs((a.date || 0) - rowTs);
-            if (gap < bestGap) { best = a; bestGap = gap; }
-        }
-        if (!best) continue;
-
-        const timeUsed = (needTime && typeof best.timeTaken === 'number' && best.timeTaken > 0)
-            ? Math.round(best.timeTaken) : null;
-        const reviewTime = (needReview && typeof best.accumulatedReview === 'number' && best.accumulatedReview > 0)
-            ? Math.round(best.accumulatedReview) : null;
-        if (timeUsed === null && reviewTime === null) continue;  // match adds nothing the row lacks
-        used.add(best);
-        out.push({ problem: row.problem, createdAt: row.createdAt, timeUsed, reviewTime });
-    }
-}
-
-export async function maybeEnrichServerHistory() {
-    if (localStorage.getItem(ENRICH_DONE_KEY)) return;
-    if (!hasEnrichableLocalEntries()) {
-        // No pre-era local detail to contribute (fresh device / post-era-only
-        // account) — don't spend a full-history pull on it.
-        localStorage.setItem(ENRICH_DONE_KEY, '1');
-        return;
-    }
-    if (!rampEligibleToday(ENRICH_RAMP_START_MS)) return;
-
-    try {
-        // Capture every pulled server row (incl. the already-claimed originals
-        // the merge skips) so the soft match sees the full set. The pull also
-        // re-claims, exactly as round 1 did, so the match is based on fresh
-        // server truth rather than any stored field.
-        const rowsBySize = new Map();
-        const rowSink = (size, rows) => {
-            if (!rowsBySize.has(size)) rowsBySize.set(size, []);
-            const bucket = rowsBySize.get(size);
-            for (const r of rows) bucket.push(r);
-        };
-        const { complete } = await pullReports({ force: true, mode: 'reconcile', fromStart: true, rowSink });
-        if (!complete) return;  // incomplete view — retry on a later eligible day
-
-        const updates = [];
-        for (const size of SUPPORTED_BOARD_SIZES) {
-            collectEnrichUpdates(size, rowsBySize.get(size) || [], updates);
-        }
-        if (updates.length === 0) {
-            localStorage.setItem(ENRICH_DONE_KEY, '1');
-            return;
-        }
-
-        for (let i = 0; i < updates.length; i += ENRICH_BATCH) {
-            const batch = updates.slice(i, i + ENRICH_BATCH);
-            const res = await fetch('/report-enrich', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: state.userId, updates: batch }),
-            });
-            if (!res.ok) {
-                console.warn(`account-sync: enrich batch failed (${res.status}); will retry on a later eligible day`);
-                return;
-            }
-        }
-
-        localStorage.setItem(ENRICH_DONE_KEY, '1');
-        console.log(`account-sync: enriched ${updates.length} historical rows (time/review) on the server`);
-    } catch (e) {
-        console.warn('account-sync: history enrich failed (will retry):', e);
-    }
-}
-
-// Regular syncs: app load and tab becoming visible — the "user returned to
-// this device" signals. No interval polling: while the user actively plays,
-// every report response carries the piggyback signal above, which is both
-// fresher and free. pullReports throttles internally. The one-off history
-// backfill rides the load pull's tail so the two never overlap.
+// Regular syncs: app load, tab becoming visible, and regaining connectivity.
+// No interval polling: an active session is kept in sync by the per-report seq
+// signal (checkSyncSignal). The outbox rides the load/visible/online pulls so
+// offline attempts upload as soon as connectivity returns, and a pull's own
+// digest check escalates to a reconcile if a gap is found. pullReports and the
+// outbox each throttle internally, so the three triggers can't pile up.
 export function startBackgroundSync() {
     pullReports()
-        .then(() => maybeBackfillLocalHistory())
-        .then(() => maybeEnrichServerHistory())
+        .then(() => flushOutbox())
         .catch(() => {});
     window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') pullReports();
+        if (document.visibilityState === 'visible') {
+            pullReports().then(() => flushOutbox()).catch(() => {});
+        }
+    });
+    window.addEventListener('online', () => {
+        pullReports({ force: true }).then(() => flushOutbox({ force: true })).catch(() => {});
     });
 }
