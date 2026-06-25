@@ -8,7 +8,19 @@ CREATE TABLE IF NOT EXISTS tsumego_reports (
     move TEXT,
     time_used INTEGER,
     review_time INTEGER,
-    is_repeat INTEGER NOT NULL DEFAULT 0
+    is_repeat INTEGER NOT NULL DEFAULT 0,
+    -- Per-profile sync digest (docs/account_sync_redesign.md). user_seq is the
+    -- 1-based count of the user's attempts; running_sum is the EXCLUSIVE prefix
+    -- sum of shared/sync-digest.js's rowHash(id) over the user's earlier rows
+    -- (a row's own id isn't known until insert, so the live digest adds
+    -- rowHash(latest.id) at read time). Both are computed in the INSERT (see
+    -- src/handlers/report.js) and lazy-seed on a user's first post-migration
+    -- attempt — NULL until then. They replace the prevCreatedAt piggyback as
+    -- the change-detection signal and let /sync page by id instead of
+    -- created_at (so a row inserted with a historical created_at, e.g. an
+    -- offline flush, is never missed).
+    user_seq INTEGER,
+    running_sum INTEGER
 );
 
 -- Range index for the server-stats 7-day window. Without it, every
@@ -16,11 +28,18 @@ CREATE TABLE IF NOT EXISTS tsumego_reports (
 -- read), which is what the community-stats aggregation hits each recompute.
 CREATE INDEX IF NOT EXISTS idx_tsumego_reports_created ON tsumego_reports(created_at);
 
--- Per-user cursor scan for POST /sync (account sync across devices). The
--- endpoint runs `WHERE user_id = ? AND created_at > ?` on every device poll;
--- with this index an up-to-date device reads ~0 rows, without it every poll
--- is a scan (D1 bills rows read) — same failure mode the created_at index
--- above guards against for server-stats.
+-- Per-user id-cursor scan for POST /sync (account sync across devices) and the
+-- O(1) latest-row lookup the digest INSERT/read use (`... WHERE user_id = ?
+-- ORDER BY id DESC LIMIT 1`). /sync pages by `WHERE user_id = ? AND id > ?
+-- ORDER BY id`; id (arrival order) rather than created_at (event time) is the
+-- gap-free cursor — see the redesign doc.
+CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_id ON tsumego_reports(user_id, id);
+
+-- LEGACY per-user created_at cursor, used by the pre-redesign /sync path and
+-- the /report prevCreatedAt piggyback. Both migrate to idx_tsumego_reports_user_id;
+-- drop this in the same change that removes the report-backfill/report-enrich
+-- handlers (the enrich UPDATE is its last reader):
+--   DROP INDEX IF EXISTS idx_tsumego_reports_user_created;
 CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_created ON tsumego_reports(user_id, created_at);
 
 -- One row per attempt (including repeats). There is no UNIQUE constraint on
@@ -34,6 +53,14 @@ CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_created ON tsumego_reports(u
 --   ALTER TABLE tsumego_reports ADD COLUMN time_used INTEGER;
 --   ALTER TABLE tsumego_reports ADD COLUMN review_time INTEGER;
 --   ALTER TABLE tsumego_reports ADD COLUMN is_repeat INTEGER NOT NULL DEFAULT 0;
+-- Sync-digest columns + id-cursor index (docs/account_sync_redesign.md). No
+-- backfill UPDATE: existing rows stay NULL and the INSERT lazy-seeds each user's
+-- latest row on their first post-migration attempt (a one-time COUNT/SUM read),
+-- so this costs ZERO writes — a full ROW_NUMBER backfill would blow the daily
+-- write cap and is unnecessary (only the latest row per user is ever read).
+--   ALTER TABLE tsumego_reports ADD COLUMN user_seq INTEGER;
+--   ALTER TABLE tsumego_reports ADD COLUMN running_sum INTEGER;
+--   CREATE INDEX IF NOT EXISTS idx_tsumego_reports_user_id ON tsumego_reports(user_id, id);
 -- Dropping the legacy UNIQUE(user_id, problem) index in SQLite requires
 -- rebuilding the table; the simplest path is:
 --   DROP INDEX IF EXISTS sqlite_autoindex_tsumego_reports_1;

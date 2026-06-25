@@ -1,5 +1,6 @@
 import { APP_VERSION } from '../version.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
+import { rowHash, ID_HASH_SQL } from '../../shared/sync-digest.js';
 
 export async function handleReport(request, env) {
   // Every response carries the deployed Worker version so the client can
@@ -43,25 +44,48 @@ export async function handleReport(request, env) {
     // on the matching answerHistory entry (serverCreatedAt) — that's how a
     // /sync pull recognizes the device's own rows instead of re-merging them.
     //
-    // prevCreatedAt — the user's latest report BEFORE this one — is the
-    // account-sync piggyback signal: a device that doesn't recognize the
-    // timestamp knows another device wrote it and pulls, so active sessions
-    // need no sync polling at all. The SELECT rides the same batch round trip
-    // and reads ~1 row via idx_tsumego_reports_user_created.
+    // The INSERT also lazy-computes the per-profile sync digest in the same
+    // statement (docs/account_sync_redesign.md): user_seq = the user's running
+    // attempt count, running_sum = the EXCLUSIVE prefix of rowHash(id) over the
+    // user's earlier rows. Both fall back to a one-time COUNT/SUM the first time
+    // a user reports after the column was added (latest row NULL), then ride the
+    // O(1) latest-row lookup via idx_tsumego_reports_user_id. RETURNING hands
+    // back the new row's id + the two digest fields; the response digest is the
+    // INCLUSIVE value running_sum + rowHash(id), which the client compares
+    // against its local Σ rowHash(serverId). serverId/seq/digest are the new
+    // change-detection signal.
+    //
+    // prevCreatedAt — the user's latest report BEFORE this one — is the LEGACY
+    // piggyback signal, kept for pre-redesign clients until they migrate to the
+    // seq comparison. It rides the same batch and reads ~1 row.
     const createdAt = new Date().toISOString();
-    const [prevRes] = await env.DB.batch([
+    const [prevRes, insRes] = await env.DB.batch([
       env.DB.prepare(
         'SELECT max(created_at) AS last FROM tsumego_reports WHERE user_id = ?'
       ).bind(data.userId),
       env.DB.prepare(
-        'INSERT INTO tsumego_reports (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        `INSERT INTO tsumego_reports
+           (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat, user_seq, running_sum)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+           COALESCE((SELECT user_seq FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
+                    (SELECT COUNT(*) FROM tsumego_reports WHERE user_id = ?1)) + 1,
+           COALESCE((SELECT running_sum + ${ID_HASH_SQL} FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
+                    (SELECT COALESCE(SUM(${ID_HASH_SQL}), 0) FROM tsumego_reports WHERE user_id = ?1))
+         RETURNING id, user_seq, running_sum`
       ).bind(data.userId, data.problem, data.success ? 1 : 0, createdAt, size, move, timeUsed, reviewTime, isRepeat),
     ]);
     const prevCreatedAt = (prevRes && prevRes.results && prevRes.results[0])
       ? (prevRes.results[0].last ?? null)
       : null;
 
-    return new Response(JSON.stringify({ createdAt, prevCreatedAt }), {
+    const ins = (insRes && insRes.results && insRes.results[0]) ? insRes.results[0] : null;
+    const serverId = ins ? ins.id : null;
+    const userSeq = ins ? ins.user_seq : null;
+    // Inclusive digest = exclusive prefix on the new row + the new row's own
+    // hash (id known only post-insert), matching the client's full Σ.
+    const digest = ins ? (ins.running_sum + rowHash(ins.id)) : null;
+
+    return new Response(JSON.stringify({ createdAt, prevCreatedAt, serverId, userSeq, digest }), {
       status: 201,
       headers: { ...reportHeaders, 'Content-Type': 'application/json' },
     });
