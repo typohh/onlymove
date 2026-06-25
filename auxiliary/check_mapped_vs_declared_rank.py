@@ -35,8 +35,12 @@ Inputs (run `pipeline.fetch_database` first to refresh the dump):
   ratings/rating_to_rank.json                M  (shared rating→rank curve)
   ratings/rank_map.json                      per-server internal↔server knots
 
+Server ranks are always time-adjusted (the onlymove header rank stays raw), the
+same dock the PWA shows: a solver slower than typical for their rank reads weaker
+on a timed server. Users without enough timed novel attempts keep the raw rank.
+
 Usage:
-  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank
+  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --list
   ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --csv out.csv
   ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --min-attempts 30
 """
@@ -102,7 +106,7 @@ def apply_M(R, m_ratings, m_internal):
     return float(interp_extrap_vec(np.array([R]), m_ratings, m_internal)[0])
 
 
-# --- Time adjustment (optional, mirrors the client) ------------------------
+# --- Time adjustment (always on, mirrors the client) -----------------------
 # The PWA docks the *server-translated* rank (header onlymove rank stays raw):
 # practice here is untimed but server ranks are timed, so a solver slower than
 # typical FOR THEIR RANK overstates their timed strength. See
@@ -218,6 +222,19 @@ def _stat_header(first="bucket", width=18):
     print("-" * (width + 6 + 9 + 9 + 8 + 8 + 8 + 8 + 9 + 8))
 
 
+def _print_full_listing(df):
+    """Per server: onlymove rank, declared rank, predicted rank, err (ranks)."""
+    for server in SERVERS:
+        sub = df[df["server"] == server].sort_values("declared_scalar")
+        if sub.empty:
+            continue
+        print(f"\n{server}  (n={len(sub)})")
+        print(f"{'user':<10}{'onlymove':>9}{'declared':>9}{'predicted':>10}{'err':>7}")
+        for _, r in sub.iterrows():
+            print(f"{r['prefix']:<10}{r['our_label']:>9}{r['declared_rank']:>9}"
+                  f"{r['pred_server_label']:>10}{r['err_server']:>+7.1f}")
+
+
 # Internal-rank bands (scalar: 1k=0, 1d=1). Half-open [lo, hi).
 RANK_BANDS = [
     (-1e9, -14, "≤15k"),
@@ -238,36 +255,27 @@ def main():
                     help="Drop survey users with fewer pooled attempts.")
     ap.add_argument("--csv", default=None,
                     help="If set, write the per-declaration error table here.")
-    ap.add_argument("--time-adjust", action="store_true",
-                    help="Apply the client's time adjustment to the displayed "
-                         "(server) rank — docks solvers slower than typical for "
-                         "their rank, the same correction the PWA shows. Median "
-                         f"solve time is taken over the working set (last {WORKING_SET} "
-                         "attempts), matching getMergedAnswerHistory.")
+    ap.add_argument("--list", action="store_true",
+                    help="Print the full per-user predicted-vs-declared list, "
+                         "grouped by ranking system (in each server's own rank "
+                         "units), in addition to the aggregate stats.")
     ap.add_argument("--time-recenter", action="store_true",
-                    help="With --time-adjust: demean the time-dock over the survey "
-                         "cohort (the fleet-fit g0,g1 line has a non-zero mean "
-                         "residual on survey users, leaking a uniform bias). Keeps "
-                         "the within-cohort precision gain, drops the mean shift.")
+                    help="Demean the time-dock over the survey cohort (the fleet-fit "
+                         "g0,g1 line has a non-zero mean residual on survey users, "
+                         "leaking a uniform bias). Keeps the within-cohort precision "
+                         "gain, drops the mean shift.")
     ap.add_argument("--sqlite",
                     default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"),
                     help="SQLite DB for per-user median solve time (--time-adjust).")
     args = ap.parse_args()
 
-    print(f"Reading {args.sql} ...")
     surveys = load_rank_surveys(args.sql)
     if surveys is None or surveys.empty:
         sys.exit("No rank_surveys rows found — run pipeline.fetch_database.")
     surveys = latest_per_user_server(surveys)
-    print(f"  {len(surveys)} latest declarations from "
-          f"{surveys['user_id'].nunique()} users")
 
     m_ratings, m_internal = load_M(args.dir)
     server_curves = load_server_curves(args.dir)
-    print(f"  M: {len(m_ratings)} knots, rating "
-          f"[{m_ratings[0]:.2f},{m_ratings[-1]:.2f}] → internal "
-          f"[{m_internal[0]:.1f},{m_internal[-1]:.1f}]")
-    print(f"  rank_map servers: {', '.join(server_curves)}")
 
     merged_ratings, merged_slopes = {}, {}
     for s in SIZES:
@@ -278,9 +286,13 @@ def main():
 
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
 
-    print(f"\nEstimating each user's {int(CALIBRATION_P*100)}%-clear v2-rating "
-          f"(pooled across boards) ...")
-    user_internal = {}  # prefix8 -> our internal rank scalar
+    # user_internal: the raw onlymove rank (the header value); never time-adjusted.
+    # user_internal_adj: the rank that drives the SERVER translations — the onlymove
+    #   rank plus the time dock. Mirrors the PWA (rank-translation.js): the onlymove
+    #   header stays raw, every server map (EGF included) translates from the docked
+    #   index, so a slow solver reads weaker on a (timed) server than on onlymove.
+    user_internal = {}      # prefix8 -> raw onlymove rank scalar
+    user_internal_adj = {}  # prefix8 -> docked rank feeding the server maps
     user_R = {}
     for uid in surveys["user_id"].unique():
         pref = uid[:8]
@@ -294,35 +306,28 @@ def main():
         if R is not None and n >= args.min_attempts:
             user_R[pref] = R
             user_internal[pref] = apply_M(R, m_ratings, m_internal)
-    print(f"  {len(user_internal)} users with a usable rating "
-          f"(≥{args.min_attempts} attempts)")
+            user_internal_adj[pref] = user_internal[pref]  # default: no dock
 
-    if args.time_adjust:
-        ta = load_time_adjust(args.dir)
-        if ta is None:
-            sys.exit("--time-adjust: no time_adjust block in population_constants.json")
-        alpha, g0, g1 = ta
-        med_min = load_user_median_solve_minutes(args.sqlite)
-        # delta in RATING units per user (skip users missing the feature — the
-        # client shows them the raw rank). Center on the time expected for THIS
-        # user's (base) rank index; the curve's native axis is
-        # internal_scalar + RANK_INDEX_OFFSET.
-        deltas = {}
-        for pref in user_R:
-            mm = med_min.get(pref)
-            if mm is None or mm <= 0:
-                continue
-            native_idx = user_internal[pref] + RANK_INDEX_OFFSET
-            deltas[pref] = alpha * (np.log10(mm) - (g0 + g1 * native_idx))
-        if args.time_recenter and deltas:
-            mean_delta = float(np.mean(list(deltas.values())))
-            deltas = {p: d - mean_delta for p, d in deltas.items()}
-        for pref, d in deltas.items():
-            user_internal[pref] = apply_M(user_R[pref] + d, m_ratings, m_internal)
-        print(f"  TIME ADJUSTMENT applied to {len(deltas)}/{len(user_R)} users "
-              f"(alpha={alpha}, g0={g0}, g1={g1:g}"
-              f"{', survey-recentered' if args.time_recenter else ''}); the rest "
-              f"lack ≥{TIME_ADJUST_MIN_TIMED} timed novel attempts (raw rank shown)")
+    # Time adjustment (always on): dock each user's SERVER rank by
+    # alpha·(log10 median solve min − expected-for-their-rank). Users without
+    # ≥MIN_TIMED timed novel attempts keep the raw rank (matching the client).
+    ta = load_time_adjust(args.dir)
+    if ta is None:
+        sys.exit("No time_adjust block in population_constants.json.")
+    alpha, g0, g1 = ta
+    med_min = load_user_median_solve_minutes(args.sqlite)
+    deltas = {}
+    for pref in user_R:
+        mm = med_min.get(pref)
+        if mm is None or mm <= 0:
+            continue
+        native_idx = user_internal[pref] + RANK_INDEX_OFFSET
+        deltas[pref] = alpha * (np.log10(mm) - (g0 + g1 * native_idx))
+    if args.time_recenter and deltas:
+        mean_delta = float(np.mean(list(deltas.values())))
+        deltas = {p: d - mean_delta for p, d in deltas.items()}
+    for pref, d in deltas.items():
+        user_internal_adj[pref] = apply_M(user_R[pref] + d, m_ratings, m_internal)
 
     # --- one row per (user, server) declaration ---
     rows = []
@@ -331,10 +336,13 @@ def main():
         g = r.get("rank_scalar")
         if pref not in user_internal or g is None or pd.isna(g):
             continue
-        ours = user_internal[pref]
+        ours = user_internal[pref]              # raw header rank
+        ours_adj = user_internal_adj[pref]      # time-adjusted; drives server maps
         declared_internal = declared_to_internal(r["server"], float(g),
                                                   server_curves)
-        pred_server = internal_to_server(r["server"], ours, server_curves)
+        # Server prediction translates from the TIME-ADJUSTED internal, so a timed
+        # server (EGF included) differs from the raw header rank by the dock.
+        pred_server = internal_to_server(r["server"], ours_adj, server_curves)
         rows.append({
             "prefix": pref,
             "server": r["server"],
@@ -343,61 +351,45 @@ def main():
             "our_R": user_R[pref],
             "our_internal": ours,
             "our_label": scalar_to_rank(ours),
+            "our_internal_adj": ours_adj,
             "declared_internal": declared_internal,
-            # internal-rank error (pools across servers): ours − theirs
+            # internal-rank error (pools across servers): raw ours − theirs
             "err_internal": ours - declared_internal,
-            # forward-mapped error in the server's own rank units
+            # forward-mapped predicted rank in the server's own rank units
             "pred_server_scalar": pred_server,
+            "pred_server_label": scalar_to_rank(pred_server),
             "err_server": pred_server - float(g),
         })
     df = pd.DataFrame(rows)
     if df.empty:
         sys.exit("No (user, server) declarations joined to a rated user.")
 
-    print(f"\n{len(df)} declarations from {df['prefix'].nunique()} rated users "
-          f"across {df['server'].nunique()} servers.")
     no_coupling = sorted(set(df["server"]) - set(server_curves))
-    if no_coupling:
-        print(f"  NOTE: {', '.join(no_coupling)} have no coupling in rank_map.json "
-              f"(too few survey samples) — scored against the identity hub, so "
-              f"their error reflects the raw internal scale, not a fitted offset.")
-    print("\nerror e = our_internal − declared_internal  (internal-rank units; "
-          ">0 ⇒ we rate them STRONGER than they self-declare)")
+    note = f"  ({', '.join(no_coupling)}: no rank_map coupling)" if no_coupling else ""
+    print(f"\n{len(df)} declarations, {df['prefix'].nunique()} users, "
+          f"{df['server'].nunique()} servers  "
+          f"[{len(deltas)} time-adjusted, {len(user_R) - len(deltas)} raw]" + note)
 
-    overall = _stats(df["err_internal"])
-    print(f"\n{'='*92}")
-    print("OVERALL")
-    print(f"{'='*92}")
+    # err = predicted server rank − declared server rank (ranks; + = we rate stronger)
+    print("\nerr = predicted − declared  (ranks; + = we rate them stronger)")
     _stat_header()
-    _print_stat_row("all declarations", overall)
+    _print_stat_row("OVERALL", _stats(df["err_server"]))
 
-    print(f"\n{'='*92}")
-    print("ERROR BY OUR RANK BAND  (bucketed on our_internal estimate)")
-    print(f"{'='*92}")
+    print("\nby onlymove rank band")
     _stat_header()
     for lo, hi, label in RANK_BANDS:
         sub = df[(df["our_internal"] >= lo) & (df["our_internal"] < hi)]
-        _print_stat_row(label, _stats(sub["err_internal"]))
+        _print_stat_row(label, _stats(sub["err_server"]))
 
-    print(f"\n{'='*92}")
-    print("ERROR BY SERVER  (internal-rank units; pooled-comparable)")
-    print(f"{'='*92}")
-    _stat_header(first="server")
-    for server in SERVERS:
-        sub = df[df["server"] == server]
-        if not sub.empty:
-            _print_stat_row(server, _stats(sub["err_internal"]))
-
-    print(f"\n{'='*92}")
-    print("ERROR BY SERVER  (forward-mapped: predicted − declared, in that "
-          "server's OWN rank units)")
-    print("  = the literal on-screen discrepancy for that server's players.")
-    print(f"{'='*92}")
+    print("\nby server")
     _stat_header(first="server")
     for server in SERVERS:
         sub = df[df["server"] == server]
         if not sub.empty:
             _print_stat_row(server, _stats(sub["err_server"]))
+
+    if args.list:
+        _print_full_listing(df)
 
     if args.csv:
         df.sort_values(["server", "our_internal"]).to_csv(args.csv, index=False)
