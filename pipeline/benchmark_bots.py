@@ -1,3 +1,4 @@
+import argparse
 import math
 import os
 import queue
@@ -15,13 +16,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.configurations import BOARD_SIZE
+from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_controller import KatagoController
 from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_number, get_rank_str, _get_rank_str
 from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
 
-TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
-ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts", str(BOARD_SIZE))
+# Set in main() from the mandatory size arg: tsumegos/<size>/ and attempts/<size>/.
+TSUMEGO_DIR = None
+ATTEMPTS_DIRECTORY = None
 DEBUG = False
 BATCH_SIZE = 10000
 
@@ -199,10 +201,10 @@ class HeuristicBot:
 
 
 class KataGo:
-    def __init__(self, weights, playouts=1, human_rank=None, temperature=1.0):
+    def __init__(self, weights, board_size, playouts=1, human_rank=None, temperature=1.0):
         self._controller = KatagoController()
-        self._controller.start_engine(model=weights, verbose=DEBUG, human=human_rank is not None)
-        self._query = KatagoQueries(self._controller)
+        self._controller.start_engine(model=weights, board_size=board_size, verbose=DEBUG, human=human_rank is not None)
+        self._query = KatagoQueries(self._controller, board_size)
         self._playouts = playouts
         self._human_rank = human_rank
         self._temperature = temperature
@@ -244,10 +246,10 @@ class KataGo:
         return self
 
 class KataGoFullGame:
-    def __init__(self, weights, human_rank):
+    def __init__(self, weights, board_size, human_rank):
         self._controller = KatagoController()
-        self._controller.start_engine(model=weights, verbose=DEBUG, human=True)
-        self._query = KatagoQueries(self._controller)
+        self._controller.start_engine(model=weights, board_size=board_size, verbose=DEBUG, human=True)
+        self._query = KatagoQueries(self._controller, board_size)
         self._human_rank = human_rank
 
     def get_probability(self, game):
@@ -418,40 +420,40 @@ def test_bot(bot, attempts_file, batch_ids):
 
 
 
-# ATTEMPTS_DIRECTORY is defined at the top
+# TSUMEGO_DIR / ATTEMPTS_DIRECTORY are set in main() from the size arg.
 SKIP_IF_EXISTS = False
 
 
-def get_bot_configs():
+def get_bot_configs(board_size):
     """
     Returns a list of (bot_factory, attempts_filename) tuples.
     bot_factory is a callable that creates the bot when called.
     """
     configs = []
-    
+
     # Human rank bots with temperature 1.0
     for human_rank in get_all_ranks():
         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}.txt")
         configs.append((
-            lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), 1, human_rank=hr, temperature=1.0),
+            lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), board_size, 1, human_rank=hr, temperature=1.0),
             filename
         ))
-    
+
     # Model + temperature combinations
     for model in [MODEL_FULL]:
         for temperature in [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
             model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
             configs.append((
-                lambda mf=model_filename, t=temperature: KataGo(mf, temperature=t),
+                lambda mf=model_filename, t=temperature: KataGo(mf, board_size, temperature=t),
                 filename
             ))
-    
+
     # High temperature variants for 20k rank
     for temperature in [1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 2, 3, 5, 10, 50]:
         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_20k_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
         configs.append((
-            lambda t=temperature: KataGo(get_model(MODEL_BEST_SMALL), human_rank=get_all_ranks()[0], temperature=t),
+            lambda t=temperature: KataGo(get_model(MODEL_BEST_SMALL), board_size, human_rank=get_all_ranks()[0], temperature=t),
             filename
         ))
     
@@ -470,23 +472,32 @@ def get_bot_configs():
     return configs
 
 
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(description='Benchmark bots on generated tsumegos')
+    parser.add_argument('size', type=int, choices=ALL_BOARD_SIZES,
+                        help='Board size to benchmark (one of %(choices)s)')
+    args = parser.parse_args()
+
+    global TSUMEGO_DIR, ATTEMPTS_DIRECTORY
+    TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
+    ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts", str(args.size))
+
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
-    
-    bot_configs = get_bot_configs()
-    
+
+    bot_configs = get_bot_configs(args.size)
+
     # Filter out configs where SKIP_IF_EXISTS applies
     if SKIP_IF_EXISTS:
         bot_configs = [(factory, filename) for factory, filename in bot_configs if not os.path.exists(filename)]
-    
+
     if not bot_configs:
         print("All bots already have complete attempt files.")
         list_outcomes()
-        exit(0)
-    
+        return
+
     all_ids = get_all_tsumego_ids()
     total_count = len(all_ids)
-    
+
     iteration = 0
     while True:
         # Calculate batch for this iteration
@@ -515,5 +526,9 @@ if __name__ == "__main__":
         cache.clear()
         
         iteration += 1
-    
+
     list_outcomes()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,6 @@
 import random
 import numpy as np
-from utils.configurations import BOARD_SIZE, RULES, KOMI
+from utils.configurations import RULES, KOMI
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
@@ -21,16 +21,16 @@ class KatagoQueries:
     A class to manage the KataGo analysis engine process.
     """
 
-    def __init__(self, katago_controller):
+    def __init__(self, katago_controller, board_size):
         """
         Initializes the KatagoController.
 
         Args:
-            katago_path (str): The path to the KataGo executable.
-            model_path (str): The path to the KataGo model file (for the RL network).
-            human_model_path (str, optional): The path to the KataGo human SL model file. Defaults to None.
+            katago_controller (KatagoController): The controller wrapping the engine.
+            board_size (int): The board size all queries/coordinate math use.
         """
         self._katago_controller = katago_controller
+        self.board_size = board_size
 
     def get_legal_moves(self, moves):
         """
@@ -110,8 +110,8 @@ class KatagoQueries:
             "initialStones": [],
             "rules": RULES,
             "komi": KOMI,
-            "boardXSize": BOARD_SIZE,
-            "boardYSize": BOARD_SIZE,
+            "boardXSize": self.board_size,
+            "boardYSize": self.board_size,
             "includePolicy": playouts == 1,
             "maxVisits": playouts,
         }
@@ -143,11 +143,11 @@ class KatagoQueries:
         Assumes a 9x9 board
         """
 
-        if idx == BOARD_SIZE * BOARD_SIZE:
+        if idx == self.board_size * self.board_size:
             return "pass"
 
-        row = idx // BOARD_SIZE
-        col = idx % BOARD_SIZE
+        row = idx // self.board_size
+        col = idx % self.board_size
 
         # Convert to Go board coordinates (A1 is bottom-left, I9 is top-right)
         # KataGo uses 0-indexed from top-left, so A1 is (0,0) in KataGo's internal representation
@@ -158,7 +158,7 @@ class KatagoQueries:
         col_char = chr(ord('A') + col)
         if col >= 8:  # Skip 'I'
             col_char = chr(ord('A') + col + 1)
-        row_char = str(BOARD_SIZE - row)
+        row_char = str(self.board_size - row)
 
         return f"{col_char}{row_char}"
 
@@ -169,7 +169,7 @@ class KatagoQueries:
         """
 
         if move == "pass":
-            return BOARD_SIZE * BOARD_SIZE
+            return self.board_size * self.board_size
 
         col_char = move[0].upper()
         row_str = move[1:]
@@ -181,9 +181,9 @@ class KatagoQueries:
 
         # Convert row string to index
         row_num = int(row_str)
-        row = BOARD_SIZE - row_num
+        row = self.board_size - row_num
 
-        return row * BOARD_SIZE + col
+        return row * self.board_size + col
 
     def get_position_info(self, moves):
         """

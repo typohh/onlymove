@@ -1,12 +1,10 @@
 import math
 import random
 
-from utils.configurations import debug, DEBUG, BOARD_SIZE
+from utils.configurations import debug, DEBUG
 from utils.katago_queries import KatagoQueries
 
 KATAGO_COLS = "ABCDEFGHJKLMNOPQRST"
-EDGE_COLS = {KATAGO_COLS[0], KATAGO_COLS[1], KATAGO_COLS[BOARD_SIZE - 2], KATAGO_COLS[BOARD_SIZE - 1]}
-EDGE_ROWS = {"1", "2", str(BOARD_SIZE - 1), str(BOARD_SIZE)}
 
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4
@@ -31,6 +29,15 @@ class ProblemFinder:
             queries (KatagoQueries): The KataGo controller for the SL network.
         """
         self.queries = queries
+        self.board_size = queries.board_size
+        # First two and last two columns/rows of this board are off-limits for
+        # the random opening moves (1st/2nd line). Derived from the board size
+        # the queries object is bound to.
+        self.edge_cols = {
+            KATAGO_COLS[0], KATAGO_COLS[1],
+            KATAGO_COLS[self.board_size - 2], KATAGO_COLS[self.board_size - 1],
+        }
+        self.edge_rows = {"1", "2", str(self.board_size - 1), str(self.board_size)}
 
     def generate_initial_position(self):
         """
@@ -44,9 +51,9 @@ class ProblemFinder:
         def is_valid(move):
             if move == "pass":
                 return False
-            if move[0] in EDGE_COLS:
+            if move[0] in self.edge_cols:
                 return False
-            if move[1:] in EDGE_ROWS:
+            if move[1:] in self.edge_rows:
                 return False
             return True
 

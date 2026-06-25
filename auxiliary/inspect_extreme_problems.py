@@ -278,9 +278,10 @@ def main():
         csv_path = joint_csv
         source = "joint"
     else:
-        from utils.configurations import BOARD_SIZE
-        csv_path = os.path.join(PROJECT_ROOT, "embeddings", str(BOARD_SIZE), "per_problem.csv")
-        source = f"per-size ({BOARD_SIZE})"
+        from utils.configurations import ALL_BOARD_SIZES
+        size = args.size if args.size != "all" else str(ALL_BOARD_SIZES[0])
+        csv_path = os.path.join(PROJECT_ROOT, "embeddings", size, "per_problem.csv")
+        source = f"per-size ({size})"
     if not os.path.exists(csv_path):
         raise SystemExit("no per_problem.csv found (looked at joint and per-size locations)")
 

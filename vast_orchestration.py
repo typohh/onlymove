@@ -20,6 +20,8 @@ import subprocess
 import sys
 import time
 
+from utils.configurations import ALL_BOARD_SIZES
+
 VASTAI_BIN = ".venv/bin/vastai"
 REMOTE_DIR = "/workspace/onlymove"
 STATE_FILE = "orchestration_state.json"
@@ -34,6 +36,12 @@ PIPELINE_STEPS = {
     "calibrate19": "auxiliary.calibrate_ranks_19x19",
     "calibrate_handicap": "auxiliary.calibrate_handicap_ranks",
 }
+
+# Steps that take a mandatory positional board size as their first arg — it's
+# forwarded verbatim to the remote `python -m pipeline.<step> <size>`, which
+# selects tsumegos/<size>/, attempts/<size>/, and the engine board dimensions.
+# The calibrate* steps are fixed-board auxiliary diagnostics and take no size.
+SIZE_REQUIRED_STEPS = {"tune", "generate", "benchmark"}
 
 # Files uploaded from the local repo. We ship the CUDA katago build to the
 # remote (vast.ai NVIDIA GPUs); the local repo's bots/katago is OpenCL and is
@@ -696,8 +704,10 @@ def _is_step_running(base_ssh):
 def cmd_run(args):
     """Start a pipeline step in tmux on an instance.
 
-    Usage: run [<id>] <step> [-- <step args...>]
+    Usage: run [<id>] <step> [<step args...>]
     If <id> is omitted and only one instance exists, it is used.
+    tune/generate/benchmark require a board size as their first step arg
+    (e.g. `run generate 13`), forwarded to the remote module.
     """
     if not args:
         print(f"Usage: run [<id>] <step> [args...]   step ∈ {{{', '.join(PIPELINE_STEPS)}}}")
@@ -714,6 +724,17 @@ def cmd_run(args):
     if step not in PIPELINE_STEPS:
         print(f"Unknown step '{step}'. Available: {', '.join(PIPELINE_STEPS)}")
         return
+
+    # tune/generate/benchmark take a mandatory board size as their first arg.
+    # Validate locally so a missing/invalid size fails here with a clear message
+    # rather than crashing the remote module's argparse after provisioning.
+    if step in SIZE_REQUIRED_STEPS:
+        sizes = ", ".join(str(s) for s in ALL_BOARD_SIZES)
+        if not (step_args and step_args[0].isdigit()
+                and int(step_args[0]) in ALL_BOARD_SIZES):
+            print(f"Step '{step}' requires a board size as its first argument "
+                  f"(one of {sizes}). e.g. run {step} {ALL_BOARD_SIZES[0]}")
+            return
 
     inst = find_instance(target)
     if not inst:
@@ -1122,6 +1143,7 @@ COMMANDS = {
         "help": [
             f"Start a pipeline step in tmux. step ∈ {{{', '.join(PIPELINE_STEPS)}}}",
             "Extra args are forwarded to python -m pipeline.<step>",
+            "tune/generate/benchmark need a board size first, e.g. run generate 13",
         ],
         "handler": cmd_run,
     },

@@ -9,7 +9,7 @@ import re
 import argparse
 import traceback
 
-from utils.configurations import BOARD_SIZE, DEFAULT_MODEL
+from utils.configurations import ALL_BOARD_SIZES, DEFAULT_MODEL
 from utils.katago_controller import KATAGO_PATH, CONFIG_FILE
 from utils.models import get_model, MODEL_HUMAN, MODEL_BEST_SMALL
 
@@ -31,13 +31,13 @@ TIMED_BATCHES = 100
 ANALYSIS_THREAD_FACTOR = 3.0
 # --- Helper Function for Query Generation ---
 
-def generate_random_query(query_id: str) -> dict:
+def generate_random_query(query_id: str, board_size: int) -> dict:
     """
     Generates a query with 2 black and 2 white stones placed randomly
-    on a board of size BOARD_SIZE.
+    on a board of size board_size.
     """
-    cols = "ABCDEFGHJKLMNOPQRST"[:BOARD_SIZE]  # No 'I' in Go coordinates
-    all_coords = [f"{c}{r}" for c in cols for r in range(1, BOARD_SIZE + 1)]
+    cols = "ABCDEFGHJKLMNOPQRST"[:board_size]  # No 'I' in Go coordinates
+    all_coords = [f"{c}{r}" for c in cols for r in range(1, board_size + 1)]
     try:
         positions = random.sample(all_coords, 4)
     except ValueError:
@@ -50,8 +50,8 @@ def generate_random_query(query_id: str) -> dict:
 
     return {
         "id": query_id, "moves": [], "initialStones": initial_stones,
-        "rules": "tromp-taylor", "komi": 7.5, "boardXSize": BOARD_SIZE,
-        "boardYSize": BOARD_SIZE, "maxVisits": 1,
+        "rules": "tromp-taylor", "komi": 7.5, "boardXSize": board_size,
+        "boardYSize": board_size, "maxVisits": 1,
         # "includePolicy": True, "overrideSettings": {"humanSLProfile": "rank_2d", "ignorePreRootHistory": False, "rootNumSymmetriesToSample": 1 }
     }
 
@@ -103,7 +103,7 @@ def update_config_file(config_path: str, batch_size: int):
         print(f"\nError: Failed to update config file: {e}", file=sys.stderr)
 
 
-def run_test(batch_size, best_queries_per_second, proc_holder=None):
+def run_test(batch_size, best_queries_per_second, board_size, proc_holder=None):
     # One-line status message for the current test
     print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
@@ -114,7 +114,7 @@ def run_test(batch_size, best_queries_per_second, proc_holder=None):
         "-override-config",
         f"numAnalysisThreads={analysis_threads},nnMaxBatchSize={batch_size},"
         f"numSearchThreadsPerAnalysisThread=1,"
-        f"maxBoardXSizeForNNBuffer={BOARD_SIZE},maxBoardYSizeForNNBuffer={BOARD_SIZE}",
+        f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}",
         # "-model", get_model(DEFAULT_MODEL), "-human-model", get_model(MODEL_HUMAN)
         "-model", get_model(DEFAULT_MODEL)
         # "-model", get_model(MODEL_BEST_SMALL)
@@ -146,7 +146,7 @@ def run_test(batch_size, best_queries_per_second, proc_holder=None):
         # batch sizes, total query bytes (~250B × N) and response bytes
         # easily exceed Linux's ~64KB default pipe size, so writing all
         # queries before reading any responses can deadlock both sides.
-        all_queries = [generate_random_query(f"q_{i}") for i in range(total_count)]
+        all_queries = [generate_random_query(f"q_{i}", board_size) for i in range(total_count)]
         write_error = [None]
 
         def writer():
@@ -197,12 +197,12 @@ def run_test(batch_size, best_queries_per_second, proc_holder=None):
             process.communicate()
 
 
-def run_test_in_thread(batch_size, best_queries_per_second):
+def run_test_in_thread(batch_size, best_queries_per_second, board_size):
     result = [0]  # shared between threads
     proc_holder = [None]  # the thread publishes its subprocess here
 
     def thread_target():
-        result[0] = run_test(batch_size, best_queries_per_second, proc_holder=proc_holder)
+        result[0] = run_test(batch_size, best_queries_per_second, board_size, proc_holder=proc_holder)
 
     thread = threading.Thread(target=thread_target)
     thread.start()
@@ -240,6 +240,8 @@ def main():
     Main function to run the batch size test.
     """
     parser = argparse.ArgumentParser(description='KataGo batch size optimization')
+    parser.add_argument('size', type=int, choices=ALL_BOARD_SIZES,
+                        help='Board size to tune the engine for (one of %(choices)s)')
     parser.add_argument('--batchsize', type=int, help='Set specific batch size and skip testing')
     parser.add_argument('--verbose', action='store_true', help='set verbose mode')
     args = parser.parse_args()
@@ -270,7 +272,7 @@ def main():
     print("--- Starting KataGo Throughput Test ---")
     while True:
 
-        queries_per_second = run_test_in_thread(batch_size, best_queries_per_second)
+        queries_per_second = run_test_in_thread(batch_size, best_queries_per_second, args.size)
         all_results.append((batch_size, queries_per_second))
 
         if queries_per_second == 0:

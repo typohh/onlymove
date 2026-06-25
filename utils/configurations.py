@@ -3,7 +3,6 @@ from datetime import datetime
 from utils.models import MODEL_FULL
 
 DEBUG = False
-BOARD_SIZE = 13
 ALL_BOARD_SIZES = (9, 13)
 DEFAULT_MODEL = MODEL_FULL
 KOMI = 6.5

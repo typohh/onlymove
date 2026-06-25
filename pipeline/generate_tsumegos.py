@@ -12,7 +12,7 @@ from utils.add_variations import (
     add_shallow_variations,
     generate_variations_directly_to_sgf,
 )
-from utils.configurations import BOARD_SIZE, DEBUG, DEFAULT_MODEL, debug
+from utils.configurations import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
 from utils.helper import construct_initial_sgf
 from utils.katago_controller import KatagoController
 from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
@@ -21,11 +21,12 @@ from utils.problem_finder import ProblemFinder
 from sgfmill import boards
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(BOARD_SIZE))
 
 print_lock = threading.Lock()
 stop_event = threading.Event()
 max_problems = None
+# Set in main() from the mandatory size arg: tsumegos/<size>/.
+OUTPUT_DIR = None
 
 
 class RunningStats:
@@ -174,15 +175,15 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
 
                     STATS.set_state("other")
                     # Compute board state for hashing
-                    board = boards.Board(BOARD_SIZE)
+                    board = boards.Board(queries.board_size)
                     player = 'b'
                     for move in moves:
                         if move != "pass":
-                            row, col = katago_to_sgf_coords(move, BOARD_SIZE)
+                            row, col = katago_to_sgf_coords(move, queries.board_size)
                             board.play(row, col, player)
                         player = 'w' if player == 'b' else 'b'
                     # 1. Construct initial SGF
-                    game,node,answer = construct_initial_sgf(moves, solution)
+                    game,node,answer = construct_initial_sgf(moves, solution, queries.board_size)
 
                     STATS.set_state("deep_variations")
                     generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True, None)
@@ -234,12 +235,15 @@ def print_stats(active_threads=0):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate tsumegos')
+    parser.add_argument('size', type=int, choices=ALL_BOARD_SIZES,
+                        help='Board size to generate tsumegos for (one of %(choices)s)')
     parser.add_argument('--max-problems', type=int, default=None,
                         help='Stop after this many problems have been generated')
     args = parser.parse_args()
 
-    global max_problems
+    global max_problems, OUTPUT_DIR
     max_problems = args.max_problems
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
 
     # Treat SIGHUP / SIGTERM as KeyboardInterrupt so the main try/finally runs
     # and KataGo gets stop_engine'd. tmux kill-session sends SIGHUP; without
@@ -254,10 +258,10 @@ def main():
     try:
         print("Starting KataGo engines...")
         controller = KatagoController()
-        controller.start_engine(get_model(DEFAULT_MODEL), verbose=DEBUG)
+        controller.start_engine(get_model(DEFAULT_MODEL), board_size=args.size, verbose=DEBUG)
         print("KataGo engines started.")
 
-        queries = KatagoQueries(controller)
+        queries = KatagoQueries(controller, args.size)
         problem_finder = ProblemFinder(queries)
         problem_finder.debug = DEBUG
 

@@ -4,7 +4,6 @@ import re
 import subprocess
 import threading
 
-from utils.configurations import BOARD_SIZE
 from utils.models import MODEL_HUMAN, get_model
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,11 +33,11 @@ class KatagoController:
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
 
-    def start_engine(self, model, human=False, verbose=False):
+    def start_engine(self, model, board_size, human=False, verbose=False):
         command = [
             KATAGO_PATH, "analysis",
             "-config", CONFIG_FILE,
-            "-override-config", f"maxBoardXSizeForNNBuffer={BOARD_SIZE},maxBoardYSizeForNNBuffer={BOARD_SIZE}",
+            "-override-config", f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}",
         ]
         command.extend(["-model", model])
         if human:

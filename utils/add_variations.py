@@ -1,4 +1,3 @@
-from utils.configurations import BOARD_SIZE
 from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
 from sgfmill import sgf
 
@@ -28,14 +27,15 @@ CALM_UTILITY_OVERRIDE = {
 }
 
 
-def get_child_move(node: sgf.Tree_node, color, move: str, has_to_exist=False):
+def get_child_move(node: sgf.Tree_node, color, move: str, board_size, has_to_exist=False):
     """
     Find the child node with a given move. If no such node exists, create a new one.
     - node: The parent sgf.Tree_node.
     - color: 'b' or 'w' for the player making the move.
     - move: The move in KataGo coordinate format (e.g., "D4", "pass").
+    - board_size: Board size, for KataGo→SGF coordinate conversion.
     """
-    target_move = katago_to_sgf_coords(move, BOARD_SIZE)
+    target_move = katago_to_sgf_coords(move, board_size)
 
     # Look for an existing child node with the same move
     for child in node:
@@ -74,11 +74,11 @@ def add_shallow_variations(queries: KatagoQueries, node: sgf.Tree_node, moves):
         response_move, winrate, score, _ = queries.get_best_move(response_result)
 
         # Add variation to SGF
-        var_node = get_child_move(node, player, move)
+        var_node = get_child_move(node, player, move, queries.board_size)
         var_node.set("C", f"{winrate * 100:.1f}%/{score:.1f}")
 
         response_player = "b" if player == "w" else "w"
-        response_node = get_child_move(var_node, response_player, response_move)
+        response_node = get_child_move(var_node, response_player, response_move, queries.board_size)
         response_node.set("C", f"{winrate * 100:.1f}%/{score:.1f}")
 
     return
@@ -131,7 +131,7 @@ def generate_variations_directly_to_sgf(
         new_cumulative_perc = cumulative_playout_perc * current_branch_perc
 
         # Create a new child node for this variation
-        var_node = get_child_move(parent_sgf_node, "b" if (len(current_moves) % 2 == 0) else "w", move_info["move"])
+        var_node = get_child_move(parent_sgf_node, "b" if (len(current_moves) % 2 == 0) else "w", move_info["move"], queries.board_size)
 
         if not var_node.has_property("C"):
             var_node.set("C", f"{move_info['winrate'] * 100:.1f}%/{move_info['scoreLead']:.1f}")
