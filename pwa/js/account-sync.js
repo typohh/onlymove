@@ -254,24 +254,21 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
     try {
         let sync = readSyncState();
         if (!sync) {
-            // First sync for this userId on this device. Local state already
-            // reflects everything this device did, so start from now; only an
-            // account switch rebuilds from the beginning.
-            sync = { userId: state.userId, cursor: new Date().toISOString() };
+            sync = { userId: state.userId };
             writeSyncState(sync);
         }
 
-        // Cursor mode. id mode (gap-free for historical-created_at rows) once a
-        // cursorId is known, or for any fromStart pull (sinceId 0). An existing
-        // device whose stored cursor is still a created_at string does ONE more
-        // legacy pull, then adopts the server frontier (serverMaxId) as cursorId
-        // and is on the id cursor thereafter.
-        const idMode = fromStart || Number.isInteger(sync.cursorId);
+        // Pure id cursor: page by AUTOINCREMENT id (gap-free for rows inserted
+        // with a historical created_at — an offline flush, a backfill). cursorId
+        // is established by the one-time migrateIdCursor() probe (existing
+        // devices) or advances from the first from-0 pull (fresh accounts /
+        // adoption); a fromStart pull always restarts at 0. The new client never
+        // sends the legacy created_at cursor.
         let sinceId = fromStart ? 0 : (Number.isInteger(sync.cursorId) ? sync.cursorId : 0);
-        let since = fromStart ? '' : (sync.cursor || '');
-        // A from-the-beginning pull (adoption / full refresh) evicts old rows to
-        // the cold tail mid-pull; only then must the synced fill cover the tail.
-        const startedFromBeginning = fromStart || (!idMode && since === '');
+        // A from-the-beginning pull (adoption / full refresh / a not-yet-migrated
+        // device) evicts old rows to the cold tail mid-pull; only then must the
+        // synced fill cover the tail.
+        const startedFromBeginning = fromStart || !Number.isInteger(sync.cursorId);
         let complete = false;
         let capExceeded = false;
         let refreshesLeft;
@@ -288,9 +285,7 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             const res = await fetch('/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(idMode
-                    ? { userId: sync.userId, sinceId }
-                    : { userId: sync.userId, since }),
+                body: JSON.stringify({ userId: sync.userId, sinceId }),
             });
             if (!res.ok) break;
             const body = await res.json().catch(() => null);
@@ -321,21 +316,12 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
                 }
             }
 
-            // Advance the cursor. Never move the persisted cursor backwards: a
-            // fromStart pull walks through old positions the normal cursor is
-            // already past.
-            if (idMode) {
-                if (Number.isInteger(body.cursorId) && body.cursorId > sinceId) {
-                    sinceId = body.cursorId;
-                    if (!Number.isInteger(sync.cursorId) || body.cursorId > sync.cursorId) {
-                        sync.cursorId = body.cursorId;
-                        writeSyncState(sync);
-                    }
-                }
-            } else if (typeof body.cursor === 'string' && body.cursor) {
-                since = body.cursor;
-                if (body.cursor > sync.cursor) {
-                    sync.cursor = body.cursor;
+            // Advance the id cursor. Never move it backwards: a fromStart pull
+            // walks through old ids the normal cursor is already past.
+            if (Number.isInteger(body.cursorId) && body.cursorId > sinceId) {
+                sinceId = body.cursorId;
+                if (!Number.isInteger(sync.cursorId) || body.cursorId > sync.cursorId) {
+                    sync.cursorId = body.cursorId;
                     writeSyncState(sync);
                 }
             }
@@ -344,21 +330,12 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
 
         lastPullAt = Date.now();
 
-        // Existing-device transition + seq-signal baseline from the latest
-        // summary. After a complete legacy drain, adopt the server frontier as
-        // cursorId ("cursor = now" in id space; the digest check backstops
-        // anything below it). Keep lastSeq (the seq-signal high-water) current.
-        if (lastBody) {
-            // Only adopt a real frontier (>0). An empty account (serverMaxId 0)
-            // stays on the cheap legacy created_at cursor — a cursorId of 0
-            // would send sinceId:0 and be billed as a full pull every time.
-            if (!idMode && complete && Number.isInteger(lastBody.serverMaxId) && lastBody.serverMaxId > 0) {
-                sync.cursorId = lastBody.serverMaxId;
-            }
-            if (Number.isFinite(lastBody.serverSeq) &&
-                (!Number.isFinite(sync.lastSeq) || lastBody.serverSeq > sync.lastSeq)) {
-                sync.lastSeq = lastBody.serverSeq;
-            }
+        // Keep lastSeq (the seq-signal high-water) current from the latest
+        // summary, so the next /report's userSeq is compared against the right
+        // baseline.
+        if (lastBody && Number.isFinite(lastBody.serverSeq) &&
+            (!Number.isFinite(sync.lastSeq) || lastBody.serverSeq > sync.lastSeq)) {
+            sync.lastSeq = lastBody.serverSeq;
             writeSyncState(sync);
         }
 
@@ -533,7 +510,7 @@ export function switchAccount(newId) {
     ];
     for (const k of wipeKeys) localStorage.removeItem(k);
     localStorage.setItem('userId', newId);
-    writeSyncState({ userId: newId, cursor: '' });
+    writeSyncState({ userId: newId });
     localStorage.setItem(SWITCH_FLAG_KEY, '1');
     location.reload();
     return true;
@@ -549,12 +526,13 @@ export async function accountExists(userId) {
         const res = await fetch('/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, since: '', limit: 1 }),
+            body: JSON.stringify({ userId, sinceId: 0, limit: 1 }),
         });
         if (!res.ok) return null;
         const body = await res.json().catch(() => null);
         if (!body || !Array.isArray(body.reports)) return null;
-        return body.reports.length > 0;
+        // serverMaxId > 0 OR any returned row ⇒ the account has reports.
+        return (Number.isInteger(body.serverMaxId) && body.serverMaxId > 0) || body.reports.length > 0;
     } catch {
         return null;
     }
@@ -573,12 +551,12 @@ export async function maybeFinishAccountSwitch() {
     // wipes localStorage but can't await an async IDB clear before reload), so
     // drop it (and its eviction tracking) before pulling the new account's history.
     await clearHistoryTail();
-    // Adoption is a since='' full pull, so it counts against the daily cap. If
-    // the account has already used its full pulls today the server returns
-    // capExceeded and no rows — the device adopts the account but stays empty
-    // until incremental sync fills it (next day, when the cap resets). Surface
-    // that to the caller so init can tell the user.
-    const result = await pullReports({ force: true, mode: 'adopt' });
+    // Adoption is a from-the-beginning full pull, so it counts against the daily
+    // cap. If the account has already used its full pulls today the server
+    // returns capExceeded and no rows — the device adopts the account but stays
+    // empty until incremental sync fills it (next day, when the cap resets).
+    // Surface that to the caller so init can tell the user.
+    const result = await pullReports({ force: true, mode: 'adopt', fromStart: true });
     if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
@@ -817,6 +795,50 @@ export async function flushOutbox({ force = false } = {}) {
     }
 }
 
+// --- One-time id-cursor migration (remove the flag once all clients have run) -
+// A device that synced under the old release has a created_at cursor and no
+// cursorId, and its old answer-history rows carry no serverId, so it can't
+// derive an id cursor from local data. This brings it onto the id cursor WITHOUT
+// ever calling the legacy created_at /sync branch — so that branch is needed
+// only by not-yet-reloaded old bundles and can be retired on the normal
+// client-update schedule (NOT "once every device has transitioned", which is
+// unbounded). It probes the current frontier (a limit:1 /sync — not billed
+// against the daily full-pull cap) and adopts it as cursorId ("cursor = now" in
+// id space); the steady-state digest check then reconciles any gap, including
+// the historical-below-cursor gap this redesign fixes. Idempotent + flag-gated.
+// A fresh/empty account (frontier 0) or a failed probe leaves cursorId unset —
+// steady state falls back to a from-0 pull, which is correct and cheap there.
+const ID_CURSOR_MIGRATED_KEY = 'idCursorMigrated_v1';
+
+async function probeFrontier(userId) {
+    try {
+        const res = await fetch('/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, sinceId: 0, limit: 1 }),
+        });
+        if (!res.ok) return null;
+        const body = await res.json().catch(() => null);
+        return (body && Number.isInteger(body.serverMaxId)) ? body.serverMaxId : null;
+    } catch {
+        return null;
+    }
+}
+
+async function migrateIdCursor() {
+    if (localStorage.getItem(ID_CURSOR_MIGRATED_KEY)) return;
+    const sync = readSyncState();
+    if (sync && !Number.isInteger(sync.cursorId)) {
+        const frontier = await probeFrontier(sync.userId);
+        if (frontier === null) return;  // probe failed — retry next load (no flag)
+        if (frontier > 0) {
+            sync.cursorId = frontier;
+            writeSyncState(sync);
+        }
+    }
+    localStorage.setItem(ID_CURSOR_MIGRATED_KEY, '1');
+}
+
 // Regular syncs: app load, tab becoming visible, and regaining connectivity.
 // No interval polling: an active session is kept in sync by the per-report seq
 // signal (checkSyncSignal). The outbox rides the load/visible/online pulls so
@@ -824,7 +846,8 @@ export async function flushOutbox({ force = false } = {}) {
 // digest check escalates to a reconcile if a gap is found. pullReports and the
 // outbox each throttle internally, so the three triggers can't pile up.
 export function startBackgroundSync() {
-    pullReports()
+    migrateIdCursor()
+        .then(() => pullReports())
         .then(() => flushOutbox())
         .catch(() => {});
     window.addEventListener('visibilitychange', () => {
