@@ -43,7 +43,8 @@ import { trainWeakness } from './weakness.js';
 import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
 import { momentumRankStep, replayMomentumRank, RANK_REPLAY_WINDOW } from './momentum-rank.js';
 import { fillSyncedHistoryFields } from './embedding-backfill.js';
-import { getTailServerCreatedAtSet } from './history-store.js';
+import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
+import { rowHash } from '../shared/sync-digest.js';
 import { updateAllUI } from './ui.js';
 
 const SYNC_STATE_KEY = 'accountSyncState';
@@ -83,18 +84,20 @@ export function isValidAccountCode(code) {
     return typeof code === 'string' && /^[A-Za-z0-9_-]{8}$/.test(code);
 }
 
-// Stamp the server-side created_at onto the answerHistory entry the report
-// described, so pulls can skip this device's own rows by exact match. Called
-// from sendReport with the /report response. The entry is created by
-// updateUserStats microtasks after sendReport fires, normally long before the
-// network roundtrip returns — the one retry covers the pathological ordering.
-export function recordReportAck(problemId, createdAt) {
+// Stamp the server-side created_at + row id onto the answerHistory entry the
+// report described, so pulls can skip this device's own rows (serverCreatedAt
+// is the dedup key; serverId is the id-cursor / digest key). Called from
+// sendReport with the /report response. The entry is created by updateUserStats
+// microtasks after sendReport fires, normally long before the network roundtrip
+// returns — the one retry covers the pathological ordering.
+export function recordReportAck(problemId, createdAt, serverId = null) {
     const attach = () => {
         const history = state.answerHistory;
         for (let i = history.length - 1; i >= 0; i--) {
             const a = history[i];
             if (a.problemId === problemId && !a.serverCreatedAt) {
                 a.serverCreatedAt = createdAt;
+                if (Number.isFinite(serverId)) a.serverId = serverId;
                 updateAnswerHistory(history);
                 return true;
             }
@@ -146,6 +149,7 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
         }
         if (best) {
             best.serverCreatedAt = row.createdAt;
+            if (Number.isFinite(row.id)) best.serverId = row.id;
             claimed++;
             continue;
         }
@@ -155,6 +159,7 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
             correct: !!row.success,
             date: ts,
             serverCreatedAt: row.createdAt,
+            serverId: Number.isFinite(row.id) ? row.id : undefined,
             timeTaken: typeof row.timeUsed === 'number' ? row.timeUsed : 0,
             reviewTime: 0,
             accumulatedReview: typeof row.reviewTime === 'number' ? row.reviewTime : 0,
@@ -251,23 +256,29 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
         if (!sync) {
             // First sync for this userId on this device. Local state already
             // reflects everything this device did, so start from now; only an
-            // account switch rebuilds from ''.
+            // account switch rebuilds from the beginning.
             sync = { userId: state.userId, cursor: new Date().toISOString() };
             writeSyncState(sync);
         }
 
-        let since = fromStart ? '' : sync.cursor;
-        // A from-the-beginning pull (adoption or a full refresh) evicts old rows
-        // to the cold tail mid-pull; only then must the synced fill cover the
-        // tail. Incremental pulls only ever merge recent rows (working set), so
-        // they skip the tail scan.
-        const startedFromBeginning = since === '';
+        // Cursor mode. id mode (gap-free for historical-created_at rows) once a
+        // cursorId is known, or for any fromStart pull (sinceId 0). An existing
+        // device whose stored cursor is still a created_at string does ONE more
+        // legacy pull, then adopts the server frontier (serverMaxId) as cursorId
+        // and is on the id cursor thereafter.
+        const idMode = fromStart || Number.isInteger(sync.cursorId);
+        let sinceId = fromStart ? 0 : (Number.isInteger(sync.cursorId) ? sync.cursorId : 0);
+        let since = fromStart ? '' : (sync.cursor || '');
+        // A from-the-beginning pull (adoption / full refresh) evicts old rows to
+        // the cold tail mid-pull; only then must the synced fill cover the tail.
+        const startedFromBeginning = fromStart || (!idMode && since === '');
         let complete = false;
         let capExceeded = false;
         let refreshesLeft;
+        let lastBody = null;
         const insertedEntries = [];
         const touchedSizes = new Set();
-        // Dedup also against the cold tail, not just the working set. Snapshot it
+        // Dedup against the cold tail too, not just the working set. Snapshot it
         // once up front: rows evicted DURING this pull were merged this pull (so
         // already in the working-set known-set), and /sync pages are disjoint by
         // cursor, so no row re-arrives within one pull.
@@ -277,14 +288,17 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             const res = await fetch('/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: sync.userId, since }),
+                body: JSON.stringify(idMode
+                    ? { userId: sync.userId, sinceId }
+                    : { userId: sync.userId, since }),
             });
             if (!res.ok) break;
             const body = await res.json().catch(() => null);
             if (!body || !Array.isArray(body.reports)) break;
-            // The server caps full-from-beginning pulls (since='') per day; page 0
-            // of such a pull may come back capExceeded. (Pages 2+ carry a real
-            // cursor and are never capped.) refreshesLeft rides those responses.
+            lastBody = body;
+            // The server caps full-from-beginning pulls per day; page 0 of such
+            // a pull may come back capExceeded. (Pages 2+ carry a real cursor and
+            // are never capped.) refreshesLeft rides those responses.
             if (typeof body.refreshesLeft === 'number') refreshesLeft = body.refreshesLeft;
             if (body.capExceeded) { capExceeded = true; break; }
 
@@ -296,9 +310,9 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             }
             for (const [size, rows] of bySize) {
                 // Hand the raw rows to an optional observer BEFORE the merge
-                // mutates anything — round-2 enrichment soft-matches against
-                // them (it needs every server row, incl. the already-claimed
-                // pre-era originals the merge skips).
+                // mutates anything — the outbox's first-run claim soft-matches
+                // against them (it needs every server row, incl. the already-
+                // claimed pre-era originals the merge skips).
                 if (rowSink) rowSink(size, rows);
                 const inserted = mergeRowsForSize(size, rows, tailKnown);
                 if (inserted.length > 0) {
@@ -307,10 +321,19 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
                 }
             }
 
-            if (typeof body.cursor === 'string' && body.cursor) {
+            // Advance the cursor. Never move the persisted cursor backwards: a
+            // fromStart pull walks through old positions the normal cursor is
+            // already past.
+            if (idMode) {
+                if (Number.isInteger(body.cursorId) && body.cursorId > sinceId) {
+                    sinceId = body.cursorId;
+                    if (!Number.isInteger(sync.cursorId) || body.cursorId > sync.cursorId) {
+                        sync.cursorId = body.cursorId;
+                        writeSyncState(sync);
+                    }
+                }
+            } else if (typeof body.cursor === 'string' && body.cursor) {
                 since = body.cursor;
-                // Never move the persisted cursor backwards: a fromStart pull
-                // walks through old timestamps the normal cursor is already past.
                 if (body.cursor > sync.cursor) {
                     sync.cursor = body.cursor;
                     writeSyncState(sync);
@@ -320,6 +343,25 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
         }
 
         lastPullAt = Date.now();
+
+        // Existing-device transition + seq-signal baseline from the latest
+        // summary. After a complete legacy drain, adopt the server frontier as
+        // cursorId ("cursor = now" in id space; the digest check backstops
+        // anything below it). Keep lastSeq (the seq-signal high-water) current.
+        if (lastBody) {
+            // Only adopt a real frontier (>0). An empty account (serverMaxId 0)
+            // stays on the cheap legacy created_at cursor — a cursorId of 0
+            // would send sinceId:0 and be billed as a full pull every time.
+            if (!idMode && complete && Number.isInteger(lastBody.serverMaxId) && lastBody.serverMaxId > 0) {
+                sync.cursorId = lastBody.serverMaxId;
+            }
+            if (Number.isFinite(lastBody.serverSeq) &&
+                (!Number.isFinite(sync.lastSeq) || lastBody.serverSeq > sync.lastSeq)) {
+                sync.lastSeq = lastBody.serverSeq;
+            }
+            writeSyncState(sync);
+        }
+
         if (insertedEntries.length > 0) {
             console.log(`account-sync: merged ${insertedEntries.length} foreign attempts (sizes: ${[...touchedSizes].join(', ')})`);
             try {
@@ -332,12 +374,62 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
             }
             retrainAfterMerge(insertedEntries, mode);
         }
+
+        // Cheap divergence backstop: after an incremental feed pull, confirm the
+        // local acked-row count (and content digest) matches the server's. A
+        // gap the incremental pull couldn't close (a below-cursor legacy row)
+        // escalates to a full reconcile. Deferred a tick so it runs AFTER
+        // pullInFlight is released (the reconcile is itself a pullReports).
+        // fromStart / reconcile pulls ARE the reconcile, so they never re-check.
+        if (!fromStart && mode === 'feed' && lastBody && lastBody.serverSeq != null) {
+            const ss = lastBody.serverSeq, sd = lastBody.serverDigest;
+            setTimeout(() => { checkInSync(ss, sd).catch(() => {}); }, 0);
+        }
+
         return { inserted: insertedEntries.length, complete, capExceeded, refreshesLeft };
     } catch (e) {
         console.warn('account-sync: pull failed:', e);
         return { inserted: 0, complete: false };
     } finally {
         pullInFlight = false;
+    }
+}
+
+// Local count of ACKED rows (working set + cold tail) and Σ rowHash(serverId)
+// over them. Compared against the server's user_seq / digest. The content sum
+// is valid only when every acked row carries a serverId (allHaveId) — during
+// the rollout, rows acked before the id field existed don't, so the check falls
+// back to count-only until a reconcile repopulates them.
+async function computeLocalDigest() {
+    let ackedCount = 0, idSum = 0, allHaveId = true;
+    for (const a of getMergedAnswerHistory()) {
+        if (!a.serverCreatedAt) continue;
+        ackedCount++;
+        if (Number.isFinite(a.serverId)) idSum += rowHash(a.serverId);
+        else allHaveId = false;
+    }
+    try {
+        const t = await getTailDigestInfo();
+        ackedCount += t.ackedCount;
+        idSum += t.idSum;
+        if (!t.allHaveId) allHaveId = false;
+    } catch (_) { /* tail unavailable → working-set-only digest */ }
+    return { ackedCount, idSum, allHaveId };
+}
+
+// Backstop divergence check (after an incremental pull). serverSeq null = the
+// server's latest row isn't seeded yet (no post-migration report); skip.
+async function checkInSync(serverSeq, serverDigest) {
+    if (!Number.isFinite(serverSeq)) return;
+    const { ackedCount, idSum, allHaveId } = await computeLocalDigest();
+    if (ackedCount < serverSeq) {
+        console.log(`account-sync: digest gap (acked ${ackedCount} < server ${serverSeq}) — full reconcile`);
+        await refreshHistoryFromServer();
+        return;
+    }
+    if (allHaveId && ackedCount === serverSeq && Number.isFinite(serverDigest) && idSum !== serverDigest) {
+        console.log(`account-sync: digest content mismatch (Σ ${idSum} != server ${serverDigest}) — full reconcile`);
+        await refreshHistoryFromServer();
     }
 }
 
@@ -560,23 +652,40 @@ export async function refreshHistoryFromServer() {
 const SIGNAL_DEBOUNCE_MS = 60 * 1000;
 let lastSignalPullAt = 0;
 
-export function checkSyncSignal(prevCreatedAt) {
-    if (typeof prevCreatedAt !== 'string' || !prevCreatedAt) return;
+function maybeSignalPull() {
+    const now = Date.now();
+    if (now - lastSignalPullAt < SIGNAL_DEBOUNCE_MS) return;
+    lastSignalPullAt = now;
+    pullReports({ force: true });
+}
+
+// Called from sendReport with the /report response. Two signals, seq preferred:
+//   - userSeq (the server's per-profile attempt count incl. this report): if it
+//     lands past lastSeq+1, another device wrote in between → pull. lastSeq is
+//     advanced to it either way (and also from /sync's serverSeq). This is the
+//     in-sync signal that lets an active session need no polling.
+//   - prevCreatedAt (legacy, for Workers that don't return userSeq): the user's
+//     latest report before this one; unrecognized → another device wrote → pull.
+export function checkSyncSignal(prevCreatedAt, userSeq) {
     const sync = readSyncState();
-    // ISO timestamps compare lexicographically = chronologically.
-    if (sync && prevCreatedAt <= sync.cursor) return;
-    // One of our own acked rows? Scan backwards — the match is almost always
-    // among the most recent entries.
+    if (sync && Number.isFinite(userSeq)) {
+        const expected = Number.isFinite(sync.lastSeq) ? sync.lastSeq + 1 : userSeq;
+        const foreign = userSeq > expected;
+        sync.lastSeq = userSeq;
+        writeSyncState(sync);
+        if (foreign) maybeSignalPull();
+        return;
+    }
+    // Legacy fallback.
+    if (typeof prevCreatedAt !== 'string' || !prevCreatedAt) return;
+    if (sync && sync.cursor && prevCreatedAt <= sync.cursor) return;
     for (const size of SUPPORTED_BOARD_SIZES) {
         const history = getAnswerHistoryForSize(size);
         for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].serverCreatedAt === prevCreatedAt) return;
         }
     }
-    const now = Date.now();
-    if (now - lastSignalPullAt < SIGNAL_DEBOUNCE_MS) return;
-    lastSignalPullAt = now;
-    pullReports({ force: true });
+    maybeSignalPull();
 }
 
 // --- One-off historical backfill (TEMPORARY — remove with /report-backfill) --

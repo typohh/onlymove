@@ -126,17 +126,22 @@ export async function handleSync(request, env) {
     // Per-profile digest summary (the user's latest row), so an up-to-date
     // device can confirm it is in sync without making a /report: compare
     // serverSeq to its local row count and serverDigest to its local
-    // Σ rowHash(serverId). O(1) via idx_tsumego_reports_user_id.
-    //   - no rows at all      → serverSeq 0,    serverDigest 0
+    // Σ rowHash(serverId). O(1) via idx_tsumego_reports_user_id. serverMaxId is
+    // the current id frontier — an existing device adopting the id cursor for
+    // the first time inits cursorId to it ("cursor = now" in id space; the
+    // digest check backstops any rows that skips).
+    //   - no rows at all      → serverSeq 0,    serverDigest 0,   serverMaxId 0
     //   - rows exist, unseeded (latest row predates the digest columns and the
     //     user hasn't reported since) → serverSeq null (client skips the check
-    //     until the user's first post-migration /report seeds it)
+    //     until the user's first post-migration /report seeds it); serverMaxId
+    //     is still the real frontier so the cursor can migrate.
     //   - seeded              → the real values
-    let serverSeq = 0, serverDigest = 0;
+    let serverSeq = 0, serverDigest = 0, serverMaxId = 0;
     const latest = await env.DB.prepare(
       `SELECT id, user_seq, running_sum FROM tsumego_reports WHERE user_id = ? ORDER BY id DESC LIMIT 1`
     ).bind(data.userId).first();
     if (latest) {
+      serverMaxId = latest.id;
       if (latest.user_seq != null && latest.running_sum != null) {
         serverSeq = latest.user_seq;
         serverDigest = latest.running_sum + rowHash(latest.id);
@@ -145,7 +150,7 @@ export async function handleSync(request, env) {
       }
     }
 
-    const payload = { reports, cursor, cursorId, hasMore, serverSeq, serverDigest };
+    const payload = { reports, cursor, cursorId, hasMore, serverSeq, serverDigest, serverMaxId };
     if (refreshesLeft !== undefined) payload.refreshesLeft = refreshesLeft;
     return new Response(JSON.stringify(payload), {
       status: 200,

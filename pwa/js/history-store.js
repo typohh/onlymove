@@ -20,6 +20,8 @@
 //     working set, so an unavailable tail degrades to "charts show the working
 //     set only" rather than losing attempts.
 
+import { rowHash } from '../shared/sync-digest.js';
+
 const DB_NAME = 'onlymove';
 const DB_VERSION = 1;
 const STORE = 'answerHistoryTail';
@@ -137,6 +139,37 @@ export async function getTail() {
 // full row array). The sync merge dedups against this so a re-pull of rows long
 // since evicted to the tail can't re-insert them as duplicates. Empty set if
 // unavailable.
+// One cold-tail scan for the sync digest: how many tail rows are acked
+// (serverCreatedAt present), the Σ rowHash(serverId) over those that carry a
+// serverId, and whether every acked row has one (allHaveId=false disables the
+// content check, leaving the count check). Defensive: empty info on any error.
+export async function getTailDigestInfo() {
+    const db = await openDB();
+    const info = { ackedCount: 0, idSum: 0, allHaveId: true };
+    if (!db) return info;
+    return new Promise((resolve) => {
+        let req;
+        try {
+            req = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+        } catch {
+            resolve(info);
+            return;
+        }
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) { resolve(info); return; }
+            const v = cursor.value;
+            if (v && v.serverCreatedAt) {
+                info.ackedCount++;
+                if (Number.isFinite(v.serverId)) info.idSum += rowHash(v.serverId);
+                else info.allHaveId = false;
+            }
+            cursor.continue();
+        };
+        req.onerror = () => resolve(info);
+    });
+}
+
 export async function getTailServerCreatedAtSet() {
     const db = await openDB();
     const set = new Set();
