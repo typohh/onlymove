@@ -43,22 +43,6 @@ import { getTerm } from './i18n.js';
 import { initAudio } from './audio.js';
 
 /**
- * Cleans the URL by removing the 'id' parameter, the size-hint path
- * (`/9` or `/13`), and 'index.html'. The path always collapses to '/'
- * so the deep-link doesn't stick in the address bar.
- */
-function cleanUrl() {
-    const url = new URL(window.location);
-    url.searchParams.delete('id');
-    url.searchParams.delete('recall');
-    let newPath = url.pathname.replace(/index\.html$/, '');
-    if (/^\/(9|13)\/?$/.test(newPath)) {
-        newPath = '/';
-    }
-    window.history.replaceState({}, '', newPath + url.search + url.hash);
-}
-
-/**
  * Reads `/9` or `/13` from the pathname. Returns null if the path is anything
  * else. The caller decides whether to apply it as a size hint.
  */
@@ -500,8 +484,9 @@ async function resolveInitialBoardSize(tsumegoId) {
 
 // Load the first problem under the initial spinner: a shared link (?id), a
 // recall-notification intent (?recall=1), or the standing challenge / due
-// recall on a plain open. hideLoading() is left to the caller (after cleanUrl +
-// first paint).
+// recall on a plain open. hideLoading() is left to the caller (after first
+// paint). The URL is cleaned by displayProblem (only for non-linked problems, so
+// a shared problem's deep-link survives a reload) — see cleanUrl in problem-loader.
 async function loadInitialProblem({ urlParams, tsumegoId, wantsRecall, orientation, orientationParam }) {
     // Spinner over the initial problem load (fetching/parsing the zip archive)
     // so cold loads don't sit on a blank board. Lifted after the first paint.
@@ -704,8 +689,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const intent = parseUrlIntent();
     await resolveInitialBoardSize(intent.tsumegoId);
     await loadInitialProblem(intent);
-
-    cleanUrl();
 
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();

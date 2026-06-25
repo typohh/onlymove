@@ -281,12 +281,35 @@ function loadNextZip() {
 const MAX_LOAD_ATTEMPTS = 5;
 const RELOAD_COOLDOWN_MS = 30000;
 
+// Strips the share/deep-link params (`?id`/`?o`/`?recall`) and the entry-only
+// `/9`|`/13` size-hint path, collapsing the address bar to `/`. We deliberately
+// do NOT clean while a linked (shared) problem is on screen — its `?id`/`?o`
+// stay in the URL so that ANY reload (a service-worker update takeover, a manual
+// refresh, an in-app-browser reload) re-enters the SAME shared problem at boot
+// instead of silently dropping the user onto the standing challenge. The URL is
+// cleaned the moment they move on to a non-linked problem — every such transition
+// repaints through displayProblem below. No-ops once the URL is already clean.
+function cleanUrl() {
+    const url = new URL(window.location);
+    url.searchParams.delete('id');
+    url.searchParams.delete('o');
+    url.searchParams.delete('recall');
+    let newPath = url.pathname.replace(/index\.html$/, '');
+    if (/^\/(9|13)\/?$/.test(newPath)) newPath = '/';
+    const next = newPath + url.search + url.hash;
+    const current = window.location.pathname + window.location.search + window.location.hash;
+    if (next !== current) window.history.replaceState({}, '', next);
+}
+
 // Installs a ready (SGF-carrying) problem as the on-screen problem: sets it as
 // currentProblem, paints the board, resets the solve timer, re-enables clicks.
 // Throws if the SGF won't load so the caller can blacklist + reselect.
 function displayProblem(problem, appMode) {
     setCurrentProblem(problem);
     setAppMode(appMode);
+    // Keep a shared problem's deep-link in the address bar so a reload re-enters
+    // it; strip it the instant we paint any non-linked problem (see cleanUrl).
+    if (appMode !== APP_MODES.LINKED) cleanUrl();
     try {
         loadSgf(problem.sgf);
     } catch (error) {
