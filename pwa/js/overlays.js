@@ -6,6 +6,28 @@ import { TOTAL_RANKS } from './constants.js';
 
 const boardContainer = document.getElementById('board-container');
 
+// Signed time change for the recall-impact overlay, in the largest unit that keeps
+// the number readable: seconds under a minute, minutes under an hour, else hours.
+function formatRecallDelta(deltaHours) {
+    const sign = deltaHours >= 0 ? '+' : '−';
+    const secs = Math.abs(deltaHours) * 3600;
+    if (secs < 60) return `${sign}${Math.round(secs)} s`;
+    if (secs < 3600) return `${sign}${Math.round(secs / 60)} min`;
+    return `${sign}${(secs / 3600).toFixed(1)} h`;
+}
+
+// One line, like the rank change: how much this recall answer moved the time until
+// first repeat of a generic problem (e.g. "+7 min repeat delay").
+function appendRecallImpact(container, { beforeHours, afterHours }) {
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+        fontSize: `${boardContainer.offsetWidth / 20}px`,
+        marginBottom: '20px',
+    });
+    el.textContent = getTerm('recallDelayFormat', { change: formatRecallDelta(afterHours - beforeHours) });
+    container.appendChild(el);
+}
+
 function createOverlayContent(stats, message, textColor) {
     const container = document.createElement('div');
     Object.assign(container.style, {
@@ -18,7 +40,11 @@ function createOverlayContent(stats, message, textColor) {
         textAlign: 'center',
     });
 
-    if (stats && stats.rankChange) {
+    if (stats && stats.recallImpact) {
+        // Recall (repeat) attempt: the rank barely moves, so show how this answer
+        // shifted the time until first repeat of a generic problem instead.
+        appendRecallImpact(container, stats.recallImpact);
+    } else if (stats && stats.rankChange) {
         const rankChange = stats.rankChange;
         if (rankChange !== 0) {
             const rankChangeInUnits = rankChange * TOTAL_RANKS;

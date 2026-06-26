@@ -5,7 +5,7 @@ import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { TOTAL_RANKS } from './constants.js';
-import { calculateAndStoreStatsResults } from './model.js';
+import { calculateAndStoreStatsResults, freshFailureReviewHours } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, checkSyncSignal } from './account-sync.js';
 // The live rank is a linear-information window 4PL MLE over the recent first-time
@@ -140,13 +140,16 @@ export async function updateUserStats(isCorrect, {
 
     const problemId = tsumegoIdOf(currentProblem.filename);
     let successSinceFailure;
+    // The prior attempt on this problem — kept for the recall-impact overlay below
+    // (its date gives the elapsed gap, its streak the r going into this attempt).
+    let recallLastAnswer = null;
     if (currentProblem.isRepeat) {
         const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
-        const lastAnswer = previousAnswers.pop();
+        recallLastAnswer = previousAnswers.length ? previousAnswers[previousAnswers.length - 1] : null;
         if (!isCorrect) {
             successSinceFailure = 0;
         } else {
-            successSinceFailure = (lastAnswer && lastAnswer.successSinceFailure !== undefined) ? lastAnswer.successSinceFailure + 1 : 1;
+            successSinceFailure = (recallLastAnswer && recallLastAnswer.successSinceFailure !== undefined) ? recallLastAnswer.successSinceFailure + 1 : 1;
         }
     } else if (!isCorrect) {
         successSinceFailure = 0;
@@ -231,21 +234,46 @@ export async function updateUserStats(isCorrect, {
     if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
     else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
 
-    // Recall + weakness models retrain off the merged history. Their training
-    // loops block the main thread (~up to 2s worst case), so we schedule them on
-    // browser idle time: requestIdleCallback fires only once the thread is free,
-    // so the work lands DURING the result overlay without janking its fade-in or
-    // the next-problem load (incorrect-path overlays sit idle while shown;
-    // correct-path runs it once the load settles). The `timeout` guarantees it
-    // still runs on a page that never goes idle. Nothing needs the fresh model
-    // before the overlay — the incorrect-path overlay message only needs stable
-    // coefficients, not this attempt folded in.
-    scheduleIdle(() => { calculateAndStoreStatsResults(); });
+    // For a recall (repeat) attempt the rank barely moves (rank is fit on
+    // first-time attempts only). Instead the overlay shows how recording this
+    // answer ACTUALLY changed the recall model: we run the real model retrain now
+    // — the same fit the idle path runs — and measure the time until first repeat
+    // of a generic problem before vs after teaching it this attempt. No formula,
+    // no shortcut, no cap: the delta is the genuine before/after the model
+    // produces (a correct recall generally pushes it later, a miss earlier, but
+    // since it's the real retrain over a finite window the magnitude — and rarely
+    // the sign — is whatever the model actually learns). Worth the synchronous
+    // retrain block (≤~2s, usually far less warm-started) because the overlay
+    // cannot report the true value without first training on the answer.
+    let recallImpact = null;
+    if (currentProblem.isRepeat) {
+        // Typical recall difficulty across both sizes, so the displayed generic
+        // delay tracks the stats panel's figure; fall back to the user's rank.
+        const repeatRanks = getMergedAnswerHistory()
+            .filter(p => p.isRepeat && typeof p.problemRank === 'number')
+            .map(p => p.problemRank);
+        const genericProblemRank = repeatRanks.length
+            ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length
+            : state.userRank;
+        const opts = { problemRank: genericProblemRank, size: state.boardSize, userRank: state.userRank };
+        const beforeHours = freshFailureReviewHours(state.modelParams, opts);
+        await calculateAndStoreStatsResults();   // teach the model this answer
+        const afterHours = freshFailureReviewHours(state.modelParams, opts);
+        if (beforeHours !== null && afterHours !== null) {
+            recallImpact = { beforeHours, afterHours };
+        }
+    } else {
+        // First-time attempt: nothing to display. Keep the retrain off the
+        // critical path — deferred to browser idle (requestIdleCallback fires once
+        // the thread is free, with a timeout fallback) so it never janks the
+        // overlay fade-in or the next-problem load.
+        scheduleIdle(() => { calculateAndStoreStatsResults(); });
+    }
     scheduleIdle(trainWeakness);
     // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
     // active user is suppressed by the cron anyway, so per-attempt replace-all
     // writes were pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect };
+    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, recallImpact };
 }
