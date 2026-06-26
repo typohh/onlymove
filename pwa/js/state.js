@@ -2,11 +2,6 @@
 import { APP_MODES, ANSWER_HISTORY_WORKING_SET } from './constants.js';
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
-// The momentum-rank loop constants/guards live in momentum-rank.js (the pure
-// step function shared by user-stats.js and the account-sync replay);
-// re-exported here for the existing importers.
-import { DEFAULT_MOMENTUM, MOMENTUM_MAX, clampMomentum } from './momentum-rank.js';
-export { MOMENTUM_MIN, MOMENTUM_MAX, clampMomentum } from './momentum-rank.js';
 
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
@@ -24,7 +19,6 @@ const DEFAULT_BOARD_SIZE = 9;
         'problemHistory',
         'answerHistory',
         'nextTsumego',
-        'momentum',
         'modelParams',
         'adamState',
         'weaknessParams',
@@ -64,30 +58,23 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.setItem('boardSizeMigrated_v1', 'true');
 })();
 
-// --- Cross-size merge: rank, momentum, and the learned models are now shared ---
+// --- Cross-size merge: rank and the learned models are now shared ---
 // The two board sizes share one rank (displayed everywhere, used to pick
 // problems) and one each of the recall + weakness models (trained on the union
 // of both histories — every per-problem feature they read is board-independent).
 // This migration collapses the per-size buckets v1 created back into single
 // values: rank = max of the two (a strong 9x9 player should immediately see
-// hard 13x13 problems), momentum follows the higher-ranked size, and the model
-// buckets are dropped so the shared models retrain from scratch on next load.
-// answerHistory and challengeProblem stay per-size.
+// hard 13x13 problems), and the model buckets are dropped so the shared models
+// retrain from scratch on next load. answerHistory and challengeProblem stay per-size.
 (function mergeSharedAcrossSizes_v2() {
     if (localStorage.getItem('sharedAcrossSizesMigrated_v2')) return;
 
     const rankBucket = readJSONObject('userRank');
-    let maxRank = 0, maxRankSize = null;
-    for (const [sz, v] of Object.entries(rankBucket)) {
-        if (typeof v === 'number' && v > maxRank) { maxRank = v; maxRankSize = sz; }
+    let maxRank = 0;
+    for (const v of Object.values(rankBucket)) {
+        if (typeof v === 'number' && v > maxRank) maxRank = v;
     }
     localStorage.setItem('userRank', JSON.stringify(maxRank));
-
-    const momentumBucket = readJSONObject('momentum');
-    const momentum = (maxRankSize !== null && typeof momentumBucket[maxRankSize] === 'number')
-        ? momentumBucket[maxRankSize]
-        : 30;
-    localStorage.setItem('momentum', JSON.stringify(momentum));
 
     // Models retrain from scratch — drop the per-size buckets entirely.
     for (const key of ['modelParams', 'adamState', 'weaknessParams',
@@ -118,35 +105,6 @@ const DEFAULT_BOARD_SIZE = 9;
     localStorage.setItem('recallRetentionModelMigrated_v5', 'true');
 })();
 
-// --- Repair momentum corrupted by the a_p² scalingFactor bug ---
-// The front-page momentum rank loop in user-stats.js was written when `quality`
-// was a normalized [0,1] weight, so its scalingFactor stayed ≤ 1. The v2 rating
-// migration redefined `quality` as the RAW Fisher-information selection weight
-// a_p² (median ~6, up to ~20). Fed into the failure recurrence
-// m ← m − sf·(2m−1)/3 — stable only for sf < 3 — momentum became an unstable
-// oscillator: it diverged and flipped sign every wrong answer, and a NEGATIVE
-// momentum inverts the rank update (a win lowers the rank, a loss raises it),
-// producing the wild 8d↔50k swings users reported. user-stats.js now bounds
-// scalingFactor and clamps momentum every step, but momentum already persisted in
-// a corrupt state must be reset once. A negative, non-finite, or runaway
-// (> MOMENTUM_MAX) value is unambiguously corrupt → reset to default and flag so
-// main.js can also re-anchor the (likely wrecked) rank from the user's history.
-(function repairCorruptedMomentum_v3() {
-    if (localStorage.getItem('momentumCorruptionRepaired_v3')) return;
-    const raw = localStorage.getItem('momentum');
-    if (raw !== null) {
-        let m = null;
-        try { m = JSON.parse(raw); } catch { m = parseFloat(raw); }
-        if (typeof m !== 'number' || !Number.isFinite(m) || m <= 0 || m > MOMENTUM_MAX) {
-            localStorage.setItem('momentum', JSON.stringify(DEFAULT_MOMENTUM));
-            // Rank may have been driven to an extreme by the inverted update;
-            // main.js re-anchors it to the skill decomposition (needs M + the
-            // merged history, both only available after async init).
-            localStorage.setItem('rankNeedsReanchor_v3', 'true');
-        }
-    }
-    localStorage.setItem('momentumCorruptionRepaired_v3', 'true');
-})();
 
 // --- Challenge-model migration ---
 // The "which problem is shown" state used to be a 2-slot `problemHistory` array
@@ -367,12 +325,16 @@ export async function syncTailExpectedToActual() {
 }
 
 // --- Shared-across-sizes state (single values, not bucketed). ---
-// rank + momentum are one control loop over a single shared rank; the recall
-// (modelParams/adamState) and weakness (weaknessParams/Adam/Se/AxisCov) models
-// train on the union of both sizes' histories. See mergeSharedAcrossSizes_v2.
+// The single shared rank is the window-MLE estimate (rank-decomposition
+// .estimateWindowRank); the recall (modelParams/adamState) and weakness
+// (weaknessParams/Adam/Se/AxisCov) models train on the union of both sizes'
+// histories. See mergeSharedAcrossSizes_v2.
 const shared = {
     userRank: readJSON('userRank', null),
-    momentum: readJSON('momentum', null),
+    // serveRank = userRank + the UCB serve bonus (uncertainty-scaled), in the same
+    // normalized 0..1 units. Problem SELECTION serves near serveRank (slightly harder
+    // while the rank estimate is still uncertain); everything DISPLAYED reads userRank.
+    serveRank: readJSON('serveRank', null),
     modelParams: readJSON('modelParams', null),
     adamState: readJSON('adamState', null),
     weaknessParams: readJSON('weaknessParams', null),
@@ -388,8 +350,8 @@ const shared = {
 // The 6 model/weakness shared values below share an identical accessor pair —
 // `get` returns the stored value or null, `set` assigns and persists. They're
 // defined on `state` via a loop after the object literal (see defineSharedNull)
-// to avoid six copies of the same template. userRank and momentum differ (they
-// have numeric defaults), so they keep explicit accessors in the literal.
+// to avoid six copies of the same template. userRank and serveRank differ (they
+// have non-null fallbacks), so they keep explicit accessors in the literal.
 const NULLABLE_SHARED_KEYS = [
     'modelParams', 'adamState',
     'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
@@ -448,8 +410,7 @@ const getOrCreateUserId = () => {
     return userId;
 };
 
-// Defaults applied when a size's bucket is empty. (DEFAULT_MOMENTUM and the
-// momentum bounds are defined at the top of the file, alongside clampMomentum.)
+// Default applied when a size's bucket is empty.
 const DEFAULT_USER_RANK = 0;
 
 export const state = {
@@ -556,6 +517,16 @@ export const state = {
         writeJSON('userRank', v);
     },
 
+    // Serve rank (estimate + UCB bonus). Falls back to the displayed rank before any
+    // estimate has run, so a fresh device serves at-level until the first attempt.
+    get serveRank() {
+        return typeof shared.serveRank === 'number' ? shared.serveRank : this.userRank;
+    },
+    set serveRank(v) {
+        shared.serveRank = v;
+        writeJSON('serveRank', v);
+    },
+
     get challengeProblem() {
         return perSize.challengeProblem[_boardSize] ?? null;
     },
@@ -585,14 +556,6 @@ export const state = {
     },
     set answerHistory(v) {
         reconcileSize(_boardSize, v);
-    },
-
-    get momentum() {
-        return typeof shared.momentum === 'number' ? shared.momentum : DEFAULT_MOMENTUM;
-    },
-    set momentum(v) {
-        shared.momentum = v;
-        writeJSON('momentum', v);
     },
 
     // modelParams / adamState / weakness{Params,Adam,Se,AxisCov} accessors are
@@ -721,8 +684,8 @@ export function updateUserRank(rank) {
     state.userRank = rank;
 }
 
-export function updateMomentum(momentum) {
-    state.momentum = momentum;
+export function updateServeRank(rank) {
+    state.serveRank = rank;
 }
 
 export function setChallengeProblem(problem) {

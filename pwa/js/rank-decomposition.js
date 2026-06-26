@@ -320,6 +320,96 @@ function flattenAttempts(answerHistory) {
         .sort((a, b) => a.t - b.t);
 }
 
+// ---------------------------------------------------------------------------
+// Linear-in-information window estimator — the live front-page rank.
+// ---------------------------------------------------------------------------
+// The displayed/served internal rank is the linearly-weighted 4PL MLE over the
+// most recent FIRST-TIME attempts. Walking back from the newest, each attempt's
+// weight ramps linearly 1 → 0 as the ACCUMULATED Fisher information (evaluated at
+// the warm-start estimate) goes 0 → WIN_ITARGET. Because the boundary is set by
+// INFORMATION (not sample count) the window auto-widens on flat, low-discrimination
+// high-rank problems — keeping the estimate steady where a fixed-count window would
+// starve — and the departing attempt sits at ~0 weight, so a per-attempt rank
+// delta isn't contaminated by an old problem dropping off the edge. The ramp's
+// area is WIN_ITARGET/2, so the effective precision equals a hard window of
+// i_target = WIN_ITARGET/2 = 8. WIN_CAP bounds the walk by SAMPLE COUNT only (no
+// time cutoff: a long-idle return still uses its real recent history). The lapse
+// term in the 4PL (clearSpan/clearKappa) already discounts below-level misclicks,
+// so early random slips fade on their own — the linear ramp is for the smooth
+// boundary, not noise handling.
+const WIN_ITARGET = 16;                       // accumulated-info target (linear ramp)
+const WIN_CAP = 500;                          // hard sample-count backstop (no time cap)
+const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
+const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
+const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
+// Steady-state SE floor: info → prior + ∫₀^ITARGET (1−I/ITARGET) dI = prior + ITARGET/2.
+const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
+
+function windowMLE(attempts, refR) {
+    // Build the linearly-weighted window walking back from the newest attempt; the
+    // weight is a linear ramp over the Fisher info accumulated by NEWER attempts.
+    const win = [];
+    let acc = 0;
+    for (let j = attempts.length - 1; j >= 0 && win.length < WIN_CAP; j--) {
+        const w = 1 - acc / WIN_ITARGET;
+        if (w <= 0) break;
+        const a = attempts[j];
+        win.push({ a, w });
+        const span = clearSpan(a.floor);
+        const praw = sigmoid(a.slope * (refR - a.x) + a.kappa);
+        let p = a.floor + span * praw;
+        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+        const g = span * a.slope * praw * (1 - praw);
+        acc += g * g / (p * (1 - p));          // Fisher info at refR, accumulated
+    }
+    // Weighted 4PL Newton for R, warm-started at refR with a weak prior N(refR, 1/info).
+    let R = refR, info = WIN_PRIOR_INFO;
+    for (let it = 0; it < 15; it++) {
+        let score = WIN_PRIOR_INFO * (refR - R);
+        info = WIN_PRIOR_INFO;
+        for (const { a, w } of win) {
+            const span = clearSpan(a.floor);
+            const praw = sigmoid(a.slope * (R - a.x) + a.kappa);
+            let p = a.floor + span * praw;
+            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+            const g = span * a.slope * praw * (1 - praw);
+            score += w * (a.correct - p) * g / (p * (1 - p));
+            info += w * g * g / (p * (1 - p));
+        }
+        if (info < 1e-9) break;
+        let step = score / info;
+        if (step > 2) step = 2; else if (step < -2) step = -2;
+        R += step;
+        if (R < X_CLAMP_LO) R = X_CLAMP_LO; else if (R > X_CLAMP_HI) R = X_CLAMP_HI;
+        if (Math.abs(step) < 1e-6) break;
+    }
+    return { R, se: info > 0 ? 1 / Math.sqrt(info) : Infinity };
+}
+
+// Public: internal-rank estimate from answerHistory (first-time attempts only,
+// pooled across sizes through each attempt's own M — pass getMergedAnswerHistory()).
+// prevRankIndex warm-starts the fit (the live displayed rank · TOTAL_RANKS); on a
+// cold device it falls back to the recent attempts' mean. Returns:
+//   rankIndex      — the estimate to DISPLAY / score (internal-rank index)
+//   se             — its posterior standard error (rank units)
+//   serveRankIndex — rankIndex + the uncertainty-scaled UCB serve bonus, which is
+//                    large while the posterior is loose (cold start / streak) and
+//                    vanishes once it tightens; problem SELECTION uses this, display
+//                    uses rankIndex.
+// null when no usable (first-time, curve-mapped) attempt exists.
+export function estimateWindowRank(answerHistory, prevRankIndex) {
+    const attempts = flattenAttempts(answerHistory);
+    if (!attempts.length) return null;
+    let ref = prevRankIndex;
+    if (!Number.isFinite(ref)) {
+        const tail = attempts.slice(-Math.min(attempts.length, 20));
+        ref = tail.reduce((s, a) => s + a.x, 0) / tail.length;
+    }
+    const { R, se } = windowMLE(attempts, ref);
+    const bonus = WIN_UCB_K * Math.max(0, se - WIN_SE_FLOOR);
+    return { rankIndex: R, se, serveRankIndex: R + bonus };
+}
+
 // Coarse, regularly-spaced evaluation of the wide (skill) kernel. Used only to
 // interpolate the wide track when forming form residuals; the rendered skill
 // line evaluates the kernel exactly (see evaluateAt). The 30-day kernel is

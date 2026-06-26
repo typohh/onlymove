@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateMomentum, updateAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateUserRank, updateServeRank, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -8,10 +8,10 @@ import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, checkSyncSignal } from './account-sync.js';
-// The momentum-rank update itself (step sizes, headroom cap, loss penalty,
-// quality modulation, momentum guards) lives in momentum-rank.js — one pure
-// step function shared with the account-sync anchored replay.
-import { momentumRankStep } from './momentum-rank.js';
+// The live rank is a linear-information window 4PL MLE over the recent first-time
+// history; the estimator lives in rank-decomposition.js alongside the per-attempt
+// slope/floor conversion it shares with the skill chart.
+import { estimateWindowRank } from './rank-decomposition.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     // Linked-mode problems are rank-frozen URL-shares: updateUserStats already
@@ -207,14 +207,17 @@ export async function updateUserStats(isCorrect, {
     setCurrentSolvingStartTime(null);
 
     const oldRank = state.userRank;
-    const { rank, momentum } = momentumRankStep(oldRank, state.momentum, {
-        correct: isCorrect,
-        isRepeat: currentProblem.isRepeat || false,
-        quality: currentProblem.quality,
-    });
-
-    updateUserRank(rank);
-    updateMomentum(momentum);
+    // Re-fit the linear-information window MLE over the merged first-time history
+    // (the current attempt was appended above). oldRank·TOTAL_RANKS warm-starts the
+    // fit AND is the R_before for the overlay delta below: because the sync path
+    // updates userRank SILENTLY when foreign attempts arrive (see account-sync
+    // .feedAttemptsThroughLoop), oldRank already reflects them, so the reported rank
+    // change is the effect of THIS tsumego alone — never the synced batch.
+    const est = estimateWindowRank(getMergedAnswerHistory(), oldRank * TOTAL_RANKS);
+    if (est) {
+        updateUserRank(est.rankIndex / TOTAL_RANKS);
+        updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+    }
     // The just-answered problem is moved into the previous slot, and the
     // challenge reselected if it was one, by completeCurrentProblem() in the
     // caller (game-logic) — recording the attempt and rotating the slots are

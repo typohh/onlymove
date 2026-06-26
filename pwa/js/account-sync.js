@@ -33,15 +33,14 @@
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
-    getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateMomentum,
+    getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank,
     evictColdTail, clearHistoryTail, syncTailExpectedToActual,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
 import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
-import { computeRankDecomposition, evaluateAt } from './rank-decomposition.js';
-import { momentumRankStep, replayMomentumRank, RANK_REPLAY_WINDOW } from './momentum-rank.js';
+import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields } from './embedding-backfill.js';
 import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
@@ -111,7 +110,7 @@ export function recordReportAck(problemId, createdAt, serverId = null) {
 // Synchronous on purpose: no await between read and write of the history
 // bucket, so a concurrent solve can't be clobbered. Returns the inserted
 // entry objects (live references — the field fill mutates them in place, and
-// the momentum-loop feed reads them afterwards).
+// the post-merge rank re-fit reads the merged history afterwards).
 // `tailKnown` carries the serverCreatedAt values already in the IndexedDB cold
 // tail (read once per pull). Without it the dedup would only see the working
 // set, so a re-pull (re-adopt / "refresh history") would re-insert every row
@@ -239,9 +238,9 @@ let pullInFlight = false;
 let lastPullAt = 0;
 
 // Pull reports newer than the cursor and merge them. `mode` controls what the
-// merge does to the momentum-rank loop state (see retrainAfterMerge): 'feed'
-// (default, ongoing sync), 'adopt' (account switch), 'reconcile' (one-off
-// local-history backfill — models only, never the loop; the merged rows are
+// merge does to the rank estimate (see retrainAfterMerge): 'feed' (default,
+// ongoing sync), 'adopt' (account switch), 'reconcile' (one-off local-history
+// backfill — models only, never the rank; the merged rows are
 // ancient). `fromStart` ignores the stored cursor and pulls the full history
 // (the reconcile needs every row to claim against). Returns
 // { inserted, complete } — `complete` is true only if the pull drained the
@@ -410,84 +409,49 @@ async function checkInSync(serverSeq, serverDigest) {
     }
 }
 
-// Post-merge state update. Models always retrain off the merged history. The
-// momentum-rank loop is handled so that the MLE touches it exactly ONCE per
-// device — at adoption — and never again:
+// Post-merge state update. Models always retrain off the merged history. The rank
+// is the linear-information window MLE (rank-decomposition.estimateWindowRank) — a
+// PURE FUNCTION of the recent first-time history — so device adoption and an
+// incremental foreign sync are the same operation: recompute from scratch (no
+// loop state to warm, no anchor to recover), and because every device sees the
+// same multiset of recent attempts they converge to the same rank regardless of
+// how the attempts were batched. The recompute runs SILENTLY (no overlay), so
+// the next live answer's reported rank change is that tsumego's effect alone — a
+// freshly-synced foreign batch moves the rank between problems, never inside the
+// shown delta (the live loop's R_before is this silently-updated value).
 //
-//   - adopt (account switch; no loop state exists for this account here):
-//     hybrid recovery — rank LEVEL from the skill decomposition (an estimator,
-//     robust to code eras / injected repairs / log gaps) evaluated at the
-//     rank-replay window's start, then the live dynamics replayed on top
-//     (momentum warmed long, rank integrated through the short window — see
-//     replayMomentumRank for why both halves are load-bearing). If the account
-//     is too small for the decomposition, replay everything from scratch —
-//     onboarding-equivalent.
-//
-//   - ongoing merge ('feed'): feed the newly merged foreign attempts THROUGH
-//     THE LIVE LOOP from the device's current state, exactly as if they'd been
-//     solved here. No re-anchor, no MLE — the account behaves like one
-//     continuous momentum loop fed by every device, so momentum stays fully
-//     load-bearing for users who alternate devices. Incremental rows are
-//     recent, current-era outcomes processed at the device's already-converged
-//     momentum, so none of the long-replay pathologies (era-mismatch drift,
-//     cold-start transient) apply. Devices agree up to interleaving order
-//     (each processes the same multiset of attempts, merely batched
-//     differently), which is second-order at converged momentum.
-//
-//   - 'reconcile' (one-off local-history backfill): models retrain, but the
-//     loop is untouched — the merged rows are ancient attempts this device
-//     either already lived through or that predate it.
+//   - adopt (account switch): re-fit over the new account's full merged history,
+//     seeded from the data (the prior account's rank is irrelevant).
+//   - feed (ongoing merge): re-fit over the merged history, warm-started from the
+//     current rank.
+//   - 'reconcile' (one-off local-history backfill): models retrain, but the rank
+//     is untouched — the merged rows are ancient attempts already in the window or
+//     predating it.
 function retrainAfterMerge(insertedEntries, mode) {
     try { calculateAndStoreStatsResults(); } catch (e) { console.warn('account-sync: recall retrain failed:', e); }
     try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
-        if (mode === 'adopt') {
-            const merged = getMergedAnswerHistory();
-            const decomp = computeRankDecomposition(merged);
-            let next = null;
-            if (decomp) {
-                const start = Math.max(0, merged.length - RANK_REPLAY_WINDOW);
-                const at = evaluateAt(decomp, merged[start].date || Date.now());
-                if (at && Number.isFinite(at.S)) {
-                    next = replayMomentumRank(merged, at.S / TOTAL_RANKS);
-                }
-            } else {
-                // Tiny account: no estimator support — replay the whole thing
-                // from the cold-start state, like a fresh device onboarding.
-                next = replayMomentumRank(merged, 0, {
-                    maxLength: merged.length, rankWindow: merged.length,
-                });
+        // Both paths re-fit the linear-information window MLE over the merged
+        // history. A window estimator is a pure function of the recent first-time
+        // history, so an account ADOPTION (full pull) and an incremental FEED of
+        // foreign attempts are the same operation — recompute the rank from scratch;
+        // there is no loop state to warm and no anchor to recover. This runs SILENTLY
+        // (no overlay), so the next live answer's reported delta reflects that
+        // tsumego alone and is never muddled by the synced batch. adopt seeds the
+        // fit from the data (the prior account's rank is irrelevant); feed warm-
+        // starts from the current rank.
+        if (mode === 'adopt' || mode === 'feed') {
+            const seed = mode === 'feed' ? state.userRank * TOTAL_RANKS : undefined;
+            const est = estimateWindowRank(getMergedAnswerHistory(), seed);
+            if (est) {
+                updateUserRank(est.rankIndex / TOTAL_RANKS);
+                updateServeRank(est.serveRankIndex / TOTAL_RANKS);
             }
-            if (next && Number.isFinite(next.rank) && Number.isFinite(next.momentum)) {
-                updateUserRank(next.rank);
-                updateMomentum(next.momentum);
-            }
-        } else if (mode === 'feed') {
-            feedAttemptsThroughLoop(insertedEntries);
         }
     } catch (e) {
         console.warn('account-sync: loop state update failed:', e);
     }
     updateAllUI();
-}
-
-// Run merged foreign attempts through the same step the live loop uses, from
-// the current device state, in chronological order.
-function feedAttemptsThroughLoop(entries) {
-    const sorted = [...entries].sort((a, b) => (a.date || 0) - (b.date || 0));
-    let rank = state.userRank;
-    let momentum = state.momentum;
-    for (const a of sorted) {
-        ({ rank, momentum } = momentumRankStep(rank, momentum, {
-            correct: !!a.correct,
-            isRepeat: !!a.isRepeat,
-            quality: a.problemQuality,
-        }));
-    }
-    if (Number.isFinite(rank) && Number.isFinite(momentum)) {
-        updateUserRank(rank);
-        updateMomentum(momentum);
-    }
 }
 
 // Adopt another account on this device: wipe everything derived from the old
@@ -499,7 +463,7 @@ export function switchAccount(newId) {
     if (!isValidAccountCode(newId) || newId === state.userId) return false;
     const wipeKeys = [
         'answerHistory', 'challengeProblem', 'previousProblem',
-        'userRank', 'momentum',
+        'userRank', 'serveRank',
         'modelParams', 'adamState',
         'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
         'recallPausedUntil',

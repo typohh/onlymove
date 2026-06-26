@@ -32,6 +32,6 @@ export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
 // localStorage as the synchronous working set. Everything older is evicted to
 // IndexedDB (see history-store.js + state.evictColdTail) and read back only for
 // the full-history charts. Set equal to the largest hot window the app uses on
-// the *merged* history (the momentum/recall replay warms over the last 3000),
+// the *merged* history (the recall/weakness models warm over the last 3000),
 // so the working set is a superset of every synchronous read.
 export const ANSWER_HISTORY_WORKING_SET = 3000;

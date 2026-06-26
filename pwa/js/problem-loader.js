@@ -80,19 +80,23 @@ function selectChallengeCandidate() {
 
     if (available.length === 0) return null;
 
-    available.sort((a, b) => Math.abs(a.rank - state.userRank) - Math.abs(b.rank - state.userRank));
+    // Serve near the SERVE rank (estimate + the uncertainty-scaled UCB bonus), not
+    // the displayed rank: while the rank estimate is still loose this pushes
+    // problems slightly harder (faster, more informative onboarding), collapsing to
+    // at-level once the posterior tightens. Display/scoring still read userRank.
+    const serveRank = state.serveRank;
+    available.sort((a, b) => Math.abs(a.rank - serveRank) - Math.abs(b.rank - serveRank));
     const candidateProblems = available.slice(0, 50);
 
     // Kick off background loading of a closer zip if our candidate pool is thin
-    // or a not-yet-loaded shard sits nearer the user's rank.
+    // or a not-yet-loaded shard sits nearer the serve rank.
     if (candidateProblems.length < 50) {
         backgroundLoadCloserZip();
     } else {
         const closestZip = findClosestUnloadedZip();
         if (closestZip) {
-            const userRank = state.userRank;
-            const candidateDiff = Math.abs(candidateProblems[49].rank - userRank);
-            const zipDiff = Math.min(Math.abs(userRank - closestZip.minRank), Math.abs(userRank - closestZip.maxRank));
+            const candidateDiff = Math.abs(candidateProblems[49].rank - serveRank);
+            const zipDiff = Math.min(Math.abs(serveRank - closestZip.minRank), Math.abs(serveRank - closestZip.maxRank));
             if (zipDiff < candidateDiff) backgroundLoadCloserZip();
         }
     }
@@ -253,9 +257,10 @@ export async function loadZipProblems(zipFilename) {
 }
 
 function findClosestUnloadedZip() {
+    const serveRank = state.serveRank;   // load shards near where we SERVE, not display
     const unloadedZips = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
     return unloadedZips.reduce((closest, zip) => {
-        const diff = Math.min(Math.abs(state.userRank - zip.minRank), Math.abs(state.userRank - zip.maxRank));
+        const diff = Math.min(Math.abs(serveRank - zip.minRank), Math.abs(serveRank - zip.maxRank));
         return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
     }, { zip: null, minDiff: Infinity }).zip;
 }

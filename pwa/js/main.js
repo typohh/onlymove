@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, updateServeRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
 import { runMigrations, runTailMigration } from './migrations.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -76,7 +76,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems, resumeCurrentProblem } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './embedding-backfill.js';
-import { loadRatingRankMap, computeRankDecomposition } from './rank-decomposition.js';
+import { loadRatingRankMap, estimateWindowRank } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
@@ -391,47 +391,26 @@ async function maybeFinishPendingAccountSwitch() {
     }
 }
 
-// One-time front-page (momentum) rank re-anchor to the maximum-likelihood
-// estimate. The a_p² scalingFactor bug (see repairCorruptedMomentum_v3 in
-// state.js / user-stats.js) drove some users' front-page rank to extremes via
-// an inverted update — and a kyu reached an absurd dan rank by *losing*, not
-// winning. The original repair only re-anchored users whose *momentum* still
-// looked corrupt at load, missing everyone whose oscillating momentum had
-// frozen on a normal-looking positive value (their wrecked rank was left as-is).
-// This pass re-anchors to the principled skill-decomposition currentSkill — the
-// same quantity the Rank tab shows — gated so we only touch users who are
-// actually off:
-//   1. > 30 attempts, so the decomposition is reliable (don't disturb onboarding)
-//   2. front-page rank more than REANCHOR_GRADE_THRESHOLD grades from the MLE
-//      (don't disturb users already in a reasonable band; the gap is symmetric
-//      so it catches both the inflated-up corruption and a cratered-down one)
-// currentSkill is in grade (rank-index) units; state.userRank is normalized
-// 0..1, so multiply by TOTAL_RANKS to compare in grades. No upper cap on the
-// anchor — a genuinely strong player's MLE rank can sit above 1.0 (past 9d).
-function maybeReanchorRankOnce() {
-    const REANCHOR_GRADE_THRESHOLD = 2;
-    if (localStorage.getItem('mleRankReanchor_v4')) return;
+// One-time transition from the momentum loop to the window-MLE rank. Recompute the
+// DISPLAYED rank and the SERVE rank from the window estimator over the stored
+// history, silently (no overlay), so an existing user switches estimators between
+// problems and the first post-deploy answer's reported delta is that tsumego's
+// effect alone — not the one-off momentum→window jump. Also seeds serveRank (a new
+// field) so the very first served problem already reflects the UCB bonus. A fresh
+// device with no usable first-time history is a no-op (serveRank then falls back to
+// userRank until the first attempt).
+function maybeInitWindowRankOnce() {
+    if (localStorage.getItem('windowRankInit_v1')) return;
     try {
-        const merged = getMergedAnswerHistory();
-        if (merged.length > 30) {
-            const decomp = computeRankDecomposition(merged);
-            const skill = decomp && decomp.summary ? decomp.summary.currentSkill : null;
-            if (typeof skill === 'number' && Number.isFinite(skill)) {
-                const currentGrades = state.userRank * TOTAL_RANKS;
-                if (Math.abs(currentGrades - skill) > REANCHOR_GRADE_THRESHOLD) {
-                    // No lower clamp — rank below 0 = below 20k is allowed.
-                    updateUserRank(skill / TOTAL_RANKS);
-                }
-            }
+        const est = estimateWindowRank(getMergedAnswerHistory(), state.userRank * TOTAL_RANKS);
+        if (est) {
+            updateUserRank(est.rankIndex / TOTAL_RANKS);
+            updateServeRank(est.serveRankIndex / TOTAL_RANKS);
         }
     } catch (e) {
-        console.warn('one-time MLE rank re-anchor failed:', e);
+        console.warn('one-time window-rank init failed:', e);
     }
-    // The momentum repair's flag is subsumed by the deviation gate above (a
-    // genuinely wrecked rank is always > 2 grades off); clear it so the old
-    // repair path doesn't re-anchor again (with its 1.0 cap) on a later load.
-    localStorage.removeItem('rankNeedsReanchor_v3');
-    localStorage.setItem('mleRankReanchor_v4', 'true');
+    localStorage.setItem('windowRankInit_v1', 'true');
 }
 
 // Parse the URL's intent: a shared problem id, the recall-notification flag, and
@@ -682,7 +661,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // background — the first problem load doesn't wait.
     runTailMigration().catch(() => {}).then(() => backfillMissingEmbeddings());
 
-    maybeReanchorRankOnce();
+    maybeInitWindowRankOnce();
 
     // Resolve board size, then load the first problem (shared link / recall
     // notification / standing challenge).
