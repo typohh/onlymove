@@ -300,11 +300,32 @@ class ExpDecayMLEDriver:
 
     def __init__(self, decay=0.9, prior_info=1.0 / 4 ** 2, ucb_k=1.0, serve_offset=0.0,
                  start=0.0, lapse=0.0, weight_eps=1e-2, info_scale=0.0, shape="exp",
-                 cap=200, name="exp"):
+                 cap=200, pop_mean=None, pop_sd=6.4, name="exp"):
         self.decay = float(decay)
+        # prior_info = the PER-UPDATE REGULARISER precision (1/initial_SD²), centred
+        # at the live estimate self._R — it tames the all-win window and bounds the
+        # per-step move; initial_SD (was 4) is the knob to sweep.
         self.prior_info = prior_info
         self.ucb_k = ucb_k
         self.serve_offset = serve_offset
+        # pop_mean/pop_sd = a SEPARATE, FIXED population anchor N(pop_mean, pop_sd²)
+        # ADDED to the per-update prior. It is NOT the cold start: a no-history user
+        # still cold-starts at `start` (index 0 == 20k, the shipped `lin` baseline),
+        # exactly as production does. The anchor is a constant pull toward pop_mean
+        # whose sign flips at the mean — pop_info·(pop_mean − R): while the estimate is
+        # BELOW the mean the pull is upward (it SPEEDS the climb toward the mean) and
+        # once it passes the mean the pull is downward (it SLOWS progress past it). It
+        # is deliberately WEAK (pop_sd = the true population SD ≈ 6.4), so it only bites
+        # at cold start when the window is near-empty; once the window fills its
+        # ~pop_info/window_info bias is sub-0.05 stone, so it never traps a genuinely
+        # weak/strong user at the mean. None = no anchor (plain self._R regulariser).
+        #
+        # NB the earlier draft SEEDED self._R = pop_mean, which OVERRODE the 20k/SD-4
+        # cold start: a true 15k was then served 6k problems (9 stones too hard) and had
+        # to climb DOWN — the opposite of "speed toward the mean". The cold start must
+        # stay at `start`; the anchor only leans the climb.
+        self.pop_mean = pop_mean
+        self.pop_info = (1.0 / float(pop_sd) ** 2) if pop_mean is not None else 0.0
         self._R = start
         self.lapse = lapse
         self.weight_eps = weight_eps          # truncate the exp tail where weight < eps
@@ -376,7 +397,13 @@ class ExpDecayMLEDriver:
                 _, x, slope, floor, kappa, y = a[:6]
                 window.append((x, slope, floor, kappa, y, self.decay ** age))
         # prior centred at the current estimate (no lean; optimism lives in serving)
-        R_new, info = H._newton_3pl(window, self._R, self.prior_info, self._R, self.lapse)
+        # Prior = product of two Gaussians: the per-update regulariser N(self._R,
+        # 1/prior_info) AND the fixed population anchor N(pop_mean, 1/pop_info).
+        # Precisions add; the mean is the precision-weighted average.
+        info0 = self.prior_info + self.pop_info
+        mean0 = ((self.prior_info * self._R + self.pop_info * (self.pop_mean or 0.0))
+                 / info0) if info0 > 0 else self._R
+        R_new, info = H._newton_3pl(window, mean0, info0, self._R, self.lapse)
         self._R = R_new
         self._last_se = 1.0 / math.sqrt(info) if info > 0 else 0.0
         # online estimate of the per-attempt info at level, from the newest attempt
@@ -639,6 +666,12 @@ DRIVER_DEFAULTS = {
     # info_scale=16 ⇒ effective info ≈ 8 (= the hard window's i_target), since the
     # linear ramp's area is info_scale/2.
     "lin":    dict(sd=4.0, ucb_k=1.0, info_scale=16.0, shape="linear"),
+    # lin + a FIXED population anchor N(pop_mean=14 ≈6k, pop_sd=6.4 = true population
+    # SD) for cold start, PLUS the per-update regulariser whose `sd` (the 'initial SD',
+    # was 4) is the knob to sweep. The pop anchor sets where a no-history user starts;
+    # the regulariser SD tunes per-step responsiveness vs stability.
+    "linpop": dict(sd=4.0, ucb_k=1.0, info_scale=16.0, shape="linear",
+                   pop_mean=14.0, pop_sd=6.4),
     # local-linear-trend Kalman
     "kalman": dict(v0=2.0, vel_revert=1.0, vel_decay=1.0, q_level=0.02, q_vel=0.03,
                    level_var=9.0, vel_var=2.0, level_floor=1.0, vel_floor=0.05,
@@ -660,12 +693,13 @@ def build_driver(model, p, start, lapse):
                                    start=start, lapse=lapse, name="serve")
         return OptWindowDriver(p["i_target"], pinfo, 0.0, start=start, lapse=lapse,
                                ucb_k=p["ucb_k"], name="ucb")
-    if model in ("exp", "lin"):
+    if model in ("exp", "lin", "linpop"):
         return ExpDecayMLEDriver(decay=p.get("decay", 0.9),
-                                 prior_info=1.0 / float(p["sd"]) ** 2,
+                                 prior_info=1.0 / float(p["sd"]) ** 2,   # regulariser (initial SD)
                                  ucb_k=p["ucb_k"], info_scale=p.get("info_scale", 0.0),
-                                 shape=p.get("shape", "exp"), start=start, lapse=lapse,
-                                 name=model)
+                                 shape=p.get("shape", "exp"),
+                                 pop_mean=p.get("pop_mean", None), pop_sd=p.get("pop_sd", 6.4),
+                                 start=start, lapse=lapse, name=model)
     if model == "kalman":
         return KalmanDriver(start=start, v0=p["v0"], vel_revert=p["vel_revert"],
                             vel_decay=p["vel_decay"], level_var=p["level_var"],
@@ -1062,7 +1096,13 @@ def run_evolve(args, corpus):
     print("Beat momentum: lower rise, lower hard, |bias|→0, lower std/sett.")
     print("=" * _FULL_W)
 
-    rows = [("momentum(base)", _runset_scn(lambda: MomentumDriver(), scenarios, pool, xs, args, rng))]
+    if args.baseline == "momentum":
+        base_make, base_label = (lambda: MomentumDriver()), "momentum(base)"
+    else:
+        base_make = lambda: build_driver(args.baseline, dict(DRIVER_DEFAULTS[args.baseline]),
+                                         0.0, args.lapse)
+        base_label = f"{args.baseline}(base)"
+    rows = [(base_label, _runset_scn(base_make, scenarios, pool, xs, args, rng))]
     for c in combos:
         p = {**base, **c}
         make = lambda p=p: build_driver(model, p, 0.0, args.lapse)
@@ -1253,8 +1293,11 @@ def main():
                     help="run ONLY the reps-vs-confidence diagnostic and exit")
     ap.add_argument("--five", action="store_true",
                     help="run ONLY the focused 5-column (mean ± SD) report and exit")
-    ap.add_argument("--evolve", choices=["lean", "serve", "ucb", "exp", "lin", "kalman"],
+    ap.add_argument("--evolve", choices=["lean", "serve", "ucb", "exp", "lin", "linpop", "kalman"],
                     help="run ONLY the evolve sweep for this candidate model and exit")
+    ap.add_argument("--baseline", default="momentum",
+                    choices=["momentum", "lin", "ucb", "lean", "serve", "exp", "linpop", "kalman"],
+                    help="evolve baseline row to compare the sweep against (default momentum)")
     ap.add_argument("--p1", help="evolve: name of the first parameter to sweep")
     ap.add_argument("--v1", help="evolve: comma-separated values for --p1")
     ap.add_argument("--p2", help="evolve: optional second parameter (2-D grid)")
