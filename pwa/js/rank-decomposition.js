@@ -701,20 +701,15 @@ function decompose(attempts) {
     const gp = globalPerformanceSigma(resid);
     const decomp = { attempts, resid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
 
-    // "Supported" range: grid points whose skill estimate pools ≥ SUPPORT_EFFN
-    // effective attempts. Current skill and long-term drift read its endpoints.
-    let firstT = null, lastT = null;
+    // Current skill reads the last "supported" grid point — the latest with
+    // ≥ SUPPORT_EFFN effective pooled attempts (and a finite estimate).
+    let lastT = null;
     for (const g of wideGrid) {
-        if (g.effN >= SUPPORT_EFFN && Number.isFinite(g.R)) {
-            if (firstT === null) firstT = g.t;
-            lastT = g.t;
-        }
+        if (g.effN >= SUPPORT_EFFN && Number.isFinite(g.R)) lastT = g.t;
     }
     if (lastT === null) lastT = wideGrid[wideGrid.length - 1].t;
 
     const cur = evaluateAt(decomp, lastT);
-    const haveSpan = firstT !== null && lastT > firstT;
-    const sFirst = haveSpan ? evaluateAt(decomp, firstT) : null;
 
     decomp.summary = {
         currentSkill: cur && Number.isFinite(cur.S) ? cur.S : null,
@@ -723,8 +718,6 @@ function decompose(attempts) {
         sigmaMUpper: Math.sqrt(gp.upper2),
         sigmaUp: Math.sqrt(gp.sigma2Up),      // good-day overperformance (ranks)
         sigmaDown: Math.sqrt(gp.sigma2Down),  // bad-day underperformance (ranks)
-        longTermDrift: (sFirst && cur) ? cur.S - sFirst.S : null,
-        longTermSpanMs: haveSpan ? lastT - firstT : null,
     };
     return decomp;
 }
