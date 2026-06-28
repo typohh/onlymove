@@ -53,17 +53,6 @@ const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
 const RATINGS_VERSION_KEY = 'ratingsVersion';
 const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 
-// Bumped when the backfill's re-derive LOGIC changes in a way that must re-process
-// already-stamped history (NOT the ratings DATA — that's RATINGS_VERSION). 'tail-rederive'
-// added the cold-tail rating re-derive: existing devices already stamped the current
-// ratings_version via the old working-set-ONLY walk, so their stale, device-dependent
-// tails won't heal through the standing ratingsChanged gate (the stamp already matches).
-// Bumping this forces ONE full re-derive. NOT the redundant kind of migration we removed
-// (BACKFILL_REPAIR_EPOCH was covered by a ratings change); this is a code-only fix that
-// nothing else triggers, so the old "done" stamp is effectively lying and must be redone.
-const BACKFILL_LOGIC_VERSION = 'tail-rederive-v1';
-const BACKFILL_LOGIC_KEY = 'backfillLogicVersion';
-
 // Removed-problem prune. Problems get dropped from the corpus on regeneration
 // (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
 // entries keep the rating/rank stored at attempt time — the shard no longer
@@ -155,12 +144,8 @@ export async function backfillMissingEmbeddings() {
     // gate.) The curve is the same for both sizes; query it with the default board.
     const curveVersion = ratingRankCurveVersion(DEFAULT_BOARD_SIZE);
     const embeddingsChanged = localStorage.getItem(EMBEDDING_VERSION_KEY) !== serverEmbeddingVersion;
-    // A logic bump forces a full ratings re-derive once even when the data version is
-    // unchanged — heals devices stamped by an earlier, less-complete backfill.
-    const ratingsLogicMigration = RATINGS_VERSION !== null
-        && localStorage.getItem(BACKFILL_LOGIC_KEY) !== BACKFILL_LOGIC_VERSION;
     const ratingsChanged = RATINGS_VERSION !== null
-        && (ratingsLogicMigration || localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION);
+        && localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION;
     const curveChanged = curveVersion !== null
         && localStorage.getItem(RANK_CURVE_VERSION_KEY) !== curveVersion;
 
@@ -189,12 +174,7 @@ export async function backfillMissingEmbeddings() {
         }
         // Stamp the single versions ONCE, only now that every size has persisted.
         if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
-        if (ratingsChanged) {
-            localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
-            // The ratings re-derive (which now covers the tail) just ran — mark the
-            // logic migration done so it fires exactly once on existing devices.
-            localStorage.setItem(BACKFILL_LOGIC_KEY, BACKFILL_LOGIC_VERSION);
-        }
+        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
         if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
         console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'})`);
     }

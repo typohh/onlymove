@@ -143,6 +143,22 @@ function migrateModelArch3pl() {
     console.log('Model arch migration: dropped pre-3PL model params for clean retrain.');
 }
 
+// The backfill's rating re-derive was working-set ONLY until the cold-tail re-derive
+// landed: the IndexedDB tail kept each attempt's rating frozen at eviction time, so
+// after a re-rate two devices' tails (evicted at different rating eras) diverged and
+// the Rank-tab chart disagreed device-to-device. The fix re-derives the tail too, gated
+// on the steady-state ratingsChanged check (backfill.js). But devices that already
+// stamped the current ratingsVersion via the OLD walk won't re-fire that gate, so clear
+// the stamp ONCE: the next backfill then sees ratingsChanged and re-derives everything
+// (the working set is a no-op, already current; the tail heals). Reuses the steady-state
+// primitive — no special re-derive path in the backfill itself.
+function migrateClearRatingsStampForTailRederive() {
+    if (localStorage.getItem('tailRederiveMigrated_v1')) return;
+    localStorage.removeItem('ratingsVersion');
+    localStorage.setItem('tailRederiveMigrated_v1', '1');
+    console.log('Migration: cleared ratingsVersion stamp so the next backfill re-derives the cold tail.');
+}
+
 // Original successSinceFailure backfill: walk each problem's attempts in date
 // order, counting successes since the most recent failure.
 function migrateAnswerHistory() {
@@ -196,6 +212,7 @@ export function runMigrations() {
     migrateClearIgnoredFlag();
     migrateAnswerHistory();
     migrateModelArch3pl();
+    migrateClearRatingsStampForTailRederive();
 }
 
 const TAIL_MIGRATION_KEY = 'tailMigration_v1';
