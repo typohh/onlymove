@@ -53,6 +53,17 @@ const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
 const RATINGS_VERSION_KEY = 'ratingsVersion';
 const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 
+// Bumped when the backfill's re-derive LOGIC changes in a way that must re-process
+// already-stamped history (NOT the ratings DATA — that's RATINGS_VERSION). 'tail-rederive'
+// added the cold-tail rating re-derive: existing devices already stamped the current
+// ratings_version via the old working-set-ONLY walk, so their stale, device-dependent
+// tails won't heal through the standing ratingsChanged gate (the stamp already matches).
+// Bumping this forces ONE full re-derive. NOT the redundant kind of migration we removed
+// (BACKFILL_REPAIR_EPOCH was covered by a ratings change); this is a code-only fix that
+// nothing else triggers, so the old "done" stamp is effectively lying and must be redone.
+const BACKFILL_LOGIC_VERSION = 'tail-rederive-v1';
+const BACKFILL_LOGIC_KEY = 'backfillLogicVersion';
+
 // Removed-problem prune. Problems get dropped from the corpus on regeneration
 // (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
 // entries keep the rating/rank stored at attempt time — the shard no longer
@@ -67,6 +78,15 @@ const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
 const PRUNE_STRIP_FIELDS = [
     'problemRating', 'problemRawRating', 'problemRank', 'problemSlope',
     'problemQuality', 'problemFloor', 'embedding', 'pickedEmbedding', 'pickedCellIndex',
+];
+
+// The rating fields the cold-tail re-derive writes (present problems) or strips
+// (problems that left the corpus — never leave a stale rating on a removed problem;
+// flattenAttempts then drops the rating-less attempt from the chart). Subset of
+// PRUNE_STRIP_FIELDS without the embedding fields, which the tail never carries.
+const RATING_FIELDS = [
+    'problemRating', 'problemRawRating', 'problemRank',
+    'problemSlope', 'problemQuality', 'problemFloor',
 ];
 // Old per-version flag keys; cleared on first run after the upgrade so they
 // don't linger in users' localStorage. The new scheme stores a content-hash
@@ -135,8 +155,12 @@ export async function backfillMissingEmbeddings() {
     // gate.) The curve is the same for both sizes; query it with the default board.
     const curveVersion = ratingRankCurveVersion(DEFAULT_BOARD_SIZE);
     const embeddingsChanged = localStorage.getItem(EMBEDDING_VERSION_KEY) !== serverEmbeddingVersion;
+    // A logic bump forces a full ratings re-derive once even when the data version is
+    // unchanged — heals devices stamped by an earlier, less-complete backfill.
+    const ratingsLogicMigration = RATINGS_VERSION !== null
+        && localStorage.getItem(BACKFILL_LOGIC_KEY) !== BACKFILL_LOGIC_VERSION;
     const ratingsChanged = RATINGS_VERSION !== null
-        && localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION;
+        && (ratingsLogicMigration || localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION);
     const curveChanged = curveVersion !== null
         && localStorage.getItem(RANK_CURVE_VERSION_KEY) !== curveVersion;
 
@@ -165,7 +189,12 @@ export async function backfillMissingEmbeddings() {
         }
         // Stamp the single versions ONCE, only now that every size has persisted.
         if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
-        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
+        if (ratingsChanged) {
+            localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
+            // The ratings re-derive (which now covers the tail) just ran — mark the
+            // logic migration done so it fires exactly once on existing devices.
+            localStorage.setItem(BACKFILL_LOGIC_KEY, BACKFILL_LOGIC_VERSION);
+        }
         if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
         console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'})`);
     }
@@ -358,16 +387,11 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             }
         }
 
-        // The IndexedDB cold tail (attempts beyond the working set) feeds only
-        // the full-history rank chart — it carries no embeddings and no model
-        // reads it. On a curve change, recompute its problemRank from the stored
-        // raw rating so the deep-history part of the chart stays on the current
-        // curve. We deliberately do NOT fetch shards for the tail (the walk below
-        // is working-set only), so the tail keeps its attempt-time raw rating and
-        // only the rating→rank mapping is refreshed. Runs whenever the curve
-        // changed — including alongside a ratings change, since the tail can't
-        // get fresh ratings from shards.
-        if (curveChanged) {
+        // Curve-only tail remap: when ONLY the curve changed (ratings didn't),
+        // recompute the cold tail's problemRank straight from its stored raw rating —
+        // no shard fetch needed. When ratings ALSO changed, the shard-backed tail
+        // re-derive below rewrites rank from the fresh rating, so skip this.
+        if (curveChanged && !ratingsChanged) {
             let tailUpdated = 0;
             await updateTail((entry) => {
                 if (!entry || entry.size !== size) return null;
@@ -403,9 +427,22 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
                 if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
             }
         }
+        let tailNeedsRederive = false;
         if (ratingsChanged) {
             for (let i = 0; i < history.length; i++) {
                 if (history[i].problemId) needIdsForRatings.add(history[i].problemId);
+            }
+            // Re-derive the cold tail too. Its ratings are frozen at eviction time, so
+            // after a re-rate the old attempts carry stale (and device-dependent — each
+            // device evicted at a different rating era) ratings, and the Rank-tab chart
+            // plots them. Pull the tail's problem ids so the SAME shard walk loads their
+            // shards; the tail rows are rewritten from those shards after the walk.
+            const tail = await getTail();
+            for (const e of tail) {
+                if (e && e.size === size && typeof e.problemId === 'string') {
+                    needIdsForRatings.add(e.problemId);
+                    tailNeedsRederive = true;
+                }
             }
         }
 
@@ -442,6 +479,10 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         let totalFilled = 0;
         let totalFilledPicked = 0;
         let totalRatingsUpdated = 0;
+        // Current rating per problem, accumulated across every shard the walk loads, so
+        // the cold-tail re-derive below can rewrite the tail (in IndexedDB, after the
+        // walk) from the same data. Slim {rating,slope,floor} — the tail needs no embeds.
+        const tailRatingItems = new Map();
         await mapWithConcurrency([...zipToIds.keys()], SHARD_WALK_CONCURRENCY, async (zipHash) => {
             const zipFilename = zipFilenameByHash.get(zipHash);
             if (!zipFilename) return;
@@ -457,6 +498,9 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
                     if (Array.isArray(item.embedding)) {
                         // Quantize to 2 decimals to keep localStorage small.
                         embeddingByProblem.set(tid, quantizeEmbedding(item.embedding));
+                    }
+                    if (tailNeedsRederive && typeof item.rating === 'number') {
+                        tailRatingItems.set(tid, { rating: item.rating, slope: item.slope, floor: item.floor });
                     }
                 }
 
@@ -533,6 +577,41 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
             persistAnswerHistory(size, history);
             console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
+        }
+
+        // Re-derive the cold tail from the same shards (ratings change only). Present
+        // problems get the CURRENT rating; a problem that left the corpus has its rating
+        // fields STRIPPED — never leave a stale rating on a removed problem — so
+        // flattenAttempts drops the now-rating-less attempt from the chart. One IDB
+        // cursor pass. (The working-set copy wins in getMergedFullAnswerHistory, so an
+        // attempt present in both is unaffected here; this fixes the tail-ONLY attempts.)
+        if (tailNeedsRederive) {
+            let tailRederived = 0, tailStripped = 0;
+            await updateTail((entry) => {
+                if (!entry || entry.size !== size || typeof entry.problemId !== 'string') return null;
+                const item = tailRatingItems.get(entry.problemId);
+                if (item) {
+                    if (entry.problemRating === item.rating) return null;  // already current
+                    applyRatingFields(entry, item, size);
+                    if (entry.problemRawRating !== undefined) delete entry.problemRawRating;
+                    tailRederived++;
+                    return entry;
+                }
+                // Not loaded from a current shard: strip if the problem left the corpus;
+                // if it's still in the corpus (a transient shard-load failure this run),
+                // leave it untouched for the next pass.
+                if (!lookupMap.has(entry.problemId)) {
+                    let touched = false;
+                    for (const k of RATING_FIELDS) {
+                        if (entry[k] !== undefined) { delete entry[k]; touched = true; }
+                    }
+                    if (touched) { tailStripped++; return entry; }
+                }
+                return null;
+            });
+            if (tailRederived || tailStripped) {
+                console.log(`backfill[${size}]: cold-tail re-derived ${tailRederived}, stripped ${tailStripped} removed-problem ratings`);
+            }
         }
         return totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated;
     } catch (err) {
