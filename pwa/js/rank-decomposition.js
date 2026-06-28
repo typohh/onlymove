@@ -321,46 +321,52 @@ function flattenAttempts(answerHistory) {
 }
 
 // ---------------------------------------------------------------------------
-// Linear-in-information window estimator — the live front-page rank.
+// Positional-linear window estimator — the live front-page rank.
 // ---------------------------------------------------------------------------
-// The displayed/served internal rank is the linearly-weighted 4PL MLE over the
+// The displayed/served internal rank is the positionally-weighted 4PL MLE over the
 // most recent FIRST-TIME attempts. Walking back from the newest, each attempt's
-// weight ramps linearly 1 → 0 as the ACCUMULATED Fisher information (evaluated at
-// the warm-start estimate) goes 0 → WIN_ITARGET. Because the boundary is set by
-// INFORMATION (not sample count) the window auto-widens on flat, low-discrimination
-// high-rank problems — keeping the estimate steady where a fixed-count window would
-// starve — and the departing attempt sits at ~0 weight, so a per-attempt rank
-// delta isn't contaminated by an old problem dropping off the edge. The ramp's
-// area is WIN_ITARGET/2, so the effective precision equals a hard window of
-// i_target = WIN_ITARGET/2 = 8. WIN_CAP bounds the walk by SAMPLE COUNT only (no
-// time cutoff: a long-idle return still uses its real recent history). The lapse
-// term in the 4PL (clearSpan/clearKappa) already discounts below-level misclicks,
-// so early random slips fade on their own — the linear ramp is for the smooth
-// boundary, not noise handling.
-const WIN_ITARGET = 16;                       // accumulated-info target (linear ramp)
-const WIN_CAP = 500;                          // hard sample-count backstop (no time cap)
+// weight ramps linearly 1 → 1/M with its POSITION across the AVAILABLE window (newest
+// = 1, the oldest in-window ≈ 0), where M = min(#attempts, WIN_CAP) — a plain
+// (M − age)/M ramp that always spans whatever recent history exists. The point is the
+// edge: the attempt aging out at the cap leaves at ~0 weight BY CONSTRUCTION, so a
+// per-attempt rank delta is never contaminated by an old problem dropping off — which
+// removes the correct→down / wrong→up display artifact the earlier info-ramp produced.
+// (That ramp only drove the edge weight to 0 once accumulated Fisher info reached
+// WIN_ITARGET, which in the served-at-rank LOW-information regime it never did, so the
+// departing sample left at ~0.93 weight and yanked the rank the opposite way of the
+// new answer.)
+//
+// Cost of going positional: the weight ignores how informative each attempt is, so the
+// effective sample size is ~3·M/4 (Σw = (M+1)/2, Σw² ≈ M/3) rather than the full M, and
+// it no longer auto-widens on flat low-discrimination problems. That
+// auto-widen was vacuous here anyway — served at the user's rank the per-attempt info
+// is so low the window ALWAYS bound on WIN_CAP, never on WIN_ITARGET — so the positional
+// ramp gives up nothing real while removing the boundary artifact. WIN_CAP bounds the
+// walk by SAMPLE COUNT only (no time cutoff: a long-idle return still uses its real
+// recent history). The lapse term in the 4PL (clearSpan/clearKappa) already discounts
+// below-level misclicks, so early random slips fade on their own.
+const WIN_ITARGET = 16;                       // design steady-state info — sets the SE floor only
+const WIN_CAP = 500;                          // hard sample-count window + the ramp's denominator
 const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
 const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
 const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
-// Steady-state SE floor: info → prior + ∫₀^ITARGET (1−I/ITARGET) dI = prior + ITARGET/2.
+// Steady-state SE floor: under the design assumption that the window holds WIN_ITARGET
+// total info, the positional ramp's effective info Σw·(WIN_ITARGET/WIN_CAP) = WIN_ITARGET/2
+// — same as the old info-ramp's area — so this floor (and the UCB serve) carry over unchanged.
 const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 
 function windowMLE(attempts, refR) {
-    // Build the linearly-weighted window walking back from the newest attempt; the
-    // weight is a linear ramp over the Fisher info accumulated by NEWER attempts.
+    // Build the positionally-weighted window walking back from the newest attempt; the
+    // weight is a linear ramp over POSITION across the AVAILABLE window — newest = 1, the
+    // oldest in-window = 1/M ≈ 0, where M = min(#attempts, WIN_CAP). The denominator is the
+    // available window (not a fixed WIN_CAP), so the ramp spans whatever history exists and
+    // the oldest sample always leaves at ~0 weight — even cold-start with few attempts —
+    // rather than sitting near-uniform until the history fills past WIN_CAP.
+    const M = Math.min(attempts.length, WIN_CAP);
     const win = [];
-    let acc = 0;
     for (let j = attempts.length - 1; j >= 0 && win.length < WIN_CAP; j--) {
-        const w = 1 - acc / WIN_ITARGET;
-        if (w <= 0) break;
-        const a = attempts[j];
-        win.push({ a, w });
-        const span = clearSpan(a.floor);
-        const praw = sigmoid(a.slope * (refR - a.x) + a.kappa);
-        let p = a.floor + span * praw;
-        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-        const g = span * a.slope * praw * (1 - praw);
-        acc += g * g / (p * (1 - p));          // Fisher info at refR, accumulated
+        const w = (M - win.length) / M;
+        win.push({ a: attempts[j], w });
     }
     // Weighted 4PL Newton for R, warm-started at refR with a weak prior N(refR, 1/info).
     let R = refR, info = WIN_PRIOR_INFO;
