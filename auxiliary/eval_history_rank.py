@@ -35,7 +35,9 @@ simulated here:
   optwin_serve     : estimate is the UNBIASED window MLE, but problems are SERVED
                      at estimate+δ (decoupled — fast & unbiased display, same push)
   plainwin         : window MLE, no optimism (δ=0) — isolates what the lean buys
-  momentum         : faithful port of the shipped loop (the thing we're replacing)
+  momentum         : faithful port of the OBSOLETE momentum loop — replaced in
+                     production (2026-06-26) by the linear-information window MLE;
+                     kept only as a comparison point, it is NOT the baseline
 
 Methodology — closed-loop forward simulation
 --------------------------------------------
@@ -152,8 +154,10 @@ def idx_to_label(idx):
 # problem (they differ only for the decoupled serve-offset variant).
 # ---------------------------------------------------------------------------
 class MomentumDriver:
-    """The shipped momentum loop (port in eval_rank_estimators.MomentumEstimator),
-    cold-starting at 20k (index 0) exactly as production does."""
+    """The OBSOLETE momentum loop (port in eval_rank_estimators.MomentumEstimator),
+    cold-starting at 20k (index 0). Replaced in production (2026-06-26) by the
+    linear-information window MLE (LinWindowDriver); retained only as a comparison
+    point — the PRODUCTION/BASELINE estimator is the window MLE, not this."""
     name = "momentum"
 
     def __init__(self, **_):
@@ -263,6 +267,136 @@ class OptWindowDriver:
         R_new, info = H._newton_3pl(window, prior_mean, self.prior_info, self._R, self.lapse)
         if self.step_cap is not None:
             R_new = min(self._R + self.step_cap, max(self._R - self.step_cap, R_new))
+        self._R = R_new
+        self._last_se = 1.0 / math.sqrt(info) if info > 0 else 0.0
+
+
+class LinWindowDriver:
+    """Production-faithful LINEAR-information-ramp window MLE — exactly the shipped
+    estimateWindowRank (rank-decomposition.js): walking back from the newest attempt
+    the weight ramps 1 → 0 as the accumulated Fisher information (at the current
+    estimate) goes 0 → i_target, with a HARD sample cap `win_cap`. Weak prior
+    N(R_prev, 1/prior_info); UCB serving at estimate + ucb_k·(se − se_floor).
+
+    Unlike OptWindowDriver (a HARD info window: uniform weight then a sharp cut, no
+    sample cap), this reproduces the two knobs the production estimator actually has
+    — `i_target` (WIN_ITARGET=16) and `win_cap` (WIN_CAP=500) — so the boundary the
+    cap creates (a sample aging out at non-zero weight when the ramp can't reach 0
+    within the cap, in the served-at-rank low-information regime) is reproduced."""
+
+    def __init__(self, i_target=16.0, win_cap=500, prior_info=1.0 / 16, ucb_k=1.0,
+                 start=0.0, lapse=0.0, name="lin"):
+        self.i_target = i_target
+        self.win_cap = win_cap
+        self.prior_info = prior_info
+        self.ucb_k = ucb_k
+        denom = prior_info + i_target / 2.0      # steady-state info = prior + ramp area
+        self.se_floor = (1.0 / math.sqrt(denom)) if denom > 0 else 0.0
+        self.lapse = lapse
+        self._R = start
+        self._last_se = 0.0
+        self.hist = []
+        self.name = name
+
+    @property
+    def estimate(self):
+        return self._R
+
+    @property
+    def serve_rank(self):
+        return self._R + self.ucb_k * max(0.0, self._last_se - self.se_floor)
+
+    def update(self, att):
+        self.hist.append(att)
+        upper = 1.0 - self.lapse
+        window = []
+        acc = 0.0
+        R_ref = self._R
+        for a in reversed(self.hist):
+            if len(window) >= self.win_cap:
+                break
+            w = 1.0 - acc / self.i_target
+            if w <= 0.0:
+                break
+            _, x, slope, floor, kappa, y = a[:6]
+            window.append((x, slope, floor, kappa, y, w))
+            praw = H.sigmoid(slope * (R_ref - x) + kappa)
+            p = min(max(floor + (upper - floor) * praw, 1e-9), 1 - 1e-9)
+            g = (upper - floor) * slope * praw * (1 - praw)
+            acc += g * g / (p * (1 - p))
+        R_new, info = H._newton_3pl(window, self._R, self.prior_info, self._R, self.lapse)
+        self._R = R_new
+        self._last_se = 1.0 / math.sqrt(info) if info > 0 else 0.0
+
+
+class LinPosWindowDriver:
+    """Window MLE with a PURELY POSITIONAL linear weight — `w = (M − j)/M` for the j-th
+    attempt back from the newest (j=0 → w=1, the oldest in-window → w=1/M ≈ 0), where
+    M = min(#attempts, cap) is the AVAILABLE window. This is the user's "n/min(samples,500)
+    linear weight": the ramp always spans whatever recent history exists, so the oldest
+    sample leaves at ~0 weight even cold-start with few attempts (not near-uniform until
+    the history fills past the cap).
+
+    Contrast with LinWindowDriver (the shipped info-ramp): there the edge weight only
+    reaches 0 once the accumulated Fisher information hits i_target, which in the
+    served-at-rank LOW-information regime it never does — so the departing sample leaves
+    at ~0.93 and yanks the rank opposite the new answer (the correct→down boundary
+    artifact). The positional ramp forces the departing sample to ~0 BY CONSTRUCTION,
+    independent of information content, so that artifact cannot occur. Cost: it ignores
+    how informative each attempt is (weights by position alone) — fine served at rank
+    where per-attempt info is ~constant, but it does NOT auto-widen on genuinely flat
+    problems the way a constant-information window would. Effective sample size ~3·M/4
+    (Σw=(M+1)/2, Σw²≈M/3).
+
+    Same weak prior N(R_prev, 1/prior_info) and UCB serving as LinWindowDriver; the SE
+    floor is the steady-state full-window SE 1/√(prior_info + Σw·i_per) with Σw=(cap+1)/2
+    and the per-attempt info i_per tracked online (≈constant served at rank)."""
+
+    def __init__(self, win_cap=500, prior_info=1.0 / 16, ucb_k=1.0,
+                 start=0.0, lapse=0.0, i_per_init=5e-3, name="linpos"):
+        self.win_cap = win_cap
+        self.prior_info = prior_info
+        self.ucb_k = ucb_k
+        self.sum_w = (win_cap + 1) / 2.0     # Σ_{j=0}^{cap-1}(cap−j)/cap = (cap+1)/2
+        self.i_per = i_per_init
+        self.lapse = lapse
+        self._R = start
+        self._last_se = 0.0
+        self.hist = []
+        self.name = name
+
+    @property
+    def estimate(self):
+        return self._R
+
+    @property
+    def se_floor(self):
+        denom = self.prior_info + self.sum_w * self.i_per
+        return (1.0 / math.sqrt(denom)) if denom > 0 else 0.0
+
+    @property
+    def serve_rank(self):
+        return self._R + self.ucb_k * max(0.0, self._last_se - self.se_floor)
+
+    def update(self, att):
+        self.hist.append(att)
+        upper = 1.0 - self.lapse
+        R_ref = self._R
+        window = []
+        m = min(len(self.hist), self.win_cap)   # ramp spans the AVAILABLE window
+        for j, a in enumerate(reversed(self.hist)):
+            if j >= self.win_cap:
+                break
+            w = (m - j) / m
+            _, x, slope, floor, kappa, y = a[:6]
+            window.append((x, slope, floor, kappa, y, w))
+        # online per-attempt info at the newest attempt (≈ served-at-rank constant)
+        _, x0, s0, f0, k0, _ = self.hist[-1][:6]
+        praw0 = H.sigmoid(s0 * (R_ref - x0) + k0)
+        p0 = min(max(f0 + (upper - f0) * praw0, 1e-9), 1 - 1e-9)
+        g0 = (upper - f0) * s0 * praw0 * (1 - praw0)
+        self.i_per += 0.1 * (g0 * g0 / (p0 * (1 - p0)) - self.i_per)
+        R_new, info = H._newton_3pl(window, self._R, self.prior_info, self._R, self.lapse)
         self._R = R_new
         self._last_se = 1.0 / math.sqrt(info) if info > 0 else 0.0
 
@@ -713,7 +847,8 @@ def make_drivers(args, start):
     """Factory dict {name: () -> driver}. `start` is the cold-start index shared
     by every window estimator (momentum always cold-starts at 0 internally).
 
-      momentum     the shipped bounded-step climber (the baseline to beat)
+      momentum     the OBSOLETE bounded-step climber — replaced in production by the
+                   linear-information window MLE; kept only for comparison, NOT a baseline
       plainwin     window MLE, no optimism (δ=0) — isolates what the lean buys
       optwin_lean  the proposal: +δ lean, prior SD = 1/√prior_info (default 2.5 —
                    a TIGHTER prior overshoots, because a tight lean adds ~δ each
@@ -723,6 +858,24 @@ def make_drivers(args, start):
       kalman       local-linear-trend filter: level + velocity, velocity seeded at
                    +v0 ranks/sample so it onboards fast then self-limits
     """
+    # --lin-only: the production way of computing rank IS the linear-ramp window MLE,
+    # so `baseline_500/16` (WIN_CAP=500, WIN_ITARGET=16) is the BASELINE. We compare it
+    # against the two alternative window CONFIGS under study (expand the cap to 3500;
+    # lower the info target to 4 so the ramp reaches 0 by ~the 500th sample). The
+    # OBSOLETE MomentumDriver is included only as a legacy comparison point — it is
+    # NOT the baseline. One framework run prints the standard climb/grid tables with
+    # these as the rows.
+    if getattr(args, "lin_only", False):
+        pinfo = 1.0 / 16          # WIN_PRIOR_SD = 4 → prior_info = 1/16 (production)
+        lw = lambda it, cap, nm: (lambda: LinWindowDriver(
+            it, cap, pinfo, 1.0, start=start, lapse=args.lapse, name=nm))
+        return {
+            "momentum":         lambda: MomentumDriver(),
+            "baseline_500/16":  lw(16.0, 500, "baseline_500/16"),
+            "expand_3500/16":   lw(16.0, 3500, "expand_3500/16"),
+            "linpos_500":       lambda: LinPosWindowDriver(
+                500, pinfo, 1.0, start=start, lapse=args.lapse, name="linpos_500"),
+        }
     return {
         "momentum":     lambda: MomentumDriver(),
         "plainwin":     lambda: OptWindowDriver(args.i_target, args.prior_info, 0.0,
@@ -982,8 +1135,11 @@ def run_five(args, corpus):
 # Evolve: sweep ONE (or two) knobs of a candidate model at the two EXTREME
 # abilities — 15k (idx 5, a 5-stone climb) and 5d (idx 24, a 24-stone climb).
 # Same params must serve both, since the cold-start path length is unknown. The
-# fixed momentum baseline is printed first; a candidate "wins" only if it matches
-# or beats momentum's rise / hard / bias / settle at BOTH extremes.
+# comparison row chosen by --baseline is printed first (default the OBSOLETE
+# momentum — a legacy reference, NOT the production baseline; the production way of
+# computing rank is the linear-information window MLE, --baseline lin); a candidate
+# "wins" only if it matches or beats that row's rise / hard / bias / settle at BOTH
+# extremes.
 # ---------------------------------------------------------------------------
 def _agg(mets):
     """Per-scenario summary: (mean, STDDEV) over the per-run metric values for each
@@ -1093,7 +1249,7 @@ def run_evolve(args, corpus):
     print("\n" + "=" * _FULL_W)
     print(f"EVOLVE {model} — sweep {sweep_desc}; {args.reps} reps. "
           f"every cell = mean±stddev (run-to-run spread).")
-    print("Beat momentum: lower rise, lower hard, |bias|→0, lower std/sett.")
+    print("Beat the baseline row (--baseline): lower rise, lower hard, |bias|→0, lower std/sett.")
     print("=" * _FULL_W)
 
     if args.baseline == "momentum":
@@ -1117,9 +1273,11 @@ def run_evolve(args, corpus):
 
 
 def run_showdown(args, corpus):
-    """Final head-to-head: the fixed momentum baseline vs the best-tuned candidate of
-    each family (defaults in DRIVER_DEFAULTS). One row per estimator, all metrics, over
-    the two extreme abilities PLUS the noisy-onboarding 1d scenario."""
+    """Final head-to-head: the --baseline comparison row (default the OBSOLETE
+    momentum loop — kept only for reference, NOT the production baseline; the
+    production estimator is the linear-information window MLE) vs the best-tuned
+    candidate of each family (defaults in DRIVER_DEFAULTS). One row per estimator,
+    all metrics, over the two extreme abilities PLUS the noisy-onboarding 1d scenario."""
     pool, xs = get_pool(args, corpus)
     scenarios = _scenarios(args, with_noise=True)
     rng = random.Random(args.seed)
@@ -1277,6 +1435,11 @@ def main():
     ap.add_argument("--grid-abilities", default="6,11,16,20,24",
                     help="true indices for the grid table")
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--lin-only", action="store_true",
+                    help="run the climb/grid with the BASELINE = the production linear-ramp "
+                         "window MLE (baseline 500/16) against the two alternative window "
+                         "configs (expand 3500/16, lowinfo 500/4), plus the obsolete momentum "
+                         "loop as a legacy reference — needs --attempts > 500 for the cap to bind")
     ap.add_argument("--no-grid", action="store_true", help="skip the grid table")
     ap.add_argument("--no-climb", action="store_true", help="skip the climb test")
     ap.add_argument("--no-plot", action="store_true", help="don't write the climb PNG")
@@ -1297,7 +1460,9 @@ def main():
                     help="run ONLY the evolve sweep for this candidate model and exit")
     ap.add_argument("--baseline", default="momentum",
                     choices=["momentum", "lin", "ucb", "lean", "serve", "exp", "linpop", "kalman"],
-                    help="evolve baseline row to compare the sweep against (default momentum)")
+                    help="evolve comparison row to sweep against. NOTE the production baseline is "
+                         "the window MLE ('lin'); 'momentum' (the default, for back-compat) is the "
+                         "OBSOLETE loop kept only as a legacy reference, not a baseline")
     ap.add_argument("--p1", help="evolve: name of the first parameter to sweep")
     ap.add_argument("--v1", help="evolve: comma-separated values for --p1")
     ap.add_argument("--p2", help="evolve: optional second parameter (2-D grid)")
