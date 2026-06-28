@@ -7,7 +7,7 @@ import { initDebugLog } from './debug-log.js';
 initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, updateServeRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
-import { runMigrations, runTailMigration } from './migrations.js';
+import { runMigrations, runTailMigration, dedupTailExact } from './migrations.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -668,7 +668,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // migration (de-dup + reconstruct + eviction-baseline fix) settles the tail
     // FIRST so the backfill's curve-recompute doesn't race its writes. Both are
     // background — the first problem load doesn't wait.
-    runTailMigration().catch(() => {}).then(() => backfillMissingEmbeddings());
+    runTailMigration()
+        .catch(() => {})
+        .then(() => dedupTailExact())
+        .catch(() => {})
+        .then(() => backfillMissingEmbeddings());
 
     maybeInitWindowRankOnce();
 

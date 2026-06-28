@@ -279,7 +279,10 @@ export async function getMergedFullAnswerHistory() {
     const seen = new Set(unifiedHistory.map(a => `${a.problemId}|${a.date}`));
     const merged = [];
     for (const a of tail) {
-        if (seen.has(`${a.problemId}|${a.date}`)) continue;
+        const k = `${a.problemId}|${a.date}`;
+        if (seen.has(k)) continue;
+        seen.add(k);   // also de-dup WITHIN the tail — legacy outbox/sync re-inserts left
+                       // exact (problemId,date) dup rows that would otherwise double-plot
         merged.push(a.size != null ? { ...a } : { ...a, size: 9 });
     }
     for (const a of unifiedHistory) merged.push({ ...a });

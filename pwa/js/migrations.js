@@ -215,6 +215,30 @@ export function runMigrations() {
     migrateClearRatingsStampForTailRederive();
 }
 
+// De-dup the cold tail by EXACT (problemId,date), keeping the richest copy (so the tail
+// stays oldest→newest). Returns rows removed. Exact key ONLY, on purpose: a separate
+// attempt can't share a millisecond, so same-timestamp rows are storage dups, whereas
+// same-problem rows seconds/minutes apart are legitimate fast repeats that must survive.
+async function dedupTailByProblemDate() {
+    const tail = await getTail();
+    if (!Array.isArray(tail) || tail.length === 0) return 0;
+    const richness = (e) =>
+        (typeof e.problemRank === 'number' ? 4 : 0) +
+        (typeof e.problemRating === 'number' ? 2 : 0) +
+        (e.embedding !== undefined ? 1 : 0);
+    const best = new Map();
+    const order = [];
+    for (const e of tail) {
+        if (!e) continue;
+        const k = `${e.problemId}|${e.date}`;
+        if (!best.has(k)) { best.set(k, e); order.push(k); }
+        else if (richness(e) > richness(best.get(k))) best.set(k, e);
+    }
+    const removed = tail.length - order.length;
+    if (removed > 0) await replaceTail(order.map((k) => best.get(k)));
+    return removed;
+}
+
 const TAIL_MIGRATION_KEY = 'tailMigration_v1';
 
 /**
@@ -247,23 +271,8 @@ export async function runTailMigration() {
     try {
         const tail = await getTail();
         if (Array.isArray(tail) && tail.length > 0) {
-            // De-dup by (problemId,date), keeping the richest copy in first
-            // position (so the tail stays oldest→newest).
-            const richness = (e) =>
-                (typeof e.problemRank === 'number' ? 4 : 0) +
-                (typeof e.problemRating === 'number' ? 2 : 0) +
-                (e.embedding !== undefined ? 1 : 0);
-            const best = new Map();
-            const order = [];
-            for (const e of tail) {
-                if (!e) continue;
-                const k = `${e.problemId}|${e.date}`;
-                if (!best.has(k)) { best.set(k, e); order.push(k); }
-                else if (richness(e) > richness(best.get(k))) best.set(k, e);
-            }
-            const dedupedCount = tail.length - order.length;
+            const dedupedCount = await dedupTailByProblemDate();
             if (dedupedCount > 0) {
-                await replaceTail(order.map((k) => best.get(k)));
                 console.log(`tail-migration: removed ${dedupedCount} duplicate rows`);
             }
 
@@ -287,4 +296,31 @@ export async function runTailMigration() {
         return;
     }
     if (reconstructOk) localStorage.setItem(TAIL_MIGRATION_KEY, '1');
+}
+
+const TAIL_DEDUP_KEY = 'tailDedupExact_v1';
+
+/**
+ * ONE-TIME: remove exact (problemId,date) duplicate rows the cold tail accumulated from
+ * the April–May 2026 outbox/sync re-inserts — created AFTER runTailMigration's one-shot
+ * dedup, so they slipped past it (~1.6k rows on a heavy device). getMergedFullAnswerHistory
+ * now also de-dups the tail at READ time, so the chart no longer double-plots regardless;
+ * this is the matching storage cleanup. Runs once, after runTailMigration and before the
+ * backfill (main.js sequences them). Left unflagged on a tail-fetch failure so it retries.
+ */
+export async function dedupTailExact() {
+    if (localStorage.getItem(TAIL_DEDUP_KEY)) return;
+    try {
+        const removed = await dedupTailByProblemDate();
+        if (removed > 0) {
+            // Shrinking the tail moves the silent-eviction high-water mark, or the next
+            // stats open misreads it as the browser dropping rows.
+            try { await syncTailExpectedToActual(); } catch {}
+            console.log(`tail-dedup: removed ${removed} exact duplicate rows`);
+        }
+    } catch (e) {
+        console.warn('tail-dedup failed (will retry next load):', e);
+        return;
+    }
+    localStorage.setItem(TAIL_DEDUP_KEY, '1');
 }
