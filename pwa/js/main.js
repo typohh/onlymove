@@ -8,6 +8,7 @@ initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, updateServeRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
 import { runMigrations, runTailMigration } from './migrations.js';
+import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
@@ -114,14 +115,21 @@ function hideBootSplash() {
 // ~500-line closure. handleSizeToggle / performIgnore / recoverBoardIfNeeded
 // are module-level (they only touch imported state + helpers).
 
-// Log the bundle hash of the running main file — handy when confirming which
-// deploy a user is on, alongside the X-App-Version header.
-function logMainScriptHash() {
+// Startup version log — three global identities, handy for confirming two devices
+// are on the same build + same shipped data (the cross-device-divergence debug):
+//   - the app:    the running main file's bundle hash (which deploy)
+//   - the data:   data_version, the content hash that cache-busts the served data
+//   - the rating: ratings_version. The rating model is ONE joint cross-board fit, so
+//     a re-rate changes both boards together — the {9,13} sub-hashes are just the two
+//     problem sets of the same fit, not independent per-board versions.
+function logStartupVersions() {
     const scriptElement = document.currentScript || document.querySelector('script[src*="main"]');
     if (scriptElement) {
         const hash = scriptElement.src.split('.').slice(-2, -1)[0]; // main.[hash].js
         console.log(`Main file hash: ${hash}`);
     }
+    console.log('Data version:', DATA_VERSION);
+    console.log('Ratings version:', EMBEDDING_META_INLINE.ratings_version ?? 'unknown');
 }
 
 // Switch board size (the menu names the target, e.g. "Switch to 13x13", so it
@@ -622,7 +630,7 @@ function wireLifecycleRecovery() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     hideBootSplash();
-    logMainScriptHash();
+    logStartupVersions();
 
     updateBoardSize();
     // Using CSS vi units for responsive sizing, but still need to update the WGo

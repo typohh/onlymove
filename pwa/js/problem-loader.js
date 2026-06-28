@@ -11,20 +11,6 @@ import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize, slopeToQuality } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
 
-// FNV-1a 32-bit fingerprint of a string. Used only for the debug "Metadata
-// hash:" log below, so it needs no cryptographic strength — just a stable short
-// digest. Deliberately a plain JS hash (not crypto.subtle.digest, which is
-// undefined in non-secure contexts like the Zalo in-app webview and used to
-// throw mid-load): one synchronous implementation that works everywhere.
-function simpleHash(str) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = Math.imul(h, 0x01000193);
-    }
-    return (h >>> 0).toString(16).padStart(8, '0');
-}
-
 function weightedRandomSelect(items, weightFn) {
     const totalWeight = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
     if (totalWeight === 0) return items[0]; // fallback to first if no weights
@@ -160,8 +146,6 @@ export async function loadZipMetadata() {
             z.maxRank = normalizedRankForSize(z.max_rating, state.boardSize);
         }
         state.zipMetadata = zips;
-        const metadataStr = JSON.stringify(state.zipMetadata);
-        console.log('Metadata hash:', simpleHash(metadataStr));
     }
 }
 
