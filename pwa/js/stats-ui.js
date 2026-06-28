@@ -906,6 +906,11 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // are SKILL values, so they take the (temporal) time adjustment then translate;
     // the scatter dots are PROBLEM difficulties (independent of how fast the user
     // solves), so they translate only. onlymove = identity (raw internal index).
+    // internalIndexToServerScalar returns the HONEST (unclamped) server scalar:
+    // the dots are problem difficulties that extrapolate past 9d, and the
+    // band-focused y-window below drops the out-of-range ones. (A rank-ladder cap
+    // would instead pile every above-9d dot onto the 8d-9d border — only the
+    // translation-table LABELS clamp; see rank-translation.js.)
     const skillToDisplay = (internalIdx, delta) => {
         if (selectedServer === ONLYMOVE) return internalIdx;
         const adj = (Number.isFinite(delta) && delta !== 0)

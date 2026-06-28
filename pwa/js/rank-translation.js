@@ -31,10 +31,17 @@ import RANK_MAP from '../tsumegos/rank_map.json';
 // index↔scalar offset) are imported from shared/rank-math.js — one kyu/dan
 // ladder, shared with the Worker and the stats UI.
 
-// Clamp translated server ranks to the real rank range (30k..9d) so extreme
-// extrapolation can't print impossible labels like "15 dan" (matches the
-// our_lo/our_hi clamp the fit used to apply server-side).
+// Real rank-ladder bounds (30k..9d). Used ONLY to clamp a translated server rank
+// for a displayed LABEL (boundServerScalar) so extreme extrapolation can't print
+// an impossible label like "15 dan" on a server whose ladder tops out at 9d. The
+// translation itself (internalIndexToServerScalar) is never clamped — see its
+// note; the Rank chart needs the honest continuous value.
 const RANK_SCALAR_LO = -29, RANK_SCALAR_HI = 9;
+
+// Clamp a translated server scalar to the real rank ladder, for a displayed LABEL.
+function boundServerScalar(s) {
+    return Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
+}
 
 // interpExtrap + rankScalarToLabel now live in shared/rank-math.js (one copy
 // shared with the Worker).
@@ -45,20 +52,23 @@ const RANK_SCALAR_LO = -29, RANK_SCALAR_HI = 9;
 export const RANK_TRANSLATION_SERVERS = Object.keys(RANK_MAP || {});
 
 // internal-rank INDEX (~0..29, floor(rating·29) scale) → that server's CONTINUOUS
-// rank scalar (1k=0, 1d=1), clamped to the real rank range. EGF is identity.
-// Returns null if the server has no usable curve. This is the scalar form of
-// serverRanksFor (which returns rounded labels) — the Rank chart needs the
-// continuous value to place the skill line, not a label.
+// rank scalar (1k=0, 1d=1). EGF is identity. Returns null if the server has no
+// usable curve. This is the scalar form of serverRanksFor (which returns rounded
+// labels) — the Rank chart needs the continuous value to place the skill line.
+//
+// Always the HONEST translated value — there is no rank-ladder clamp here. A
+// hidden cap once lived in this function and silently pinned every above-9d value
+// to the 8d-9d border: harmless for a rank LABEL but wrong for the Rank chart,
+// which plots problem difficulties that extrapolate far past 9d and relies on its
+// own band-focused y-window to drop the out-of-range ones. The label-ceiling cap
+// now lives at the one place that builds labels (serverRanksFor → boundServerScalar).
 export function internalIndexToServerScalar(rankIndex, server) {
     if (!Number.isFinite(rankIndex)) return null;
     const ourScalar = rankIndex - RANK_INDEX_OFFSET;
-    if (server === 'EGF') {
-        return Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, ourScalar));
-    }
+    if (server === 'EGF') return ourScalar;
     const c = RANK_MAP && RANK_MAP[server];
     if (!c || !Array.isArray(c.our) || !Array.isArray(c.server) || c.our.length < 2) return null;
-    const s = interpExtrap(ourScalar, c.our, c.server);
-    return Math.max(RANK_SCALAR_LO, Math.min(RANK_SCALAR_HI, s));
+    return interpExtrap(ourScalar, c.our, c.server);
 }
 
 // {server: label} translating the (already time-adjusted) CONTINUOUS internal
@@ -71,7 +81,7 @@ function serverRanksFor(adjRankIndex, egfLabel) {
     for (const server of RANK_TRANSLATION_SERVERS) {
         if (server === 'EGF') { out.EGF = egfLabel; continue; }
         const s = internalIndexToServerScalar(adjRankIndex, server);
-        if (Number.isFinite(s)) out[server] = rankScalarToLabel(s);
+        if (Number.isFinite(s)) out[server] = rankScalarToLabel(boundServerScalar(s));
     }
     return out;
 }
