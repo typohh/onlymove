@@ -33,3 +33,15 @@ export const DATA_VERSION =
         && EMBEDDING_META.data_version.length > 0)
         ? EMBEDDING_META.data_version
         : APP_VERSION;
+
+// ONE ratings version. The rating model is a single joint cross-board fit, so a re-rate
+// moves BOTH boards together — there is no independent per-board rating version. The
+// manifest's `ratings_version` is keyed by size only because each board hashes a
+// different problem set of that one fit; we collapse those sub-hashes (sorted, joined)
+// to a single value that the backfill gates on and the startup log prints.
+export const RATINGS_VERSION = (() => {
+    const rv = EMBEDDING_META && EMBEDDING_META.ratings_version;
+    if (!rv || typeof rv !== 'object') return null;
+    const parts = Object.keys(rv).sort().map((k) => rv[k]);
+    return parts.length ? parts.join('-') : null;
+})();

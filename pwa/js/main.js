@@ -8,7 +8,7 @@ initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, updateServeRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
 import { runMigrations, runTailMigration } from './migrations.js';
-import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
+import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
@@ -76,7 +76,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 }
 
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems, resumeCurrentProblem } from './problem-loader.js';
-import { backfillMissingEmbeddings } from './embedding-backfill.js';
+import { backfillMissingEmbeddings } from './backfill.js';
 import { loadRatingRankMap, estimateWindowRank } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
@@ -119,9 +119,10 @@ function hideBootSplash() {
 // are on the same build + same shipped data (the cross-device-divergence debug):
 //   - the app:    the running main file's bundle hash (which deploy)
 //   - the data:   data_version, the content hash that cache-busts the served data
-//   - the rating: ratings_version. The rating model is ONE joint cross-board fit, so
-//     a re-rate changes both boards together — the {9,13} sub-hashes are just the two
-//     problem sets of the same fit, not independent per-board versions.
+//   - the rating: RATINGS_VERSION — ONE value. The rating model is a single joint
+//     cross-board fit, so a re-rate changes both boards together; there is no
+//     independent per-board version (data-version.js collapses the manifest's per-size
+//     sub-hashes to this single string).
 function logStartupVersions() {
     const scriptElement = document.currentScript || document.querySelector('script[src*="main"]');
     if (scriptElement) {
@@ -129,7 +130,7 @@ function logStartupVersions() {
         console.log(`Main file hash: ${hash}`);
     }
     console.log('Data version:', DATA_VERSION);
-    console.log('Ratings version:', EMBEDDING_META_INLINE.ratings_version ?? 'unknown');
+    console.log('Ratings version:', RATINGS_VERSION ?? 'unknown');
 }
 
 // Switch board size (the menu names the target, e.g. "Switch to 13x13", so it

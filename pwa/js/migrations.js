@@ -14,7 +14,7 @@
 
 import { state, updateAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
 import { getTail, replaceTail } from './history-store.js';
-import { fillSyncedTailFields } from './embedding-backfill.js';
+import { fillSyncedTailFields } from './backfill.js';
 
 // Backfill accumulatedReview: the total reviewTime spent on a problem across all
 // PRIOR attempts (strictly before this entry's date).

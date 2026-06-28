@@ -1,4 +1,4 @@
-// js/embedding-backfill.js
+// js/backfill.js
 //
 // Retroactively patches per-shard fields on answerHistory entries. Two
 // independent jobs share one shard walk:
@@ -34,7 +34,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
-import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
+import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail } from './history-store.js';
 import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
@@ -43,9 +43,15 @@ import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
 // trainer ever uses. Anything older eats localStorage for no benefit.
 const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 
-const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
-const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
-const RANK_CURVE_VERSION_KEY = (size) => `rankCurveVersion_${size}`;
+// One stamp per axis (NOT per-size). The embedding fit, the rating fit, and the rank
+// curve are each a single shared/joint artifact — a re-ship of any re-derives BOTH
+// boards, so there is no per-board version. The gate + stamp live in
+// backfillMissingEmbeddings (once, around the per-size work loop). The old per-size
+// keys (`…_9`/`…_13`) are abandoned; the first load after this lands re-derives once,
+// which a real data ship triggers anyway.
+const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
+const RATINGS_VERSION_KEY = 'ratingsVersion';
+const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 
 // Removed-problem prune. Problems get dropped from the corpus on regeneration
 // (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
@@ -96,17 +102,14 @@ function persistAnswerHistory(size, snapshot) {
 }
 
 export async function backfillMissingEmbeddings() {
-    // Joint metadata (embedding version + labels + sidecar layout + per-size
-    // ratings_version) is shared across sizes. It is now INLINED into the bundle
-    // (data-version.js), so it can never be served stale by a cache — the read is
-    // synchronous and always matches the deployed code. Populates state.embeddingMeta
-    // with the K/dtype/bytes_per_cell tuple used by picked-embedding.js to decode
-    // per-cell .embeddings.bin sidecars.
+    // Joint metadata (embedding version + labels + sidecar layout + ratings_version)
+    // is shared across sizes and INLINED into the bundle (data-version.js), so it can
+    // never be served stale by a cache — the read is synchronous and always matches the
+    // deployed code. Populates state.embeddingMeta with the K/dtype/bytes_per_cell tuple
+    // used by picked-embedding.js to decode per-cell .embeddings.bin sidecars.
     const meta = EMBEDDING_META_INLINE;
-    const serverVersion = (typeof meta.embedding_version === 'string')
+    const serverEmbeddingVersion = (typeof meta.embedding_version === 'string')
         ? meta.embedding_version : 'unknown';
-    const ratingsVersionsBySize = (meta.ratings_version && typeof meta.ratings_version === 'object')
-        ? meta.ratings_version : {};
     if (meta.labels && meta.labels.components) {
         state.embeddingLabels = meta.labels.components;
     }
@@ -117,27 +120,63 @@ export async function backfillMissingEmbeddings() {
             bytes_per_cell: typeof meta.bytes_per_cell === 'number'
                 ? meta.bytes_per_cell
                 : meta.K * 2,  // sensible fp16 default
-            embedding_version: serverVersion,
+            embedding_version: serverEmbeddingVersion,
         };
     }
 
-    // Strip stale fields off entries whose problem left the corpus, before the
-    // per-size rating walk (which can't refresh them — the shard is gone).
-    const pruned = await pruneRemovedProblems(serverVersion, ratingsVersionsBySize);
+    // SINGLE version gates. Each axis is one shared/joint artifact (the embedding fit,
+    // RATINGS_VERSION = the joint cross-board rating fit, and the shared rank curve), so
+    // a change re-derives BOTH boards — no per-board version. Decide once here; do the
+    // per-size WORK in backfillForSize (problems live in per-size shards); then stamp
+    // the single keys ONCE, after every size's walk has persisted. The stamp is the only
+    // "done" marker, so a shutdown mid-loop leaves nothing stamped and the whole backfill
+    // re-runs idempotently. (problemRank is derived from the raw rating through M, so a
+    // curve re-fit with untouched ratings still shifts every stored rank — hence its own
+    // gate.) The curve is the same for both sizes; query it with the default board.
+    const curveVersion = ratingRankCurveVersion(DEFAULT_BOARD_SIZE);
+    const embeddingsChanged = localStorage.getItem(EMBEDDING_VERSION_KEY) !== serverEmbeddingVersion;
+    const ratingsChanged = RATINGS_VERSION !== null
+        && localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION;
+    const curveChanged = curveVersion !== null
+        && localStorage.getItem(RANK_CURVE_VERSION_KEY) !== curveVersion;
+
+    // Strip stale fields off entries whose problem left the corpus, before the rating
+    // walk (which can't refresh them — the shard is gone).
+    const pruned = await pruneRemovedProblems(serverEmbeddingVersion, RATINGS_VERSION);
 
     const sizesFilled = [];
-    for (const size of SUPPORTED_BOARD_SIZES) {
-        // ratings_version is keyed by string in the JSON; tolerate either.
-        const ratingsVersion = ratingsVersionsBySize[size]
-            ?? ratingsVersionsBySize[String(size)]
-            ?? null;
-        const filled = await backfillForSize(size, serverVersion, ratingsVersion);
-        if (filled > 0) sizesFilled.push(size);
+    if (embeddingsChanged || ratingsChanged || curveChanged) {
+        // Bracket the whole run: a "triggered" line (which axes moved + the new
+        // ratings version) and a "complete" line (elapsed + which sizes were rewritten).
+        // These straddle the async shard walk, so the console shows when a re-derive
+        // started and that it finished — the front-page rank can shift between them.
+        const changed = [
+            embeddingsChanged && 'embeddings',
+            ratingsChanged && 'ratings',
+            curveChanged && 'curve',
+        ].filter(Boolean).join('+');
+        const t0 = performance.now();
+        console.log(`backfill: triggered (${changed} changed; ratings_version=${RATINGS_VERSION}) — re-deriving stored history`);
+        for (const size of SUPPORTED_BOARD_SIZES) {
+            const filled = await backfillForSize(size, {
+                embeddingsChanged, ratingsChanged, curveChanged, serverEmbeddingVersion,
+            });
+            if (filled > 0) sizesFilled.push(size);
+        }
+        // Stamp the single versions ONCE, only now that every size has persisted.
+        if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
+        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
+        if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
+        console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'})`);
     }
-    // One shared weakness model trained on the union of both histories — retrain
-    // once if any size's embeddings/ratings were refreshed OR a prune changed
-    // what the model sees.
-    if (sizesFilled.length > 0 || pruned) {
+
+    // Retrain the single shared weakness model if any size refreshed, a prune changed
+    // its training set, OR the model is missing — the last heals a device whose model
+    // was cleared by an interrupted embedding refit and then re-loaded after the stamp
+    // (so no refit re-fires). trainWeakness no-ops below its min training size, so a
+    // cold-start user just gets a cheap early return.
+    const weaknessUntrained = !state.weaknessParams || state.weaknessParams.length < 4;
+    if (sizesFilled.length > 0 || pruned || weaknessUntrained) {
         setTimeout(() => trainWeakness(), 0);
     }
 }
@@ -148,8 +187,8 @@ export async function backfillMissingEmbeddings() {
 // failed/empty lookup fetch (that would strip everything) — a real false
 // positive is harmless anyway, since the rating-refresh walk refills the fields
 // next time that problem's shard is touched. Returns true if it stripped fields.
-async function pruneRemovedProblems(embeddingVersion, ratingsVersionsBySize) {
-    const signature = JSON.stringify({ e: embeddingVersion, r: ratingsVersionsBySize });
+async function pruneRemovedProblems(embeddingVersion, ratingsVersion) {
+    const signature = JSON.stringify({ e: embeddingVersion, r: ratingsVersion });
     // Corpus unchanged since the last prune — nothing new to remove.
     if (localStorage.getItem(PRUNE_SIGNATURE_KEY) === signature) return false;
 
@@ -265,25 +304,13 @@ function groupIdsByZip(lookupMap, ids) {
     return zipToIds;
 }
 
-async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersion) {
-    const storedEmbeddingVersion = localStorage.getItem(VERSION_KEY(size));
-    const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
-    const curveVersion = ratingRankCurveVersion(size);
-    const storedCurveVersion = localStorage.getItem(RANK_CURVE_VERSION_KEY(size));
-    const embeddingsChanged = storedEmbeddingVersion !== serverEmbeddingVersion;
-    const ratingsChanged = serverRatingsVersion !== null
-        && storedRatingsVersion !== serverRatingsVersion;
-    // problemRank is derived from the raw rating through M, so a curve re-fit
-    // that left ratings untouched still shifts every stored rank.
-    const curveChanged = curveVersion !== null && storedCurveVersion !== curveVersion;
-    if (!embeddingsChanged && !ratingsChanged && !curveChanged) return 0;
-
-    const persistVersions = () => {
-        if (embeddingsChanged) localStorage.setItem(VERSION_KEY(size), serverEmbeddingVersion);
-        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY(size), serverRatingsVersion);
-        if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY(size), curveVersion);
-    };
-
+// Per-size WORK for one board, driven by the GLOBAL change flags the caller already
+// decided (the versions are single/shared — see backfillMissingEmbeddings). Problems
+// live in per-size shards so the walk is necessarily per-size, but this function NEVER
+// touches the version stamps — the caller stamps the single versions once, after every
+// size has returned and persisted, so a shutdown mid-loop leaves nothing stamped and
+// the whole backfill re-runs idempotently.
+async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveChanged, serverEmbeddingVersion }) {
     try {
         const history = getAnswerHistoryForSize(size);
 
@@ -302,13 +329,12 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 // size's now-stale embeddings (jointly with the other size's).
                 clearWeaknessModel();
                 persistAnswerHistory(size, history);
-                console.log(`embedding-backfill[${size}]: cleared ${cleared} stale embeddings (${storedEmbeddingVersion || 'first run'} -> ${serverEmbeddingVersion})`);
+                console.log(`backfill[${size}]: cleared ${cleared} stale embeddings (-> ${serverEmbeddingVersion})`);
             }
             for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
         }
 
         if (!history || history.length === 0) {
-            persistVersions();
             return 0;
         }
 
@@ -328,7 +354,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             }
             if (curveRankUpdated > 0) {
                 persistAnswerHistory(size, history);
-                console.log(`embedding-backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
+                console.log(`backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
             }
         }
 
@@ -355,7 +381,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                 return null;
             });
             if (tailUpdated > 0) {
-                console.log(`embedding-backfill[${size}]: recomputed problemRank for ${tailUpdated} cold-tail entries (curve change)`);
+                console.log(`backfill[${size}]: recomputed problemRank for ${tailUpdated} cold-tail entries (curve change)`);
             }
         }
 
@@ -398,13 +424,12 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
             }
             if (strippedOld > 0) {
                 persistAnswerHistory(size, history);
-                console.log(`embedding-backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
+                console.log(`backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
             }
         }
 
         const allNeedIds = new Set([...needIdsForEmbed, ...needIdsForRatings]);
         if (allNeedIds.size === 0) {
-            persistVersions();
             return curveRankUpdated;
         }
 
@@ -471,7 +496,7 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                         let indexPayload = null;
                         try { indexPayload = JSON.parse(await idxFile.async('text')); }
                         catch (e) {
-                            console.warn(`embedding-backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                            console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
                         }
                         if (indexPayload && indexPayload.problems) {
                             // Sequential per-entry WITHIN the shard: Range
@@ -501,18 +526,17 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
                     }
                 }
             } catch (err) {
-                console.warn(`embedding-backfill[${size}]: failed for ${zipFilename}:`, err);
+                console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
             }
         });
 
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
             persistAnswerHistory(size, history);
-            console.log(`embedding-backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
+            console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
-        persistVersions();
         return totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated;
     } catch (err) {
-        console.error(`embedding-backfill[${size}] failed`, err);
+        console.error(`backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
         return 0;
     }

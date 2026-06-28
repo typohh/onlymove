@@ -41,7 +41,7 @@ import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
-import { fillSyncedHistoryFields } from './embedding-backfill.js';
+import { fillSyncedHistoryFields } from './backfill.js';
 import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { updateAllUI } from './ui.js';
