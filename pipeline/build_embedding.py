@@ -34,11 +34,12 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import FastICA, IncrementalPCA
+from threadpoolctl import threadpool_limits  # sklearn dep; pin BLAS in workers
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -152,11 +153,23 @@ def load_size(size: int):
     sample = _load_correct_vec(act_dir, ids[0], by_ext)
     n, d = len(ids), sample.shape[0]
     print(f"  [size {size}] loading {n} activations × {d} features...")
+    # Each file is np.savez_compressed, so reading the correct row still
+    # decompresses the whole candidates block (zlib, GIL-released). The reads
+    # are independent and write to distinct rows of X, so fan them out across
+    # threads — byte-for-byte the same X as the serial fill, just ~cores× faster.
     X = np.empty((n, d), dtype=np.float32)
-    for i, tid in enumerate(ids):
+    n_workers = min(8, (os.cpu_count() or 4))
+
+    def _fill(idx_tid):
+        i, tid = idx_tid
         X[i] = _load_correct_vec(act_dir, tid, by_ext)
-        if (i + 1) % 20000 == 0:
-            print(f"    [size {size}]   {i + 1}/{n}", flush=True)
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        for _ in ex.map(_fill, enumerate(ids)):
+            done += 1
+            if done % 20000 == 0:
+                print(f"    [size {size}]   {done}/{n}", flush=True)
 
     ratings_df = pd.read_csv(ratings_path)[["tsumego_id", "rating"]]
     ratings_map = dict(zip(ratings_df["tsumego_id"], ratings_df["rating"]))
@@ -410,6 +423,70 @@ def update_labels_and_bank(
           f"cosine >= {cosine_threshold})")
 
 
+def _decode_pca_arc(pca_arc):
+    """Decode pca.npz once into the float64 arrays + precomputed constants that
+    _project_decoded needs, so a caller projecting many problems pays the npz
+    read / astype / standardization-fold once instead of per call.
+
+    The transforms _project_decoded applies are algebraically equal to the
+    explicit z-score → residualize → center → standardize sequence in main();
+    folding constants here only reassociates the float ops (negligible rounding,
+    well under the fp16 the embeddings ship in):
+      - inv_stds = 1/feature_stds replaces the per-feature division;
+      - affine_const = -(feature_means/feature_stds) - pca_mean is the
+        problem-independent part of the centering (the per-problem part is the
+        OLS offset, subtracted in _project_decoded);
+      - comp_scaled_T folds /component_stds into the (transposed, contiguous)
+        PCA loadings; ica_scaled_T folds /ica_stds into the unmixing.
+    """
+    kept = pca_arc["kept_feature_mask"].astype(bool)
+    feature_means = pca_arc["feature_means"].astype(np.float64)
+    feature_stds = pca_arc["feature_stds"].astype(np.float64)
+    inv_stds = 1.0 / feature_stds  # kept features all have std >= std_floor
+    pca_mean = pca_arc["pca_mean"].astype(np.float64)
+    pca_components = pca_arc["pca_components"].astype(np.float64)
+    component_stds = pca_arc["component_stds"].astype(np.float64)
+    component_stds = np.where(component_stds < 1e-9, 1.0, component_stds)
+    P = {
+        "all_kept": bool(kept.all()),
+        "kept": kept,
+        "inv_stds": inv_stds,
+        "affine_const": -(feature_means * inv_stds) - pca_mean,
+        "rating_slope": pca_arc["rating_slope"].astype(np.float64),
+        "size_slope": pca_arc["size_slope"].astype(np.float64),
+        "ols_intercept": pca_arc["ols_intercept"].astype(np.float64),
+        "comp_scaled_T": np.ascontiguousarray(
+            (pca_components / component_stds[:, None]).T),   # (D_kept, K)
+    }
+    if "ica_unmixing" in pca_arc.files:
+        ica_unmixing = pca_arc["ica_unmixing"].astype(np.float64)
+        ica_stds = pca_arc["ica_stds"].astype(np.float64)
+        ica_stds = np.where(ica_stds < 1e-9, 1.0, ica_stds)
+        P["ica_scaled_T"] = np.ascontiguousarray(
+            (ica_unmixing / ica_stds[:, None]).T)            # (K, K)
+    return P
+
+
+def _project_decoded(activations, rating, size_is_13, P):
+    """Project raw activations to the K-dim embedding using arrays already
+    decoded by _decode_pca_arc. See project_to_embedding for the contract."""
+    V = np.asarray(activations, dtype=np.float64)
+    single = (V.ndim == 1)
+    if single:
+        V = V[None, :]
+    # When no channels were dropped (the common case) the boolean fancy-index
+    # is an exact copy of V — skip it.
+    V_kept = V if P["all_kept"] else V[:, P["kept"]]         # (N, D_kept)
+    # offset = OLS residualization shift (constant across a problem's cells).
+    offset = P["rating_slope"] * rating + P["size_slope"] * size_is_13 + P["ols_intercept"]
+    centered = V_kept * P["inv_stds"]                         # (N, D_kept)
+    centered += P["affine_const"] - offset
+    pca_scores = centered @ P["comp_scaled_T"]               # (N, K), /std folded in
+    out = pca_scores @ P["ica_scaled_T"] if "ica_scaled_T" in P else pca_scores
+    out = out.astype(np.float32)
+    return out[0] if single else out
+
+
 def project_to_embedding(activations, rating, size_is_13, pca_arc):
     """Project raw 6912-dim trunk activations to the K-dim joint embedding.
 
@@ -436,39 +513,7 @@ def project_to_embedding(activations, rating, size_is_13, pca_arc):
     np.ndarray
         (K,) or (N, K) float32, with shape matching the input's leading dim.
     """
-    kept = pca_arc["kept_feature_mask"].astype(bool)
-    feature_means = pca_arc["feature_means"].astype(np.float64)
-    feature_stds = pca_arc["feature_stds"].astype(np.float64)
-    rating_slope = pca_arc["rating_slope"].astype(np.float64)
-    size_slope = pca_arc["size_slope"].astype(np.float64)
-    ols_intercept = pca_arc["ols_intercept"].astype(np.float64)
-    pca_components = pca_arc["pca_components"].astype(np.float64)
-    pca_mean = pca_arc["pca_mean"].astype(np.float64)
-    component_stds = pca_arc["component_stds"].astype(np.float64)
-    component_stds = np.where(component_stds < 1e-9, 1.0, component_stds)
-
-    V = np.asarray(activations, dtype=np.float64)
-    single = (V.ndim == 1)
-    if single:
-        V = V[None, :]
-    V_kept = V[:, kept]                                       # (N, D_kept)
-    Z = (V_kept - feature_means) / feature_stds               # (N, D_kept)
-    # Rating + size offsets are constant across cells of one problem.
-    offset = rating_slope * rating + size_slope * size_is_13 + ols_intercept
-    R = Z - offset                                            # (N, D_kept)
-    centered = R - pca_mean
-    pca_scores = (centered @ pca_components.T) / component_stds  # (N, K)
-
-    if "ica_unmixing" in pca_arc.files:
-        ica_unmixing = pca_arc["ica_unmixing"].astype(np.float64)
-        ica_stds = pca_arc["ica_stds"].astype(np.float64)
-        ica_stds = np.where(ica_stds < 1e-9, 1.0, ica_stds)
-        out = (pca_scores @ ica_unmixing.T) / ica_stds       # (N, K)
-    else:
-        out = pca_scores
-
-    out = out.astype(np.float32)
-    return out[0] if single else out
+    return _project_decoded(activations, rating, size_is_13, _decode_pca_arc(pca_arc))
 
 
 # --- Per-cell projection: a post-fit pass that projects every problem's full
@@ -477,17 +522,31 @@ def project_to_embedding(activations, rating, size_is_13, pca_arc):
 # no PCA matmul or raw-activation reads at packaging time, just a small
 # pre-projected file per problem.
 #
-# Parallelized via ProcessPoolExecutor. Each worker loads pca.npz once and
+# Parallelized via ProcessPoolExecutor. Each worker decodes pca.npz once and
 # then processes its share of problems. Embarrassingly parallel — no shared
 # mutable state, modest per-task memory.
 
-_PCA_ARC_WORKER = None
+_PCA_DECODED_WORKER = None
+_THREAD_LIMITER = None
 
 
 def _init_per_cell_worker(pca_path):
-    """ProcessPoolExecutor initializer: open pca.npz once per worker."""
-    global _PCA_ARC_WORKER
-    _PCA_ARC_WORKER = np.load(pca_path, allow_pickle=False)
+    """ProcessPoolExecutor initializer: decode pca.npz once per worker and pin
+    BLAS to a single thread.
+
+    Pinning matters: with N worker processes each defaulting to all cores, the
+    small per-problem matmuls oversubscribe the CPU and run several-fold slower
+    (measured ~4× on an 8-core box). One thread per process lets N processes
+    cleanly fill N cores. The limiter is stashed in a module global so it stays
+    in effect for the worker's lifetime.
+    """
+    global _PCA_DECODED_WORKER, _THREAD_LIMITER
+    try:
+        _THREAD_LIMITER = threadpool_limits(limits=1)
+    except Exception:
+        _THREAD_LIMITER = None
+    with np.load(pca_path, allow_pickle=False) as arc:
+        _PCA_DECODED_WORKER = _decode_pca_arc(arc)
 
 
 def _project_one_for_per_cell(task):
@@ -507,8 +566,8 @@ def _project_one_for_per_cell(task):
 
     size_is_13 = 1.0 if size == 13 else 0.0
     try:
-        projected = project_to_embedding(candidates, raw_rating, size_is_13,
-                                         _PCA_ARC_WORKER)
+        projected = _project_decoded(candidates, raw_rating, size_is_13,
+                                     _PCA_DECODED_WORKER)
     except Exception as e:
         return tid, f"project_failed:{type(e).__name__}"
 

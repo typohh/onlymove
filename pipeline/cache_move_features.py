@@ -122,18 +122,33 @@ def _process_chunk(task):
 
 def build_size(size, workers, force):
     out_path = _cache_path(size)
-    if os.path.exists(out_path) and not force:
-        print(f"size {size}: cache exists ({os.path.basename(out_path)}); --force to rebuild")
-        return
     ids_path = _cache_ids_path(size)
     if not os.path.exists(ids_path):
         print(f"size {size}: no activation id cache ({ids_path}); skipping")
         return
     tids = json.load(open(ids_path))
-    idx = {t: i for i, t in enumerate(tids)}
-    feats = np.full((len(tids), N_FEATS), np.nan, dtype=np.float32)
-    chunks = [(size, tids[i:i + CHUNK]) for i in range(0, len(tids), CHUNK)]
-    print(f"size {size}: {len(tids)} problems, {len(chunks)} chunks, {workers} workers")
+
+    # INCREMENTAL: each row is a pure per-problem function of its SGF's embedded
+    # KataGo eval (no training, no cross-problem dependency), so reusing the already-
+    # cached rows and extracting only the tids missing from the cache is byte-identical
+    # to a full rebuild — at a fraction of the cost. This also makes the no-force path
+    # self-updating: a top-up of new tsumegos is picked up automatically instead of the
+    # old "skip if the file exists" (which silently left the cache stale). --force still
+    # re-extracts every row.
+    cached = {}
+    if os.path.exists(out_path) and not force:
+        d = np.load(out_path)
+        cached = {t: r for t, r in zip(d["tids"].tolist(), d["feats"])}
+    to_extract = tids if force else [t for t in tids if t not in cached]
+    if not to_extract:
+        print(f"size {size}: cache up to date ({len(cached)} problems)")
+        return
+
+    idx = {t: i for i, t in enumerate(to_extract)}
+    new_feats = np.full((len(to_extract), N_FEATS), np.nan, dtype=np.float32)
+    chunks = [(size, to_extract[i:i + CHUNK]) for i in range(0, len(to_extract), CHUNK)]
+    print(f"size {size}: {len(to_extract)} to extract ({len(cached)} cached), "
+          f"{len(chunks)} chunks, {workers} workers")
     t0 = time.time()
     done = 0
     with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -141,17 +156,28 @@ def build_size(size, workers, force):
         for k, fu in enumerate(as_completed(futs)):
             ctids, cout = fu.result()
             for t, row in zip(ctids, cout):
-                feats[idx[t]] = row
+                new_feats[idx[t]] = row
             done += len(ctids)
-            if (k + 1) % 50 == 0 or done == len(tids):
-                print(f"  {done}/{len(tids)} ({done / max(time.time() - t0, 1e-9):.0f}/s)")
-    good = np.isfinite(feats).all(axis=1)
+            if (k + 1) % 50 == 0 or done == len(to_extract):
+                print(f"  {done}/{len(to_extract)} ({done / max(time.time() - t0, 1e-9):.0f}/s)")
+    for t, row in zip(to_extract, new_feats):
+        cached[t] = row
+
+    # Emit in correct_ids order, dropping any non-finite row (e.g. an SGF missing the
+    # eval comment) — exactly as the full rebuild did.
+    out_tids, out_rows = [], []
+    for t in tids:
+        row = cached.get(t)
+        if row is not None and np.isfinite(row).all():
+            out_tids.append(t)
+            out_rows.append(row)
     os.makedirs(CACHE_DIR, exist_ok=True)
     tmp = f"{out_path}.tmp{os.getpid()}.npz"
-    np.savez(tmp, tids=np.array([t for t, g in zip(tids, good) if g]), feats=feats[good])
+    np.savez(tmp, tids=np.array(out_tids),
+             feats=np.array(out_rows, dtype=np.float32).reshape(len(out_rows), N_FEATS))
     os.replace(tmp, out_path)
-    print(f"size {size}: wrote {int(good.sum())} rows to {os.path.basename(out_path)} "
-          f"({int((~good).sum())} skipped) in {time.time() - t0:.0f}s")
+    print(f"size {size}: wrote {len(out_tids)} rows to {os.path.basename(out_path)} "
+          f"({len(tids) - len(out_tids)} dropped) in {time.time() - t0:.0f}s")
 
 
 def main():

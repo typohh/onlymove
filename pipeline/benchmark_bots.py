@@ -419,6 +419,23 @@ def test_bot(bot, attempts_file, batch_ids):
             f.write(f"{key} {value}\n")
 
 
+def batch_has_missing(attempts_file, batch_ids):
+    """True iff some id in batch_ids is not yet recorded in attempts_file — i.e. this
+    bot has work to do for this batch. Lets main() skip the (expensive) engine spin-up
+    for batch×bot cells with nothing to benchmark: a no-op test_bot otherwise still
+    pays a full KataGo model-load + OpenCL init. On an incremental top-up (most cells
+    have zero missing) this makes the run cost proportional to the new work, not to the
+    corpus size. Cheap — reads only the key column of the .txt."""
+    if not os.path.exists(attempts_file):
+        return True  # nothing benchmarked yet → all of batch_ids is missing
+    done = set()
+    with open(attempts_file) as f:
+        for line in f:
+            parts = line.split()
+            if parts:
+                done.add(parts[0])
+    return any(tid not in done for tid in batch_ids)
+
 
 # TSUMEGO_DIR / ATTEMPTS_DIRECTORY are set in main() from the size arg.
 SKIP_IF_EXISTS = False
@@ -514,13 +531,24 @@ def main():
         print(f"ITERATION {iteration}: Processing tsumegos {start_idx}-{min(end_idx, total_count) - 1} ({len(batch_ids)} files, {max(0, remaining)} remaining)")
         print(f"{'='*60}\n")
         
+        ran = 0
         for bot_factory, attempts_file in bot_configs:
+            # Skip the engine spin-up when this bot already covers the whole batch.
+            # KataGo startup (model load + OpenCL) dominates and is otherwise paid for
+            # every batch×bot cell even when test_bot would no-op — so an incremental
+            # top-up costs as much as a full rebuild. This makes it proportional to the
+            # new work. (See batch_has_missing.)
+            if not batch_has_missing(attempts_file, batch_ids):
+                continue
+            ran += 1
             bot = bot_factory()
             try:
                 test_bot(bot, attempts_file, batch_ids)
             finally:
                 bot.stop()
-        
+        print(f"  batch {iteration}: {ran}/{len(bot_configs)} bots had new work "
+              f"({len(bot_configs) - ran} engine startups skipped)")
+
         # Clear the cache between iterations to free memory
         print(f"\nClearing cache ({len(cache)} entries)...")
         cache.clear()

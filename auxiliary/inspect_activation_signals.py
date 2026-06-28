@@ -80,7 +80,17 @@ def _load_chunk(task):
     return start, out
 
 
-def _build_cache(size, workers):
+def _build_cache(size, workers, force=False):
+    """Build/refresh the correct-cell activation cache (correct_vecs/correct_ids) that
+    train_rating's feature loader (rating_features.load_joint_activations) reads.
+
+    INCREMENTAL: each row is a pure per-problem read of that problem's activation .npz
+    (its correct-cell vector), so reusing the rows already cached and only loading the
+    .npz of tids missing from the cache is identical to a full rebuild — but skips the
+    per-problem disk reads that dominate. This also makes a top-up of new tsumegos
+    self-updating instead of silently leaving the cache stale (the bug that dropped
+    train_rating's size-13 set to the pre-top-up count). force=True re-reads every npz.
+    """
     act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
     if not os.path.isdir(act_dir):
         raise SystemExit(f"no activations dir for size {size}: {act_dir}")
@@ -92,33 +102,52 @@ def _build_cache(size, workers):
         raise SystemExit(f"no .npz/.npy activation files in {act_dir}")
     n = len(ids)
 
+    # Reuse the existing cache where it covers the same tid (in any order).
+    vecs_path, ids_path = _cache_vecs_path(size), _cache_ids_path(size)
+    old_row, old_vecs = {}, None
+    if not force and os.path.exists(vecs_path) and os.path.exists(ids_path):
+        old_ids = json.load(open(ids_path))
+        cand = np.load(vecs_path, mmap_mode="r")
+        if cand.shape == (len(old_ids), N_FEATS):
+            old_vecs, old_row = cand, {t: i for i, t in enumerate(old_ids)}
+        if old_ids == ids and old_vecs is not None:
+            print(f"[size {size}] correct-vector cache up to date ({n} problems)", flush=True)
+            return
+
+    missing = [t for t in ids if t not in old_row]
     os.makedirs(CACHE_DIR, exist_ok=True)
-    tmp_path = _cache_vecs_path(size) + ".tmp"
-    mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16, shape=(n, N_FEATS))
+    print(f"[size {size}] correct-vector cache: {n} problems "
+          f"({len(missing)} to load, {n - len(missing)} reused) "
+          f"-> {vecs_path} ({n * N_FEATS * 2 / 1e9:.2f} GB)", flush=True)
 
+    # Load only the missing tids' correct vectors (parallel); keep by tid for assembly.
+    missing_rows = {}
     chunk = 1024
-    tasks = []
-    for s in range(0, n, chunk):
-        chunk_ids = ids[s:s + chunk]
-        items = [(tid, npz.get(tid), npy.get(tid)) for tid in chunk_ids]
-        tasks.append((s, act_dir, items))
+    tasks = [(s, act_dir,
+              [(t, npz.get(t), npy.get(t)) for t in missing[s:s + chunk]])
+             for s in range(0, len(missing), chunk)]
+    t0, done = time.time(), 0
+    if tasks:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for (_, arr), (_, _, items) in zip(ex.map(_load_chunk, tasks), tasks):
+                for j, (tid, _, _) in enumerate(items):
+                    missing_rows[tid] = arr[j]
+                done += len(items)
+                rate = done / (time.time() - t0) if time.time() > t0 else 0.0
+                print(f"\r  {done}/{len(missing)} ({rate:.0f}/s)", end="", flush=True)
+        print(flush=True)
 
-    print(f"[size {size}] building correct-vector cache: {n} problems "
-          f"-> {_cache_vecs_path(size)} ({n * N_FEATS * 2 / 1e9:.2f} GB)", flush=True)
-    t0 = time.time()
-    done = 0
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        for s, arr in ex.map(_load_chunk, tasks):
-            mm[s:s + arr.shape[0]] = arr
-            done += arr.shape[0]
-            elapsed = time.time() - t0
-            rate = done / elapsed if elapsed > 0 else 0.0
-            print(f"\r  {done}/{n} ({rate:.0f}/s)", end="", flush=True)
-    print(flush=True)
+    # Assemble the full cache in `ids` order: reused rows from the old memmap, the rest
+    # from this run's loads. Written to a tmp memmap, then atomically swapped in.
+    tmp_path = vecs_path + ".tmp"
+    mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16, shape=(n, N_FEATS))
+    for i, t in enumerate(ids):
+        mm[i] = old_vecs[old_row[t]] if t in old_row else missing_rows[t]
     mm.flush()
     del mm
-    os.replace(tmp_path, _cache_vecs_path(size))
-    with open(_cache_ids_path(size), "w") as f:
+    del old_vecs  # release the mmap before replacing the file underneath it
+    os.replace(tmp_path, vecs_path)
+    with open(ids_path, "w") as f:
         json.dump(ids, f)
 
 
@@ -126,8 +155,9 @@ def _load_signal(size, layer, channel, workers, rebuild):
     """Return a DataFrame [tsumego_id, signal] for one (layer, channel)."""
     vecs_path = _cache_vecs_path(size)
     ids_path = _cache_ids_path(size)
-    if rebuild or not (os.path.exists(vecs_path) and os.path.exists(ids_path)):
-        _build_cache(size, workers)
+    # Always reconcile the cache (incremental top-up; cheap no-op when current). rebuild
+    # forces a full re-read.
+    _build_cache(size, workers, force=rebuild)
 
     with open(ids_path) as f:
         ids = json.load(f)
