@@ -15,7 +15,7 @@ For deeper architecture, `CLAUDE.md` documents the subsystems and cross-file inv
 
 ## Board size
 
-`BOARD_SIZE` in `utils/configurations.py` is a single global switch (`9` or `13`). All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run the pipeline once with `BOARD_SIZE = 9`, then again with `BOARD_SIZE = 13`.
+Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/configurations.py`); there is no single global `BOARD_SIZE` switch. The three single-size generation steps — `tune_engine`, `generate_tsumegos`, `benchmark_bots` — take a **mandatory positional `size` arg** (`9` or `13`). The downstream steps (`extract_activations` onward) iterate both sizes in one run and take no size arg. All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run each generation step once per size (e.g. `generate_tsumegos 9` then `generate_tsumegos 13`), then run the downstream steps once.
 
 ## Pipeline execution
 
@@ -28,21 +28,21 @@ Pulls the latest tsumego attempts and rank surveys from Cloudflare D1 into `atte
 ```
 
 ### 2. Tune engine
-Optimizes KataGo batch sizes for the current hardware (rewrites `bots/analysis.cfg` in place).
+Optimizes KataGo batch sizes for the current hardware (rewrites `bots/analysis.cfg` in place). Takes a mandatory `size` arg (`9` or `13`).
 ```bash
-./.venv/bin/python3 -m pipeline.tune_engine
+./.venv/bin/python3 -m pipeline.tune_engine <size>
 ```
 
 ### 3. Generate tsumegos
-Continuously generates new tsumego positions into `tsumegos/<size>/`.
+Continuously generates new tsumego positions into `tsumegos/<size>/`. Takes a mandatory `size` arg (`9` or `13`).
 ```bash
-./.venv/bin/python3 -m pipeline.generate_tsumegos
+./.venv/bin/python3 -m pipeline.generate_tsumegos <size>
 ```
 
 ### 4. Benchmark bots
-Runs a stable of bots against the generated tsumegos to collect performance data into `attempts/<size>/`.
+Runs a stable of bots against the generated tsumegos to collect performance data into `attempts/<size>/`. Takes a mandatory `size` arg (`9` or `13`).
 ```bash
-./.venv/bin/python3 -m pipeline.benchmark_bots
+./.venv/bin/python3 -m pipeline.benchmark_bots <size>
 ```
 
 ### 5. Extract activations
@@ -89,7 +89,8 @@ These two steps are board-independent and run outside the in-order pipeline. The
 The heavy generation steps can run on a rented Vast.ai GPU:
 
 ```bash
-python vast_orchestration.py      # no args prints subcommands; tune / generate / benchmark are remoted, the rest stay local
+python vast_orchestration.py                  # no args prints subcommands
+python vast_orchestration.py run <step> <size>  # tune / generate / benchmark are remoted (size forwarded); the rest stay local
 ```
 
 ## PWA
