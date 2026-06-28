@@ -366,25 +366,32 @@ def upload_code(host, base_rsync, include_setup_only=False):
     return True
 
 
-def upload_input_dirs(host, base_rsync, dirs):
+def upload_input_dirs(host, base_ssh, base_rsync, dirs, size=None):
     """Push state dirs (e.g. attempts/) to the remote so a step can resume.
 
-    Excludes database.sql (local-only D1 dump) — same as cmd_sync.
+    For a size-dependent step (benchmark), pass `size` to upload ONLY that
+    board's subdir (attempts/<size>/). That alone skips the other board size
+    AND the top-level D1 dumps — database.sql / database*.sqlite live in
+    attempts/ directly, not attempts/<size>/ — so no per-file excludes are
+    needed. rsync won't create missing parent dirs, so mkdir -p the target
+    first.
     """
-    excludes = ["--exclude", "database.sql", "--exclude", "__pycache__/",
-                "--exclude", "*.pyc"]
+    excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc"]
     for d in dirs:
-        if not os.path.isdir(d):
-            print(f"  {d}/ not present locally, skipping upload")
+        local = os.path.join(d, str(size)) if size is not None else d
+        if not os.path.isdir(local):
+            print(f"  {local}/ not present locally, skipping upload")
             continue
+        remote = f"{REMOTE_DIR}/{local}"
+        subprocess.run(base_ssh + [f"mkdir -p {remote}"], capture_output=True)
         res = subprocess.run(
-            base_rsync + excludes + [f"{d}/", f"root@{host}:{REMOTE_DIR}/{d}/"],
+            base_rsync + excludes + [f"{local}/", f"root@{host}:{remote}/"],
             timeout=1800,
         )
         if res.returncode != 0:
-            print(f"  {d}/ upload failed (rsync rc={res.returncode}).")
+            print(f"  {local}/ upload failed (rsync rc={res.returncode}).")
             return False
-        print(f"  {d}/ uploaded.")
+        print(f"  {local}/ uploaded.")
     return True
 
 
@@ -760,8 +767,15 @@ def cmd_run(args):
 
     input_dirs = STEP_INPUT_DIRS.get(step, [])
     if input_dirs:
-        print(f"Uploading input dirs for '{step}': {', '.join(input_dirs)}")
-        if not upload_input_dirs(host, base_rsync, input_dirs):
+        # benchmark is size-dependent (reads tsumegos/<size>/ + attempts/<size>/),
+        # so upload only that board's subdir — which also skips the local-only
+        # DB dumps (database.sql/.sqlite) that sit in attempts/ directly.
+        in_size = (step_args[0] if step in SIZE_REQUIRED_STEPS and step_args
+                   else None)
+        label = ", ".join(f"{d}/{in_size}" if in_size else d for d in input_dirs)
+        print(f"Uploading input dirs for '{step}': {label}")
+        if not upload_input_dirs(host, base_ssh, base_rsync, input_dirs,
+                                 size=in_size):
             return
 
     module = PIPELINE_STEPS[step]
