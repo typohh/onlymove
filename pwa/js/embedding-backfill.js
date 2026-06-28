@@ -47,19 +47,6 @@ const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
 const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
 const RANK_CURVE_VERSION_KEY = (size) => `rankCurveVersion_${size}`;
 
-// One-time repair epoch. The pre-2026-06 cache design busted the served metadata.json
-// by APP_VERSION (the git-based build version), which is BLIND to the gitignored
-// pwa/tsumegos/ data — so a data re-ship from the same commit served a stale-cached
-// metadata.json. A device could then stamp the current ratings_version while its
-// per-attempt rating/slope/floor came from an OLDER shard set, and the gate skipped
-// forever (stamp matches, values stale → divergent rank graph across a user's
-// devices). Now that fetches are data_version-busted the desync can't recur, but
-// already-corrupted devices won't self-heal (their stamp still matches). Bumping this
-// constant forces every device to re-derive those fields ONCE. It is NOT a per-ship
-// knob — leave it; future data ships heal automatically via ratings_version.
-const BACKFILL_REPAIR_EPOCH = '2026-06-cache-desync';
-const BACKFILL_REPAIR_KEY = 'backfillRepairEpoch';
-
 // Removed-problem prune. Problems get dropped from the corpus on regeneration
 // (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
 // entries keep the rating/rank stored at attempt time — the shard no longer
@@ -147,9 +134,6 @@ export async function backfillMissingEmbeddings() {
         const filled = await backfillForSize(size, serverVersion, ratingsVersion);
         if (filled > 0) sizesFilled.push(size);
     }
-    // Mark the one-time repair done only after BOTH sizes' walks completed, so a
-    // crash mid-walk re-runs the heal next load (the per-size walks are idempotent).
-    localStorage.setItem(BACKFILL_REPAIR_KEY, BACKFILL_REPAIR_EPOCH);
     // One shared weakness model trained on the union of both histories — retrain
     // once if any size's embeddings/ratings were refreshed OR a prune changed
     // what the model sees.
@@ -286,13 +270,9 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
     const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
     const curveVersion = ratingRankCurveVersion(size);
     const storedCurveVersion = localStorage.getItem(RANK_CURVE_VERSION_KEY(size));
-    // One-time heal for devices corrupted by the old version-blind cache (stamp says
-    // current, stored values stale): force a full re-derive of rating/slope/floor +
-    // embeddings regardless of the stamps. See BACKFILL_REPAIR_EPOCH.
-    const repairNeeded = localStorage.getItem(BACKFILL_REPAIR_KEY) !== BACKFILL_REPAIR_EPOCH;
-    const embeddingsChanged = repairNeeded || storedEmbeddingVersion !== serverEmbeddingVersion;
-    const ratingsChanged = repairNeeded
-        || (serverRatingsVersion !== null && storedRatingsVersion !== serverRatingsVersion);
+    const embeddingsChanged = storedEmbeddingVersion !== serverEmbeddingVersion;
+    const ratingsChanged = serverRatingsVersion !== null
+        && storedRatingsVersion !== serverRatingsVersion;
     // problemRank is derived from the raw rating through M, so a curve re-fit
     // that left ratings untouched still shifts every stored rank.
     const curveChanged = curveVersion !== null && storedCurveVersion !== curveVersion;
