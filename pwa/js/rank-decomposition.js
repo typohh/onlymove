@@ -211,16 +211,55 @@ function lowerBound(attempts, lo) {
     return a;
 }
 
+// Weak prior on the local time-slope used by the LOCAL-LINEAR wide kernel (in
+// ability units per kernel width τ). It ridge-shrinks the fitted drift toward 0
+// so a thin or one-sided (boundary) window degrades gracefully back to the
+// local-constant estimate instead of extrapolating a noisy slope — the standard
+// penalized-local-linear boundary fix. As SLOPE_PRIOR_SD → 0 the linear fit
+// collapses to local-constant (point AND sandwich SE); larger = more boundary
+// de-biasing at the cost of more boundary variance.
+//
+// Validated on real histories (auxiliary/eval_rank_endpoint_bias.py — interior
+// held-out lag test, 10 users): today's local-constant endpoint LAGS the lag-free
+// two-sided reference by ~1.2 stones on TRENDING stretches; this is a genuine
+// bias/variance dial (no sharp knee). SD=2.0 removes ~40% of that lag (−1.16 →
+// −0.67) for a ~20% band widening and keeps boundary over-extrapolation on thin
+// histories in check; 1.5 is more conservative, 2.5 more aggressive. (RMS-vs-
+// reference is flat across SD because the reference is itself noise-dominated, so
+// it cancels the bias signal — the signed trending lag is the metric that selects.)
+//
+// IMPORTANT — this is a SMOOTHING BANDWIDTH, not a drift prior. The measured
+// population SD of real 30-day skill drift is only ~0.6 stones/30d (robust ~0.23);
+// 2.0 is deliberately ~3× looser because the ridge fights the boundary slope's
+// MEASUREMENT noise, not real trend rates. Do NOT "derive it from the population"
+// and set it to ~0.6 — that over-shrinks the slope and silently RE-INTRODUCES the
+// lag (≈10% removed vs ≈40% here). If anything, ~0.6 is a FLOOR (never regularize
+// tighter than people actually trend), never the value. See the design note in
+// docs / the project memory before changing this.
+const SLOPE_PRIOR_SD = 2.0;                  // ranks per τ_S (bandwidth, not a drift prior)
+const SLOPE_PRIOR_INFO = 1 / (SLOPE_PRIOR_SD * SLOPE_PRIOR_SD);
+
 // Kernel-weighted pooled 3PL MLE for the internal-rank skill R at time t0:
 // P(correct)=c_j+(1−c_j)·σ(slope_j·(R−x_j)+κ_j), where each attempt j carries its own
 // slope (logit per internal rank), guessing floor c_j (problemFloor) and κ_j=κ(c_j)
-// (so P=80% at R==x_j) — all set in flattenAttempts. Returns { R, se, effN };
+// (so P=80% at R==x_j) — all set in flattenAttempts. Returns { R, se, effN, drift };
 // attempts MUST be sorted by t.
-function poolLogistic(attempts, t0, tau) {
+//
+// `linear` selects the time model:
+//   false (default) — LOCAL-CONSTANT in time: ability is one scalar R over the
+//     whole kernel window. Correct for the narrow form kernel (a session can't
+//     support a trend), but at the RIGHT edge (now) a symmetric kernel sees only
+//     past data, so the estimate is a backward-weighted average that trails a
+//     trending user by ~0.8·τ — the boundary lag.
+//   true — LOCAL-LINEAR in time: fit R(t)=a+b·u, u=(t−t0)/τ, and report a (the
+//     level AT t0); the drift b is ridge-shrunk toward 0 (SLOPE_PRIOR_INFO). The
+//     intercept of a local-linear fit has O(h²) boundary bias (vs O(h) for
+//     local-constant), so the lag cancels. `drift` (b) is returned for free.
+function poolLogistic(attempts, t0, tau, linear = false) {
     const win = KERNEL_TRUNC_SIGMA * tau;
     const lo = lowerBound(attempts, t0 - win);
     const hi = lowerBound(attempts, t0 + win + 1);
-    if (hi <= lo) return { R: NaN, se: Infinity, effN: 0 };
+    if (hi <= lo) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
 
     let sumW = 0, sumW2 = 0, sumWx = 0;
     for (let j = lo; j < hi; j++) {
@@ -228,8 +267,11 @@ function poolLogistic(attempts, t0, tau) {
         if (w <= 0) continue;
         sumW += w; sumW2 += w * w; sumWx += w * attempts[j].x;
     }
-    if (sumW <= 0) return { R: NaN, se: Infinity, effN: 0 };
+    if (sumW <= 0) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
     const effN = (sumW * sumW) / sumW2;
+
+    if (linear) return poolLinear(attempts, t0, tau, lo, hi, sumWx / sumW, effN);
+
     let R = sumWx / sumW;
 
     // 4PL MLE for R: P = c + (1−c−LAPSE)·σ(slope·(R−x)+κ). dP/dR = span·slope·praw·(1−praw),
@@ -272,7 +314,71 @@ function poolLogistic(attempts, t0, tau) {
         A += w * v; B += w * w * v;
     }
     const se = A > 0 ? Math.sqrt(B) / A : Infinity;
-    return { R, se, effN };
+    return { R, se, effN, drift: 0 };
+}
+
+// Local-LINEAR-in-time wide-kernel fit (see poolLogistic's `linear` doc). Fits
+// R(t)=a+b·u over the same kernel window, u=(t−t0)/τ, reports the intercept a and
+// drift b. The drift carries a weak ridge (SLOPE_PRIOR_INFO) so a thin/one-sided
+// window can't extrapolate noise; as that prior tightens the whole thing collapses
+// to the local-constant estimate (point AND SE), so SLOPE_PRIOR_SD is a clean
+// "how much boundary de-biasing" knob. SE(a) is the 2×2 robust (sandwich) SE
+// Cov=B⁻¹·M·B⁻¹, the exact generalization of the scalar sandwich the local-
+// constant path uses — kernel weights aren't true probabilities, so the naive
+// model-info SE would mis-scale; in the tight-prior limit this reproduces √B/A.
+function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
+    let a = x0, b = 0;
+    for (let it = 0; it < 25; it++) {
+        let Sa = 0, Sb = -SLOPE_PRIOR_INFO * b;
+        let Iaa = 0, Iab = 0, Ibb = SLOPE_PRIOR_INFO;
+        for (let j = lo; j < hi; j++) {
+            const u = (attempts[j].t - t0) / tau;
+            const w = gaussianWeight(u);
+            if (w <= 0) continue;
+            const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
+            const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
+            let p = c + span * praw;
+            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+            const g = span * slope * praw * (1 - praw);     // dP/dR
+            const wv = w * g * g / (p * (1 - p));           // weighted Fisher info
+            const sc = w * (attempts[j].correct - p) * g / (p * (1 - p));
+            Sa += sc;  Sb += sc * u;
+            Iaa += wv; Iab += wv * u; Ibb += wv * u * u;
+        }
+        const det = Iaa * Ibb - Iab * Iab;
+        if (Math.abs(det) < 1e-12) break;
+        let da = (Ibb * Sa - Iab * Sb) / det;
+        let db = (Iaa * Sb - Iab * Sa) / det;
+        if (da > 2) da = 2; else if (da < -2) da = -2;
+        if (db > 2) db = 2; else if (db < -2) db = -2;
+        a += da; b += db;
+        if (a < X_CLAMP_LO) a = X_CLAMP_LO; else if (a > X_CLAMP_HI) a = X_CLAMP_HI;
+        if (Math.abs(da) < 1e-6 && Math.abs(db) < 1e-6) break;
+    }
+    // 2×2 sandwich SE of the intercept: bread B = Σ w·v·JJᵀ + ridge, meat
+    // M = Σ w²·v·JJᵀ (J=[1,u]); Cov₀₀ = (B_bb²·M_aa − 2 B_ab B_bb M_ab + B_ab² M_bb)/detB².
+    let Baa = 0, Bab = 0, Bbb = SLOPE_PRIOR_INFO, Maa = 0, Mab = 0, Mbb = 0;
+    for (let j = lo; j < hi; j++) {
+        const u = (attempts[j].t - t0) / tau;
+        const w = gaussianWeight(u);
+        if (w <= 0) continue;
+        const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
+        const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
+        let p = c + span * praw;
+        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+        const g = span * slope * praw * (1 - praw);
+        const v = g * g / (p * (1 - p));
+        const wv = w * v, w2v = w * w * v;
+        Baa += wv;  Bab += wv * u;  Bbb += wv * u * u;
+        Maa += w2v; Mab += w2v * u; Mbb += w2v * u * u;
+    }
+    const detB = Baa * Bbb - Bab * Bab;
+    let se = Infinity;
+    if (detB > 0) {
+        const cov00 = (Bbb * Bbb * Maa - 2 * Bab * Bbb * Mab + Bab * Bab * Mbb) / (detB * detB);
+        se = cov00 > 0 ? Math.sqrt(cov00) : Infinity;
+    }
+    return { R: a, se, effN, drift: b };
 }
 
 function clampSlope(s) {
@@ -428,7 +534,7 @@ function buildWideGrid(attempts, points) {
     const grid = [];
     for (let i = 0; i < points; i++) {
         const t = t0 + span * (i / (points - 1));
-        const w = poolLogistic(attempts, t, TAU_S_MS);
+        const w = poolLogistic(attempts, t, TAU_S_MS, true);   // local-linear wide skill
         grid.push({ t, R: w.R, se: w.se, effN: w.effN });
     }
     return grid;
@@ -654,7 +760,7 @@ export function computeRankDecomposition(answerHistory) {
 export function evaluateAt(decomp, t) {
     if (!decomp) return null;
     const { attempts, resid } = decomp;
-    const sk = poolLogistic(attempts, t, TAU_S_MS);          // exact wide skill
+    const sk = poolLogistic(attempts, t, TAU_S_MS, true);    // exact local-linear wide skill
     if (!Number.isFinite(sk.R)) return null;
     const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
     return {

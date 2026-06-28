@@ -93,6 +93,10 @@ TAU_S_MS = 30 * DAY_MS            # skill (slow) kernel — the rank-tab wide ke
 KERNEL_TRUNC_SIGMA = 4
 MIN_ATTEMPTS = 20
 SUPPORT_EFFN = 10                 # effN floor for "supported" (line drawn)
+# Local-linear wide-kernel slope ridge (ranks per τ_S); see Smoother.at(linear=).
+# Mirrors SLOPE_PRIOR_SD in pwa/js/rank-decomposition.js (tuned via
+# auxiliary/eval_rank_endpoint_bias.py).
+SLOPE_PRIOR_SD = 2.0
 
 NEAR_RANK_P_HI = 0.95
 LOGIT_80 = math.log(0.8 / 0.2)
@@ -252,7 +256,11 @@ class Smoother:
         self.span = np.maximum(0.0, 1.0 - self.floor - lapse)
         self.n = len(ts)
 
-    def at(self, t0, tau=TAU_S_MS):
+    def at(self, t0, tau=TAU_S_MS, linear=False, slope_prior_sd=SLOPE_PRIOR_SD):
+        """Port of pwa/js/rank-decomposition.js poolLogistic. linear=False is the
+        local-CONSTANT kernel MLE; linear=True is the local-LINEAR-in-time fit (port
+        of poolLinear) that removes the right-edge lag, reporting the intercept (level
+        at t0) with the slope ridge-shrunk by SLOPE_PRIOR_INFO=1/slope_prior_sd²."""
         win = KERNEL_TRUNC_SIGMA * tau
         lo = int(np.searchsorted(self.ts, t0 - win, side="left"))
         hi = int(np.searchsorted(self.ts, t0 + win + 1, side="left"))
@@ -266,6 +274,10 @@ class Smoother:
             return float("nan"), float("inf"), 0.0
         x, sp, fl, ka, y, span = (self.x[sl], self.slope[sl], self.floor[sl],
                                   self.kappa[sl], self.y[sl], self.span[sl])
+        effN = sumW * sumW / float((w * w).sum())
+        if linear:
+            return self._at_linear(t0, tau, w, dt, x, sp, fl, ka, y, span, sumW,
+                                   effN, slope_prior_sd)
         R = float((w * x).sum() / sumW)
         for _ in range(15):
             praw = _sigmoid(sp * (R - x) + ka)
@@ -288,13 +300,54 @@ class Smoother:
         A = float((w * v).sum())
         B = float((w * w * v).sum())
         se = math.sqrt(B) / A if A > 0 else float("inf")
-        effN = sumW * sumW / float((w * w).sum())
         return R, se, effN
 
-    def grid(self, ts_grid, tau=TAU_S_MS):
+    def _at_linear(self, t0, tau, w, u, x, sp, fl, ka, y, span, sumW, effN, sd):
+        """Local-linear fit R(t)=a+b·u, u=(t−t0)/τ; report intercept a + 2×2 sandwich
+        SE. Port of poolLinear. The slope b is ridge-shrunk by prior_info=1/sd²."""
+        prior_info = 1.0 / (sd * sd)
+        a = float((w * x).sum() / sumW)
+        b = 0.0
+        for _ in range(25):
+            praw = _sigmoid(sp * (a + b * u - x) + ka)
+            p = np.clip(fl + span * praw, 1e-9, 1 - 1e-9)
+            g = span * sp * praw * (1 - praw)
+            denom = p * (1 - p)
+            wv = w * g * g / denom
+            sc = w * (y - p) * g / denom
+            Sa = float(sc.sum()); Sb = float((sc * u).sum()) - prior_info * b
+            Iaa = float(wv.sum()); Iab = float((wv * u).sum())
+            Ibb = float((wv * u * u).sum()) + prior_info
+            det = Iaa * Ibb - Iab * Iab
+            if abs(det) < 1e-12:
+                break
+            da = (Ibb * Sa - Iab * Sb) / det
+            db = (Iaa * Sb - Iab * Sa) / det
+            da = 2.0 if da > 2 else (-2.0 if da < -2 else da)
+            db = 2.0 if db > 2 else (-2.0 if db < -2 else db)
+            a += da; b += db
+            a = X_CLAMP_LO if a < X_CLAMP_LO else (X_CLAMP_HI if a > X_CLAMP_HI else a)
+            if abs(da) < 1e-6 and abs(db) < 1e-6:
+                break
+        praw = _sigmoid(sp * (a + b * u - x) + ka)
+        p = np.clip(fl + span * praw, 1e-9, 1 - 1e-9)
+        g = span * sp * praw * (1 - praw)
+        v = g * g / (p * (1 - p))
+        wv = w * v; w2v = w * w * v
+        Baa = float(wv.sum()); Bab = float((wv * u).sum())
+        Bbb = float((wv * u * u).sum()) + prior_info
+        Maa = float(w2v.sum()); Mab = float((w2v * u).sum()); Mbb = float((w2v * u * u).sum())
+        detB = Baa * Bbb - Bab * Bab
+        se = float("inf")
+        if detB > 0:
+            cov00 = (Bbb * Bbb * Maa - 2 * Bab * Bbb * Mab + Bab * Bab * Mbb) / (detB * detB)
+            se = math.sqrt(cov00) if cov00 > 0 else float("inf")
+        return a, se, effN
+
+    def grid(self, ts_grid, tau=TAU_S_MS, linear=False, slope_prior_sd=SLOPE_PRIOR_SD):
         R = np.empty(len(ts_grid)); se = np.empty(len(ts_grid)); eff = np.empty(len(ts_grid))
         for i, t in enumerate(ts_grid):
-            R[i], se[i], eff[i] = self.at(t, tau)
+            R[i], se[i], eff[i] = self.at(t, tau, linear, slope_prior_sd)
         return R, se, eff
 
 
@@ -379,9 +432,13 @@ def build_features(rows, rs):
             arr(y), arr(size, int), n_unmatched)
 
 
-def compute_variant(full, grid, apply_filter, lapse):
+def compute_variant(full, grid, apply_filter, lapse, linear=True):
     """Return (smoother, S_grid, seS_grid, effN_grid, S_at, effN_at, used, n_kept)
-    for the near-rank-filtered (or unfiltered) skill curve in INTERNAL-RANK space."""
+    for the near-rank-filtered (or unfiltered) skill curve in INTERNAL-RANK space.
+    `linear` selects the displayed skill curve's time model — True (default) matches
+    the shipped local-LINEAR wide kernel (rank-decomposition.js); the near-rank
+    filter's S0 pre-pass stays local-constant (it only decides which attempts to
+    keep)."""
     if apply_filter:
         S0_grid, _, _ = full.grid(grid)
         S0_at = np.interp(full.ts, grid, S0_grid)
@@ -396,7 +453,7 @@ def compute_variant(full, grid, apply_filter, lapse):
             n_kept = full.n
     else:
         sm, used, n_kept = full, "no filter", full.n
-    S_grid, seS_grid, effN_grid = sm.grid(grid)
+    S_grid, seS_grid, effN_grid = sm.grid(grid, linear=linear)
     S_at = np.interp(full.ts, grid, S_grid)
     effN_at = np.interp(full.ts, grid, effN_grid)
     return sm, S_grid, seS_grid, effN_grid, S_at, effN_at, used, n_kept
@@ -431,6 +488,9 @@ def main():
                     help="OnlyMove (default), EGF, or a rank_map.json server")
     ap.add_argument("--both-filters", action="store_true",
                     help="overlay near-rank-filter ON and OFF on one graph/table")
+    ap.add_argument("--local-constant", action="store_true",
+                    help="render the OLD local-constant wide kernel (pre-boundary-fix) "
+                         "instead of the shipped local-linear one")
     ap.add_argument("--csv", default=None)
     ap.add_argument("--plot", default=None)
     args = ap.parse_args()
@@ -499,7 +559,8 @@ def main():
     results = {}
     for name, do_filter in variants:
         (sm, S_grid, seS_grid, effN_grid, S_at, effN_at,
-         used, n_kept) = compute_variant(full, grid, do_filter, lapse)
+         used, n_kept) = compute_variant(full, grid, do_filter, lapse,
+                                          linear=not args.local_constant)
         # transform skill (+ band edges) to display space
         d_grid = time_deltas(S_grid, grid, med_at, ta, server)
         disp_grid = to_display(S_grid, d_grid, rs, server)
