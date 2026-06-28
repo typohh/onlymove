@@ -34,6 +34,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
+import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail } from './history-store.js';
 import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
@@ -45,6 +46,19 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 const VERSION_KEY = (size) => `weaknessEmbeddingVersion_${size}`;
 const RATINGS_VERSION_KEY = (size) => `ratingsVersion_${size}`;
 const RANK_CURVE_VERSION_KEY = (size) => `rankCurveVersion_${size}`;
+
+// One-time repair epoch. The pre-2026-06 cache design busted the served metadata.json
+// by APP_VERSION (the git-based build version), which is BLIND to the gitignored
+// pwa/tsumegos/ data — so a data re-ship from the same commit served a stale-cached
+// metadata.json. A device could then stamp the current ratings_version while its
+// per-attempt rating/slope/floor came from an OLDER shard set, and the gate skipped
+// forever (stamp matches, values stale → divergent rank graph across a user's
+// devices). Now that fetches are data_version-busted the desync can't recur, but
+// already-corrupted devices won't self-heal (their stamp still matches). Bumping this
+// constant forces every device to re-derive those fields ONCE. It is NOT a per-ship
+// knob — leave it; future data ships heal automatically via ratings_version.
+const BACKFILL_REPAIR_EPOCH = '2026-06-cache-desync';
+const BACKFILL_REPAIR_KEY = 'backfillRepairEpoch';
 
 // Removed-problem prune. Problems get dropped from the corpus on regeneration
 // (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
@@ -96,37 +110,29 @@ function persistAnswerHistory(size, snapshot) {
 
 export async function backfillMissingEmbeddings() {
     // Joint metadata (embedding version + labels + sidecar layout + per-size
-    // ratings_version) is shared across sizes. Fetch once, then iterate sizes
-    // for per-size wipe/refill. Also populates state.embeddingMeta with the
-    // K/dtype/bytes_per_cell tuple used by picked-embedding.js to decode
+    // ratings_version) is shared across sizes. It is now INLINED into the bundle
+    // (data-version.js), so it can never be served stale by a cache — the read is
+    // synchronous and always matches the deployed code. Populates state.embeddingMeta
+    // with the K/dtype/bytes_per_cell tuple used by picked-embedding.js to decode
     // per-cell .embeddings.bin sidecars.
-    let serverVersion = 'unknown';
-    let ratingsVersionsBySize = {};
-    try {
-        const r = await fetch(`tsumegos/embedding_meta.json?v=${APP_VERSION}`);
-        if (r.ok) {
-            const meta = await r.json();
-            if (meta && typeof meta.embedding_version === 'string') {
-                serverVersion = meta.embedding_version;
-            }
-            if (meta && meta.ratings_version && typeof meta.ratings_version === 'object') {
-                ratingsVersionsBySize = meta.ratings_version;
-            }
-            if (meta && meta.labels && meta.labels.components) {
-                state.embeddingLabels = meta.labels.components;
-            }
-            if (meta && typeof meta.K === 'number') {
-                state.embeddingMeta = {
-                    K: meta.K,
-                    dtype: typeof meta.dtype === 'string' ? meta.dtype : 'float16',
-                    bytes_per_cell: typeof meta.bytes_per_cell === 'number'
-                        ? meta.bytes_per_cell
-                        : meta.K * 2,  // sensible fp16 default
-                    embedding_version: serverVersion,
-                };
-            }
-        }
-    } catch (_) { /* fall through to 'unknown' */ }
+    const meta = EMBEDDING_META_INLINE;
+    const serverVersion = (typeof meta.embedding_version === 'string')
+        ? meta.embedding_version : 'unknown';
+    const ratingsVersionsBySize = (meta.ratings_version && typeof meta.ratings_version === 'object')
+        ? meta.ratings_version : {};
+    if (meta.labels && meta.labels.components) {
+        state.embeddingLabels = meta.labels.components;
+    }
+    if (typeof meta.K === 'number') {
+        state.embeddingMeta = {
+            K: meta.K,
+            dtype: typeof meta.dtype === 'string' ? meta.dtype : 'float16',
+            bytes_per_cell: typeof meta.bytes_per_cell === 'number'
+                ? meta.bytes_per_cell
+                : meta.K * 2,  // sensible fp16 default
+            embedding_version: serverVersion,
+        };
+    }
 
     // Strip stale fields off entries whose problem left the corpus, before the
     // per-size rating walk (which can't refresh them — the shard is gone).
@@ -141,6 +147,9 @@ export async function backfillMissingEmbeddings() {
         const filled = await backfillForSize(size, serverVersion, ratingsVersion);
         if (filled > 0) sizesFilled.push(size);
     }
+    // Mark the one-time repair done only after BOTH sizes' walks completed, so a
+    // crash mid-walk re-runs the heal next load (the per-size walks are idempotent).
+    localStorage.setItem(BACKFILL_REPAIR_KEY, BACKFILL_REPAIR_EPOCH);
     // One shared weakness model trained on the union of both histories — retrain
     // once if any size's embeddings/ratings were refreshed OR a prune changed
     // what the model sees.
@@ -211,7 +220,7 @@ async function buildShardLocator(size) {
         }
     }
 
-    const metaResp = await fetch(`tsumegos/${size}/metadata.json?v=${APP_VERSION}`);
+    const metaResp = await fetch(`tsumegos/${size}/metadata.json?v=${DATA_VERSION}`);
     if (!metaResp.ok) return null;
     const zipMeta = await metaResp.json();
     const zipFilenameByHash = new Map();
@@ -277,9 +286,13 @@ async function backfillForSize(size, serverEmbeddingVersion, serverRatingsVersio
     const storedRatingsVersion = localStorage.getItem(RATINGS_VERSION_KEY(size));
     const curveVersion = ratingRankCurveVersion(size);
     const storedCurveVersion = localStorage.getItem(RANK_CURVE_VERSION_KEY(size));
-    const embeddingsChanged = storedEmbeddingVersion !== serverEmbeddingVersion;
-    const ratingsChanged = serverRatingsVersion !== null
-        && storedRatingsVersion !== serverRatingsVersion;
+    // One-time heal for devices corrupted by the old version-blind cache (stamp says
+    // current, stored values stale): force a full re-derive of rating/slope/floor +
+    // embeddings regardless of the stamps. See BACKFILL_REPAIR_EPOCH.
+    const repairNeeded = localStorage.getItem(BACKFILL_REPAIR_KEY) !== BACKFILL_REPAIR_EPOCH;
+    const embeddingsChanged = repairNeeded || storedEmbeddingVersion !== serverEmbeddingVersion;
+    const ratingsChanged = repairNeeded
+        || (serverRatingsVersion !== null && storedRatingsVersion !== serverRatingsVersion);
     // problemRank is derived from the raw rating through M, so a curve re-fit
     // that left ratings untouched still shifts every stored rank.
     const curveChanged = curveVersion !== null && storedCurveVersion !== curveVersion;

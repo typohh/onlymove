@@ -490,7 +490,7 @@ export const state = {
 
     // In-memory cache of labels.components (joint across board sizes —
     // the PCA + ICA fit is joint, so labels are shared). Populated by
-    // embedding-backfill.js after fetching any size's embedding_meta.json.
+    // embedding-backfill.js from the inlined embedding_meta.json (data-version.js).
     // Used by the stats panel to name top weakness PCs. Not persisted.
     embeddingLabels: null,
 

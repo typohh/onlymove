@@ -3,6 +3,21 @@ import { execSync, spawn } from 'child_process';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
+
+const EMBEDDING_META_PATH = 'tsumegos/embedding_meta.json';
+
+// Data files inlined into the JS/Worker bundles at build time (imported, never
+// fetched). They are dead weight in dist (dropped via DIST_DEAD_FILES) AND folded
+// into APP_VERSION (computeVersion), so ANY data change moves the reload signal +
+// SW precache name — pwa/tsumegos/ is gitignored, so git HEAD alone can't see a
+// data-only re-ship.
+const INLINED_DATA_FILES = [
+    'tsumegos/rating_to_rank.json',
+    'tsumegos/rank_map.json',
+    'tsumegos/population_constants.json',
+    EMBEDDING_META_PATH,
+];
 
 const DIST_DIR = 'dist';
 const STATIC_ASSETS = [
@@ -32,13 +47,42 @@ async function clearDistContents() {
     await Promise.all(entries.map(e => fs.rm(path.join(DIST_DIR, e), { recursive: true, force: true })));
 }
 
+// data_version: the content hash package_for_pwa stamped into embedding_meta.json
+// (a hash of the served metadata.json files). The client reads the same value from
+// the inlined manifest (data-version.js); we stamp it into sw.js so the runtime-cache
+// prune keeps DATA_VERSION-busted entries (metadata.json/lookup.txt).
+function readDataVersion() {
+    try {
+        const meta = JSON.parse(fsSync.readFileSync(EMBEDDING_META_PATH, 'utf-8'));
+        if (meta && typeof meta.data_version === 'string' && meta.data_version) {
+            return meta.data_version;
+        }
+    } catch { /* no packaged data yet */ }
+    return 'nodata';
+}
+
 function computeVersion() {
     const gitHash = execSync('git rev-parse HEAD').toString().trim().slice(0, 8);
     // maxBuffer bumped because `package_for_pwa` regenerates thousands of
     // embedding/zip files; default 1 MB buffer overflows on a fresh package.
     const isDirty = execSync('git status --porcelain',
         { maxBuffer: 64 * 1024 * 1024 }).toString().trim().length > 0;
-    return isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
+    const base = isDirty ? `${gitHash}-dirty-${Date.now().toString(36)}` : gitHash;
+    // pwa/tsumegos/ (the inlined data files) is gitignored, so git HEAD is blind to a
+    // data-only re-ship. Fold a hash of every inlined data file in so APP_VERSION (the
+    // graceful-reload signal + SW precache name) moves whenever ratings, the curve,
+    // labels, or population constants change, even from the same commit.
+    // (metadata.json/lookup.txt fetch freshness rides DATA_VERSION separately, so a
+    // pure-code deploy still won't re-pull them.)
+    let dataTag = '';
+    try {
+        const h = crypto.createHash('sha256');
+        for (const f of INLINED_DATA_FILES) {
+            try { h.update(fsSync.readFileSync(f)); } catch { h.update(`missing:${f}`); }
+        }
+        dataTag = '-d' + h.digest('hex').slice(0, 8);
+    } catch { /* ignore */ }
+    return base + dataTag;
 }
 
 async function writeWorkerVersion(version) {
@@ -55,11 +99,11 @@ async function writeWorkerVersion(version) {
 // source, but the served copies are dead weight — drop them from dist. Safe
 // because every client force-upgrades on a version change, so nothing is still
 // fetching the old served path.
-const DIST_DEAD_FILES = [
-    'tsumegos/rating_to_rank.json',
-    'tsumegos/rank_map.json',
-    'tsumegos/population_constants.json',
-];
+// All inlined data files are dead weight in dist (embedding_meta.json joined the set
+// once it became an import — data-version.js — so it can never be served stale). The
+// build reads them from the SOURCE tree (not dist) for the data tag + sw.js stamp, so
+// this dist removal order doesn't matter.
+const DIST_DEAD_FILES = INLINED_DATA_FILES;
 
 async function copyStaticAssets() {
     for (const asset of STATIC_ASSETS) {
@@ -125,6 +169,7 @@ async function patchHtmlAfterBuild(metafile, version) {
     const swPath = path.join(DIST_DIR, 'sw.js');
     let swContent = await fs.readFile(swPath, 'utf-8');
     swContent = swContent.replace(/'initial-version'/, `'${version}'`);
+    swContent = swContent.replace(/'initial-data-version'/, `'${readDataVersion()}'`);
     await fs.writeFile(swPath, swContent);
 
     return { newScriptPath, newCssPath, mainJsHash, utcDate };

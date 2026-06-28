@@ -792,6 +792,26 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     return embedding_meta, ratings_hash, inputs_hash
 
 
+def compute_data_version(output_dir):
+    """Content hash over the per-size directory metadata.json files — the PWA's
+    `data_version`, the single value it cache-busts metadata.json + lookup.txt by.
+    Each metadata.json lists every shard's content-hash filename, so ANY data change
+    (new tsumegos, re-rated problems, refit embeddings → a new shard hash) perturbs
+    it. It gates the FETCH cache ONLY — new problems become serveable lazily — while
+    the history backfill stays gated on ratings_version / embedding_version (those
+    drive the immediate re-derive). Stable across pure code deploys, so a JS-only
+    ship doesn't needlessly re-pull the (multi-MB) lookup.txt."""
+    h = hashlib.sha256()
+    for size in ALL_BOARD_SIZES:
+        p = os.path.join(output_dir, "tsumegos", str(size), "metadata.json")
+        try:
+            with open(p, "rb") as f:
+                h.update(f.read())
+        except OSError:
+            h.update(f"missing-{size}".encode())
+    return h.hexdigest()[:16]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Package rated tsumegos for the PWA.")
     parser.add_argument(
@@ -862,6 +882,11 @@ if __name__ == "__main__":
         if ratings_versions:
             meta_out["ratings_version"] = ratings_versions
         meta_out["rating_model"] = RATING_MODEL_TAG
+        # data_version: hash of the served metadata.json files — the PWA's cache-bust
+        # key for metadata.json + lookup.txt (computed AFTER the curve copy so every
+        # size's metadata.json is final on disk, including sizes whose shard rebuild
+        # was skipped this run).
+        meta_out["data_version"] = compute_data_version(OUTPUT_DIR)
         embedding_meta_path = os.path.join(OUTPUT_DIR, 'tsumegos', 'embedding_meta.json')
         os.makedirs(os.path.dirname(embedding_meta_path), exist_ok=True)
         with open(embedding_meta_path, 'w', encoding='utf-8') as f:

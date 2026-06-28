@@ -1,5 +1,9 @@
-// This version string is dynamically replaced by the build script (build.mjs)
+// These version strings are dynamically replaced by the build script (build.mjs).
+// VERSION is the app/build version (moves on any deploy); DATA_VERSION is the data
+// content hash (moves only when the shipped tsumego data changes), used to bust
+// metadata.json / lookup.txt so a pure-code deploy doesn't re-pull them.
 const VERSION = 'initial-version';
+const DATA_VERSION = 'initial-data-version';
 const PRECACHE_NAME = `only-move-precache-${VERSION}`;
 const RUNTIME_CACHE_NAME = 'only-move-runtime';
 
@@ -58,14 +62,14 @@ self.addEventListener('activate', event => {
         })
     );
 
-    // Prune runtime cache entries whose ?v= no longer matches the current
-    // VERSION (lookup.txt, metadata.json) so they don't accumulate one
-    // entry per release.
+    // Prune runtime cache entries whose ?v= matches neither the current build
+    // VERSION nor the current DATA_VERSION (lookup.txt / metadata.json are busted by
+    // DATA_VERSION now) so stale-version entries don't accumulate one per release.
     const runtimeCache = await caches.open(RUNTIME_CACHE_NAME);
     const requests = await runtimeCache.keys();
     await Promise.all(requests.map(req => {
       const v = new URL(req.url).searchParams.get('v');
-      if (v && v !== VERSION) {
+      if (v && v !== VERSION && v !== DATA_VERSION) {
         console.log('Pruning stale versioned cache entry:', req.url);
         return runtimeCache.delete(req);
       }

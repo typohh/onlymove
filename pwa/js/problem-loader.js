@@ -9,6 +9,7 @@ import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize, slopeToQuality } from './rank-decomposition.js';
+import { DATA_VERSION } from './data-version.js';
 
 // FNV-1a 32-bit fingerprint of a string. Used only for the debug "Metadata
 // hash:" log below, so it needs no cryptographic strength — just a stable short
@@ -149,7 +150,7 @@ async function fetchSgfFromZip(filename, zipFilename) {
 
 export async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
-        const response = await fetch(`tsumegos/${state.boardSize}/metadata.json?v=${APP_VERSION}`);
+        const response = await fetch(`tsumegos/${state.boardSize}/metadata.json?v=${DATA_VERSION}`);
         const zips = await response.json();
         // Shard min/max_rating are raw ratings; derive their rank bounds with M
         // so selection (which works in rank space against state.userRank) can use
@@ -609,7 +610,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
 // and embedding-backfill.js) — keep it that way so the parses can't drift.
 export async function fetchLookupLines() {
     try {
-        const response = await fetch(`lookup.txt?v=${APP_VERSION}`);
+        const response = await fetch(`lookup.txt?v=${DATA_VERSION}`);
         if (!response.ok) return null;
         const text = await response.text();
         return text.split('\n').filter(line => line.trim() !== '');
