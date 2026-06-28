@@ -5,7 +5,7 @@ import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { TOTAL_RANKS } from './constants.js';
-import { calculateAndStoreStatsResults, freshFailureReviewHours } from './model.js';
+import { calculateAndStoreStatsResults, recallImpactWithRefine } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, checkSyncSignal } from './account-sync.js';
 // The live rank is a linear-information window 4PL MLE over the recent first-time
@@ -247,18 +247,12 @@ export async function updateUserStats(isCorrect, {
     // cannot report the true value without first training on the answer.
     let recallImpact = null;
     if (currentProblem.isRepeat) {
-        // Typical recall difficulty across both sizes, so the displayed generic
-        // delay tracks the stats panel's figure; fall back to the user's rank.
-        const repeatRanks = getMergedAnswerHistory()
-            .filter(p => p.isRepeat && typeof p.problemRank === 'number')
-            .map(p => p.problemRank);
-        const genericProblemRank = repeatRanks.length
-            ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length
-            : state.userRank;
-        const opts = { problemRank: genericProblemRank, size: state.boardSize, userRank: state.userRank };
-        const beforeHours = freshFailureReviewHours(state.modelParams, opts);
-        await calculateAndStoreStatsResults();   // teach the model this answer
-        const afterHours = freshFailureReviewHours(state.modelParams, opts);
+        // The genuine before/after the recall model produces from teaching it this
+        // answer (generic average-difficulty problem), THEN — if the displayed delay
+        // moved the wrong way for this answer — a few extra Adam steps one at a time
+        // until it agrees with the answer's sign (recallImpactWithRefine, shared with
+        // the offline contradiction sim so both run the identical path).
+        const { beforeHours, afterHours } = await recallImpactWithRefine(isCorrect);
         if (beforeHours !== null && afterHours !== null) {
             recallImpact = { beforeHours, afterHours };
         }

@@ -615,8 +615,8 @@ let isCalculatingStats = false;
 // NOTE: the one-shot wipe of pre-3PL persisted params lives in migrations.js
 // (migrateModelArch3pl), which runMigrations() runs at boot before any training.
 
-export async function calculateAndStoreStatsResults() {
-    if (isCalculatingStats) return;
+export async function calculateAndStoreStatsResults(trainOpts = {}) {
+    if (isCalculatingStats) return null;
     isCalculatingStats = true;
 
     try {
@@ -647,7 +647,7 @@ export async function calculateAndStoreStatsResults() {
             ? JSON.parse(JSON.stringify(state.adamState))
             : { m: Array(numParams).fill(0), v: Array(numParams).fill(0), t: 0 };
 
-        const { trainedParams, finalAdamState } = await trainUserModel(trainingData, { params, adamState });
+        const { trainedParams, finalAdamState, epochsRun, stopReason } = await trainUserModel(trainingData, { params, adamState }, trainOpts);
 
         // Sanity check for non-numeric values
         const areParamsValid = trainedParams.every(p => isFinite(p));
@@ -657,6 +657,7 @@ export async function calculateAndStoreStatsResults() {
             setModelParams(trainedParams);
             setAdamState(finalAdamState);
             setStatsResults(finalResults);
+            return { epochsRun, stopReason };
         } else {
             console.error("Model training resulted in non-numeric weights. Wiping model state.");
             Sentry.captureMessage("Model training resulted in non-numeric weights.");
@@ -671,6 +672,50 @@ export async function calculateAndStoreStatsResults() {
     } finally {
         isCalculatingStats = false;
     }
+}
+
+// Max extra one-at-a-time Adam steps the recall-impact refine loop may take when
+// the displayed delay contradicts the answer. 5 captures essentially all the
+// realizable benefit at ~1% extra compute; 10 only shaves the residual ~0.3pp at
+// ~2x cost (the rest is a structural floor where the two heads genuinely disagree).
+const RECALL_REFINE_MAX_STEPS = 5;
+
+// Per-attempt recall impact for the result overlay, with an experimental refine
+// loop. After the DEFAULT retrain it takes ONE extra Adam step at a time (up to
+// maxExtraSteps), re-checking after each whether the GENERIC fresh-failure delay
+// has moved the way the just-recorded answer implies — a correct recall should
+// push it LATER, a miss SOONER — and stops as soon as it does. Returns
+// { beforeHours, afterHours, extraSteps } (hours; nulls if the model isn't ready).
+// Shared by updateUserStats and the offline contradiction sim so both run the
+// identical path. maxExtraSteps = 0 reproduces the pre-experiment behaviour.
+export async function recallImpactWithRefine(isCorrect, maxExtraSteps = RECALL_REFINE_MAX_STEPS) {
+    const repeatRanks = getMergedAnswerHistory()
+        .filter(p => p.isRepeat && typeof p.problemRank === 'number')
+        .map(p => p.problemRank);
+    const genericProblemRank = repeatRanks.length
+        ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length
+        : state.userRank;
+    const opts = { problemRank: genericProblemRank, size: state.boardSize, userRank: state.userRank };
+
+    const beforeHours = freshFailureReviewHours(state.modelParams, opts);
+    const defaultMeta = await calculateAndStoreStatsResults();   // the default update
+    let afterHours = freshFailureReviewHours(state.modelParams, opts);
+
+    // Congruent = the displayed delay change agrees with the answer's sign.
+    const congruent = (h) => (beforeHours == null || h == null)
+        ? true
+        : (isCorrect ? h >= beforeHours : h <= beforeHours);
+
+    let extraSteps = 0;
+    while (!congruent(afterHours) && extraSteps < maxExtraSteps) {
+        // One more Adam step on the same window, continuing the optimizer.
+        await calculateAndStoreStatsResults({ minEpochs: 1, maxEpochs: 1, maxTrainingTimeMs: Infinity });
+        afterHours = freshFailureReviewHours(state.modelParams, opts);
+        extraSteps++;
+    }
+    // defaultEpochs = Adam epochs the default update ran (so the extra-step cost
+    // can be judged relative to it); each extra step is exactly one more epoch.
+    return { beforeHours, afterHours, extraSteps, defaultEpochs: defaultMeta?.epochsRun ?? null };
 }
 
 export function prepareTrainingData(history, validHistory) {
@@ -740,13 +785,20 @@ export function prepareTrainingData(history, validHistory) {
     };
 }
 
-async function trainUserModel(trainingData, modelState) {
+async function trainUserModel(trainingData, modelState, trainOpts = {}) {
     const { y, weights, elapsedDays, isRepeatArr, n, floors,
             time_per_percentile_min, time_per_percentile_min_r } = trainingData;
     let { params, adamState } = modelState;
 
     const learningRate = 0.02;
-    const maxEpochs = 10000, maxTrainingTimeMs = 2000, lossConvergenceThreshold = 1e-6;
+    // Convergence budget is overridable so the per-attempt "refine until the
+    // displayed recall change agrees with the answer" experiment can force extra
+    // Adam steps (minEpochs) or a tighter stop. Defaults reproduce the shipped fit.
+    const maxEpochs = trainOpts.maxEpochs ?? 10000;
+    const maxTrainingTimeMs = trainOpts.maxTrainingTimeMs ?? 2000;
+    const lossConvergenceThreshold = trainOpts.convThreshold ?? 1e-6;
+    const minEpochs = trainOpts.minEpochs ?? 0;
+    let epochsRun = 0, stopReason = 'maxEpochs';
     const lambda = 10; // L2 regularization parameter
 
     // Per-run L2 targets. The TIME_SOLVING/REVIEW_TIME coefficients live in
@@ -801,11 +853,19 @@ async function trainUserModel(trainingData, modelState) {
             }
         }
         adamUpdate(params, gradient, adamState, learningRate);
+        epochsRun = epoch + 1;
 
-        if (Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold || Date.now() - startTime > maxTrainingTimeMs) break;
+        const converged = Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold;
+        const timedOut = Date.now() - startTime > maxTrainingTimeMs;
+        // minEpochs lets a caller force extra Adam steps past convergence (the
+        // per-attempt recall-refine experiment forces exactly one at a time).
+        if (epoch + 1 >= minEpochs && (converged || timedOut)) {
+            stopReason = converged ? 'converged' : 'timeCap';
+            break;
+        }
         prevLoss = currentLoss;
     }
-    return { trainedParams: params, finalAdamState: adamState };
+    return { trainedParams: params, finalAdamState: adamState, epochsRun, stopReason };
 }
 
 export function calculateResultsAndStdErrors(finalParams, trainingData) {
