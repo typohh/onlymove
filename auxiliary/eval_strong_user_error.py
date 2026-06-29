@@ -43,11 +43,12 @@ from utils.rank_surveys import (  # noqa: E402
     load_rank_surveys,
 )
 from pipeline.map_rating_to_egf import (  # noqa: E402
-    SIZES, fit_joint_shared, load_ratings, load_slopes,
+    SIZES, fit_joint_shared, load_floors, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
+from utils.ratings_io import load_lapse  # noqa: E402
 
 # map_rating_to_egf argparse defaults — keep in lockstep so this scores the
 # SAME curve the pipeline would ship for each config.
@@ -65,12 +66,14 @@ def scalar_label(s):
 def user_ratings_for_config(v2_dir, surveys, attempts):
     """{user_pref: 80%-clear v2-rating} for every survey user with ≥MIN_ATTEMPTS
     pooled attempts, using this config's per-problem ratings/slopes."""
-    merged_ratings, merged_slopes = {}, {}
+    merged_ratings, merged_slopes, merged_floors = {}, {}, {}
     for s in SIZES:
         merged_ratings.update(load_ratings(v2_dir, s))
         merged_slopes.update(load_slopes(v2_dir, s))
+        merged_floors.update(load_floors(v2_dir, s))
     if not merged_ratings:
         return None
+    lapse = load_lapse(v2_dir)   # 4PL ceiling λ — match the client / EGF anchor
     out = {}
     for uid in surveys["user_id"].unique():
         pref = uid[:8]
@@ -80,7 +83,7 @@ def user_ratings_for_config(v2_dir, surveys, attempts):
         if len(pooled) < MIN_ATTEMPTS:
             continue
         R, n = fit_user_rating(pooled, merged_ratings, min_n=MIN_ATTEMPTS,
-                               slopes=merged_slopes)
+                               slopes=merged_slopes, floors=merged_floors, lapse=lapse)
         if R is not None and n >= MIN_ATTEMPTS:
             out[pref] = R
     return out

@@ -40,7 +40,8 @@ from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 from utils.ratings_io import (  # noqa: E402
-    QUALITY_CSV, RATINGS_CSV, load_rating_rank_curve, load_value_map,
+    FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_lapse, load_rating_rank_curve,
+    load_value_map,
 )
 from utils.rank_surveys import scalar_to_rank  # noqa: E402
 
@@ -58,13 +59,15 @@ def load_problem_maps(v2_dir):
     """Merge per-size {tsumego_id: rating} and {tsumego_id: slope a_p} across
     boards — v2 b_p is one shared cross-board scale, so a problem's id is unique
     and the merge is lossless."""
-    ratings, slopes = {}, {}
+    ratings, slopes, floors = {}, {}, {}
     for size in SIZES:
         ratings.update(load_value_map(
             os.path.join(v2_dir, str(size), RATINGS_CSV), "rating", missing_ok=True))
         slopes.update(load_value_map(
             os.path.join(v2_dir, str(size), QUALITY_CSV), "quality", missing_ok=True))
-    return ratings, slopes
+        floors.update(load_value_map(
+            os.path.join(v2_dir, str(size), FLOOR_CSV), "floor", missing_ok=True))
+    return ratings, slopes, floors
 
 
 def load_curve(v2_dir):
@@ -115,12 +118,12 @@ def select_recent(rows, recent_days, last_n):
     return rows
 
 
-def estimate(rows, ratings, slopes, xs, ys):
+def estimate(rows, ratings, slopes, xs, ys, floors=None, lapse=0.0):
     """fit_user_rating over (tid, success) → rating → rank. Returns a dict."""
     att = [(tid, succ) for tid, succ, *_ in rows]
     matched = sum(1 for tid, _ in att if tid in ratings)
     R, n = fit_user_rating(att, ratings, target=CALIBRATION_P, slopes=slopes,
-                           min_n=1)
+                           floors=floors, lapse=lapse, min_n=1)
     if R is None:
         return None
     rank_index, scalar, label = rating_to_rank(R, xs, ys)
@@ -154,7 +157,8 @@ def main():
     if not os.path.exists(args.db):
         sys.exit(f"{args.db} not found — run pipeline.fetch_database first.")
 
-    ratings, slopes = load_problem_maps(args.dir)
+    ratings, slopes, floors = load_problem_maps(args.dir)
+    lapse = load_lapse(args.dir)   # 4PL ceiling λ — match the client / EGF anchor
     if not ratings:
         sys.exit(f"No v2 ratings under {args.dir} — run train_rating.")
     xs, ys = load_curve(args.dir)
@@ -189,7 +193,7 @@ def main():
     print("-" * 65)
     for name, rd, ln in windows:
         sub = select_recent(rows, rd, ln)
-        res = estimate(sub, ratings, slopes, xs, ys)
+        res = estimate(sub, ratings, slopes, xs, ys, floors=floors, lapse=lapse)
         if res is None:
             print(f"{name:<12}{'(no matched attempts)':>30}")
             continue

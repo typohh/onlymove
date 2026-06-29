@@ -80,7 +80,9 @@ from utils.fit_rank_curves import (  # noqa: E402
     ordinal_nll_vec, _unpack_thresholds,
 )
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
-from utils.ratings_io import QUALITY_CSV, RATINGS_CSV, load_value_map  # noqa: E402
+from utils.ratings_io import (  # noqa: E402
+    FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_lapse, load_value_map,
+)
 
 SIZES = list(ALL_BOARD_SIZES)
 
@@ -105,6 +107,15 @@ def load_slopes(v2_dir, size):
     M) are anchored with the SAME per-problem a_p the PWA's estimator uses."""
     return load_value_map(
         os.path.join(v2_dir, str(size), QUALITY_CSV), "quality", missing_ok=True)
+
+
+def load_floors(v2_dir, size):
+    """{tsumego_id: c_p} from ratings/<size>/tsumego_floor_final.csv — the per-problem
+    4PL guessing floor. fit_user_rating uses these (with the global ceiling λ) so the
+    survey-user 80%-clear ratings that anchor M match the client's 4PL rank estimator
+    (pwa/js/irt.js) exactly — same c_p/λ or the anchor↔client loop reopens."""
+    return load_value_map(
+        os.path.join(v2_dir, str(size), FLOOR_CSV), "floor", missing_ok=True)
 
 
 def _shape_at(ys):
@@ -301,23 +312,28 @@ def main():
 
     ratings_by_size = {s: load_ratings(args.dir, s) for s in SIZES}
     slopes_by_size = {s: load_slopes(args.dir, s) for s in SIZES}
+    floors_by_size = {s: load_floors(args.dir, s) for s in SIZES}
     merged_ratings = {}
     merged_slopes = {}
+    merged_floors = {}
     for s in SIZES:
         if not ratings_by_size[s]:
             print(f"  size {s}: no v2 ratings at {args.dir}/{s}/ (skipped)")
         merged_ratings.update(ratings_by_size[s])   # b_p is one shared scale
         merged_slopes.update(slopes_by_size[s])     # a_p, same shared scale
+        merged_floors.update(floors_by_size[s])     # c_p, 4PL guessing floor
     if not merged_ratings:
         sys.exit("No v2 per-problem ratings found — run train_rating first.")
+    lapse = load_lapse(args.dir)                     # global 4PL ceiling λ (= client's)
 
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
 
     # Each user's 80%-CLEAR v2-rating, POOLED across boards (shared scale). This
-    # is the same quantity the PWA computes per user (fit_user_rating @ 80%),
+    # is the same quantity the PWA computes per user (fit_user_rating @ 80%, full
+    # 4PL with per-problem floor c_p + ceiling λ — same as the client's irt.js),
     # so anchoring it → EGF makes the displayed rank match the survey rank.
     print(f"\nEstimating each user's {int(CALIBRATION_P * 100)}%-clear v2-rating "
-          f"(pooled across boards) ...")
+          f"(pooled across boards; 4PL, λ={lapse:.4f}) ...")
     user_rating = {}
     for uid in surveys["user_id"].unique():
         pref = uid[:8]
@@ -327,7 +343,8 @@ def main():
         if len(pooled) < args.min_attempts:
             continue
         R, n = fit_user_rating(pooled, merged_ratings, min_n=args.min_attempts,
-                               slopes=merged_slopes)
+                               slopes=merged_slopes, floors=merged_floors,
+                               lapse=lapse)
         if R is not None and n >= args.min_attempts:
             user_rating[pref] = R
     print(f"  {len(user_rating)} users with a usable rating "

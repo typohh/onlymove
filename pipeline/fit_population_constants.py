@@ -401,7 +401,7 @@ def _weighted_spearman(pairs, alpha):
     return acc / w if w else np.nan
 
 
-def fit_time_adjust(by_user, params, surveys, apply_m, survey_recenter=True):
+def fit_time_adjust(by_user, params, surveys, apply_m, survey_recenter=True, lapse=0.0):
     """Returns (alpha, time_vs_rank_intercept, time_vs_rank_slope, info); any numeric
     is None when too sparse to fit (caller keeps the default block).
 
@@ -424,6 +424,7 @@ def fit_time_adjust(by_user, params, surveys, apply_m, survey_recenter=True):
     g1 untouched. --no-survey-recenter keeps the raw fleet intercept."""
     raw_ratings = {k: v[0] for k, v in params.items()}
     slopes = {k: v[1] for k, v in params.items()}
+    floors = {k: v[2] for k, v in params.items()}   # 4PL guessing floor c_p
 
     # Time feature + our 80%-clear rating/rank for every user that has both. The raw
     # rating feeds the survey Spearman term (so alpha lands in rating units); the rank
@@ -442,7 +443,8 @@ def fit_time_adjust(by_user, params, surveys, apply_m, survey_recenter=True):
         if len(rated) < TA_MIN_ATTEMPTS:
             continue
         att = [((r["size"], r["problem"]), r["success"]) for r in rated]
-        R, _ = fit_user_rating(att, raw_ratings, slopes=slopes, min_n=TA_MIN_ATTEMPTS)
+        R, _ = fit_user_rating(att, raw_ratings, slopes=slopes, floors=floors,
+                               lapse=lapse, min_n=TA_MIN_ATTEMPTS)
         if R is not None:
             rating_of[user] = R
             rank_of[user] = apply_m(R)
@@ -784,7 +786,7 @@ def main():
         print("  WARNING: ratings/rating_to_rank.json missing (run map_rating_to_egf "
               "first) — keeping default time_adjust block")
     ta_alpha, ta_g0, ta_g1, ta_info = fit_time_adjust(
-        by_user, params, load_surveys(args.db), apply_m, args.survey_recenter)
+        by_user, params, load_surveys(args.db), apply_m, args.survey_recenter, lapse=lam)
     print(f"  {ta_info}")
     if ta_alpha is not None and ta_g0 is not None and ta_g1 is not None:
         out["time_adjust"] = {

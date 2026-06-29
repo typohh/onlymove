@@ -59,6 +59,24 @@ def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
     )
 
 
+def load_lapse(ratings_dir):
+    """The global 4PL ceiling λ (fat-finger / lapse rate) the shipped ratings were
+    derived under and the client uses — read from population_constants.json, falling
+    back to rating_constants.json, then 0.0. fit_user_rating's 4PL must use THIS λ so
+    the EGF anchor matches the client's rank estimator (pwa/js/irt.js LAPSE)."""
+    for fname in ("population_constants.json", "rating_constants.json"):
+        path = os.path.join(ratings_dir, fname)
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    v = json.load(f).get("fat_finger_rate")
+                if isinstance(v, (int, float)) and 0.0 <= v < 1.0:
+                    return float(v)
+            except (ValueError, OSError):
+                pass
+    return 0.0
+
+
 def load_rating_rank_curve(ratings_dir, *, size="9", offset=0.0):
     """(ratings_knots, rank_index_knots − offset) float arrays from the board-`size`
     key of ratings/rating_to_rank.json. The v2 curve writes both board keys

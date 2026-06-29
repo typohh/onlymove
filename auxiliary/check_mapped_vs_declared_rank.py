@@ -64,12 +64,12 @@ from utils.rank_surveys import (  # noqa: E402
     load_rank_surveys, scalar_to_rank,
 )
 from pipeline.map_rating_to_egf import (  # noqa: E402
-    SIZES, load_ratings, load_slopes,
+    SIZES, load_floors, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
-from utils.ratings_io import load_rating_rank_curve  # noqa: E402
+from utils.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
 
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
@@ -229,10 +229,13 @@ def _print_full_listing(df):
         if sub.empty:
             continue
         print(f"\n{server}  (n={len(sub)})")
-        print(f"{'user':<10}{'onlymove':>9}{'declared':>9}{'predicted':>10}{'err':>7}")
+        print(f"{'user':<10}{'rating':>8}{'time':>8}{'onlymove':>9}{'declared':>9}"
+              f"{'predicted':>10}{'err':>7}")
         for _, r in sub.iterrows():
-            print(f"{r['prefix']:<10}{r['our_label']:>9}{r['declared_rank']:>9}"
-                  f"{r['pred_server_label']:>10}{r['err_server']:>+7.1f}")
+            tstr = f"{r['median_min']*60:.0f}s" if pd.notna(r['median_min']) else "-"
+            print(f"{r['prefix']:<10}{r['our_R']:>+8.2f}{tstr:>8}{r['our_label']:>9}"
+                  f"{r['declared_rank']:>9}{r['pred_server_label']:>10}"
+                  f"{r['err_server']:>+7.1f}")
 
 
 # Internal-rank bands (scalar: 1k=0, 1d=1). Half-open [lo, hi).
@@ -277,12 +280,14 @@ def main():
     m_ratings, m_internal = load_M(args.dir)
     server_curves = load_server_curves(args.dir)
 
-    merged_ratings, merged_slopes = {}, {}
+    merged_ratings, merged_slopes, merged_floors = {}, {}, {}
     for s in SIZES:
         merged_ratings.update(load_ratings(args.dir, s))
         merged_slopes.update(load_slopes(args.dir, s))
+        merged_floors.update(load_floors(args.dir, s))
     if not merged_ratings:
         sys.exit("No v2 per-problem ratings — run train_rating first.")
+    lapse = load_lapse(args.dir)   # global 4PL ceiling λ — match the client / anchor
 
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
 
@@ -302,7 +307,7 @@ def main():
         if len(pooled) < args.min_attempts:
             continue
         R, n = fit_user_rating(pooled, merged_ratings, min_n=args.min_attempts,
-                               slopes=merged_slopes)
+                               slopes=merged_slopes, floors=merged_floors, lapse=lapse)
         if R is not None and n >= args.min_attempts:
             user_R[pref] = R
             user_internal[pref] = apply_M(R, m_ratings, m_internal)
@@ -349,6 +354,7 @@ def main():
             "declared_rank": r["rank"],
             "declared_scalar": float(g),
             "our_R": user_R[pref],
+            "median_min": med_min.get(pref),   # working-set median novel solve min, or None
             "our_internal": ours,
             "our_label": scalar_to_rank(ours),
             "our_internal_adj": ours_adj,

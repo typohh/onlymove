@@ -34,6 +34,9 @@ from scipy.special import expit
 # ranks ⇒ ~0.1 rating/rank; with ~0.28 logit/rank that's ~2.8 logit/rating).
 LOGIT_PER_RATING = 2.5
 CALIBRATION_P = 0.8  # matches the client / momentum: rank = where you clear 80%
+# Clamp per-problem floors below CALIBRATION_P so κ(c)=logit((P−c)/(1−c−λ)) stays
+# finite (κ→∞ as c→P). Mirrors pwa/js/irt.js clampFloor / FLOOR_MAX exactly.
+FLOOR_MAX = 0.78
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -43,36 +46,52 @@ from utils.rank_surveys import SERVERS  # noqa: E402
 
 
 def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
-                    slopes=None):
+                    slopes=None, floors=None, lapse=0.0):
     """The user's rating = the problem RATING at which they clear `target` (80%).
 
-    MLE of R in  P(correct) = σ(a_p·(R − raw_rating) + logit(target))  over the
-    user's (raw_rating, correct) attempts. `raw_rating` is the shipped 80%-clear
-    rating r_p, so the +logit(target) offset is exact for ANY slope a_p; this is
-    the proper 2PL ability estimate. `slopes` is an optional {tid: a_p} map — when
-    given, each attempt uses its problem's true discrimination a_p; otherwise (or
-    for a missing/non-positive a_p) it falls back to the constant LOGIT_PER_RATING.
-    This is the in-loop estimator — it never touches the rating-derivation
-    internals, only the shipped ratings/slopes — and is the SAME quantity the
-    client (rank-decomposition.js) computes; M is then anchored on it, so the
-    client and the anchor MUST use the same per-problem a_p or the loop reopens.
+    Full 4PL MLE of R, IDENTICAL to the client's rank estimator
+    (pwa/js/rank-decomposition.js via irt.js):
+
+        P(correct) = c_p + (1 − c_p − λ)·σ(a_p·(R − raw_rating) + κ(c_p))
+        κ(c) = logit((target − c)/(1 − c − λ))   (anchors P=target at R=raw_rating)
+
+    `raw_rating` is the shipped 80%-clear rating r_p, so the κ offset keeps the
+    "clear r_p at target" anchor exact for ANY slope/floor — and because the
+    shipped ratings were DERIVED under this same 4PL (per-problem floor c_p +
+    global ceiling λ), the ability estimate is consistent with them. `slopes`
+    {tid: a_p} gives each attempt its own discrimination (else LOGIT_PER_RATING);
+    `floors` {tid: c_p} its guessing floor (else 0); `lapse` is the global ceiling
+    λ (population_constants.json fat_finger_rate). With floors=None & lapse=0 this
+    reduces EXACTLY to the old 2PL. The floor is what stops a careless failure on
+    a far-below-rank problem from yanking R, and matters most for strong users on
+    easy problems. M is anchored on THIS quantity, so the client and the anchor
+    MUST use the same per-problem a_p/c_p/λ or the loop reopens — keep them in
+    lockstep with irt.js.
 
     Returns (R, n_joined) or (None, 0)."""
-    rows = [(raw_ratings[t], s, (slopes.get(t) if slopes else None))
+    rows = [(raw_ratings[t], s, (slopes.get(t) if slopes else None),
+             (floors.get(t) if floors else None))
             for t, s in attempts if t in raw_ratings]
     if len(rows) < min_n:
         return None, 0
-    rr = np.array([r for r, _, _ in rows], dtype=float)
-    sc = np.array([s for _, s, _ in rows], dtype=float)
+    rr = np.array([r for r, _, _, _ in rows], dtype=float)
+    sc = np.array([s for _, s, _, _ in rows], dtype=float)
     sl = np.array([(a if (a is not None and np.isfinite(a) and a > 0)
-                    else LOGIT_PER_RATING) for _, _, a in rows], dtype=float)
-    off = float(np.log(target / (1 - target)))
+                    else LOGIT_PER_RATING) for _, _, a, _ in rows], dtype=float)
+    c = np.array([min(max(f if (f is not None and np.isfinite(f)) else 0.0, 0.0),
+                      FLOOR_MAX) for _, _, _, f in rows], dtype=float)
+    lam = max(0.0, float(lapse))
+    span = np.clip(1.0 - c - lam, 1e-6, 1.0)              # (1 − floor − λ) asymptote span
+    q = np.clip((target - c) / span, 1e-6, 1.0 - 1e-6)
+    kappa = np.log(q / (1.0 - q))                          # κ(c): P=target at R=raw_rating
     R = float(rr.mean())
     for _ in range(80):
-        z = np.clip(sl * (R - rr) + off, -40.0, 40.0)
-        p = 1.0 / (1.0 + np.exp(-z))
-        score = float(np.sum(sl * (sc - p)))
-        info = float(np.sum(sl ** 2 * p * (1 - p)))
+        praw = 1.0 / (1.0 + np.exp(-np.clip(sl * (R - rr) + kappa, -40.0, 40.0)))
+        p = np.clip(c + span * praw, 1e-9, 1.0 - 1e-9)
+        g = span * sl * praw * (1.0 - praw)               # dP/dR
+        denom = p * (1.0 - p)
+        score = float(np.sum((sc - p) * g / denom))
+        info = float(np.sum(g * g / denom))               # 4PL Fisher info
         if info < 1e-9:
             break
         step = max(-1.0, min(1.0, score / info))
