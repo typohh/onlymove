@@ -77,7 +77,7 @@ def load_db():
 def load_curves():
     path = os.path.join(TSUMEGOS_DIR, "rating_to_rank.json")
     if not os.path.exists(path):
-        sys.exit(f"Missing {path}. Run `python -m pipeline.map_rating_to_egf` "
+        sys.exit(f"Missing {path}. Run `python -m pipeline.map_rating_to_rank` "
                  f"then `python -m pipeline.package_for_pwa` first.")
     return json.load(open(path))
 

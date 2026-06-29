@@ -1,7 +1,7 @@
 """Shared readers for the backend rating artifacts under ratings/<size>/ and the
 ratings/rating_to_rank.json curve.
 
-These were copy-pasted across the pipeline (map_rating_to_egf,
+These were copy-pasted across the pipeline (map_rating_to_rank,
 fit_population_constants, package_for_pwa) and the auxiliary rank tools — the same
 `{tsumego_id: float}` CSV load and the same rating_to_rank.json knot extraction in
 seven-plus places. Centralizing them keeps a column rename or curve-shape change

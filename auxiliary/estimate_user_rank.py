@@ -5,7 +5,7 @@ It reproduces the SAME two steps the production client does on the front page:
 
   1. MLE rating  — the user's 80%-clear v2-rating (`fit_user_rating` @
      CALIBRATION_P, the in-loop estimator shared by the client
-     `rank-decomposition.js` and the EGF anchor `map_rating_to_egf`). It is a
+     `rank-decomposition.js` and the EGF anchor `map_rating_to_rank`). It is a
      2PL MLE over the user's (problem-rating, success) attempts, using each
      problem's own discrimination a_p as the success-curve slope. Optionally
      restricted to recent attempts (`--recent-days` / `--last-n`) since the live

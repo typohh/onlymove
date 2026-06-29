@@ -31,7 +31,7 @@ EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
 
 # Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
-# pipeline.train_rating + pipeline.map_rating_to_egf) is the only rating
+# pipeline.train_rating + pipeline.map_rating_to_rank) is the only rating
 # backend — package_for_pwa is the single writer of pwa/tsumegos/ and always
 # reads ratings/. RATING_MODEL_TAG is stamped into embedding_meta.json as
 # `rating_model` for provenance (the PWA does not branch on it).
@@ -76,7 +76,7 @@ RATING_FLOOR_MARGIN = 0.1
 
 # package_for_pwa is rank-agnostic: it ships one raw black-box rating per
 # problem and never converts to ranks. The rating→rank curve (M) is fitted and
-# written into ratings/rating_to_rank.json by pipeline.map_rating_to_egf
+# written into ratings/rating_to_rank.json by pipeline.map_rating_to_rank
 # (and copied across by this script); the client fetches it and does all
 # rating→rank conversion itself.
 
@@ -585,7 +585,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
 def copy_curve(output_dir):
     """Copy the rating→rank curve (rating_to_rank.json + rank_map.json) from the
     backend RATINGS_ROOT into the served pwa/tsumegos/. package_for_pwa is the
-    SINGLE writer of pwa/tsumegos/: map_rating_to_egf writes the curve into
+    SINGLE writer of pwa/tsumegos/: map_rating_to_rank writes the curve into
     ratings/, and this copies it across. Returns the list of copied filenames.
     Every source is REQUIRED — the client cannot rank a problem without the curve and
     aborts boot without the population constants — so a missing source aborts the run
@@ -595,11 +595,11 @@ def copy_curve(output_dir):
     os.makedirs(served, exist_ok=True)
     copied = []
     # rating_to_rank.json + rank_map.json: the survey-calibrated rating→rank curve M
-    # (map_rating_to_egf). population_constants.json: the fitted model constants the
+    # (map_rating_to_rank). population_constants.json: the fitted model constants the
     # client requires (fit_population_constants). All three are mandatory.
     required = {
-        "rating_to_rank.json": "map_rating_to_egf",
-        "rank_map.json": "map_rating_to_egf",
+        "rating_to_rank.json": "map_rating_to_rank",
+        "rank_map.json": "map_rating_to_rank",
         "population_constants.json": "fit_population_constants",
     }
     for name, producer in required.items():

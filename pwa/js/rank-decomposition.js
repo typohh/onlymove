@@ -77,7 +77,7 @@ const KERNEL_TRUNC_SIGMA = 4;
 // Per attempt the success-curve slope is the problem's OWN 2PL discrimination
 // a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
 // logit-per-internal-rank slope by dividing by the local steepness of M. The
-// EGF anchor (map_rating_to_egf → fit_user_rating) uses the same per-problem
+// EGF anchor (map_rating_to_rank → fit_user_rating) uses the same per-problem
 // a_p, so the rank loop stays closed. LOGIT_PER_RATING is only the FALLBACK slope
 // for legacy entries that predate `problemSlope`; set near the corpus-mean a_p
 // (~1.6) so an un-backfilled attempt isn't mis-scaled against the re-anchored M.
@@ -164,7 +164,7 @@ export function normalizedRankForSize(rawRating, size) {
 // Apply a RATING-space delta to a rank index: invert M at the rank index, shift
 // by deltaRating (raw rating units), re-apply M. Exact rather than linearized
 // via M', so it stays correct across knot boundaries. The curve is shared
-// across both board sizes (map_rating_to_egf writes one curve to both keys),
+// across both board sizes (map_rating_to_rank writes one curve to both keys),
 // so size 9's key stands in for either. Used by the stats Rank tab to turn the
 // population time-adjustment (alpha · Δlog10-minutes, fit in rating units by
 // pipeline.fit_population_constants) into a rank-space shift.

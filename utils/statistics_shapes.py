@@ -2,7 +2,7 @@
 
 `statistics.txt` is KataGo's tabulated weak-side win rate for even games at each rank gap; the
 ΔAIC-best fit to it gives the rating→rank curve's SHAPE (the EGF cubic), with only the affine
-(α, β) left for the survey fit downstream. The rank-calibration stage (pipeline.map_rating_to_egf
+(α, β) left for the survey fit downstream. The rank-calibration stage (pipeline.map_rating_to_rank
 via utils.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse the same fitted
 shape, so the fit lives here (a dependency-free leaf — no auxiliary/ or pipeline/ imports).
 

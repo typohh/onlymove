@@ -89,7 +89,7 @@ SIZES = [9, 13]
 # total bot mass and drowning the human attempts.
 ANCHOR_REF_RUNGS = 2
 # logit of the serving/anchoring success rate (80%): rating = the ability θ at which
-# P(clear) = CALIBRATION_P. Single source of truth shared with the PWA + map_rating_to_egf.
+# P(clear) = CALIBRATION_P. Single source of truth shared with the PWA + map_rating_to_rank.
 CLEAR_LOGIT = float(np.log(CALIBRATION_P / (1.0 - CALIBRATION_P)))
 # Effective support of the success curve in gap (= slope·(ability−rating)) logits: past ±ZCLIP the
 # sigmoid is within ~0.7% of its asymptote, so a larger gap carries no curve information (and extreme

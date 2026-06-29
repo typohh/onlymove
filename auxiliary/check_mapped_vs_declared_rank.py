@@ -1,10 +1,10 @@
 """How closely does our mapped rank match each user's self-declared rank?
 
 This is the end-to-end calibration check on the SHIPPED v2 mapping (NOT a refit):
-it takes the curves `map_rating_to_egf` already wrote and asks, per survey
+it takes the curves `map_rating_to_rank` already wrote and asks, per survey
 user, "does the rank we'd show them line up with what they say they are?".
 
-Pipeline mirrored from the PWA / map_rating_to_egf (so the numbers are what a
+Pipeline mirrored from the PWA / map_rating_to_rank (so the numbers are what a
 user actually sees):
 
   1. R = the user's 80%-clear v2-rating, pooled across boards
@@ -63,7 +63,7 @@ from utils.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys, scalar_to_rank,
 )
-from pipeline.map_rating_to_egf import (  # noqa: E402
+from pipeline.map_rating_to_rank import (  # noqa: E402
     SIZES, load_floors, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
@@ -122,14 +122,13 @@ WORKING_SET = 3000  # ANSWER_HISTORY_WORKING_SET in pwa/js/constants.js
 
 
 def load_time_adjust(v2_dir):
-    """(alpha, g0, g1) from the shipped population_constants.json, or None."""
+    """(alpha, center) from the shipped population_constants.json, or None — the simple
+    log-time dock alpha·(log10 median min − center) the consensus mapping produces."""
     with open(os.path.join(v2_dir, "population_constants.json")) as f:
         ta = json.load(f).get("time_adjust")
     if not ta:
         return None
-    return (float(ta["alpha_per_log10_min"]),
-            float(ta["time_vs_rank_intercept"]),
-            float(ta["time_vs_rank_slope"]))
+    return (float(ta["alpha_per_log10_min"]), float(ta["center_log10_min"]))
 
 
 def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
@@ -319,15 +318,14 @@ def main():
     ta = load_time_adjust(args.dir)
     if ta is None:
         sys.exit("No time_adjust block in population_constants.json.")
-    alpha, g0, g1 = ta
+    alpha, center = ta
     med_min = load_user_median_solve_minutes(args.sqlite)
     deltas = {}
     for pref in user_R:
         mm = med_min.get(pref)
         if mm is None or mm <= 0:
             continue
-        native_idx = user_internal[pref] + RANK_INDEX_OFFSET
-        deltas[pref] = alpha * (np.log10(mm) - (g0 + g1 * native_idx))
+        deltas[pref] = alpha * (np.log10(mm) - center)
     if args.time_recenter and deltas:
         mean_delta = float(np.mean(list(deltas.values())))
         deltas = {p: d - mean_delta for p, d in deltas.items()}

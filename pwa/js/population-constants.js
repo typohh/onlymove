@@ -36,15 +36,14 @@ export function loadPopulationConstants() {
 
 // --- Time-adjusted rank --------------------------------------------------
 // Practice here is untimed, but server ranks reflect timed play, so a slow
-// solver's untimed rank overstates their timed strength. `time_adjust` (fit by
-// pipeline.fit_population_constants) corrects an internal RATING by
-// alpha · (log10(median solve minutes) − EXPECTED-time-for-the-user's-rank),
-// alpha ≤ 0, where the expected time is a linear g0 + g1·rankIndex line
-// (time_vs_rank_intercept / time_vs_rank_slope). The feature is RANK-RESIDUALIZED
-// so only time UNEXPLAINED by rank moves the rank — a player merely as slow as is
-// typical for their level gets no dock. Shared by the Rank-tab chart/summary
-// (stats-ui.js) and the rank-translation modal (rank-translation.js) so the median
-// feature is defined in exactly ONE place.
+// solver's untimed rank overstates their timed strength. `time_adjust` corrects an
+// internal RATING by alpha · (log10(median solve minutes) − center), alpha ≤ 0 — a
+// single global log-time slope + center. It is PRODUCED by pipeline.map_rating_to_rank
+// (fit jointly with the rating→rank curve) and read through into the population
+// constants; the per-server couplings absorb the rank-correlated part of solve time on
+// their own, so there is no rank-residualization line (the old g0/g1 are gone). Shared
+// by the Rank-tab chart/summary (stats-ui.js) and the rank-translation modal
+// (rank-translation.js) so the median feature is defined in exactly ONE place.
 
 // The feature definition MUST match user_median_log10_minutes in
 // fit_population_constants (non-repeat, >0, AFK-capped) — the alpha was fit
@@ -67,23 +66,19 @@ export function medianNovelSolveMinutes(history) {
 }
 
 // The whole-history time-adjustment in RATING units:
-//   alpha · (log10(medianMin) − (g0 + g1·userRankIndex)).
-// `userRankIndex` is the user's CURRENT internal-rank index (0..29 scale, e.g.
-// userRank·TOTAL_RANKS); the centering is the time expected for that rank, so the
-// client reproduces exactly the rank-residualized feature the constant was fit on.
-// Returns null when it can't be computed (constants missing, no rank, or too few
-// timed attempts) — callers then show the raw, unadjusted rank. Apply the returned
-// delta to an internal rank index via rankIndexAfterRatingDelta.
-export function timeAdjustDeltaRating(history, userRankIndex) {
+//   alpha · (log10(medianMin) − center).
+// A single global log-time slope around `center` (the population-typical log10 median),
+// so a typical-speed solver gets ~0 dock. Returns null when it can't be computed
+// (constants missing or too few timed attempts) — callers then show the raw,
+// unadjusted rank. Apply the returned delta to an internal rank index via
+// rankIndexAfterRatingDelta.
+export function timeAdjustDeltaRating(history) {
     const ta = getPopulationConstants()?.time_adjust;
     if (!ta || !Number.isFinite(ta.alpha_per_log10_min)
-        || !Number.isFinite(ta.time_vs_rank_intercept)
-        || !Number.isFinite(ta.time_vs_rank_slope)
-        || !Number.isFinite(userRankIndex)) {
+        || !Number.isFinite(ta.center_log10_min)) {
         return null;
     }
     const medMin = medianNovelSolveMinutes(history);
     if (medMin === null) return null;
-    const expectedLog10 = ta.time_vs_rank_intercept + ta.time_vs_rank_slope * userRankIndex;
-    return ta.alpha_per_log10_min * (Math.log10(medMin) - expectedLog10);
+    return ta.alpha_per_log10_min * (Math.log10(medMin) - ta.center_log10_min);
 }
