@@ -29,16 +29,21 @@ Model (internal rank ≡ EGF rank is the hub / identity), estimated TOGETHER:
     rating R ──shared curve m──▶ INTERNAL(EGF) RANK ──per server──▶ server rank
 
   * R = the v2-rating at which a user clears 80% (fit_user_rating, pooled).
-  * m: the EGF statistics.txt cubic SHAPE with a 2-param affine fit to surveys —
-    rating-thresholds `a_g = α + β·S(g)`, S = the ΔAIC-best fit to the even-game
-    win-rate table (utils.statistics_shapes). The shape is NOT a magic
+  * m: a MONOTONE per-segment fit with the EGF statistics.txt cubic SHAPE as a
+    PRIOR. The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)`
+    (>0 ⇒ monotone); δ_g=0 reproduces the old rigid affine `a_g = α + β·S(g)`, and
+    `λ_shape·Σδ_g²` penalises deviation from the shape. S = the ΔAIC-best fit to the
+    even-game win-rate table (utils.statistics_shapes). The shape is NOT a magic
     constant: EGF data rejects a linear rank↔rating link (ΔAIC 1652 vs cubic 0),
     and the bot Elo ladder + our human R(rank) independently show the same convex
-    acceleration. A linear/free curve over-rates kyu (+4 ranks) and under-rates
-    dan (−2); the cubic shape removes that tilt at no aggregate cost. Only α, β
-    (β>0 ⇒ monotone) are fit here. (NOT v1's cubic, which is pinned to v1's rating
-    scale via humanv0 bots; this re-fits the shape's affine to v2's b_p surveys.)
-    See docs/rank_mapping_experiments.md for the CV / per-rank-band evidence.
+    acceleration — so it's the right EXTRAPOLATION backbone for the sparse tails.
+    But as a HARD 2-param affine it under-fit the dan anchors by ~3 ranks (the EGF
+    declarers are the only dan-heavy cohort, and the data's real shape there isn't
+    the borrowed cubic). Softening it to a prior lets the dense kyu–dan EGF data
+    bend the curve to the anchors (held-out CV picks λ_shape at a real bias-variance
+    minimum — see docs/rank_mapping_experiments.md), halving the EGF residual; the
+    irreducible remainder is the rating model's strong-player compression, not m.
+    (NOT v1's cubic, pinned to v1's scale via humanv0 bots; this fits v2's b_p.)
   * Each non-EGF server: P(declared ≤ h | internal rank x) = expit(τ_{s,h} − x),
     free ordinal thresholds, uniform-spacing prior (--lambda). EGF feeds the
     rating curve directly (the identity hub); other servers couple in on top.
@@ -110,17 +115,24 @@ def _shape_at(ys):
     return np.asarray(theta(np.asarray(ys, float) + 19.0, params), dtype=float)
 
 
-def fit_joint_shared(decls, egf_lo, egf_hi, lam,
+def fit_joint_shared(decls, egf_lo, egf_hi, lam, lam_shape,
                      rank_padding, extend_to, min_server_samples):
     """Jointly fit ONE shared rating→internal(EGF)-rank curve and per-server
     internal-rank→server-rank couplings over all `decls`.
 
-    The rating→EGF curve is the EGF statistics.txt cubic SHAPE with only a 2-param
-    affine (a, b>0) fit to surveys: rating-thresholds `a_g = α + β·S(g)`, where
-    `S` = _shape_at. A linear curve is decisively rejected by the same EGF data
-    (ΔAIC 1652) and over-/under-rates the rank extremes; the cubic shape removes
-    that tilt (docs/rank_mapping_experiments.md). Server couplings stay free
-    ordinal thresholds with a uniform-spacing prior (`lam`).
+    The rating→EGF curve is a MONOTONE per-segment fit with the EGF statistics.txt
+    cubic shape as a PRIOR (not a hard constraint): the gap between consecutive
+    rating-thresholds is `β·ΔS(g)·exp(δ_g)` (strictly positive ⇒ monotone), so δ_g=0
+    reproduces the old rigid affine `a_g = α + β·S(g)` exactly, and `lam_shape·Σδ_g²`
+    penalises each segment's slope for deviating from the shape. Where the EGF
+    declarations are dense (kyu–dan) the likelihood overrides the prior and the
+    curve bends to the anchors (the old 2-param affine under-fit the dan anchors by
+    ~3 ranks); where they are sparse (the tails) nothing overrides it, so
+    extrapolation stays on the cubic shape. `lam_shape` is held-out-CV-selected (a
+    real bias-variance minimum; see docs/rank_mapping_experiments.md). A free LINEAR
+    curve was decisively rejected by the same EGF data (ΔAIC 1652) — the shape prior
+    keeps the tails from that tilt. Server couplings stay free ordinal thresholds
+    with a uniform-spacing prior (`lam`).
 
     decls : iterable of (server, rating R, declared g_scalar). There is no board
     split — b_p is one shared scale, so a user contributes ONE R (pooled across
@@ -135,7 +147,9 @@ def fit_joint_shared(decls, egf_lo, egf_hi, lam,
     N_egf = egf_hi - egf_lo + 1
     egf_thr_ranks = list(range(egf_lo + 1, egf_hi + 1))   # K = N_egf-1 ranks
     ys = np.array([g - 0.5 for g in egf_thr_ranks], dtype=float)  # EGF scalar
-    S = _shape_at(ys)                                      # fixed cubic shape
+    S = _shape_at(ys)                                      # cubic shape (prior MEAN)
+    dS = np.diff(S)                  # shape's per-segment slope (>0, S monotone)
+    nseg = len(dS)                   # = K_egf-1 free per-segment shape-deviations
 
     # --- bucket declarations ---
     egf_R, egf_k = [], []
@@ -180,10 +194,13 @@ def fit_joint_shared(decls, egf_lo, egf_hi, lam,
             "baseline": np.ones(K - 1) if K > 1 else np.array([]),
             "rating": rating, "k": kk}
 
-    # --- parameter layout: 2-param rating affine, then per-server blocks ---
+    # --- parameter layout: rating curve [α, log β, δ_1..δ_nseg], then per-server
+    #     blocks. δ init 0 ⇒ the fit STARTS exactly at today's α+β·S affine; the
+    #     shape penalty (lam_shape) pulls it back there wherever the EGF data is too
+    #     sparse to override. ---
     srv_layout = []   # (server, start, n)
-    x0 = list(x0_rating)
-    idx = 2
+    x0 = list(x0_rating) + [0.0] * nseg
+    idx = 2 + nseg
     for server, blk in server_blocks.items():
         n = len(blk["baseline"]) + 1
         srv_layout.append((server, idx, n))
@@ -193,7 +210,16 @@ def fit_joint_shared(decls, egf_lo, egf_hi, lam,
     x0 = np.asarray(x0, dtype=float)
 
     def unpack(params):
-        a = params[0] + np.exp(params[1]) * S            # rating thresholds
+        # Rating thresholds as α plus a running sum of STRICTLY POSITIVE gaps, so the
+        # curve is monotone by construction. Each gap is the shape's local slope β·dS
+        # times exp(δ), so δ=0 ⇒ a = α + β·S exactly (today's curve) and the EGF data
+        # can stretch/compress any segment (δ≠0) at the cost of the shape penalty.
+        beta = np.exp(params[1])
+        a = np.empty(len(S))
+        a[0] = params[0] + beta * S[0]
+        if nseg:
+            gaps = beta * dS * np.exp(params[2:2 + nseg])   # > 0 ⇒ strictly increasing
+            a[1:] = a[0] + np.cumsum(gaps)
         b, logs = {}, {}
         for server, st, n in srv_layout:
             b[server] = _unpack_thresholds(params[st:st + n],
@@ -208,6 +234,10 @@ def fit_joint_shared(decls, egf_lo, egf_hi, lam,
             x_int = interp_extrap_vec(blk["rating"], a, ys)
             nll += ordinal_nll_vec(b[server], x_int, blk["k"])
         pen = lam * sum(float(np.sum(lg ** 2)) for lg in logs.values())
+        # Shape prior: penalise each segment's slope for deviating from the cubic
+        # shape (δ=0). High lam_shape ⇒ rigid α+β·S; low ⇒ free monotone fit.
+        if nseg:
+            pen += lam_shape * float(np.sum(params[2:2 + nseg] ** 2))
         return nll + pen
 
     res = minimize(objective, x0, method="L-BFGS-B", options={"maxiter": 10000})
@@ -247,6 +277,15 @@ def main():
                          "at every seed — it lets the couplings down-rate online "
                          "dan inflation; see docs/rank_mapping_experiments.md). "
                          "Sparse servers still stay near a clean offset.")
+    ap.add_argument("--lambda-shape", type=float, default=3.0, dest="lam_shape",
+                    help="Prior strength pulling the rating→EGF curve's per-segment "
+                         "slopes toward the fixed cubic shape. HIGH ⇒ today's rigid "
+                         "2-param affine (under-fits the dan anchors); LOW ⇒ free "
+                         "monotone fit to the EGF declarations. Where the EGF data is "
+                         "dense the likelihood overrides the prior (kills the dan "
+                         "under-fit by interpolation); where it is sparse (the tails) "
+                         "nothing overrides it, so extrapolation stays on the shape. "
+                         "CV-selected — see docs/rank_mapping_experiments.md.")
     ap.add_argument("--egf-lo", type=int, default=-20,
                     help="Lowest EGF boundary (egf_lo+1 = weakest threshold).")
     ap.add_argument("--egf-hi", type=int, default=10, help="Highest EGF boundary.")
@@ -303,12 +342,12 @@ def main():
         decls.append((row["server"], user_rating[pref], float(g)))
     n_egf = sum(1 for srv, _, _ in decls if srv == "EGF")
     print(f"\nJoint fit over {len(decls)} declarations "
-          f"[{n_egf} EGF anchoring the scale; rating curve = '{RATING_SHAPE}' "
-          f"statistics.txt shape (2-param affine); server prior λ = {args.lam}, "
-          f"≥{args.min_server_samples} samples]")
+          f"[{n_egf} EGF anchoring the scale; rating curve = monotone fit with a "
+          f"'{RATING_SHAPE}' statistics.txt shape PRIOR (λ_shape = {args.lam_shape}); "
+          f"server prior λ = {args.lam}, ≥{args.min_server_samples} samples]")
 
     rating_knots, egf_thr_ranks, server_fits = fit_joint_shared(
-        decls, args.egf_lo, args.egf_hi, lam=args.lam,
+        decls, args.egf_lo, args.egf_hi, lam=args.lam, lam_shape=args.lam_shape,
         rank_padding=args.rank_padding, extend_to=args.extend_to,
         min_server_samples=args.min_server_samples)
 
