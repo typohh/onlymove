@@ -29,16 +29,14 @@ export const FLOOR_MAX = 0.78;
 // failure probability on a problem the user should clear with certainty (a
 // misclick / misread, most common when strong players are bored by trivial
 // problems). Fitted by pipeline.fit_population_constants as the plateau of the
-// observed failure rate as modeled-clear → 1 (~0.27%). Capping the success curve
-// at (1 − LAPSE) instead of 1 is what stops a single careless failure on a
+// observed failure rate as modeled-clear → 1. Capping the success curve at
+// (1 − LAPSE) instead of 1 is what stops a single careless failure on a
 // far-below-rank problem from yanking the rank/recall estimate: at the top the
 // likelihood's P(1−P) stays bounded by LAPSE·(1−LAPSE) while the gradient → 0,
-// so the slip carries almost no weight. Clamped so (1 − floor − LAPSE) > 0 for
-// any floor ≤ FLOOR_MAX. Falls back to the fitted-population default if the
-// constant is missing/garbage in the bundle.
-const _ff = POPULATION_CONSTANTS && POPULATION_CONSTANTS.fat_finger_rate;
-export const LAPSE = (typeof _ff === 'number' && _ff >= 0 && _ff < 1 - FLOOR_MAX)
-    ? _ff : 0.0026;
+// so the slip carries almost no weight. Read straight from the inlined
+// population constants (mandatory + build-time, like weakness.js's RIDGE_LAMBDA);
+// the fitter guarantees 0 ≤ LAPSE < 1 − FLOOR_MAX so (1 − floor − LAPSE) > 0.
+export const LAPSE = POPULATION_CONSTANTS.fat_finger_rate;
 
 // κ(c): the offset that keeps P(clear) = CALIBRATION_P at a zero rank gap for a
 // 4PL problem with guessing floor c and upper asymptote (1 − LAPSE). Re-anchored

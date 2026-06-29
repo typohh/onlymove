@@ -135,7 +135,7 @@ const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slo
 // difficulty slope ~5x too flat (reported logit/rank ~0.06 vs the ~0.28
 // everything else is calibrated to, and a retention z far flatter than the
 // rating-space z KAPPA was fit against in pipeline.fit_population_constants).
-const DIFFICULTY_NEUTRAL = ratingSpanPerNormalizedRank() ?? 5.4;
+const DIFFICULTY_NEUTRAL = ratingSpanPerNormalizedRank();
 
 // Inner logit (linear in params): excludes the per-problem κ(floor) offset and
 // the retention-only SUCCESS_SINCE_FAILURE / LN_C. Reads MODEL_INDICES at call
