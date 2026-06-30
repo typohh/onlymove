@@ -5,16 +5,30 @@
 // DOMContentLoaded handler (~130 lines in the boot path); collected here so the
 // entry point just calls runMigrations().
 //
-// NOTE: the board-size bucket migrations (boardSizeMigrated_v1,
-// sharedAcrossSizesMigrated_v2) deliberately stay in state.js — they must run
-// at import time, before any state property is read. These are the *later*
+// NOTE: the import-time localStorage-SHAPE migrations (boardSizeMigrated_v1,
+// sharedAcrossSizesMigrated_v2, …) live in boot-migrations.js, not here — they
+// must run before state.js reads any property, and this module (via backfill.js)
+// is too heavy to import from state.js without a cycle. These are the *later*
 // answerHistory-shape migrations, which run after state is live and operate
 // through state.answerHistory (the active size's view, already wrapped under
-// the size bucket by the state.js migrations) and updateAnswerHistory().
+// the size bucket by the boot migrations) and updateAnswerHistory().
+//
+// NOTE: one more migration lives OUTSIDE both migration files — migrateIdCursor()
+// (idCursorMigrated_v1) in account-sync.js. It's deliberately NOT here: it isn't a
+// localStorage transform but a one-time sync-CURSOR transition that reads/writes the
+// sync state and does a network frontier probe via account-sync's own private
+// helpers (readSyncState/writeSyncState/probeFrontier). Pulling it out would mean
+// exporting those internals + an account-sync↔migrations import cycle, to relocate
+// logic that belongs to the sync subsystem. It runs from startBackgroundSync(),
+// before the first pull. So the full migration set = boot-migrations.js (import-time
+// shape) + this file (answerHistory/model/tail/window-rank) + that one in
+// account-sync.js. Anyone auditing migrations should check all three.
 
-import { state, updateAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
+import { state, updateAnswerHistory, updateUserRank, updateServeRank, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
 import { getTail, replaceTail } from './history-store.js';
 import { fillSyncedTailFields } from './backfill.js';
+import { estimateWindowRank } from './rank-decomposition.js';
+import { TOTAL_RANKS } from './constants.js';
 
 // Backfill accumulatedReview: the total reviewTime spent on a problem across all
 // PRIOR attempts (strictly before this entry's date).
@@ -213,6 +227,32 @@ export function runMigrations() {
     migrateAnswerHistory();
     migrateModelArch3pl();
     migrateClearRatingsStampForTailRederive();
+}
+
+// One-time transition from the momentum loop to the window-MLE rank. Recompute the
+// DISPLAYED rank and the SERVE rank from the window estimator over the stored
+// history, silently (no overlay), so an existing user switches estimators between
+// problems and the first post-deploy answer's reported delta is that tsumego's
+// effect alone — not the one-off momentum→window jump. Also seeds serveRank (a new
+// field) so the very first served problem already reflects the UCB bonus. A fresh
+// device with no usable first-time history is a no-op (serveRank then falls back to
+// userRank until the first attempt).
+//
+// NOT folded into runMigrations(): that runs synchronously before initHistoryStorage,
+// whereas this reads the normalized merged history, so main.js calls it separately at
+// the matching boot point.
+export function maybeInitWindowRankOnce() {
+    if (localStorage.getItem('windowRankInit_v1')) return;
+    try {
+        const est = estimateWindowRank(getMergedAnswerHistory(), state.userRank * TOTAL_RANKS);
+        if (est) {
+            updateUserRank(est.rankIndex / TOTAL_RANKS);
+            updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+        }
+    } catch (e) {
+        console.warn('one-time window-rank init failed:', e);
+    }
+    localStorage.setItem('windowRankInit_v1', 'true');
 }
 
 // De-dup the cold tail by EXACT (problemId,date), keeping the richest copy (so the tail

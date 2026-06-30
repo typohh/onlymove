@@ -6,8 +6,8 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, updateUserRank, updateServeRank, getMergedAnswerHistory, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
-import { runMigrations, runTailMigration, dedupTailExact } from './migrations.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
+import { runMigrations, runTailMigration, dedupTailExact, maybeInitWindowRankOnce } from './migrations.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -77,7 +77,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems, resumeCurrentProblem } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './backfill.js';
-import { loadRatingRankMap, estimateWindowRank } from './rank-decomposition.js';
+import { loadRatingRankMap } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
@@ -85,7 +85,7 @@ import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButt
 import { hasPendingAccountSwitch, maybeFinishAccountSwitch, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { performShare } from './share.js';
-import { APP_MODES, TOTAL_RANKS } from './constants.js';
+import { APP_MODES } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -398,28 +398,6 @@ async function maybeFinishPendingAccountSwitch() {
     if (switchResult && switchResult.capExceeded) {
         alert(getTerm('accountHistoryCapped'));
     }
-}
-
-// One-time transition from the momentum loop to the window-MLE rank. Recompute the
-// DISPLAYED rank and the SERVE rank from the window estimator over the stored
-// history, silently (no overlay), so an existing user switches estimators between
-// problems and the first post-deploy answer's reported delta is that tsumego's
-// effect alone — not the one-off momentum→window jump. Also seeds serveRank (a new
-// field) so the very first served problem already reflects the UCB bonus. A fresh
-// device with no usable first-time history is a no-op (serveRank then falls back to
-// userRank until the first attempt).
-function maybeInitWindowRankOnce() {
-    if (localStorage.getItem('windowRankInit_v1')) return;
-    try {
-        const est = estimateWindowRank(getMergedAnswerHistory(), state.userRank * TOTAL_RANKS);
-        if (est) {
-            updateUserRank(est.rankIndex / TOTAL_RANKS);
-            updateServeRank(est.serveRankIndex / TOTAL_RANKS);
-        }
-    } catch (e) {
-        console.warn('one-time window-rank init failed:', e);
-    }
-    localStorage.setItem('windowRankInit_v1', 'true');
 }
 
 // Parse the URL's intent: a shared problem id, the recall-notification flag, and
