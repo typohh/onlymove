@@ -24,10 +24,10 @@ export async function runRecallNotifications(env) {
   const now = Date.now();
 
   // Due problems for users that have at least one push subscription. No join to
-  // push_subscriptions here: a user can now have several device rows, which
-  // would multiply each problem row — we read the problems once (per user) and
-  // fan out to that user's devices below. The IN-subquery scopes the
-  // recall_schedule read to subscribed users (matching the old JOIN's filter).
+  // push_subscriptions here: a user can have several device rows, which would
+  // multiply each problem row — we read the problems once (per user) and fan
+  // out to that user's devices below. The IN-subquery scopes the
+  // recall_schedule read to subscribed users.
   const due = await env.DB.prepare(
     `SELECT user_id, problem_id, enter_at, exit_at,
             enter_notified_at, exit_notified_at, updated_at
@@ -59,7 +59,7 @@ export async function runRecallNotifications(env) {
       byUser.set(row.user_id, u);
     }
     // Activity watermark from the schedule side: recall_schedule.updated_at
-    // still covers legacy replace-all clients. push_subscriptions.last_seen_at
+    // covers legacy replace-all clients. push_subscriptions.last_seen_at
     // (bumped on every /schedule call) is folded in per-device below.
     u.lastActiveAt = Math.max(u.lastActiveAt, row.updated_at || 0);
     if (row.enter_notified_at === null && row.enter_at <= now) {

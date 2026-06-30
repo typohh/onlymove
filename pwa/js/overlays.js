@@ -94,7 +94,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         alignItems: 'center', zIndex: '1000', opacity: '0'
     });
 
-    if (stats) { // This is the new "failed problem" overlay
+    if (stats) { // This is the "failed problem" overlay
         const content = createOverlayContent(stats, message, 'white');
         overlay.appendChild(content);
         document.body.appendChild(overlay);
@@ -346,11 +346,10 @@ export function modalRankGrid() {
     return grid;
 }
 
-// Shared centered container that STACKS toasts vertically. Toasts used to each
-// be position:fixed at top/left:50% — so any two alive at once (e.g. the
-// "preparing…" toast plus a result, or rapid retries) rendered on the exact
-// same spot and overlapped into garbled text. One flex column centers the group
-// and lays them out instead.
+// Shared centered container that STACKS toasts vertically: one flex column
+// centers the group and lays them out, so any two alive at once (e.g. the
+// "preparing…" toast plus a result, or rapid retries) don't render on the exact
+// same spot and overlap into garbled text.
 let toastContainer = null;
 function getToastContainer() {
     if (toastContainer && toastContainer.isConnected) return toastContainer;

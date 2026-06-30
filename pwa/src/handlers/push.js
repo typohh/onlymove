@@ -31,8 +31,8 @@ export async function handleUnsubscribe(request, env) {
   if (!isValidUserId(data?.userId)) return jsonResponse({ error: 'Invalid body' }, 400);
   // Multi-device: remove only THIS device's subscription (scoped to the account
   // so an endpoint can't be deleted out from under another user). A legacy
-  // client that doesn't send its endpoint falls back to the old clear-the-whole-
-  // account behavior.
+  // client that doesn't send its endpoint falls back to clearing the whole
+  // account.
   if (typeof data.endpoint === 'string' && data.endpoint) {
     await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?')
       .bind(data.endpoint, data.userId).run();

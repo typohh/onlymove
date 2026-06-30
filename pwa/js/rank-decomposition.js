@@ -11,9 +11,9 @@
 // there. Each attempt is mapped through ITS OWN size's M before pooling:
 //   - x = applyM(rawRating, sizeCurve)            (internal rank index)
 //   - slope = LOGIT_PER_RATING / |M'(rawRating)|  (logit per internal rank)
-// The per-attempt slope preserves the calibration that estimating in raw-rating
-// space used to give: the success curve has constant slope in rating space, so
-// in rank space the slope must vary with the local steepness of M. With it, a
+// The per-attempt slope preserves calibration: the success curve has constant
+// slope in rating space, so in rank space the slope must vary with the local
+// steepness of M. With it, a
 // 4d still reads as a 4d. Then:
 //
 //   1. Per attempt: x (internal rank) and its own slope, from its size's curve.
@@ -71,8 +71,8 @@ const KERNEL_TRUNC_SIGMA = 4;
 // by train_rating from the bot ladder) gives P(clear) = c + (1−c)·σ(slope·
 // (R−x)+κ(c)); κ(c) keeps P(clear)=80% at R==x for any c. Far below a problem
 // (R≪x) P→c, so a success there is weak evidence of skill — which correctly
-// discounts a strong user's lucky above-rank clears (the early over-credit
-// behind the Rank-tab dip). The 3PL constants + κ/floor helpers live in irt.js.
+// discounts a strong user's lucky above-rank clears. The 3PL constants + κ/floor
+// helpers live in irt.js.
 
 // Per attempt the success-curve slope is the problem's OWN 2PL discrimination
 // a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
@@ -113,11 +113,10 @@ const SIGMA_PRIOR_SESSIONS = 8;  // shrinkage prior strength, in effective sessi
 // ---------------------------------------------------------------------------
 // M: rating → rank map (pwa/tsumegos/rating_to_rank.json), per board size.
 // ---------------------------------------------------------------------------
-// M ships inside the bundle now (see the import above), so there is nothing to
-// fetch and nothing to fail: it is present the instant the module evaluates.
-// loadRatingRankMap is retained for the existing call site in main.js, which keeps
-// a null-guard against a malformed/empty packaged file (a build-time error, not a
-// runtime one).
+// M ships inside the bundle (see the import above), so there is nothing to fetch
+// and nothing to fail: it is present the instant the module evaluates.
+// loadRatingRankMap serves the call site in main.js, which keeps a null-guard
+// against a malformed/empty packaged file (a build-time error, not a runtime one).
 let _ratingRankMap = RATING_RANK_MAP;
 
 export function loadRatingRankMap() {
@@ -131,7 +130,7 @@ export function loadRatingRankMap() {
 // Returned RAW (not on any [0,1] range): weightedRandomSelect normalizes, so only
 // the relative a_p² matters — a sharp problem is quadratically preferred and a
 // flat one strongly down-weighted, by genuine information rather than a min-max
-// remap. (Replaces the old arbitrary [0,1] quality.)
+// remap.
 export function slopeToQuality(slope) {
     if (typeof slope !== 'number' || !Number.isFinite(slope) || slope <= 0) return 0;
     return slope * slope;
@@ -417,7 +416,7 @@ function flattenAttempts(answerHistory) {
                 return null;
             }
             // 3PL guessing floor (problemFloor, shipped per problem). Legacy entries
-            // without it fall back to 0 → the 2PL curve, unchanged behaviour.
+            // without it fall back to 0 → the plain 2PL curve.
             const flr = clampFloor(a.problemFloor);
             return { t: a.date, x, slope, correct: a.correct ? 1 : 0,
                      floor: flr, kappa: clearKappa(flr), src: a };
@@ -435,30 +434,23 @@ function flattenAttempts(answerHistory) {
 // = 1, the oldest in-window ≈ 0), where M = min(#attempts, WIN_CAP) — a plain
 // (M − age)/M ramp that always spans whatever recent history exists. The point is the
 // edge: the attempt aging out at the cap leaves at ~0 weight BY CONSTRUCTION, so a
-// per-attempt rank delta is never contaminated by an old problem dropping off — which
-// removes the correct→down / wrong→up display artifact the earlier info-ramp produced.
-// (That ramp only drove the edge weight to 0 once accumulated Fisher info reached
-// WIN_ITARGET, which in the served-at-rank LOW-information regime it never did, so the
-// departing sample left at ~0.93 weight and yanked the rank the opposite way of the
-// new answer.)
+// per-attempt rank delta is never contaminated by an old problem dropping off.
 //
-// Cost of going positional: the weight ignores how informative each attempt is, so the
-// effective sample size is ~3·M/4 (Σw = (M+1)/2, Σw² ≈ M/3) rather than the full M, and
-// it no longer auto-widens on flat low-discrimination problems. That
-// auto-widen was vacuous here anyway — served at the user's rank the per-attempt info
-// is so low the window ALWAYS bound on WIN_CAP, never on WIN_ITARGET — so the positional
-// ramp gives up nothing real while removing the boundary artifact. WIN_CAP bounds the
-// walk by SAMPLE COUNT only (no time cutoff: a long-idle return still uses its real
-// recent history). The lapse term in the 4PL (clearSpan/clearKappa) already discounts
-// below-level misclicks, so early random slips fade on their own.
+// The positional weight ignores how informative each attempt is, so the effective
+// sample size is ~3·M/4 (Σw = (M+1)/2, Σw² ≈ M/3). That gives up nothing real: served
+// at the user's rank the per-attempt info is so low the window always bounds on
+// WIN_CAP, not on accumulated information. WIN_CAP bounds the walk by SAMPLE COUNT
+// only (no time cutoff: a long-idle return still uses its real recent history). The
+// lapse term in the 4PL (clearSpan/clearKappa) already discounts below-level
+// misclicks, so early random slips fade on their own.
 const WIN_ITARGET = 16;                       // design steady-state info — sets the SE floor only
 const WIN_CAP = 500;                          // hard sample-count window + the ramp's denominator
 const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
 const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
 const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
 // Steady-state SE floor: under the design assumption that the window holds WIN_ITARGET
-// total info, the positional ramp's effective info Σw·(WIN_ITARGET/WIN_CAP) = WIN_ITARGET/2
-// — same as the old info-ramp's area — so this floor (and the UCB serve) carry over unchanged.
+// total info, the positional ramp's effective info Σw·(WIN_ITARGET/WIN_CAP) = WIN_ITARGET/2,
+// which sets this floor (and the UCB serve).
 const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 
 function windowMLE(attempts, refR) {
@@ -726,16 +718,11 @@ function decompose(attempts) {
 // daily-variance band — over the user's FULL first-time history.
 //
 // Far-from-rank attempts carry systematic bias (a strong user's lucky above-rank
-// clears over-credit skill; the guessing floor inflates far-below clears), but
-// the 4PL MLE in poolLogistic now absorbs that WITHIN the estimate rather than
-// needing a hard pre-filter: the per-problem guessing floor c discounts far-below
-// clears (P→c there, so a clear is weak evidence of skill) and the LAPSE upper
-// asymptote caps the score of a far-above slip (P(1−P)→LAPSE·(1−LAPSE) while the
-// gradient →0). An earlier seeded near-rank pre-filter (drop |slope·(S0−x)| > L)
-// was removed once the filtered and unfiltered curves were shown to agree to
-// within the measurement band across users — the floor+lapse handling makes it
-// redundant. (Reproduce the comparison with auxiliary/recreate_rank_graph.py
-// --both-filters.)
+// clears over-credit skill; the guessing floor inflates far-below clears), but the
+// 4PL MLE in poolLogistic absorbs that WITHIN the estimate, so no pre-filter is
+// needed: the per-problem guessing floor c discounts far-below clears (P→c there,
+// so a clear is weak evidence of skill) and the LAPSE upper asymptote caps the
+// score of a far-above slip (P(1−P)→LAPSE·(1−LAPSE) while the gradient →0).
 export function computeRankDecomposition(answerHistory) {
     // flattenAttempts maps each attempt through its own size's M, so a merged
     // 9x9+13x13 history pools on the internal-rank axis. Attempts whose size curve

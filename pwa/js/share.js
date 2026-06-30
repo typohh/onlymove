@@ -95,7 +95,7 @@ export function performShare() {
         // API entirely and show the URL for manual copy: no API call, no prompt.
         // (execCommand copy is gesture-gated too, so it sits behind the same check.)
         // navigator.clipboard is also undefined in an insecure context / older
-        // browsers (was JAVASCRIPT-2G), which the manual modal covers as well.
+        // browsers, which the manual modal covers as well.
         const active = !navigator.userActivation || navigator.userActivation.isActive;
         if (!active) { showShareUrlFallback(shareUrl); return Promise.resolve(); }
         if (navigator.clipboard && navigator.clipboard.writeText) {

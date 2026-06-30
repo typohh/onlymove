@@ -1,10 +1,10 @@
 // js/stats-ui.js
 //
 // The detailed-stats modal: all DOM/SVG rendering for the tabbed stats panel
-// (Summary / Weaknesses / Rank / Time / Community) and its charts. Split out of
-// model.js, which now holds only the numeric recall model + stats computation.
-// The dependency is one-directional: this module consumes the model's exported
-// helpers; model.js never reaches back into the UI.
+// (Summary / Weaknesses / Rank / Time / Community) and its charts. model.js
+// holds the numeric recall model + stats computation; the dependency is
+// one-directional: this module consumes the model's exported helpers; model.js
+// never reaches back into the UI.
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
@@ -124,10 +124,9 @@ export async function showDetailedStats() {
 
         const { results = [], varCovarMatrix } = state.statsResults || {};
         const finalParams = state.modelParams;
-        // The old single "overview" pane is now split across tabs: timing
-        // probabilities ride with the Time chart, the rank decomposition rides
-        // with the Rank chart, and only the review-queue counts stay on the
-        // (now last) summary pane.
+        // Timing probabilities ride with the Time chart, the rank decomposition
+        // rides with the Rank chart, and only the review-queue counts stay on
+        // the summary pane.
         let timingText = '';
         let resultText = '';
 
@@ -148,7 +147,7 @@ export async function showDetailedStats() {
         }
 
         // Block 2: Summary Text. The "freshly-failed problem comes back in ~X h"
-        // figure is now the retention window-open delay (NEG_LN_080·S·24) for a
+        // figure is the retention window-open delay (NEG_LN_080·S·24) for a
         // just-failed (r=0) repeat at the user's typical repeat difficulty.
         if (varCovarMatrix) {
             const repeatRanks = merged.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
@@ -199,8 +198,8 @@ export async function showDetailedStats() {
         // issue can carry an interactive `examples` toggle to past mistakes.
         const issuesElement = buildLikelyIssuesElement(merged);
 
-        // Activity pane: the problems-per-day chart (moved here off the Time
-        // chart's secondary axis) above the review-queue summary text.
+        // Activity pane: the problems-per-day chart above the review-queue
+        // summary text.
         const activityPane = combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
         // Community/server-wide stats (null if the endpoint isn't ready or the
@@ -212,7 +211,7 @@ export async function showDetailedStats() {
         // under the "constructing charts" overlay shown above — so the modal
         // opens fully-ready and every tab switch is instant. The overlay
         // explains the build delay, which is why no in-modal lazy-load / spinner
-        // / pre-warm is needed anymore. The timing probabilities and rank
+        // / pre-warm is needed. The timing probabilities and rank
         // decomposition text ride with their charts.
         // computeRankDecomposition is the heavy part of this pane; the chart and
         // the summary text both need it, so compute it ONCE here and pass it to
@@ -623,8 +622,8 @@ async function buildServerStatsPane(history = []) {
 // smoother lives in stats-compute.js. Both are imported above.
 
 // The rank decomposition text (long-term skill + drift + session swing) and
-// the relative 13x13 readout that used to sit on the summary pane. Built as
-// part of the Rank tab pane (computeRankDecomposition is heavy, but the whole
+// the relative 13x13 readout, built as part of the Rank tab pane
+// (computeRankDecomposition is heavy, but the whole
 // modal is constructed up front under the "constructing charts" overlay). Reads
 // state.statsResults (already computed by the time this runs).
 function buildRankSummaryText(history, decomp) {
@@ -640,7 +639,7 @@ function buildRankSummaryText(history, decomp) {
     if (decomp) {
         const { summary } = decomp;
         // The current rank line (raw onlymove rank or the selected server's
-        // time-adjusted rank) now lives below the CHART, where it reacts to the
+        // time-adjusted rank) lives below the CHART, where it reacts to the
         // server dropdown — see the readout in buildRatingHistoryChart. Here we
         // keep only the variance/size readouts the chart can't show.
         if (typeof summary.sigmaM === 'number') {
@@ -677,9 +676,9 @@ function buildRankSummaryText(history, decomp) {
     return rankText;
 }
 
-// A tab pane that pairs a chart with the explanatory text that used to live on
-// the summary page (timing probabilities for Time, the rank decomposition for
-// Rank). Either piece may be missing: returns null only when both are, so an
+// A tab pane that pairs a chart with its explanatory text (timing
+// probabilities for Time, the rank decomposition for Rank). Either piece may
+// be missing: returns null only when both are, so an
 // empty tab is dropped by showStatsModal.
 function combineChartWithText(chartElement, text) {
     const hasText = typeof text === 'string' && text.trim().length > 0;
@@ -873,8 +872,8 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     container.className = 'stats-chart';
 
     // Server selector — sits INSIDE the chart title ("[server ▾] rank since
-    // <date>"). "OnlyMove" shows the raw, untimed internal rank (the historical
-    // behaviour — no time adjustment). Every other option shows the rank as it
+    // <date>"). "OnlyMove" shows the raw, untimed internal rank (no time
+    // adjustment). Every other option shows the rank as it
     // would read ON THAT SERVER: the internal skill TIME-ADJUSTED for the user's
     // solving speed, then translated through that server's rank curve. Only
     // servers with a usable translation curve are offered. EGF is the identity
@@ -928,8 +927,8 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
     // Current-rank readout below the graph: the selected server's current rank
     // (raw for onlymove, time-adjusted + translated otherwise). Reacts to the
-    // dropdown — this replaced the old "stable / time adjusted rank" summary text.
-    // Same element/class as the decomposition text (stats-modal-pre) so it reads
+    // dropdown. Same element/class as the decomposition text (stats-modal-pre)
+    // so it reads
     // as just another line of that text, not a distinct callout.
     const readout = document.createElement('pre');
     readout.className = 'stats-modal-pre stats-rank-readout';
@@ -1111,8 +1110,7 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
 // Number of problems attempted per calendar day, as a bar chart. Each attempt
 // is binned into its local-midnight day; the bars span first→last active day,
-// so idle days simply show no bar. Lives on the Activity tab (it used to ride
-// the Time chart's secondary right axis as a smoothed rate). Returns null when
+// so idle days simply show no bar. Lives on the Activity tab. Returns null when
 // there's too little data to read as a daily trend.
 function buildProblemsPerDayChart(history = state.answerHistory) {
     const DAY_MS = 24 * 3600 * 1000;
@@ -1273,10 +1271,9 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // always spans t0..t1 across the same pixel width, so a kernel of bw=tSpan/N
     // covers a constant slice of the width at any span — the curve reads with the
     // same visual smoothness whether it's a month or three years of history. The
-    // old code capped bw at 14 days, which for a long-time user was a sliver of a
-    // multi-year axis and left the line jagged (the cap, not the data, was the
-    // problem). The 3-day floor keeps a short history from over-smoothing to a
-    // flat line; there is deliberately no upper cap.
+    // 3-day floor keeps a short history from over-smoothing to a flat line; there
+    // is deliberately no upper cap — an absolute-days cap would shrink to a sliver
+    // of a long-time user's multi-year axis and leave the line jagged.
     const G = 140, ESS_MIN = 1.5;
     const bw = Math.max(3 * DAY_MS, tSpan / 36);
     const smooth = (pts) => {
@@ -1290,7 +1287,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
             // Sum over EVERY sample in the window (no thinning): both the centre
             // line and the band are kernel-weighted quantiles of the same window.
             // Using the full window keeps them smooth functions of t — strided
-            // subsampling here was the earlier sawtooth bug.
+            // subsampling here would reintroduce a sawtooth.
             let W = 0, sumW2 = 0;
             const pairs = [];
             for (let i = i0; i < i1; i++) {
@@ -1339,7 +1336,7 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // extreme spell clips at the top edge (overflow:hidden). Use max(mean, hi)
     // per grid point, NOT hi alone: with a heavy right tail the weighted mean can
     // sit ABOVE the 82.5% band edge, so a hi-only ceiling would clip the mean
-    // line out of the window (the bug the spread band exposed).
+    // line out of the window.
     const hiVals = [];
     for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mid));
     hiVals.sort((a, b) => a - b);
@@ -1364,8 +1361,8 @@ function buildTimeUsageChart(history = state.answerHistory) {
     // Median band hugs the actual medians (small headroom so a fine tick lands
     // just above the highest one), capped at the ceiling. niceStep self-scales to
     // ~4 ticks, so a sub-minute band yields sub-minute ticks — DON'T inflate it to
-    // a full coarse step: that spread the dense ticks more than twice past the
-    // medians (e.g. 30s/1m/90s when every median was under a minute).
+    // a full coarse step: that would spread the dense ticks more than twice past
+    // the medians (e.g. 30s/1m/90s when every median is under a minute).
     medMax = medMax > 0 ? Math.min(medMax * 1.1, yHigh) : 0;
     const lowStep = niceStep(medMax, 4);
     const fmt = (s) => s === 0 ? '0' : (s % 60 === 0 ? `${s / 60}m` : `${Math.round(s)}s`);

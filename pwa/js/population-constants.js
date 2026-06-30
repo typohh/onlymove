@@ -41,7 +41,7 @@ export function loadPopulationConstants() {
 // single global log-time slope + center. It is PRODUCED by pipeline.map_rating_to_rank
 // (fit jointly with the rating→rank curve) and read through into the population
 // constants; the per-server couplings absorb the rank-correlated part of solve time on
-// their own, so there is no rank-residualization line (the old g0/g1 are gone). Shared
+// their own, so there is no rank-residualization line. Shared
 // by the Rank-tab chart/summary (stats-ui.js) and the rank-translation modal
 // (rank-translation.js) so the median feature is defined in exactly ONE place.
 

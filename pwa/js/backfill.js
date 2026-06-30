@@ -46,20 +46,18 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 // One stamp per axis (NOT per-size). The embedding fit, the rating fit, and the rank
 // curve are each a single shared/joint artifact — a re-ship of any re-derives BOTH
 // boards, so there is no per-board version. The gate + stamp live in
-// backfillMissingEmbeddings (once, around the per-size work loop). The old per-size
-// keys (`…_9`/`…_13`) are abandoned; the first load after this lands re-derives once,
-// which a real data ship triggers anyway.
+// backfillMissingEmbeddings (once, around the per-size work loop).
 const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
 const RATINGS_VERSION_KEY = 'ratingsVersion';
 const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 
-// Removed-problem prune. Problems get dropped from the corpus on regeneration
-// (e.g. a third of the Sep–Oct 2025 9x9 set is gone). Their answerHistory
-// entries keep the rating/rank stored at attempt time — the shard no longer
-// exists, so the rating-refresh walk above silently skips them — and that stale
-// early-era rating drags the rank chart down (the spurious early "dip"). lookup.txt
-// is the authoritative current-corpus manifest, so an id absent from it is gone
-// for good; we strip its model fields (the entry stays for activity/time/count).
+// Removed-problem prune. Problems get dropped from the corpus on regeneration.
+// Their answerHistory entries keep the rating/rank stored at attempt time — the
+// shard no longer exists, so the rating-refresh walk above silently skips them —
+// and that stale early-era rating drags the rank chart down (the spurious early
+// "dip"). lookup.txt is the authoritative current-corpus manifest, so an id absent
+// from it is gone for good; we strip its model fields (the entry stays for
+// activity/time/count).
 const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
 // Fields stripped from a removed-problem entry: everything the rank chart,
 // weakness model, and recall trainer key on. date/timeTaken/size/problemId/
@@ -77,9 +75,8 @@ const RATING_FIELDS = [
     'problemRating', 'problemRawRating', 'problemRank',
     'problemSlope', 'problemQuality', 'problemFloor',
 ];
-// Old per-version flag keys; cleared on first run after the upgrade so they
-// don't linger in users' localStorage. The new scheme stores a content-hash
-// version string under VERSION_KEY instead.
+// Legacy per-version flag keys, cleared on each embedding refit so they don't
+// linger in users' localStorage.
 const STALE_FLAG_KEYS = (size) => [
     `weaknessEmbeddingBackfill_v1_${size}`,
     `weaknessEmbeddingBackfill_v2_${size}`,
@@ -89,15 +86,15 @@ const STALE_FLAG_KEYS = (size) => [
 // Persist answerHistory edits WITHOUT clobbering attempts logged while the
 // backfill awaited its (potentially minutes-long) shard + sidecar walk.
 //
-// THE BUG THIS FIXES: backfillForSize / pruneRemovedProblems capture the live
-// answerHistory array up front (`const history = getAnswerHistoryForSize(size)`),
-// then await a long network walk. Every solve in that window runs updateUserStats
-// → updateAnswerHistory([...state.answerHistory, answer]), which REPLACES
+// backfillForSize / pruneRemovedProblems capture the live answerHistory array up
+// front (`const history = getAnswerHistoryForSize(size)`), then await a long
+// network walk. Every solve in that window runs updateUserStats →
+// updateAnswerHistory([...state.answerHistory, answer]), which REPLACES
 // perSize.answerHistory[size] with a fresh array. Writing the captured snapshot
-// back via setAnswerHistoryForSize(size, history) silently dropped all those
-// attempts, reverting the history to its session-start state — which made
-// getRecallCandidates re-serve already-solved recalls (the sub-18h repeat bug)
-// and the novel filter re-serve novel problems.
+// back via setAnswerHistoryForSize(size, history) would silently drop all those
+// attempts, reverting the history to its session-start state — which would make
+// getRecallCandidates re-serve already-solved recalls and the novel filter
+// re-serve novel problems.
 //
 // The backfill edits entries IN PLACE and updateUserStats shallow-spreads, so the
 // live array shares our edited entry objects AND additionally holds the new
@@ -268,10 +265,9 @@ async function buildShardLocator(size) {
 // history entries whose problems live in that zip — so shards can be fetched
 // and processed in parallel. The bound keeps the simultaneous-request count
 // predictable (per-cell sidecar Range fetches stay sequential WITHIN a shard,
-// so total in-flight requests ≤ this), which is what the old fully-sequential
-// loop was protecting: Cloudflare's free-plan limits are forgiving, not
-// unlimited. 4 shards in flight cuts the account-restore walk to roughly a
-// quarter while staying far from any limit.
+// so total in-flight requests ≤ this): Cloudflare's free-plan limits are
+// forgiving, not unlimited. 4 shards in flight keeps the account-restore walk
+// fast while staying far from any limit.
 const SHARD_WALK_CONCURRENCY = 4;
 
 async function mapWithConcurrency(items, limit, fn) {
@@ -497,8 +493,8 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
                         if (!item || typeof item.rating !== 'number') continue;
                         if (a.problemRating !== item.rating) totalRatingsUpdated++;
                         applyRatingFields(a, item, size);
-                        // problemRating now holds the raw value, so the legacy
-                        // separate problemRawRating field is redundant.
+                        // problemRating holds the raw value, so the separate
+                        // problemRawRating field is redundant.
                         if (a.problemRawRating !== undefined) delete a.problemRawRating;
                     }
                 }
@@ -564,7 +560,8 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         // fields STRIPPED — never leave a stale rating on a removed problem — so
         // flattenAttempts drops the now-rating-less attempt from the chart. One IDB
         // cursor pass. (The working-set copy wins in getMergedFullAnswerHistory, so an
-        // attempt present in both is unaffected here; this fixes the tail-ONLY attempts.)
+        // attempt present in both is unaffected here; this pass handles the tail-ONLY
+        // attempts.)
         if (tailNeedsRederive) {
             let tailRederived = 0, tailStripped = 0;
             await updateTail((entry) => {

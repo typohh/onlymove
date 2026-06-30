@@ -10,10 +10,10 @@ import { rowHash } from '../../shared/sync-digest.js';
 //
 // Pages by AUTOINCREMENT id (`id > sinceId ORDER BY id`): id is arrival order,
 // so a row inserted with a historical created_at (an offline flush, a backfill)
-// still gets a fresh high id and is pulled — the gap the old created_at cursor
-// left. Requires idx_tsumego_reports_user_id. Every response also carries a
-// per-profile digest summary (serverSeq/serverDigest/serverMaxId) for the
-// client's cheap in-sync check. See docs/account_sync_redesign.md.
+// still gets a fresh high id and is pulled. Requires idx_tsumego_reports_user_id.
+// Every response also carries a per-profile digest summary
+// (serverSeq/serverDigest/serverMaxId) for the client's cheap in-sync check.
+// See docs/account_sync_redesign.md.
 const SYNC_PAGE_LIMIT = 1000;
 // Server-enforced cap on full-history pulls (sinceId=0) per user per UTC day:
 // the stats eviction-recovery refresh, account adoption, and the outbox
@@ -33,11 +33,9 @@ export async function handleSync(request, env) {
       return new Response('Database not configured', { status: 500, headers: syncHeaders });
     }
 
-    // id cursor only. A request without a valid sinceId is a pre-redesign client
-    // (it used the retired created_at `since` cursor) — serve an empty no-op so
-    // it simply doesn't sync until it reloads onto the current bundle, rather
-    // than triggering a full-table scan. No data is lost (its /report writes are
-    // unaffected); it resyncs in full on reload.
+    // id cursor only. A request without a valid sinceId gets an empty no-op so it
+    // doesn't trigger a full-table scan, rather than syncing. No data is lost
+    // (its /report writes are unaffected); it resyncs in full on reload.
     if (!Number.isInteger(data.sinceId) || data.sinceId < 0) {
       return new Response(
         JSON.stringify({ reports: [], cursorId: 0, hasMore: false, serverSeq: null, serverDigest: 0, serverMaxId: 0 }),

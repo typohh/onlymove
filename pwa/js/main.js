@@ -23,7 +23,7 @@ try {
         release: APP_VERSION,
         // Drop third-party browser-extension noise we don't control and can't
         // fix — e.g. the Zalo extension injects a script that throws
-        // "zaloJSV2 is not defined" (was Sentry JAVASCRIPT-1Y).
+        // "zaloJSV2 is not defined".
         ignoreErrors: [/zaloJSV2/],
     });
     window.Sentry = Sentry; // Make Sentry globally available
@@ -341,7 +341,7 @@ function wireActionButtons() {
     });
 
     // Handle button4 click - Install (solving/linked). Ignore lives in the
-    // hamburger menu now; button4 has no analyzing-mode role.
+    // hamburger menu; button4 has no analyzing-mode role.
     document.getElementById('button4').addEventListener('click', (e) => {
         e.preventDefault();
         if (e.target.classList.contains('disabled')) return;

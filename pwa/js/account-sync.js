@@ -6,11 +6,15 @@
 // the token and rebuilding local history from the server's report log.
 //
 // Reports are append-only (nothing ever UPDATEs tsumego_reports), so change
-// detection needs no content hash — a created_at cursor is complete:
+// detection needs no content hash — the AUTOINCREMENT id cursor is complete:
+// id tracks insertion order, so it stays gap-free even for rows inserted with a
+// historical created_at (an offline flush, a backfill). A per-pull digest
+// (serverSeq/serverDigest = user_seq + Σ rowHash(id)) rides along as a backstop,
+// escalating to a full reconcile if a gap is ever found.
 //
-//   - The cursor only ever advances from /sync PULLS, never from this device's
-//     own report acks. Advancing on acks would let a concurrent foreign row
-//     with an earlier timestamp slip behind the cursor forever.
+//   - cursorId only ever advances from /sync PULLS, never from this device's own
+//     report acks. Advancing on acks would let a concurrent foreign row with a
+//     lower id slip behind the cursor forever.
 //   - The device's own rows are recognized on pull by exact serverCreatedAt
 //     match: /report echoes its server-stamped created_at and sendReport stamps
 //     it on the matching answerHistory entry (recordReportAck).
@@ -18,11 +22,11 @@
 //     claimed fuzzily: same (problemId, correct, isRepeat), no serverCreatedAt
 //     yet, nearest local date within ±10 min, greedy 1-1.
 //
-// On an EXISTING device the cursor initializes to "now" — its local state
-// already reflects its own history, and pulling the backlog would only churn
-// through the legacy fuzzy-dedup minefield. Only an explicit account switch
-// (switchAccount) starts from '', pulling the full server history into a
-// wiped localStorage.
+// On an EXISTING device cursorId initializes to the current frontier (the
+// migrateIdCursor() probe adopts serverMaxId — "now" in id space), since local
+// state already reflects its own history. Only an explicit account switch
+// (switchAccount) starts from id 0, pulling the full server history into a wiped
+// localStorage.
 //
 // Merged rows become skeleton entries (problemId/correct/date/timeTaken/
 // isRepeat + review accounting); the model fields (rating/rank/slope/floor/
@@ -373,9 +377,9 @@ export async function pullReports({ force = false, mode = 'feed', fromStart = fa
 
 // Local count of ACKED rows (working set + cold tail) and Σ rowHash(serverId)
 // over them. Compared against the server's user_seq / digest. The content sum
-// is valid only when every acked row carries a serverId (allHaveId) — during
-// the rollout, rows acked before the id field existed don't, so the check falls
-// back to count-only until a reconcile repopulates them.
+// is valid only when every acked row carries a serverId (allHaveId); if any
+// acked row lacks one, the check falls back to count-only until a reconcile
+// repopulates them.
 async function computeLocalDigest() {
     let ackedCount = 0, idSum = 0, allHaveId = true;
     for (const a of getMergedAnswerHistory()) {
@@ -754,7 +758,7 @@ export async function flushOutbox({ force = false } = {}) {
 // unbounded). It probes the current frontier (a limit:1 /sync — not billed
 // against the daily full-pull cap) and adopts it as cursorId ("cursor = now" in
 // id space); the steady-state digest check then reconciles any gap, including
-// the historical-below-cursor gap this redesign fixes. Idempotent + flag-gated.
+// the historical-below-cursor gap. Idempotent + flag-gated.
 // A fresh/empty account (frontier 0) or a failed probe leaves cursorId unset —
 // steady state falls back to a from-0 pull, which is correct and cheap there.
 const ID_CURSOR_MIGRATED_KEY = 'idCursorMigrated_v1';

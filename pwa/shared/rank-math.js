@@ -1,11 +1,9 @@
 // shared/rank-math.js
 //
 // Rank-mapping primitives shared by BOTH the Cloudflare Worker (src/index.js,
-// bundled by wrangler) and the client bundle (js/*, bundled by esbuild). These
-// used to be copy-pasted into each side — the Worker's copy literally carried a
-// "Mirrors interpExtrap in js/rank-translation.js" comment — which meant the
-// rank math could silently drift between server-computed community stats and
-// the client's rank display. One source of truth now.
+// bundled by wrangler) and the client bundle (js/*, bundled by esbuild). One
+// source of truth, so the rank math can't drift between server-computed community
+// stats and the client's rank display.
 //
 // Rank-scalar convention (matches rank_map.json / rank-translation.js): 1k = 0,
 // 1d = 1, with no zero gap. "5k" → -4, "3d" → 3.

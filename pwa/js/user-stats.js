@@ -213,8 +213,8 @@ export async function updateUserStats(isCorrect, {
     // Re-fit the linear-information window MLE over the merged first-time history
     // (the current attempt was appended above). oldRank·TOTAL_RANKS warm-starts the
     // fit AND is the R_before for the overlay delta below: because the sync path
-    // updates userRank SILENTLY when foreign attempts arrive (see account-sync
-    // .feedAttemptsThroughLoop), oldRank already reflects them, so the reported rank
+    // updates userRank SILENTLY when foreign attempts arrive (see account-sync's
+    // retrainAfterMerge), oldRank already reflects them, so the reported rank
     // change is the effect of THIS tsumego alone — never the synced batch.
     const est = estimateWindowRank(getMergedAnswerHistory(), oldRank * TOTAL_RANKS);
     if (est) {
@@ -224,8 +224,7 @@ export async function updateUserStats(isCorrect, {
     // The just-answered problem is moved into the previous slot, and the
     // challenge reselected if it was one, by completeCurrentProblem() in the
     // caller (game-logic) — recording the attempt and rotating the slots are
-    // kept separate. No `answered` flag is needed anymore: a reselected
-    // challenge is never the just-answered problem.
+    // kept separate.
     updateAllUI();
 
     const oldRankInfo = getRankInfo(oldRank);
@@ -266,7 +265,7 @@ export async function updateUserStats(isCorrect, {
     scheduleIdle(trainWeakness);
     // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
     // active user is suppressed by the cron anyway, so per-attempt replace-all
-    // writes were pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
+    // writes would be pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
     return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, recallImpact };

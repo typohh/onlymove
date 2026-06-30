@@ -116,7 +116,7 @@ export async function enableNotifications() {
 export async function disableNotifications() {
     const sub = await getCurrentSubscription();
     // Capture the endpoint before unsubscribe so the server removes only THIS
-    // device's row (subscriptions are per-device now), not the whole account.
+    // device's row (subscriptions are per-device), not the whole account.
     const endpoint = sub?.endpoint;
     if (sub) {
         try { await sub.unsubscribe(); } catch {}
@@ -144,10 +144,10 @@ const HOUR_MS = 3600 * 1000;
 // survives reloads. Rows are hour-rounded — the recall cron runs hourly, so
 // sub-hour drift from per-attempt model retrains is invisible to it. This is
 // what turns the upload into a DIFF: each upsert bills the row plus its two
-// partial indexes on D1, and replace-all uploads were the single biggest
-// write consumer (~27.5k rows/day), almost all of them rewriting unchanged
-// rows. The snapshot is only advanced after the server confirms the POST, so
-// a dropped request merely re-sends the same idempotent upserts next time.
+// partial indexes on D1, so a replace-all — which rewrites mostly-unchanged
+// rows — is the heaviest write path. The snapshot is only advanced after the
+// server confirms the POST, so a dropped request merely re-sends the same
+// idempotent upserts next time.
 const SCHEDULE_SNAPSHOT_KEY = 'recallScheduleSnapshot';
 
 function readScheduleSnapshot() {
@@ -174,12 +174,10 @@ function writeScheduleSnapshot(rows) {
 // maybeFinishAccountSwitch) before the first upload, so by the time we run the
 // history is complete and an empty recompute genuinely means "caught up." We
 // therefore ALWAYS upload, empty or not, and let latest win: a diff removes our
-// now-stale rows; a snapshot-less replace-all clears all and re-seeds. No
-// empty-skip — that older guard defeated the empty-diff watermark heartbeat for
-// caught-up users, was asymmetric with the removal path, and masked bugs by
-// making "empty because nothing's due" indistinguishable from "empty because the
-// inputs broke" (a buildRecallSchedule shape bug once froze the schedule
-// invisibly).
+// now-stale rows; a snapshot-less replace-all clears all and re-seeds. Do NOT add
+// an empty-skip: it defeats the empty-diff watermark heartbeat for caught-up
+// users, is asymmetric with the removal path, and masks bugs by making "empty
+// because nothing's due" indistinguishable from "empty because the inputs broke".
 export async function uploadSchedule({ force = false } = {}) {
     if (pendingUpload) return;
     pendingUpload = true;

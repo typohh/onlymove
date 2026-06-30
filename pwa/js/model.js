@@ -8,10 +8,6 @@ import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingSpanPerNormalizedRank } from './rank-decomposition.js';
 import { adamUpdate } from './optimizer.js';
 
-// ------------------------------------------------------------------------------------------------
-// --- Moved from problem-loader.js ---------------------------------------------------------------
-// ------------------------------------------------------------------------------------------------
-
 export function findFirst(sortedArr, target) {
     let low = 0;
     let high = sortedArr.length - 1;
@@ -122,16 +118,16 @@ const LN_S_TRAIN_MAX = 8;
 // the weight on the rank gap — no rank-unit conversion (M is near-linear by its
 // uniform-spacing prior), so the fitted PROBLEM_DIFFICULTY multiplier absorbs
 // the rank↔rating unit constant. Legacy rows without a_p/c_p fall back to
-// a_p = A_REF and c_p = 0, i.e. the previous 2PL behaviour.
+// a_p = A_REF and c_p = 0, i.e. plain 2PL behaviour.
 const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
 
 // Neutral value of the PROBLEM_DIFFICULTY multiplier — the coefficient at which
 // coeff·a_p·(rank gap in NORMALIZED 0..1 units) equals the 2PL's a_p·(gap in
 // raw-rating units): the rating span of the full rank scale (~5.4 from the
 // shipped curve). The L2 prior shrinks toward THIS, not 1.0: a_p is per rating
-// unit, so a target of 1.0 was unit-inconsistent by that same ~5.4 factor — and
+// unit, so a target of 1.0 would be unit-inconsistent by that same ~5.4 factor — and
 // since at lambda=10 the prior dominates the <1 nat of Fisher information even
-// a full 500-attempt history carries on this coefficient, it pinned the fitted
+// a full 500-attempt history carries on this coefficient, it would pin the fitted
 // difficulty slope ~5x too flat (reported logit/rank ~0.06 vs the ~0.28
 // everything else is calibrated to, and a retention z far flatter than the
 // rating-space z KAPPA was fit against in pipeline.fit_population_constants).
@@ -155,8 +151,8 @@ function solveProb(features, params, floor) {
     return c + clearSpan(c) * sigmoid(logitZ(features, params) + clearKappa(c));
 }
 
-// Cold-solve LOG-ODDS — what the retention head consumes as z. Still logit(P),
-// now computed through the 3PL, so the KAPPA·(z−Z0) stability calibration keeps
+// Cold-solve LOG-ODDS — what the retention head consumes as z. logit(P)
+// computed through the 3PL, so the KAPPA·(z−Z0) stability calibration keeps
 // its meaning (z = log-odds of a cold solve).
 function retentionLogit(features, params, floor) {
     const P = Math.max(1e-9, Math.min(1 - 1e-9, solveProb(features, params, floor)));
@@ -292,7 +288,7 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     const pc = Math.max(1e-15, Math.min(1 - 1e-15, P));
     let loss = -y * Math.log(pc) - (1 - y) * Math.log(1 - pc);
     // dLoss/dinner = (P−y)/(P(1−P)) · dP/dinner, dP/dinner = span·praw·(1−praw).
-    // Reduces to (P−y) when c=0 and LAPSE=0 (the old logistic head).
+    // Reduces to (P−y) when c=0 and LAPSE=0 (the plain logistic limit).
     const eL = (pc - y) / (pc * (1 - pc)) * span * praw * (1 - praw);
     grad[M.INTERCEPT] += eL * features[M.INTERCEPT];
     grad[M.TIME_SOLVING] += eL * features[M.TIME_SOLVING];
@@ -303,8 +299,8 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     // Retention head (repeat rows): fits LN_C only; z is stop-gradient. Skipped
     // when the elapsed gap is unknown (elapsedDays === null: the previous attempt
     // fell outside the history window) — without a true t the retention
-    // likelihood is meaningless; the old elapsedDays=0 fallback injected a
-    // constant ~34-nat loss on failed rows while contributing zero gradient.
+    // likelihood is meaningless (an elapsedDays=0 fallback would inject a
+    // constant ~34-nat loss on failed rows while contributing zero gradient).
     if (isRepeat && elapsedDays !== null) {
         const z = retentionLogit(features, params, c);
         const lnSRaw = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
@@ -414,10 +410,8 @@ export function getRecallCandidates(options = {}) {
 export function buildRecallSchedule(size) {
     // The recall model and rank are shared (single keys); only the answer
     // history is per-size — a recall reminder must point at a problem in `size`.
-    // answerHistory is now ONE unified cross-size array (working-set split), so
-    // slice it per-size via getAnswerHistoryForSize rather than indexing a
-    // {9,13} bucket object (which silently returned undefined and emptied every
-    // schedule, freezing the server's recall_schedule table).
+    // answerHistory is ONE unified cross-size array (working-set split), so
+    // slice it per-size via getAnswerHistoryForSize.
     const readSharedKey = (key) => {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
@@ -485,10 +479,6 @@ export function buildRecallSchedule(size) {
     return result;
 }
 
-// ------------------------------------------------------------------------------------------------
-// --- Moved from user-stats.js -------------------------------------------------------------------
-// ------------------------------------------------------------------------------------------------
-
 export const MODEL_INDICES = {
     INTERCEPT: 0,
     TIME_SOLVING: 1,
@@ -513,7 +503,7 @@ const L2_REGULARIZATION_TARGETS = {
     // converted from per-minute to this feature's per-percentile scale via that
     // run's time_per_percentile_min. The prior the coefficient shrinks toward MUST
     // equal the bias the confidence readout recenters by, else an uninformative
-    // user can't read 50% (it saturated to ~100% when these were fixed at -0.1).
+    // user can't read 50% (saturating to ~100% instead).
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
     // Multiplier on the per-problem a_p·(rank gap). Neutral ("the shipped
@@ -601,8 +591,8 @@ export function getLogitPerRank(statsResults) {
         return LOGIT_PER_RANK_PRIOR;
     }
     // Signed: a negative fitted slope is weak/contrary evidence and should pull
-    // the blend DOWN toward the floor, not flip into positive evidence (the old
-    // Math.abs did exactly that). The 0.05 floor below keeps the result usable.
+    // the blend DOWN toward the floor, not flip into positive evidence (a
+    // Math.abs would do exactly that). The 0.05 floor below keeps the result usable.
     const userSlope = pd.coeff;
     const userPrecision = 1 / (pd.se * pd.se);
     const blended = (priorPrecision * LOGIT_PER_RANK_PRIOR + userPrecision * userSlope)
@@ -687,7 +677,7 @@ const RECALL_REFINE_MAX_STEPS = 5;
 // push it LATER, a miss SOONER — and stops as soon as it does. Returns
 // { beforeHours, afterHours, extraSteps } (hours; nulls if the model isn't ready).
 // Shared by updateUserStats and the offline contradiction sim so both run the
-// identical path. maxExtraSteps = 0 reproduces the pre-experiment behaviour.
+// identical path. maxExtraSteps = 0 takes no extra steps (just the default retrain).
 export async function recallImpactWithRefine(isCorrect, maxExtraSteps = RECALL_REFINE_MAX_STEPS) {
     const repeatRanks = getMergedAnswerHistory()
         .filter(p => p.isRepeat && typeof p.problemRank === 'number')
@@ -738,9 +728,7 @@ export function prepareTrainingData(history, validHistory) {
     // (getRecallCandidates / buildRecallSchedule) — review totals
     // (accumulatedReview + reviewTime, positive only) over the last
     // RECALL_CANDIDATE_HISTORY_LENGTH entries — so the trained coefficient is
-    // applied at scheduling on the percentile scale it was fit on. (Was the
-    // repeats-only accumulatedReview of the 500-row training window: a smaller-
-    // valued distribution that shifted every percentile between train and serve.)
+    // applied at scheduling on the percentile scale it was fit on.
     const sortedReview = validHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH)
         .map(p => (p.accumulatedReview || 0) + (p.reviewTime || 0))
         .filter(t => t > 0)
@@ -806,7 +794,7 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
     // confound is shipped per-MINUTE; convert it to this run's per-percentile
     // scale (×time_per_percentile_min) so the coefficient is shrunk toward exactly
     // the offset the confidence readout later recenters by — an uninformative user
-    // then reads ~50%, not the saturated ~100% the fixed -0.1 target produced.
+    // then reads ~50%, not the ~100% a fixed -0.1 target would produce.
     const targets = { ...L2_REGULARIZATION_TARGETS };
     targets[MODEL_INDICES.TIME_SOLVING] = (TIME_BIAS_PER_MIN ?? 0) * (time_per_percentile_min || 0);
     targets[MODEL_INDICES.REVIEW_TIME] = (REVIEW_BIAS_PER_MIN ?? 0) * (time_per_percentile_min_r || 0);
@@ -904,10 +892,10 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         let coeff = finalParams[i], se = stdErrors[i], scaleFactor = 1;
         if (i === MODEL_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
         else if (i === MODEL_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
-        // PROBLEM_DIFFICULTY is now a multiplier on a_p·gap, so the effective
+        // PROBLEM_DIFFICULTY is a multiplier on a_p·gap, so the effective
         // logit-per-rank is coeff·a_p. Fold a representative a_p (A_REF) into the
-        // reported coeff so getLogitPerRank / the size-comparison readout keep
-        // the same "logit per rank index" scale as the pre-3PL model (was 1/29).
+        // reported coeff so getLogitPerRank / the size-comparison readout keep a
+        // consistent "logit per rank index" scale (the A_REF/29 factor below).
         else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = A_REF / 29;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }

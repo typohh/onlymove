@@ -174,8 +174,8 @@ export async function getMergedFullAnswerHistory() {
     for (const a of tail) {
         const k = `${a.problemId}|${a.date}`;
         if (seen.has(k)) continue;
-        seen.add(k);   // also de-dup WITHIN the tail — legacy outbox/sync re-inserts left
-                       // exact (problemId,date) dup rows that would otherwise double-plot
+        seen.add(k);   // also de-dup WITHIN the tail — it can hold exact (problemId,date)
+                       // dup rows that would otherwise double-plot
         merged.push(a.size != null ? { ...a } : { ...a, size: 9 });
     }
     for (const a of unifiedHistory) merged.push({ ...a });
@@ -189,9 +189,9 @@ export async function getMergedFullAnswerHistory() {
 export async function initHistoryStorage() {
     await evictColdTail();
     persistUnifiedHistory();
-    // Baseline the eviction high-water mark for devices whose tail predates this
-    // tracking (first boot under this code, or a tail that needed no eviction
-    // this boot): assume the tail is intact now and start watching from here.
+    // Baseline the eviction high-water mark when none has been recorded yet (no
+    // prior eviction, or a tail that needed no eviction this boot): assume the
+    // tail is intact now and start watching from here.
     if (localStorage.getItem(TAIL_EXPECTED_KEY) === null) {
         try { localStorage.setItem(TAIL_EXPECTED_KEY, String(await countTail())); } catch {}
     }
@@ -245,7 +245,7 @@ const shared = {
 
 // The 6 model/weakness shared values below share an identical accessor pair —
 // `get` returns the stored value or null, `set` assigns and persists. They're
-// defined on `state` via a loop after the object literal (see defineSharedNull)
+// defined on `state` via a loop after the object literal
 // to avoid six copies of the same template. userRank and serveRank differ (they
 // have non-null fallbacks), so they keep explicit accessors in the literal.
 const NULLABLE_SHARED_KEYS = [
@@ -600,9 +600,9 @@ export function setCurrentProblem(problem) {
     // Persist the on-screen problem so a same-session reload restores the SAME
     // problem at the SAME orientation instead of re-picking/re-orienting it.
     // Recall problems get a random orientation (the pattern can't be recognized),
-    // so a reload that silently re-randomized it visibly rotated the board and
-    // confused users. Linked/shared detours (and a cleared slot) are intentionally
-    // not resumable — clear the slot so a reload falls back to the normal flow.
+    // so without this a reload would re-randomize and visibly rotate the board.
+    // Linked/shared detours (and a cleared slot) are intentionally not resumable
+    // — clear the slot so a reload falls back to the normal flow.
     // Best-effort: sessionStorage can throw in private mode.
     try {
         if (problem && !problem.linked) {

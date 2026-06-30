@@ -5,7 +5,7 @@ import { SGF_COMMENTS } from './constants.js';
  * Tsumego id from its SGF filename: strips the trailing `.sgf` extension. The
  * id is the symmetry-canonical 8-hex hash the corpus, shards, and reports all
  * key on. Centralized so the ~15 `filename.replace('.sgf', '')` call sites
- * can't drift (some used the unanchored form). Null-tolerant: a falsy filename
+ * can't drift. Null-tolerant: a falsy filename
  * (e.g. an optional-chained `problem?.filename`) is returned unchanged.
  */
 export function tsumegoIdOf(filename) {
@@ -61,7 +61,7 @@ export function getWinrateFromComment(comment) {
  * correctness check robust to ordering instead of trusting children[0].
  *
  * Falls back to the first child only when NO sibling carries a parseable
- * winrate/score comment (preserving the legacy behavior for such nodes).
+ * winrate/score comment.
  * @param {Array} children - Array of SGF nodes (all the same side to move).
  * @returns {object|null} - The winning move node, or null if there are none.
  */
@@ -98,7 +98,7 @@ export function findBestMoveFromChildren(children) {
     if (best) {
         return best;
     }
-    // No sibling had a parseable evaluation: preserve the legacy first-child behavior.
+    // No sibling had a parseable evaluation: fall back to the first child.
     return (children[0].comment && children[0].comment.match(/%\//)) ? children[0] : null;
 }
 

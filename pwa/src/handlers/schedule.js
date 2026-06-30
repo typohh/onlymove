@@ -15,8 +15,8 @@ import { isValidUserId, isValidProblemId } from '../guards.js';
 // device row(s) (no-op for users without a subscription): the cron's
 // mid-session suppression is per-user (active on any device defers the whole
 // account), so bumping all of them by user_id is correct, and it reads this
-// watermark since with diff uploads recall_schedule.updated_at no longer
-// refreshes across the board on every upload.
+// watermark because a diff upload doesn't refresh recall_schedule.updated_at
+// across the board.
 const SCHEDULE_MAX_ROWS = 1000;
 
 export async function handleSchedule(request, env) {

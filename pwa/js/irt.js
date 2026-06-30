@@ -7,9 +7,8 @@
 //     P(clear) = floor + (1 − floor − LAPSE)·σ(slope·(rank gap) + κ(floor))
 //
 // anchored so P(clear) = CALIBRATION_P when the user's rank equals the
-// problem's. These constants and κ/floor/span helpers were duplicated
-// byte-for-byte across both files; centralized here so the calibration point,
-// floor convention and lapse have a single source of truth.
+// problem's. The calibration point, floor convention and lapse have a single
+// source of truth here, shared by both consumers.
 
 // Baked at build time. We read only the fat-finger (lapse) rate from it here;
 // population-constants.js is the validated loader for the rest.
@@ -39,9 +38,9 @@ export const FLOOR_MAX = 0.78;
 export const LAPSE = POPULATION_CONSTANTS.fat_finger_rate;
 
 // κ(c): the offset that keeps P(clear) = CALIBRATION_P at a zero rank gap for a
-// 4PL problem with guessing floor c and upper asymptote (1 − LAPSE). Re-anchored
-// for the lapse so the rating's 80%-clear definition still holds exactly; with
-// LAPSE = 0 it reduces to the old 3PL anchor.
+// 4PL problem with guessing floor c and upper asymptote (1 − LAPSE). The lapse
+// term is folded in so the rating's 80%-clear definition holds exactly; with
+// LAPSE = 0 it reduces to the 3PL anchor.
 export function clearKappa(c) {
     const cc = Math.max(typeof c === 'number' ? c : 0, 0);
     const q = Math.min(Math.max((CALIBRATION_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6);
@@ -50,8 +49,8 @@ export function clearKappa(c) {
 
 // The success-curve span (upper asymptote − floor) = (1 − floor − LAPSE). The
 // per-attempt clear probability is `floor + clearSpan(floor)·praw`, and the
-// gradient dP/dinner is `clearSpan(floor)·praw·(1−praw)`. Centralized so every
-// 3PL→4PL site stays consistent. Guarded ≥ 0.
+// gradient dP/dinner is `clearSpan(floor)·praw·(1−praw)`. Shared so every call
+// site computes the span identically. Guarded ≥ 0.
 export function clearSpan(c) {
     return Math.max(0, 1 - Math.max(typeof c === 'number' ? c : 0, 0) - LAPSE);
 }

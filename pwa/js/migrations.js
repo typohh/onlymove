@@ -1,28 +1,17 @@
 // js/migrations.js
 //
-// One-shot answerHistory migrations, run once per browser and guarded by a
-// localStorage flag each. These were previously inlined into main.js's
-// DOMContentLoaded handler (~130 lines in the boot path); collected here so the
-// entry point just calls runMigrations().
+// One-shot answerHistory migrations, each guarded by its own localStorage flag so it
+// runs at most once per browser. main.js calls runMigrations() at boot after state is
+// live, so these operate through state.answerHistory and updateAnswerHistory().
 //
-// NOTE: the import-time localStorage-SHAPE migrations (boardSizeMigrated_v1,
-// sharedAcrossSizesMigrated_v2, …) live in boot-migrations.js, not here — they
-// must run before state.js reads any property, and this module (via backfill.js)
-// is too heavy to import from state.js without a cycle. These are the *later*
-// answerHistory-shape migrations, which run after state is live and operate
-// through state.answerHistory (the active size's view, already wrapped under
-// the size bucket by the boot migrations) and updateAnswerHistory().
-//
-// NOTE: one more migration lives OUTSIDE both migration files — migrateIdCursor()
-// (idCursorMigrated_v1) in account-sync.js. It's deliberately NOT here: it isn't a
-// localStorage transform but a one-time sync-CURSOR transition that reads/writes the
-// sync state and does a network frontier probe via account-sync's own private
-// helpers (readSyncState/writeSyncState/probeFrontier). Pulling it out would mean
-// exporting those internals + an account-sync↔migrations import cycle, to relocate
-// logic that belongs to the sync subsystem. It runs from startBackgroundSync(),
-// before the first pull. So the full migration set = boot-migrations.js (import-time
-// shape) + this file (answerHistory/model/tail/window-rank) + that one in
-// account-sync.js. Anyone auditing migrations should check all three.
+// The full migration set spans three files; an audit should check all three:
+//   - boot-migrations.js — import-time localStorage-SHAPE migrations, which must run
+//     before state.js reads any property. They stay out of this file because it pulls
+//     in backfill.js's graph, which would cycle through state.js.
+//   - this file — answerHistory / model / tail / window-rank migrations.
+//   - account-sync.js — migrateIdCursor(), a sync-CURSOR transition that uses that
+//     module's private sync-state + frontier-probe helpers, so it lives with the sync
+//     subsystem and runs from startBackgroundSync() before the first pull.
 
 import { state, updateAnswerHistory, updateUserRank, updateServeRank, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
 import { getTail, replaceTail } from './history-store.js';
@@ -142,11 +131,9 @@ function migrateClearIgnoredFlag() {
     console.log('Answer history migration for clearing ignored flags complete.');
 }
 
-// The cold-solve model switched to a per-problem 3PL (model.js): PROBLEM_DIFFICULTY
-// went from a raw negative in-band rank slope to a positive multiplier on the
-// problem's a_p·(rank gap), and a κ(floor) anchor now carries the difficulty shape.
-// A warm start from the old persisted params would be wrong (different units/sign),
-// so drop modelParams/adamState once and let the model retrain clean.
+// Drop persisted recall-model params once: the cold-solve model is a per-problem 3PL
+// whose params are unit/sign-incompatible with any pre-3PL warm start, so the model
+// must retrain clean.
 function migrateModelArch3pl() {
     if (localStorage.getItem('modelArchMigrated_v1_3plFloor')) {
         return;
@@ -157,15 +144,10 @@ function migrateModelArch3pl() {
     console.log('Model arch migration: dropped pre-3PL model params for clean retrain.');
 }
 
-// The backfill's rating re-derive was working-set ONLY until the cold-tail re-derive
-// landed: the IndexedDB tail kept each attempt's rating frozen at eviction time, so
-// after a re-rate two devices' tails (evicted at different rating eras) diverged and
-// the Rank-tab chart disagreed device-to-device. The fix re-derives the tail too, gated
-// on the steady-state ratingsChanged check (backfill.js). But devices that already
-// stamped the current ratingsVersion via the OLD walk won't re-fire that gate, so clear
-// the stamp ONCE: the next backfill then sees ratingsChanged and re-derives everything
-// (the working set is a no-op, already current; the tail heals). Reuses the steady-state
-// primitive — no special re-derive path in the backfill itself.
+// Clear the ratingsVersion stamp once so the next backfill's ratingsChanged gate
+// re-derives the cold tail, whose per-attempt ratings are frozen at eviction time and
+// otherwise stay stale (diverging device-to-device on the Rank-tab chart). Reuses the
+// steady-state re-derive path; no special-case code in the backfill.
 function migrateClearRatingsStampForTailRederive() {
     if (localStorage.getItem('tailRederiveMigrated_v1')) return;
     localStorage.removeItem('ratingsVersion');
@@ -229,18 +211,13 @@ export function runMigrations() {
     migrateClearRatingsStampForTailRederive();
 }
 
-// One-time transition from the momentum loop to the window-MLE rank. Recompute the
-// DISPLAYED rank and the SERVE rank from the window estimator over the stored
-// history, silently (no overlay), so an existing user switches estimators between
-// problems and the first post-deploy answer's reported delta is that tsumego's
-// effect alone — not the one-off momentum→window jump. Also seeds serveRank (a new
-// field) so the very first served problem already reflects the UCB bonus. A fresh
-// device with no usable first-time history is a no-op (serveRank then falls back to
-// userRank until the first attempt).
+// One-time: recompute the DISPLAYED and SERVE rank from the window-MLE estimator over the
+// stored history, silently (no overlay), so the switch lands between problems and the next
+// answer's reported delta reflects that tsumego alone. Seeds serveRank for the first served
+// problem's UCB bonus. A device with no usable first-time history is a no-op.
 //
 // NOT folded into runMigrations(): that runs synchronously before initHistoryStorage,
-// whereas this reads the normalized merged history, so main.js calls it separately at
-// the matching boot point.
+// whereas this reads the normalized merged history, so main.js calls it separately.
 export function maybeInitWindowRankOnce() {
     if (localStorage.getItem('windowRankInit_v1')) return;
     try {
@@ -282,20 +259,12 @@ async function dedupTailByProblemDate() {
 const TAIL_MIGRATION_KEY = 'tailMigration_v1';
 
 /**
- * ONE-TIME cold-tail cleanup. Async and run separately from the synchronous
- * runMigrations() above (it needs the IndexedDB tail, which only exists after
- * initHistoryStorage). Repairs damage from the pre-tail-aware sync:
- *   - a second full pull used to re-insert already-evicted rows as
- *     (problemId,date) DUPLICATES (the merge deduped only against the working
- *     set), and
- *   - full-pull eviction left synced skeletons in the tail with NO rating, so
- *     they dropped off the full-history Rank chart.
- * Steady state now prevents both — mergeRowsForSize dedups against the tail, and
- * fillSyncedHistoryFields fills the tail on a full pull — so this only fixes
- * EXISTING tails, then never runs again. Migration code, deliberately specific.
+ * ONE-TIME cold-tail cleanup, async (needs the IndexedDB tail, which exists only after
+ * initHistoryStorage) so it runs separately from the synchronous runMigrations(). On an
+ * existing tail it removes (problemId,date) DUPLICATE rows and reconstructs ratings for
+ * synced skeletons that have none (which otherwise drop off the full-history Rank chart).
  *
- * Must run BEFORE the backfill's curve-recompute touches the tail (main.js
- * sequences them).
+ * Must run BEFORE the backfill's curve-recompute touches the tail (main.js sequences them).
  */
 export async function runTailMigration() {
     if (localStorage.getItem(TAIL_MIGRATION_KEY)) return;
@@ -341,12 +310,10 @@ export async function runTailMigration() {
 const TAIL_DEDUP_KEY = 'tailDedupExact_v1';
 
 /**
- * ONE-TIME: remove exact (problemId,date) duplicate rows the cold tail accumulated from
- * the April–May 2026 outbox/sync re-inserts — created AFTER runTailMigration's one-shot
- * dedup, so they slipped past it (~1.6k rows on a heavy device). getMergedFullAnswerHistory
- * now also de-dups the tail at READ time, so the chart no longer double-plots regardless;
- * this is the matching storage cleanup. Runs once, after runTailMigration and before the
- * backfill (main.js sequences them). Left unflagged on a tail-fetch failure so it retries.
+ * ONE-TIME: remove exact (problemId,date) duplicate rows from the cold tail (storage
+ * cleanup; getMergedFullAnswerHistory also de-dups the tail at READ time). Runs once,
+ * after runTailMigration and before the backfill (main.js sequences them). Left unflagged
+ * on a tail-fetch failure so it retries.
  */
 export async function dedupTailExact() {
     if (localStorage.getItem(TAIL_DEDUP_KEY)) return;

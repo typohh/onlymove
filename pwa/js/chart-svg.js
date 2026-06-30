@@ -2,9 +2,8 @@
 //
 // Shared SVG/DOM chart primitives for the detailed-stats charts (stats-ui.js).
 // The three chart builders all create raw SVG nodes, a legend strip, and a
-// y-tick overlap-hiding observer; these helpers replace the repeated
-// createElementNS boilerplate and the byte-identical legend / tick-visibility
-// blocks that used to live inline in each builder.
+// y-tick overlap-hiding observer; these helpers provide the shared
+// createElementNS, legend, and tick-visibility building blocks.
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Create an SVG element, applying `attrs` via setAttribute. */
