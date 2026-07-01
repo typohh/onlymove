@@ -14,6 +14,7 @@ const PRECACHE_URLS = [
     '/lib/wgo/stones/black_128.png',
     '/lib/wgo/stones/white_128.png',
     '/lib/wgo/wgo.min.js',
+    '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js',
     '/lib/math.min.js',
     '/manifest.json',
