@@ -1,5 +1,7 @@
 // js/analysis.js
 
+import * as Sentry from "@sentry/browser";
+
 import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove, setCandidateMoves } from './state.js';
 import { fetchAnalysis } from './api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';

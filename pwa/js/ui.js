@@ -22,13 +22,22 @@ import { syncMotifBubble } from './motif-bubble.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
+const KOMI = 6.5;
+// White's capture-adjusted score for the current position: komi plus the
+// capture differential. Shared by the header readout and the details alert.
+function computeCaptureScore() {
+    const captures = state.kifuReader.game.position.capCount;
+    return {
+        komi: KOMI,
+        blackCaptures: captures.black,
+        whiteCaptures: captures.white,
+        score: KOMI + captures.white - captures.black,
+    };
+}
+
 export function updateCapturesUI() {
     if (state.kifuReader) {
-        const captures = state.kifuReader.game.position.capCount;
-        const komi = 6.5;
-        const blackCaptures = captures.black;
-        const whiteCaptures = captures.white;
-        const score = komi + whiteCaptures - blackCaptures;
+        const { score } = computeCaptureScore();
         const formattedScore = formatScore(score);
         document.getElementById('capture-score').textContent = formattedScore;
         document.getElementById('capture-score-h').textContent = formattedScore;
@@ -358,11 +367,7 @@ import { displayOverlay, fadeOverlay, showModal, modalTitle } from './overlays.j
 // Function to show capture details when user clicks on capture score
 export function showCaptureDetails() {
     if (!state.kifuReader) return;
-    const captures = state.kifuReader.game.position.capCount;
-    const komi = 6.5;
-    const blackCaptures = captures.black;
-    const whiteCaptures = captures.white;
-    const score = komi + whiteCaptures - blackCaptures;
+    const { komi, blackCaptures, whiteCaptures, score } = computeCaptureScore();
 
     const detailText = `${getTerm('komi')}: ${komi}
 ` +

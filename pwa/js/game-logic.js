@@ -1,5 +1,7 @@
 // js/game-logic.js
 
+import * as Sentry from "@sentry/browser";
+
 import { state, setAcceptClicks, setAppMode } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './overlays.js';

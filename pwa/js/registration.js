@@ -17,6 +17,7 @@
 
 import { state, getMergedFullAnswerHistory } from './state.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, showToast } from './overlays.js';
+import { postJson } from './net.js';
 
 // Same 8-alphanumeric shape the Worker's TOKEN_RE enforces; a mismatch means the
 // URL didn't come from a real invite link, so we don't even hit /invite.
@@ -68,12 +69,8 @@ function showRegistrationConfirm({ token, egdName, count, dateStr }) {
                 close();
                 let result = null;
                 try {
-                    const res = await fetch('/register', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        // The userId (account credential) goes ONLY here — never in the UI.
-                        body: JSON.stringify({ token, userId: state.userId }),
-                    });
+                    // The userId (account credential) goes ONLY here — never in the UI.
+                    const res = await postJson('/register', { token, userId: state.userId });
                     result = await res.json();
                 } catch (_) {
                     result = null;

@@ -39,6 +39,7 @@ import {
     calculateResultsAndStdErrors,
     freshFailureReviewHours,
     recentFailureWindowHours,
+    averageRepeatRank,
     benefitConfidenceForVar,
     MODEL_INDICES,
 } from './model.js';
@@ -150,8 +151,7 @@ export async function showDetailedStats() {
         // figure is the retention window-open delay (NEG_LN_080·S·24) for a
         // just-failed (r=0) repeat at the user's typical repeat difficulty.
         if (varCovarMatrix) {
-            const repeatRanks = merged.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
-            const repRank = repeatRanks.length ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length : 0;
+            const repRank = averageRepeatRank(merged, 0);
             // Prefer scoring the user's actual recent failures through the model
             // as-if-just-failed-now (real per-problem difficulty/slope/floor +
             // each failure's review percentile, mirroring getRecallCandidates);

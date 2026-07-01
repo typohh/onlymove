@@ -1,5 +1,5 @@
 // js/state.js
-import { APP_MODES, ANSWER_HISTORY_WORKING_SET } from './constants.js';
+import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
 import { runBootMigrations } from './boot-migrations.js';
@@ -21,9 +21,9 @@ runBootMigrations();
 // Number of most-recent entries that should keep their `embedding` field.
 // Older entries get their embedding stripped on quota pressure (the entry
 // itself stays — preserving stats like novel-problem count and the recall
-// model's history). Aligned with MODEL_INPUT_HISTORY_LENGTH which is what
-// the trainers actually use.
-const ANSWER_HISTORY_EMBEDDING_KEEP_LAST = 500;
+// model's history). MODEL_INPUT_HISTORY_LENGTH is what the trainers actually
+// use, so the two can't drift.
+const ANSWER_HISTORY_EMBEDDING_KEEP_LAST = MODEL_INPUT_HISTORY_LENGTH;
 
 const perSize = {
     // The always-assigned challenge problem (full object incl. sgf), persisted

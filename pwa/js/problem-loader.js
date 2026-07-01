@@ -1,5 +1,7 @@
 // js/problem-loader.js
 
+import * as Sentry from "@sentry/browser";
+
 import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
@@ -103,10 +105,13 @@ function selectChallengeCandidate() {
 // at identity orientation 0 (the share-link contract / picked-embedding indexing
 // assume it); recalls are randomly reoriented so the visual pattern can't be
 // recognized. Throws on a missing/invalid SGF so callers can blacklist + retry.
-async function buildProblem(raw, { isRepeat, linked }) {
+async function buildProblem(raw, { isRepeat, linked, orientation }) {
     const sgfContent = raw.sgf || await fetchSgfFromZip(raw.filename, raw.zipFilename);
     if (!sgfContent || !sgfContent.trim()) throw new Error('Invalid or empty SGF');
-    const reoriented = reorientSgf(sgfContent, isRepeat ? null : 0);
+    // Deep links may pass an explicit orientation (the share-link ?o contract,
+    // where null = randomize); otherwise novel problems are served at identity
+    // and repeats randomized.
+    const reoriented = reorientSgf(sgfContent, orientation !== undefined ? orientation : (isRepeat ? null : 0));
     return {
         filename: raw.filename,
         sgf: reoriented.sgf,
@@ -538,38 +543,18 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
 
         await loadZipProblems(zipFilename);
 
-        const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`);
-        const problemRating = problem ? problem.rating : 0;
-        const problemRankValue = problem ? problem.rank : 0;
-        const problemQuality = problem ? problem.quality : 0;
-        const problemSlopeValue = problem ? problem.slope : undefined;
-        const problemEmbedding = problem ? problem.embedding : undefined;
-
-        let sgfContent = await fetchSgfFromZip(`${tsumegoId}.sgf`, zipFilename);
-
-        const reoriented = reorientSgf(sgfContent, orientation);
-        sgfContent = reoriented.sgf;
-        const actualOrientation = reoriented.orientation;
-
         // A deep-linked share is a `linked` problem (view-only, never recorded);
         // a notification recall is a normal recall. Either way this becomes the
         // on-screen currentProblem WITHOUT touching the standing challengeProblem
         // (which stays assigned and persisted, shown when the user exits this
-        // detour — see returnToChallenge / advanceToNextProblem).
-        const newProblem = {
-            filename: `${tsumegoId}.sgf`,
-            sgf: sgfContent,
-            linked: !asRecall,
-            rating: problemRating,
-            rank: problemRankValue,
-            quality: problemQuality,
-            slope: problemSlopeValue,
-            embedding: problemEmbedding,
-            isRepeat: asRecall,
-            orientation: actualOrientation,
-            // Retained so picked-embedding can locate the sidecar .embeddings.bin.
-            zipFilename: zipFilename
-        };
+        // detour — see returnToChallenge / advanceToNextProblem). The raw pool
+        // problem may be missing (defensive) — fall back to a bare descriptor so
+        // the SGF still loads, just without rating/embedding fields.
+        const problem = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`)
+            || { filename: `${tsumegoId}.sgf`, zipFilename, rating: 0, rank: 0, quality: 0 };
+        const newProblem = await buildProblem(problem, {
+            isRepeat: asRecall, linked: !asRecall, orientation,
+        });
 
         displayProblem(newProblem, asRecall ? APP_MODES.SOLVING : APP_MODES.LINKED);
 

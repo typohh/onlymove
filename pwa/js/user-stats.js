@@ -15,6 +15,7 @@ import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 // history; the estimator lives in rank-decomposition.js alongside the per-attempt
 // slope/floor conversion it shares with the skill chart.
 import { estimateWindowRank } from './rank-decomposition.js';
+import { postJson } from './net.js';
 
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     // Linked-mode problems are rank-frozen URL-shares: updateUserStats already
@@ -29,20 +30,16 @@ export async function sendReport({ success, move = null, timeUsed = null, review
         // Attach any GoR values fetched from EGD after a previous report advertised
         // stale PINs (leaderboard refresh; the Worker can't fetch EGD itself).
         const gorUpdates = takePendingGorUpdates();
-        const res = await fetch('/report', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                userId: state.userId,
-                problem: problemId,
-                success,
-                size: state.boardSize,
-                move,
-                timeUsed,
-                reviewTime,
-                isRepeat,
-                ...(gorUpdates ? { gorUpdates } : {}),
-            })
+        const res = await postJson('/report', {
+            userId: state.userId,
+            problem: problemId,
+            success,
+            size: state.boardSize,
+            move,
+            timeUsed,
+            reviewTime,
+            isRepeat,
+            ...(gorUpdates ? { gorUpdates } : {}),
         });
         const serverVersion = res.headers.get('X-App-Version');
         if (serverVersion && serverVersion !== APP_VERSION) {
@@ -75,16 +72,12 @@ export async function sendReport({ success, move = null, timeUsed = null, review
 // geo-IP country. Never blocks the UI; failures are swallowed.
 export async function recordShareEvent({ type, problemId = null, referrer = null } = {}) {
     try {
-        await fetch('/share-event', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type,
-                userId: state.userId,
-                problemId,
-                size: state.boardSize,
-                referrer,
-            }),
+        await postJson('/share-event', {
+            type,
+            userId: state.userId,
+            problemId,
+            size: state.boardSize,
+            referrer,
         });
     } catch (error) {
         console.error('Failed to record share event:', error);

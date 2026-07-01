@@ -12,6 +12,7 @@ import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES } from './constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
+import { postJson } from './net.js';
 
 // v2: the v1 key was committed-on-render, so users hit by the version-update
 // race got their cooldown burned without ever seeing the dialog. Bumping the
@@ -133,11 +134,8 @@ function showRankSurvey() {
                 // network submission is the user's choice to lose, not a reason
                 // to re-prompt every session until it goes through.
                 if (Object.keys(ranks).length > 0) {
-                    fetch('/rank-survey', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: state.userId, ranks }),
-                    }).catch(err => console.warn('Rank survey upload failed:', err));
+                    postJson('/rank-survey', { userId: state.userId, ranks })
+                        .catch(err => console.warn('Rank survey upload failed:', err));
                 }
                 closeWithCooldown();
             };

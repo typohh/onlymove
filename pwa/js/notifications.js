@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { buildRecallSchedule } from './model.js';
+import { postJson } from './net.js';
 
 const SUPPORTED_SIZES = [9, 13];
 
@@ -99,11 +100,7 @@ export async function enableNotifications() {
         });
     }
 
-    await fetch('/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: state.userId, subscription: subscriptionToJson(sub) }),
-    });
+    await postJson('/push/subscribe', { userId: state.userId, subscription: subscriptionToJson(sub) });
 
     // Push the current recall schedule right away so the cron has something
     // to fire on without waiting for the next attempt. Force past the
@@ -122,11 +119,7 @@ export async function disableNotifications() {
         try { await sub.unsubscribe(); } catch {}
     }
     try {
-        await fetch('/push/unsubscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: state.userId, endpoint }),
-        });
+        await postJson('/push/unsubscribe', { userId: state.userId, endpoint });
     } catch {}
 }
 
@@ -222,14 +215,9 @@ export async function uploadSchedule({ force = false } = {}) {
         const payload = prev
             ? { userId: state.userId, upserts, removals }
             : { userId: state.userId, schedule: upserts };
-        const res = await fetch('/schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            // Let the request outlive a page being hidden/torn down so the
-            // visibilitychange-time upload in main.js actually lands.
-            keepalive: true,
-        });
+        // keepalive lets the request outlive a page being hidden/torn down so
+        // the visibilitychange-time upload in main.js actually lands.
+        const res = await postJson('/schedule', payload, { keepalive: true });
         if (res && res.ok) {
             writeScheduleSnapshot(current);
             lastUploadAt = Date.now();

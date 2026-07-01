@@ -670,6 +670,15 @@ export async function calculateAndStoreStatsResults(trainOpts = {}) {
 // ~2x cost (the rest is a structural floor where the two heads genuinely disagree).
 const RECALL_REFINE_MAX_STEPS = 5;
 
+// Mean internal rank over the user's repeats — the "typical repeat difficulty"
+// a hypothetical fresh failure is scored at. Shared by the recall-impact
+// refinement below and the stats Activity text; falls back to `fallback` when
+// no ranked repeats exist yet.
+export function averageRepeatRank(history, fallback) {
+    const ranks = history.filter(p => p.isRepeat && typeof p.problemRank === 'number').map(p => p.problemRank);
+    return ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : fallback;
+}
+
 // Per-attempt recall impact for the result overlay, with an experimental refine
 // loop. After the DEFAULT retrain it takes ONE extra Adam step at a time (up to
 // maxExtraSteps), re-checking after each whether the GENERIC fresh-failure delay
@@ -679,12 +688,7 @@ const RECALL_REFINE_MAX_STEPS = 5;
 // Shared by updateUserStats and the offline contradiction sim so both run the
 // identical path. maxExtraSteps = 0 takes no extra steps (just the default retrain).
 export async function recallImpactWithRefine(isCorrect, maxExtraSteps = RECALL_REFINE_MAX_STEPS) {
-    const repeatRanks = getMergedAnswerHistory()
-        .filter(p => p.isRepeat && typeof p.problemRank === 'number')
-        .map(p => p.problemRank);
-    const genericProblemRank = repeatRanks.length
-        ? repeatRanks.reduce((a, b) => a + b, 0) / repeatRanks.length
-        : state.userRank;
+    const genericProblemRank = averageRepeatRank(getMergedAnswerHistory(), state.userRank);
     const opts = { problemRank: genericProblemRank, size: state.boardSize, userRank: state.userRank };
 
     const beforeHours = freshFailureReviewHours(state.modelParams, opts);

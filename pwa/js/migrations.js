@@ -13,7 +13,7 @@
 //     module's private sync-state + frontier-probe helpers, so it lives with the sync
 //     subsystem and runs from startBackgroundSync() before the first pull.
 
-import { state, updateAnswerHistory, updateUserRank, updateServeRank, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
+import { state, updateAnswerHistory, updateUserRank, updateServeRank, setModelParams, setAdamState, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
 import { getTail, replaceTail } from './history-store.js';
 import { fillSyncedTailFields } from './backfill.js';
 import { estimateWindowRank } from './rank-decomposition.js';
@@ -138,8 +138,8 @@ function migrateModelArch3pl() {
     if (localStorage.getItem('modelArchMigrated_v1_3plFloor')) {
         return;
     }
-    state.modelParams = null;
-    state.adamState = null;
+    setModelParams(null);
+    setAdamState(null);
     localStorage.setItem('modelArchMigrated_v1_3plFloor', 'true');
     console.log('Model arch migration: dropped pre-3PL model params for clean retrain.');
 }

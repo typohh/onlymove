@@ -48,6 +48,8 @@ import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields } from './backfill.js';
 import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
+import { readJSON, writeJSON } from './persist.js';
+import { postJson } from './net.js';
 import { updateAllUI } from './ui.js';
 
 const SYNC_STATE_KEY = 'accountSyncState';
@@ -68,17 +70,15 @@ const MIN_PULL_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_PAGES = 100;
 
 function readSyncState() {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(SYNC_STATE_KEY));
-        if (parsed && parsed.userId === state.userId && typeof parsed.cursor === 'string') {
-            return parsed;
-        }
-    } catch { /* fall through */ }
+    const parsed = readJSON(SYNC_STATE_KEY);
+    if (parsed && parsed.userId === state.userId && typeof parsed.cursor === 'string') {
+        return parsed;
+    }
     return null;
 }
 
 function writeSyncState(sync) {
-    localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(sync));
+    writeJSON(SYNC_STATE_KEY, sync);
 }
 
 export function isValidAccountCode(code) {
@@ -285,11 +285,7 @@ async function pullReports({ force = false, mode = 'feed', fromStart = false, ro
         let tailKnown = null;
         try { tailKnown = await getTailServerCreatedAtSet(); } catch (_) { tailKnown = null; }
         for (let page = 0; page < MAX_PAGES; page++) {
-            const res = await fetch('/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: sync.userId, sinceId }),
-            });
+            const res = await postJson('/sync', { userId: sync.userId, sinceId });
             if (!res.ok) break;
             const body = await res.json().catch(() => null);
             if (!body || !Array.isArray(body.reports)) break;
@@ -484,26 +480,34 @@ export function switchAccount(newId) {
     return true;
 }
 
-// Cheap existence probe before adopting an account code: an account "exists"
-// iff it has at least one report (reports are the only server-side state an
-// account is rebuilt from, so a code with none is indistinguishable from a
-// typo). limit:1 makes the probe read ~1 D1 row. Returns true/false, or null
-// when the check itself failed (offline, server error).
-export async function accountExists(userId) {
+// One /sync frontier probe ({sinceId:0, limit:1} — reads ~1 D1 row, not billed
+// against the daily full-pull cap). Returns { serverMaxId, hasReports } — with
+// serverMaxId null when the response predates the field — or null when the
+// request itself failed (offline, server error, malformed body). Shared by
+// accountExists and the id-cursor migration.
+async function probeFrontier(userId) {
     try {
-        const res = await fetch('/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, sinceId: 0, limit: 1 }),
-        });
+        const res = await postJson('/sync', { userId, sinceId: 0, limit: 1 });
         if (!res.ok) return null;
         const body = await res.json().catch(() => null);
         if (!body || !Array.isArray(body.reports)) return null;
-        // serverMaxId > 0 OR any returned row ⇒ the account has reports.
-        return (Number.isInteger(body.serverMaxId) && body.serverMaxId > 0) || body.reports.length > 0;
+        return {
+            serverMaxId: Number.isInteger(body.serverMaxId) ? body.serverMaxId : null,
+            // serverMaxId > 0 OR any returned row ⇒ the account has reports.
+            hasReports: (Number.isInteger(body.serverMaxId) && body.serverMaxId > 0) || body.reports.length > 0,
+        };
     } catch {
         return null;
     }
+}
+
+// Cheap existence probe before adopting an account code: an account "exists"
+// iff it has at least one report (reports are the only server-side state an
+// account is rebuilt from, so a code with none is indistinguishable from a
+// typo). Returns true/false, or null when the check itself failed.
+export async function accountExists(userId) {
+    const probe = await probeFrontier(userId);
+    return probe === null ? null : probe.hasReports;
 }
 
 export function hasPendingAccountSwitch() {
@@ -549,17 +553,15 @@ const HISTORY_REFRESH_LEFT_KEY = 'historyRefreshLeft';
 function cacheRefreshesLeft(left) {
     if (typeof left !== 'number') return;
     const day = new Date().toISOString().slice(0, 10);
-    localStorage.setItem(HISTORY_REFRESH_LEFT_KEY, JSON.stringify({ day, left }));
+    writeJSON(HISTORY_REFRESH_LEFT_KEY, { day, left });
 }
 
 // Display hint: the server-reported remaining count if we have one for today,
 // else assume the full cap (the server is the real gate either way).
 export function historyRefreshesLeftToday() {
-    try {
-        const c = JSON.parse(localStorage.getItem(HISTORY_REFRESH_LEFT_KEY) || 'null');
-        const today = new Date().toISOString().slice(0, 10);
-        if (c && c.day === today && typeof c.left === 'number') return Math.max(0, c.left);
-    } catch {}
+    const c = readJSON(HISTORY_REFRESH_LEFT_KEY);
+    const today = new Date().toISOString().slice(0, 10);
+    if (c && c.day === today && typeof c.left === 'number') return Math.max(0, c.left);
     return HISTORY_REFRESH_DAILY_CAP;
 }
 
@@ -717,11 +719,7 @@ export async function flushOutbox({ force = false } = {}) {
 
         for (let i = 0; i < rows.length; i += OUTBOX_BATCH) {
             const batch = rows.slice(i, i + OUTBOX_BATCH);
-            const res = await fetch('/report-backfill', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: state.userId, reports: batch.map(b => b.report) }),
-            });
+            const res = await postJson('/report-backfill', { userId: state.userId, reports: batch.map(b => b.report) });
             if (!res.ok) {
                 console.warn(`account-sync: outbox batch failed (${res.status}); will retry`);
                 return;
@@ -763,29 +761,15 @@ export async function flushOutbox({ force = false } = {}) {
 // steady state falls back to a from-0 pull, which is correct and cheap there.
 const ID_CURSOR_MIGRATED_KEY = 'idCursorMigrated_v1';
 
-async function probeFrontier(userId) {
-    try {
-        const res = await fetch('/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, sinceId: 0, limit: 1 }),
-        });
-        if (!res.ok) return null;
-        const body = await res.json().catch(() => null);
-        return (body && Number.isInteger(body.serverMaxId)) ? body.serverMaxId : null;
-    } catch {
-        return null;
-    }
-}
-
 async function migrateIdCursor() {
     if (localStorage.getItem(ID_CURSOR_MIGRATED_KEY)) return;
     const sync = readSyncState();
     if (sync && !Number.isInteger(sync.cursorId)) {
-        const frontier = await probeFrontier(sync.userId);
-        if (frontier === null) return;  // probe failed — retry next load (no flag)
-        if (frontier > 0) {
-            sync.cursorId = frontier;
+        const probe = await probeFrontier(sync.userId);
+        // Probe failed / fieldless response — retry next load (no flag).
+        if (probe === null || probe.serverMaxId === null) return;
+        if (probe.serverMaxId > 0) {
+            sync.cursorId = probe.serverMaxId;
             writeSyncState(sync);
         }
     }

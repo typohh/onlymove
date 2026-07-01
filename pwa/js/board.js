@@ -1,6 +1,10 @@
 // js/board.js
 
-import { state, setBoard, setKifuReader } from './state.js';
+import { state, setBoard, setKifuReader, setGhostMove } from './state.js';
+// NOTE: the next three imports are deliberate ESM cycles — game-logic.js,
+// analysis.js, and ui.js all import board primitives back from this module.
+// They work only because every imported name is called at runtime, never at
+// module-eval time; don't add top-level calls to any of them.
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
@@ -24,18 +28,18 @@ const handleBoardClick = (x, y) => {
             if (state.ghostMove) {
                 if (state.ghostMove.x === x && state.ghostMove.y === y) {
                     // confirm
-                    state.ghostMove = null;
+                    setGhostMove(null);
                     handleTsumegoClick(x, y);
                 } else {
                     // cancel
-                    state.ghostMove = null;
+                    setGhostMove(null);
                     redraw();
                 }
             } else {
                 // first click
                 const legalNode = getLegalMoveNode(x, y);
                 if (legalNode) {
-                    state.ghostMove = {x, y};
+                    setGhostMove({ x, y });
                 }
                 // Always redraw to ensure board state is correct, even if click was invalid
                 redraw();
@@ -141,7 +145,7 @@ export function loadSgf(sgfContent) {
     // A new board invalidates any pending mobile two-tap ghost stone from the
     // previous problem; otherwise it survives the load and redraw() paints it
     // (colored by the new game's turn) on top of whatever stone now sits there.
-    state.ghostMove = null;
+    setGhostMove(null);
 
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     const kifuReader = new WGo.KifuReader(kifu);
