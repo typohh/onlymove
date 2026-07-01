@@ -13,6 +13,7 @@
 // that could fail. main.js still null-guards against a malformed packaged file.
 
 import { applyRetentionConstants, setTimeBias } from './model.js';
+import { weightedMedianOverWindow } from '../shared/rank-window.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/population_constants.json).
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
@@ -45,24 +46,31 @@ export function loadPopulationConstants() {
 // by the Rank-tab chart/summary (stats-ui.js) and the rank-translation modal
 // (rank-translation.js) so the median feature is defined in exactly ONE place.
 
-// The feature definition MUST match user_median_log10_minutes in
-// fit_population_constants (non-repeat, >0, AFK-capped) — the alpha was fit
-// against that exact median, so every client consumer must reproduce it.
+// The median feature is a POSITIONAL-WEIGHTED median over the last-500 rank window
+// (no AFK cap), so the client and the EGD-leaderboard Worker compute an IDENTICAL
+// time-adjust from the same window (the Worker only holds a 500 buffer). The window
+// and weighting do NOT change what the median estimates — the user's central novel
+// solve time — only its variance (fewer effective samples) and recency, so the shipped
+// alpha/center (fit against median solve time) still apply as-is; no refit needed.
+// Dropping the upper/AFK cap likewise leaves the median value unchanged (a median is
+// robust to idle-tab outliers). TIME_ADJUST_AFK_CAP_MS is no longer read here (kept
+// for any legacy importer).
 export const TIME_ADJUST_AFK_CAP_MS = 180000;
 export const TIME_ADJUST_MIN_TIMED = 20;
 
-// Median solving time in minutes over novel timed attempts (AFK-capped); null
-// below TIME_ADJUST_MIN_TIMED usable attempts.
+// Median solving time in minutes: a positional-weighted median over the SAME last-500
+// novel window (and the same (M − age)/M weights) as the front-page rank fit — see
+// shared/rank-window.js. Filter + sort to match rank-decomposition.js flattenAttempts
+// (first-time only, date-ascending) so the weights line up; the shared helper drops
+// non-positive / non-finite times (no upper/AFK cap) and returns null below
+// TIME_ADJUST_MIN_TIMED valid times.
 export function medianNovelSolveMinutes(history) {
-    const ts = history
-        .filter(p => !p.isRepeat && Number.isFinite(p.timeTaken)
-            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS)
-        .map(p => p.timeTaken)
-        .sort((a, b) => a - b);
-    if (ts.length < TIME_ADJUST_MIN_TIMED) return null;
-    const mid = ts.length >> 1;
-    const med = ts.length % 2 ? ts[mid] : (ts[mid - 1] + ts[mid]) / 2;
-    return med / 60000;
+    const times = history
+        .filter(p => typeof p.date === 'number' && !p.isRepeat && !p.linked)
+        .sort((a, b) => a.date - b.date)
+        .map(p => p.timeTaken);
+    const medMs = weightedMedianOverWindow(times, TIME_ADJUST_MIN_TIMED);
+    return medMs === null ? null : medMs / 60000;
 }
 
 // The whole-history time-adjustment in RATING units:

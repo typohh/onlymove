@@ -53,6 +53,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
+import { estimateWindowRankFromFlat, applyM, flattenAttempt, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
 import { sigmoid } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -81,16 +82,10 @@ const KERNEL_TRUNC_SIGMA = 4;
 // a_p, so the rank loop stays closed. LOGIT_PER_RATING is only the FALLBACK slope
 // for legacy entries that predate `problemSlope`; set near the corpus-mean a_p
 // (~1.6) so an un-backfilled attempt isn't mis-scaled against the re-anchored M.
-const LOGIT_PER_RATING = 1.6;
-
-// Representative logit-per-internal-rank used when M's local slope is unusable
-// (degenerate curve segment, or a legacy entry with only problemRank stored).
-const LOGIT_PER_RANK_FALLBACK = 0.28;
-// Guard the converted per-attempt slope against pathological M' values. SLOPE_HI
-// is set above the realized a_p/|M'| range (~2.1) so genuinely sharp problems
-// aren't clipped; it mainly catches the tiny-|M'| (MSLOPE_FLOOR) pathology.
-const SLOPE_LO = 0.05, SLOPE_HI = 3.0;
-const MSLOPE_FLOOR = 1e-3;
+// The per-attempt slope constants (LOGIT_PER_RATING, LOGIT_PER_RANK_FALLBACK,
+// SLOPE_LO/HI, MSLOPE_FLOOR) + the applyM / slope-in-rank-space transform now live
+// in pwa/shared/rank-window.js so the Worker's buffer flatten matches this one;
+// applyM, flattenAttempt and LOGIT_PER_RANK_FALLBACK are imported above.
 
 // Working coordinate is the internal rank index (~0..29, with extrapolation
 // past either end for very weak/strong users).
@@ -142,13 +137,9 @@ function curveForSize(size) {
             && m.ratings.length >= 2) ? m : null;
 }
 
-// interpExtrap lives in shared/rank-math.js (one copy shared with the Worker).
-
-function applyM(rating, c) { return interpExtrap(rating, c.ratings, c.rank_indices); }
-function Mslope(rating, c) {
-    const h = 1e-3;
-    return (applyM(rating + h, c) - applyM(rating - h, c)) / (2 * h);
-}
+// interpExtrap lives in shared/rank-math.js; applyM + the per-attempt flatten
+// transform live in shared/rank-window.js (one copy shared with the Worker).
+// applyM is imported above.
 
 // Raw rating → normalized 0..1 rank for `size` (rank_index / TOTAL_RANKS, the
 // scale getDescriptiveRank and the recall/weakness models use). Returns null
@@ -380,11 +371,6 @@ function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
     return { R: a, se, effN, drift: b };
 }
 
-function clampSlope(s) {
-    if (!Number.isFinite(s) || s <= 0) return LOGIT_PER_RANK_FALLBACK;
-    return Math.min(SLOPE_HI, Math.max(SLOPE_LO, s));
-}
-
 // Flatten answerHistory to sorted [{t, x, slope, correct}] in INTERNAL-RANK
 // space. Each attempt is mapped through ITS OWN size's curve (merged entries
 // carry `size`; otherwise the active size is assumed): x is the internal rank
@@ -403,23 +389,18 @@ function flattenAttempts(answerHistory) {
             const raw = (typeof a.problemRawRating === 'number')
                 ? a.problemRawRating
                 : a.problemRating;
-            const aP = (typeof a.problemSlope === 'number' && a.problemSlope > 0)
-                ? a.problemSlope : LOGIT_PER_RATING;
-            let x, slope;
-            if (c && typeof raw === 'number') {
-                x = applyM(raw, c);
-                slope = clampSlope(aP / Math.max(Math.abs(Mslope(raw, c)), MSLOPE_FLOOR));
-            } else if (typeof a.problemRank === 'number') {
-                x = a.problemRank * TOTAL_RANKS;
-                slope = LOGIT_PER_RANK_FALLBACK;
-            } else {
-                return null;
+            // Main path: raw rating mapped through the size curve via the SHARED
+            // transform (identical to the Worker's buffer flatten).
+            const f = flattenAttempt(raw, a.problemSlope, a.problemFloor, a.correct, c);
+            if (f) return { ...f, t: a.date, src: a };
+            // Legacy fallback: no usable curve, but a stored normalized problemRank.
+            if (typeof a.problemRank === 'number') {
+                const flr = clampFloor(a.problemFloor);
+                return { t: a.date, x: a.problemRank * TOTAL_RANKS,
+                         slope: LOGIT_PER_RANK_FALLBACK, correct: a.correct ? 1 : 0,
+                         floor: flr, kappa: clearKappa(flr), src: a };
             }
-            // 3PL guessing floor (problemFloor, shipped per problem). Legacy entries
-            // without it fall back to 0 → the plain 2PL curve.
-            const flr = clampFloor(a.problemFloor);
-            return { t: a.date, x, slope, correct: a.correct ? 1 : 0,
-                     floor: flr, kappa: clearKappa(flr), src: a };
+            return null;
         })
         .filter(Boolean)
         .sort((a, b) => a.t - b.t);
@@ -443,75 +424,21 @@ function flattenAttempts(answerHistory) {
 // only (no time cutoff: a long-idle return still uses its real recent history). The
 // lapse term in the 4PL (clearSpan/clearKappa) already discounts below-level
 // misclicks, so early random slips fade on their own.
-const WIN_ITARGET = 16;                       // design steady-state info — sets the SE floor only
-const WIN_CAP = 500;                          // hard sample-count window + the ramp's denominator
-const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
-const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
-const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
-// Steady-state SE floor: under the design assumption that the window holds WIN_ITARGET
-// total info, the positional ramp's effective info Σw·(WIN_ITARGET/WIN_CAP) = WIN_ITARGET/2,
-// which sets this floor (and the UCB serve).
-const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
-
-function windowMLE(attempts, refR) {
-    // Build the positionally-weighted window walking back from the newest attempt; the
-    // weight is a linear ramp over POSITION across the AVAILABLE window — newest = 1, the
-    // oldest in-window = 1/M ≈ 0, where M = min(#attempts, WIN_CAP). The denominator is the
-    // available window (not a fixed WIN_CAP), so the ramp spans whatever history exists and
-    // the oldest sample always leaves at ~0 weight — even cold-start with few attempts —
-    // rather than sitting near-uniform until the history fills past WIN_CAP.
-    const M = Math.min(attempts.length, WIN_CAP);
-    const win = [];
-    for (let j = attempts.length - 1; j >= 0 && win.length < WIN_CAP; j--) {
-        const w = (M - win.length) / M;
-        win.push({ a: attempts[j], w });
-    }
-    // Weighted 4PL Newton for R, warm-started at refR with a weak prior N(refR, 1/info).
-    let R = refR, info = WIN_PRIOR_INFO;
-    for (let it = 0; it < 15; it++) {
-        let score = WIN_PRIOR_INFO * (refR - R);
-        info = WIN_PRIOR_INFO;
-        for (const { a, w } of win) {
-            const span = clearSpan(a.floor);
-            const praw = sigmoid(a.slope * (R - a.x) + a.kappa);
-            let p = a.floor + span * praw;
-            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-            const g = span * a.slope * praw * (1 - praw);
-            score += w * (a.correct - p) * g / (p * (1 - p));
-            info += w * g * g / (p * (1 - p));
-        }
-        if (info < 1e-9) break;
-        let step = score / info;
-        if (step > 2) step = 2; else if (step < -2) step = -2;
-        R += step;
-        if (R < X_CLAMP_LO) R = X_CLAMP_LO; else if (R > X_CLAMP_HI) R = X_CLAMP_HI;
-        if (Math.abs(step) < 1e-6) break;
-    }
-    return { R, se: info > 0 ? 1 / Math.sqrt(info) : Infinity };
-}
-
-// Public: internal-rank estimate from answerHistory (first-time attempts only,
-// pooled across sizes through each attempt's own M — pass getMergedAnswerHistory()).
-// prevRankIndex warm-starts the fit (the live displayed rank · TOTAL_RANKS); on a
-// cold device it falls back to the recent attempts' mean. Returns:
+// The window constants, the weighted 4PL Newton (windowMLE) and the positional
+// weighted-median now live in pwa/shared/rank-window.js so the Cloudflare Worker
+// (EGD leaderboard) runs BIT-IDENTICAL rank code. estimateWindowRank here just
+// flattens the client's answerHistory (size/curve-aware, first-time only, pooled
+// across sizes through each attempt's own M — pass getMergedAnswerHistory()) and
+// delegates. prevRankIndex warm-starts the fit (the live displayed rank · TOTAL_RANKS);
+// on a cold device the shared helper falls back to the recent attempts' mean. Returns:
 //   rankIndex      — the estimate to DISPLAY / score (internal-rank index)
 //   se             — its posterior standard error (rank units)
-//   serveRankIndex — rankIndex + the uncertainty-scaled UCB serve bonus, which is
-//                    large while the posterior is loose (cold start / streak) and
-//                    vanishes once it tightens; problem SELECTION uses this, display
-//                    uses rankIndex.
+//   serveRankIndex — rankIndex + the uncertainty-scaled UCB serve bonus (large while
+//                    the posterior is loose, vanishing as it tightens); problem
+//                    SELECTION uses this, display uses rankIndex.
 // null when no usable (first-time, curve-mapped) attempt exists.
 export function estimateWindowRank(answerHistory, prevRankIndex) {
-    const attempts = flattenAttempts(answerHistory);
-    if (!attempts.length) return null;
-    let ref = prevRankIndex;
-    if (!Number.isFinite(ref)) {
-        const tail = attempts.slice(-Math.min(attempts.length, 20));
-        ref = tail.reduce((s, a) => s + a.x, 0) / tail.length;
-    }
-    const { R, se } = windowMLE(attempts, ref);
-    const bonus = WIN_UCB_K * Math.max(0, se - WIN_SE_FLOOR);
-    return { rankIndex: R, se, serveRankIndex: R + bonus };
+    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex);
 }
 
 // Coarse, regularly-spaced evaluation of the wide (skill) kernel. Used only to
