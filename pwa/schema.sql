@@ -141,7 +141,6 @@ CREATE TABLE IF NOT EXISTS rank_surveys (
     rank TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_rank_surveys_user ON rank_surveys(user_id);
 
 -- One row per share-link event. event_type is 'create' (user generated a share
 -- link) or 'open' (someone arrived via a shared link). referrer is the client's
@@ -159,7 +158,6 @@ CREATE TABLE IF NOT EXISTS share_events (
     referrer TEXT,
     created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_share_events_problem ON share_events(problem_id);
 
 -- Cached server-wide stats, recomputed at most once per ~24h by the cron from
 -- the preceding 7 days of tsumego_reports. Single logical row

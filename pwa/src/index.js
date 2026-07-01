@@ -1,4 +1,4 @@
-import { CORS_HEADERS, tooManyRequests } from './http.js';
+import { CORS_HEADERS, jsonResponse, tooManyRequests } from './http.js';
 import { rateLimited } from './guards.js';
 import { handleReport } from './handlers/report.js';
 import { handleSync } from './handlers/sync.js';
@@ -36,6 +36,37 @@ const WRITE_ROUTES = [
   { path: '/admin/create-invite', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCreate },
 ];
 
+// GET routes, dispatched like WRITE_ROUTES (reads, so no limiter). Every entry
+// must sit here rather than in the SPA fallback below — the fallback swallows
+// any unmatched navigation into index.html.
+const GET_ROUTES = [
+  { path: '/push/vapid-public-key', handler: (request, env) => new Response(env.VAPID_PUBLIC_KEY || '', {
+      headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' },
+    }) },
+  { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
+  // Standalone EGD leaderboard page (HTML).
+  { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
+  // Invitation preview (JSON) for the /register confirmation dialog. (GET /register
+  // itself is a navigation and falls through to the SPA, which reads ?t= and POSTs.)
+  { path: '/invite', handler: (request, env) => handleInvitePreview(request, env) },
+  // Admin invite generator page (HTML). Inert without a valid account code,
+  // which the POST endpoints verify.
+  { path: '/admin/invite', handler: (request, env) => handleAdminPage(env) },
+];
+
+// Last-resort error boundary so a handler that throws (malformed JSON body, a
+// D1 hiccup, a missing binding) always yields a well-formed CORS JSON 500
+// instead of workerd's raw error page. Handlers still return their own
+// specific 4xx/5xx responses; this only catches what they didn't.
+async function dispatch(handler, request, env, ctx) {
+  try {
+    return await handler(request, env, ctx);
+  } catch (e) {
+    console.error(`${new URL(request.url).pathname} handler failed:`, e);
+    return jsonResponse({ error: 'Internal server error' }, 500);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -47,32 +78,16 @@ export default {
     for (const route of WRITE_ROUTES) {
       if (url.pathname === route.path && request.method === route.method) {
         if (await rateLimited(request, env, route.limiter)) return tooManyRequests();
-        return route.handler(request, env, ctx);
+        return dispatch(route.handler, request, env, ctx);
       }
     }
 
-    if (url.pathname === '/push/vapid-public-key' && request.method === 'GET') {
-      return new Response(env.VAPID_PUBLIC_KEY || '', {
-        headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' },
-      });
-    }
-    if (url.pathname === '/server-stats' && request.method === 'GET') {
-      return handleServerStats(env);
-    }
-    // Standalone EGD leaderboard page — MUST be before the SPA fallback (it returns
-    // HTML, so isNavigation would otherwise swallow it into index.html).
-    if (url.pathname === '/leaderboard' && request.method === 'GET') {
-      return handleLeaderboard(env);
-    }
-    // Invitation preview (JSON) for the /register confirmation dialog. (GET /register
-    // itself is a navigation and falls through to the SPA, which reads ?t= and POSTs.)
-    if (url.pathname === '/invite' && request.method === 'GET') {
-      return handleInvitePreview(request, env);
-    }
-    // Admin invite generator page (before the SPA fallback — it returns HTML). Inert
-    // without a valid account code, which the POST endpoints verify.
-    if (url.pathname === '/admin/invite' && request.method === 'GET') {
-      return handleAdminPage(env);
+    if (request.method === 'GET') {
+      for (const route of GET_ROUTES) {
+        if (url.pathname === route.path) {
+          return dispatch(route.handler, request, env, ctx);
+        }
+      }
     }
 
     // SPA fallback for navigations only. Static assets are served before

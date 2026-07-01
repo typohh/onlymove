@@ -10,6 +10,7 @@
 // and any header sorts. See docs/leaderboard_plan.md.
 
 import { readLeaderboardRows } from '../leaderboard.js';
+import { baseCss, ESC_SNIPPET } from './page-shell.js';
 
 export async function handleLeaderboard(env) {
     let rows = [];
@@ -66,11 +67,7 @@ function renderPage(rows) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>onlymove — Leaderboard</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 1.5rem 1rem 3rem;
-         max-width: 760px; margin-inline: auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 .3rem; }
-  p.sub { margin: 0 0 1rem; opacity: .6; font-size: .85rem; }
+  ${baseCss(760)}
   .toggles { display: flex; flex-wrap: wrap; gap: .5rem .75rem; margin-bottom: 1rem; }
   .toggle { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; overflow: hidden; }
   .toggle button { font: inherit; padding: .35rem .8rem; border: 0; background: transparent; color: currentColor;
@@ -80,7 +77,6 @@ function renderPage(rows) {
      currentColor fill, in dark AND light mode. No mix-blend-mode: difference — it
      resolved white-on-white on the white fill in dark mode. */
   .toggle button[aria-pressed="true"] span { color: Canvas; }
-  table { width: 100%; border-collapse: collapse; }
   th, td { padding: .5rem .5rem; text-align: right; white-space: nowrap; }
   td:nth-child(2) { text-align: left; width: 99%; }
   th.player { text-align: left; }
@@ -91,7 +87,6 @@ function renderPage(rows) {
   thead th[data-sort] { cursor: pointer; user-select: none; -webkit-user-select: none; }
   thead th[data-sort]:hover { opacity: .85; }
   thead th.sorted { opacity: .95; }
-  tbody tr:nth-child(even) { background: color-mix(in srgb, currentColor 5%, transparent); }
   td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
   td.gor { opacity: .7; font-variant-numeric: tabular-nums; }
@@ -143,8 +138,7 @@ function renderPage(rows) {
   var sortDir = -1;    // 1 ascending, -1 descending
   var tbody = document.getElementById('rows');
 
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  ${ESC_SNIPPET}
 
   // Numeric -> display string. Absolute = plain GoR; relative = signed GoR gap.
   function fmtCell(v) {

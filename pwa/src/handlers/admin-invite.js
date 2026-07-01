@@ -21,6 +21,7 @@
 
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
+import { baseCss, ESC_SNIPPET } from './page-shell.js';
 
 // The account code is the admin key. Compare against the configured admin id(s);
 // fail closed if the secret is unset so the page can't be an open invite faucet.
@@ -142,11 +143,7 @@ function renderAdminPage() {
 <meta name="robots" content="noindex">
 <title>onlymove — admin tools</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 1.5rem 1rem 3rem;
-         max-width: 720px; margin-inline: auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 .3rem; }
-  p.sub { margin: 0 0 1.25rem; opacity: .6; font-size: .85rem; }
+  ${baseCss(720)}
   #gate { margin: 2rem 0; font-size: .95rem; }
   #gate.err { color: #c0392b; }
   #tools { display: none; }
@@ -158,11 +155,9 @@ function renderAdminPage() {
   button:disabled { opacity: .5; cursor: default; }
   #msg { min-height: 1.4em; margin: .5rem 0 1rem; font-size: .9rem; opacity: .8; }
   #msg.err { color: #c0392b; opacity: 1; }
-  table { width: 100%; border-collapse: collapse; }
   th, td { padding: .45rem .4rem; text-align: right; white-space: nowrap; }
   th.l, td.l { text-align: left; width: 99%; overflow: hidden; text-overflow: ellipsis; max-width: 12rem; }
   th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .55; border-bottom: 1px solid; }
-  tbody tr:nth-child(even) { background: color-mix(in srgb, currentColor 5%, transparent); }
   td button { padding: .3rem .7rem; font-size: .85rem; }
   #out { display: none; margin-top: 1.5rem; padding: 1rem; border: 1px solid;
          border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); }
@@ -202,7 +197,7 @@ function renderAdminPage() {
     already_registered: 'That EGD player is already registered.',
     bad_pin: 'Invalid PIN.', bad_name: 'Missing name.', bad_gor: 'Missing GoR.'
   };
-  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  ${ESC_SNIPPET}
   function setMsg(t, err) { msg.textContent = t || ''; msg.className = err ? 'err' : ''; }
   function showGate(t) { gate.textContent = t; gate.className = 'err'; tools.style.display = 'none'; }
 
