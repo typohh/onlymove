@@ -261,8 +261,8 @@ async function buildShardLocator(size) {
     return { lookupMap, zipFilenameByHash };
 }
 
-// Shard-walk concurrency. Both walks below (the version-driven rating/
-// embedding refresh and the account-sync synced-entry fill) process one shard
+// Shard-walk concurrency. All the walks below (the version-driven rating/
+// embedding refresh and the account-sync synced-entry fills) process one shard
 // fully independently of the others — each zip's writes touch only the
 // history entries whose problems live in that zip — so shards can be fetched
 // and processed in parallel. The bound keeps the simultaneous-request count
@@ -283,10 +283,9 @@ async function mapWithConcurrency(items, limit, fn) {
 }
 
 // Fetch + open one shard zip and parse its metadata.json. Returns { zip, items }
-// or null on any fetch/parse miss, so a caller can skip the shard. Shared by all
-// three shard walks below (version-driven refresh, synced-entry fill, cold-tail
-// fill) — the per-shard processing differs, but the fetch+open+parse prologue is
-// identical.
+// or null on any fetch/parse miss, so the walk can skip the shard. Every shard
+// walk (version-driven refresh, synced-entry fill, cold-tail fill) goes through
+// walkShards below, which owns this fetch+open+parse prologue.
 async function loadShard(size, zipFilename) {
     const resp = await fetch(`tsumegos/${size}/${zipFilename}`);
     if (!resp.ok) return null;
@@ -309,6 +308,74 @@ function groupIdsByZip(lookupMap, ids) {
         zipToIds.get(zipHash).push(id);
     }
     return zipToIds;
+}
+
+// Shared shard-walk prologue for the three walks in this file (version-driven
+// embedding refresh, synced-entry fill, cold-tail fill): build the locator,
+// group the wanted problem ids by shard zip, then fetch + open each shard
+// (SHARD_WALK_CONCURRENCY-wide) and hand `{ zip, items, zipFilename, shardIds }`
+// to `perShard`. A per-shard failure goes to `onShardError` (each walk logs
+// under its own tag) and never aborts the walk. Returns false ONLY when the
+// shard locator couldn't be built (offline / fetch failure) — no shard was
+// touched — so a caller can distinguish "walked" from "retry later".
+async function walkShards(size, ids, perShard, onShardError) {
+    const locator = await buildShardLocator(size);
+    if (!locator) return false;
+    const { lookupMap, zipFilenameByHash } = locator;
+    const zipToIds = groupIdsByZip(lookupMap, ids);
+    await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, shardIds]) => {
+        const zipFilename = zipFilenameByHash.get(zipHash);
+        if (!zipFilename) return;
+        try {
+            const shard = await loadShard(size, zipFilename);
+            if (!shard) return;
+            await perShard({ zip: shard.zip, items: shard.items, zipFilename, shardIds });
+        } catch (err) {
+            onShardError(zipFilename, err);
+        }
+    });
+    return true;
+}
+
+// Parse a shard's embeddings_index.json (the per-cell sidecar index), if the
+// shard ships one — older builds don't. Returns the payload or null (missing
+// file / parse failure); `onParseError` lets each walk decide whether a parse
+// failure warrants a console line.
+async function parseEmbeddingsIndex(zip, onParseError) {
+    const idxFile = zip.file('embeddings_index.json');
+    if (!idxFile) return null;
+    try {
+        return JSON.parse(await idxFile.async('text'));
+    } catch (e) {
+        if (onParseError) onParseError(e);
+        return null;
+    }
+}
+
+// Fill one entry's `pickedEmbedding` from the shard's per-cell sidecar, when
+// it's an eligible wrong attempt (known pickedCellIndex, not yet filled, and
+// the shard's index knows the problem). Range-fetches one cell. Returns true
+// iff it filled — shared by the version-driven walk and the synced-entry fill,
+// which count fills differently but fill identically.
+async function fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size }) {
+    if (a.correct !== false) return false;
+    if (typeof a.pickedCellIndex !== 'number') return false;
+    if (a.pickedEmbedding) return false;
+    if (!indexPayload || !indexPayload.problems) return false;
+    const indexEntry = indexPayload.problems[a.problemId];
+    if (!indexEntry) return false;
+    const emb = await fetchPickedEmbeddingWithIndexEntry({
+        tsumegoId: a.problemId,
+        cellIndex: a.pickedCellIndex,
+        zipFilename,
+        boardSize: size,
+        indexEntry,
+    });
+    if (Array.isArray(emb)) {
+        a.pickedEmbedding = quantizeEmbedding(emb);
+        return true;
+    }
+    return false;
 }
 
 // Load + decode the single problem_params.bin asset into
@@ -350,28 +417,15 @@ async function loadProblemParams() {
 // touches the version stamps — the caller stamps the single versions once, after every
 // size has returned and persisted, so a shutdown mid-loop leaves nothing stamped and
 // the whole backfill re-runs idempotently.
+//
+// Orchestrates the per-size steps in a fixed order; each step lives in its own
+// helper directly below, in execution order.
 async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveChanged, serverEmbeddingVersion }) {
     try {
         const history = getAnswerHistoryForSize(size);
 
-        // Embedding wipe — only when embedding_version changed. Rating-only
-        // refreshes keep the trained model intact.
         if (embeddingsChanged) {
-            let cleared = 0;
-            for (const a of history) {
-                if (a.embedding) {
-                    delete a.embedding;
-                    cleared++;
-                }
-            }
-            if (cleared > 0) {
-                // Wipe the single shared weakness model — it was trained on this
-                // size's now-stale embeddings (jointly with the other size's).
-                clearWeaknessModel();
-                persistAnswerHistory(size, history);
-                console.log(`backfill[${size}]: cleared ${cleared} stale embeddings (-> ${serverEmbeddingVersion})`);
-            }
-            for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
+            wipeStaleEmbeddings(size, history, serverEmbeddingVersion);
         }
 
         if (!history || history.length === 0) {
@@ -379,45 +433,12 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         }
 
         // Curve-only refit: ranks shift but raw ratings don't, so no shard
-        // fetch is needed — recompute problemRank straight from the stored raw
-        // problemRating. When ratings also changed, the shard walk below
-        // refreshes both, so skip this to avoid a double pass.
+        // fetch is needed. When ratings also changed, the ratings rewrite below
+        // refreshes both, so skip these to avoid a double pass.
         let curveRankUpdated = 0;
         if (curveChanged && !ratingsChanged) {
-            for (const a of history) {
-                if (typeof a.problemRating !== 'number') continue;
-                const newRank = normalizedRankForSize(a.problemRating, size);
-                if (newRank !== null && a.problemRank !== newRank) {
-                    a.problemRank = newRank;
-                    curveRankUpdated++;
-                }
-            }
-            if (curveRankUpdated > 0) {
-                persistAnswerHistory(size, history);
-                console.log(`backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
-            }
-        }
-
-        // Curve-only tail remap: when ONLY the curve changed (ratings didn't),
-        // recompute the cold tail's problemRank straight from its stored raw rating —
-        // no shard fetch needed. When ratings ALSO changed, the shard-backed tail
-        // re-derive below rewrites rank from the fresh rating, so skip this.
-        if (curveChanged && !ratingsChanged) {
-            let tailUpdated = 0;
-            await updateTail((entry) => {
-                if (!entry || entry.size !== size) return null;
-                if (typeof entry.problemRating !== 'number') return null;
-                const newRank = normalizedRankForSize(entry.problemRating, size);
-                if (newRank !== null && entry.problemRank !== newRank) {
-                    entry.problemRank = newRank;
-                    tailUpdated++;
-                    return entry;
-                }
-                return null;
-            });
-            if (tailUpdated > 0) {
-                console.log(`backfill[${size}]: recomputed problemRank for ${tailUpdated} cold-tail entries (curve change)`);
-            }
+            curveRankUpdated = remapCurveOnlyWorkingSet(size, history);
+            await remapCurveOnlyTail(size);
         }
 
         // Ratings refresh reads the single problem_params.bin asset (rating/slope/
@@ -431,153 +452,25 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             if (!problemParams) return curveRankUpdated;
         }
 
-        // Working-set ratings rewrite: one pass over the FULL history (no keep-window
-        // cap — the chart needs old entries updated), reading the current value from
-        // problem_params. Present problems get the CURRENT rating (+ derived rank,
-        // slope/quality, floor via the shared applyRatingFields); a problem that left
-        // the corpus keeps its stale value for pruneRemovedProblems to strip. Edited
-        // in place; persisted below alongside any embedding fills.
-        let totalRatingsUpdated = 0;
-        if (ratingsChanged) {
-            for (let i = 0; i < history.length; i++) {
-                const a = history[i];
-                if (!a.problemId) continue;
-                const item = problemParams.get(a.problemId);
-                if (!item || typeof item.rating !== 'number') continue;
-                if (a.problemRating !== item.rating) totalRatingsUpdated++;
-                applyRatingFields(a, item, size);
-                // problemRating holds the raw value, so the separate
-                // problemRawRating field is redundant.
-                if (a.problemRawRating !== undefined) delete a.problemRawRating;
-            }
-        }
+        const totalRatingsUpdated = ratingsChanged
+            ? rewriteWorkingSetRatings(size, history, problemParams)
+            : 0;
 
         // Does the cold tail carry this size's rows to re-derive? (ratings change
-        // only). Its ratings are frozen at eviction time, so after a re-rate the old
-        // attempts carry stale (and device-dependent — each device evicted at a
-        // different rating era) ratings, and the Rank-tab chart plots them. The tail
-        // rows are rewritten from problem_params after the embedding walk below.
-        let tailNeedsRederive = false;
-        if (ratingsChanged) {
-            const tail = await getTail();
-            for (const e of tail) {
-                if (e && e.size === size && typeof e.problemId === 'string') {
-                    tailNeedsRederive = true;
-                    break;
-                }
-            }
-        }
+        // only). Decided BEFORE the long embedding walk; the tail rows themselves
+        // are rewritten from problem_params after it.
+        const tailNeedsRederive = ratingsChanged && await tailHasRowsForSize(size);
 
-        // Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields. These
-        // drive the shard walk (embeddings live in metadata.json + the per-cell
-        // sidecars; problem_params carries none).
         const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
-        const needIdsForEmbed = new Set();
-        if (embeddingsChanged) {
-            for (let i = startIdx; i < history.length; i++) {
-                const a = history[i];
-                const needsCorrect = !a.embedding;
-                const needsPicked = (
-                    a.correct === false &&
-                    typeof a.pickedCellIndex === 'number' &&
-                    !a.pickedEmbedding
-                );
-                if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
-            }
-        }
-
-        // Strip stray embeddings from entries older than the keep window —
-        // only on embedding refits (this is a wipe, not a refill).
-        if (embeddingsChanged) {
-            let strippedOld = 0;
-            for (let i = 0; i < startIdx; i++) {
-                const a = history[i];
-                if (!a) continue;
-                let touched = false;
-                if (a.embedding !== undefined) { delete a.embedding; touched = true; }
-                if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
-                if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
-                if (touched) strippedOld++;
-            }
-            if (strippedOld > 0) {
-                persistAnswerHistory(size, history);
-                console.log(`backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
-            }
-        }
-
-        // Embedding shard walk (problem_params has no embeddings, so this stays on the
-        // zips). Skipped entirely when nothing in the keep window needs a fill — so a
-        // ratings-only refresh never fetches a shard.
         let totalFilled = 0;
         let totalFilledPicked = 0;
-        if (needIdsForEmbed.size > 0) {
-            const locator = await buildShardLocator(size);
-            if (locator) {
-                const { lookupMap, zipFilenameByHash } = locator;
-                const zipToIds = groupIdsByZip(lookupMap, needIdsForEmbed);
-                await mapWithConcurrency([...zipToIds.keys()], SHARD_WALK_CONCURRENCY, async (zipHash) => {
-                    const zipFilename = zipFilenameByHash.get(zipHash);
-                    if (!zipFilename) return;
-                    try {
-                        const shard = await loadShard(size, zipFilename);
-                        if (!shard) return;
-                        const { zip, items } = shard;
-                        const embeddingByProblem = new Map();
-                        for (const item of items) {
-                            if (Array.isArray(item.embedding)) {
-                                // Quantize to 2 decimals to keep localStorage small.
-                                embeddingByProblem.set(tsumegoIdOf(item.filename), quantizeEmbedding(item.embedding));
-                            }
-                        }
-
-                        for (let i = startIdx; i < history.length; i++) {
-                            const a = history[i];
-                            if (!a.embedding && embeddingByProblem.has(a.problemId)) {
-                                a.embedding = embeddingByProblem.get(a.problemId);
-                                totalFilled++;
-                            }
-                        }
-
-                        // Picked-move backfill: same shard, Range-fetched per-cell
-                        // sidecar. Skipped silently for shards that don't ship one
-                        // (older builds) or when there are no eligible attempts.
-                        const idxFile = zip.file('embeddings_index.json');
-                        if (idxFile) {
-                            let indexPayload = null;
-                            try { indexPayload = JSON.parse(await idxFile.async('text')); }
-                            catch (e) {
-                                console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
-                            }
-                            if (indexPayload && indexPayload.problems) {
-                                // Sequential per-entry WITHIN the shard: Range
-                                // requests are cheap (~256B), and with shards
-                                // running SHARD_WALK_CONCURRENCY-wide this bounds
-                                // the total in-flight request count.
-                                for (let i = startIdx; i < history.length; i++) {
-                                    const a = history[i];
-                                    if (a.correct !== false) continue;
-                                    if (typeof a.pickedCellIndex !== 'number') continue;
-                                    if (a.pickedEmbedding) continue;
-                                    const indexEntry = indexPayload.problems[a.problemId];
-                                    if (!indexEntry) continue;
-                                    const emb = await fetchPickedEmbeddingWithIndexEntry({
-                                        tsumegoId: a.problemId,
-                                        cellIndex: a.pickedCellIndex,
-                                        zipFilename,
-                                        boardSize: size,
-                                        indexEntry,
-                                    });
-                                    if (Array.isArray(emb)) {
-                                        a.pickedEmbedding = quantizeEmbedding(emb);
-                                        totalFilledPicked++;
-                                    }
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
-                    }
-                });
+        if (embeddingsChanged) {
+            const needIdsForEmbed = collectEmbeddingNeedIds(history, startIdx);
+            stripOldEmbeddingFields(size, history, startIdx);
+            if (needIdsForEmbed.size > 0) {
+                const r = await walkEmbeddingShards(size, history, startIdx, needIdsForEmbed);
+                totalFilled = r.filled;
+                totalFilledPicked = r.filledPicked;
             }
         }
 
@@ -586,45 +479,232 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
 
-        // Re-derive the cold tail from problem_params (ratings change only). Present
-        // problems get the CURRENT rating; a problem that left the corpus has its rating
-        // fields STRIPPED — never leave a stale rating on a removed problem — so
-        // flattenAttempts drops the now-rating-less attempt from the chart. One IDB
-        // cursor pass. (The working-set copy wins in getMergedFullAnswerHistory, so an
-        // attempt present in both is unaffected here; this pass handles the tail-ONLY
-        // attempts.)
         if (tailNeedsRederive && problemParams) {
-            let tailRederived = 0, tailStripped = 0;
-            await updateTail((entry) => {
-                if (!entry || entry.size !== size || typeof entry.problemId !== 'string') return null;
-                const item = problemParams.get(entry.problemId);
-                if (item) {
-                    if (entry.problemRating === item.rating) return null;  // already current
-                    applyRatingFields(entry, item, size);
-                    if (entry.problemRawRating !== undefined) delete entry.problemRawRating;
-                    tailRederived++;
-                    return entry;
-                }
-                // Absent from problem_params ⇒ the problem left the corpus: strip its
-                // rating fields (flattenAttempts then drops the attempt from the chart).
-                if (!problemParams.has(entry.problemId)) {
-                    let touched = false;
-                    for (const k of RATING_FIELDS) {
-                        if (entry[k] !== undefined) { delete entry[k]; touched = true; }
-                    }
-                    if (touched) { tailStripped++; return entry; }
-                }
-                return null;
-            });
-            if (tailRederived || tailStripped) {
-                console.log(`backfill[${size}]: cold-tail re-derived ${tailRederived}, stripped ${tailStripped} removed-problem ratings`);
-            }
+            await rederiveTailRatings(size, problemParams);
         }
         return totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated;
     } catch (err) {
         console.error(`backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
         return 0;
+    }
+}
+
+// Embedding wipe — only when embedding_version changed. Rating-only
+// refreshes keep the trained model intact.
+function wipeStaleEmbeddings(size, history, serverEmbeddingVersion) {
+    let cleared = 0;
+    for (const a of history) {
+        if (a.embedding) {
+            delete a.embedding;
+            cleared++;
+        }
+    }
+    if (cleared > 0) {
+        // Wipe the single shared weakness model — it was trained on this
+        // size's now-stale embeddings (jointly with the other size's).
+        clearWeaknessModel();
+        persistAnswerHistory(size, history);
+        console.log(`backfill[${size}]: cleared ${cleared} stale embeddings (-> ${serverEmbeddingVersion})`);
+    }
+    for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
+}
+
+// Curve-only working-set remap: recompute problemRank straight from the stored
+// raw problemRating. Returns the number of entries whose rank moved.
+function remapCurveOnlyWorkingSet(size, history) {
+    let curveRankUpdated = 0;
+    for (const a of history) {
+        if (typeof a.problemRating !== 'number') continue;
+        const newRank = normalizedRankForSize(a.problemRating, size);
+        if (newRank !== null && a.problemRank !== newRank) {
+            a.problemRank = newRank;
+            curveRankUpdated++;
+        }
+    }
+    if (curveRankUpdated > 0) {
+        persistAnswerHistory(size, history);
+        console.log(`backfill[${size}]: recomputed problemRank for ${curveRankUpdated} entries (curve change)`);
+    }
+    return curveRankUpdated;
+}
+
+// Curve-only tail remap: recompute the cold tail's problemRank straight from
+// its stored raw rating — no shard fetch needed. (When ratings ALSO changed,
+// the shard-backed tail re-derive rewrites rank from the fresh rating, so the
+// caller skips this.)
+async function remapCurveOnlyTail(size) {
+    let tailUpdated = 0;
+    await updateTail((entry) => {
+        if (!entry || entry.size !== size) return null;
+        if (typeof entry.problemRating !== 'number') return null;
+        const newRank = normalizedRankForSize(entry.problemRating, size);
+        if (newRank !== null && entry.problemRank !== newRank) {
+            entry.problemRank = newRank;
+            tailUpdated++;
+            return entry;
+        }
+        return null;
+    });
+    if (tailUpdated > 0) {
+        console.log(`backfill[${size}]: recomputed problemRank for ${tailUpdated} cold-tail entries (curve change)`);
+    }
+}
+
+// Working-set ratings rewrite: one pass over the FULL history (no keep-window
+// cap — the chart needs old entries updated), reading the current value from
+// problem_params. Present problems get the CURRENT rating (+ derived rank,
+// slope/quality, floor via the shared applyRatingFields); a problem that left
+// the corpus keeps its stale value for pruneRemovedProblems to strip. Edited
+// in place; the caller persists alongside any embedding fills. Returns the
+// number of entries whose rating actually changed.
+function rewriteWorkingSetRatings(size, history, problemParams) {
+    let totalRatingsUpdated = 0;
+    for (let i = 0; i < history.length; i++) {
+        const a = history[i];
+        if (!a.problemId) continue;
+        const item = problemParams.get(a.problemId);
+        if (!item || typeof item.rating !== 'number') continue;
+        if (a.problemRating !== item.rating) totalRatingsUpdated++;
+        applyRatingFields(a, item, size);
+        // problemRating holds the raw value, so the separate
+        // problemRawRating field is redundant.
+        if (a.problemRawRating !== undefined) delete a.problemRawRating;
+    }
+    return totalRatingsUpdated;
+}
+
+// Does the cold tail carry this size's rows? The tail's ratings are frozen at
+// eviction time, so after a re-rate the old attempts carry stale (and
+// device-dependent — each device evicted at a different rating era) ratings,
+// and the Rank-tab chart plots them.
+async function tailHasRowsForSize(size) {
+    const tail = await getTail();
+    for (const e of tail) {
+        if (e && e.size === size && typeof e.problemId === 'string') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields. These
+// drive the shard walk (embeddings live in metadata.json + the per-cell
+// sidecars; problem_params carries none).
+function collectEmbeddingNeedIds(history, startIdx) {
+    const needIdsForEmbed = new Set();
+    for (let i = startIdx; i < history.length; i++) {
+        const a = history[i];
+        const needsCorrect = !a.embedding;
+        const needsPicked = (
+            a.correct === false &&
+            typeof a.pickedCellIndex === 'number' &&
+            !a.pickedEmbedding
+        );
+        if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
+    }
+    return needIdsForEmbed;
+}
+
+// Strip stray embeddings from entries older than the keep window —
+// only on embedding refits (this is a wipe, not a refill).
+function stripOldEmbeddingFields(size, history, startIdx) {
+    let strippedOld = 0;
+    for (let i = 0; i < startIdx; i++) {
+        const a = history[i];
+        if (!a) continue;
+        let touched = false;
+        if (a.embedding !== undefined) { delete a.embedding; touched = true; }
+        if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
+        if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
+        if (touched) strippedOld++;
+    }
+    if (strippedOld > 0) {
+        persistAnswerHistory(size, history);
+        console.log(`backfill[${size}]: stripped embedding fields from ${strippedOld} old entries (beyond keep-last ${KEEP_EMBEDDING_LAST})`);
+    }
+}
+
+// Embedding shard walk (problem_params has no embeddings, so this stays on the
+// zips). The caller skips it entirely when nothing in the keep window needs a
+// fill — so a ratings-only refresh never fetches a shard. Fills correct-move
+// `embedding` from each shard's metadata.json and `pickedEmbedding` via the
+// per-cell sidecar; returns the two fill counts.
+async function walkEmbeddingShards(size, history, startIdx, needIdsForEmbed) {
+    let filled = 0;
+    let filledPicked = 0;
+    await walkShards(size, needIdsForEmbed, async ({ zip, items, zipFilename }) => {
+        const embeddingByProblem = new Map();
+        for (const item of items) {
+            if (Array.isArray(item.embedding)) {
+                // Quantize to 2 decimals to keep localStorage small.
+                embeddingByProblem.set(tsumegoIdOf(item.filename), quantizeEmbedding(item.embedding));
+            }
+        }
+
+        for (let i = startIdx; i < history.length; i++) {
+            const a = history[i];
+            if (!a.embedding && embeddingByProblem.has(a.problemId)) {
+                a.embedding = embeddingByProblem.get(a.problemId);
+                filled++;
+            }
+        }
+
+        // Picked-move backfill: same shard, Range-fetched per-cell
+        // sidecar. Skipped silently for shards that don't ship one
+        // (older builds) or when there are no eligible attempts.
+        const indexPayload = await parseEmbeddingsIndex(zip, (e) => {
+            console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+        });
+        if (indexPayload && indexPayload.problems) {
+            // Sequential per-entry WITHIN the shard: Range
+            // requests are cheap (~256B), and with shards
+            // running SHARD_WALK_CONCURRENCY-wide this bounds
+            // the total in-flight request count.
+            for (let i = startIdx; i < history.length; i++) {
+                if (await fillPickedEmbeddingFromSidecar(history[i], { indexPayload, zipFilename, size })) {
+                    filledPicked++;
+                }
+            }
+        }
+    }, (zipFilename, err) => {
+        console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
+    });
+    return { filled, filledPicked };
+}
+
+// Re-derive the cold tail from problem_params (ratings change only). Present
+// problems get the CURRENT rating; a problem that left the corpus has its rating
+// fields STRIPPED — never leave a stale rating on a removed problem — so
+// flattenAttempts drops the now-rating-less attempt from the chart. One IDB
+// cursor pass. (The working-set copy wins in getMergedFullAnswerHistory, so an
+// attempt present in both is unaffected here; this pass handles the tail-ONLY
+// attempts.)
+async function rederiveTailRatings(size, problemParams) {
+    let tailRederived = 0, tailStripped = 0;
+    await updateTail((entry) => {
+        if (!entry || entry.size !== size || typeof entry.problemId !== 'string') return null;
+        const item = problemParams.get(entry.problemId);
+        if (item) {
+            if (entry.problemRating === item.rating) return null;  // already current
+            applyRatingFields(entry, item, size);
+            if (entry.problemRawRating !== undefined) delete entry.problemRawRating;
+            tailRederived++;
+            return entry;
+        }
+        // Absent from problem_params ⇒ the problem left the corpus: strip its
+        // rating fields (flattenAttempts then drops the attempt from the chart).
+        if (!problemParams.has(entry.problemId)) {
+            let touched = false;
+            for (const k of RATING_FIELDS) {
+                if (entry[k] !== undefined) { delete entry[k]; touched = true; }
+            }
+            if (touched) { tailStripped++; return entry; }
+        }
+        return null;
+    });
+    if (tailRederived || tailStripped) {
+        console.log(`backfill[${size}]: cold-tail re-derived ${tailRederived}, stripped ${tailStripped} removed-problem ratings`);
     }
 }
 
@@ -685,80 +765,49 @@ async function fillSyncedForSize(size) {
     }
     if (needIds.size === 0) return 0;
 
-    const locator = await buildShardLocator(size);
-    if (!locator) return 0;
-    const { lookupMap, zipFilenameByHash } = locator;
-
-    const zipToIds = groupIdsByZip(lookupMap, needIds);
-
     let filled = 0;
-    await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, ids]) => {
-        const zipFilename = zipFilenameByHash.get(zipHash);
-        if (!zipFilename) return;
-        try {
-            const shard = await loadShard(size, zipFilename);
-            if (!shard) return;
-            const { zip, items } = shard;
-            const itemByProblem = new Map();
-            for (const item of items) {
-                itemByProblem.set(tsumegoIdOf(item.filename), item);
-            }
-            let indexPayload = null;
-            const idxFile = zip.file('embeddings_index.json');
-            if (idxFile) {
-                try { indexPayload = JSON.parse(await idxFile.async('text')); }
-                catch (_) { /* shard without a usable sidecar index */ }
-            }
-            const idsHere = new Set(ids);
-
-            for (let i = 0; i < history.length; i++) {
-                const a = history[i];
-                if (!a || !a.synced || !idsHere.has(a.problemId)) continue;
-                const item = itemByProblem.get(a.problemId);
-                if (!item) continue;
-                const inWindow = i >= startIdx;
-
-                if (typeof a.problemRating !== 'number' && typeof item.rating === 'number') {
-                    applyRatingFields(a, item, size);
-                    filled++;
-                }
-
-                if (inWindow && !a.embedding && Array.isArray(item.embedding)) {
-                    a.embedding = quantizeEmbedding(item.embedding);
-                    filled++;
-                }
-
-                if (inWindow && a.correct === false && typeof a.syncedMove === 'string') {
-                    const idx = await cellIndexForMove(zip, a.problemId, a.syncedMove, size);
-                    if (typeof idx === 'number' && idx >= 0) a.pickedCellIndex = idx;
-                    // One-shot either way: an unresolvable move (illegal after a
-                    // corpus change, parse failure) would otherwise re-walk this
-                    // shard on every sync.
-                    delete a.syncedMove;
-                }
-
-                if (inWindow && a.correct === false && !a.pickedEmbedding &&
-                    typeof a.pickedCellIndex === 'number' &&
-                    indexPayload && indexPayload.problems) {
-                    const indexEntry = indexPayload.problems[a.problemId];
-                    if (indexEntry) {
-                        const emb = await fetchPickedEmbeddingWithIndexEntry({
-                            tsumegoId: a.problemId,
-                            cellIndex: a.pickedCellIndex,
-                            zipFilename,
-                            boardSize: size,
-                            indexEntry,
-                        });
-                        if (Array.isArray(emb)) {
-                            a.pickedEmbedding = quantizeEmbedding(emb);
-                            filled++;
-                        }
-                    }
-                }
-            }
-        } catch (err) {
-            console.warn(`synced-fill[${size}]: failed for ${zipFilename}:`, err);
+    await walkShards(size, needIds, async ({ zip, items, zipFilename, shardIds }) => {
+        const itemByProblem = new Map();
+        for (const item of items) {
+            itemByProblem.set(tsumegoIdOf(item.filename), item);
         }
+        // A parse failure = shard without a usable sidecar index; the
+        // picked-embedding fill below just skips (no console line).
+        const indexPayload = await parseEmbeddingsIndex(zip);
+        const idsHere = new Set(shardIds);
+
+        for (let i = 0; i < history.length; i++) {
+            const a = history[i];
+            if (!a || !a.synced || !idsHere.has(a.problemId)) continue;
+            const item = itemByProblem.get(a.problemId);
+            if (!item) continue;
+            const inWindow = i >= startIdx;
+
+            if (typeof a.problemRating !== 'number' && typeof item.rating === 'number') {
+                applyRatingFields(a, item, size);
+                filled++;
+            }
+
+            if (inWindow && !a.embedding && Array.isArray(item.embedding)) {
+                a.embedding = quantizeEmbedding(item.embedding);
+                filled++;
+            }
+
+            if (inWindow && a.correct === false && typeof a.syncedMove === 'string') {
+                const idx = await cellIndexForMove(zip, a.problemId, a.syncedMove, size);
+                if (typeof idx === 'number' && idx >= 0) a.pickedCellIndex = idx;
+                // One-shot either way: an unresolvable move (illegal after a
+                // corpus change, parse failure) would otherwise re-walk this
+                // shard on every sync.
+                delete a.syncedMove;
+            }
+
+            if (inWindow && await fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size })) {
+                filled++;
+            }
+        }
+    }, (zipFilename, err) => {
+        console.warn(`synced-fill[${size}]: failed for ${zipFilename}:`, err);
     });
 
     if (filled > 0) {
@@ -817,26 +866,16 @@ function applyRatingFields(e, item, size) {
 async function fetchShardItems(size, ids) {
     const out = new Map();
     if (!ids || ids.size === 0) return { items: out, ok: true };
-    const locator = await buildShardLocator(size);
-    if (!locator) return { items: out, ok: false };
-    const { lookupMap, zipFilenameByHash } = locator;
-    const zipToIds = groupIdsByZip(lookupMap, ids);
-    await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, idList]) => {
-        const zipFilename = zipFilenameByHash.get(zipHash);
-        if (!zipFilename) return;
-        try {
-            const shard = await loadShard(size, zipFilename);
-            if (!shard) return;
-            const want = new Set(idList);
-            for (const item of shard.items) {
-                const id = tsumegoIdOf(item.filename);
-                if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
-            }
-        } catch (err) {
-            console.warn(`synced-tail-fill[${size}]: shard ${zipFilename} failed:`, err);
+    const ok = await walkShards(size, ids, async ({ items, shardIds }) => {
+        const want = new Set(shardIds);
+        for (const item of items) {
+            const id = tsumegoIdOf(item.filename);
+            if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
         }
+    }, (zipFilename, err) => {
+        console.warn(`synced-tail-fill[${size}]: shard ${zipFilename} failed:`, err);
     });
-    return { items: out, ok: true };
+    return { items: out, ok };
 }
 
 // Fill one size's cold-tail synced skeletons. Returns { filled, ok }.
