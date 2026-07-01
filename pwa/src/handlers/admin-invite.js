@@ -4,19 +4,23 @@
 // page at GET /admin/invite lets an admin search EGD (by name or PIN) and mint an
 // invitation link (an `invitation` row + the /register?t= URL).
 //
-//   GET  /admin/invite               -> the admin page (inert without a valid code)
-//   POST /admin/egd-search {code, q} -> EGD search (name or PIN), admin-gated
-//   POST /admin/create-invite {code, pin} -> insert invitation, return the link
+//   GET  /admin/invite                 -> the admin page
+//   POST /admin/check {code}           -> is this account code an admin? (page gate)
+//   POST /admin/create-invite {code, pin, name, gor, country} -> insert invitation
 //
-// Auth is the admin's own account code (user_id) checked against env.ADMIN_USER_IDS
-// (a wrangler secret, comma-separated for multiple admins — see wrangler.toml). It
-// FAILS CLOSED when unset, so a missing secret means nobody can generate invites.
-// The write endpoints are also per-IP rate-limited (RL_WRITE) in the dispatcher,
-// which bounds any code-guessing on top of the 62^8 token space.
+// Auth is the admin's own account code (user_id), read automatically from the
+// browser's localStorage (same key the PWA uses) and verified against
+// env.ADMIN_USER_IDS (a wrangler secret, comma-separated — see wrangler.toml). It
+// FAILS CLOSED when the secret is unset. The POST endpoints are also per-IP
+// rate-limited (RL_WRITE) in the dispatcher.
+//
+// EGD is fetched CLIENT-SIDE (the browser can — EGD sends CORS `*`), because the
+// deployed Worker cannot: EGD sits behind Cloudflare and a Worker→Cloudflare-zone
+// fetch is bot-blocked. So the page does the search itself and hands the chosen
+// player's fields to /admin/create-invite; the Worker only writes the row.
 
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
-import { fetchEgdPlayer, searchEgdPlayers } from '../leaderboard.js';
 
 // The account code is the admin key. Compare against the configured admin id(s);
 // fail closed if the secret is unset so the page can't be an open invite faucet.
@@ -62,39 +66,32 @@ export async function handleAdminPage(env) {
     });
 }
 
-export async function handleAdminSearch(request, env) {
+// Page gate: does this browser's account code have admin rights?
+export async function handleAdminCheck(request, env) {
     try {
-        const { code, query } = await request.json();
+        const { code } = await request.json();
         if (!isAdmin(code, env)) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
-        if (!env.DB) return jsonResponse({ ok: false, error: 'server' }, 500);
-        const q = String(query || '').trim();
-        if (!q) return jsonResponse({ ok: true, players: [] });
-        // A numeric query is a PIN (single lookup); otherwise a name search.
-        let players;
-        if (/^\d+$/.test(q)) {
-            const p = await fetchEgdPlayer(q);
-            players = p ? [{ pin: q, name: p.egd_name || '', country: p.country_code || '', rank: '', gor: p.gor }] : [];
-        } else {
-            players = await searchEgdPlayers(q);
-        }
-        return jsonResponse({ ok: true, players });
+        return jsonResponse({ ok: true });
     } catch (e) {
-        console.error('admin search failed:', e);
         return jsonResponse({ ok: false, error: 'server' }, 500);
     }
 }
 
 export async function handleAdminCreate(request, env) {
     try {
-        const { code, pin } = await request.json();
+        const { code, pin, name, gor, country } = await request.json();
         if (!isAdmin(code, env)) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
         if (!env.DB) return jsonResponse({ ok: false, error: 'server' }, 500);
+
+        // The player fields come from the admin-authed client's own EGD fetch (the
+        // Worker can't reach EGD). Validate shape; trust the values.
         const pinStr = String(pin || '');
         if (!/^\d+$/.test(pinStr)) return jsonResponse({ ok: false, error: 'bad_pin' }, 400);
-
-        // Validate against EGD (rejects a bad PIN) and capture the current name/GoR/country.
-        const p = await fetchEgdPlayer(pinStr);
-        if (!p || !p.egd_name || p.gor === null) return jsonResponse({ ok: false, error: 'egd_not_found' }, 404);
+        const egdName = typeof name === 'string' ? name.trim().slice(0, 100) : '';
+        if (!egdName) return jsonResponse({ ok: false, error: 'bad_name' }, 400);
+        const gorInt = Number.isFinite(Number(gor)) ? Math.round(Number(gor)) : null;
+        if (gorInt === null) return jsonResponse({ ok: false, error: 'bad_gor' }, 400);
+        const cc = (typeof country === 'string' ? country : '').slice(0, 2).toUpperCase();
 
         // 1:1 binding: no point inviting a PIN that already has a registered account
         // (the claim would be rejected anyway). Surface it as a clean error.
@@ -103,14 +100,12 @@ export async function handleAdminCreate(request, env) {
         ).bind(pinStr).first();
         if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
 
-        const token = await insertInvitation(env, {
-            pin: pinStr, name: p.egd_name, country: p.country_code || '', gor: p.gor,
-        });
+        const token = await insertInvitation(env, { pin: pinStr, name: egdName, country: cc, gor: gorInt });
         return jsonResponse({
             ok: true,
             inviteToken: token,
             link: `https://onlymove.net/register?t=${token}`,
-            egdName: p.egd_name, gor: p.gor, country: p.country_code || '',
+            egdName, gor: gorInt, country: cc,
         });
     } catch (e) {
         console.error('admin create failed:', e);
@@ -125,24 +120,23 @@ function renderAdminPage() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>onlymove — invite admin</title>
+<title>onlymove — admin tools</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 1.5rem 1rem 3rem;
          max-width: 720px; margin-inline: auto; }
   h1 { font-size: 1.4rem; margin: 0 0 .3rem; }
   p.sub { margin: 0 0 1.25rem; opacity: .6; font-size: .85rem; }
-  label { display: block; font-size: .8rem; opacity: .7; margin: 0 0 .2rem; }
-  input[type=text], input[type=password] { font: inherit; padding: .45rem .6rem; border: 1px solid;
-         border-radius: 8px; background: transparent; color: inherit; box-sizing: border-box; }
-  .field { margin-bottom: .9rem; }
-  #code { width: 16rem; max-width: 100%; }
-  .searchrow { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-  #q { flex: 1 1 12rem; }
+  #gate { margin: 2rem 0; font-size: .95rem; }
+  #gate.err { color: #c0392b; }
+  #tools { display: none; }
+  .searchrow { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+  #q { flex: 1 1 12rem; font: inherit; padding: .45rem .6rem; border: 1px solid; border-radius: 8px;
+       background: transparent; color: inherit; box-sizing: border-box; }
   button { font: inherit; padding: .45rem .9rem; border: 1px solid currentColor; border-radius: 8px;
            background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
   button:disabled { opacity: .5; cursor: default; }
-  #msg { min-height: 1.4em; margin: .25rem 0 1rem; font-size: .9rem; opacity: .8; }
+  #msg { min-height: 1.4em; margin: .5rem 0 1rem; font-size: .9rem; opacity: .8; }
   #msg.err { color: #c0392b; opacity: 1; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: .45rem .4rem; text-align: right; white-space: nowrap; }
@@ -159,40 +153,38 @@ function renderAdminPage() {
 </head>
 <body>
 <h1>Generate invitation</h1>
-<p class="sub">Admin only — the web equivalent of generate_invite.py. Enter your account code, search EGD by name or PIN, and mint an invite link.</p>
-<div class="field">
-  <label for="code">Admin account code</label>
-  <input type="password" id="code" autocomplete="off" spellcheck="false">
-</div>
-<div class="field">
-  <label for="q">EGD name or PIN</label>
+<p class="sub">Admin tools — the web equivalent of generate_invite.py. Search EGD by name or PIN and mint an invite link.</p>
+<div id="gate">Checking access…</div>
+<div id="tools">
   <div class="searchrow">
-    <input type="text" id="q" placeholder="e.g. Hemming, or Henry Hemming, or 16025130" autocomplete="off">
+    <input type="text" id="q" placeholder="EGD name or PIN — e.g. Hemming, Henry Hemming, or 16025130" autocomplete="off">
     <button id="searchBtn">Search</button>
   </div>
+  <div id="msg"></div>
+  <div id="results"></div>
+  <div id="out"></div>
 </div>
-<div id="msg"></div>
-<div id="results"></div>
-<div id="out"></div>
 <script>
 (function () {
-  var codeEl = document.getElementById('code');
-  var qEl = document.getElementById('q');
-  var msg = document.getElementById('msg');
-  var results = document.getElementById('results');
-  var out = document.getElementById('out');
-  var SAVED = 'onlymove_admin_code';
-  try { codeEl.value = localStorage.getItem(SAVED) || ''; } catch (e) {}
+  var EGD = 'https://www.europeangodatabase.eu/EGD/';
+  var gate = document.getElementById('gate');
+  var tools = document.getElementById('tools');
+  var qEl, msg, results, out;
+  var currentPlayers = [];
+
+  // The admin key is THIS browser's account code (the PWA's user_id) — read it
+  // automatically, no prompt. Same origin => same localStorage as the app.
+  var code = '';
+  try { code = localStorage.getItem('userId') || ''; } catch (e) {}
 
   var errMap = {
-    unauthorized: 'Not authorized — check your account code.',
+    unauthorized: 'This account is not authorized for admin tools.',
     already_registered: 'That EGD player is already registered.',
-    egd_not_found: 'EGD PIN not found.',
-    bad_pin: 'Invalid PIN.'
+    bad_pin: 'Invalid PIN.', bad_name: 'Missing name.', bad_gor: 'Missing GoR.'
   };
-  function setMsg(t, err) { msg.textContent = t || ''; msg.className = err ? 'err' : ''; }
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  function saveCode(){ try { localStorage.setItem(SAVED, codeEl.value.trim()); } catch (e) {} }
+  function setMsg(t, err) { msg.textContent = t || ''; msg.className = err ? 'err' : ''; }
+  function showGate(t) { gate.textContent = t; gate.className = 'err'; tools.style.display = 'none'; }
 
   async function post(url, body) {
     var res;
@@ -202,34 +194,74 @@ function renderAdminPage() {
     return { status: res.status, data: data };
   }
 
+  function mapPlayer(p, pinFallback) {
+    var gor = parseInt(p.Gor, 10);
+    return {
+      pin: p.Pin_Player || pinFallback || '',
+      name: ((p.Name || '') + ' ' + (p.Last_Name || '')).trim(),
+      country: p.Country_Code || '', rank: p.Grade || '',
+      gor: isNaN(gor) ? null : gor
+    };
+  }
+
+  // EGD fetched directly from the browser (CORS *). One word -> lastname + name
+  // (name-only is a no-op, EGD needs a lastname); two words -> both orders; deduped.
+  async function egdByName(q) {
+    var tokens = q.split(/\\s+/);
+    var sets = tokens.length <= 1
+      ? [{ lastname: q }, { name: q }]
+      : [{ name: tokens[0], lastname: tokens.slice(1).join(' ') },
+         { name: tokens.slice(1).join(' '), lastname: tokens[0] }];
+    var seen = {}, order = [];
+    for (var i = 0; i < sets.length; i++) {
+      var usp = new URLSearchParams(sets[i]);
+      try {
+        var res = await fetch(EGD + 'GetPlayerDataByData.php?' + usp.toString());
+        if (!res.ok) continue;
+        var d = await res.json();
+        if (!d || d.retcode !== 'Ok' || !Array.isArray(d.players)) continue;
+        for (var j = 0; j < d.players.length; j++) {
+          var p = d.players[j];
+          if (p.Pin_Player && !seen[p.Pin_Player]) { seen[p.Pin_Player] = 1; order.push(mapPlayer(p)); }
+        }
+      } catch (e) { /* skip this query */ }
+    }
+    return order;
+  }
+  async function egdByPin(pin) {
+    try {
+      var res = await fetch(EGD + 'GetPlayerDataByPIN.php?pin=' + encodeURIComponent(pin));
+      if (!res.ok) return [];
+      var d = await res.json();
+      if (!d || d.retcode !== 'Ok') return [];
+      return [mapPlayer(d, pin)];
+    } catch (e) { return []; }
+  }
+
   async function search() {
-    var code = codeEl.value.trim(), q = qEl.value.trim();
-    if (!code) { setMsg('Enter your admin account code.', true); return; }
+    var q = qEl.value.trim();
     if (!q) { setMsg('Enter a name or PIN to search.', true); return; }
-    saveCode();
-    setMsg('Searching…'); results.innerHTML = ''; out.style.display = 'none';
-    var r = await post('/admin/egd-search', { code: code, query: q });
-    if (r.status === 403) { setMsg(errMap.unauthorized, true); return; }
-    if (!r.data || !r.data.ok) { setMsg('Search failed.', true); return; }
-    var players = r.data.players || [];
+    setMsg('Searching EGD…'); results.innerHTML = ''; out.style.display = 'none';
+    var players = /^\\d+$/.test(q) ? await egdByPin(q) : await egdByName(q);
+    currentPlayers = players;
     if (!players.length) { setMsg('No EGD players found.'); return; }
     setMsg(players.length + ' result(s):');
     results.innerHTML = '<table><thead><tr><th>PIN</th><th class="l">Name</th><th>CC</th><th>Rank</th><th>GoR</th><th></th></tr></thead><tbody>' +
-      players.map(function (p) {
-        return '<tr><td>' + esc(p.pin) + '</td><td class="l">' + esc(p.name) + '</td><td>' + esc(p.country||'') +
-          '</td><td>' + esc(p.rank||'') + '</td><td>' + (p.gor==null?'—':esc(String(p.gor))) +
-          '</td><td><button class="gen" data-pin="' + esc(p.pin) + '">Generate</button></td></tr>';
+      players.map(function (p, i) {
+        return '<tr><td>' + esc(p.pin) + '</td><td class="l">' + esc(p.name) + '</td><td>' + esc(p.country) +
+          '</td><td>' + esc(p.rank) + '</td><td>' + (p.gor == null ? '—' : esc(String(p.gor))) +
+          '</td><td><button class="gen" data-idx="' + i + '">Generate</button></td></tr>';
       }).join('') + '</tbody></table>';
     Array.prototype.forEach.call(results.querySelectorAll('button.gen'), function (b) {
-      b.addEventListener('click', function () { generate(b.getAttribute('data-pin'), b); });
+      b.addEventListener('click', function () { generate(currentPlayers[+b.getAttribute('data-idx')], b); });
     });
   }
 
-  async function generate(pin, btn) {
-    var code = codeEl.value.trim();
-    if (!code) { setMsg('Enter your admin account code.', true); return; }
+  async function generate(p, btn) {
+    if (!p) return;
     btn.disabled = true; btn.textContent = '…';
-    var r = await post('/admin/create-invite', { code: code, pin: pin });
+    var r = await post('/admin/create-invite',
+      { code: code, pin: p.pin, name: p.name, gor: p.gor, country: p.country });
     if (!r.data || !r.data.ok) {
       var err = (r.data && r.data.error) || 'error';
       setMsg(errMap[err] || ('Could not create invitation (' + err + ').'), true);
@@ -254,9 +286,26 @@ function renderAdminPage() {
     });
   }
 
-  document.getElementById('searchBtn').addEventListener('click', search);
-  qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') search(); });
-  codeEl.addEventListener('change', saveCode);
+  function wireTools() {
+    qEl = document.getElementById('q');
+    msg = document.getElementById('msg');
+    results = document.getElementById('results');
+    out = document.getElementById('out');
+    document.getElementById('searchBtn').addEventListener('click', search);
+    qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') search(); });
+    tools.style.display = 'block';
+    gate.style.display = 'none';
+    qEl.focus();
+  }
+
+  // Auto-verify admin from the stored account code, then reveal the tools.
+  (async function init() {
+    if (!code) { showGate('No onlymove account found in this browser. Open this page where you use the app.'); return; }
+    var r = await post('/admin/check', { code: code });
+    if (r.status === 403) { showGate(errMap.unauthorized); return; }
+    if (!r.data || !r.data.ok) { showGate('Could not verify admin access — reload to retry.'); return; }
+    wireTools();
+  })();
 })();
 </script>
 </body>

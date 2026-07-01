@@ -1,7 +1,7 @@
 import { APP_VERSION } from '../version.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
 import { rowHash, ID_HASH_SQL } from '../../shared/sync-digest.js';
-import { updateLeaderboardOnReport } from '../leaderboard.js';
+import { updateLeaderboardOnReport, applyGorUpdates, getStaleGorPins } from '../leaderboard.js';
 
 export async function handleReport(request, env, ctx) {
   // Every response carries the deployed Worker version so the client can
@@ -86,7 +86,23 @@ export async function handleReport(request, env, ctx) {
       );
     }
 
-    return new Response(JSON.stringify({ createdAt, serverId, userSeq, digest }), {
+    // EGD-leaderboard GoR piggyback (see leaderboard.js): the Worker can't reach EGD,
+    // so active clients fetch registered players' GoR and post it here as `gorUpdates`;
+    // the response advertises which PINs are still stale this week (`refreshPins`) for
+    // a client to fetch next. Best-effort and fully isolated — a failure here must
+    // never affect the attempt report. getStaleGorPins is in-memory-cached (cheap).
+    const respBody = { createdAt, serverId, userSeq, digest };
+    try {
+      if (Array.isArray(data.gorUpdates) && data.gorUpdates.length) {
+        await applyGorUpdates(env, data.gorUpdates);
+      }
+      const refreshPins = await getStaleGorPins(env);
+      if (refreshPins.length) respBody.refreshPins = refreshPins;
+    } catch (e) {
+      console.error('gor piggyback failed:', e);
+    }
+
+    return new Response(JSON.stringify(respBody), {
       status: 201,
       headers: { ...reportHeaders, 'Content-Type': 'application/json' },
     });

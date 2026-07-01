@@ -130,6 +130,11 @@ export function computeRank(buffer, params) {
 export function weekIdAt(ms) {
     return Math.floor((Math.floor(ms / 86400000) - 4) / 7);
 }
+// ISO timestamp of the current week's Monday 00:00 UTC (the "GoR is fresh this week"
+// cutoff). weekId*7+4 is that Monday's day index since the epoch.
+export function weekStartIso(ms) {
+    return new Date((weekIdAt(ms) * 7 + 4) * 86400000).toISOString();
+}
 
 // Roll this-week / previous-week maxes for a fresh pred_egf_rank. `row` carries the
 // stored week_id / this_week_max / prev_week_max / prev_week_gor_rank / gor_rank.
@@ -189,62 +194,72 @@ export function pushBuffer(buffer, problemId, success, timeUsed) {
 // --- EGD lookup -----------------------------------------------------------------
 // Public JSON, no key. Returns { egd_name, gor, country_code } or null on a network
 // error / non-Ok retcode (callers keep the last known value on a transient miss).
-export async function fetchEgdPlayer(pin) {
+// --- GoR refresh via client piggyback on /report --------------------------------
+// The Worker CANNOT fetch EGD (it's behind Cloudflare; a Worker→CF-zone subrequest
+// is blocked, HTTP 403 "error code: 1106" — the orange-to-orange restriction). GoR
+// is public (keyed on the EGD PIN, no user secret), so instead any ACTIVE client
+// fetches registered players' current GoR from EGD (CORS *) and posts it back on its
+// next /report. The report response advertises which PINs are still stale this week;
+// updates are accepted once per week per PIN (gor_updated_at IS the flag).
+
+const GOR_STALE_TTL_MS = 5 * 60 * 1000;   // in-memory cache so /report doesn't scan D1 each call
+const GOR_MIN = 100, GOR_MAX = 3000;      // plausibility bound on a submitted GoR
+
+// Per-isolate cache of the PINs whose GoR hasn't been refreshed this week.
+let _staleGor = { pins: [], at: 0, weekStart: '' };
+function invalidateStaleGor() { _staleGor.at = 0; }
+
+// PINs still needing a GoR refresh this week, cached in memory (keeps the high-volume
+// /report path off D1 — the scan reads 0 rows once everyone's fresh anyway).
+export async function getStaleGorPins(env) {
+    if (!env.DB) return [];
+    const now = Date.now();
+    const weekStart = weekStartIso(now);
+    if (_staleGor.weekStart === weekStart && (now - _staleGor.at) < GOR_STALE_TTL_MS) return _staleGor.pins;
     try {
-        const res = await fetch(
-            `https://www.europeangodatabase.eu/EGD/GetPlayerDataByPIN.php?pin=${encodeURIComponent(pin)}`);
-        if (!res || !res.ok) return null;
-        const d = await res.json();
-        if (!d || d.retcode !== 'Ok') return null;
-        const name = `${d.Name || ''} ${d.Last_Name || ''}`.trim();
-        const gor = Number(d.Gor);
-        return {
-            egd_name: name || null,
-            gor: Number.isFinite(gor) ? Math.round(gor) : null,
-            country_code: d.Country_Code || null,
-        };
-    } catch {
-        return null;
+        const res = await env.DB.prepare(
+            `SELECT egd_pin FROM leaderboard WHERE gor_updated_at IS NULL OR gor_updated_at < ?1`
+        ).bind(weekStart).all();
+        const pins = ((res && res.results) || []).map((r) => r.egd_pin).filter(Boolean);
+        _staleGor = { pins, at: now, weekStart };
+        return pins;
+    } catch (e) {
+        console.error('getStaleGorPins failed:', e);
+        return [];
     }
 }
 
-// Search EGD by name for the admin invite tool. One word -> searched as both last
-// name and first name (the first-name-only attempt is a no-op — EGD requires a
-// lastname — but the lastname search does the work); two words -> name+lastname in
-// BOTH orders so word order doesn't matter. Combined + de-duped by Pin_Player.
-// Mirrors generate_invite.py. Returns [{pin, name, country, rank, gor}].
-export async function searchEgdPlayers(query) {
-    const q = (query || '').trim();
-    if (!q) return [];
-    const tokens = q.split(/\s+/);
-    const paramSets = tokens.length <= 1
-        ? [{ lastname: q }, { name: q }]
-        : [{ name: tokens[0], lastname: tokens.slice(1).join(' ') },
-           { name: tokens.slice(1).join(' '), lastname: tokens[0] }];
-    const seen = new Map();
-    for (const params of paramSets) {
-        const usp = new URLSearchParams(params);
-        try {
-            const res = await fetch(`https://www.europeangodatabase.eu/EGD/GetPlayerDataByData.php?${usp}`);
-            if (!res || !res.ok) continue;
-            const d = await res.json();
-            if (!d || d.retcode !== 'Ok' || !Array.isArray(d.players)) continue;
-            for (const p of d.players) {
-                const pin = p.Pin_Player;
-                if (pin && !seen.has(pin)) {
-                    const gor = Number(p.Gor);
-                    seen.set(pin, {
-                        pin,
-                        name: `${p.Name || ''} ${p.Last_Name || ''}`.trim(),
-                        country: p.Country_Code || '',
-                        rank: p.Grade || '',
-                        gor: Number.isFinite(gor) ? Math.round(gor) : null,
-                    });
-                }
-            }
-        } catch { /* skip this query; a partial result is still useful */ }
+// Apply client-submitted GoR updates. Once-per-week + plausibility are enforced in
+// the WHERE clause, so a stale/duplicate/spoofed re-submit after the first is a
+// silent no-op. A spoof is self-correcting: next week an honest client overwrites it.
+export async function applyGorUpdates(env, updates) {
+    if (!env.DB || !Array.isArray(updates) || !updates.length) return;
+    const weekStart = weekStartIso(Date.now());
+    const nowIso = new Date().toISOString();
+    const stmts = [];
+    for (const u of updates.slice(0, 50)) {
+        const pin = String((u && u.pin) || '');
+        if (!/^\d+$/.test(pin)) continue;
+        const gor = Math.round(Number(u && u.gor));
+        if (!Number.isFinite(gor) || gor < GOR_MIN || gor > GOR_MAX) continue;
+        const name = (typeof u.name === 'string' ? u.name.trim().slice(0, 100) : '');
+        const cc = (typeof u.country === 'string' ? u.country : '').slice(0, 2).toUpperCase();
+        stmts.push(env.DB.prepare(
+            `UPDATE leaderboard
+                SET gor = ?2, gor_rank = ?3,
+                    egd_name = COALESCE(NULLIF(?4, ''), egd_name),
+                    country_code = COALESCE(NULLIF(?5, ''), country_code),
+                    gor_updated_at = ?6
+              WHERE egd_pin = ?1 AND (gor_updated_at IS NULL OR gor_updated_at < ?7)`
+        ).bind(pin, gor, gorToRankScalar(gor), name, cc, nowIso, weekStart));
     }
-    return [...seen.values()];
+    if (!stmts.length) return;
+    try {
+        await env.DB.batch(stmts);
+        invalidateStaleGor();
+    } catch (e) {
+        console.error('applyGorUpdates failed:', e);
+    }
 }
 
 // --- seed a row's buffer + rank from tsumego_reports (the source of truth) -------
@@ -298,20 +313,8 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
            wk.week_id, wk.this_week_max, wk.prev_week_max, wk.prev_week_gor_rank, nowIso).run();
 }
 
-// --- cron: weekly GoR refresh (leaves prev_week_gor_rank frozen) -----------------
-export async function refreshGorForAll(env) {
-    if (!env.DB) return;
-    const res = await env.DB.prepare(`SELECT user_id, egd_pin FROM leaderboard`).all();
-    for (const row of ((res && res.results) || [])) {
-        const p = await fetchEgdPlayer(row.egd_pin);
-        if (!p || p.gor === null) continue;   // keep last known on a transient miss
-        await env.DB.prepare(
-            `UPDATE leaderboard SET egd_name = ?2, country_code = ?3, gor = ?4,
-                gor_rank = ?5, gor_updated_at = ?6 WHERE user_id = ?1`
-        ).bind(row.user_id, p.egd_name, p.country_code, p.gor,
-               gorToRankScalar(p.gor), new Date().toISOString()).run();
-    }
-}
+// (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
+// see the GoR-piggyback note above — so GoR is refreshed by active clients now.)
 
 // --- cron: rebuild buffers from tsumego_reports (heal drift + re-rate refresh) ---
 // Preserves week history (week_id / prev_week_max / prev_week_gor_rank); only the

@@ -8,6 +8,9 @@ import { TOTAL_RANKS } from './constants.js';
 import { calculateAndStoreStatsResults, recallImpactWithRefine } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, checkSyncSignal } from './account-sync.js';
+// EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale
+// PINs, we fetch their GoR from EGD (the Worker can't) and send it on the next report.
+import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 // The live rank is a linear-information window 4PL MLE over the recent first-time
 // history; the estimator lives in rank-decomposition.js alongside the per-attempt
 // slope/floor conversion it shares with the skill chart.
@@ -23,6 +26,9 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     if (state.currentProblem?.linked) return;
     try {
         const problemId = tsumegoIdOf(state.currentProblem.filename);
+        // Attach any GoR values fetched from EGD after a previous report advertised
+        // stale PINs (leaderboard refresh; the Worker can't fetch EGD itself).
+        const gorUpdates = takePendingGorUpdates();
         const res = await fetch('/report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -35,6 +41,7 @@ export async function sendReport({ success, move = null, timeUsed = null, review
                 timeUsed,
                 reviewTime,
                 isRepeat,
+                ...(gorUpdates ? { gorUpdates } : {}),
             })
         });
         const serverVersion = res.headers.get('X-App-Version');
@@ -53,6 +60,9 @@ export async function sendReport({ success, move = null, timeUsed = null, review
                 recordReportAck(problemId, body.createdAt, body.serverId);
             }
             if (body) checkSyncSignal(body.userSeq);
+            // Server advertised registered PINs whose GoR is stale this week — fetch
+            // them from EGD now; they ride the next report back (see gor-refresh.js).
+            if (body && Array.isArray(body.refreshPins)) requestGorRefresh(body.refreshPins);
         }
     } catch (error) {
         console.error('Failed to send report:', error);

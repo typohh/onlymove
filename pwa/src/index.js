@@ -11,8 +11,8 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
-import { handleAdminPage, handleAdminSearch, handleAdminCreate } from './handlers/admin-invite.js';
-import { refreshGorForAll, reconcileBuffers } from './leaderboard.js';
+import { handleAdminPage, handleAdminCheck, handleAdminCreate } from './handlers/admin-invite.js';
+import { reconcileBuffers } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
 // flood is dropped by a cheap Worker invocation instead of spending D1 quota.
@@ -30,9 +30,9 @@ const WRITE_ROUTES = [
   { path: '/rank-survey', method: 'POST', limiter: 'RL_WRITE', handler: handleRankSurvey },
   { path: '/share-event', method: 'POST', limiter: 'RL_WRITE', handler: handleShareEvent },
   { path: '/register', method: 'POST', limiter: 'RL_WRITE', handler: handleRegister },
-  // Admin invite tool (account-code gated in the handler). Rate-limited too, which
-  // bounds any code-guessing on top of the account-code check.
-  { path: '/admin/egd-search', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminSearch },
+  // Admin invite tool (account-code gated in the handler; EGD search is client-side).
+  // Rate-limited too, which bounds any code-guessing on top of the account-code check.
+  { path: '/admin/check', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCheck },
   { path: '/admin/create-invite', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCreate },
 ];
 
@@ -103,12 +103,11 @@ export default {
     ctx.waitUntil(runRecallNotifications(env));
     ctx.waitUntil(maybeComputeServerStats(env));
     ctx.waitUntil(pruneHistoryRefreshLog(env));
-    // EGD leaderboard: refresh each registered user's GoR from EGD and reconcile
-    // buffers from tsumego_reports. Weekly (Monday 00:00 UTC — the week boundary),
-    // since GoR only moves after tournaments and the reconcile just heals drift.
+    // EGD leaderboard: reconcile buffers from tsumego_reports (heals drift + freezes
+    // last week's GoR at the week boundary). Weekly (Monday 00:00 UTC). GoR itself is
+    // refreshed by active clients piggybacking on /report (the Worker can't reach EGD).
     const now = new Date();
     if (now.getUTCDay() === 1 && now.getUTCHours() === 0) {
-      ctx.waitUntil(refreshGorForAll(env));
       ctx.waitUntil(reconcileBuffers(env));
     }
   },
