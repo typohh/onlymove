@@ -1,9 +1,10 @@
 // js/chart-svg.js
 //
-// Shared SVG/DOM chart primitives for the detailed-stats charts (stats-ui.js).
-// The three chart builders all create raw SVG nodes, a legend strip, and a
-// y-tick overlap-hiding observer; these helpers provide the shared
-// createElementNS, legend, and tick-visibility building blocks.
+// Shared SVG/DOM chart primitives for the detailed-stats charts
+// (stats-rank-pane.js, stats-activity-chart.js, stats-time-chart.js). The three
+// chart builders all create raw SVG nodes, the same chart frame (container +
+// title + plot row + y-axis), a legend strip, and a y-tick overlap-hiding
+// observer; these helpers provide the shared building blocks.
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Create an SVG element, applying `attrs` via setAttribute. */
@@ -18,13 +19,98 @@ export function makeChartSvg(W, H) {
     return svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
 }
 
-/** A faint horizontal gridline at `y` spanning the full chart width. */
-export function hGridLine(y, W) {
+/** A faint gridline from (x1,y1) to (x2,y2) — horizontal or vertical. */
+export function gridLine(x1, y1, x2, y2) {
     return svgEl('line', {
-        x1: 0, x2: W, y1: y, y2: y,
+        x1, x2, y1, y2,
         stroke: 'rgba(128,128,128,0.35)', 'stroke-width': '0.5',
         'vector-effect': 'non-scaling-stroke',
     });
+}
+
+/** A faint horizontal gridline at `y` spanning the full chart width. */
+export function hGridLine(y, W) {
+    return gridLine(0, y, W, y);
+}
+
+// Pick a viewBox height (for a fixed width W) so the chart's aspect ratio
+// approximates the modal's visible area. The SVG renders at width:100% /
+// height:auto with uniform scaling, so a W×H viewBox paints at
+// renderedW × renderedW·(H/W); matching H/W to (visible height)/(width) makes
+// the whole chart block (title + plot + legend) fit inside the scrollable
+// 70vh body without being taller than the viewport — visible whole on scroll.
+export function chartViewBoxHeight(W) {
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const bodyVisibleH = 0.70 * vh;            // .stats-modal-body max-height: 70vh
+    const chrome = 120;                        // title + legend + x-axis + margins (px)
+    const plotH = Math.max(150, bodyVisibleH - chrome);
+    const cardPad = 0.06 * Math.min(vw, vh);   // .stats-modal-card padding: 3vmin each side
+    const yAxisCol = 42;                       // y-tick label column
+    const plotW = Math.max(220, 0.9 * vw - cardPad - yAxisCol);
+    // Clamp to a sane band: never taller than square, never an extreme letterbox.
+    const ratio = Math.max(0.42, Math.min(plotH / plotW, 1.0));
+    return Math.round(W * ratio);
+}
+
+/**
+ * The common chart scaffold: a `.stats-chart` container opening with a
+ * `.stats-chart-title`. `titleContent` is a string, or an array of nodes for a
+ * composite title (the Rank chart embeds its server <select> in the title).
+ */
+export function makeChartFrame(titleContent) {
+    const container = document.createElement('div');
+    container.className = 'stats-chart';
+    const title = document.createElement('div');
+    title.className = 'stats-chart-title';
+    if (Array.isArray(titleContent)) title.append(...titleContent);
+    else title.textContent = titleContent;
+    container.append(title);
+    return container;
+}
+
+/**
+ * A `.stats-chart-yaxis` column: a `.y-spacer` sizing element (give it the
+ * widest expected label) followed by one absolutely-positioned `.y-tick` per
+ * `{ top, text }` entry (`top` in percent of the plot height). Returns the
+ * axis element plus the tick elements in input order, so a caller can pair
+ * them with grid lines (see hideOverlappingYTicks' `rows` mode).
+ */
+export function buildYAxis(spacerText, ticks) {
+    const yaxis = document.createElement('div');
+    yaxis.className = 'stats-chart-yaxis';
+    const spacer = document.createElement('span');
+    spacer.className = 'y-spacer';
+    spacer.textContent = spacerText;
+    yaxis.append(spacer);
+    const tickEls = ticks.map(t => {
+        const tick = document.createElement('div');
+        tick.className = 'y-tick';
+        tick.style.top = `${t.top}%`;
+        tick.textContent = t.text;
+        yaxis.append(tick);
+        return tick;
+    });
+    return { yaxis, tickEls };
+}
+
+/**
+ * A `.stats-chart-plot-row`: the y-axis and the svg (wrapped in a
+ * `.stats-chart-svg-wrap`) side by side in a `.stats-chart-plot-main`, with an
+ * optional x-axis element below.
+ */
+export function buildPlotRow(yaxis, svg, xaxis = null) {
+    const plotRow = document.createElement('div');
+    plotRow.className = 'stats-chart-plot-row';
+    const svgWrap = document.createElement('div');
+    svgWrap.className = 'stats-chart-svg-wrap';
+    svgWrap.append(svg);
+    const plotMain = document.createElement('div');
+    plotMain.className = 'stats-chart-plot-main';
+    plotMain.append(yaxis, svgWrap);
+    plotRow.append(plotMain);
+    if (xaxis) plotRow.append(xaxis);
+    return plotRow;
 }
 
 /**
@@ -46,22 +132,41 @@ export function buildLegend(items) {
     return legend;
 }
 
+// The y-tick "nice step" ladder for time-valued (seconds) axes: every step is
+// a whole minute or a round number of seconds. `niceStep(span, target)` picks
+// the smallest step that fits ~`target` ticks across `span`.
+export const NICE_TIME_STEPS = [10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 3600, 7200];
+export function niceStep(span, target, steps = NICE_TIME_STEPS) {
+    return steps.find(s => s >= span / target) ?? steps[steps.length - 1];
+}
+
 /**
- * Greedily hide `.y-tick` labels in `yaxis` that would physically overlap, top
- * to bottom: a tick is shown only if it clears one line-height from the last
- * shown one. No-op until the SVG has a measured height.
+ * Greedily hide y-axis tick labels that would physically overlap. No-op until
+ * the SVG has a measured height.
+ *
+ * Default mode (no `rows`): the `.y-tick` labels in `yaxis`, top to bottom — a
+ * tick is shown only if it clears one line-height from every shown one.
+ *
+ * `rows` mode ([{ labelEl, lineEl, pri }]): ticks are walked by tier priority
+ * first (pri 0 = coarse/preferred, then finer tiers), then by position, and a
+ * kept label toggles its paired grid line with it — so the coarse ticks always
+ * win and the finer ones fill the gaps where there's room, never overlapping.
  */
-export function hideOverlappingYTicks(svg, yaxis) {
+export function hideOverlappingYTicks(svg, yaxis, rows = null) {
     const h = svg.getBoundingClientRect().height;
     if (h === 0) return;
-    const tickEls = [...yaxis.querySelectorAll('.y-tick')]
-        .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
     const minSepPx = parseFloat(getComputedStyle(yaxis).lineHeight) || 18;
-    let lastShownPx = -Infinity;
-    for (const el of tickEls) {
-        const topPx = (parseFloat(el.style.top) / 100) * h;
-        if (topPx - lastShownPx >= minSepPx) { el.style.visibility = ''; lastShownPx = topPx; }
-        else el.style.visibility = 'hidden';
+    const entries = (rows
+        ? rows.map(r => ({ r, px: (parseFloat(r.labelEl.style.top) / 100) * h }))
+        : [...yaxis.querySelectorAll('.y-tick')]
+            .map(el => ({ r: { labelEl: el, lineEl: null, pri: 0 }, px: (parseFloat(el.style.top) / 100) * h }))
+    ).sort((a, b) => ((a.r.pri || 0) - (b.r.pri || 0)) || (a.px - b.px));
+    const kept = [];
+    for (const { r, px } of entries) {
+        const show = kept.every(p => Math.abs(p - px) >= minSepPx);
+        r.labelEl.style.visibility = show ? '' : 'hidden';
+        if (r.lineEl) r.lineEl.style.display = show ? '' : 'none';
+        if (show) kept.push(px);
     }
 }
 

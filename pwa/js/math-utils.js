@@ -1,8 +1,9 @@
 // js/math-utils.js
 //
 // Tiny shared numeric helpers used across the client models
-// (model.js, weakness.js, rank-decomposition.js, game-logic.js, stats-ui.js,
-// bivariate-normal.js), kept in one place so the definitions can't drift.
+// (model.js, weakness.js, rank-decomposition.js, game-logic.js,
+// stats-compute.js, the stats chart modules, bivariate-normal.js), kept in one
+// place so the definitions can't drift.
 
 // Numerically stable logistic. Avoids Math.exp overflow on large-magnitude z
 // (the naive 1/(1+exp(-z)) saturates fine in JS but this form is exact on both
@@ -27,6 +28,32 @@ export function normCdf(z) {
 // (correct-move or picked) is stored.
 export function quantizeEmbedding(arr) {
     return arr.map(v => Math.round(v * 100) / 100);
+}
+
+// The (untruncated) Gaussian kernel weight exp(-0.5·x²), shared by the stats
+// smoothers (stats-compute.js, rank-decomposition.js). rank-decomposition keeps
+// its own named TRUNCATED variant (exact 0 past KERNEL_TRUNC_SIGMA) built on
+// this one.
+export function gaussianWeight(x) {
+    return Math.exp(-0.5 * x * x);
+}
+
+// First index in ascending `arr` whose value is >= `target` (binary search).
+// `valueOf` extracts the ordering key — identity for plain number arrays;
+// rank-decomposition passes `a => a.t` for its {t, …} attempt rows.
+export function lowerBound(arr, target, valueOf = (x) => x) {
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (valueOf(arr[m]) < target) lo = m + 1; else hi = m; }
+    return lo;
+}
+
+// Plain linear-interpolation quantile of an ASCENDING-sorted numeric array
+// (unweighted counterpart of weightedQuantile below).
+export function quantileSorted(sorted, p) {
+    if (sorted.length === 1) return sorted[0];
+    const idx = p * (sorted.length - 1);
+    const lo = Math.floor(idx), hi = Math.ceil(idx);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
 // Kernel-weighted empirical quantile over a window. `pairs` is ascending by

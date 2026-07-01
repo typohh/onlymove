@@ -43,7 +43,7 @@ export function loadPopulationConstants() {
 // (fit jointly with the rating→rank curve) and read through into the population
 // constants; the per-server couplings absorb the rank-correlated part of solve time on
 // their own, so there is no rank-residualization line. Shared
-// by the Rank-tab chart/summary (stats-ui.js) and the rank-translation modal
+// by the Rank-tab chart/summary (stats-rank-pane.js) and the rank-translation modal
 // (rank-translation.js) so the median feature is defined in exactly ONE place.
 
 // The median feature is a POSITIONAL-WEIGHTED median over the last-500 rank window

@@ -1,14 +1,49 @@
 // js/stats-compute.js
 //
-// Pure-numeric helpers consumed by the detailed-stats UI (stats-ui.js) — no DOM,
-// no rendering. Split out of stats-ui so the UI module is rendering-only and the
-// numeric work (community-bucket mirroring, the time-adjust smoother, the
-// weakness-example selector) sits with the rest of the model math.
+// Pure-numeric helpers consumed by the detailed-stats pane modules
+// (stats-community.js, stats-rank-pane.js, stats-time-chart.js,
+// stats-weaknesses.js) — no DOM, no rendering. Split out of the stats UI so
+// those modules are rendering-only and the numeric work (community-bucket
+// mirroring, the kernel smoothers, the weakness-example selector) sits with
+// the rest of the model math.
 
 import { TOTAL_RANKS } from './constants.js';
 import { rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 import { TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
-import { normCdf, weightedQuantile } from './math-utils.js';
+import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
+
+// Display bins in SECONDS over the server's fine-bucket histogram (the
+// Community pane's solving/review-time bar lists). Solving time is log-normal
+// (the hump sits at ~5–20s), so the low end is split finely and the long tail
+// coarsely — this reveals the bell instead of collapsing it into one tall
+// "0–10s" bar. Every edge is a multiple of the server's bucket width, so a
+// bucket maps cleanly to exactly one display bin.
+export const TIME_BINS = [
+    { lo: 0, hi: 5, label: '0–5s' },
+    { lo: 5, hi: 10, label: '5–10s' },
+    { lo: 10, hi: 15, label: '10–15s' },
+    { lo: 15, hi: 20, label: '15–20s' },
+    { lo: 20, hi: 30, label: '20–30s' },
+    { lo: 30, hi: 45, label: '30–45s' },
+    { lo: 45, hi: 60, label: '45–60s' },
+    { lo: 60, hi: 90, label: '1–1.5m' },
+    { lo: 90, hi: 120, label: '1.5–2m' },
+    { lo: 120, hi: 180, label: '2–3m' },
+    { lo: 180, hi: 300, label: '3–5m' },
+    { lo: 300, hi: Infinity, label: '5m+' },
+];
+
+// Fold a server fine-bucket histogram ([{bucket, n}] rows, bucket width
+// `bucketSec` seconds) into the TIME_BINS display bins.
+export function binHist(hist, bucketSec) {
+    const rows = TIME_BINS.map(b => ({ label: b.label, value: 0 }));
+    for (const r of (hist || [])) {
+        const sec = r.bucket * bucketSec;   // lower edge of the server bucket
+        const i = TIME_BINS.findIndex(b => sec >= b.lo && sec < b.hi);
+        if (i >= 0) rows[i].value += r.n;
+    }
+    return rows;
+}
 
 // Locate the current user within each Community distribution, reproducing the
 // Worker's per-user bucketing (computeServerStats in src/server-stats.js) on the
@@ -29,7 +64,7 @@ export function computeUserCommunityBuckets(history, timeBins) {
         const m = s.length >> 1;
         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     };
-    // timeBins are in SECONDS now (see TIME_BINS in buildServerStatsPane); the
+    // timeBins are in SECONDS now (see TIME_BINS above); the
     // edges align to the server's bucket width, so binning the median directly
     // lands in the same bin the server would have bucketed it into.
     const binSeconds = (ms) => timeBins.findIndex(b => (ms / 1000) >= b.lo && (ms / 1000) < b.hi);
@@ -133,7 +168,7 @@ export function makeMedianSolveMinutesAt(history) {
         for (let i = 0; i < pts.length; i++) {
             const d = (t - ts[i]) / TIME_ADJUST_TAU_MS;
             if (Math.abs(d) > 4) continue;
-            const w = Math.exp(-0.5 * d * d);
+            const w = gaussianWeight(d);
             W += w; sumW2 += w * w;
             pairs.push({ v: pts[i].v, w });
         }
@@ -145,6 +180,64 @@ export function makeMedianSolveMinutesAt(history) {
         const wl = ess / (ess + TIME_ADJUST_SHRINK_ESS);
         return Math.pow(10, wl * localLog + (1 - wl) * globalLog);
     };
+}
+
+// Kernel-weighted median line + a weighted-quantile spread band on a regular
+// t-grid (the Time chart's solving/review smoother, buildTimeUsageChart).
+// `pts` is [{t, v}] ascending by t; the grid spans [t0, t0 + tSpan] at
+// `gridPoints` points with kernel bandwidth `bw`. Returns an array of
+// {t, mid, lo, hi}, with null at grid points with too little nearby data
+// (those break the line), or null outright when the series is too short.
+//
+// This shares the gaussian-kernel + effective-sample-size + weightedQuantile
+// shape with makeMedianSolveMinutesAt above, but the two DELIBERATELY differ
+// and are kept as separate functions rather than one parameterized smoother:
+//   - inclusion: the chart's series is broader (repeats included, no AFK cap),
+//     while the time-adjust smoother mirrors fit_population_constants'
+//     capped-novel rule;
+//   - window: ±3.5·bw via binary search on a caller-chosen (span-relative)
+//     bandwidth, vs the fixed 30-day tau truncated at ±4;
+//   - thin data: the ESS gate yields a GAP (null grid point), vs an
+//     empirical-Bayes shrink toward the whole-history median (always a value);
+//   - output: three raw quantiles (25/50/75%) in value space, vs a single
+//     log-space-shrunk median scalar.
+export function kernelQuantileGrid(pts, { t0, tSpan, bw, gridPoints, essMin }) {
+    if (pts.length < 4) return null;
+    const ts = pts.map(p => p.t);
+    const grid = new Array(gridPoints);
+    for (let g = 0; g < gridPoints; g++) {
+        const t = t0 + tSpan * (g / (gridPoints - 1));
+        const i0 = lowerBound(ts, t - 3.5 * bw);
+        const i1 = lowerBound(ts, t + 3.5 * bw);
+        // Sum over EVERY sample in the window (no thinning): both the centre
+        // line and the band are kernel-weighted quantiles of the same window.
+        // Using the full window keeps them smooth functions of t — strided
+        // subsampling here would reintroduce a sawtooth.
+        let W = 0, sumW2 = 0;
+        const pairs = [];
+        for (let i = i0; i < i1; i++) {
+            const d = (t - ts[i]) / bw;
+            const w = gaussianWeight(d);
+            W += w; sumW2 += w * w;
+            pairs.push({ v: pts[i].v, w });
+        }
+        const ess = W > 0 ? (W * W) / sumW2 : 0; // effective sample size near t
+        if (ess < essMin) { grid[g] = null; continue; }
+        pairs.sort((a, b) => a.v - b.v);
+        // Centre line = kernel-weighted MEDIAN (not the mean): time usage is
+        // heavily right-skewed (idle-tab outliers), so the mean is dragged up
+        // by the tail and isn't a typical day. The median is, and it always
+        // sits inside the band. Band = 25%/75% edges = the middle 50% of
+        // attempts (the interquartile range, read off the EMPIRICAL skewed
+        // distribution — no normal assumption).
+        grid[g] = {
+            t,
+            mid: weightedQuantile(pairs, W, 0.5),
+            lo: weightedQuantile(pairs, W, 0.25),
+            hi: weightedQuantile(pairs, W, 0.75),
+        };
+    }
+    return grid;
 }
 
 // Picks wrong attempts whose embedding signature aligns with the (k, quadrant)

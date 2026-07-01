@@ -54,7 +54,7 @@ import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
 import { estimateWindowRankFromFlat, applyM, flattenAttempt, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
-import { sigmoid } from './math-utils.js';
+import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
@@ -189,16 +189,11 @@ export function ratingRankCurveVersion(size) {
 
 // ---------------------------------------------------------------------------
 
+// Truncated variant of math-utils' gaussianWeight: exactly 0 past
+// KERNEL_TRUNC_SIGMA so the kernel windows stay finite.
 function gaussianWeight(dtOverTau) {
     if (Math.abs(dtOverTau) > KERNEL_TRUNC_SIGMA) return 0;
-    return Math.exp(-0.5 * dtOverTau * dtOverTau);
-}
-
-
-function lowerBound(attempts, lo) {
-    let a = 0, b = attempts.length;
-    while (a < b) { const m = (a + b) >> 1; if (attempts[m].t < lo) a = m + 1; else b = m; }
-    return a;
+    return gaussianWeightUntruncated(dtOverTau);
 }
 
 // Weak prior on the local time-slope used by the LOCAL-LINEAR wide kernel (in
@@ -247,8 +242,8 @@ const SLOPE_PRIOR_INFO = 1 / (SLOPE_PRIOR_SD * SLOPE_PRIOR_SD);
 //     local-constant), so the lag cancels. `drift` (b) is returned for free.
 function poolLogistic(attempts, t0, tau, linear = false) {
     const win = KERNEL_TRUNC_SIGMA * tau;
-    const lo = lowerBound(attempts, t0 - win);
-    const hi = lowerBound(attempts, t0 + win + 1);
+    const lo = lowerBound(attempts, t0 - win, a => a.t);
+    const hi = lowerBound(attempts, t0 + win + 1, a => a.t);
     if (hi <= lo) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
 
     let sumW = 0, sumW2 = 0, sumWx = 0;
@@ -495,7 +490,7 @@ function buildResidualTrack(attempts, wideGrid) {
         for (let j = 0; j < resid.length; j++) {
             const dd = (resid[i].t - resid[j].t) / SESSION_CORR_MS;
             if (Math.abs(dd) > KERNEL_TRUNC_SIGMA) continue;
-            m += Math.exp(-0.5 * dd * dd);
+            m += gaussianWeightUntruncated(dd);
         }
         resid[i].m = m;
     }
