@@ -208,6 +208,45 @@ export async function fetchEgdPlayer(pin) {
     }
 }
 
+// Search EGD by name for the admin invite tool. One word -> searched as both last
+// name and first name (the first-name-only attempt is a no-op — EGD requires a
+// lastname — but the lastname search does the work); two words -> name+lastname in
+// BOTH orders so word order doesn't matter. Combined + de-duped by Pin_Player.
+// Mirrors generate_invite.py. Returns [{pin, name, country, rank, gor}].
+export async function searchEgdPlayers(query) {
+    const q = (query || '').trim();
+    if (!q) return [];
+    const tokens = q.split(/\s+/);
+    const paramSets = tokens.length <= 1
+        ? [{ lastname: q }, { name: q }]
+        : [{ name: tokens[0], lastname: tokens.slice(1).join(' ') },
+           { name: tokens.slice(1).join(' '), lastname: tokens[0] }];
+    const seen = new Map();
+    for (const params of paramSets) {
+        const usp = new URLSearchParams(params);
+        try {
+            const res = await fetch(`https://www.europeangodatabase.eu/EGD/GetPlayerDataByData.php?${usp}`);
+            if (!res || !res.ok) continue;
+            const d = await res.json();
+            if (!d || d.retcode !== 'Ok' || !Array.isArray(d.players)) continue;
+            for (const p of d.players) {
+                const pin = p.Pin_Player;
+                if (pin && !seen.has(pin)) {
+                    const gor = Number(p.Gor);
+                    seen.set(pin, {
+                        pin,
+                        name: `${p.Name || ''} ${p.Last_Name || ''}`.trim(),
+                        country: p.Country_Code || '',
+                        rank: p.Grade || '',
+                        gor: Number.isFinite(gor) ? Math.round(gor) : null,
+                    });
+                }
+            }
+        } catch { /* skip this query; a partial result is still useful */ }
+    }
+    return [...seen.values()];
+}
+
 // --- seed a row's buffer + rank from tsumego_reports (the source of truth) -------
 // The user's last <= BUFFER_CAP novel attempts, newest first, + the derived rank.
 // Used by /register (seed an established player) and the cron reconcile.

@@ -2,6 +2,9 @@ node_modules/
 dist/
 .wrangler/
 src/version.js
+# Local Worker secrets/vars for `wrangler dev` (e.g. ADMIN_USER_IDS). Never commit —
+# production values live as `wrangler secret put`, not in the repo.
+.dev.vars
 # Local-only scratch. out/corners/ holds the full-res Gemini source images for
 # the corner art (~27 MB; the derived, production-ready alpha masks in
 # pwa/corners/ ARE tracked — these originals are kept for re-tuning the mask

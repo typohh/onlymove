@@ -11,6 +11,7 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
+import { handleAdminPage, handleAdminSearch, handleAdminCreate } from './handlers/admin-invite.js';
 import { refreshGorForAll, reconcileBuffers } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -29,6 +30,10 @@ const WRITE_ROUTES = [
   { path: '/rank-survey', method: 'POST', limiter: 'RL_WRITE', handler: handleRankSurvey },
   { path: '/share-event', method: 'POST', limiter: 'RL_WRITE', handler: handleShareEvent },
   { path: '/register', method: 'POST', limiter: 'RL_WRITE', handler: handleRegister },
+  // Admin invite tool (account-code gated in the handler). Rate-limited too, which
+  // bounds any code-guessing on top of the account-code check.
+  { path: '/admin/egd-search', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminSearch },
+  { path: '/admin/create-invite', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCreate },
 ];
 
 export default {
@@ -63,6 +68,11 @@ export default {
     // itself is a navigation and falls through to the SPA, which reads ?t= and POSTs.)
     if (url.pathname === '/invite' && request.method === 'GET') {
       return handleInvitePreview(request, env);
+    }
+    // Admin invite generator page (before the SPA fallback — it returns HTML). Inert
+    // without a valid account code, which the POST endpoints verify.
+    if (url.pathname === '/admin/invite' && request.method === 'GET') {
+      return handleAdminPage(env);
     }
 
     // SPA fallback for navigations only. Static assets are served before
