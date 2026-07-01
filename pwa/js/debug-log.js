@@ -262,9 +262,24 @@ function showDialog() {
     inputRow.appendChild(input);
     inputRow.appendChild(runBtn);
 
+    // Admin tools link (invite generator). Opens in a new tab so the app/debug
+    // state isn't lost; the page is inert without a valid admin account code.
+    const footer = document.createElement('div');
+    Object.assign(footer.style, {
+        marginTop: '10px', flexShrink: '0', fontSize: '12px', textAlign: 'right',
+    });
+    const adminLink = document.createElement('a');
+    adminLink.textContent = 'Invite admin →';
+    adminLink.href = '/admin/invite';
+    adminLink.target = '_blank';
+    adminLink.rel = 'noopener';
+    Object.assign(adminLink.style, { color: '#8ab4f8', textDecoration: 'underline' });
+    footer.appendChild(adminLink);
+
     overlay.appendChild(header);
     overlay.appendChild(body);
     overlay.appendChild(inputRow);
+    overlay.appendChild(footer);
     document.body.appendChild(overlay);
 }
 
