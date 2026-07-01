@@ -633,9 +633,7 @@ function buildRankSummaryText(history, decomp) {
     // long-term-trend number and a session-to-session swing number that can't
     // be read off the single-line smoother in the chart. See
     // rank-decomposition.js for the model and the backfitting approach. `decomp`
-    // is normally passed in (computed once for the whole Rank pane); fall back to
-    // computing it for any standalone caller.
-    if (decomp === undefined) decomp = computeRankDecomposition(history);
+    // is computed once for the whole Rank pane and passed in.
     if (decomp) {
         const { summary } = decomp;
         // The current rank line (raw onlymove rank or the selected server's
@@ -821,9 +819,8 @@ function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
-    // Passed in by the Rank pane (computed once for both chart + summary); fall
-    // back to computing for any standalone caller.
-    if (decomp === undefined) decomp = computeRankDecomposition(history);
+    // `decomp` is passed in by the Rank pane (computed once for both chart +
+    // summary).
     const GRID_POINTS = 300;
     const Z = 1.96;
     // Half-widths in rank space: inner band = measurement uncertainty (how well

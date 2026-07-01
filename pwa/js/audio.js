@@ -15,7 +15,7 @@ const _playSound = (audioObject) => {
     }
 }
 
-export function initAudio() {
+function initAudio() {
     try {
         stoneSound = new Audio('sound/stone.wav');
         stoneSound.preload = 'auto';

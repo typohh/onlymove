@@ -37,11 +37,9 @@ import { getRecallCandidates } from './model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule } from './notifications.js';
 import { recordShareEvent } from './user-stats.js';
-import { loadSgf, redraw, initializeBoard } from './board.js';
+import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
-
-import { initAudio } from './audio.js';
 
 /**
  * Reads `/9` or `/13` from the pathname. Returns null if the path is anything
@@ -75,7 +73,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, findZipIdForTsumegoId, loadZipMetadata, loadZipProblems, resumeCurrentProblem } from './problem-loader.js';
+import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem } from './problem-loader.js';
 import { backfillMissingEmbeddings } from './backfill.js';
 import { loadRatingRankMap } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';

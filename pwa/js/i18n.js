@@ -32,9 +32,7 @@ const localization = {
     iWontRushIt: '我保证不再仓促行事！',
     rankUpTo: '升至{rank}',
     rankDownTo: '降至{rank}',
-    installPrompt: '安装为应用以获得更好的体验！',
     install: '安装',
-    installed: '已安装',
     notify: '提醒',
     reminders: '已提醒',
     remindersBlocked: '已封禁',
@@ -56,7 +54,6 @@ const localization = {
     statsOldFailures: '另外还有 {count_other} 个过去的失败偶尔会重复。',
     statsNovelProblems: '您迄今为止尝试了 {count} 个独特的问题。',
     statsIgnoredProblems: "您已忽略{count_ignored}个问题，另有{count_slipped}个问题因不规律的练习而被放弃。",
-    statsModelCoefficients: '逻辑回归模型系数：',
     statsIssuesHeading: '可能的问题',
     statsIssuesNotEnough: '（数据尚不足）',
     statsIssuesNoneAbove: '（暂无置信度高于 {percent}% 的问题）',
@@ -132,7 +129,6 @@ const localization = {
     accountInvalid: '账户代码无效',
     accountNotFound: '未找到使用此代码的账户',
     rankSurveyTitle: '您目前活跃的段位有哪些？',
-    rankSurveyHint: '在您下棋的任何服务器或组织中选择您当前的段位。可以全部留空。',
     rankSurveyNone: '无',
     rankSurveySubmit: '提交',
     rankSurveyDismiss: '稍后再说'
@@ -166,9 +162,7 @@ const localization = {
     iWontRushIt: '急がないことを約束します！',
     rankUpTo: '{rank}に昇段',
     rankDownTo: '{rank}に降段',
-    installPrompt: 'アプリとしてインストールして、より良い体験を！',
     install: 'インストール',
-    installed: 'インストール済み',
     notify: '通知',
     reminders: '通知中',
     remindersBlocked: 'ブロック中',
@@ -190,7 +184,6 @@ const localization = {
     statsOldFailures: 'さらに {count_other} 件の過去の失敗が時折繰り返されます。',
     statsNovelProblems: 'これまでに {count} 個のユニークな問題を試しました。',
     statsIgnoredProblems: "あなたは{count_ignored}個の問題を無視し、不規則な練習のためにさらに{count_slipped}個が放棄されました。",
-    statsModelCoefficients: 'ロジットモデル係数：',
     statsIssuesHeading: '考えられる弱点',
     statsIssuesNotEnough: '（データがまだ足りません）',
     statsIssuesNoneAbove: '（信頼度 {percent}% を超える項目はまだありません）',
@@ -266,7 +259,6 @@ const localization = {
     accountInvalid: 'アカウントコードが無効です',
     accountNotFound: 'このコードのアカウントは見つかりませんでした',
     rankSurveyTitle: '現在の棋力（段位・級位）を教えてください（複数可）',
-    rankSurveyHint: '対局している各サーバーや団体での現在の段位／級位を選択してください。空欄のままでも構いません。',
     rankSurveyNone: 'なし',
     rankSurveySubmit: '送信',
     rankSurveyDismiss: '後で'
@@ -300,9 +292,7 @@ const localization = {
     iWontRushIt: '서두르지 않겠다고 약속합니다!',
     rankUpTo: '{rank}으로 승급',
     rankDownTo: '{rank}으로 강등',
-    installPrompt: '앱으로 설치하여 더 나은 경험을!',
     install: '설치',
-    installed: '설치됨',
     notify: '알림',
     reminders: '알림 켜짐',
     remindersBlocked: '차단됨',
@@ -324,7 +314,6 @@ const localization = {
     statsOldFailures: '추가로 {count_other}개의 과거 실패가 때때로 반복됩니다.',
     statsNovelProblems: '지금까지 {count}개의 고유한 문제를 시도했습니다.',
     statsIgnoredProblems: "당신은 {count_ignored}개의 문제를 무시했으며, 불규칙한 연습으로 인해 {count_slipped}개의 문제가 포기되었습니다.",
-    statsModelCoefficients: '로짓 모델 계수:',
     statsIssuesHeading: '예상되는 약점',
     statsIssuesNotEnough: '(아직 데이터가 부족합니다)',
     statsIssuesNoneAbove: '(아직 신뢰도 {percent}% 이상인 항목이 없습니다)',
@@ -400,7 +389,6 @@ const localization = {
     accountInvalid: '잘못된 계정 코드입니다',
     accountNotFound: '이 코드의 계정을 찾을 수 없습니다',
     rankSurveyTitle: '현재 활동 중인 급수/단위를 모두 알려주세요',
-    rankSurveyHint: '두는 서버나 단체별로 현재 급수/단위를 선택해 주세요. 모두 비워두어도 됩니다.',
     rankSurveyNone: '없음',
     rankSurveySubmit: '제출',
     rankSurveyDismiss: '나중에'
@@ -435,9 +423,7 @@ const localization = {
     iWontRushIt: "I promise not to rush!",
     rankUpTo: 'Rank up to {rank}',
     rankDownTo: 'Rank down to {rank}',
-    installPrompt: 'Install as an app for a better experience!',
     install: 'Install',
-    installed: 'Installed',
     notify: 'Notify',
     reminders: 'Ready',
     remindersBlocked: 'Blocked',
@@ -470,7 +456,6 @@ const localization = {
     statsNovelProblems: 'You have so far attempted {count} unique problems.',
     statsIgnoredProblems: "You have ignored {count_ignored} problems, and another {count_slipped} were abandoned due to irregular practice.",
 
-    statsModelCoefficients: 'Logit Model Coefficients:',
     statsIssuesHeading: 'Likely issues',
     statsIssuesNotEnough: '(not enough data yet)',
     statsIssuesNoneAbove: '(none above {percent}% confidence yet)',
@@ -547,7 +532,6 @@ const localization = {
     accountInvalid: 'Invalid account code',
     accountNotFound: 'No account found with this code',
     rankSurveyTitle: "What are your current active ranks?",
-    rankSurveyHint: 'Pick your current rank on any server or organization where you play. Leave any as None if you don’t play there.',
     rankSurveyNone: 'None',
     rankSurveySubmit: 'Submit',
     rankSurveyDismiss: 'Not now',
@@ -560,11 +544,10 @@ const localization = {
 
 /**
  * Resolves the active UI language to one of the supported codes
- * ('zh' | 'ja' | 'ko' | 'en'). Single source of truth used by both getTerm
- * and any caller that needs the raw code (e.g. motif-label lookups in
- * embedding_meta.json's positive_i18n maps).
+ * ('zh' | 'ja' | 'ko' | 'en'). Single source of truth for getTerm and
+ * localizedMotif.
  */
-export function getLang() {
+function getLang() {
   const lang = navigator.language || 'en';
   if (lang.startsWith('zh')) return 'zh';
   if (lang.startsWith('ja')) return 'ja';

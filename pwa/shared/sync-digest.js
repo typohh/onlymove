@@ -41,14 +41,3 @@ export const ID_HASH_SQL = '((id*2654435761)%2147483647)';
 export function rowHash(id) {
   return Number((BigInt(id) * HASH_MULT) % HASH_MOD);
 }
-
-// Sum rowHash over an iterable of server ids. Stays well under 2^53 for any
-// realistic history (≈2.1e9 per row × millions of rows), so plain Number
-// accumulation is exact; the per-row BigInt mix is what guards precision.
-export function digestSum(ids) {
-  let s = 0;
-  for (const id of ids) {
-    if (Number.isFinite(id)) s += rowHash(id);
-  }
-  return s;
-}

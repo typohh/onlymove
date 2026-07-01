@@ -1,5 +1,4 @@
 // js/sgf.js
-import { SGF_COMMENTS } from './constants.js';
 
 /**
  * Tsumego id from its SGF filename: strips the trailing `.sgf` extension. The
@@ -65,7 +64,7 @@ export function getWinrateFromComment(comment) {
  * @param {Array} children - Array of SGF nodes (all the same side to move).
  * @returns {object|null} - The winning move node, or null if there are none.
  */
-export function findBestMoveFromChildren(children) {
+function findBestMoveFromChildren(children) {
     if (!children || children.length === 0) {
         return null;
     }

@@ -8,7 +8,7 @@ import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingSpanPerNormalizedRank } from './rank-decomposition.js';
 import { adamUpdate } from './optimizer.js';
 
-export function findFirst(sortedArr, target) {
+function findFirst(sortedArr, target) {
     let low = 0;
     let high = sortedArr.length - 1;
     let result = -1;
@@ -25,7 +25,7 @@ export function findFirst(sortedArr, target) {
     return result;
 }
 
-export function findLast(sortedArr, target) {
+function findLast(sortedArr, target) {
     let low = 0;
     let high = sortedArr.length - 1;
     let result = -1;

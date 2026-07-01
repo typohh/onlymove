@@ -324,7 +324,6 @@ export const state = {
 
     // Board and Game state
     board: null,
-    game: null,
     kifuReader: null,
 
     // Tsumego state — per-size in-memory pool. Cleared on size switch.
@@ -349,8 +348,6 @@ export const state = {
     analysisHintMove: null,
     candidateMoves: [],
     reviewStartTime: null,
-
-    linkedId: null,
 
     statsResults: null,
 
@@ -508,7 +505,6 @@ export function setAppMode(mode) {
 
 export function setKifuReader(kifuReader) {
     state.kifuReader = kifuReader;
-    state.game = kifuReader ? kifuReader.game : null;
 }
 
 // Hooks fired on setAcceptClicks(true) — registered from main.js so state.js

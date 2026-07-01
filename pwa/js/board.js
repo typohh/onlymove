@@ -4,7 +4,7 @@ import { state, setBoard, setKifuReader } from './state.js';
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
-import { SGF_COMMENTS, APP_MODES } from './constants.js';
+import { APP_MODES } from './constants.js';
 
 WGo.DIR = 'lib/wgo/';
 

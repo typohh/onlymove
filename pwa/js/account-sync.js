@@ -250,7 +250,7 @@ let lastPullAt = 0;
 // { inserted, complete } — `complete` is true only if the pull drained the
 // server (no page failed mid-way), which the backfill requires before it may
 // upload anything.
-export async function pullReports({ force = false, mode = 'feed', fromStart = false, rowSink = null } = {}) {
+async function pullReports({ force = false, mode = 'feed', fromStart = false, rowSink = null } = {}) {
     if (pullInFlight) return { inserted: 0, complete: false };
     if (!force && Date.now() - lastPullAt < MIN_PULL_INTERVAL_MS) return { inserted: 0, complete: false };
     pullInFlight = true;

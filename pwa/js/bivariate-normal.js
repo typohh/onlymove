@@ -11,10 +11,8 @@
 // (well-behaved) integrand — accurate to ~1e-7 with N=128 subdivisions,
 // which is plenty for a UI that thresholds at 60-70% probability.
 
-// Standard normal CDF (math.js erf), shared from math-utils; re-exported here
-// for the historical import surface of this module.
+// Standard normal CDF (math.js erf), shared from math-utils.
 import { normCdf } from './math-utils.js';
-export { normCdf };
 
 // Owen's T function:
 //   T(h, a) = (1/(2π)) ∫₀^a exp(-h²(1+x²)/2) / (1+x²) dx
@@ -23,7 +21,7 @@ export { normCdf };
 // keep the integration over a positive interval. The integrand is monotone-
 // decreasing and bounded by 1/(1+x²), so adaptive Simpson over a fixed grid
 // converges fast.
-export function owensT(h, a) {
+function owensT(h, a) {
     if (a === 0) return 0;
     const sign = a < 0 ? -1 : 1;
     const absA = Math.abs(a);
@@ -70,7 +68,7 @@ export function owensT(h, a) {
 // and δ ∈ {0, ¼} depending on the quadrant of (a, b) and the sign of ρ.
 //
 // Degenerate cases (ρ → ±1, a=0 or b=0) handled via limits.
-export function biNormCdf(a, b, rho) {
+function biNormCdf(a, b, rho) {
     // Clamp ρ inside (-1, 1) to avoid divide-by-zero in the q_a, q_b terms.
     if (rho > 0.99999) rho = 0.99999;
     else if (rho < -0.99999) rho = -0.99999;

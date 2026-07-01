@@ -249,7 +249,7 @@ async function computeServerStats(env) {
     version: APP_VERSION,
     computedAt: new Date().toISOString(),
     windowDays: 7,
-    totals: totals || { attempts: 0, wins: 0, users: 0 },
+    totals,
     bucketSec: SOLVE_BUCKET_SEC,
     daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks,
   };

@@ -134,7 +134,7 @@ async function fetchSgfFromZip(filename, zipFilename) {
     return await file.async('text');
 }
 
-export async function loadZipMetadata() {
+async function loadZipMetadata() {
     if (state.zipMetadata.length === 0) {
         const response = await fetch(`tsumegos/${state.boardSize}/metadata.json?v=${DATA_VERSION}`);
         const zips = await response.json();
@@ -149,7 +149,7 @@ export async function loadZipMetadata() {
     }
 }
 
-export async function loadZipProblems(zipFilename) {
+async function loadZipProblems(zipFilename) {
     if (state.loadedZips[zipFilename]) return;
 
     const cacheKey = `tsumegos/${state.boardSize}/${zipFilename}`;
@@ -258,13 +258,6 @@ async function backgroundLoadCloserZip() {
         } catch (error) {
             console.error(`Failed to background load ${closestZip.filename}:`, error);
         }
-    }
-}
-
-function loadNextZip() {
-    const nextZip = findClosestUnloadedZip();
-    if (nextZip) {
-        loadZipProblems(nextZip.filename);
     }
 }
 
@@ -607,7 +600,7 @@ export async function fetchLookupLines() {
 // the global lookup.txt. Each row is "id zipHash size". Returns null when
 // the id is unknown (or the manifest can't be fetched), otherwise
 // { zipId, size }.
-export async function findZipIdForTsumegoId(tsumegoId) {
+async function findZipIdForTsumegoId(tsumegoId) {
     const lines = await fetchLookupLines();
     if (!lines) return null;
 
