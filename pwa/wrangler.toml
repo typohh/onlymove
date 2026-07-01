@@ -71,15 +71,18 @@ simple = { limit = 50, period = 60 }
 # OUTER edge layer: a Cloudflare dashboard WAF *rate-limiting rule* (Security →
 # WAF → Rate limiting rules). It is account config, not in this repo, so apply
 # it manually. Blocked requests never invoke the Worker (zero Worker + D1 cost),
-# so this is the cheapest layer and absorbs the worst bursts. Suggested rule:
-#   When incoming requests match:
-#     (http.request.method eq "POST") and (
-#        http.request.uri.path in {"/report" "/schedule" "/rank-survey" "/share-event" "/sync"}
-#        or starts_with(http.request.uri.path, "/push/"))
-#   Counting characteristic: IP   Period: 60s   Requests: 300   (free plan: use
-#   the 10s window with 100 requests)   Action: Block   Duration: 60s
-# 300/60s is ~12x the observed real 60s ceiling (24), so it never trips a power
-# user yet stops a flood before it reaches the Worker.
+# so this is the cheapest layer and absorbs the worst bursts. This rule is
+# CURRENTLY IN EFFECT (deployed; last updated 2026-05-30) — not aspirational:
+#   Description: "Flood guard on write endpoints (POST)"   Action: Block
+#   When incoming requests match:  (http.request.method eq "POST")
+#   Counting characteristic: ip.src   Period: 10s   Requests: 100
+#   Mitigation timeout: 10s
+# It matches ALL POSTs by METHOD alone (no path list), so every write endpoint —
+# /report, /sync, /schedule, /rank-survey, /share-event, /push/*, /register, and
+# any future POST route — is covered automatically; there is nothing to add per
+# endpoint. 100/10s is well above any legitimate burst (the heaviest real user
+# hit ~24 reports in a 60s window, far under 100 in any 10s), yet a scripted
+# flood is dropped at the edge before it reaches the Worker.
 #
 # fetch_database is NOT affected: `wrangler d1 export` (pipeline.fetch_database)
 # hits api.cloudflare.com with an API token, a different hostname than the
