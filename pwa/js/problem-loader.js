@@ -584,7 +584,7 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
 // per problem, sorted by id) and returns its non-empty lines, or null on any
 // fetch failure so callers can bail rather than act on a partial manifest.
 // The single fetch/split for every lookup.txt consumer (the resolver below
-// and embedding-backfill.js) — keep it that way so the parses can't drift.
+// and backfill.js) — keep it that way so the parses can't drift.
 export async function fetchLookupLines() {
     try {
         const response = await fetch(`lookup.txt?v=${DATA_VERSION}`);

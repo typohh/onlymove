@@ -221,7 +221,7 @@ export function freshFailureReviewHours(params, { problemRank = 0, size, userRan
 // Median window-open delay (hours) over the user's recent failures, each scored
 // AS IF it just failed now — using each problem's real difficulty/slope/floor and
 // that failure's own review percentile, exactly as getRecallCandidates schedules
-// them (model.js:307-317). Reflects when the recommender would actually re-serve
+// them (buildFeatures + stabilityDaysForRepeat). Reflects when the recommender would actually re-serve
 // the user's recent misses, unlike freshFailureReviewHours which evaluates a
 // single idealized average-difficulty, no-review, reference-slope, zero-floor
 // failure (the minimal-stability corner, so a systematic underestimate). Returns

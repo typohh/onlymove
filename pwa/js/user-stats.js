@@ -199,7 +199,7 @@ export async function updateUserStats(isCorrect, {
         answer.embedding = quantizeEmbedding(currentProblem.embedding);
     }
     if (typeof pickedCellIndex === 'number' && pickedCellIndex >= 0) {
-        // Record the SGF variation index the user picked so embedding-backfill
+        // Record the SGF variation index the user picked so backfill.js
         // can look up the cell embedding later, even if the live fetch fails
         // or hasn't returned by the time the answer is logged.
         answer.pickedCellIndex = pickedCellIndex;

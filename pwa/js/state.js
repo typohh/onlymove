@@ -383,12 +383,12 @@ export const state = {
 
     // In-memory cache of labels.components (joint across board sizes —
     // the PCA + ICA fit is joint, so labels are shared). Populated by
-    // embedding-backfill.js from the inlined embedding_meta.json (data-version.js).
+    // backfill.js from the inlined embedding_meta.json (data-version.js).
     // Used by the stats panel to name top weakness PCs. Not persisted.
     embeddingLabels: null,
 
     // Joint embedding meta consumed by the per-cell sidecar reader (K,
-    // bytes_per_cell, dtype). Populated by embedding-backfill.js from the
+    // bytes_per_cell, dtype). Populated by backfill.js from the
     // same fetch that gives us embeddingLabels — same file, joint meta.
     // Null until that fetch has run; readers must short-circuit on null.
     embeddingMeta: null,

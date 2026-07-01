@@ -1,7 +1,7 @@
 // js/stats-ui.js
 //
 // The detailed-stats modal: all DOM/SVG rendering for the tabbed stats panel
-// (Summary / Weaknesses / Rank / Time / Community) and its charts. model.js
+// (Weaknesses / Rank / Time / Activity / Community) and its charts. model.js
 // holds the numeric recall model + stats computation; the dependency is
 // one-directional: this module consumes the model's exported helpers; model.js
 // never reaches back into the UI.
@@ -126,7 +126,7 @@ export async function showDetailedStats() {
         const finalParams = state.modelParams;
         // Timing probabilities ride with the Time chart, the rank decomposition
         // rides with the Rank chart, and only the review-queue counts stay on
-        // the summary pane.
+        // the Activity pane.
         let timingText = '';
         let resultText = '';
 
@@ -146,7 +146,7 @@ export async function showDetailedStats() {
             }
         }
 
-        // Block 2: Summary Text. The "freshly-failed problem comes back in ~X h"
+        // Block 2: Activity text. The "freshly-failed problem comes back in ~X h"
         // figure is the retention window-open delay (NEG_LN_080·S·24) for a
         // just-failed (r=0) repeat at the user's typical repeat difficulty.
         if (varCovarMatrix) {

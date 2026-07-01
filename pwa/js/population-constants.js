@@ -53,8 +53,9 @@ export function loadPopulationConstants() {
 // solve time — only its variance (fewer effective samples) and recency, so the shipped
 // alpha/center (fit against median solve time) still apply as-is; no refit needed.
 // Dropping the upper/AFK cap likewise leaves the median value unchanged (a median is
-// robust to idle-tab outliers). TIME_ADJUST_AFK_CAP_MS is no longer read here (kept
-// for any legacy importer).
+// robust to idle-tab outliers). TIME_ADJUST_AFK_CAP_MS is no longer read here, but
+// stats-compute's makeMedianSolveMinutesAt (the Time-chart smoother) still applies
+// it, so the two median-solve-time computations deliberately diverge on AFK handling.
 export const TIME_ADJUST_AFK_CAP_MS = 180000;
 export const TIME_ADJUST_MIN_TIMED = 20;
 

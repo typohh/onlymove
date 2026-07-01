@@ -390,9 +390,6 @@ export function updateBoardSize() {
     state.board.setHeight(boardSize);
 }
 
-// No need for toggleAnalysisModeUI anymore since we're using a single div
-// and updating button functionality based on the current mode
-
 export function updateAnalysisUI(score, bestMove) {
     // In analysis mode, display rank at starting position, score otherwise
     if (state.appMode === APP_MODES.ANALYZING) {

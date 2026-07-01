@@ -12,7 +12,7 @@
 //     tsumego byte offset + n_cells.
 //   - Layout parameters (K, dtype, bytes_per_cell) live in the joint
 //     pwa/tsumegos/embedding_meta.json, mirrored into state.embeddingMeta
-//     by embedding-backfill.js.
+//     by backfill.js.
 //
 // The cell-index input is the **SGF root-variation index** as observed by
 // game-logic.handleBoardClick (children.indexOf(moveNode)). Extraction +
@@ -113,7 +113,7 @@ export async function fetchPickedEmbedding({
     });
 }
 
-// Backfill path: called from embedding-backfill when iterating shards. The
+// Backfill path: called from backfill.js when iterating shards. The
 // caller has already parsed the shard's embeddings_index.json and passes the
 // entry directly — no cache dependency.
 export async function fetchPickedEmbeddingWithIndexEntry({

@@ -1,4 +1,4 @@
-// js/utils.js
+// js/i18n.js
 
 import { TOTAL_RANKS } from './constants.js';
 

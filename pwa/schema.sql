@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS share_events (
 CREATE INDEX IF NOT EXISTS idx_share_events_problem ON share_events(problem_id);
 
 -- Cached server-wide stats, recomputed at most once per ~24h by the cron from
--- the preceding 7 days of tsumego_reports + rank_surveys. Single logical row
+-- the preceding 7 days of tsumego_reports. Single logical row
 -- (key='latest'); `data` is the precomputed JSON the PWA renders verbatim.
 CREATE TABLE IF NOT EXISTS server_stats (
     key         TEXT PRIMARY KEY,
@@ -170,9 +170,9 @@ CREATE TABLE IF NOT EXISTS server_stats (
     computed_at TEXT NOT NULL
 );
 
--- Per-user daily counter for full-history pulls (POST /sync with since='' — the
+-- Per-user daily counter for full-history pulls (POST /sync with sinceId=0 — the
 -- from-the-beginning scan: the stats "restore evicted history" refresh, account
--- adoption, and the backfill/enrich reconciles all count). Each is a full
+-- adoption, and the outbox reconcile all count). Each is a full
 -- per-user table scan, so it is server-capped per UTC day (client enforcement is
 -- bypassable by clearing localStorage). One row per (user, day); the hourly cron
 -- prunes days older than a small window. The (user_id, day) primary key makes

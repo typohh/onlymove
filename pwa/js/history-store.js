@@ -135,10 +135,6 @@ export async function getTail() {
     });
 }
 
-// Just the serverCreatedAt values present in the tail (cheap cursor scan — no
-// full row array). The sync merge dedups against this so a re-pull of rows long
-// since evicted to the tail can't re-insert them as duplicates. Empty set if
-// unavailable.
 // One cold-tail scan for the sync digest: how many tail rows are acked
 // (serverCreatedAt present), the Σ rowHash(serverId) over those that carry a
 // serverId, and whether every acked row has one (allHaveId=false disables the
@@ -170,6 +166,10 @@ export async function getTailDigestInfo() {
     });
 }
 
+// Just the serverCreatedAt values present in the tail (cheap cursor scan — no
+// full row array). The sync merge dedups against this so a re-pull of rows long
+// since evicted to the tail can't re-insert them as duplicates. Empty set if
+// unavailable.
 export async function getTailServerCreatedAtSet() {
     const db = await openDB();
     const set = new Set();

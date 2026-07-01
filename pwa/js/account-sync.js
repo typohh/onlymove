@@ -31,7 +31,7 @@
 // Merged rows become skeleton entries (problemId/correct/date/timeTaken/
 // isRepeat + review accounting); the model fields (rating/rank/slope/floor/
 // embeddings, picked-move cell index from the reported move) are filled by
-// fillSyncedHistoryFields (embedding-backfill.js) over the same shard walk
+// fillSyncedHistoryFields (backfill.js) over the same shard walk
 // the version-driven backfill uses.
 
 import {

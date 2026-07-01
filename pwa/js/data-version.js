@@ -18,7 +18,7 @@
 // new tsumegos bumps data_version (new shards → new metadata.json) but leaves
 // ratings_version untouched, so new problems become serveable lazily while stored
 // answer-history values are left alone. A ratings change bumps ratings_version and
-// triggers the immediate re-derive (see embedding-backfill.js).
+// triggers the immediate re-derive (see backfill.js).
 //
 // Baked at build time from the pipeline's output (pwa/tsumegos/embedding_meta.json);
 // build.mjs drops the served copy from dist since nothing fetches it anymore.
