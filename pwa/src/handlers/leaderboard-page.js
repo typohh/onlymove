@@ -66,11 +66,14 @@ function renderPage(rows) {
   h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
   p.sub { margin: 0 0 1.25rem; opacity: .6; font-size: .85rem; }
   .toggle { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; overflow: hidden;
-            margin-bottom: 1rem; opacity: .9; }
-  .toggle button { font: inherit; padding: .35rem 1rem; border: 0; background: transparent; color: inherit;
-                   cursor: pointer; }
-  .toggle button[aria-pressed="true"] { background: currentColor; }
-  .toggle button[aria-pressed="true"] span { color: Canvas; mix-blend-mode: difference; }
+            margin-bottom: 1rem; }
+  .toggle button { font: inherit; padding: .35rem 1rem; border: 0; background: transparent; color: currentColor;
+                   cursor: pointer; opacity: .6; }
+  .toggle button[aria-pressed="true"] { background: currentColor; opacity: 1; }
+  /* Selected label = the page background color (Canvas) so it always contrasts the
+     currentColor fill, in dark AND light mode. No mix-blend-mode: difference — it
+     resolved white-on-white on the white fill in dark mode. */
+  .toggle button[aria-pressed="true"] span { color: Canvas; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: .45rem .4rem; text-align: right; white-space: nowrap; }
   td:nth-child(2) { text-align: left; width: 99%; }
