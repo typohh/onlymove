@@ -20,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_queries import gtp_to_xy
-from utils.ratings_io import FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_value_map
+from utils.ratings_io import FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_size_value_maps, load_value_map
 from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
 
 
@@ -809,7 +809,46 @@ def compute_data_version(output_dir):
                 h.update(f.read())
         except OSError:
             h.update(f"missing-{size}".encode())
+    # Fold the merged problem_params.bin (per-problem rating/slope/floor for both
+    # sizes) so a ratings-only change perturbs data_version and the PWA re-fetches it.
+    pp = os.path.join(output_dir, "tsumegos", "problem_params.bin")
+    try:
+        with open(pp, "rb") as f:
+            h.update(f.read())
+    except OSError:
+        h.update(b"missing-problem-params")
     return h.hexdigest()[:16]
+
+
+def emit_problem_params(output_dir):
+    """Single packed file for BOTH board sizes: tsumego_id -> (rating, slope, floor).
+    16 bytes/problem — a 4-byte id (the 8-hex tsumego_id) followed by 3 little-endian
+    float32 (rating, slope, floor). The PWA Worker (leaderboard rank recompute) and
+    the client ratings-change backfill both read it into one Map for O(1) rating
+    resolution, so neither has to walk the shard zips. ~2.6MB for ~165k problems.
+
+    Re-reads the ratings CSVs directly (not the per-size in-memory maps, which are
+    absent on a skipped-shard run), so it always covers every size."""
+    ratings_root = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
+    chunks = []
+    for size in ALL_BOARD_SIZES:
+        ratings, slopes, floors = load_size_value_maps(ratings_root, size, missing_ok=True)
+        for tid, rating in ratings.items():
+            if len(tid) != 8 or tid not in slopes or tid not in floors:
+                continue
+            try:
+                id_bytes = bytes.fromhex(tid)
+            except ValueError:
+                continue
+            vals = np.array([rating, slopes[tid], floors[tid]], dtype="<f4").tobytes()
+            chunks.append(id_bytes + vals)
+    out_path = os.path.join(output_dir, "tsumegos", "problem_params.bin")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(b"".join(chunks))
+    print(f"  wrote problem_params.bin ({len(chunks)} problems, "
+          f"{len(chunks) * 16} bytes) at {out_path}")
+    return out_path
 
 
 if __name__ == "__main__":
@@ -870,6 +909,12 @@ if __name__ == "__main__":
     copied = copy_curve(OUTPUT_DIR)
     if copied:
         print(f"  copied {', '.join(copied)} from {RATINGS_ROOT}/ → pwa/tsumegos/")
+
+    # Merged per-problem params (rating/slope/floor) for the leaderboard Worker and
+    # the client ratings-change backfill. Emitted every run (cheap, deterministic)
+    # and BEFORE compute_data_version so its bytes are folded into data_version.
+    print("\n--- problem_params ---")
+    emit_problem_params(OUTPUT_DIR)
 
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently
