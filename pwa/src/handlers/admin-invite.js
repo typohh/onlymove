@@ -100,6 +100,26 @@ export async function handleAdminCreate(request, env) {
         ).bind(pinStr).first();
         if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
 
+        // Idempotent: if this PIN already has an UNCLAIMED invitation, reuse it (refresh
+        // its stored EGD fields to the current values) instead of piling up duplicate
+        // links for one person. A claimed invitation would have been caught above.
+        const openInvite = await env.DB.prepare(
+            `SELECT invite_token FROM invitation
+              WHERE egd_pin = ?1 AND claimed_by_user_id IS NULL
+              ORDER BY created_at DESC LIMIT 1`
+        ).bind(pinStr).first();
+        if (openInvite) {
+            await env.DB.prepare(
+                `UPDATE invitation SET egd_name = ?2, country_code = ?3, gor = ?4 WHERE invite_token = ?1`
+            ).bind(openInvite.invite_token, egdName, cc, gorInt).run();
+            return jsonResponse({
+                ok: true,
+                inviteToken: openInvite.invite_token,
+                link: `https://onlymove.net/register?t=${openInvite.invite_token}`,
+                egdName, gor: gorInt, country: cc, reused: true,
+            });
+        }
+
         const token = await insertInvitation(env, { pin: pinStr, name: egdName, country: cc, gor: gorInt });
         return jsonResponse({
             ok: true,
@@ -274,7 +294,8 @@ function renderAdminPage() {
   function showLink(d) {
     setMsg('');
     out.style.display = 'block';
-    out.innerHTML = '<p>Invitation for <strong>' + esc(d.egdName) + '</strong> (GoR ' + esc(String(d.gor)) + '):</p>' +
+    var reused = d.reused ? ' <em>(existing unclaimed link — reused)</em>' : '';
+    out.innerHTML = '<p>Invitation for <strong>' + esc(d.egdName) + '</strong> (GoR ' + esc(String(d.gor)) + ')' + reused + ':</p>' +
       '<div class="linkrow"><input id="lnk" readonly value="' + esc(d.link) + '"><button id="copy">Copy</button></div>';
     var lnk = document.getElementById('lnk');
     document.getElementById('copy').addEventListener('click', function () {
