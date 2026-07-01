@@ -319,8 +319,11 @@ export async function readLeaderboardRows(env) {
         }
         const gr = r.gor_rank;
         const rel = (v, g) => (Number.isFinite(v) && Number.isFinite(g)) ? v - g : null;
+        // Frozen last-week GoR as an integer (inverse of gorToRankScalar) so the page
+        // can show the matching GoR when the last-week-peak view is selected.
+        const prevWeekGor = Number.isFinite(prevGor) ? Math.round(2000 + 100 * prevGor) : null;
         return {
-            name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: gr,
+            name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: gr, prevWeekGor,
             currentAbs: r.pred_egf_rank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
             currentRel: rel(r.pred_egf_rank, gr), thisWeekRel: rel(thisMax, gr),
             prevWeekRel: rel(prevMax, prevGor),
