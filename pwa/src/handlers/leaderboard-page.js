@@ -64,12 +64,13 @@ function renderPage(rows) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>onlymove — EGD leaderboard</title>
+<title>onlymove — Leaderboard</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 1.5rem 1rem 3rem;
          max-width: 760px; margin-inline: auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .3rem; }
+  p.sub { margin: 0 0 1rem; opacity: .6; font-size: .85rem; }
   .toggles { display: flex; flex-wrap: wrap; gap: .5rem .75rem; margin-bottom: 1rem; }
   .toggle { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; overflow: hidden; }
   .toggle button { font: inherit; padding: .35rem .8rem; border: 0; background: transparent; color: currentColor;
@@ -98,6 +99,7 @@ function renderPage(rows) {
   .empty { opacity: .5; padding: 2rem 0; text-align: center; }
   footer { margin-top: 1.5rem; opacity: .55; font-size: .82rem; }
   footer p { margin: .35rem 0; }
+  footer a { color: inherit; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
     .toggle button { padding: .35rem .6rem; font-size: .92rem; }
@@ -105,7 +107,8 @@ function renderPage(rows) {
 </style>
 </head>
 <body>
-<h1>EGD leaderboard</h1>
+<h1>Leaderboard</h1>
+<p class="sub">onlymove-estimated GoR vs European Go Database GoR. A player needs 100 attempts to be included.</p>
 <div class="toggles">
   <div class="toggle" role="group" aria-label="timeframe">
     <button id="tf0" aria-pressed="true"><span>Current</span></button>
@@ -129,8 +132,7 @@ function renderPage(rows) {
   <tbody id="rows"></tbody>
 </table>
 <footer>
-  <p>onlymove-estimated GoR vs European Go Database GoR. A player needs 100 attempts to be included.</p>
-  <p>Invite only — ask in Discord if interested.</p>
+  <p>Invite only — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a> if interested.</p>
 </footer>
 <script>
 (function () {
