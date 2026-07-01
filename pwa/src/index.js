@@ -9,6 +9,9 @@ import { handleRankSurvey } from './handlers/rank-survey.js';
 import { handleShareEvent } from './handlers/share-event.js';
 import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
+import { handleRegister, handleInvitePreview } from './handlers/register.js';
+import { handleLeaderboard } from './handlers/leaderboard-page.js';
+import { refreshGorForAll, reconcileBuffers } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
 // flood is dropped by a cheap Worker invocation instead of spending D1 quota.
@@ -25,6 +28,7 @@ const WRITE_ROUTES = [
   { path: '/schedule', method: 'POST', limiter: 'RL_WRITE', handler: handleSchedule },
   { path: '/rank-survey', method: 'POST', limiter: 'RL_WRITE', handler: handleRankSurvey },
   { path: '/share-event', method: 'POST', limiter: 'RL_WRITE', handler: handleShareEvent },
+  { path: '/register', method: 'POST', limiter: 'RL_WRITE', handler: handleRegister },
 ];
 
 export default {
@@ -38,7 +42,7 @@ export default {
     for (const route of WRITE_ROUTES) {
       if (url.pathname === route.path && request.method === route.method) {
         if (await rateLimited(request, env, route.limiter)) return tooManyRequests();
-        return route.handler(request, env);
+        return route.handler(request, env, ctx);
       }
     }
 
@@ -49,6 +53,16 @@ export default {
     }
     if (url.pathname === '/server-stats' && request.method === 'GET') {
       return handleServerStats(env);
+    }
+    // Standalone EGD leaderboard page — MUST be before the SPA fallback (it returns
+    // HTML, so isNavigation would otherwise swallow it into index.html).
+    if (url.pathname === '/leaderboard' && request.method === 'GET') {
+      return handleLeaderboard(env);
+    }
+    // Invitation preview (JSON) for the /register confirmation dialog. (GET /register
+    // itself is a navigation and falls through to the SPA, which reads ?t= and POSTs.)
+    if (url.pathname === '/invite' && request.method === 'GET') {
+      return handleInvitePreview(request, env);
     }
 
     // SPA fallback for navigations only. Static assets are served before
@@ -79,6 +93,14 @@ export default {
     ctx.waitUntil(runRecallNotifications(env));
     ctx.waitUntil(maybeComputeServerStats(env));
     ctx.waitUntil(pruneHistoryRefreshLog(env));
+    // EGD leaderboard: refresh each registered user's GoR from EGD and reconcile
+    // buffers from tsumego_reports. Weekly (Monday 00:00 UTC — the week boundary),
+    // since GoR only moves after tournaments and the reconcile just heals drift.
+    const now = new Date();
+    if (now.getUTCDay() === 1 && now.getUTCHours() === 0) {
+      ctx.waitUntil(refreshGorForAll(env));
+      ctx.waitUntil(reconcileBuffers(env));
+    }
   },
 };
 

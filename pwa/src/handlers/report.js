@@ -1,8 +1,9 @@
 import { APP_VERSION } from '../version.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
 import { rowHash, ID_HASH_SQL } from '../../shared/sync-digest.js';
+import { updateLeaderboardOnReport } from '../leaderboard.js';
 
-export async function handleReport(request, env) {
+export async function handleReport(request, env, ctx) {
   // Every response carries the deployed Worker version so the client can
   // detect a stale bundle and trigger a quiescent reload (see
   // js/state.js maybeReload).
@@ -73,6 +74,17 @@ export async function handleReport(request, env) {
     // Inclusive digest = exclusive prefix on the new row + the new row's own
     // hash (id known only post-insert), matching the client's full Σ.
     const digest = ins ? (ins.running_sum + rowHash(ins.id)) : null;
+
+    // EGD leaderboard: fan a NOVEL attempt into the registered user's rank buffer
+    // AFTER the response (ctx.waitUntil) so the high-volume /report path isn't slowed.
+    // The point read inside is the registration check — unregistered users are a
+    // cheap no-op. Best-effort; the buffer is a derived cache (the cron reconciles).
+    if (isRepeat === 0 && ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(
+        updateLeaderboardOnReport(env, data.userId, data.problem, data.success, timeUsed)
+          .catch((e) => console.error('leaderboard update failed:', e))
+      );
+    }
 
     return new Response(JSON.stringify({ createdAt, serverId, userSeq, digest }), {
       status: 201,

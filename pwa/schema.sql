@@ -183,3 +183,49 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
     count   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, day)
 );
+
+-- EGD leaderboard: one row per registered user. Holds the EGD binding + a
+-- materialized rank buffer (the user's last 500 novel attempts) + the derived
+-- rank scalars, so /report can recompute the rank in-Worker with +1 read/+1 write.
+-- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
+-- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
+-- >= 100 novel attempts (rank-start gate); the leaderboard read filters on
+-- `pred_egf_rank IS NOT NULL`. gor_rank is the current/this-week GoR-rank;
+-- prev_week_gor_rank is frozen at the week rollover so past deltas don't move.
+-- week_id is the Monday-00:00-UTC week number. See docs/leaderboard_plan.md.
+CREATE TABLE IF NOT EXISTS leaderboard (
+    user_id            TEXT PRIMARY KEY,
+    egd_pin            TEXT NOT NULL,
+    egd_name           TEXT,
+    country_code       TEXT,
+    gor                INTEGER,
+    gor_updated_at     TEXT,
+    buffer             TEXT,
+    pred_egf_rank      REAL,
+    pred_egf_se        REAL,
+    gor_rank           REAL,
+    prev_week_gor_rank REAL,
+    week_id            INTEGER,
+    this_week_max      REAL,
+    prev_week_max      REAL,
+    last_active        TEXT
+);
+-- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_egd_pin ON leaderboard(egd_pin);
+
+-- Admin-issued registration invitations. A random 8-char opaque token recorded
+-- alongside the target EGD PIN (no crypto). The recipient opens /register?t=<token>
+-- in their PWA; the Worker looks the token up, binds their user_id to the PIN, and
+-- marks it claimed (one-time use). egd_name/country_code/gor are fetched from EGD at
+-- creation so the confirmation preview + claim need no live EGD call. Never expires;
+-- deleted/revoked manually. See docs/leaderboard_plan.md.
+CREATE TABLE IF NOT EXISTS invitation (
+    invite_token       TEXT PRIMARY KEY,
+    egd_pin            TEXT NOT NULL,
+    egd_name           TEXT,
+    country_code       TEXT,
+    gor                INTEGER,
+    created_at         TEXT,
+    claimed_by_user_id TEXT,
+    claimed_at         TEXT
+);
