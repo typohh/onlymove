@@ -8,7 +8,6 @@
 // See docs/leaderboard_plan.md.
 
 import { readLeaderboardRows } from '../leaderboard.js';
-import { rankScalarToLabel } from '../../shared/rank-math.js';
 
 export async function handleLeaderboard(env) {
     let rows = [];
@@ -26,8 +25,16 @@ export async function handleLeaderboard(env) {
     });
 }
 
-const fmtAbs = (v) => (Number.isFinite(v) ? rankScalarToLabel(v) : '—');
-const fmtRel = (v) => (Number.isFinite(v) ? (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) : '—');
+// The estimate is an EGF rank scalar; display it as GoR — the inverse of the
+// Worker's gorToRankScalar (1k=2000, 1d=2100, ~100 GoR/stone). Relative mode
+// shows the GoR gap (estimated GoR − actual GoR) = exactly 100× the scalar diff.
+const scalarToGor = (v) => Math.round(2000 + 100 * v);
+const fmtAbs = (v) => (Number.isFinite(v) ? String(scalarToGor(v)) : '—');
+const fmtRel = (v) => {
+    if (!Number.isFinite(v)) return '—';
+    const d = Math.round(100 * v);
+    return (d >= 0 ? '+' : '−') + Math.abs(d);
+};
 const flag = (cc) => (typeof cc === 'string' && cc.length === 2)
     ? cc.toUpperCase().replace(/./g, (c) => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)) : '';
 
@@ -65,10 +72,17 @@ function renderPage(rows) {
   .toggle button[aria-pressed="true"] { background: currentColor; }
   .toggle button[aria-pressed="true"] span { color: Canvas; mix-blend-mode: difference; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { padding: .5rem .4rem; text-align: right; white-space: nowrap; }
-  th:nth-child(2), td:nth-child(2) { text-align: left; width: 99%; }
-  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .55; font-weight: 600;
-       border-bottom: 1px solid; }
+  th, td { padding: .45rem .4rem; text-align: right; white-space: nowrap; }
+  td:nth-child(2) { text-align: left; width: 99%; }
+  th.player { text-align: left; }
+  thead th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .55; font-weight: 600; }
+  /* group-label row (EGD | OnlyMove) sits above the sub-headers */
+  thead th.grp { text-align: center; opacity: .7;
+                 border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+  /* solid underline under the whole header: sub-header row + the rowspan cells */
+  thead tr:last-child th, thead th[rowspan] { border-bottom: 1px solid; }
+  /* vertical divider separating the EGD group (GoR) from the OnlyMove group */
+  th.om-start, td.om-start { border-left: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
   tbody tr:nth-child(even) { background: color-mix(in srgb, currentColor 5%, transparent); }
   td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -79,13 +93,26 @@ function renderPage(rows) {
 </head>
 <body>
 <h1>EGD leaderboard</h1>
-<p class="sub">Estimated onlymove rank vs European Go Database GoR. Rank starts after 100 solved problems.</p>
+<p class="sub">onlymove-estimated GoR vs European Go Database GoR. A player needs 100 attempts to be included.</p>
 <div class="toggle" role="group" aria-label="mode">
   <button id="mAbs" aria-pressed="true"><span>Absolute</span></button>
   <button id="mRel" aria-pressed="false"><span>Relative</span></button>
 </div>
 <table>
-  <thead><tr><th>#</th><th>Player</th><th>GoR</th><th>Current</th><th>This week</th><th>Last week</th></tr></thead>
+  <thead>
+    <tr>
+      <th rowspan="2">#</th>
+      <th rowspan="2" class="player">Player</th>
+      <th class="grp">EGD</th>
+      <th class="grp om-start" colspan="3">OnlyMove</th>
+    </tr>
+    <tr>
+      <th>GoR</th>
+      <th class="om-start">Current</th>
+      <th>This week</th>
+      <th>Last week</th>
+    </tr>
+  </thead>
   <tbody id="rows"></tbody>
 </table>
 <script>
@@ -102,7 +129,7 @@ function renderPage(rows) {
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') + '<span class="name">' + esc(r.name) + '</span></td>' +
         '<td class="gor">' + r.gor + '</td>' +
-        '<td class="val">' + cells[0] + '</td>' +
+        '<td class="val om-start">' + cells[0] + '</td>' +
         '<td class="val">' + cells[1] + '</td>' +
         '<td class="val">' + cells[2] + '</td></tr>';
     }).join('');
