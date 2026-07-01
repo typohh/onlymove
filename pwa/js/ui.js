@@ -316,6 +316,7 @@ const updateMenuItems = () => {
     const accountItem = document.getElementById('menu-account');
     accountItem.style.display = localStorage.getItem(HISTORY_BACKFILL_DONE_KEY) ? '' : 'none';
     accountItem.textContent = getTerm('menuAccount');
+    document.getElementById('menu-leaderboard').textContent = getTerm('leaderboard');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');

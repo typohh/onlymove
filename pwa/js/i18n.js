@@ -411,6 +411,7 @@ const localization = {
     review: 'Previous',
     about: 'About',
     discord: 'Discord',
+    leaderboard: 'Leaderboard',
     analyzing: 'Analyzing…',
     error: 'Error',
     exit: 'Next',

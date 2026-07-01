@@ -1,26 +1,28 @@
 // js/backfill.js
 //
-// Retroactively patches per-shard fields on answerHistory entries. Two
-// independent jobs share one shard walk:
+// Retroactively patches per-problem fields on answerHistory entries. Two
+// independent jobs, on separate data sources:
 //
 //   1. Embedding fill (last MODEL_INPUT_HISTORY_LENGTH entries only)
 //      Triggered by `embedding_version` change in embedding_meta.json.
-//      Wipes any stale embeddings, then fills `embedding` + optional
-//      `pickedEmbedding` for entries inside the keep window. Older
-//      entries get their embedding fields stripped to keep localStorage
-//      bounded.
+//      Walks the shard zips (embeddings live in metadata.json + per-cell
+//      sidecars): wipes any stale embeddings, then fills `embedding` +
+//      optional `pickedEmbedding` for entries inside the keep window.
+//      Older entries get their embedding fields stripped to keep
+//      localStorage bounded.
 //
 //   2. Rating refresh (all history entries, no keep-window cap)
-//      Triggered by per-size `ratings_version` change. Walks every shard
-//      that contains a referenced problem and rewrites
-//      `answerHistory[*].problemRating` to the current shard value. The
-//      chart, weakness training, and recall logic all read this field,
-//      so a stale rating shows up everywhere.
+//      Triggered by `ratings_version` change. Reads the single
+//      `problem_params.bin` asset (rating/slope/floor by problem id, both
+//      boards) and rewrites `answerHistory[*].problemRating` (+ derived
+//      rank, slope/quality, floor) to the current value — no shard walk.
+//      The chart, weakness training, and recall logic all read these
+//      fields, so a stale rating shows up everywhere.
 //
-// Both versions are tracked separately in localStorage (one key each per
-// size) so a rating-only refresh doesn't wipe the embedding model and
-// vice-versa. The walk runs for every supported size on every app load;
-// each size short-circuits when both versions match.
+// Both versions are tracked separately in localStorage so a rating-only
+// refresh doesn't wipe the embedding model and vice-versa. The work runs
+// for every supported size on every app load; each size short-circuits
+// when both versions match.
 
 import * as Sentry from "@sentry/browser";
 import {
@@ -309,6 +311,39 @@ function groupIdsByZip(lookupMap, ids) {
     return zipToIds;
 }
 
+// Load + decode the single problem_params.bin asset into
+// Map<hexId, {rating, slope, floor}>. This is the rating refresh's source (rating/
+// slope/floor for EVERY problem, both boards, no embeddings), replacing the shard
+// walk — cache-busted by DATA_VERSION like metadata.json / lookup.txt. Layout: a
+// flat sequence of 16-byte records, each a 4-byte big-endian problem id (byte k ->
+// two hex chars) followed by 3 little-endian float32 rating/slope/floor. Matches the
+// Worker decoder in src/leaderboard.js loadProblemParams. Null on any fetch failure
+// so a caller bails (leaving the version un-stamped to retry) rather than doing
+// partial work.
+async function loadProblemParams() {
+    try {
+        const resp = await fetch(`tsumegos/problem_params.bin?v=${DATA_VERSION}`);
+        if (!resp.ok) return null;
+        const bytes = new Uint8Array(await resp.arrayBuffer());
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const REC = 16;   // 4-byte id + 3 little-endian float32 (rating, slope, floor)
+        const map = new Map();
+        for (let off = 0; off + REC <= bytes.length; off += REC) {
+            let id = '';
+            for (let k = 0; k < 4; k++) id += bytes[off + k].toString(16).padStart(2, '0');
+            map.set(id, {
+                rating: dv.getFloat32(off + 4, true),
+                slope: dv.getFloat32(off + 8, true),
+                floor: dv.getFloat32(off + 12, true),
+            });
+        }
+        return map;
+    } catch (err) {
+        console.warn('backfill: problem_params.bin load failed:', err);
+        return null;
+    }
+}
+
 // Per-size WORK for one board, driven by the GLOBAL change flags the caller already
 // decided (the versions are single/shared — see backfillMissingEmbeddings). Problems
 // live in per-size shards so the walk is necessarily per-size, but this function NEVER
@@ -385,12 +420,59 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             }
         }
 
-        // Two needs sets feed one shard walk:
-        //   - Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields
-        //   - Rating needs:    every entry (no cap; the chart shows full history)
+        // Ratings refresh reads the single problem_params.bin asset (rating/slope/
+        // floor by id, both boards) — built ONCE per size, replacing the shard walk
+        // for the rating fields. Embeddings still walk the shards below. Null on a
+        // transient fetch failure -> bail so the version stays un-stamped and retries
+        // on the next load.
+        let problemParams = null;
+        if (ratingsChanged) {
+            problemParams = await loadProblemParams();
+            if (!problemParams) return curveRankUpdated;
+        }
+
+        // Working-set ratings rewrite: one pass over the FULL history (no keep-window
+        // cap — the chart needs old entries updated), reading the current value from
+        // problem_params. Present problems get the CURRENT rating (+ derived rank,
+        // slope/quality, floor via the shared applyRatingFields); a problem that left
+        // the corpus keeps its stale value for pruneRemovedProblems to strip. Edited
+        // in place; persisted below alongside any embedding fills.
+        let totalRatingsUpdated = 0;
+        if (ratingsChanged) {
+            for (let i = 0; i < history.length; i++) {
+                const a = history[i];
+                if (!a.problemId) continue;
+                const item = problemParams.get(a.problemId);
+                if (!item || typeof item.rating !== 'number') continue;
+                if (a.problemRating !== item.rating) totalRatingsUpdated++;
+                applyRatingFields(a, item, size);
+                // problemRating holds the raw value, so the separate
+                // problemRawRating field is redundant.
+                if (a.problemRawRating !== undefined) delete a.problemRawRating;
+            }
+        }
+
+        // Does the cold tail carry this size's rows to re-derive? (ratings change
+        // only). Its ratings are frozen at eviction time, so after a re-rate the old
+        // attempts carry stale (and device-dependent — each device evicted at a
+        // different rating era) ratings, and the Rank-tab chart plots them. The tail
+        // rows are rewritten from problem_params after the embedding walk below.
+        let tailNeedsRederive = false;
+        if (ratingsChanged) {
+            const tail = await getTail();
+            for (const e of tail) {
+                if (e && e.size === size && typeof e.problemId === 'string') {
+                    tailNeedsRederive = true;
+                    break;
+                }
+            }
+        }
+
+        // Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields. These
+        // drive the shard walk (embeddings live in metadata.json + the per-cell
+        // sidecars; problem_params carries none).
         const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
         const needIdsForEmbed = new Set();
-        const needIdsForRatings = new Set();
         if (embeddingsChanged) {
             for (let i = startIdx; i < history.length; i++) {
                 const a = history[i];
@@ -401,24 +483,6 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
                     !a.pickedEmbedding
                 );
                 if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
-            }
-        }
-        let tailNeedsRederive = false;
-        if (ratingsChanged) {
-            for (let i = 0; i < history.length; i++) {
-                if (history[i].problemId) needIdsForRatings.add(history[i].problemId);
-            }
-            // Re-derive the cold tail too. Its ratings are frozen at eviction time, so
-            // after a re-rate the old attempts carry stale (and device-dependent — each
-            // device evicted at a different rating era) ratings, and the Rank-tab chart
-            // plots them. Pull the tail's problem ids so the SAME shard walk loads their
-            // shards; the tail rows are rewritten from those shards after the walk.
-            const tail = await getTail();
-            for (const e of tail) {
-                if (e && e.size === size && typeof e.problemId === 'string') {
-                    needIdsForRatings.add(e.problemId);
-                    tailNeedsRederive = true;
-                }
             }
         }
 
@@ -441,132 +505,99 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             }
         }
 
-        const allNeedIds = new Set([...needIdsForEmbed, ...needIdsForRatings]);
-        if (allNeedIds.size === 0) {
-            return curveRankUpdated;
-        }
-
-        const locator = await buildShardLocator(size);
-        if (!locator) return 0;
-        const { lookupMap, zipFilenameByHash } = locator;
-
-        const zipToIds = groupIdsByZip(lookupMap, allNeedIds);
-
+        // Embedding shard walk (problem_params has no embeddings, so this stays on the
+        // zips). Skipped entirely when nothing in the keep window needs a fill — so a
+        // ratings-only refresh never fetches a shard.
         let totalFilled = 0;
         let totalFilledPicked = 0;
-        let totalRatingsUpdated = 0;
-        // Current rating per problem, accumulated across every shard the walk loads, so
-        // the cold-tail re-derive below can rewrite the tail (in IndexedDB, after the
-        // walk) from the same data. Slim {rating,slope,floor} — the tail needs no embeds.
-        const tailRatingItems = new Map();
-        await mapWithConcurrency([...zipToIds.keys()], SHARD_WALK_CONCURRENCY, async (zipHash) => {
-            const zipFilename = zipFilenameByHash.get(zipHash);
-            if (!zipFilename) return;
-            try {
-                const shard = await loadShard(size, zipFilename);
-                if (!shard) return;
-                const { zip, items } = shard;
-                const embeddingByProblem = new Map();
-                const itemByProblem = new Map();
-                for (const item of items) {
-                    const tid = tsumegoIdOf(item.filename);
-                    itemByProblem.set(tid, item);
-                    if (Array.isArray(item.embedding)) {
-                        // Quantize to 2 decimals to keep localStorage small.
-                        embeddingByProblem.set(tid, quantizeEmbedding(item.embedding));
-                    }
-                    if (tailNeedsRederive && typeof item.rating === 'number') {
-                        tailRatingItems.set(tid, { rating: item.rating, slope: item.slope, floor: item.floor });
-                    }
-                }
-
-                // Ratings: rewrite across the full history. Cheap (just a map
-                // lookup per entry) and the chart needs old entries updated. The
-                // field writes go through applyRatingFields (rating + derived
-                // rank + slope/quality + floor) — the same writer the synced and
-                // cold-tail fills use.
-                if (ratingsChanged) {
-                    for (let i = 0; i < history.length; i++) {
-                        const a = history[i];
-                        if (!a.problemId) continue;
-                        const item = itemByProblem.get(a.problemId);
-                        if (!item || typeof item.rating !== 'number') continue;
-                        if (a.problemRating !== item.rating) totalRatingsUpdated++;
-                        applyRatingFields(a, item, size);
-                        // problemRating holds the raw value, so the separate
-                        // problemRawRating field is redundant.
-                        if (a.problemRawRating !== undefined) delete a.problemRawRating;
-                    }
-                }
-
-                if (embeddingsChanged) {
-                    for (let i = startIdx; i < history.length; i++) {
-                        const a = history[i];
-                        if (!a.embedding && embeddingByProblem.has(a.problemId)) {
-                            a.embedding = embeddingByProblem.get(a.problemId);
-                            totalFilled++;
+        if (needIdsForEmbed.size > 0) {
+            const locator = await buildShardLocator(size);
+            if (locator) {
+                const { lookupMap, zipFilenameByHash } = locator;
+                const zipToIds = groupIdsByZip(lookupMap, needIdsForEmbed);
+                await mapWithConcurrency([...zipToIds.keys()], SHARD_WALK_CONCURRENCY, async (zipHash) => {
+                    const zipFilename = zipFilenameByHash.get(zipHash);
+                    if (!zipFilename) return;
+                    try {
+                        const shard = await loadShard(size, zipFilename);
+                        if (!shard) return;
+                        const { zip, items } = shard;
+                        const embeddingByProblem = new Map();
+                        for (const item of items) {
+                            if (Array.isArray(item.embedding)) {
+                                // Quantize to 2 decimals to keep localStorage small.
+                                embeddingByProblem.set(tsumegoIdOf(item.filename), quantizeEmbedding(item.embedding));
+                            }
                         }
-                    }
 
-                    // Picked-move backfill: same shard, Range-fetched per-cell
-                    // sidecar. Skipped silently for shards that don't ship one
-                    // (older builds) or when there are no eligible attempts.
-                    const idxFile = zip.file('embeddings_index.json');
-                    if (idxFile) {
-                        let indexPayload = null;
-                        try { indexPayload = JSON.parse(await idxFile.async('text')); }
-                        catch (e) {
-                            console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                        for (let i = startIdx; i < history.length; i++) {
+                            const a = history[i];
+                            if (!a.embedding && embeddingByProblem.has(a.problemId)) {
+                                a.embedding = embeddingByProblem.get(a.problemId);
+                                totalFilled++;
+                            }
                         }
-                        if (indexPayload && indexPayload.problems) {
-                            // Sequential per-entry WITHIN the shard: Range
-                            // requests are cheap (~256B), and with shards
-                            // running SHARD_WALK_CONCURRENCY-wide this bounds
-                            // the total in-flight request count.
-                            for (let i = startIdx; i < history.length; i++) {
-                                const a = history[i];
-                                if (a.correct !== false) continue;
-                                if (typeof a.pickedCellIndex !== 'number') continue;
-                                if (a.pickedEmbedding) continue;
-                                const indexEntry = indexPayload.problems[a.problemId];
-                                if (!indexEntry) continue;
-                                const emb = await fetchPickedEmbeddingWithIndexEntry({
-                                    tsumegoId: a.problemId,
-                                    cellIndex: a.pickedCellIndex,
-                                    zipFilename,
-                                    boardSize: size,
-                                    indexEntry,
-                                });
-                                if (Array.isArray(emb)) {
-                                    a.pickedEmbedding = quantizeEmbedding(emb);
-                                    totalFilledPicked++;
+
+                        // Picked-move backfill: same shard, Range-fetched per-cell
+                        // sidecar. Skipped silently for shards that don't ship one
+                        // (older builds) or when there are no eligible attempts.
+                        const idxFile = zip.file('embeddings_index.json');
+                        if (idxFile) {
+                            let indexPayload = null;
+                            try { indexPayload = JSON.parse(await idxFile.async('text')); }
+                            catch (e) {
+                                console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
+                            }
+                            if (indexPayload && indexPayload.problems) {
+                                // Sequential per-entry WITHIN the shard: Range
+                                // requests are cheap (~256B), and with shards
+                                // running SHARD_WALK_CONCURRENCY-wide this bounds
+                                // the total in-flight request count.
+                                for (let i = startIdx; i < history.length; i++) {
+                                    const a = history[i];
+                                    if (a.correct !== false) continue;
+                                    if (typeof a.pickedCellIndex !== 'number') continue;
+                                    if (a.pickedEmbedding) continue;
+                                    const indexEntry = indexPayload.problems[a.problemId];
+                                    if (!indexEntry) continue;
+                                    const emb = await fetchPickedEmbeddingWithIndexEntry({
+                                        tsumegoId: a.problemId,
+                                        cellIndex: a.pickedCellIndex,
+                                        zipFilename,
+                                        boardSize: size,
+                                        indexEntry,
+                                    });
+                                    if (Array.isArray(emb)) {
+                                        a.pickedEmbedding = quantizeEmbedding(emb);
+                                        totalFilledPicked++;
+                                    }
                                 }
                             }
                         }
+                    } catch (err) {
+                        console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
                     }
-                }
-            } catch (err) {
-                console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
+                });
             }
-        });
+        }
 
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
             persistAnswerHistory(size, history);
             console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
 
-        // Re-derive the cold tail from the same shards (ratings change only). Present
+        // Re-derive the cold tail from problem_params (ratings change only). Present
         // problems get the CURRENT rating; a problem that left the corpus has its rating
         // fields STRIPPED — never leave a stale rating on a removed problem — so
         // flattenAttempts drops the now-rating-less attempt from the chart. One IDB
         // cursor pass. (The working-set copy wins in getMergedFullAnswerHistory, so an
         // attempt present in both is unaffected here; this pass handles the tail-ONLY
         // attempts.)
-        if (tailNeedsRederive) {
+        if (tailNeedsRederive && problemParams) {
             let tailRederived = 0, tailStripped = 0;
             await updateTail((entry) => {
                 if (!entry || entry.size !== size || typeof entry.problemId !== 'string') return null;
-                const item = tailRatingItems.get(entry.problemId);
+                const item = problemParams.get(entry.problemId);
                 if (item) {
                     if (entry.problemRating === item.rating) return null;  // already current
                     applyRatingFields(entry, item, size);
@@ -574,10 +605,9 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
                     tailRederived++;
                     return entry;
                 }
-                // Not loaded from a current shard: strip if the problem left the corpus;
-                // if it's still in the corpus (a transient shard-load failure this run),
-                // leave it untouched for the next pass.
-                if (!lookupMap.has(entry.problemId)) {
+                // Absent from problem_params ⇒ the problem left the corpus: strip its
+                // rating fields (flattenAttempts then drops the attempt from the chart).
+                if (!problemParams.has(entry.problemId)) {
                     let touched = false;
                     for (const k of RATING_FIELDS) {
                         if (entry[k] !== undefined) { delete entry[k]; touched = true; }

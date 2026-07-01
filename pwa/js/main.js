@@ -84,6 +84,7 @@ import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
 import { hasPendingAccountSwitch, maybeFinishAccountSwitch, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
+import { maybeHandleRegistration } from './registration.js';
 import { performShare } from './share.js';
 import { APP_MODES } from './constants.js';
 
@@ -223,6 +224,11 @@ function wireMenu() {
         state.audioEnabled = !state.audioEnabled;
         closeMenu();
         updateAllUI();
+    });
+    // menu-leaderboard is a real anchor to the standalone /leaderboard page
+    // (target=_blank); let the browser navigate.
+    document.getElementById('menu-leaderboard').addEventListener('click', () => {
+        closeMenu();
     });
     // menu-about is a real anchor (target=_blank); let the browser navigate.
     document.getElementById('menu-about').addEventListener('click', () => {
@@ -666,4 +672,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     startBackgroundServices();
     wireLifecycleRecovery();
+
+    // EGD-leaderboard registration: if the PWA booted on an invite link
+    // (/register?t=<token>), preview the invitation and offer to bind this
+    // account. Fire-and-forget after boot so it overlays a painted board;
+    // gated on ?t= so normal opens are entirely unaffected.
+    if (new URLSearchParams(window.location.search).has('t')) {
+        maybeHandleRegistration();
+    }
 });
