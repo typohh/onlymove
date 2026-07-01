@@ -414,7 +414,9 @@ export function updateAnalysisUI(score, bestMove) {
                 }
             }
             let displayText;
-            if (formattedScore === getTerm('analyzing')) {
+            if (formattedScore === getTerm('analyzing') || formattedScore === getTerm('error')) {
+                // Status strings stand alone; only real scores get the
+                // "Score:" prefix.
                 displayText = formattedScore;
             } else {
                 displayText = `${scoreText}: ${formattedScore}`;

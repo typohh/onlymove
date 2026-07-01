@@ -302,6 +302,12 @@ async function requestAndDisplayAnalysis() {
             }
         } else if (state.appMode !== APP_MODES.ANALYZING) {
             updateAnalysisUI(score, null);
+        } else if (getCurrentSgf() === sgf) {
+            // Still analyzing this position but the server gave no move back:
+            // fetchAnalysis swallows network/server failures into bestMove:null
+            // (only 499 maps to RETRY), so without this branch the pane stays
+            // on "Analyzing…" forever.
+            updateAnalysisUI(getTerm('error'), null);
         }
 
     } catch (error) {
