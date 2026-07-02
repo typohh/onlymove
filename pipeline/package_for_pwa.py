@@ -394,15 +394,15 @@ def print_rating_distribution(metadata):
               f"avg slope: {avg_slope:.3f}, avg rating: {avg_rating:.3f})")
 
 
-def _embeddings_dir(board_size):
-    """The embeddings source dir for this size: prefer the joint model, fall back
-    to the legacy per-size one. Returns (dir, is_joint) or (None, False)."""
+def _embeddings_dir():
+    """The embeddings source dir: the joint model, or None if it hasn't been
+    built (the embeddings-absent sentinel — the size's shards are then left
+    frozen at their older rating era). Returns (dir, is_joint) or (None, False).
+    No legacy per-size fallback: a stale embeddings/<size>/ must not silently
+    stand in for the joint fit."""
     joint_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
-    legacy_dir = os.path.join(PROJECT_ROOT, "embeddings", str(board_size))
     if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
         return joint_dir, True
-    if os.path.exists(os.path.join(legacy_dir, "per_problem.csv")):
-        return legacy_dir, False
     return None, False
 
 
@@ -458,13 +458,12 @@ def load_embeddings(board_size, meta_only=False):
                      and extreme_problems are kept locally in embeddings/joint/
                      as inspection aids and not shipped.
     """
-    embed_dir, is_joint = _embeddings_dir(board_size)
+    embed_dir, is_joint = _embeddings_dir()
     if embed_dir is None:
         # The whole embeddings artifact is missing (build_embedding never ran) — a
         # misconfigured run, not a per-problem coverage gap. Abort.
         raise FileNotFoundError(
-            f"no embeddings under embeddings/{{joint,{board_size}}}/per_problem.csv "
-            f"— run build_embedding")
+            "no embeddings at embeddings/joint/per_problem.csv — run build_embedding")
 
     per_problem = os.path.join(embed_dir, "per_problem.csv")
     # meta_only: read just the header to count K columns, skip the row map.
@@ -530,7 +529,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     _hash_file_into(h, os.path.join(rdir, "tsumego_ratings_final.csv"))
     _hash_file_into(h, os.path.join(rdir, "tsumego_quality_final.csv"))
     _hash_file_into(h, os.path.join(rdir, "tsumego_floor_final.csv"))
-    embed_dir, _ = _embeddings_dir(board_size)
+    embed_dir, _ = _embeddings_dir()
     if embed_dir:
         _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
         h.update((shipped_embedding_version(embed_dir) or "noemb").encode())
@@ -706,13 +705,13 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # fatal. This also sidesteps size_inputs_hash dropping its embedding terms when
     # embeddings/ is gone, which would otherwise change the hash and force a doomed
     # rebuild instead of the skip the unchanged shards deserve.
-    if _embeddings_dir(board_size)[0] is None:
+    if _embeddings_dir()[0] is None:
         if have_zips:
             print("  embeddings/ absent but shards present — keeping shards, "
                   "embedding_meta and manifest untouched (curve/constants-only run)")
             return None, None, None
         raise FileNotFoundError(
-            f"no embeddings under embeddings/{{joint,{board_size}}}/ AND no existing "
+            f"no embeddings at embeddings/joint/ AND no existing "
             f"shards in {zip_dir} — run build_embedding first")
 
     if (not force and prev and have_zips

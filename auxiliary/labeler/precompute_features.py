@@ -60,14 +60,11 @@ def residualize(vec, rating, size_is_13, p):
 
 
 def load_correct_vec(act_dir, tid):
-    """Return the correct-move 6912-float vector, npz (preferred) or legacy npy."""
+    """Return the correct-move 6912-float vector from the problem's .npz, or None."""
     npz_path = os.path.join(act_dir, tid + ".npz")
     if os.path.exists(npz_path):
         with np.load(npz_path) as s:
             return s["candidates"][int(s["correct_idx"])]
-    npy_path = os.path.join(act_dir, tid + ".npy")
-    if os.path.exists(npy_path):
-        return np.load(npy_path)
     return None
 
 

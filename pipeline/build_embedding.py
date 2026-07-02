@@ -2,7 +2,7 @@
 per-problem KataGo trunk activations across all configured board sizes.
 
 Inputs (loads from each size that has data):
-  activations/<size>/<id>.npy
+  activations/<size>/<id>.npz
   ratings/<size>/tsumego_ratings_final.csv
 
 Outputs (single shared model — embeddings/joint/):
@@ -100,26 +100,17 @@ def _chunked_residualize(X, X_design, coefs, chunk_rows):
 
 
 def _load_correct_vec(act_dir: str, tid: str, by_ext: dict) -> np.ndarray:
-    """Return the correct-move 6912-float vector for a single problem,
-    handling both the new .npz (all-legal-cells, with correct_idx) and the
-    legacy .npy (correct-cell-only) layouts. On a corrupt .npz, falls back
-    to .npy if present — silently for fitting, since the correct cell is
-    the only vector we need here regardless of format.
+    """Return the correct-move 6912-float vector for a single problem from its
+    .npz (all-legal-cells, indexed by correct_idx). A corrupt/unreadable .npz is
+    a HARD ERROR that aborts the run, so on-disk corruption of the activation
+    corpus surfaces instead of being silently masked.
     """
-    if tid in by_ext.get("npz", {}):
-        npz_path = os.path.join(act_dir, by_ext["npz"][tid])
-        try:
-            with np.load(npz_path) as s:
-                return s["candidates"][int(s["correct_idx"])]
-        except Exception as e:
-            if tid not in by_ext.get("npy", {}):
-                raise RuntimeError(
-                    f"corrupt .npz at {npz_path} and no .npy fallback ({e})"
-                )
-            print(f"  [warn] corrupt npz {npz_path}: {type(e).__name__}; "
-                  f"falling back to .npy", flush=True)
-    path = os.path.join(act_dir, by_ext["npy"][tid])
-    return np.load(path)
+    npz_path = os.path.join(act_dir, by_ext["npz"][tid])
+    try:
+        with np.load(npz_path) as s:
+            return s["candidates"][int(s["correct_idx"])]
+    except Exception as e:
+        raise RuntimeError(f"corrupt/unreadable .npz at {npz_path}") from e
 
 
 def load_size(size: int):
@@ -135,20 +126,11 @@ def load_size(size: int):
         print(f"  [size {size}] no ratings file; skipping")
         return None, None, None
 
-    by_ext = {
-        "npz": {f[:-4]: f for f in os.listdir(act_dir) if f.endswith(".npz")},
-        "npy": {f[:-4]: f for f in os.listdir(act_dir) if f.endswith(".npy")},
-    }
-    # Prefer .npz when both exist for the same id.
-    ids = sorted(set(by_ext["npz"]) | set(by_ext["npy"]))
+    by_ext = {"npz": {f[:-4]: f for f in os.listdir(act_dir) if f.endswith(".npz")}}
+    ids = sorted(by_ext["npz"])
     if not ids:
         print(f"  [size {size}] no activation files; skipping")
         return None, None, None
-    n_npz = sum(1 for tid in ids if tid in by_ext["npz"])
-    n_npy = len(ids) - n_npz
-    if n_npy:
-        print(f"  [size {size}] {n_npz} .npz + {n_npy} legacy .npy "
-              f"(legacy entries fitted from correct-cell-only vector)")
 
     sample = _load_correct_vec(act_dir, ids[0], by_ext)
     n, d = len(ids), sample.shape[0]

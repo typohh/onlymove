@@ -68,11 +68,8 @@ def _load_chunk(task):
     """
     start, act_dir, items = task
     out = np.full((len(items), N_FEATS), np.nan, dtype=np.float16)
-    for i, (tid, npz_name, npy_name) in enumerate(items):
-        by_ext = {
-            "npz": {tid: npz_name} if npz_name else {},
-            "npy": {tid: npy_name} if npy_name else {},
-        }
+    for i, (tid, npz_name) in enumerate(items):
+        by_ext = {"npz": {tid: npz_name} if npz_name else {}}
         try:
             out[i] = _load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
         except Exception:
@@ -96,10 +93,9 @@ def _build_cache(size, workers, force=False):
         raise SystemExit(f"no activations dir for size {size}: {act_dir}")
     files = os.listdir(act_dir)
     npz = {f[:-4]: f for f in files if f.endswith(".npz")}
-    npy = {f[:-4]: f for f in files if f.endswith(".npy")}
-    ids = sorted(set(npz) | set(npy))
+    ids = sorted(npz)
     if not ids:
-        raise SystemExit(f"no .npz/.npy activation files in {act_dir}")
+        raise SystemExit(f"no .npz activation files in {act_dir}")
     n = len(ids)
 
     # Reuse the existing cache where it covers the same tid (in any order).
@@ -124,13 +120,13 @@ def _build_cache(size, workers, force=False):
     missing_rows = {}
     chunk = 1024
     tasks = [(s, act_dir,
-              [(t, npz.get(t), npy.get(t)) for t in missing[s:s + chunk]])
+              [(t, npz[t]) for t in missing[s:s + chunk]])
              for s in range(0, len(missing), chunk)]
     t0, done = time.time(), 0
     if tasks:
         with ProcessPoolExecutor(max_workers=workers) as ex:
             for (_, arr), (_, _, items) in zip(ex.map(_load_chunk, tasks), tasks):
-                for j, (tid, _, _) in enumerate(items):
+                for j, (tid, _) in enumerate(items):
                     missing_rows[tid] = arr[j]
                 done += len(items)
                 rate = done / (time.time() - t0) if time.time() > t0 else 0.0
