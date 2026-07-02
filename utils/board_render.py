@@ -111,10 +111,9 @@ def simulate(setup, size):
                         board[gy][gx] = "."
                     captured.extend(grp)
         grp, libs = _group(board, x, y, size)
-        if not libs:  # suicide — undo, not a real move
-            for gx, gy in grp:
-                board[gy][gx] = "."
-            continue
+        if not libs:  # suicide (no capture above saved it) — undo only the
+            board[y][x] = "."  # just-placed stone, NOT the whole friendly
+            continue           # group it joined (those were legal before this)
         last_move = (color, x, y)
         last_captured = captured
 

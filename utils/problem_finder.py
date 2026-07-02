@@ -2,9 +2,7 @@ import math
 import random
 
 from utils.configurations import debug, DEBUG
-from utils.katago_queries import KatagoQueries
-
-KATAGO_COLS = "ABCDEFGHJKLMNOPQRST"
+from utils.katago_queries import KatagoQueries, GTP_COLS
 
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4
@@ -18,13 +16,11 @@ PLAYOUTS_GAME = 30
 
 class ProblemFinder:
     """
-    Assesses the difficulty of a move.
+    Generates tsumego problems and validates their difficulty.
     """
 
     def __init__(self, queries: KatagoQueries):
         """
-        Initializes the DifficultyAssessor.
-
         Args:
             queries (KatagoQueries): The KataGo controller for the SL network.
         """
@@ -34,8 +30,8 @@ class ProblemFinder:
         # the random opening moves (1st/2nd line). Derived from the board size
         # the queries object is bound to.
         self.edge_cols = {
-            KATAGO_COLS[0], KATAGO_COLS[1],
-            KATAGO_COLS[self.board_size - 2], KATAGO_COLS[self.board_size - 1],
+            GTP_COLS[0], GTP_COLS[1],
+            GTP_COLS[self.board_size - 2], GTP_COLS[self.board_size - 1],
         }
         self.edge_rows = {"1", "2", str(self.board_size - 1), str(self.board_size)}
 
@@ -57,17 +53,18 @@ class ProblemFinder:
                 return False
             return True
 
-        # Play random moves, anywhere except 1st and 2nd lines
+        # Play random moves, anywhere except 1st and 2nd lines. The draw is
+        # deliberately UNIFORM over legal non-edge cells (not policy-weighted)
+        # to maximize opening-position diversity in the generated corpus.
         for _ in range(RANDOM_MOVE_COUNT):
             response = self.queries.query(moves)
-            legal_moves = [
-                (i, p)
+            legal_idxs = [
+                i
                 for i, p in enumerate(response["policy"])
                 if p > 0 and is_valid(self.queries.get_move_from_idx(i))
             ]
 
-            move_indices, probabilities = zip(*legal_moves)
-            chosen_idx = random.choices(move_indices)[0]
+            chosen_idx = random.choices(legal_idxs)[0]
             move = self.queries.get_move_from_idx(chosen_idx)
 
             moves.append(move)
@@ -123,7 +120,15 @@ class ProblemFinder:
         line confirms the expectation (the caller maps False → None)."""
         game_moves = moves.copy()
         game_moves.append(first_move)
+        # Depth cap: KataGo can refuse to pass in a settled position and play
+        # on indefinitely (add_variations guards the same failure mode with
+        # MAX_VARIATION_DEPTH). Bail rather than loop forever — a line this long
+        # is not a clean tsumego resolution anyway.
+        max_line_len = len(moves) + 2 * self.board_size * self.board_size
         while game_moves[-1] != 'pass' or game_moves[-2] != 'pass':
+            if len(game_moves) > max_line_len:
+                debug(f"line exceeded {max_line_len} moves without a double pass; bailing")
+                return False
             move, winrate, score, _ = self.queries.get_best_move(self.queries.query(game_moves, playouts=PLAYOUTS_GAME))
             fell_off = (winrate < 0.5 or score < 0) if expect_win else (winrate > 0.5 or score > 0)
             if fell_off:

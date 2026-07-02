@@ -98,9 +98,11 @@ EXTEND_TO = 9               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with fewer pooled declarations
 MIN_ATTEMPTS = 20           # drop survey users with fewer pooled attempts
 
-# Solve-time feature — MUST match the client (pwa/js/population-constants.js
-# medianNovelSolveMinutes over the working set): non-repeat, timed, AFK-capped median
-# over the most-recent WORKING_SET attempts, in minutes.
+# Solve-time feature (server side): non-repeat, timed, AFK-capped median over the
+# most-recent WORKING_SET attempts, in minutes. This approximates but no longer
+# exactly matches the client — the client's timeAdjustDeltaRating now uses a
+# positional-weighted working-set median with no AFK cap (a deliberate divergence),
+# so treat this as the mapping's own solve-time definition, not a strict mirror.
 AFK_CAP_MS = 180000
 MIN_TIMED = 20
 WORKING_SET = 3000

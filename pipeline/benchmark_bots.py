@@ -147,11 +147,10 @@ class HeuristicBot:
         self.moves_weight = 2.7749
         self.base_prob = 0.5968
 
-    def _get_moves_remaining(self, game):
-        _, variation_nodes = parse_tsumego_sgf(game)
+    def _get_moves_remaining(self, variation_nodes):
         if not variation_nodes:
             return 0
-        
+
         count = 1
         current_node = variation_nodes[0]
         while len(current_node) > 0:
@@ -167,14 +166,19 @@ class HeuristicBot:
                 continue
 
             score_found = False
-            for comment_bytes in node.get_raw_list("C"):
-                comment = comment_bytes.decode('utf-8')
-                # Format: "100.0%/34.1"
-                match = re.search(r"(\d+\.?\d*)%/([-]?\d+\.?\d*)", comment)
-                if match:
-                    scores.append(float(match.group(2)))
-                    score_found = True
-                    break
+            # has_property guard: get_raw_list("C") raises a raw KeyError on a
+            # comment-less node — leaving it unguarded, a missing comment
+            # bypassed the friendly "missing a probability/score comment" error
+            # below (which only covered an unparsable comment).
+            if node.has_property("C"):
+                for comment_bytes in node.get_raw_list("C"):
+                    comment = comment_bytes.decode('utf-8')
+                    # Format: "100.0%/34.1"
+                    match = re.search(r"(\d+\.?\d*)%/([-]?\d+\.?\d*)", comment)
+                    if match:
+                        scores.append(float(match.group(2)))
+                        score_found = True
+                        break
             if not score_found:
                 color, move_bytes = node.get_raw_move()
                 raise ValueError(f"SGF variation for move '{color.upper()} {move_bytes.decode('utf-8')}' is missing a probability/score comment.")
@@ -187,7 +191,8 @@ class HeuristicBot:
 
         # Compute probability components
         p_score = 1.0 - math.exp(-score_diff / self.score_decay)
-        moves_remaining = self._get_moves_remaining(game)
+        # Reuse the already-parsed nodes rather than re-parsing the SGF tree.
+        moves_remaining = self._get_moves_remaining(variation_nodes)
         p_moves = math.exp(-moves_remaining / self.moves_decay)
 
         # Weighted combination with base probability

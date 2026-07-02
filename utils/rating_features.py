@@ -143,7 +143,11 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
         row = {t: i for i, t in enumerate(ids)}
         vecs = np.load(_cache_vecs_path(size), mmap_mode="r")
         usable = [t for t in tids_by_size[size] if t in row]
-        rows = np.array([row[t] for t in usable])
+        # Force integer dtype: an empty `usable` yields np.array([]) which is
+        # float64, and a float array can't index the memmap (IndexError). With
+        # intp an empty index just selects zero rows, so a size with no usable
+        # ids contributes an empty block instead of crashing the whole fit.
+        rows = np.array([row[t] for t in usable], dtype=np.intp)
         X = np.asarray(vecs[rows], dtype=np.float32)
         finite = np.isfinite(X).all(axis=1)
         usable = [t for t, f in zip(usable, finite) if f]

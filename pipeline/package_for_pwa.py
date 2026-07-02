@@ -11,7 +11,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 import sgfmill.sgf
-from scipy.optimize import curve_fit
 
 # --- Path Setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,89 +37,11 @@ EMBEDDING_BYTES_PER_FLOAT = 2
 RATINGS_ROOT = "ratings"
 RATING_MODEL_TAG = "v2"
 
-# Rating-to-rank mapping. Each problem's raw rating r (the v2 model's 80%-clear
-# rating, from pipeline.train_rating) is mapped to a true-handicap-stones
-# axis via r = A·exp(k·x_handi) + C, then linearly to the PWA's 0..1 axis
-# where x = -17 (true 20k) -> 0 and x = +11 (true 9d) -> 1. The PWA axis is
-# thus linear in handicap stones, which is the underlying definition of rank.
-#
-# The rating model is scale-invariant under joint
-# additive shifts of (bot ratings, problem ratings), so the absolute level
-# of r drifts every time the model is refit on a new corpus. We therefore
-# can't hardcode (A, k, C) — they need to be re-fit at packaging time from
-# the *current* bot_ratings_final.csv against a stable handicap-stone
-# anchor. BOT_HANDI_RANK below is that anchor: the bots' 19x19 handicap-
-# stone strength from auxiliary/calibrate_handicap_ranks.py --report-only,
-# which is independent of the tsumego corpus and stable across rating
-# refits. Per-bot SE in the handi calibration is ~0.2-0.6 stones; refresh
-# the table if calibration_handicap_sgf/ grows substantially.
-BOT_HANDI_RANK = {
-    "20k": -14.59, "19k": -14.15, "18k": -13.00, "17k": -13.01,
-    "16k": -12.21, "15k": -12.06, "14k": -10.86, "13k": -10.54,
-    "12k": -9.66,  "11k": -8.85,  "10k":  -8.39, "9k":   -7.63,
-    "8k":   -6.07, "7k":   -5.11, "6k":   -4.02, "5k":   -2.77,
-    "4k":   -1.19, "3k":    0.00, "2k":   +1.36, "1k":   +2.54,
-    "1d":   +3.76, "2d":   +5.12, "3d":   +5.93, "4d":   +6.85,
-    "5d":   +7.24, "6d":   +7.63, "7d":   +7.69, "8d":   +8.01,
-    "9d":   +8.56,
-}
-PWA_X0 = -17.0   # true-handi-stones at PWA axis 0 (nominal 20k)
-PWA_X1 = +11.0   # true-handi-stones at PWA axis 1 (nominal 9d)
-PWA_SPAN = PWA_X1 - PWA_X0
-# Margin above the fit's asymptote C; keeps ln((r - C)/A) well-conditioned
-# for the rare ultra-easy problem that ends up within an r-hair of C. At
-# 0.1, neither current corpus actually clamps; raise (e.g. to 0.2) if a
-# future regenerated corpus starts producing problems with r ≤ C + 0.1.
-RATING_FLOOR_MARGIN = 0.1
-
-
 # package_for_pwa is rank-agnostic: it ships one raw black-box rating per
 # problem and never converts to ranks. The rating→rank curve (M) is fitted and
 # written into ratings/rating_to_rank.json by pipeline.map_rating_to_rank
 # (and copied across by this script); the client fetches it and does all
 # rating→rank conversion itself.
-
-
-def fit_rating_curve(ratings_dir):
-    """Fit r = A·exp(k·x_handi) + C against the current humanv0 bot ratings.
-
-    Reads ratings_dir/bot_ratings_final.csv, joins each humanv0 bot (no
-    temperature variant) against BOT_HANDI_RANK, and least-squares-fits the
-    three-parameter exponential. Returns (A, k, C). The fit is the anchor
-    between the freely-drifting tsumego rating scale and the stable
-    handicap-stone scale, and must be recomputed every time the rating
-    model is refit (i.e. every packaging run)."""
-    bot_ratings_df = pd.read_csv(os.path.join(ratings_dir, "bot_ratings_final.csv"))
-    xs, ys = [], []
-    for _, row in bot_ratings_df.iterrows():
-        name = row["bot_id"]
-        if not name.startswith("b18c384nbt-humanv0_"):
-            continue
-        label = name[len("b18c384nbt-humanv0_"):]
-        if "_t" in label:  # temperature variants share a base bot's name suffix
-            continue
-        if label not in BOT_HANDI_RANK:
-            continue
-        xs.append(BOT_HANDI_RANK[label])
-        ys.append(float(row["rating"]))
-
-    if len(xs) < 5:
-        raise RuntimeError(
-            f"not enough humanv0 bots matched to BOT_HANDI_RANK at {ratings_dir} "
-            f"({len(xs)} found); check bot_id naming")
-
-    xs, ys = np.array(xs), np.array(ys)
-    # Initial guess scaled to the data range; curve_fit's default Levenberg-
-    # Marquardt walks home from here in <50 iters on either corpus.
-    y_range = ys.max() - ys.min()
-    x_range = xs.max() - xs.min()
-    p0 = [y_range / 2.0, float(np.log(2.0)) / x_range, ys.min() - y_range / 2.0]
-    (A, k, C), _ = curve_fit(
-        lambda x, A, k, C: A * np.exp(k * x) + C, xs, ys,
-        p0=p0, maxfev=10000,
-    )
-    rmse = float(np.sqrt(np.mean((ys - (A * np.exp(k * xs) + C)) ** 2)))
-    return float(A), float(k), float(C), rmse
 
 
 def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
@@ -245,17 +166,17 @@ def _build_group_shard(task):
     # zip so we can drop embeddings_index.json inside the same zip below.
     bin_buffer = bytearray()
     embeddings_index = {}
-    n_with_cells = n_without_cells = 0
+    n_with_cells = 0
     if embed_cells_enabled:
         for item in group_items:
             tid = item["filename"].split(".")[0]
             per_cell_path = os.path.join(per_cell_dir, tid + ".npz")
             sgf_path = os.path.join(tsumegos_dir, item["filename"])
+            # project_cells_for_problem RAISES on any missing/corrupt/
+            # SGF-inconsistent npz (a gap is a hard error, never silently
+            # skipped), so there is no "no cells" case to count here.
             cells, n_cells = project_cells_for_problem(
                 per_cell_path, sgf_path, reorder_by_sgf=reorder_by_sgf)
-            if cells is None:
-                n_without_cells += 1
-                continue
             offset = len(bin_buffer)
             bin_buffer.extend(cells.tobytes())  # fp16 little-endian
             embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
@@ -291,7 +212,6 @@ def _build_group_shard(task):
         "max_rating": max_rating,
         "tsumego_ids": [item["filename"].split(".")[0] for item in group_items],
         "n_with_cells": n_with_cells,
-        "n_without_cells": n_without_cells,
     }
 
 
@@ -318,7 +238,10 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     is forwarded to project_cells_for_problem (see there).
     """
 
-    metadata.sort(key=lambda x: x["rating"])
+    # Tie-break equal ratings by filename so grouping (and thus the shard
+    # contents/hashes) is deterministic — otherwise os.listdir order leaks in
+    # and the reproducible-zip effort is undone for same-rating problems.
+    metadata.sort(key=lambda x: (x["rating"], x["filename"]))
     group_count = int(len(metadata) ** 0.5)
     for i, item in enumerate(metadata):
         item["group"] = int(group_count * i / len(metadata))
@@ -348,10 +271,10 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
 
     zip_metadata = []  # (group_index, entry) — sorted to group order before write
     new_lookup_entries = []  # entries for the size we are (re)building now
-    n_with_cells = n_without_cells = 0
+    n_with_cells = 0
 
     def handle_result(res):
-        nonlocal n_with_cells, n_without_cells
+        nonlocal n_with_cells
         zip_filename = f"{res['zip_hash']}.zip"
         with open(os.path.join(zip_dir, zip_filename), 'wb') as f:
             f.write(res["zip_bytes"])
@@ -367,7 +290,6 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
         for tsumego_id in res["tsumego_ids"]:
             new_lookup_entries.append((tsumego_id, res["zip_hash"], board_size))
         n_with_cells += res["n_with_cells"]
-        n_without_cells += res["n_without_cells"]
 
     if n_workers == 1:
         for task in tasks:
@@ -385,8 +307,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     zip_metadata = [entry for _, entry in zip_metadata]
 
     if embed_cells_enabled:
-        print(f"  per-cell embeddings: {n_with_cells} problems shipped, "
-              f"{n_without_cells} skipped (no .npz / no rating / no SGF match)")
+        print(f"  per-cell embeddings: {n_with_cells} problems shipped")
 
     # Per-size metadata.json sits inside the size subdirectory.
     metadata_path = os.path.join(zip_dir, "metadata.json")
@@ -764,8 +685,16 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
 
     inputs_hash = size_inputs_hash(board_size, reorder_by_sgf)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
-    have_zips = os.path.isdir(zip_dir) and any(
-        f.endswith(".zip") for f in os.listdir(zip_dir))
+    # A shard set counts as present only with BOTH zips AND its metadata.json.
+    # create_packages removes metadata.json first and rewrites it last, so
+    # "zips exist but no metadata.json" means a crashed rebuild left a
+    # half-built dir — require both so the skip / embeddings-absent-sentinel
+    # paths below never validate (and ship) that partial dir.
+    have_zips = (
+        os.path.isdir(zip_dir)
+        and os.path.exists(os.path.join(zip_dir, "metadata.json"))
+        and any(f.endswith(".zip") for f in os.listdir(zip_dir))
+    )
 
     # Embeddings absent: the shards CANNOT be (re)built. They may, however, already
     # exist from a prior full run on a machine where the heavy embeddings/ artifacts
@@ -926,6 +855,10 @@ if __name__ == "__main__":
 
     joint_embedding_meta = None
     ratings_versions = {}
+    # A size returns (None, None, None) on the embeddings-absent sentinel path
+    # (its shards are left frozen at an older rating era). Track it so we don't
+    # re-derive problem_params.bin from newer CSVs and desync it from them.
+    any_sentinel = False
     # Seed with the prior manifest so a size that no-ops this run (unchanged shards,
     # or embeddings/ absent) keeps its recorded entry instead of being dropped.
     size_manifest = dict(prev_sizes)
@@ -940,6 +873,8 @@ if __name__ == "__main__":
             ratings_versions[str(size)] = ratings_hash
             size_manifest[str(size)] = {
                 "inputs_hash": inputs_hash, "ratings_hash": ratings_hash}
+        else:
+            any_sentinel = True
 
     # Copy the rating→rank curve from the backend ratings/ into the served path
     # (single-writer rule). Cheap; always refreshed so a curve-only edit ships even
@@ -953,7 +888,16 @@ if __name__ == "__main__":
     # the client ratings-change backfill. Emitted every run (cheap, deterministic)
     # and BEFORE compute_data_version so its bytes are folded into data_version.
     print("\n--- problem_params ---")
-    emit_problem_params(OUTPUT_DIR)
+    params_path = os.path.join(OUTPUT_DIR, "tsumegos", "problem_params.bin")
+    if any_sentinel and os.path.exists(params_path):
+        # A size took the embeddings-absent sentinel path: its shards are frozen
+        # at an older rating era. Re-deriving from the CURRENT ratings CSVs could
+        # desync problem_params.bin from those frozen shards, so keep the
+        # existing file (which matches the shards on disk).
+        print("  keeping existing problem_params.bin (a size took the "
+              "embeddings-absent sentinel path; shards frozen)")
+    else:
+        emit_problem_params(OUTPUT_DIR)
 
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently

@@ -384,10 +384,14 @@ def upload_input_dirs(host, base_ssh, base_rsync, dirs, size=None):
             continue
         remote = f"{REMOTE_DIR}/{local}"
         subprocess.run(base_ssh + [f"mkdir -p {remote}"], capture_output=True)
-        res = subprocess.run(
-            base_rsync + excludes + [f"{local}/", f"root@{host}:{remote}/"],
-            timeout=1800,
-        )
+        try:
+            res = subprocess.run(
+                base_rsync + excludes + [f"{local}/", f"root@{host}:{remote}/"],
+                timeout=1800,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"  {local}/ upload timed out (rsync >1800s).")
+            return False
         if res.returncode != 0:
             print(f"  {local}/ upload failed (rsync rc={res.returncode}).")
             return False
@@ -683,6 +687,11 @@ def cmd_add():
         "--template_hash", "f779495b2d83b2c5b56e3c03f233f0ad",
         "--disk", "32", "--ssh",
     ])
+    if not isinstance(res, dict) or "new_contract" not in res:
+        # run_vast_cmd returns None on empty CLI output; guard so we abort
+        # cleanly instead of TypeError'ing on res["new_contract"].
+        print("VastAI create returned no contract id; aborting.")
+        sys.exit(1)
     instance_id = res["new_contract"]
 
     print(f"Waiting for instance {instance_id}...")
@@ -707,11 +716,16 @@ def cmd_setup(target):
 
 
 def _is_step_running(base_ssh):
-    res = subprocess.run(
-        base_ssh + ["pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1 "
-                    "&& echo RUNNING || echo IDLE"],
-        capture_output=True, text=True, timeout=15,
-    )
+    try:
+        res = subprocess.run(
+            base_ssh + ["pgrep -f '[p]ython3.* -u -m' >/dev/null 2>&1 "
+                        "&& echo RUNNING || echo IDLE"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        # ssh hung — can't confirm; treat as not-running rather than crashing
+        # the caller with a raw traceback.
+        return False
     return "RUNNING" in (res.stdout or "")
 
 

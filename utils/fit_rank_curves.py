@@ -1,23 +1,23 @@
-"""Shared survey-calibration helpers for the rank-curve / rating→EGF fits.
+"""Shared survey-calibration helpers for the rank-curve / rating→rank fits.
 
 This is a stateless helper library (no CLI / no `main`): it provides the pieces
-the production v2 rank-mapping (`pipeline.map_rating_to_rank`) and a couple of
+the production rank-mapping (`pipeline.map_rating_to_rank`) and a couple of
 auxiliary survey tools share.
 
-Concepts (internal rank = EGF rank is the hub / common unit):
+Concepts:
 
-  * INTERNAL RANK IS EGF RANK. Each user's rating = the problem RATING at which
-    they clear CALIBRATION_P (80%), from a logistic over their (raw_rating,
-    correct) attempts (`fit_user_rating`) — the SAME quantity the client computes,
-    using only the shipped black-box ratings (never the derivation internals).
-  * Per-server couplings are a cumulative-link (ordinal-threshold) fit in
-    internal-rank units (`ordinal_nll_vec`, `build_server_curves`), with thresholds
-    unpacked from a uniform-spacing parameterisation (`_unpack_thresholds`).
+  * Each user's rating = the problem RATING at which they clear CALIBRATION_P
+    (80%), from a logistic over their (raw_rating, correct) attempts
+    (`fit_user_rating`) — the SAME quantity the client computes, using only the
+    shipped black-box ratings (never the derivation internals).
+  * Per-server couplings are a cumulative-link (ordinal-threshold) fit
+    (`ordinal_nll_vec`), with thresholds unpacked from a uniform-spacing
+    parameterisation (`_unpack_thresholds`).
 
-`build_server_curves` emits {server: {our, server}} interpolation knots: `our` =
-the internal/EGF-rank scalar at each server-rank boundary; `server` = the server
-scalar there. Board-independent; the client interpolates its CONTINUOUS internal
-rank through these knots and rounds only for display.
+The production mapping (`map_rating_to_rank`) is a CONSENSUS model: rating maps
+to a latent consensus rank and every server INCLUDING EGF is a free coupling off
+it (EGF is not a privileged identity hub). The earlier EGF-hub server-curve knot
+builder (`build_server_curves`) was removed as dead.
 """
 
 import os
@@ -41,8 +41,6 @@ FLOOR_MAX = 0.78
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
-
-from utils.rank_surveys import SERVERS  # noqa: E402
 
 
 def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
@@ -158,36 +156,3 @@ def _unpack_thresholds(block, baseline):
     return np.concatenate([[alpha], alpha + np.cumsum(spacings)])
 
 
-def build_server_curves(fits, our_lo=-29, our_hi=9):
-    """Per-server interpolation knots: our (internal=EGF) rank → that server's
-    rank, both in scalar units (1k=0, 1d=1; no zero gap).
-
-    Board-independent. For each fitted server we ship the thresholds directly as
-    knots — `our` = the internal-rank scalar at each server-rank boundary (τ_g,
-    ascending), `server` = the server scalar there (g−0.5). The client
-    interpolates its CONTINUOUS internal rank through these knots (linear, with
-    end-slope extrapolation) and rounds only for the displayed label, so a weak
-    3d and a strong 3d can translate to different server ranks — the old
-    integer-keyed map collapsed them. The client clamps to the real rank range,
-    so the surveyed band needn't be padded here.
-
-    EGF is the identity hub (internal rank IS EGF rank): it gets a straight
-    identity line spanning [our_lo, our_hi]. Emitted in SERVERS order so the PWA
-    renders the translation table in a stable order.
-
-    Returns {server: {"our": [...], "server": [...]}}."""
-    out = {}
-    for server in SERVERS:
-        if server == "EGF":
-            out["EGF"] = {"our": [float(our_lo), float(our_hi)],
-                          "server": [float(our_lo), float(our_hi)]}
-            continue
-        if server not in fits:
-            continue
-        thresholds = fits[server][0]
-        if len(thresholds) < 2:
-            continue
-        gs = sorted(thresholds)
-        out[server] = {"our": [float(thresholds[g]) for g in gs],
-                       "server": [float(g - 0.5) for g in gs]}
-    return out

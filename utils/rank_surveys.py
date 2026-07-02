@@ -19,7 +19,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 
-# The servers a user can declare a rank on; EGF is the calibration hub (identity).
+# The servers a user can declare a rank on. Under the consensus mapping
+# (map_rating_to_rank) EGF is NOT special — it's a free coupling like every
+# other server, not the identity/calibration hub it was in the retired model.
 SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA"]
 
 # INSERT INTO "rank_surveys" ("id","user_id","server","rank","created_at")
