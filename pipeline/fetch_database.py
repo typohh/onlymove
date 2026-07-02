@@ -110,7 +110,12 @@ def _run_wrangler_json(command, pwa_dir):
                 if isinstance(data, dict) and data.get("error"):
                     print(f"\nD1 query failed: {data['error']}\n  query: {command}")
                     sys.exit(1)
-                return data
+                if proc.returncode == 0:
+                    return data
+                # Nonzero exit but still emitted JSON without a structured
+                # error: don't trust a possibly-partial result — an empty list
+                # here would blank a just-DROPped table on refill. Fall through
+                # to the retry/give-up path instead of returning it.
 
         err = (proc.stderr or "").strip()
         print(f"\nwrangler query failed (attempt {attempt + 1}/{total_attempts}): "
@@ -233,7 +238,9 @@ def emit_dump(con, sql_file):
         "SELECT type, name, tbl_name, sql FROM sqlite_master "
         "WHERE sql IS NOT NULL "
         "AND name NOT LIKE 'sqlite_%' "
-        "AND name NOT LIKE '\\_%' ESCAPE '\\'"
+        "AND name NOT LIKE '\\_%' ESCAPE '\\' "
+        "AND name <> 'd1_migrations'"  # match _remote_schema — a --full baseline
+                                       # can carry d1_migrations; don't re-emit it
     ).fetchall()
     tables = [o for o in objs if o[0] == "table"]
     with open(sql_file, "w", encoding="utf-8") as f:
@@ -350,15 +357,24 @@ def rebuild_sqlite(sql_file):
         print(f"\nError: dump not found at {sql_file}; cannot rebuild SQLite DB.")
         sys.exit(1)
 
-    if os.path.exists(sqlite_file):
-        os.remove(sqlite_file)
+    # Import into a temp DB and os.replace onto the canonical path only after a
+    # clean import. A failed import must NOT leave a partial database.sqlite —
+    # the next incremental run would adopt it as its id-cursor baseline and
+    # silently skip every row the truncated import missed.
+    tmp_sqlite = sqlite_file + ".tmp"
+    if os.path.exists(tmp_sqlite):
+        os.remove(tmp_sqlite)
 
     print(f"Rebuilding local SQLite DB at {sqlite_file}...")
+
+    def _cleanup_tmp():
+        if os.path.exists(tmp_sqlite):
+            os.remove(tmp_sqlite)
 
     try:
         with open(sql_file, "rb") as dump:
             proc = subprocess.Popen(
-                ["sqlite3", sqlite_file],
+                ["sqlite3", tmp_sqlite],
                 stdin=subprocess.PIPE,
             )
             proc.stdin.write(b"BEGIN;\n")
@@ -368,12 +384,15 @@ def rebuild_sqlite(sql_file):
             proc.stdin.close()
             rc = proc.wait()
         if rc != 0:
+            _cleanup_tmp()
             print(f"\nError: sqlite3 import exited with status {rc}.")
             sys.exit(1)
     except FileNotFoundError:
+        _cleanup_tmp()
         print("\nError: 'sqlite3' command not found. Install the sqlite3 CLI.")
         sys.exit(1)
 
+    os.replace(tmp_sqlite, sqlite_file)
     print("Local SQLite DB rebuilt successfully.")
 
 

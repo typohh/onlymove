@@ -554,32 +554,58 @@ def _project_one_for_per_cell(task):
     pre-projected (n_cells, K) fp16 + xys to the per_cell output dir.
     Returns (tid, status_str) for logging."""
     size, tid, raw_rating, in_dir, out_dir = task
+    out_path = os.path.join(out_dir, tid + ".npz")
+
+    def _fail(status):
+        # Never leave a PRIOR fit's projection behind on failure: packaging
+        # would ship that stale file under the NEW embedding_version — exactly
+        # the staleness the version gate exists to prevent. Deleting it makes
+        # packaging's missing-file check fire loudly instead of shipping stale.
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+        return tid, status
+
     npz_path = os.path.join(in_dir, tid + ".npz")
     if not os.path.exists(npz_path):
-        return tid, "missing_npz"
+        return _fail("missing_npz")
     try:
         with np.load(npz_path) as data:
             candidates = np.asarray(data["candidates"])  # (n_cells, 6912) fp16
             xys = np.asarray(data["xys"])                # (n_cells, 2)
     except Exception as e:
-        return tid, f"load_failed:{type(e).__name__}"
+        return _fail(f"load_failed:{type(e).__name__}")
 
     size_is_13 = 1.0 if size == 13 else 0.0
     try:
         projected = _project_decoded(candidates, raw_rating, size_is_13,
                                      _PCA_DECODED_WORKER)
     except Exception as e:
-        return tid, f"project_failed:{type(e).__name__}"
+        return _fail(f"project_failed:{type(e).__name__}")
 
-    out_path = os.path.join(out_dir, tid + ".npz")
     # Uncompressed (STORED): the payload is ~94% fp16 embedding data, which is
     # high-entropy and only deflates ~8%. Not worth the inflate cost paid on
     # every load during packaging (package_for_pwa reads all ~20k per run).
-    np.savez(
-        out_path,
-        embeddings=projected.astype(np.float16),
-        xys=xys.astype(np.int32),
-    )
+    # Write to a temp file then os.replace so a crash mid-write can't leave a
+    # torn npz that a later packaging run reads as valid.
+    tmp_path = out_path + ".tmp"
+    try:
+        with open(tmp_path, "wb") as fh:
+            np.savez(
+                fh,
+                embeddings=projected.astype(np.float16),
+                xys=xys.astype(np.int32),
+            )
+        os.replace(tmp_path, out_path)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        return _fail(f"save_failed:{type(e).__name__}")
     return tid, "ok"
 
 

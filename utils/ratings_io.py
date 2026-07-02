@@ -35,6 +35,8 @@ def load_value_map(csv_path, value_col, *, keep=None, missing_ok=False):
     keep_set = None if keep is None else set(keep)
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            return out  # existing-but-empty CSV (no header) -> no rows
         id_col = reader.fieldnames[0]
         for row in reader:
             tid = row[id_col]
@@ -61,10 +63,15 @@ def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
 
 def load_lapse(ratings_dir):
     """The global 4PL ceiling λ (fat-finger / lapse rate) the shipped ratings were
-    derived under and the client uses — read from population_constants.json, falling
-    back to rating_constants.json, then 0.0. fit_user_rating's 4PL must use THIS λ so
-    the EGF anchor matches the client's rank estimator (pwa/js/irt.js LAPSE)."""
-    for fname in ("population_constants.json", "rating_constants.json"):
+    derived under and the client uses. train_rating writes it to rating_constants.json
+    (the authoritative source — it learns λ jointly); fit_population_constants only
+    reads it THROUGH into population_constants.json. So prefer rating_constants.json,
+    fall back to population_constants.json, then 0.0 — otherwise a re-run of
+    train_rating (fresh λ) followed by map_rating_to_rank would anchor the curve under
+    a one-cycle-stale λ still sitting in population_constants.json. fit_user_rating's
+    4PL must use THIS λ so the anchor matches the client's rank estimator
+    (pwa/js/irt.js LAPSE)."""
+    for fname in ("rating_constants.json", "population_constants.json"):
         path = os.path.join(ratings_dir, fname)
         if os.path.exists(path):
             try:
@@ -85,7 +92,14 @@ def load_rating_rank_curve(ratings_dir, *, size="9", offset=0.0):
     get the internal-rank scalar directly."""
     with open(os.path.join(ratings_dir, "rating_to_rank.json")) as f:
         rr = json.load(f)
-    c = rr.get(str(size)) or next(iter(rr.values()))
+    c = rr.get(str(size))
+    if c is None:
+        # Fall back to any board-size curve — but never the top-level
+        # time_adjust dict, which has no ratings/rank_indices keys.
+        c = next((v for v in rr.values()
+                  if isinstance(v, dict) and "ratings" in v), None)
+    if c is None:
+        raise KeyError(f"rating_to_rank.json has no curve for size {size!r}")
     xs = np.asarray(c["ratings"], dtype=float)
     ys = np.asarray(c["rank_indices"], dtype=float) - offset
     return xs, ys

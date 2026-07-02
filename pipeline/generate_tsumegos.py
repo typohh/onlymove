@@ -46,16 +46,13 @@ class RunningStats:
     def stddev(self):
         return (self.M2 / (self.n - 1)) ** 0.5 if self.n > 1 else float("nan")
 
-    @property
-    def get_mean(self):
-        return self.mean
-
 
 class Stats:
     def __init__(self):
         self.problems_found = 0
         self.failures_to_create = 0
         self.duplicate_ids_skipped = 0
+        self.worker_errors = 0
         self.number_of_moves = RunningStats()
         self.start_time = time.time()
         self.last_state_change_time = time.time()
@@ -87,6 +84,9 @@ class Stats:
     def add_duplicate_id_skipped(self):
         self.duplicate_ids_skipped += 1
 
+    def add_worker_error(self):
+        self.worker_errors += 1
+
     def should_print_stats(self):
         """Check if enough time has passed to print stats again (at most once per minute)"""
         now = time.time()
@@ -116,6 +116,8 @@ class Stats:
         }
         if self.duplicate_ids_skipped:
             stats["Duplicate ids skipped"] = self.duplicate_ids_skipped
+        if self.worker_errors:
+            stats["Worker errors (skipped)"] = self.worker_errors
 
         # Add time tracking stats
         total_tracked_time = sum(time_spent.values())
@@ -251,8 +253,22 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     print(f"  sequence: {e.moves}")
                 STATS.set_state("other")
                 continue
+            except Exception as e:
+                # Any other transient failure (a KataGo query hiccup, a parse
+                # error, ...) must skip ONE problem, not kill the worker for
+                # the rest of the run. Without this the outer handler returned
+                # and the thread died permanently, so workers dropped off one
+                # by one and throughput silently decayed toward zero.
+                STATS.add_worker_error()
+                STATS.set_state("other")
+                with print_lock:
+                    print(f"[skip] worker error: {e}")
+                    traceback.print_exc()
+                continue
 
     except Exception as e:
+        # Backstop only — the inner loop now handles per-problem errors, so
+        # reaching here means the loop scaffolding itself failed.
         print(e)
         traceback.print_exc()
 
@@ -295,7 +311,6 @@ def main():
 
         queries = KatagoQueries(controller, args.size)
         problem_finder = ProblemFinder(queries)
-        problem_finder.debug = DEBUG
 
         # Match ANALYSIS_THREAD_FACTOR in pipeline.tune_engine — python workers
         # need to keep KataGo's analysis queue full despite GIL serialization.
