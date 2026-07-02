@@ -8,16 +8,21 @@
 // Wire protocol:
 //   - .embeddings.bin holds raw fp16 little-endian floats, K per cell, with
 //     cells concatenated in SGF variation document order across all problems
-//     in the shard. embeddings_index.json (inside the zip) gives the per-
-//     tsumego byte offset + n_cells.
+//     in the shard. The pass variation (never embedded upstream) occupies an
+//     all-zeros placeholder row, so bin row i == SGF child index i exactly —
+//     including for children after a non-last pass (bin format rev 2; rev 1
+//     skipped the pass and was off by one there). The pass row itself is
+//     never fetched: a board click can't select the pass node.
+//     embeddings_index.json (inside the zip) gives the per-tsumego byte
+//     offset + n_cells.
 //   - Layout parameters (K, dtype, bytes_per_cell) live in the joint
 //     pwa/tsumegos/embedding_meta.json, mirrored into state.embeddingMeta
 //     by backfill.js.
 //
 // The cell-index input is the **SGF root-variation index** as observed by
-// game-logic.handleBoardClick (children.indexOf(moveNode)). Extraction +
-// packaging emit cells in the same SGF document order, so no recomputation
-// of legality or coordinate flips is required client-side.
+// game-logic.handleBoardClick (children.indexOf(moveNode)). Packaging emits
+// bin rows in the same SGF document order, so no recomputation of legality
+// or coordinate flips is required client-side.
 
 import { state, embeddingsIndexCache } from './state.js';
 

@@ -55,6 +55,7 @@ class Stats:
     def __init__(self):
         self.problems_found = 0
         self.failures_to_create = 0
+        self.duplicate_ids_skipped = 0
         self.number_of_moves = RunningStats()
         self.start_time = time.time()
         self.last_state_change_time = time.time()
@@ -83,6 +84,9 @@ class Stats:
     def add_failure_to_create_problem(self):
         self.failures_to_create += 1
 
+    def add_duplicate_id_skipped(self):
+        self.duplicate_ids_skipped += 1
+
     def should_print_stats(self):
         """Check if enough time has passed to print stats again (at most once per minute)"""
         now = time.time()
@@ -110,6 +114,8 @@ class Stats:
             "Tsumegos per Minute": f"{tsumegos_per_minute:.2f}",
             "Active Worker Threads": active_threads,
         }
+        if self.duplicate_ids_skipped:
+            stats["Duplicate ids skipped"] = self.duplicate_ids_skipped
 
         # Add time tracking stats
         total_tracked_time = sum(time_spent.values())
@@ -160,6 +166,22 @@ def get_orientation_invariant_hash(board):
         hashes.append(h)
     return min(hashes)
 
+def tsumego_id_taken(filename):
+    """True if a tsumego with this id already exists on ANY board size.
+
+    Never overwrite an existing id: attempts/, activations/, ratings/ and the
+    PWA all key rows by the 8-hex id, so replacing the SGF would silently
+    re-point every one of those artifacts at different content. Hits happen two
+    ways — the truncated hash is only 32 bits, so distinct positions collide
+    (birthday math: ~2 expected at the current 9x9 corpus size), and the
+    generator can legitimately rediscover an already-generated position. The id
+    namespace is checked across ALL sizes because downstream id-keyed consumers
+    share it (the corpus already carries 4 cross-size collisions from before
+    this guard; those are grandfathered, not license to add more)."""
+    return any(
+        os.path.exists(os.path.join(PROJECT_ROOT, "tsumegos", str(s), filename))
+        for s in ALL_BOARD_SIZES)
+
 def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_list: list):
     """
     The task for a single worker thread.
@@ -171,8 +193,6 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                 STATS.set_state("problem_creation")
                 moves,solution = problem_finder.create_problem()
                 if solution:
-                    STATS.add_problem_found(len(moves))
-
                     STATS.set_state("other")
                     # Compute board state for hashing
                     board = boards.Board(queries.board_size)
@@ -182,6 +202,20 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                             row, col = katago_to_sgf_coords(move, queries.board_size)
                             board.play(row, col, player)
                         player = 'w' if player == 'b' else 'b'
+                    # Identity check BEFORE the expensive variation queries: a
+                    # duplicate id costs only the position search, not the
+                    # minutes of KataGo analysis below.
+                    board_hash = get_orientation_invariant_hash(board)
+                    filename = board_hash[:8] + ".sgf"
+                    if tsumego_id_taken(filename):
+                        STATS.add_duplicate_id_skipped()
+                        with print_lock:
+                            print(f"[skip] {filename}: id already exists "
+                                  f"(this or another size); not overwriting")
+                        continue
+
+                    STATS.add_problem_found(len(moves))
+
                     # 1. Construct initial SGF
                     game,node,answer = construct_initial_sgf(moves, solution, queries.board_size)
 
@@ -198,8 +232,6 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
 
                     STATS.set_state("other")
                     os.makedirs(OUTPUT_DIR, exist_ok=True)
-                    board_hash = get_orientation_invariant_hash(board)
-                    filename = board_hash[:8] + ".sgf"
                     with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
                         f.write(game.serialise(None).decode())
                     with print_lock:

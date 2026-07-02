@@ -139,6 +139,15 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     in SGF-variation order; otherwise every picked-move lookup reads the wrong
     cell's embedding. The reorder below is therefore load-bearing.
 
+    The pass variation (present in every problem's SGF, never embedded by
+    extraction) gets an ALL-ZEROS placeholder row so that bin row i == SGF child
+    index i exactly. The PWA's children.indexOf counts the pass child, so
+    skipping it here would shift every later cell's row by one — for the ~half
+    of problems where the pass isn't the last variation, that mis-read a
+    neighboring cell's embedding for every picked move after it (BIN_FORMAT_REV
+    2 fixed this). The zeros row is never fetched: a board click can't select
+    the pass node, and backfill's coordinate match never resolves to it.
+
     reorder_by_sgf=True (default) re-parses the SGF and reorders rows by the
     (x, y) → variation_index map. The sgfmill parse dominates packaging time
     (~60× the npz read), so it's the hot path — parallelize the caller, don't
@@ -170,11 +179,15 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
 
     ordered_rows = []
+    n_real_cells = 0
+    zero_row = np.zeros(embeddings.shape[1], dtype=embeddings.dtype)
     for node in variation_nodes:
         _, mb = node.get_raw_move()
         xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
         if xy is None:
-            continue  # pass: never embedded (the one expected omission)
+            # Pass: never embedded — placeholder row for index parity (see docstring).
+            ordered_rows.append(zero_row)
+            continue
         row = xy_to_row.get(xy)
         if row is None:
             # The npz is meant to be a superset of the SGF's non-pass variations, so a
@@ -185,8 +198,9 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
                 f"per_cell {per_cell_path} is missing cell {xy} present in {sgf_path} "
                 f"(stale extraction?) — refusing to ship a misaligned sidecar")
         ordered_rows.append(embeddings[row])
+        n_real_cells += 1
 
-    if not ordered_rows:
+    if n_real_cells == 0:
         raise RuntimeError(
             f"per_cell {per_cell_path}: no non-pass variation matched {sgf_path}")
 
@@ -486,6 +500,29 @@ def _read_embedding_version(embed_dir):
     return None
 
 
+# Bump when the .embeddings.bin / embeddings_index.json layout changes in a way
+# the client must react to. The rev is folded into the SHIPPED embedding_version
+# (below), so a format change wipes + re-derives clients' stored embeddings via
+# the standing version gate, and into size_inputs_hash, so the shards rebuild on
+# the next run without --force. Rev history:
+#   1 (implicit): SGF-variation order MINUS the pass — bin rows after a non-last
+#     pass were off by one vs the PWA's children.indexOf cell index.
+#   2: pass variations get an all-zeros placeholder row (index parity).
+BIN_FORMAT_REV = 2
+
+
+def shipped_embedding_version(embed_dir):
+    """embedding_version as shipped to the client: the pca.npz content hash with
+    the bin-format rev appended. The pca hash alone can't see sidecar-layout
+    changes (same PCA, different bin bytes), so both invalidation consumers —
+    the PWA's embedding wipe and the shard-build inputs hash — must use THIS,
+    never the raw hash."""
+    raw = _read_embedding_version(embed_dir)
+    if raw is None:
+        return None
+    return f"{raw}-b{BIN_FORMAT_REV}"
+
+
 def load_embeddings(board_size, meta_only=False):
     """Load per-problem PCA scores filtered to this board size, plus the
     shared embedding metadata (model is fit jointly across sizes).
@@ -533,7 +570,7 @@ def load_embeddings(board_size, meta_only=False):
 
     embedding_meta = {
         "K": K,
-        "embedding_version": _read_embedding_version(embed_dir),
+        "embedding_version": shipped_embedding_version(embed_dir),
         "labels": labels,
     }
     return embedding_map, embedding_meta
@@ -558,9 +595,11 @@ def size_inputs_hash(board_size, reorder_by_sgf):
       - tsumego_quality_final.csv (metadata `quality`)
       - tsumego_floor_final.csv (metadata `floor`; absent on older backends)
       - embeddings/joint/per_problem.csv (correct-cell `embedding` in metadata)
-      - embedding_version (covers per_cell/*.npz content, which is regenerated
-        with the embedding refit — those files are tid-named but their CONTENTS
-        change on refit, so the version, not the filename set, is the signal)
+      - shipped embedding_version (covers per_cell/*.npz content, which is
+        regenerated with the embedding refit — those files are tid-named but
+        their CONTENTS change on refit, so the version, not the filename set,
+        is the signal — AND the bin-format rev, so a sidecar-layout change
+        rebuilds shards without --force)
       - the SGF filename set (filenames ARE orientation-invariant content hashes,
         so a content change cannot occur without a filename change → the set hash
         detects add/remove/content)
@@ -573,7 +612,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     embed_dir, _ = _embeddings_dir(board_size)
     if embed_dir:
         _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
-        h.update((_read_embedding_version(embed_dir) or "noemb").encode())
+        h.update((shipped_embedding_version(embed_dir) or "noemb").encode())
     tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
     names = sorted(f for f in os.listdir(tdir)
                    if f.endswith(".sgf")) if os.path.isdir(tdir) else []
