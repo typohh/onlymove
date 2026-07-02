@@ -31,12 +31,97 @@ _STAR_POINTS = {
 
 # ---- SGF parsing -------------------------------------------------------
 
+# Setup-chain move: ";B[ab]" / ";W[ab]" with a REQUIRED leading ";" so an
+# AB[..]/AW[..] setup-stone property is never mistaken for a move.
+_SETUP_MOVE_RE = re.compile(r";\s*([BW])\[([a-z]{0,2})\]")
+# A move inside a variation's first node (the leading ";" has been stripped).
+_VAR_MOVE_RE = re.compile(r"([BW])\[([a-z]{0,2})\]")
+# Embedded analysis comment: a Black-perspective "<winrate>%/<score>", e.g.
+# "86.4%/3.1". Every candidate first move carries one.
+_CMT_RE = re.compile(r"C\[(\d+\.?\d*)%/(-?\d+\.?\d*)\]")
+
+
+def _top_level_variations(s):
+    """The content of each top-level ``(...)`` group in ``s`` (which begins at the
+    first ``(``). Tracks ``[...]`` property values so a paren inside a comment
+    can't skew the paren depth, and honours SGF's ``\\]`` escape."""
+    groups, i, n = [], 0, len(s)
+    while i < n:
+        if s[i] != "(":
+            i += 1
+            continue
+        depth, j, in_brackets = 0, i, False
+        while j < n:
+            c = s[j]
+            if in_brackets:
+                if c == "\\":
+                    j += 2
+                    continue
+                if c == "]":
+                    in_brackets = False
+                j += 1
+                continue
+            if c == "[":
+                in_brackets = True
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    groups.append(s[i + 1:j])
+                    j += 1
+                    break
+            j += 1
+        i = j
+    return groups
+
+
+def _select_correct_move(variations_region):
+    """Pick the correct first move by embedded winrate — mirroring the PWA's
+    findBestMoveFromChildren (pwa/js/sgf.js), NOT trusting children[0].
+
+    Each top-level variation is a candidate first move whose first node carries a
+    Black-perspective "<winrate>%/<score>" comment. The correct move is the
+    highest winrate for Black to play (lowest for White), score breaking an exact
+    tie. A handful of problems have a mis-ordered variation list where the first
+    branch is NOT the solution — which is exactly why this can't be children[0].
+    Returns (color, "ab") or None; falls back to the first real-move variation
+    only when no candidate carries a parseable winrate."""
+    cands = []  # (color, coord, winrate|None, score|None)
+    for content in _top_level_variations(variations_region):
+        head = content[1:] if content.startswith(";") else content
+        end = re.search(r"[;(]", head)   # the first node ends at the next node / child
+        first_node = head[:end.start()] if end else head
+        mv = _VAR_MOVE_RE.search(first_node)
+        if not mv or not mv.group(2) or mv.group(2) == "tt":
+            continue                     # skip a pass — never the solution
+        cm = _CMT_RE.search(first_node)
+        wr = float(cm.group(1)) if cm else None
+        sc = float(cm.group(2)) if cm else None
+        cands.append((mv.group(1), mv.group(2), wr, sc))
+    if not cands:
+        return None
+    scored = [c for c in cands if c[2] is not None]
+    if not scored:
+        return (cands[0][0], cands[0][1])   # no winrates anywhere: old children[0] behavior
+    black = cands[0][0] == "B"
+
+    def key(c):
+        wr, sc = c[2], c[3]
+        return (wr, sc if sc is not None else (float("-inf") if black else float("inf")))
+
+    best = max(scored, key=key) if black else min(scored, key=key)
+    return (best[0], best[1])
+
+
 def parse_sgf(sgf_text):
     """Return (size, setup_moves, correct_move).
 
-    setup_moves: list of (color, "ab") played in the linear chain before
-    the first variation node. correct_move: (color, "ab") of the first
-    move inside the first variation (the canonical correct answer), or None.
+    setup_moves: list of (color, "ab") played in the linear chain before the
+    first variation node. correct_move: (color, "ab") of the CORRECT first move,
+    chosen by embedded winrate across ALL first-level variations (see
+    _select_correct_move) rather than blindly children[0] — a few problems have a
+    mis-ordered variation list. None when there are no variations.
     """
     size_m = re.search(r"SZ\[(\d+)\]", sgf_text)
     size = int(size_m.group(1)) if size_m else 9
@@ -47,14 +132,12 @@ def parse_sgf(sgf_text):
         body = body[1:]
     first_inner = body.find("(")
     if first_inner == -1:
-        setup_part, var_part = body, ""
+        setup_part, variations_region = body, ""
     else:
-        setup_part, var_part = body[:first_inner], body[first_inner + 1:]
+        setup_part, variations_region = body[:first_inner], body[first_inner:]
 
-    move_re = re.compile(r";\s*([BW])\[([a-z]{0,2})\]")
-    setup = [(c, p) for c, p in move_re.findall(setup_part) if p and p != "tt"]
-    first = move_re.search(var_part)
-    correct = (first.group(1), first.group(2)) if first and first.group(2) and first.group(2) != "tt" else None
+    setup = [(c, p) for c, p in _SETUP_MOVE_RE.findall(setup_part) if p and p != "tt"]
+    correct = _select_correct_move(variations_region)
     return size, setup, correct
 
 
