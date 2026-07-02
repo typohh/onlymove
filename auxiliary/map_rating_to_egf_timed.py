@@ -160,7 +160,10 @@ def build_decls(args):
         print("  WARNING: no time_adjust block — R_prod falls back to R_raw")
     alpha, g0, g1 = ta if ta else (0.0, 0.0, 0.0)
 
-    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
+    # first_time_only: mirror the production anchor + the client's first-time-only
+    # estimator; repeats would inflate the 80%-clear rating this harness fits.
+    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),
+                                       first_time_only=True)
     med_min = load_user_median_solve_minutes(args.sqlite)   # {pref8: median minutes}
 
     user_R, user_T, user_dock = {}, {}, {}
@@ -264,7 +267,10 @@ def time_form_study(args, boot=300):
     lapse = load_lapse(args.dir)
     m_ratings, m_internal = load_M(args.dir)
     server_curves = load_server_curves(args.dir)
-    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
+    # first_time_only: mirror the production anchor + the client's first-time-only
+    # estimator; repeats would inflate the 80%-clear rating this harness fits.
+    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),
+                                       first_time_only=True)
     med_min = load_user_median_solve_minutes(args.sqlite)
 
     user_R = {}

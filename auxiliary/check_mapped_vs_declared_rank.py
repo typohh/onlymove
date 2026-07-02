@@ -288,7 +288,11 @@ def main():
         sys.exit("No v2 per-problem ratings — run train_rating first.")
     lapse = load_lapse(args.dir)   # global 4PL ceiling λ — match the client / anchor
 
-    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
+    # first_time_only: match the production anchor (and the client's first-time-only
+    # rank estimator) — repeats' spaced-repetition success would inflate the 80%-clear
+    # rating this diagnostic compares against declared ranks.
+    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),
+                                       first_time_only=True)
 
     # user_internal: the raw onlymove rank (the header value); never time-adjusted.
     # user_internal_adj: the rank that drives the SERVER translations — the onlymove

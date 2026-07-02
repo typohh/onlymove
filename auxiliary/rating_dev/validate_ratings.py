@@ -164,7 +164,10 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
         load_rank_surveys, latest_per_user_server, load_attempts_for_users, SQL_PATH_DEFAULT)
     from utils.fit_rank_curves import fit_user_rating
     surveys = latest_per_user_server(load_rank_surveys(SQL_PATH_DEFAULT))
-    attempts = load_attempts_for_users(SQL_PATH_DEFAULT, set(surveys["user_id"].unique()))
+    # first_time_only: mirror the client / production anchor (first-time attempts);
+    # repeats' spaced-repetition success would inflate the 80%-clear rating this rho uses.
+    attempts = load_attempts_for_users(SQL_PATH_DEFAULT, set(surveys["user_id"].unique()),
+                                       first_time_only=True)
     user_rating = {}
     for uid in surveys["user_id"].unique():
         pooled = []
