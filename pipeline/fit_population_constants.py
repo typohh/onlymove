@@ -5,7 +5,7 @@ of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
 drifting from a one-off manual fit.
 
-Four groups of constants:
+Five groups of constants:
 
 1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
    overlays gate on a per-user solving/review-time coefficient that is biased
@@ -70,9 +70,9 @@ upstream of it depends on the dist artifacts. No GPU, not part of the in-order
 pipeline.
 
 Run:
-  ./.venv/bin/python3 -m pipeline.fetch_database --rebuild-sqlite   # refresh first
-  ./.venv/bin/python3 -m pipeline.fit_population_constants          # reads ratings/
-  ./.venv/bin/python3 -m pipeline.package_for_pwa                   # publishes the JSON
+  ./.venv/bin/python3 -m pipeline.fetch_database          # refresh attempts/database.sqlite
+  ./.venv/bin/python3 -m pipeline.fit_population_constants # reads ratings/
+  ./.venv/bin/python3 -m pipeline.package_for_pwa          # publishes the JSON
 """
 
 import argparse

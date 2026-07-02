@@ -415,9 +415,9 @@ def _read_embedding_version(embed_dir):
     # A present pca.npz that won't load is corruption — let it abort rather than
     # silently shipping embedding_meta with a null version (which disables the PWA's
     # embedding-cache invalidation).
-    arc = np.load(pca_path, allow_pickle=False)
-    if "embedding_version" in arc.files:
-        return str(arc["embedding_version"].item())
+    with np.load(pca_path, allow_pickle=False) as arc:
+        if "embedding_version" in arc.files:
+            return str(arc["embedding_version"].item())
     return None
 
 

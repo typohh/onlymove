@@ -142,8 +142,8 @@ def build_size(size, workers, force):
     # re-extracts every row.
     cached = {}
     if os.path.exists(out_path) and not force:
-        d = np.load(out_path)
-        cached = {t: r for t, r in zip(d["tids"].tolist(), d["feats"])}
+        with np.load(out_path) as d:
+            cached = {t: r for t, r in zip(d["tids"].tolist(), d["feats"])}
     to_extract = tids if force else [t for t in tids if t not in cached]
     if not to_extract:
         print(f"size {size}: cache up to date ({len(cached)} problems)")

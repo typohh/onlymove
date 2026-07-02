@@ -977,7 +977,6 @@ def main():
         rating_slope=coefs[0].astype(np.float32),
         size_slope=coefs[1].astype(np.float32),
         ols_intercept=coefs[2].astype(np.float32),
-        rating_mean=np.array([ratings.mean()], dtype=np.float64),
         pca_components=pca.components_.astype(np.float32),
         pca_mean=pca.mean_.astype(np.float32),
         pca_explained_variance=pca.explained_variance_.astype(np.float32),
