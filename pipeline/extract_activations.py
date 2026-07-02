@@ -23,6 +23,9 @@ SGF-variation order by (x, y) (the npz being a superset of the SGF's non-pass
 variations is what makes that remap total).
 
 Resumable: skips problems where the output .npz already exists (--force overrides).
+Fail-loud: a problem that fails to process is a hard error that aborts the run,
+never skipped — a missing id would silently desync every downstream cache from
+the tsumego set.
 """
 
 import argparse
@@ -178,7 +181,7 @@ def main():
     print(f"Capturing {len(block_names)} block outputs (rconv1..rconv18)", flush=True)
     print(f"Processing sizes: {list(ALL_BOARD_SIZES)}", flush=True)
 
-    totals = {"done": 0, "skipped": 0, "errored": 0}
+    totals = {"done": 0, "skipped": 0}
     for size in ALL_BOARD_SIZES:
         in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
         out_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
@@ -197,7 +200,7 @@ def main():
                                  pos_len=size, verbose=False)
         model.eval()
 
-        n_done = n_skipped = n_errored = 0
+        n_done = n_skipped = 0
         t0 = time.time()
         for fname in sgf_files:
             tsumego_id = fname[:-4]
@@ -209,9 +212,12 @@ def main():
                 vecs, xys, correct_idx, _ = process_one_sgf(
                     os.path.join(in_dir, fname), model, block_names)
             except Exception as e:
-                n_errored += 1
-                print(f"  [err] {fname}: {e}", flush=True)
-                continue
+                # A malformed / unembeddable problem is a hard error: abort the
+                # whole run rather than silently dropping it from the activation
+                # corpus (a missing id desyncs every downstream cache — the move
+                # cache, correct_ids, the embedding — from the tsumego set).
+                raise RuntimeError(
+                    f"[size {size}] failed to extract activations for {fname}") from e
             np.savez_compressed(
                 out_path,
                 candidates=vecs,
@@ -225,18 +231,17 @@ def main():
                 # Accumulate stats in fp32 — reducing fp16 directly overflows.
                 stat_mean = vecs.mean(dtype=np.float32)
                 stat_std = vecs.std(dtype=np.float32)
-                print(f"  [size {size}] {n_done} done, {n_skipped} skipped, "
-                      f"{n_errored} errored ({rate:.1f}/s); last: {fname} -> "
+                print(f"  [size {size}] {n_done} done, {n_skipped} skipped "
+                      f"({rate:.1f}/s); last: {fname} -> "
                       f"{vecs.shape[0]} cells × {vecs.shape[1]} feats "
                       f"correct_idx={correct_idx} "
                       f"sample stats mean={stat_mean:+.3f} std={stat_std:.3f}",
                       flush=True)
 
-        print(f"[size {size}] Done: {n_done} extracted, {n_skipped} skipped, "
-              f"{n_errored} errored.", flush=True)
+        print(f"[size {size}] Done: {n_done} extracted, {n_skipped} skipped.",
+              flush=True)
         totals["done"] += n_done
         totals["skipped"] += n_skipped
-        totals["errored"] += n_errored
 
         # Free GPU memory before loading the next size's model.
         del model
@@ -244,7 +249,7 @@ def main():
             torch.cuda.empty_cache()
 
     print(f"\nAll sizes done: {totals['done']} extracted, "
-          f"{totals['skipped']} skipped, {totals['errored']} errored.")
+          f"{totals['skipped']} skipped.")
 
 
 if __name__ == "__main__":

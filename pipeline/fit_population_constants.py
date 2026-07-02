@@ -98,7 +98,9 @@ Z0 = np.log(0.7 / 0.3)                 # fixed retention reference (= logit(0.7)
 REPEAT_LOG_CUTOFF = "2026-05-15"       # repeats logged only from here (clean chains)
 AFK_CAP_S = 180.0                      # drop AFK solving times before the bias fit
 
-# Current hardcoded defaults — the fallback when data is too sparse to refit.
+# Current hardcoded defaults. NOT a silent fallback: by default the run CRASHES
+# rather than resorting to any of these (see _resort_to_default + main). They are
+# used only when --allow-defaults is passed, or as the minimize() init below.
 DEFAULTS = {
     "time_bias_per_min": -0.91,
     "review_bias_per_min": 0.0,
@@ -562,12 +564,28 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
 
 
 # ---------------------------------------------------------------------------
+def _resort_to_default(field, reason, allow):
+    """Called wherever the fit would otherwise fall back to the DEFAULTS value for
+    `field`. Crashes by default so a sparse/missing input is never silently shipped
+    as a fabricated constant; --allow-defaults downgrades it to a warning that keeps
+    the DEFAULTS value already seeded into `out`."""
+    if not allow:
+        raise RuntimeError(
+            f"would resort to the hardcoded default for '{field}' ({reason}). "
+            f"Refusing by default — fix the inputs and re-run, or pass "
+            f"--allow-defaults to ship the DEFAULTS value deliberately.")
+    print(f"  [allow-defaults] keeping default {field} ({reason})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
     ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings", "population_constants.json"))
+    ap.add_argument("--allow-defaults", action="store_true",
+                    help="ship the hardcoded DEFAULTS for any constant that can't be fit "
+                         "(sparse/missing inputs) instead of crashing")
     args = ap.parse_args()
 
     print(f"Loading attempts from {args.db} ...")
@@ -606,8 +624,9 @@ def main():
         print(f"Fat-finger (lapse) rate from the rating model: {out['fat_finger_rate']} "
               f"(ratings/rating_constants.json — train_rating learns it jointly)")
     else:
-        print(f"No rating_constants.json (run train_rating first); "
-              f"keeping default fat_finger_rate {out['fat_finger_rate']}")
+        _resort_to_default("fat_finger_rate",
+                           "no rating_constants.json (run train_rating first)",
+                           args.allow_defaults)
 
     # --- Time / review bias ---
     print("Fitting time-benefit bias (3PL-controlled, logit/min) ...")
@@ -622,13 +641,17 @@ def main():
         print(f"  solving-time bias = {tb:+.3f} logit/min  ({n_tb} users) "
               f"→ shipped {out['time_bias_per_min']:+.3f}")
     else:
-        print(f"  solving-time: only {n_tb} usable users (<{MIN_BIAS_USERS}); keeping default")
+        _resort_to_default("time_bias_per_min",
+                           f"only {n_tb} usable users (<{MIN_BIAS_USERS})",
+                           args.allow_defaults)
     if rb is not None:
         out["review_bias_per_min"] = round(min(rb, 0.0), 4)
         print(f"  review-time bias  = {rb:+.3f} logit/min  ({n_rb} users) "
               f"→ shipped {out['review_bias_per_min']:+.3f} (clamped ≤0)")
     else:
-        print(f"  review-time: only {n_rb} usable users (<{MIN_BIAS_USERS}); keeping default")
+        _resort_to_default("review_bias_per_min",
+                           f"only {n_rb} usable users (<{MIN_BIAS_USERS})",
+                           args.allow_defaults)
 
     # --- Time-adjusted rank: READ THROUGH from the mapping (not fit here) ---
     # pipeline.map_rating_to_rank fits the log-time slope α jointly with the rating→rank
@@ -641,9 +664,10 @@ def main():
               f"alpha={ta['alpha_per_log10_min']:+.4f} rating/log10-min, "
               f"center={ta['center_log10_min']:+.4f} log10-min")
     else:
+        _resort_to_default("time_adjust",
+                           "no time_adjust in rating_to_rank.json (run map_rating_to_rank first)",
+                           args.allow_defaults)
         out["time_adjust"] = dict(DEFAULTS["time_adjust"])
-        print("  WARNING: no time_adjust in rating_to_rank.json (run map_rating_to_rank "
-              "first) — keeping default time_adjust block")
 
     # --- Per-axis weakness prior (empirical-Bayes between-user variance) ---
     # The client's ONLY weakness prior. Mandatory: no scalar fallback, so if it
@@ -673,9 +697,12 @@ def main():
             print(f"  KAPPA={fit['kappa']:.3f}  GROWTH={fit['growth']:.3f}  "
                   f"LN_C_PRIOR={fit['ln_c_prior']:.3f}  (Z0={fit['z0']:.3f} fixed)")
         else:
-            print("  retention fit degenerate; keeping defaults")
+            _resort_to_default("retention", "retention fit degenerate",
+                               args.allow_defaults)
     else:
-        print(f"  <{MIN_RETENTION_EVENTS} events; keeping retention defaults")
+        _resort_to_default("retention",
+                           f"<{MIN_RETENTION_EVENTS} retention events",
+                           args.allow_defaults)
 
     out["fit_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out["n_retention_events"] = len(events)

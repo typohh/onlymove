@@ -82,10 +82,11 @@ def extract_move_features(sgf_bytes):
         color, _mb = node.get_raw_move()
         black_to_move = color == "b"
         wr = sc = None
-        # get_raw_list("C") raises KeyError on a comment-less node; guard it so
-        # such a node is skipped (wr stays None → continue) rather than raising
-        # out to _process_chunk's bare except, which would silently drop the
-        # WHOLE problem from the cache instead of just this one node.
+        # A comment-less move node is normal (not every node carries an eval),
+        # so skip just that node (wr stays None → continue). get_raw_list("C")
+        # would raise KeyError on such a node, so gate on has_property first —
+        # this is expected-data handling, NOT error tolerance: a genuinely
+        # unreadable SGF still propagates out of _process_chunk and aborts.
         if node.has_property("C"):
             for cb in node.get_raw_list("C"):
                 m = CMT_RE.search(cb.decode("utf-8"))
@@ -109,19 +110,27 @@ def extract_move_features(sgf_bytes):
 
 
 def _process_chunk(task):
-    """Worker: feature vectors for a chunk of tids (module scope so it pickles). A problem that
-    fails to parse / has no comments stays a NaN row; the parent drops it."""
+    """Worker: feature vectors for a chunk of tids (module scope so it pickles).
+
+    Fail-loud: an unreadable/corrupt SGF, or a problem with no usable move
+    evaluations, RAISES and aborts the whole build (the exception surfaces in
+    the parent at fu.result()). Dropping such a problem would silently desync
+    the cache from correct_ids — train_rating would then score a different
+    problem set than it thinks — so a bad input must be fixed, not skipped."""
     size, tids = task
     tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
-    out = np.full((len(tids), N_FEATS), np.nan, dtype=np.float32)
+    out = np.empty((len(tids), N_FEATS), dtype=np.float32)
     for i, tid in enumerate(tids):
         try:
             with open(os.path.join(tdir, f"{tid}.sgf"), "rb") as fh:
                 f = extract_move_features(fh.read())
-            if f is not None:
-                out[i] = f
-        except Exception:
-            pass
+        except Exception as e:
+            raise RuntimeError(f"size {size}: failed to read/parse {tid}.sgf") from e
+        if f is None:
+            raise RuntimeError(
+                f"size {size}: {tid}.sgf has no usable move evaluations "
+                f"(missing '<winrate>%/<score>' comments)")
+        out[i] = f
     return tids, out
 
 
@@ -168,21 +177,24 @@ def build_size(size, workers, force):
     for t, row in zip(to_extract, new_feats):
         cached[t] = row
 
-    # Emit in correct_ids order, dropping any non-finite row (e.g. an SGF missing the
-    # eval comment) — exactly as the full rebuild did.
-    out_tids, out_rows = [], []
-    for t in tids:
-        row = cached.get(t)
-        if row is not None and np.isfinite(row).all():
-            out_tids.append(t)
-            out_rows.append(row)
+    # Emit in correct_ids order. Every tid is guaranteed present and finite — a
+    # failed extraction aborts the run above — so nothing is dropped and the
+    # cache tid set matches correct_ids exactly. The finite check is a loud
+    # backstop (replacing the old silent drop): a corrupt cache must not ship.
+    out_tids = list(tids)
+    out_rows = np.array([cached[t] for t in tids],
+                        dtype=np.float32).reshape(len(tids), N_FEATS)
+    if not np.isfinite(out_rows).all():
+        bad = [t for t, r in zip(tids, out_rows) if not np.isfinite(r).all()]
+        raise RuntimeError(
+            f"size {size}: {len(bad)} non-finite feature rows (e.g. {bad[:5]}); "
+            f"refusing to write a corrupt cache")
     os.makedirs(CACHE_DIR, exist_ok=True)
     tmp = f"{out_path}.tmp{os.getpid()}.npz"
-    np.savez(tmp, tids=np.array(out_tids),
-             feats=np.array(out_rows, dtype=np.float32).reshape(len(out_rows), N_FEATS))
+    np.savez(tmp, tids=np.array(out_tids), feats=out_rows)
     os.replace(tmp, out_path)
     print(f"size {size}: wrote {len(out_tids)} rows to {os.path.basename(out_path)} "
-          f"({len(tids) - len(out_tids)} dropped) in {time.time() - t0:.0f}s")
+          f"in {time.time() - t0:.0f}s")
 
 
 def main():
