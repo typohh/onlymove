@@ -314,7 +314,11 @@ def main():
     if not merged_ratings:
         sys.exit("No per-problem ratings found — run train_rating first.")
     lapse = load_lapse(args.dir)
-    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()))
+    # first_time_only: the client's rank estimator anchors on first-time attempts,
+    # so build the survey anchor from novel problems too — repeats' spaced-repetition
+    # success rate would otherwise inflate review-heavy users' 80%-clear ratings.
+    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),
+                                       first_time_only=True)
     med_min = load_user_median_solve_minutes(args.sqlite)
 
     # Each user's 80%-clear rating (pooled across boards) + their log10 median solve time.

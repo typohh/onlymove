@@ -31,9 +31,16 @@ RANK_SURVEY_RE = re.compile(
     r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'\);"
 )
 
+# Captures: user_id, problem, success, size (optional), is_repeat (optional).
+# The trailing columns (size, move, time_used, review_time, is_repeat, ...) are
+# only present on a full-schema dump; keep them optional so a narrower/legacy
+# dump still parses — is_repeat then reads as None and is treated as first-time.
 FULL_ATTEMPT_RE = re.compile(
     r"INSERT INTO [\"`]?tsumego_reports[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
-    r"\d+,'([^']+)','([^']+)',([01]),'[^']+'(?:,(\d+))?"
+    r"\d+,'([^']+)','([^']+)',([01]),'[^']+'"
+    r"(?:,(\d+)"                                                    # size
+    r"(?:,(?:NULL|'[^']*'),(?:NULL|-?\d+),(?:NULL|-?\d+),([01]))?"  # move,time,review,is_repeat
+    r")?"
 )
 
 
@@ -84,9 +91,14 @@ def load_rank_surveys(sql_path):
     return pd.DataFrame(rows)
 
 
-def load_attempts_for_users(sql_path, user_ids):
+def load_attempts_for_users(sql_path, user_ids, first_time_only=False):
     """Parse all tsumego_reports rows belonging to a set of full user_ids.
-    Returns dict (user_prefix8, size) -> list of (tsumego_id, success)."""
+    Returns dict (user_prefix8, size) -> list of (tsumego_id, success).
+
+    first_time_only=True drops repeat attempts (is_repeat=1), leaving the
+    first-time-only view the client's rank estimator uses — so an anchor built
+    from these mirrors the client instead of being inflated by the higher
+    success rate on re-solved (spaced-repetition) problems."""
     targets = set(user_ids)
     out = defaultdict(list)
     with open(sql_path, "r") as f:
@@ -94,8 +106,10 @@ def load_attempts_for_users(sql_path, user_ids):
             m = FULL_ATTEMPT_RE.match(line)
             if not m:
                 continue
-            user_id, tid, success_str, size_str = m.groups()
+            user_id, tid, success_str, size_str, is_repeat_str = m.groups()
             if user_id not in targets:
+                continue
+            if first_time_only and is_repeat_str == "1":
                 continue
             size = int(size_str) if size_str else 9
             out[(user_id[:8], size)].append((tid, int(success_str)))
