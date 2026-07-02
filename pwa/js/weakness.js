@@ -40,12 +40,20 @@ import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 export const WEAKNESS_TEMPERATURE = 0.5;
 
 const MIN_TRAINING_ATTEMPTS = 20;
-// Prior precision on each per-PC beta_k (beta_k ~ N(0, 1/RIDGE_LAMBDA)). Fit
-// against the production attempts DB by held-out CV in
-// pipeline.fit_population_constants and shipped in population_constants.json,
-// which is inlined at build time and mandatory (main.js aborts boot if it's
-// missing), so we read it straight — never a hardcoded value.
+// Prior precision on each per-PC beta_k (beta_k ~ N(0, 1/lambda_k)). Both come
+// from population_constants.json, which is inlined at build time and mandatory
+// (main.js aborts boot if it's missing), so we read them straight:
+//   - weakness_axis_lambda (primary): a per-axis vector fit by empirical Bayes
+//     in pipeline.fit_population_constants — the between-user variance tau_k^2
+//     of each axis's weakness coefficient, shipped as lambda_k = 2/tau_k^2 and
+//     applied to BOTH beta_correct[k] and beta_picked[k], so the prior on the
+//     identified sum beta_correct + beta_picked is exactly N(0, tau_k^2). Axes
+//     users genuinely differ along get a loose prior; no-signal axes stay pinned.
+//   - weakness_ridge_lambda (fallback): the scalar held-out-CV fit, used when
+//     the vector is absent or its length doesn't match the embedding K (an
+//     embedding refit shipped without a constants refit).
 const RIDGE_LAMBDA = POPULATION_CONSTANTS.weakness_ridge_lambda;
+const AXIS_LAMBDA = POPULATION_CONSTANTS.weakness_axis_lambda;
 const MAX_EPOCHS = 200;
 const MAX_TRAINING_TIME_MS = 1000;
 const LEARNING_RATE = 0.05;
@@ -75,6 +83,13 @@ export async function trainWeakness() {
             console.warn(`weakness: inconsistent embedding lengths; skipping`);
             return;
         }
+
+        // Per-coefficient prior precision: the per-axis vector when it matches
+        // this K, else the scalar uniformly. lambda_k applies to both the
+        // beta_correct[k] and beta_picked[k] slots of axis k.
+        const axisLambda = (Array.isArray(AXIS_LAMBDA) && AXIS_LAMBDA.length === K &&
+            AXIS_LAMBDA.every(v => Number.isFinite(v) && v > 0)) ? AXIS_LAMBDA : null;
+        const lambdaForAxis = (k) => axisLambda ? axisLambda[k] : RIDGE_LAMBDA;
 
         // Augmented features: [1, rating, correct_emb_0..K-1, picked_emb_0..K-1].
         // For correct attempts picked = correct (definition); for wrong attempts
@@ -128,17 +143,23 @@ export async function trainWeakness() {
 
             let l2 = 0;
             // Ridge over all β coefficients (correct and picked alike), not
-            // the intercept or rating. Same RIDGE_LAMBDA on every β; the
-            // fit_population_constants CV targets per-axis precision and we
-            // honor that uniformly across the two coefficient blocks.
-            for (let j = 2; j < numParams; j++) l2 += params[j] * params[j];
-            loss = loss / N + (RIDGE_LAMBDA / (2 * N)) * l2;
+            // the intercept or rating. lambdaForAxis(k) hits both of axis k's
+            // coefficient slots — the per-axis empirical-Bayes prior when
+            // shipped, the scalar CV lambda otherwise.
+            for (let k = 0; k < K; k++) {
+                const lam = lambdaForAxis(k);
+                l2 += lam * (params[2 + k] * params[2 + k] +
+                             params[2 + K + k] * params[2 + K + k]);
+            }
+            loss = loss / N + l2 / (2 * N);
 
             // Finalize the gradient (mean-reduce + ridge on the β block, j ≥ 2),
             // then apply the shared Adam moment update.
-            for (let j = 0; j < numParams; j++) {
-                grad[j] /= N;
-                if (j >= 2) grad[j] += (RIDGE_LAMBDA / N) * params[j];
+            for (let j = 0; j < numParams; j++) grad[j] /= N;
+            for (let k = 0; k < K; k++) {
+                const lam = lambdaForAxis(k);
+                grad[2 + k] += (lam / N) * params[2 + k];
+                grad[2 + K + k] += (lam / N) * params[2 + K + k];
             }
             adamUpdate(params, grad, adam, LEARNING_RATE);
 
@@ -157,11 +178,12 @@ export async function trainWeakness() {
 
         // Laplace-approx posterior cov. H = X' diag(p(1-p)) X + diag(lam_vec);
         // posterior cov ≈ H^-1. We pull out the per-axis 2x2 block on
-        // (β_correct[k], β_picked[k]) so the stats panel can compute sign-
-        // quadrant probabilities via bivariate-normal.js. Storing the full
-        // (2 + 2K)x(2 + 2K) matrix would blow localStorage at K=64; the
-        // diagonal (weaknessSe) + per-axis off-diagonals (weaknessAxisCov) is
-        // sufficient for the UI use case.
+        // (β_correct[k], β_picked[k]) so the stats panel can compute the
+        // posterior of the identified SUM β_correct + β_picked per axis
+        // (var_c + var_p + 2·cov) — the Weaknesses pane's level-1 detection
+        // (stats-weaknesses.js). Storing the full (2 + 2K)x(2 + 2K) matrix
+        // would blow localStorage at K=64; the diagonal (weaknessSe) +
+        // per-axis off-diagonals (weaknessAxisCov) is sufficient for that.
         try {
             const X = history.map((a, i) => {
                 const row = new Array(numParams);
@@ -182,7 +204,10 @@ export async function trainWeakness() {
                 return sigmoid(z);
             });
             const lamVec = new Array(numParams).fill(1e-6);  // tiny guard on intercept/rating
-            for (let j = 2; j < numParams; j++) lamVec[j] = RIDGE_LAMBDA;
+            for (let k = 0; k < K; k++) {
+                lamVec[2 + k] = lambdaForAxis(k);
+                lamVec[2 + K + k] = lambdaForAxis(k);
+            }
             const W = math.diag(pHat.map(p => p * (1 - p)));
             const Xm = math.matrix(X);
             const fisher = math.multiply(math.transpose(Xm), W, Xm);

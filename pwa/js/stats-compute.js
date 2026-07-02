@@ -7,7 +7,7 @@
 // mirroring, the kernel smoothers, the weakness-example selector) sits with
 // the rest of the model math.
 
-import { TOTAL_RANKS } from './constants.js';
+import { TOTAL_RANKS, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 import { TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
@@ -240,27 +240,91 @@ export function kernelQuantileGrid(pts, { t0, tSpan, bw, gridPoints, essMin }) {
     return grid;
 }
 
-// Picks wrong attempts whose embedding signature aligns with the (k, quadrant)
-// issue. Each quadrant requires BOTH axes to land on the side the quadrant's
-// joint sign demands — a one-sided gate would include attempts that only
-// support one axis, which is misleading for the both-negative `badAt` case
-// (and for the off-diagonals it lets same-sign-ordered attempts slip through).
+// P(θ > 1/2) for θ ~ Beta(1 + pos, 1 + neg) — the exact posterior direction
+// probability of a sign test under a uniform prior on the direction rate.
+// Via the identity I_x(a, b) = P(Bin(a+b−1, x) ≥ a) for integer a, b, this is
+// the binomial lower tail P(Bin(n+1, 1/2) ≤ pos) with n = pos + neg, computed
+// by the stable term recurrence term_j = term_{j−1}·(N−j+1)/j starting from
+// term_0 = 2^{−N}. 2^{−N} stays a normal double for N ≲ 1000, far above the
+// ≤ MODEL_INPUT_HISTORY_LENGTH wrong attempts this ever sees.
+export function betaProbAboveHalf(pos, neg) {
+    const N = pos + neg + 1;
+    let term = Math.pow(0.5, N);
+    let sum = term;
+    for (let j = 1; j <= pos; j++) {
+        term *= (N - j + 1) / j;
+        sum += term;
+    }
+    return Math.min(1, Math.max(0, sum));
+}
+
+// Level-2 direction statistic for the Weaknesses pane: for each level-1-flagged
+// axis, a paired sign test on the (picked − correct) axis loading over the
+// user's own wrong attempts. This needs no model and no assumption about which
+// moves are reasonable alternatives — every problem has exactly one canonical
+// answer (the generator's single-solution invariant), so the contrast is
+// defined for every wrong attempt whose picked-move embedding was fetched.
+// A predominantly POSITIVE contrast means the user's errors overshoot the
+// motif (they reach for it when it isn't called for); predominantly NEGATIVE
+// means they miss it (the correct move loads on it, their pick doesn't).
 //
-// The minimum |ec|, |ep| per attempt scales with the issue's posterior
+// The flagged axes co-load on the same problems, so each wrong attempt is
+// attributed to the single flagged axis where its |contrast| is largest —
+// without attribution one error would count toward every correlated axis at
+// once and the per-axis counts would not be independent evidence.
+//
+// The attempt window mirrors the weakness.js training filter + slice so level
+// 2 reads the same era of attempts level 1 was trained on.
+//
+// Returns Map k → {nPos, nNeg, pOver} with pOver = betaProbAboveHalf(nPos, nNeg).
+export function computeAxisDirections(history, flaggedKs) {
+    const out = new Map();
+    if (!Array.isArray(flaggedKs) || flaggedKs.length === 0) return out;
+    for (const k of flaggedKs) out.set(k, { nPos: 0, nNeg: 0, pOver: 0.5 });
+    const rows = history
+        .filter(a => a && !a.isRepeat &&
+                     a.embedding && Array.isArray(a.embedding) &&
+                     typeof a.problemRank === 'number' &&
+                     typeof a.correct === 'boolean')
+        .slice(-MODEL_INPUT_HISTORY_LENGTH);
+    for (const a of rows) {
+        if (a.correct) continue;
+        if (!Array.isArray(a.pickedEmbedding)) continue;
+        let bestK = -1, bestAbs = 0, bestD = 0;
+        for (const k of flaggedKs) {
+            if (a.embedding.length <= k || a.pickedEmbedding.length <= k) continue;
+            const ec = a.embedding[k];
+            const ep = a.pickedEmbedding[k];
+            if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
+            const d = ep - ec;
+            if (Math.abs(d) > bestAbs) { bestAbs = Math.abs(d); bestK = k; bestD = d; }
+        }
+        if (bestK < 0) continue;
+        const s = out.get(bestK);
+        if (bestD > 0) s.nPos++; else s.nNeg++;
+    }
+    for (const s of out.values()) s.pOver = betaProbAboveHalf(s.nPos, s.nNeg);
+    return out;
+}
+
+// Picks wrong attempts that illustrate a surfaced (axis k, category) issue,
+// mirroring the two-level detection in stats-weaknesses.js:
+//   badAt (weak at the motif, direction inconclusive): the correct move loads
+//     on the axis (ec > t) and the user failed — the level-1 evidence shape.
+//   tooMuch (overplays): the picked move loads HIGHER than the correct one
+//     (d = ep − ec > t) — the user reached for the motif when it wasn't
+//     called for.
+//   notEnough (misses): the correct move loads higher than the pick
+//     (−d > t) — the motif was called for and the user played away from it.
+//
+// The minimum evidence per attempt scales with the issue's level-1 posterior
 // probability via `threshold = probit(p)` — so a 90%-confident issue needs
-// ~1.28σ-strong evidence per axis, while a 50%-confident issue collapses to
-// the pure sign constraint. Without this scaling, a 51%-borderline issue and
-// a 95%-certain one would surface the same attempts, even though the latter
-// should be backed by stronger per-attempt evidence.
-//
-// After the gate, per-attempt evidence strength is the sum of the two relevant
-// signed σ contributions — monotone in either axis so a 5σ-on-one + threshold-
-// on-the-other attempt ranks above one that just clears the threshold on both.
-// (The earlier `min` tied any two attempts at the weaker axis regardless of
-// the other one, which made the ordering look arbitrary on the panel.)
-// Embeddings are unit-variance per component (skew-ICA standardized), so
-// z-scale thresholds and sums are directly interpretable as σ above/below
-// baseline.
+// ~1.28σ-strong evidence per attempt, while a threshold-confidence issue
+// collapses toward the pure sign constraint. Without this scaling, a
+// borderline issue and a 95%-certain one would surface the same attempts,
+// even though the latter should be backed by stronger per-attempt evidence.
+// Embeddings are unit-variance per component (skew-ICA standardized), so the
+// gate and the score are directly interpretable on the σ scale.
 export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0) {
     const t = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
     const byId = new Map();
@@ -275,16 +339,17 @@ export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, th
         const ec = a.embedding[k];
         const ep = a.pickedEmbedding[k];
         if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
+        const d = ep - ec;
         let score;
         if (quadrant === 'tooMuch') {
-            if (!(ep > t) || !(-ec > t)) continue;
-            score = ep + (-ec);
+            if (!(d > t)) continue;
+            score = d;
         } else if (quadrant === 'notEnough') {
-            if (!(ec > t) || !(-ep > t)) continue;
-            score = ec + (-ep);
+            if (!(-d > t)) continue;
+            score = -d;
         } else {  // badAt
-            if (!(ec > t) || !(ep > t)) continue;
-            score = ec + ep;
+            if (!(ec > t)) continue;
+            score = ec;
         }
         const prev = byId.get(a.problemId);
         if (!prev || score > prev.score) {

@@ -181,10 +181,12 @@ export async function showDetailedStats() {
         const ignoredProblemCount = merged.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems', { count_ignored: ignoredProblemCount, count_slipped: slippedProblemCount }) + '\n';
 
-        // Augmented-model posterior on (β_correct[k], β_picked[k]) per axis,
-        // turned into sign-quadrant probabilities via bivariate-normal.js and
-        // rendered as a DOM block (instead of inlined into resultText) so each
-        // issue can carry an interactive `examples` toggle to past mistakes.
+        // Two-level weakness detection (stats-weaknesses.js): the augmented
+        // model's posterior on the identified sum β_correct[k] + β_picked[k]
+        // flags weak axes, and a paired picked-vs-correct sign test qualifies
+        // the direction. Rendered as a DOM block (instead of inlined into
+        // resultText) so each issue can carry an interactive `examples` toggle
+        // to past mistakes.
         const issuesElement = buildLikelyIssuesElement(merged);
 
         // Activity pane: the problems-per-day chart above the review-queue

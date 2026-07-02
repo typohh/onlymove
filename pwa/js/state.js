@@ -238,8 +238,9 @@ const shared = {
     weaknessSe: readJSON('weaknessSe', null),
     // Per-axis cov(β_correct[k], β_picked[k]) for the augmented model.
     // Flat array of K floats. Combined with weaknessSe (for the diagonals)
-    // and weaknessParams, this is the minimum state needed to compute
-    // sign-quadrant probabilities per axis without retraining.
+    // and weaknessParams, this is the minimum state needed to compute the
+    // posterior of the identified sum β_correct[k] + β_picked[k] per axis
+    // (the Weaknesses pane's level-1 detection) without retraining.
     weaknessAxisCov: readJSON('weaknessAxisCov', null),
 };
 

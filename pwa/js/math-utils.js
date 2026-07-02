@@ -2,7 +2,7 @@
 //
 // Tiny shared numeric helpers used across the client models
 // (model.js, weakness.js, rank-decomposition.js, game-logic.js,
-// stats-compute.js, the stats chart modules, bivariate-normal.js), kept in one
+// stats-compute.js, the stats chart modules), kept in one
 // place so the definitions can't drift.
 
 // Numerically stable logistic. Avoids Math.exp overflow on large-magnitude z

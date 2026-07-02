@@ -8,24 +8,39 @@
 
 import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
-import { quadrantProbs } from './bivariate-normal.js';
-import { findExamplesForIssue, probit } from './stats-compute.js';
+import { normCdf } from './math-utils.js';
+import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
 import { getRecallCandidates } from './model.js';
 
 // Builds the "Likely issues" DOM block consumed by showDetailedStats. Each
-// surfaced (axis k, quadrant) issue is one row with a toggle that lazily
-// fetches matching past mistakes from answerHistory. Quadrants mirror the
-// augmented model's sign analysis on (β_correct[k], β_picked[k]):
-//   tooMuch    β_c > 0, β_p < 0  → user mis-applies motif k
-//   notEnough  β_c < 0, β_p > 0  → user under-applies motif k
-//   badAt      β_c < 0, β_p < 0  → user struggles with motif k overall
-// `offDiagonal: true` quadrants need cov(β_c, β_p) ≥ 0 — anti-correlated
-// posteriors (typical when most rows have picked = correct fallback) can land
-// high mass in BOTH off-diagonal quadrants simultaneously without the data
-// actually distinguishing over- vs under-application. badAt skips the gate
-// because its both-negative sign-pattern is identifiable from β_c + β_p.
+// surfaced (axis k, category) issue is one row with a toggle that lazily
+// fetches matching past mistakes from answerHistory.
+//
+// Two-level detection:
+//   Level 1 — IS axis k a weakness? — from the augmented model's posterior on
+//   the SUM β_correct[k] + β_picked[k] (mean from weaknessParams, variance
+//   var_c + var_p + 2·cov from weaknessSe/weaknessAxisCov). The sum is the
+//   direction the training data identifies: ~80% of rows have picked = correct
+//   (the fallback + every correct attempt), so the correct/picked SPLIT is
+//   prior-dominated and must not drive detection. The old sign-quadrant
+//   scheme did exactly that, and its cov<0 gate (structural under the
+//   collinearity) left `badAt` as the only category that could ever render.
+//   Level 2 — WHICH WAY does the user err? — a paired sign test on the
+//   (picked − correct) axis loading over the user's own wrong attempts
+//   (computeAxisDirections in stats-compute.js): overshoot → tooMuch,
+//   undershoot → notEnough, inconclusive → badAt ("inconsistently") as the
+//   honest residual. Needs no model and no assumption about which moves are
+//   reasonable alternatives.
 export function buildLikelyIssuesElement(history = state.answerHistory) {
-    const PROB_THRESHOLD = 0.50;
+    // P(β_correct + β_picked < 0) needed to flag an axis as a weakness. This is
+    // a one-sided posterior probability on a single identified quantity (a
+    // 50% bar would flag half the axes under a flat posterior), unlike the old
+    // 0.50 bar on four-way quadrant mass.
+    const WEAK_PROB_THRESHOLD = 0.80;
+    // Sign-test posterior needed to call a direction, and the minimum number
+    // of attributed errors before a direction can be called at all.
+    const DIRECTION_PROB_THRESHOLD = 0.85;
+    const MIN_DIRECTION_N = 3;
     const weaknessParams = state.weaknessParams;
     const weaknessSe = state.weaknessSe;
     const weaknessAxisCov = state.weaknessAxisCov;
@@ -34,11 +49,11 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         const entry = labelMap[String(k)];
         return localizedMotif(entry) || getTerm('statsStyleFallback', { k });
     };
-    const QUADRANTS = [
-        { key: 'tooMuch',   offDiagonal: true,  phrase: (l) => getTerm('statsIssueTooMuch', { motif: l }) },
-        { key: 'notEnough', offDiagonal: true,  phrase: (l) => getTerm('statsIssueNotEnough', { motif: l }) },
-        { key: 'badAt',     offDiagonal: false, phrase: (l) => getTerm('statsIssueBadAt', { motif: l }) },
-    ];
+    const PHRASES = {
+        tooMuch:   (l) => getTerm('statsIssueTooMuch', { motif: l }),
+        notEnough: (l) => getTerm('statsIssueNotEnough', { motif: l }),
+        badAt:     (l) => getTerm('statsIssueBadAt', { motif: l }),
+    };
 
     const root = document.createElement('div');
     root.className = 'stats-issues';
@@ -62,7 +77,9 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     }
 
     const K = (weaknessParams.length - 2) / 2;
-    const issues = [];
+
+    // Level 1: flag axes whose identified sum coefficient is credibly negative.
+    const flagged = [];
     for (let k = 0; k < K; k++) {
         const mu_c = weaknessParams[2 + k];
         const mu_p = weaknessParams[2 + K + k];
@@ -70,22 +87,30 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
         const cov = weaknessAxisCov[k] || 0;
         if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
-        if (!(var_c > 0) || !(var_p > 0)) continue;
-        const probs = quadrantProbs(mu_c, mu_p, var_c, var_p, cov);
-        for (const q of QUADRANTS) {
-            if (q.offDiagonal && cov < 0) continue;
-            const p = probs[q.key];
-            if (p >= PROB_THRESHOLD) {
-                issues.push({ k, quadrant: q.key, p, sentence: q.phrase(labelFor(k)) });
-            }
-        }
+        const varSum = var_c + var_p + 2 * cov;
+        if (!(varSum > 0)) continue;
+        const pWeak = normCdf(-(mu_c + mu_p) / Math.sqrt(varSum));
+        if (pWeak >= WEAK_PROB_THRESHOLD) flagged.push({ k, p: pWeak });
     }
+
+    // Level 2: qualify each flagged axis's direction from the paired
+    // picked-vs-correct contrast; inconclusive stays "inconsistently".
+    const directions = computeAxisDirections(history, flagged.map(f => f.k));
+    const issues = flagged.map(({ k, p }) => {
+        let quadrant = 'badAt';
+        const dir = directions.get(k);
+        if (dir && dir.nPos + dir.nNeg >= MIN_DIRECTION_N) {
+            if (dir.pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
+            else if (1 - dir.pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
+        }
+        return { k, quadrant, p, sentence: PHRASES[quadrant](labelFor(k)) };
+    });
     issues.sort((a, b) => b.p - a.p);
 
     if (issues.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = getTerm('statsIssuesNoneAbove', { percent: (PROB_THRESHOLD * 100).toFixed(0) });
+        empty.textContent = getTerm('statsIssuesNoneAbove', { percent: (WEAK_PROB_THRESHOLD * 100).toFixed(0) });
         root.appendChild(empty);
         return root;
     }
@@ -143,9 +168,12 @@ function buildIssueRow(issue, recallSet, history = state.answerHistory) {
 }
 
 function populateExamplesList(list, issue, recallSet, history = state.answerHistory) {
-    // Threshold per-axis evidence strength to match the issue's posterior
-    // confidence — see findExamplesForIssue for the rationale.
-    const threshold = probit(issue.p);
+    // Threshold per-attempt evidence strength to match the issue's posterior
+    // confidence — see findExamplesForIssue for the rationale. Capped at the
+    // 99% probit (~2.33σ): the level-1 posterior saturates to 1.0 on strong
+    // axes, and probit(1) = Infinity would demand impossible evidence and
+    // blank the examples list for exactly the most confident issues.
+    const threshold = probit(Math.min(issue.p, 0.99));
     const examples = findExamplesForIssue(history, issue.k, issue.quadrant, recallSet, threshold);
     if (examples.length === 0) {
         const none = document.createElement('div');

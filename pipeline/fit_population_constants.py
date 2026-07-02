@@ -41,6 +41,21 @@ Four groups of constants:
    model is regularized under: per-user 60d/30d chunks, 5-fold CV over a lambda grid
    (embedding betas penalized, intercept + problemRank free), shipping the
    per-attempt-NLL-minimizing lambda. The embedding axes are joint across boards.
+   This scalar is the client's FALLBACK prior; the primary is group 5.
+
+5. WEAKNESS_AXIS_LAMBDA (weakness.js): a per-axis prior precision vector (length K)
+   replacing the single prediction-CV'd scalar for the client's weakness betas.
+   Fit by empirical Bayes: the between-user variance tau_k^2 of each axis's weakness
+   coefficient is a population variance component, estimated by EM with a Laplace
+   E-step — per-user MAP ridge fits under the current per-axis prior, then
+   tau_k^2 <- mean_u(beta_uk^2 + posterior var_uk). Axes along which users genuinely
+   differ get a loose prior (their coefficients can surface in the Weaknesses pane);
+   axes with no between-user signal stay pinned. The offline design has ONE
+   coefficient per axis (the correct-move embedding — the identified SUM direction
+   beta_correct + beta_picked of the client's augmented model), so the shipped
+   per-coefficient lambda_k = 2 / tau_k^2 makes the client's implied prior on that
+   sum exactly N(0, tau_k^2). The client falls back to the scalar when this vector
+   is absent or its length mismatches the embedding K.
 
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
@@ -123,6 +138,18 @@ WEAKNESS_CV_FOLDS = 5
 WEAKNESS_LAMBDA_GRID = [30.0, 60.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0]
 WEAKNESS_SEED = 0
 MIN_WEAKNESS_CHUNKS = 20             # below this, keep the default ridge lambda
+
+# --- Per-axis weakness prior (weakness_axis_lambda; empirical Bayes, see group 5) ---
+WEAKNESS_EB_MAX_N = 500              # per-user window, mirrors the client's MODEL_INPUT_HISTORY_LENGTH
+WEAKNESS_EB_MIN_N = 100              # attempts a user needs to contribute
+WEAKNESS_EB_MIN_USERS = 30           # below this, ship no vector (client falls back to the scalar)
+WEAKNESS_EB_MAX_ITERS = 40
+WEAKNESS_EB_TOL = 1e-3               # max relative tau^2 change to declare convergence
+# Bounds on the SHIPPED client per-coefficient precision lambda_k = 2/tau_k^2:
+# the floor stops one outlier-driven axis from going near-unpenalized; the cap
+# keeps a zero-signal axis's precision finite (the client still trains on it).
+WEAKNESS_EB_LAMBDA_MIN = 20.0
+WEAKNESS_EB_LAMBDA_MAX = 5000.0
 
 
 def sigmoid(x):
@@ -548,6 +575,91 @@ def fit_weakness_ridge(by_user, params, embeddings, apply_m):
     return float(best), f"{n_chunks} chunks; per-attempt NLL [{grid}] → lambda={best:g}"
 
 
+def _weakness_user_datasets(by_user, rank_feat, embeddings):
+    """One (X, y) design per user for the empirical-Bayes variance fit: the most
+    recent WEAKNESS_EB_MAX_N novel rated+embedded attempts (mirroring the client's
+    MODEL_INPUT_HISTORY_LENGTH training window), users below WEAKNESS_EB_MIN_N or
+    with a degenerate outcome dropped. X = [1, problemRank, embed_0..K-1]."""
+    for urows in by_user.values():
+        ev = []
+        for r in urows:
+            if r["is_repeat"]:
+                continue
+            key = (r["size"], r["problem"])
+            if key not in rank_feat or key not in embeddings:
+                continue
+            ev.append((datetime.fromisoformat(r["created_at"].replace("Z", "+00:00")),
+                       1.0 if r["success"] else 0.0, rank_feat[key], embeddings[key]))
+        if len(ev) < WEAKNESS_EB_MIN_N:
+            continue
+        ev.sort(key=lambda e: e[0])
+        ev = ev[-WEAKNESS_EB_MAX_N:]
+        y = np.array([e[1] for e in ev], float)
+        if y.std() < 1e-3:
+            continue
+        X = np.column_stack([np.ones(len(ev)),
+                             np.array([e[2] for e in ev], float),
+                             np.vstack([e[3] for e in ev])])
+        yield X, y
+
+
+def fit_weakness_axis_priors(by_user, params, embeddings, apply_m, lam_scalar):
+    """Per-axis prior precision vector for the client's weakness betas (group 5 in
+    the module docstring): empirical Bayes on the between-user variance component
+    tau_k^2 of each axis's weakness coefficient, by EM with a Laplace E-step —
+    per-user MAP ridge fits under the current per-axis prior, then
+    tau_k^2 <- mean_u(beta_uk^2 + posterior var_uk). The offline design carries one
+    coefficient per axis (the identified SUM direction of the client's augmented
+    model), so the shipped client per-coefficient lambda_k = 2/tau_k^2 puts a
+    N(0, tau_k^2) prior on the client's beta_correct[k] + beta_picked[k].
+    Returns (list of K lambdas, info) or (None, info) when data is too sparse."""
+    if apply_m is None:
+        return None, "no rating_to_rank.json — no per-axis prior"
+    if not embeddings:
+        return None, "no embeddings — no per-axis prior"
+    rank_feat = {k: apply_m(v[0]) / WEAKNESS_TOTAL_RANKS for k, v in params.items()}
+    data = list(_weakness_user_datasets(by_user, rank_feat, embeddings))
+    if len(data) < WEAKNESS_EB_MIN_USERS:
+        return None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "
+                      f"attempts (<{WEAKNESS_EB_MIN_USERS}) — no per-axis prior")
+    K = WEAKNESS_K_EMBED
+    d = 2 + K
+    # tau^2 bounds in client-lambda terms (lambda_k = 2/tau_k^2).
+    tau2_lo, tau2_hi = 2.0 / WEAKNESS_EB_LAMBDA_MAX, 2.0 / WEAKNESS_EB_LAMBDA_MIN
+    tau2 = np.clip(np.full(K, 2.0 / lam_scalar), tau2_lo, tau2_hi)
+    betas = [np.zeros(d) for _ in data]   # warm starts across EM iterations
+    it = 0
+    for it in range(WEAKNESS_EB_MAX_ITERS):
+        lam_vec = np.zeros(d)
+        lam_vec[2:] = 1.0 / tau2          # offline prior: one coefficient per axis
+        second = np.zeros(K)              # Σ_u (beta_uk^2 + var_uk)
+        n_ok = 0
+        for i, (X, y) in enumerate(data):
+            beta, ok = _ridge_logistic(X, y, lam_vec, beta0=betas[i])
+            if not ok or not np.all(np.isfinite(beta)):
+                continue
+            betas[i] = beta
+            p = sigmoid(X @ beta)
+            w = np.clip(p * (1 - p), 1e-6, None)
+            H = (X * w[:, None]).T @ X + np.diag(np.maximum(lam_vec, 1e-6))
+            var = np.diag(np.linalg.inv(H))[2:]
+            second += beta[2:] ** 2 + np.maximum(var, 0.0)
+            n_ok += 1
+        if n_ok < WEAKNESS_EB_MIN_USERS:
+            return None, f"only {n_ok} converged per-user fits — no per-axis prior"
+        new_tau2 = np.clip(second / n_ok, tau2_lo, tau2_hi)
+        rel = float(np.max(np.abs(new_tau2 - tau2) / np.maximum(tau2, 1e-12)))
+        tau2 = new_tau2
+        if rel < WEAKNESS_EB_TOL:
+            break
+    lam_axis = 2.0 / tau2
+    info = (f"{len(data)} users, {it + 1} EM iters; per-coefficient lambda "
+            f"min/median/max = {lam_axis.min():.0f}/{float(np.median(lam_axis)):.0f}/"
+            f"{lam_axis.max():.0f} "
+            f"({int(np.sum(lam_axis < lam_scalar))}/{K} axes looser than the scalar)")
+    return [round(float(l), 2) for l in lam_axis], info
+
+
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -642,6 +754,18 @@ def main():
     print(f"  {w_info}")
     print(f"  shipped weakness_ridge_lambda = {out['weakness_ridge_lambda']:g}"
           f"{' (default)' if wl is None else ''}")
+
+    # --- Per-axis weakness prior (empirical-Bayes between-user variance) ---
+    # The client's primary prior; the scalar above stays as its fallback (absent
+    # vector, or an embedding refit changed K without a constants refit).
+    print("Fitting per-axis weakness prior (empirical-Bayes between-user variance) ...")
+    wa, wa_info = fit_weakness_axis_priors(by_user, params, embeddings, apply_m,
+                                           out["weakness_ridge_lambda"])
+    if wa is not None:
+        out["weakness_axis_lambda"] = wa
+    print(f"  {wa_info}")
+    if wa is None:
+        print("  no weakness_axis_lambda shipped — client falls back to the scalar")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")
