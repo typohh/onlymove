@@ -11,7 +11,7 @@ import traceback
 
 from utils.configurations import ALL_BOARD_SIZES, DEFAULT_MODEL
 from utils.katago_controller import KATAGO_PATH, CONFIG_FILE
-from utils.models import get_model, MODEL_HUMAN, MODEL_BEST_SMALL
+from utils.models import get_model
 
 
 verbose = False
@@ -103,7 +103,7 @@ def update_config_file(config_path: str, batch_size: int):
         print(f"\nError: Failed to update config file: {e}", file=sys.stderr)
 
 
-def run_test(batch_size, best_queries_per_second, board_size, proc_holder=None):
+def run_test(batch_size, board_size, proc_holder=None):
     # One-line status message for the current test
     print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
@@ -115,16 +115,19 @@ def run_test(batch_size, best_queries_per_second, board_size, proc_holder=None):
         f"numAnalysisThreads={analysis_threads},nnMaxBatchSize={batch_size},"
         f"numSearchThreadsPerAnalysisThread=1,"
         f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}",
-        # "-model", get_model(DEFAULT_MODEL), "-human-model", get_model(MODEL_HUMAN)
-        "-model", get_model(DEFAULT_MODEL)
-        # "-model", get_model(MODEL_BEST_SMALL)
+        "-model", get_model(DEFAULT_MODEL),
     ]
 
     process = None
     try:
+        # Only keep stderr as a readable pipe when we're going to drain it
+        # (verbose mode). Otherwise DEVNULL it: nothing reads stderr in the
+        # steady path, so a PIPE would deadlock KataGo the moment it writes
+        # more than a pipe-buffer's worth (e.g. if logToStderr is enabled).
         process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1
+            stderr=subprocess.PIPE if verbose else subprocess.DEVNULL,
+            text=True, bufsize=1,
         )
         if proc_holder is not None:
             proc_holder[0] = process  # publish so the watchdog can kill on timeout
@@ -202,9 +205,12 @@ def run_test_in_thread(batch_size, best_queries_per_second, board_size):
     proc_holder = [None]  # the thread publishes its subprocess here
 
     def thread_target():
-        result[0] = run_test(batch_size, best_queries_per_second, board_size, proc_holder=proc_holder)
+        result[0] = run_test(batch_size, board_size, proc_holder=proc_holder)
 
-    thread = threading.Thread(target=thread_target)
+    # Daemon so a run whose cleanup wedges (a KataGo that ignores kill) can
+    # never block interpreter exit — main() returns normally instead of
+    # needing os._exit to escape a lingering non-daemon thread.
+    thread = threading.Thread(target=thread_target, daemon=True)
     thread.start()
     if best_queries_per_second > 0:
         # 120s buffer for KataGo startup + model load + GPU init (the
@@ -215,7 +221,11 @@ def run_test_in_thread(batch_size, best_queries_per_second, board_size):
         )
         timeout = 120 + expected_query_seconds * 2
     else:
-        timeout = None  # First iteration: no prior estimate.
+        # First iteration: no prior throughput estimate to scale by. Model
+        # load + GPU init + a batch-size-1 warmup is a couple of minutes, so
+        # cap generously rather than waiting forever (None) or the ~6.7h a
+        # nonzero seed estimate used to imply.
+        timeout = 600
     thread.join(timeout=timeout)
     if thread.is_alive():
         # Kill the subprocess so it doesn't keep eating GPU while the next
@@ -250,7 +260,10 @@ def main():
         global verbose
         verbose = True
 
-    for path in [KATAGO_PATH, CONFIG_FILE, get_model(DEFAULT_MODEL), get_model(MODEL_HUMAN)]:
+    # get_model(DEFAULT_MODEL) downloads it if absent (run_test needs it).
+    # Don't pull MODEL_HUMAN here — tune_engine never loads a human model, so
+    # listing it only triggered a large pointless ~hundreds-of-MB download.
+    for path in [KATAGO_PATH, CONFIG_FILE, get_model(DEFAULT_MODEL)]:
         if not os.path.exists(path):
             print(f"Error: Required file not found at '{path}'", file=sys.stderr)
             sys.exit(1)
@@ -261,7 +274,10 @@ def main():
         return
 
     batch_size = 1
-    best_queries_per_second = 0.01
+    # Start at 0 so the first run_test_in_thread hits the "no prior estimate"
+    # timeout branch; a nonzero seed made that branch dead and imposed a
+    # multi-hour timeout on the very first run.
+    best_queries_per_second = 0.0
     all_results = []
 
     # Stop the doubling search when a step yields less than this fractional
@@ -292,18 +308,24 @@ def main():
         batch_size *= 2
 
     print("\n--- Test Complete ---")
-    if all_results:
+    # Only successful runs may drive selection. A failed run still records
+    # (batch_size, 0.0); if we selected from those, a run where EVERY attempt
+    # OOM'd/stalled would pick batch size 1 and overwrite a previously
+    # hardware-tuned bots/analysis.cfg — so filter them out and leave the
+    # config untouched when nothing succeeded.
+    successful = [(bs, qps) for bs, qps in all_results if qps > 0]
+    if successful:
         # Find the absolute maximum throughput from all successful runs
-        max_batch_size, max_throughput = max(all_results, key=lambda item: item[1])
+        max_batch_size, max_throughput = max(successful, key=lambda item: item[1])
         print(f"Peak throughput found: {max_throughput:.2f} q/s at batch size {max_batch_size}.")
 
         # Calculate the 85% target
         target_throughput = max_throughput * 0.85
 
         # Find the smallest batch size that meets the target
-        # all_results is already sorted by batch size, so we can iterate
+        # successful is already sorted by batch size, so we can iterate
         balanced_batch_size = 1
-        for bs, throughput in all_results:
+        for bs, throughput in successful:
             if throughput >= target_throughput:
                 balanced_batch_size = bs
                 break
@@ -311,8 +333,8 @@ def main():
         print(f"Selecting balanced batch size of: {balanced_batch_size}")
         update_config_file(CONFIG_FILE, balanced_batch_size)
     else:
-        print("Could not complete a single run. Please check your KataGo setup and file paths.")
-    os._exit(0)
+        print("No run succeeded; leaving bots/analysis.cfg unchanged. "
+              "Please check your KataGo setup and file paths.")
 
 
 if __name__ == "__main__":

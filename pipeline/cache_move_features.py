@@ -82,12 +82,17 @@ def extract_move_features(sgf_bytes):
         color, _mb = node.get_raw_move()
         black_to_move = color == "b"
         wr = sc = None
-        for cb in node.get_raw_list("C"):
-            m = CMT_RE.search(cb.decode("utf-8"))
-            if m:
-                wr = float(m.group(1)) / 100.0
-                sc = float(m.group(2))
-                break
+        # get_raw_list("C") raises KeyError on a comment-less node; guard it so
+        # such a node is skipped (wr stays None → continue) rather than raising
+        # out to _process_chunk's bare except, which would silently drop the
+        # WHOLE problem from the cache instead of just this one node.
+        if node.has_property("C"):
+            for cb in node.get_raw_list("C"):
+                m = CMT_RE.search(cb.decode("utf-8"))
+                if m:
+                    wr = float(m.group(1)) / 100.0
+                    sc = float(m.group(2))
+                    break
         if wr is None:
             continue
         moves.append((wr, sc) if black_to_move else (1.0 - wr, -sc))

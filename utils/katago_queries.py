@@ -1,5 +1,3 @@
-import random
-import numpy as np
 from utils.configurations import RULES, KOMI
 
 _SUPPORTED_RANKS = [
@@ -84,23 +82,6 @@ class KatagoQueries:
         normalized = [p / sum_heated if p > 0 else 0 for p in heated]
         return normalized
 
-    def get_random_move(self, policy):
-        chosen_index = random.choices(range(len(policy)), weights=policy, k=1)[0]
-        return self.get_move_from_idx(chosen_index)
-
-    def get_rank_temperature(self, human_rank):
-        ratings = [
-            0,  # 20k
-            get_rank_number('3d'),
-            1,  # 9d
-        ]
-        temperatures = [
-            1.0,
-            1.0,
-            0.1,
-        ]
-        return np.interp(human_rank, ratings, temperatures)
-
     def query(self, moves, human_rank=None, exclude_move=None, playouts=1, override_settings=None):
         """
         Provides a high playout query, where specific first move may be excluded.
@@ -140,7 +121,7 @@ class KatagoQueries:
     def get_move_from_idx(self, idx):
         """
         Converts a KataGo policy index to a Go move string (e.g., "A1", "pass").
-        Assumes a 9x9 board
+        Board size is taken from self.board_size.
         """
 
         if idx == self.board_size * self.board_size:
@@ -165,7 +146,7 @@ class KatagoQueries:
     def get_idx_from_move(self, move):
         """
         Converts a Go move string (e.g., "A1", "pass") to a KataGo policy index.
-        Assumes a 9x9 board.
+        Board size is taken from self.board_size.
         """
 
         if move == "pass":
@@ -223,7 +204,7 @@ class KatagoQueries:
             score = response["rootInfo"]["scoreLead"]
             winrate = response["rootInfo"]["winrate"]
             max_policy = max(policy)
-            return self.get_move_from_idx(policy.index(max_policy)), winrate, score, policy
+            return self.get_move_from_idx(policy.index(max_policy)), winrate, score, max_policy
 
 
 def _get_player_to_move_next(moves):
@@ -259,28 +240,6 @@ def katago_to_sgf_coords(katago_move, board_size):
     row = board_size - int(row_str)
 
     return row, col
-
-
-def sgf_to_katago_coords(sgf_move, board_size):
-    """
-    Converts SGF coordinates to KataGo coordinates.
-
-    Args:
-        sgf_move (tuple): The move in SGF coordinate format (row, col).
-        board_size (int): The size of the board.
-
-    Returns:
-        str: The move in KataGo's coordinate format (e.g., 'A1', 'B2').
-    """
-    if sgf_move is None:
-        return "pass"
-
-    row, col = sgf_move
-    col_str = chr(ord('A') + col)
-    if col >= 8:
-        col_str = chr(ord('A') + col + 1)
-    row_str = str(board_size - row)
-    return col_str + row_str
 
 
 GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matching KataGo / GTP convention

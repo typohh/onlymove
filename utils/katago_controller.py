@@ -93,22 +93,43 @@ class KatagoController:
         return self.batch_size
 
     def _master_reader(self):
-        """Master thread to read all stdout responses and signal events."""
-        while self.running and self.process and not self.process.stdout.closed:
-            response_str = self.process.stdout.readline()
-            if not response_str: break
+        """Master thread to read all stdout responses and signal events.
 
-            response = json.loads(response_str)
-            query_id = response.get("id")
+        Hardened against the three ways this thread used to die silently and
+        hang every waiter for the full QUERY_TIMEOUT_SECONDS:
+          - a non-JSON stdout line is skipped, not fatal (json.loads used to
+            propagate straight out of the loop);
+          - the membership check + .set() run under self.lock so they can't
+            race send_query's timeout-path pop (which raised KeyError here);
+          - the capture of the stdout handle up front, plus the finally,
+            mean a concurrent stop_engine() setting self.process = None can't
+            turn the loop condition into an AttributeError, and any exit path
+            still unblocks every remaining waiter.
+        """
+        stdout = self.process.stdout if self.process else None
+        try:
+            while self.running and stdout is not None and not stdout.closed:
+                response_str = stdout.readline()
+                if not response_str:
+                    break
 
-            if query_id in self.response_events:
-                self.responses[query_id] = response
-                self.response_events[query_id].set()
+                try:
+                    response = json.loads(response_str)
+                except ValueError:
+                    # KataGo can emit a non-JSON diagnostic line to stdout;
+                    # drop it rather than killing the reader for the run.
+                    continue
+                query_id = response.get("id")
 
-        # On exit, signal all remaining waiters to prevent deadlocks
-        with self.lock:
-            for event in self.response_events.values():
-                event.set()
+                with self.lock:
+                    if query_id in self.response_events:
+                        self.responses[query_id] = response
+                        self.response_events[query_id].set()
+        finally:
+            # On any exit path, signal all remaining waiters to prevent deadlocks.
+            with self.lock:
+                for event in self.response_events.values():
+                    event.set()
 
     def send_query(self, query):
         """

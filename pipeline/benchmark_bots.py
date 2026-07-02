@@ -18,8 +18,8 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.configurations import ALL_BOARD_SIZES
 from utils.katago_controller import KatagoController
-from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_number, get_rank_str, _get_rank_str
-from utils.models import MODEL_9X9, MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODELS, MODEL_HUMAN
+from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_str
+from utils.models import MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODEL_HUMAN
 
 # Set in main() from the mandatory size arg: tsumegos/<size>/ and attempts/<size>/.
 TSUMEGO_DIR = None
@@ -61,10 +61,18 @@ def sgf_to_gtp(sgf_coord: str, size: int) -> str:
     return gtp_coord
 
 
-def point_to_sgf(point):
-    """Converts a (row, col) tuple from sgfmill to an SGF coordinate string like 'pd'."""
+def point_to_sgf(point, size):
+    """Converts an sgfmill (row, col) point to an SGF coordinate string like 'pd'.
+
+    sgfmill points count rows from the BOTTOM ((0,0) = lower-left); an SGF
+    coordinate's row letter counts from the TOP. Flip the row (size-1-row) so
+    AB/AW setup stones resolve to the same square as move-node coordinates,
+    which come straight from the raw SGF (top-origin). Without the flip the
+    setup stones were vertically mirrored against the moves — latent only
+    because current tsumego SGFs place setup via move nodes and carry no
+    AB/AW."""
     row, col = point
-    return f"{chr(ord('a') + col)}{chr(ord('a') + row)}"
+    return f"{chr(ord('a') + col)}{chr(ord('a') + (size - 1 - row))}"
 
 
 def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
@@ -79,7 +87,7 @@ def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
     for prop, color_char in [("AB", "B"), ("AW", "W")]:
         if root_node.has_property(prop):
             for point_tuple in root_node.get(prop):
-                sgf_string = point_to_sgf(point_tuple)
+                sgf_string = point_to_sgf(point_tuple, size)
                 setup_moves.append((color_char, sgf_to_gtp(sgf_string, size)))
 
     current_node = root_node
@@ -120,11 +128,8 @@ class SgfMoveBot:
                 if match:
                     winrate = float(match.group(1)) / 100.0
                     return max(winrate, 1.0 - winrate)
-                    
-        raise ValueError("Could not find winrate comment in SGF for the correct move.")
 
-    def get_batch_size(self):
-        return 1000
+        raise ValueError("Could not find winrate comment in SGF for the correct move.")
 
     def stop(self):
         pass
@@ -196,9 +201,6 @@ class HeuristicBot:
     def stop(self):
         pass
 
-    def get_batch_size(self):
-        return os.cpu_count()
-
 
 class KataGo:
     def __init__(self, weights, board_size, playouts=1, human_rank=None, temperature=1.0):
@@ -245,54 +247,6 @@ class KataGo:
     def copy(self):
         return self
 
-class KataGoFullGame:
-    def __init__(self, weights, board_size, human_rank):
-        self._controller = KatagoController()
-        self._controller.start_engine(model=weights, board_size=board_size, verbose=DEBUG, human=True)
-        self._query = KatagoQueries(self._controller, board_size)
-        self._human_rank = human_rank
-
-    def get_probability(self, game):
-        wins = 0
-        losses = 0
-        for i in range(5):
-            try:
-                setup_moves, variation_nodes = parse_tsumego_sgf(game)
-                moves = [move[1] for move in setup_moves]
-                black_turn = True
-                resign_ready_count = 0
-                while ( moves[-1] != 'pass' or moves[-2] != 'pass' ) and resign_ready_count < 3:
-                    if black_turn:
-                        move,_ = self._query.query_human(moves, self._human_rank)
-                    else:
-                        response = self._query.query(moves, playouts=1)
-                        move, winrate, score, _ = self._query.get_best_move(response)
-                        if winrate < 0.01:
-                            resign_ready_count += 1
-                        else:
-                            resign_ready_count = 0
-                    moves.append(move)
-                    black_turn = not black_turn
-                score,winrate = self._query.get_position_info(moves)
-                if winrate > 0.5:
-                    wins += 1
-                else :
-                    losses += 1
-            except Exception as e:
-                print(f"KataGo attempt {i + 1}/5 failed. Retrying... Error: {e}")
-
-        if wins == 0 and losses == 0:
-            raise Exception("KataGo failed all retry attempts.")
-        return wins / (wins + losses)
-
-    def get_batch_size(self):
-        return self._controller.get_batch_size()
-
-    def stop(self):
-        self._controller.stop_engine()
-
-    def copy(self):
-        return self
 
 cache = {}
 
@@ -325,7 +279,6 @@ def worker(file_queue, bot, lock, probabilities):
         probability = process_file(file_path, worker_bot)
         with lock:
             probabilities[filename[:-4]] = probability
-        file_queue.task_done()
 
 
 
@@ -338,8 +291,10 @@ def list_outcomes():
         filepath = os.path.join(ATTEMPTS_DIRECTORY, filename)
         with open(filepath, 'r') as f:
             for line in f:
-                _, value = line.strip().split()
-                total += float(value)
+                parts = line.split()
+                if len(parts) != 2:
+                    continue  # skip blank / legacy-truncated lines
+                total += float(parts[1])
                 count += 1
         if count > 0:
             outcomes.append((filename, 100 * total / count))
@@ -377,8 +332,10 @@ def test_bot(bot, attempts_file, batch_ids):
     if os.path.exists(attempts_file):
         with open(attempts_file, 'r') as f:
             for line in f:
-                key, value = line.strip().split()
-                probabilities[key] = float(value)
+                parts = line.split()
+                if len(parts) != 2:
+                    continue  # skip blank / legacy-truncated lines
+                probabilities[parts[0]] = float(parts[1])
     
     # Queue only files from the batch that haven't been processed yet
     queued_count = 0
@@ -399,8 +356,17 @@ def test_bot(bot, attempts_file, batch_ids):
         thread = PropagatingThread(target=worker, args=(file_queue, bot, lock, probabilities))
         thread.start()
         threads.append(thread)
+    # Join every worker even if one raised: a single worker's failure (e.g.
+    # KataGo exhausting its retries) must not discard the results the other
+    # workers already wrote into `probabilities`. Remember the first failure
+    # and re-raise it only AFTER persisting the partial progress below.
+    worker_exc = None
     for thread in threads:
-        thread.join()
+        try:
+            thread.join()
+        except Exception as e:
+            if worker_exc is None:
+                worker_exc = e
     total_count = len(probabilities)
     solved_count = sum(probabilities.values())
     elapsed_time = time.time() - start_time
@@ -414,9 +380,16 @@ def test_bot(bot, attempts_file, batch_ids):
     print()
     if DEBUG:
         exit(-1)
-    with open(attempts_file, 'w') as f:
+    # Atomic write: a kill mid-write must not truncate the attempts file (a
+    # half-written final line would crash the next run's parse) nor lose the
+    # bot's accumulated results. Write a sibling temp file, then os.replace.
+    tmp_path = f"{attempts_file}.tmp"
+    with open(tmp_path, 'w') as f:
         for key, value in sorted(probabilities.items()):
             f.write(f"{key} {value}\n")
+    os.replace(tmp_path, attempts_file)
+    if worker_exc is not None:
+        raise worker_exc
 
 
 def batch_has_missing(attempts_file, batch_ids):
