@@ -33,7 +33,7 @@ export const FLOOR_MAX = 0.78;
 // far-below-rank problem from yanking the rank/recall estimate: at the top the
 // likelihood's P(1−P) stays bounded by LAPSE·(1−LAPSE) while the gradient → 0,
 // so the slip carries almost no weight. Read straight from the inlined
-// population constants (mandatory + build-time, like weakness.js's RIDGE_LAMBDA);
+// population constants (mandatory + build-time, like weakness.js's AXIS_LAMBDA);
 // the fitter guarantees 0 ≤ LAPSE < 1 − FLOOR_MAX so (1 − floor − LAPSE) > 0.
 export const LAPSE = POPULATION_CONSTANTS.fat_finger_rate;
 

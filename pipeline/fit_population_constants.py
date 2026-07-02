@@ -5,7 +5,7 @@ of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
 drifting from a one-off manual fit.
 
-Five groups of constants:
+Four groups of constants:
 
 1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
    overlays gate on a per-user solving/review-time coefficient that is biased
@@ -36,15 +36,8 @@ Five groups of constants:
    unknown hidden reviews, so only post-cutoff chains give trustworthy gaps/r).
    Z0 = logit(0.7) is a fixed reference (LN_C is the base stability at p=0.7).
 
-4. WEAKNESS_RIDGE_LAMBDA (weakness.js): the L2 precision on each per-embedding-axis
-   beta of the client's weakness logistic. Fit by the SAME held-out-CV recipe the
-   model is regularized under: per-user 60d/30d chunks, 5-fold CV over a lambda grid
-   (embedding betas penalized, intercept + problemRank free), shipping the
-   per-attempt-NLL-minimizing lambda. The embedding axes are joint across boards.
-   This scalar is the client's FALLBACK prior; the primary is group 5.
-
-5. WEAKNESS_AXIS_LAMBDA (weakness.js): a per-axis prior precision vector (length K)
-   replacing the single prediction-CV'd scalar for the client's weakness betas.
+4. WEAKNESS_AXIS_LAMBDA (weakness.js): a per-axis prior precision vector (length K) —
+   the L2 precision on each per-embedding-axis beta of the client's weakness logistic.
    Fit by empirical Bayes: the between-user variance tau_k^2 of each axis's weakness
    coefficient is a population variance component, estimated by EM with a Laplace
    E-step — per-user MAP ridge fits under the current per-axis prior, then
@@ -54,8 +47,9 @@ Five groups of constants:
    coefficient per axis (the correct-move embedding — the identified SUM direction
    beta_correct + beta_picked of the client's augmented model), so the shipped
    per-coefficient lambda_k = 2 / tau_k^2 makes the client's implied prior on that
-   sum exactly N(0, tau_k^2). The client falls back to the scalar when this vector
-   is absent or its length mismatches the embedding K.
+   sum exactly N(0, tau_k^2). This vector is MANDATORY — there is no scalar fallback:
+   if the population is too sparse to fit it, fit_population_constants RAISES rather
+   than shipping a fallback, and the client requires it.
 
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
@@ -84,7 +78,7 @@ import os
 import sqlite3
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import numpy as np
 from scipy.optimize import minimize
@@ -115,34 +109,25 @@ DEFAULTS = {
     # mapping (pipeline.map_rating_to_rank fits α jointly with the curve + couplings) and
     # READ THROUGH here into population_constants.json — not fit here. Fallback only.
     "time_adjust": {"alpha_per_log10_min": -0.16, "center_log10_min": -0.64},
-    # L2 precision on each per-embedding-axis beta of the client's weakness logistic
-    # (pwa/js/weakness.js RIDGE_LAMBDA). Fallback when the population is too sparse
-    # to refit; main() overwrites with the held-out-CV fit when it lands.
-    "weakness_ridge_lambda": 200.0,
+    # NB: no weakness prior default. weakness_axis_lambda is fit here and is
+    # MANDATORY — if it can't be fit the run raises rather than shipping a
+    # fabricated fallback (there is no scalar weakness_ridge_lambda anymore).
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
 
-# --- Weakness-model ridge prior (pwa/js/weakness.js RIDGE_LAMBDA) ---
-# L2 precision on the per-embedding-axis betas of the client's weakness logistic,
-# fit by the SAME held-out-CV recipe the model is regularized under: per-user
-# 60d/30d chunks, 5-fold CV over a lambda grid, ship the per-attempt-NLL-minimizing
-# lambda. Board-independent (9x9+13x13 pooled), the embedding axes being joint.
+# --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
+# The per-axis L2 precision on the client's weakness betas is fit by empirical
+# Bayes (group 4 / fit_weakness_axis_priors). These are the shared inputs.
+# Board-independent (9x9+13x13 pooled), the embedding axes being joint.
 WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
 WEAKNESS_K_EMBED = 64
 WEAKNESS_TOTAL_RANKS = 29.0          # problemRank = M(rating) / TOTAL_RANKS (matches the client)
-WEAKNESS_WINDOW_DAYS = 60
-WEAKNESS_STRIDE_DAYS = 30
-WEAKNESS_MIN_ATTEMPTS_PER_CHUNK = 100
-WEAKNESS_CV_FOLDS = 5
-WEAKNESS_LAMBDA_GRID = [30.0, 60.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0]
-WEAKNESS_SEED = 0
-MIN_WEAKNESS_CHUNKS = 20             # below this, keep the default ridge lambda
 
 # --- Per-axis weakness prior (weakness_axis_lambda; empirical Bayes, see group 5) ---
 WEAKNESS_EB_MAX_N = 500              # per-user window, mirrors the client's MODEL_INPUT_HISTORY_LENGTH
 WEAKNESS_EB_MIN_N = 100              # attempts a user needs to contribute
-WEAKNESS_EB_MIN_USERS = 30           # below this, ship no vector (client falls back to the scalar)
+WEAKNESS_EB_MIN_USERS = 30           # below this, the fit raises (no fallback — see main)
 WEAKNESS_EB_MAX_ITERS = 40
 WEAKNESS_EB_TOL = 1e-3               # max relative tau^2 change to declare convergence
 # Bounds on the SHIPPED client per-coefficient precision lambda_k = 2/tau_k^2:
@@ -447,12 +432,12 @@ def fit_retention(events):
 
 
 # ---------------------------------------------------------------------------
-# Weakness-model ridge prior (embedding-axis L2, held-out CV).
+# Weakness-model per-axis prior (empirical Bayes).
 # ---------------------------------------------------------------------------
 def load_problem_embeddings(needed):
     """{(size, tid): np.ndarray(K)} correct-move joint-ICA embedding from
     embeddings/joint/per_problem.csv, restricted to the attempted problems.
-    Empty if the CSV is absent — the caller then keeps the default lambda."""
+    Empty if the CSV is absent — the per-axis fit then raises (no fallback)."""
     if not os.path.exists(WEAKNESS_EMBED_CSV):
         return {}
     cols = [f"embed_{i}" for i in range(WEAKNESS_K_EMBED)]
@@ -490,91 +475,6 @@ def _ridge_logistic(X, y, lam_vec, beta0=None):
     return res.x, res.success
 
 
-def _weakness_chunks(by_user, rank_feat, embeddings):
-    """Yield (rank_vec, embed_matrix, y) for each per-user 60d/30d window holding
-    >= WEAKNESS_MIN_ATTEMPTS_PER_CHUNK novel rated+embedded attempts (mirrors the
-    chunking the ridge was historically calibrated under)."""
-    window = timedelta(days=WEAKNESS_WINDOW_DAYS)
-    stride = timedelta(days=WEAKNESS_STRIDE_DAYS)
-    for urows in by_user.values():
-        ev = []
-        for r in urows:
-            if r["is_repeat"]:
-                continue
-            key = (r["size"], r["problem"])
-            if key not in rank_feat or key not in embeddings:
-                continue
-            ev.append((datetime.fromisoformat(r["created_at"].replace("Z", "+00:00")),
-                       1.0 if r["success"] else 0.0, rank_feat[key], embeddings[key]))
-        if len(ev) < WEAKNESS_MIN_ATTEMPTS_PER_CHUNK:
-            continue
-        ev.sort(key=lambda e: e[0])
-        ts = [e[0] for e in ev]
-        start, end_all = ts[0], ts[-1]
-        while start <= end_all:
-            end = start + window
-            idx = [i for i, t in enumerate(ts) if start <= t < end]
-            if len(idx) >= WEAKNESS_MIN_ATTEMPTS_PER_CHUNK:
-                yield (np.array([ev[i][2] for i in idx], float),
-                       np.vstack([ev[i][3] for i in idx]),
-                       np.array([ev[i][1] for i in idx], float))
-            start += stride
-
-
-def fit_weakness_ridge(by_user, params, embeddings, apply_m):
-    """CV-best L2 precision for the weakness model's per-embedding-axis betas.
-    Per chunk a 5-fold CV scores a grid of ridge strengths (embedding betas
-    penalized; intercept + problemRank free) and the per-attempt-NLL-minimizing
-    lambda summed across chunks is returned. (lambda, info); lambda is None when
-    inputs are missing or the population is too sparse (caller keeps the default)."""
-    if apply_m is None:
-        return None, "no rating_to_rank.json (run map_rating_to_rank first) — keeping default"
-    if not embeddings:
-        rel = os.path.relpath(WEAKNESS_EMBED_CSV, PROJECT_ROOT)
-        return None, f"no embeddings at {rel} (run build_embedding) — keeping default"
-    rank_feat = {k: apply_m(v[0]) / WEAKNESS_TOTAL_RANKS for k, v in params.items()}
-    rng = np.random.default_rng(WEAKNESS_SEED)
-    total_nll = {lam: 0.0 for lam in WEAKNESS_LAMBDA_GRID}
-    total_n = {lam: 0 for lam in WEAKNESS_LAMBDA_GRID}
-    n_chunks = 0
-    for rank_vec, emb, y in _weakness_chunks(by_user, rank_feat, embeddings):
-        if y.std() < 1e-3:
-            continue
-        n_chunks += 1
-        n = len(y)
-        X = np.column_stack([np.ones(n), rank_vec, emb])   # [1, problemRank, embed_0..K-1]
-        d = X.shape[1]
-        idx = np.arange(n)
-        rng.shuffle(idx)
-        folds = np.array_split(idx, WEAKNESS_CV_FOLDS)
-        beta_ws = {k: np.zeros(d) for k in range(WEAKNESS_CV_FOLDS)}
-        for lam in sorted(WEAKNESS_LAMBDA_GRID, reverse=True):   # warm-start as lambda loosens
-            lam_vec = np.zeros(d)
-            lam_vec[2:] = lam                                    # penalize embedding betas only
-            for k in range(WEAKNESS_CV_FOLDS):
-                te = folds[k]
-                if len(te) == 0:
-                    continue
-                tr = np.ones(n, dtype=bool)
-                tr[te] = False
-                if y[tr].std() < 1e-3:
-                    continue
-                beta, ok = _ridge_logistic(X[tr], y[tr], lam_vec, beta0=beta_ws[k])
-                if not ok or not np.all(np.isfinite(beta)):
-                    continue
-                beta_ws[k] = beta
-                z = X[te] @ beta
-                total_nll[lam] += -float(np.sum(
-                    y[te] * (-np.logaddexp(0.0, -z)) + (1 - y[te]) * (-np.logaddexp(0.0, z))))
-                total_n[lam] += len(te)
-    if n_chunks < MIN_WEAKNESS_CHUNKS:
-        return None, f"only {n_chunks} chunks (<{MIN_WEAKNESS_CHUNKS}) — keeping default"
-    per = {lam: total_nll[lam] / max(1, total_n[lam]) for lam in WEAKNESS_LAMBDA_GRID}
-    best = min(WEAKNESS_LAMBDA_GRID, key=lambda lam: per[lam])
-    grid = "  ".join(f"{lam:g}:{per[lam]:.5f}" for lam in WEAKNESS_LAMBDA_GRID)
-    return float(best), f"{n_chunks} chunks; per-attempt NLL [{grid}] → lambda={best:g}"
-
-
 def _weakness_user_datasets(by_user, rank_feat, embeddings):
     """One (X, y) design per user for the empirical-Bayes variance fit: the most
     recent WEAKNESS_EB_MAX_N novel rated+embedded attempts (mirroring the client's
@@ -603,7 +503,7 @@ def _weakness_user_datasets(by_user, rank_feat, embeddings):
         yield X, y
 
 
-def fit_weakness_axis_priors(by_user, params, embeddings, apply_m, lam_scalar):
+def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
     """Per-axis prior precision vector for the client's weakness betas (group 5 in
     the module docstring): empirical Bayes on the between-user variance component
     tau_k^2 of each axis's weakness coefficient, by EM with a Laplace E-step —
@@ -626,7 +526,9 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m, lam_scalar):
     d = 2 + K
     # tau^2 bounds in client-lambda terms (lambda_k = 2/tau_k^2).
     tau2_lo, tau2_hi = 2.0 / WEAKNESS_EB_LAMBDA_MAX, 2.0 / WEAKNESS_EB_LAMBDA_MIN
-    tau2 = np.clip(np.full(K, 2.0 / lam_scalar), tau2_lo, tau2_hi)
+    # EM seed only (the iteration converges to the data-driven variance): the
+    # geometric mean of the bounds, so no scalar prior is needed to start.
+    tau2 = np.full(K, float(np.sqrt(tau2_lo * tau2_hi)))
     betas = [np.zeros(d) for _ in data]   # warm starts across EM iterations
     it = 0
     for it in range(WEAKNESS_EB_MAX_ITERS):
@@ -655,8 +557,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m, lam_scalar):
     lam_axis = 2.0 / tau2
     info = (f"{len(data)} users, {it + 1} EM iters; per-coefficient lambda "
             f"min/median/max = {lam_axis.min():.0f}/{float(np.median(lam_axis)):.0f}/"
-            f"{lam_axis.max():.0f} "
-            f"({int(np.sum(lam_axis < lam_scalar))}/{K} axes looser than the scalar)")
+            f"{lam_axis.max():.0f}")
     return [round(float(l), 2) for l in lam_axis], info
 
 
@@ -744,28 +645,22 @@ def main():
         print("  WARNING: no time_adjust in rating_to_rank.json (run map_rating_to_rank "
               "first) — keeping default time_adjust block")
 
-    # --- Weakness-model ridge prior (embedding-axis L2; held-out CV) ---
-    apply_m = load_rating_to_rank(args.ratings_dir)   # for the weakness ridge's problemRank
-    print("Fitting weakness-model ridge prior (embedding-axis L2, held-out CV) ...")
-    embeddings = load_problem_embeddings(needed)
-    wl, w_info = fit_weakness_ridge(by_user, params, embeddings, apply_m)
-    if wl is not None:
-        out["weakness_ridge_lambda"] = float(wl)
-    print(f"  {w_info}")
-    print(f"  shipped weakness_ridge_lambda = {out['weakness_ridge_lambda']:g}"
-          f"{' (default)' if wl is None else ''}")
-
     # --- Per-axis weakness prior (empirical-Bayes between-user variance) ---
-    # The client's primary prior; the scalar above stays as its fallback (absent
-    # vector, or an embedding refit changed K without a constants refit).
+    # The client's ONLY weakness prior. Mandatory: no scalar fallback, so if it
+    # can't be fit we RAISE rather than shipping population_constants.json without
+    # it (the client can't score weaknesses without this vector — a silent gap
+    # would go unnoticed forward, which is exactly what we refuse to do here).
+    apply_m = load_rating_to_rank(args.ratings_dir)   # for the weakness prior's problemRank
     print("Fitting per-axis weakness prior (empirical-Bayes between-user variance) ...")
-    wa, wa_info = fit_weakness_axis_priors(by_user, params, embeddings, apply_m,
-                                           out["weakness_ridge_lambda"])
-    if wa is not None:
-        out["weakness_axis_lambda"] = wa
-    print(f"  {wa_info}")
+    embeddings = load_problem_embeddings(needed)
+    wa, wa_info = fit_weakness_axis_priors(by_user, params, embeddings, apply_m)
     if wa is None:
-        print("  no weakness_axis_lambda shipped — client falls back to the scalar")
+        raise RuntimeError(
+            f"could not fit weakness_axis_lambda ({wa_info}). It is mandatory and has "
+            f"no fallback — fix the inputs (run map_rating_to_rank + build_embedding, "
+            f"or wait for more attempts) and re-run. Not shipping without it.")
+    out["weakness_axis_lambda"] = wa
+    print(f"  {wa_info}")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")
