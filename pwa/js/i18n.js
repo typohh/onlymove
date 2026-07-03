@@ -131,7 +131,12 @@ const localization = {
     rankSurveyTitle: '您目前活跃的段位有哪些？',
     rankSurveyNone: '无',
     rankSurveySubmit: '提交',
-    rankSurveyDismiss: '稍后再说'
+    rankSurveyDismiss: '稍后再说',
+    rankTranslationTitle: '你在其他平台的段级位',
+    rankTranslationEmpty: '暂无对应此棋力的平台估计。',
+    rankTranslationClose: '关闭',
+    rankProgressFormat: '{rank}，升到 {nextRank} 进度 {percent}%',
+    rankConfidenceFormat: '95% 置信区间为 ± {ci} 子'
   },
   ja: {
     kyu: '級',
@@ -261,7 +266,12 @@ const localization = {
     rankSurveyTitle: '現在の棋力（段位・級位）を教えてください（複数可）',
     rankSurveyNone: 'なし',
     rankSurveySubmit: '送信',
-    rankSurveyDismiss: '後で'
+    rankSurveyDismiss: '後で',
+    rankTranslationTitle: '他サーバーでのあなたの段級位',
+    rankTranslationEmpty: 'この棋力に対応するサーバーの推定はまだありません。',
+    rankTranslationClose: '閉じる',
+    rankProgressFormat: '{rank}、{nextRank} への進捗 {percent}%',
+    rankConfidenceFormat: '95% 信頼区間 ± {ci} 子'
   },
   ko: {
     kyu: '급',
@@ -391,7 +401,12 @@ const localization = {
     rankSurveyTitle: '현재 활동 중인 급수/단위를 모두 알려주세요',
     rankSurveyNone: '없음',
     rankSurveySubmit: '제출',
-    rankSurveyDismiss: '나중에'
+    rankSurveyDismiss: '나중에',
+    rankTranslationTitle: '다른 서버에서의 내 급/단',
+    rankTranslationEmpty: '아직 이 실력에 해당하는 서버 추정치가 없습니다.',
+    rankTranslationClose: '닫기',
+    rankProgressFormat: '{rank}, {nextRank}까지 {percent}% 진행',
+    rankConfidenceFormat: '95% 신뢰구간 ± {ci} 점'
   },
   en: {
     kyu: 'kyu',
@@ -538,7 +553,8 @@ const localization = {
     rankTranslationTitle: 'Your rank on other servers',
     rankTranslationEmpty: 'No server estimate for this rank yet.',
     rankTranslationClose: 'Close',
-    rankProgressFormat: '{rank}, {percent}% progress towards {nextRank}'
+    rankProgressFormat: '{rank}, {percent}% progress towards {nextRank}',
+    rankConfidenceFormat: 'with a 95% confidence interval of ± {ci} ranks'
   }
 };
 

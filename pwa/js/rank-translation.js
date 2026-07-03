@@ -17,7 +17,7 @@ import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel, rankIndexToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
-import { rankIndexAfterRatingDelta } from './rank-decomposition.js';
+import { rankIndexAfterRatingDelta, estimateWindowRank } from './rank-decomposition.js';
 import { timeAdjustDeltaRating } from './population-constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
 // rank_map.json is inlined at build time (like rating_to_rank.json in
@@ -89,16 +89,26 @@ export async function showRankTranslation() {
     const rating = state.userRank;
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
+    const history = getMergedAnswerHistory();
     const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
     const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
     const key = rankIndexToLabel(rankIndex);
+
+    // 95% CI half-width on the displayed rank, from the window-MLE posterior
+    // standard error. `se` is already in internal-rank-index units (= stones =
+    // ranks; see shared/rank-window.js), so 1.96·se is directly "in ranks" — no
+    // /TOTAL_RANKS or logit conversion. Warm-start the refit at the current rank
+    // so it reproduces the front-page estimate. null until there's usable history
+    // (the CI line is then omitted).
+    const rankEst = estimateWindowRank(history, rankValue);
+    const ciHalfRanks = rankEst && Number.isFinite(rankEst.se) ? 1.96 * rankEst.se : null;
 
     // The header keeps the raw, untimed onlymove (consensus) rank; the server
     // translations — EGF among them — are TIME-ADJUSTED: practice here is untimed
     // while server ranks reflect timed play, so a slow solver's untimed rank
     // overstates their timed strength. Same single-point correction the Rank-chart
     // server views use (whole-history median solve time → rating delta → mapped via M).
-    const deltaRating = timeAdjustDeltaRating(getMergedAnswerHistory());
+    const deltaRating = timeAdjustDeltaRating(history);
     const adjusted = deltaRating !== null;
     const adjValue = adjusted ? rankIndexAfterRatingDelta(rankValue, deltaRating) : rankValue;
     const adjIndex = Number.isFinite(adjValue) ? adjValue : rankValue;
@@ -121,6 +131,21 @@ export async function showRankTranslation() {
                 nextRank: rankIndexToLabel(rankIndex + 1),
             });
             modal.appendChild(progress);
+
+            // Second line: the 95% CI on the rank, phrased as a continuation of the
+            // progress line above ("…, with a 95% confidence interval of ± x.xx
+            // ranks"). Omitted when the posterior SE isn't available yet.
+            if (ciHalfRanks !== null) {
+                const ci = document.createElement('div');
+                ci.style.textAlign = 'center';
+                ci.style.marginBottom = '1vmin';
+                ci.style.fontSize = '0.85em';
+                ci.style.opacity = '0.75';
+                ci.textContent = getTerm('rankConfidenceFormat', {
+                    ci: ciHalfRanks.toFixed(2),
+                });
+                modal.appendChild(ci);
+            }
 
             modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
 
