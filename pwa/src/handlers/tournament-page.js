@@ -5,9 +5,9 @@
 // to match onlymove's gold-on-dark goban identity. Registered before the SPA
 // fallback in src/index.js. Links out to /leaderboard and the app front page (/).
 
-// Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is a real
-// corner tsumego with the single key point glowing gold — literally "the only move",
-// the app's namesake. Serif display for gravitas, monospace for the measured data
+// Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is the
+// onlymove app-icon board position, restyled in gold-on-dark, with one black stone
+// marked in gold as the current move. Serif display for gravitas, monospace for the measured data
 // (dates, prizes, ranks), sans for prose. Go stones and a hoshi star-point are the
 // recurring structural marks. Content is Finnish; the tournament is for Finnish
 // players. Copy is intentionally plain and instructional.
@@ -203,7 +203,7 @@ function renderTournamentPage() {
     .key-glow { animation: none !important; }
     .btn, .btn .arrow { transition: none; }
   }
-  /* the "only move" gold key point breathes — the single deliberate motion */
+  /* the gold current-move mark breathes — the single deliberate motion */
   @keyframes keypulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
   .key-glow { animation: keypulse 2.8s ease-in-out infinite; }
 </style>
@@ -215,7 +215,7 @@ function renderTournamentPage() {
   <header class="hero">
     <p class="eyebrow">onlymove · go-turnaus</p>
 
-    <svg class="board-art" viewBox="0 0 300 260" role="img" aria-label="Go-lauta, jossa yksi siirto hehkuu kultaisena — ainoa siirto.">
+    <svg class="board-art" viewBox="0 0 240 240" role="img" aria-label="onlymove-logon go-asema — yksi kivi on merkitty siirroksi.">
       <defs>
         <radialGradient id="wood" cx="42%" cy="30%" r="85%">
           <stop offset="0%" stop-color="#2c2517"/>
@@ -245,45 +245,49 @@ function renderTournamentPage() {
         </filter>
       </defs>
 
-      <rect x="14" y="6" width="272" height="248" rx="12" fill="url(#wood)" stroke="#33291899" stroke-width="1"/>
+      <rect x="8" y="8" width="224" height="224" rx="16" fill="url(#wood)" stroke="#33291899" stroke-width="1"/>
 
-      <!-- grid: corner crop. verticals x=40..280 step 40, horizontals y=20..220 step 40 -->
+      <!-- 5x5 grid, lines at 40,80,120,160,200 — the onlymove app-icon board -->
       <g stroke="#CEB053" stroke-opacity="0.22" stroke-width="1.4" stroke-linecap="round">
-        <line x1="40" y1="20" x2="40" y2="220"/>
-        <line x1="80" y1="20" x2="80" y2="220"/>
-        <line x1="120" y1="20" x2="120" y2="220"/>
-        <line x1="160" y1="20" x2="160" y2="220"/>
-        <line x1="200" y1="20" x2="200" y2="220"/>
-        <line x1="240" y1="20" x2="240" y2="220"/>
-        <line x1="280" y1="20" x2="280" y2="220"/>
-        <line x1="40" y1="20"  x2="280" y2="20"/>
-        <line x1="40" y1="60"  x2="280" y2="60"/>
-        <line x1="40" y1="100" x2="280" y2="100"/>
-        <line x1="40" y1="140" x2="280" y2="140"/>
-        <line x1="40" y1="180" x2="280" y2="180"/>
-        <line x1="40" y1="220" x2="280" y2="220"/>
+        <line x1="40"  y1="40" x2="40"  y2="200"/>
+        <line x1="80"  y1="40" x2="80"  y2="200"/>
+        <line x1="120" y1="40" x2="120" y2="200"/>
+        <line x1="160" y1="40" x2="160" y2="200"/>
+        <line x1="200" y1="40" x2="200" y2="200"/>
+        <line x1="40" y1="40"  x2="200" y2="40"/>
+        <line x1="40" y1="80"  x2="200" y2="80"/>
+        <line x1="40" y1="120" x2="200" y2="120"/>
+        <line x1="40" y1="160" x2="200" y2="160"/>
+        <line x1="40" y1="200" x2="200" y2="200"/>
       </g>
-      <!-- hoshi (4-4 star point) -->
-      <circle cx="160" cy="100" r="3" fill="#CEB053" fill-opacity="0.55"/>
 
-      <!-- stones (corner shape) -->
+      <!-- stones: the onlymove app-icon position, restyled in gold-on-dark -->
       <g filter="url(#shadow)">
-        <!-- white group in the corner -->
-        <circle cx="40"  cy="220" r="17" fill="url(#white)"/>
-        <circle cx="80"  cy="220" r="17" fill="url(#white)"/>
-        <circle cx="120" cy="220" r="17" fill="url(#white)"/>
-        <circle cx="40"  cy="180" r="17" fill="url(#white)"/>
-        <!-- black wall -->
-        <circle cx="160" cy="220" r="17" fill="url(#black)"/>
-        <circle cx="120" cy="180" r="17" fill="url(#black)"/>
-        <circle cx="80"  cy="180" r="17" fill="url(#black)"/>
-        <circle cx="40"  cy="140" r="17" fill="url(#black)"/>
+        <circle cx="80"  cy="40"  r="18" fill="url(#black)"/>
+        <circle cx="160" cy="40"  r="18" fill="url(#white)"/>
+        <circle cx="40"  cy="80"  r="18" fill="url(#black)"/>
+        <circle cx="80"  cy="80"  r="18" fill="url(#black)"/>
+        <circle cx="120" cy="80"  r="18" fill="url(#black)"/>
+        <circle cx="160" cy="80"  r="18" fill="url(#white)"/>
+        <circle cx="200" cy="80"  r="18" fill="url(#white)"/>
+        <circle cx="40"  cy="120" r="18" fill="url(#white)"/>
+        <circle cx="80"  cy="120" r="18" fill="url(#white)"/>
+        <circle cx="120" cy="120" r="18" fill="url(#white)"/>
+        <circle cx="160" cy="120" r="18" fill="url(#black)"/>
+        <circle cx="200" cy="120" r="18" fill="url(#black)"/>
+        <circle cx="80"  cy="160" r="18" fill="url(#white)"/>
+        <circle cx="120" cy="160" r="18" fill="url(#black)"/>
+        <circle cx="160" cy="160" r="18" fill="url(#black)"/>
+        <circle cx="200" cy="160" r="18" fill="url(#white)"/>
+        <circle cx="40"  cy="200" r="18" fill="url(#black)"/>
+        <circle cx="80"  cy="200" r="18" fill="url(#white)"/>
+        <circle cx="160" cy="200" r="18" fill="url(#black)"/>
       </g>
 
-      <!-- the only move: glowing gold key point at an empty intersection -->
-      <circle class="key-glow" cx="160" cy="180" r="20" fill="#CEB053" fill-opacity="0.25" filter="url(#glow)"/>
-      <circle cx="160" cy="180" r="15" fill="none" stroke="url(#gold)" stroke-width="3"/>
-      <circle cx="160" cy="180" r="4.5" fill="url(#gold)"/>
+      <!-- current move: the black stone at (120,160), marked in gold with a soft glow -->
+      <circle class="key-glow" cx="120" cy="160" r="14" fill="#CEB053" fill-opacity="0.28" filter="url(#glow)"/>
+      <circle cx="120" cy="160" r="8.5" fill="none" stroke="url(#gold)" stroke-width="3"/>
+      <circle cx="120" cy="160" r="2.6" fill="url(#gold)"/>
     </svg>
 
     <h1>onlymove-turnaus</h1>
