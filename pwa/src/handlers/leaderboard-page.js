@@ -9,7 +9,7 @@
 // last-week GoR for last-week peak. All values are inlined so switching is instant,
 // and any header sorts. See docs/leaderboard_plan.md.
 
-import { readLeaderboardRows } from '../leaderboard.js';
+import { readLeaderboardRows, RANK_START_MIN } from '../leaderboard.js';
 import { baseCss, ESC_SNIPPET } from './page-shell.js';
 
 export async function handleLeaderboard(env) {
@@ -50,13 +50,22 @@ function renderPage(rows) {
     const data = rows.map((r) => {
         const curGor = Number.isFinite(r.gor) ? r.gor : null;
         const pwGor = Number.isFinite(r.prevWeekGor) ? r.prevWeekGor : null;
-        return {
+        const row = {
             name: r.name || '—',
             flag: flag(r.country),
             gors: [curGor, curGor, pwGor],
             abs: [numAbs(r.currentAbs), numAbs(r.thisWeekAbs), numAbs(r.prevWeekAbs)],
             rel: [numRel(r.currentRel), numRel(r.thisWeekRel), numRel(r.prevWeekRel)],
         };
+        // Not yet ranked: the onlymove column shows attempts/threshold progress
+        // instead of an estimate, so it's obvious they haven't qualified. abs/rel are
+        // all null → this row sorts last in the estimate sort (missing values do).
+        // Clamp the numerator to the threshold so a row whose rank hasn't been
+        // recomputed yet (e.g. a 60–99-attempt user right after the threshold was
+        // lowered, before their next report/cron re-ranks them) reads "60/60", never
+        // an impossible ">60/60". In steady state novelCount < RANK_START_MIN anyway.
+        if (!r.ranked) row.progress = Math.min(r.novelCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
+        return row;
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');
 
@@ -89,6 +98,8 @@ function renderPage(rows) {
   thead th.sorted { opacity: .95; }
   td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
+  /* Not-yet-ranked progress (attempts/threshold) — muted so it reads as "pending". */
+  td.val.progress { font-weight: 400; opacity: .5; }
   td.gor { opacity: .7; font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
   .empty { opacity: .5; padding: 2rem 0; text-align: center; }
@@ -103,7 +114,7 @@ function renderPage(rows) {
 </head>
 <body>
 <h1>Leaderboard</h1>
-<p class="sub">onlymove-estimated GoR vs European Go Database GoR. A player needs 100 attempts to be included.</p>
+<p class="sub">onlymove-estimated GoR vs European Go Database GoR. Newly registered players show their attempts toward a rank (${RANK_START_MIN} needed) until they qualify.</p>
 <div class="toggles">
   <div class="toggle" role="group" aria-label="timeframe">
     <button id="tf0" aria-pressed="true"><span>Current</span></button>
@@ -188,13 +199,18 @@ function renderPage(rows) {
 
   function render() {
     updateHeaders();
-    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No ranked players yet.</td></tr>'; return; }
+    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No players yet.</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
+      // Not-yet-ranked rows show attempts/threshold progress (mode/timeframe-independent)
+      // in the estimate column instead of a rank; muted via .progress.
+      var estCell = r.progress
+        ? '<td class="val om-start progress">' + esc(r.progress) + '</td>'
+        : '<td class="val om-start">' + fmtCell(r[mode][tf]) + '</td>';
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') + '<span class="name">' + esc(r.name) + '</span></td>' +
         '<td class="gor">' + fmtGor(r.gors[tf]) + '</td>' +
-        '<td class="val om-start">' + fmtCell(r[mode][tf]) + '</td></tr>';
+        estCell + '</tr>';
     }).join('');
   }
 

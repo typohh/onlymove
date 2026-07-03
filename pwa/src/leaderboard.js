@@ -16,9 +16,10 @@ import RANK_MAP from '../tsumegos/rank_map.json';
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 // Rank is emitted only once the buffer holds this many usable novel attempts (the
-// first 100 are INCLUDED in the fit; the gate only delays emitting a rank). A user
-// with pred_egf_rank NULL is absent from the board.
-export const RANK_START_MIN = 100;
+// first 60 are INCLUDED in the fit; the gate only delays emitting a rank). A user
+// with pred_egf_rank NULL is still LISTED on the board — the page shows their
+// attempts/RANK_START_MIN progress instead of a rank (see readLeaderboardRows).
+export const RANK_START_MIN = 60;
 const TIME_MIN_TIMED = 20;              // >= this many valid solve times for a time dock
 export const BUFFER_CAP = WIN_CAP;      // 500 — the buffer + the rank window share it
 
@@ -339,20 +340,40 @@ export async function reconcileBuffers(env) {
     }
 }
 
-// --- compute-on-read: ranked rows for the /leaderboard page ---------------------
-// Applies the week rollover read-only (so an idle-this-week user displays correctly)
-// and derives absolute + relative for current / this-week / last-week. Relative =
-// rank − gor_rank; current + this-week use the live gor_rank, previous-week uses its
-// frozen prev_week_gor_rank.
+// --- compute-on-read: all bound-PIN rows for the /leaderboard page ---------------
+// EVERY registered player (bound PIN = has a row) is listed. A ranked player
+// (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries the
+// week rollover (applied read-only so an idle-this-week user displays correctly) and
+// derived absolute + relative for current / this-week / last-week (relative =
+// rank − gor_rank; current + this-week use the live gor_rank, previous-week its
+// frozen prev_week_gor_rank). A not-yet-ranked player carries `ranked: false` +
+// `novelCount` (buffered novel attempts, < RANK_START_MIN) so the page shows their
+// attempts/RANK_START_MIN progress in place of a rank.
 export async function readLeaderboardRows(env) {
     if (!env.DB) return [];
     const res = await env.DB.prepare(
-        `SELECT user_id, egd_name, country_code, gor, gor_rank, prev_week_gor_rank,
-                pred_egf_rank, week_id, this_week_max, prev_week_max
-           FROM leaderboard WHERE pred_egf_rank IS NOT NULL`
+        // buffer is only needed to count an UNRANKED row's attempts; the CASE returns
+        // NULL for ranked rows so their (up to 500-entry) blob isn't shipped to the Worker.
+        `SELECT egd_name, country_code, gor, gor_rank, prev_week_gor_rank,
+                pred_egf_rank, week_id, this_week_max, prev_week_max,
+                CASE WHEN pred_egf_rank IS NULL THEN buffer ELSE NULL END AS buffer
+           FROM leaderboard`
     ).all();
     const nowWeek = weekIdAt(Date.now());
     return ((res && res.results) || []).map((r) => {
+        // Not yet ranked: show progress toward the rank-start threshold instead of a
+        // rank. novelCount is the buffered novel-attempt count — exact here because an
+        // unranked user has < RANK_START_MIN (< BUFFER_CAP) attempts, so nothing is
+        // dropped by the cap. (Only the tiny corpus-drop case could make it lag the
+        // usable count by a couple; harmless for a progress readout.)
+        if (!Number.isFinite(r.pred_egf_rank)) {
+            return {
+                name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: r.gor_rank,
+                prevWeekGor: null, ranked: false, novelCount: parseBuffer(r.buffer).length,
+                currentAbs: null, thisWeekAbs: null, prevWeekAbs: null,
+                currentRel: null, thisWeekRel: null, prevWeekRel: null,
+            };
+        }
         let thisMax = r.this_week_max, prevMax = r.prev_week_max, prevGor = r.prev_week_gor_rank;
         if (r.week_id === nowWeek - 1) {
             prevMax = r.this_week_max; prevGor = r.gor_rank; thisMax = r.pred_egf_rank;
@@ -366,6 +387,7 @@ export async function readLeaderboardRows(env) {
         const prevWeekGor = Number.isFinite(prevGor) ? Math.round(2000 + 100 * prevGor) : null;
         return {
             name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: gr, prevWeekGor,
+            ranked: true,
             currentAbs: r.pred_egf_rank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
             currentRel: rel(r.pred_egf_rank, gr), thisWeekRel: rel(thisMax, gr),
             prevWeekRel: rel(prevMax, prevGor),
