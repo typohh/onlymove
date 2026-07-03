@@ -30,10 +30,10 @@ function renderTournamentPage() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#16130d">
 <title>onlymove-turnaus · 13.–19. heinäkuuta 2026</title>
-<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, suomalaisille pelaajille — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.">
+<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="onlymove-turnaus · 13.–19. heinäkuuta 2026">
-<meta property="og:description" content="Viikon mittainen tsumego-turnaus. Paras arvioitu vahvuutesi ratkaisee. Ilmainen, suomalaisille pelaajille.">
+<meta property="og:description" content="Viikon mittainen tsumego-turnaus. Paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville.">
 <meta property="og:url" content="https://onlymove.net/tournament">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23CEB053'/%3E%3C/svg%3E">
 <style>
@@ -325,7 +325,7 @@ function renderTournamentPage() {
 
   <section aria-labelledby="osallistu">
     <h2 id="osallistu">Näin osallistut</h2>
-    <p class="lead">Turnaus on tarkoitettu suomalaisille pelaajille.</p>
+    <p class="lead">Turnaus on avoin suomalaisille ja Suomessa asuville.</p>
     <ol class="steps">
       <li>
         <span class="stone" aria-hidden="true"></span>
@@ -345,7 +345,7 @@ function renderTournamentPage() {
         <span class="stone" aria-hidden="true"></span>
         <div>
           <div class="s-title">Ratko viikon ajan</div>
-          <div class="s-body">Ratko tsumegoja 13.–19.7. Paras (huippu) arviosi viikon aikana lasketaan turnaustulokseksi.</div>
+          <div class="s-body">Ratko tsumegoja 13.–19.7. Paras (huippu) arviosi viikon aikana lasketaan turnaustulokseksi. Arvion saat, kun olet ratkonut vähintään 60 tehtävää — uutena pelaajana aloita siis ajoissa.</div>
         </div>
       </li>
     </ol>
@@ -378,7 +378,7 @@ function renderTournamentPage() {
       <a href="/leaderboard">Tulostaulu</a>
       <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>
     </div>
-    <p class="fine">Turnaus on tarkoitettu suomalaisille osallistujille. Osallistuminen on ilmaista.</p>
+    <p class="fine">Turnaus on avoin suomalaisille ja Suomessa asuville. Osallistuminen on ilmaista.</p>
   </footer>
 
 </div>
