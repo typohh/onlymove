@@ -284,10 +284,10 @@ function renderTournamentPage() {
         <circle cx="160" cy="200" r="18" fill="url(#black)"/>
       </g>
 
-      <!-- current move: the black stone at (120,160), marked in gold with a soft glow -->
-      <circle class="key-glow" cx="120" cy="160" r="14" fill="#CEB053" fill-opacity="0.28" filter="url(#glow)"/>
-      <circle cx="120" cy="160" r="8.5" fill="none" stroke="url(#gold)" stroke-width="3"/>
-      <circle cx="120" cy="160" r="2.6" fill="url(#gold)"/>
+      <!-- current move: the black stone at (160,120), marked in gold with a soft glow -->
+      <circle class="key-glow" cx="160" cy="120" r="14" fill="#CEB053" fill-opacity="0.28" filter="url(#glow)"/>
+      <circle cx="160" cy="120" r="8.5" fill="none" stroke="url(#gold)" stroke-width="3"/>
+      <circle cx="160" cy="120" r="2.6" fill="url(#gold)"/>
     </svg>
 
     <h1>onlymove-turnaus</h1>
