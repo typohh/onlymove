@@ -19,6 +19,7 @@ const isInstalled = () =>
 import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
+import { canCreateInvites } from './invite-access.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -326,6 +327,13 @@ const updateMenuItems = () => {
     accountItem.style.display = localStorage.getItem(HISTORY_BACKFILL_DONE_KEY) ? '' : 'none';
     accountItem.textContent = getTerm('menuAccount');
     document.getElementById('menu-leaderboard').textContent = getTerm('leaderboard');
+    // Invite appears only for accounts that may create leaderboard invitations
+    // (admins + registered members). Eligibility is a server fact probed once per
+    // session (invite-access.js); the /invite page re-verifies, so hiding here is
+    // display-only. Non-members simply never see it.
+    const inviteItem = document.getElementById('menu-invite');
+    inviteItem.style.display = canCreateInvites() ? '' : 'none';
+    inviteItem.textContent = getTerm('invite');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');

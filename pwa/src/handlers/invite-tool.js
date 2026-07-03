@@ -1,35 +1,59 @@
-// pwa/src/handlers/admin-invite.js
+// pwa/src/handlers/invite-tool.js
 //
-// Admin invite generator — the web equivalent of generate_invite.py. A standalone
-// page at GET /admin/invite lets an admin search EGD (by name or PIN) and mint an
-// invitation link (an `invitation` row + the /register?t= URL).
+// Invite generator — the web equivalent of generate_invite.py. A standalone page
+// at GET /invite lets an eligible user search EGD (by name or PIN) and mint an
+// invitation link (an `invitation` row + the /register?t= URL, plus a QR code).
 //
-//   GET  /admin/invite                 -> the admin page
-//   POST /admin/check {code}           -> is this account code an admin? (page gate)
-//   POST /admin/create-invite {code, pin, name, gor, country} -> insert invitation
+//   GET  /invite                        -> the invite page (no ?t=; ?t= is the
+//                                          preview JSON in handlers/register.js)
+//   GET  /admin/invite                  -> same page (legacy alias)
+//   POST /invite/eligible {userId}      -> may this account create invites? (page gate)
+//   POST /invite/create {userId, pin, name, gor, country} -> insert invitation + QR
 //
-// Auth is the admin's own account code (user_id), read automatically from the
-// browser's localStorage (same key the PWA uses) and verified against
-// env.ADMIN_USER_IDS (a wrangler secret, comma-separated — see wrangler.toml). It
-// FAILS CLOSED when the secret is unset. The POST endpoints are also per-IP
-// rate-limited (RL_WRITE) in the dispatcher.
+// Eligibility is NO LONGER admin-only: an account may invite if it is an admin
+// (env.ADMIN_USER_IDS) OR it is a registered leaderboard member (has a
+// `leaderboard` row — the trust boundary, since membership itself is invite-only).
+// The account code (user_id) is read automatically from the browser's localStorage
+// (same key the PWA uses) and is recorded on the invitation as created_by_user_id
+// — both the abuse-attribution key and the "who invited this person" record. The
+// POST endpoints are also per-IP rate-limited (RL_WRITE) in the dispatcher.
 //
 // EGD is fetched CLIENT-SIDE (the browser can — EGD sends CORS `*`), because the
 // deployed Worker cannot: EGD sits behind Cloudflare and a Worker→Cloudflare-zone
 // fetch is bot-blocked. So the page does the search itself and hands the chosen
-// player's fields to /admin/create-invite; the Worker only writes the row.
+// player's fields to /invite/create; the Worker only writes the row. The QR is
+// rendered server-side from the minted link and returned in the create response.
 
+import qrcode from 'qrcode-generator';
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import { baseCss, ESC_SNIPPET } from './page-shell.js';
 
-// The account code is the admin key. Compare against the configured admin id(s);
-// fail closed if the secret is unset so the page can't be an open invite faucet.
+// Admins (configured account codes) can always invite. Fails closed if the secret
+// is unset — an admin code is never accidentally granted.
 function isAdmin(code, env) {
     const cfg = (env.ADMIN_USER_IDS || '').trim();
     if (!cfg) return false;
     if (typeof code !== 'string' || !isValidUserId(code)) return false;
     return cfg.split(',').map((s) => s.trim()).filter(Boolean).includes(code);
+}
+
+// A registered leaderboard member (has a row) may invite. Membership is itself
+// invite-only, so this is the trust boundary — no need to require a computed rank
+// (pred_egf_rank), which would only delay a freshly-registered player.
+async function isLeaderboardMember(code, env) {
+    if (!env.DB || typeof code !== 'string' || !isValidUserId(code)) return false;
+    const row = await env.DB.prepare(
+        `SELECT 1 AS ok FROM leaderboard WHERE user_id = ?1`
+    ).bind(code).first();
+    return !!row;
+}
+
+// Combined gate used by both the page reveal and the create endpoint.
+async function inviteEligibility(code, env) {
+    const admin = isAdmin(code, env);
+    const member = admin ? false : await isLeaderboardMember(code, env);
+    return { eligible: admin || member, admin, member };
 }
 
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -40,9 +64,23 @@ function generateToken() {
     return s;
 }
 
+// Render the invitation link as a scannable QR (SVG string). The lib draws a white
+// background rect + black modules, so it scans on either light or dark chrome.
+function makeQrSvg(link) {
+    try {
+        const qr = qrcode(0, 'M'); // typeNumber 0 = auto-size, EC level M
+        qr.addData(link);
+        qr.make();
+        return qr.createSvgTag({ cellSize: 8, margin: 32, scalable: true });
+    } catch (e) {
+        console.error('qr generation failed:', e);
+        return null; // page falls back to the copyable link alone
+    }
+}
+
 // Insert an invitation with a fresh token; retry on the (astronomically unlikely)
-// primary-key collision. Mirrors generate_invite.py's row shape.
-async function insertInvitation(env, player) {
+// primary-key collision. Mirrors generate_invite.py's row shape, plus createdBy.
+async function insertInvitation(env, player, createdBy) {
     const nowIso = new Date().toISOString();
     for (let attempt = 0; ; attempt++) {
         const token = generateToken();
@@ -50,9 +88,9 @@ async function insertInvitation(env, player) {
             await env.DB.prepare(
                 `INSERT INTO invitation
                     (invite_token, egd_pin, egd_name, country_code, gor, created_at,
-                     claimed_by_user_id, claimed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)`
-            ).bind(token, player.pin, player.name, player.country, player.gor, nowIso).run();
+                     created_by_user_id, claimed_by_user_id, claimed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL)`
+            ).bind(token, player.pin, player.name, player.country, player.gor, nowIso, createdBy).run();
             return token;
         } catch (e) {
             if (attempt >= 4) throw e;
@@ -60,31 +98,32 @@ async function insertInvitation(env, player) {
     }
 }
 
-export async function handleAdminPage(env) {
-    return new Response(renderAdminPage(), {
+export async function handleInvitePage(env) {
+    return new Response(renderInvitePage(), {
         status: 200,
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
 }
 
-// Page gate: does this browser's account code have admin rights?
-export async function handleAdminCheck(request, env) {
+// Page gate: may this browser's account code create invites?
+export async function handleInviteEligible(request, env) {
     try {
-        const { code } = await request.json();
-        if (!isAdmin(code, env)) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
-        return jsonResponse({ ok: true });
+        const { userId } = await request.json();
+        const elig = await inviteEligibility(userId, env);
+        return jsonResponse({ ok: true, ...elig });
     } catch (e) {
         return jsonResponse({ ok: false, error: 'server' }, 500);
     }
 }
 
-export async function handleAdminCreate(request, env) {
+export async function handleInviteCreate(request, env) {
     try {
-        const { code, pin, name, gor, country } = await request.json();
-        if (!isAdmin(code, env)) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
+        const { userId, pin, name, gor, country } = await request.json();
+        const elig = await inviteEligibility(userId, env);
+        if (!elig.eligible) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
         if (!env.DB) return jsonResponse({ ok: false, error: 'server' }, 500);
 
-        // The player fields come from the admin-authed client's own EGD fetch (the
+        // The player fields come from the eligible client's own EGD fetch (the
         // Worker can't reach EGD). Validate shape; trust the values.
         const pinStr = String(pin || '');
         if (!/^\d+$/.test(pinStr)) return jsonResponse({ ok: false, error: 'bad_pin' }, 400);
@@ -104,6 +143,8 @@ export async function handleAdminCreate(request, env) {
         // Idempotent: if this PIN already has an UNCLAIMED invitation, reuse it (refresh
         // its stored EGD fields to the current values) instead of piling up duplicate
         // links for one person. A claimed invitation would have been caught above.
+        // created_by is backfilled only if it was empty (e.g. an admin-CLI invite),
+        // so the first real inviter's attribution is never overwritten.
         const openInvite = await env.DB.prepare(
             `SELECT invite_token FROM invitation
               WHERE egd_pin = ?1 AND claimed_by_user_id IS NULL
@@ -111,37 +152,38 @@ export async function handleAdminCreate(request, env) {
         ).bind(pinStr).first();
         if (openInvite) {
             await env.DB.prepare(
-                `UPDATE invitation SET egd_name = ?2, country_code = ?3, gor = ?4 WHERE invite_token = ?1`
-            ).bind(openInvite.invite_token, egdName, cc, gorInt).run();
+                `UPDATE invitation
+                    SET egd_name = ?2, country_code = ?3, gor = ?4,
+                        created_by_user_id = COALESCE(created_by_user_id, ?5)
+                  WHERE invite_token = ?1`
+            ).bind(openInvite.invite_token, egdName, cc, gorInt, userId).run();
+            const link = `https://onlymove.net/register?t=${openInvite.invite_token}`;
             return jsonResponse({
-                ok: true,
-                inviteToken: openInvite.invite_token,
-                link: `https://onlymove.net/register?t=${openInvite.invite_token}`,
+                ok: true, inviteToken: openInvite.invite_token, link, qrSvg: makeQrSvg(link),
                 egdName, gor: gorInt, country: cc, reused: true,
             });
         }
 
-        const token = await insertInvitation(env, { pin: pinStr, name: egdName, country: cc, gor: gorInt });
+        const token = await insertInvitation(env, { pin: pinStr, name: egdName, country: cc, gor: gorInt }, userId);
+        const link = `https://onlymove.net/register?t=${token}`;
         return jsonResponse({
-            ok: true,
-            inviteToken: token,
-            link: `https://onlymove.net/register?t=${token}`,
+            ok: true, inviteToken: token, link, qrSvg: makeQrSvg(link),
             egdName, gor: gorInt, country: cc,
         });
     } catch (e) {
-        console.error('admin create failed:', e);
+        console.error('invite create failed:', e);
         return jsonResponse({ ok: false, error: 'server' }, 500);
     }
 }
 
-function renderAdminPage() {
+function renderInvitePage() {
     return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>onlymove — admin tools</title>
+<title>onlymove — invite a player</title>
 <style>
   ${baseCss(720)}
   #gate { margin: 2rem 0; font-size: .95rem; }
@@ -161,14 +203,16 @@ function renderAdminPage() {
   td button { padding: .3rem .7rem; font-size: .85rem; }
   #out { display: none; margin-top: 1.5rem; padding: 1rem; border: 1px solid;
          border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); }
+  #out .qr { margin: .75rem 0; text-align: center; }
+  #out .qr svg { width: 200px; height: 200px; max-width: 100%; background: #fff; border-radius: 8px; }
   #out .linkrow { display: flex; gap: .5rem; margin-top: .5rem; }
   #out input { flex: 1; font: inherit; padding: .45rem .6rem; border: 1px solid; border-radius: 8px;
                background: transparent; color: inherit; }
 </style>
 </head>
 <body>
-<h1>Generate invitation</h1>
-<p class="sub">Admin tools — the web equivalent of generate_invite.py. Search EGD by name or PIN and mint an invite link.</p>
+<h1>Invite a player</h1>
+<p class="sub">Anyone already on the onlymove leaderboard can invite others — not just admins. Search the European Go Database by name or PIN, pick the player, and share the link or QR code below. When they open it in their onlymove app it binds their account to that EGD identity and adds them to the leaderboard.</p>
 <div id="gate">Checking access…</div>
 <div id="tools">
   <div class="searchrow">
@@ -187,13 +231,14 @@ function renderAdminPage() {
   var qEl, msg, results, out;
   var currentPlayers = [];
 
-  // The admin key is THIS browser's account code (the PWA's user_id) — read it
-  // automatically, no prompt. Same origin => same localStorage as the app.
-  var code = '';
-  try { code = localStorage.getItem('userId') || ''; } catch (e) {}
+  // The invite key is THIS browser's account code (the PWA's user_id) — read it
+  // automatically, no prompt. Same origin => same localStorage as the app. It is
+  // also stored on the invitation as who invited the recipient.
+  var userId = '';
+  try { userId = localStorage.getItem('userId') || ''; } catch (e) {}
 
   var errMap = {
-    unauthorized: 'This account is not authorized for admin tools.',
+    unauthorized: 'This account cannot create invitations.',
     already_registered: 'That EGD player is already registered.',
     bad_pin: 'Invalid PIN.', bad_name: 'Missing name.', bad_gor: 'Missing GoR.'
   };
@@ -275,8 +320,8 @@ function renderAdminPage() {
   async function generate(p, btn) {
     if (!p) return;
     btn.disabled = true; btn.textContent = '…';
-    var r = await post('/admin/create-invite',
-      { code: code, pin: p.pin, name: p.name, gor: p.gor, country: p.country });
+    var r = await post('/invite/create',
+      { userId: userId, pin: p.pin, name: p.name, gor: p.gor, country: p.country });
     if (!r.data || !r.data.ok) {
       var err = (r.data && r.data.error) || 'error';
       setMsg(errMap[err] || ('Could not create invitation (' + err + ').'), true);
@@ -290,7 +335,9 @@ function renderAdminPage() {
     setMsg('');
     out.style.display = 'block';
     var reused = d.reused ? ' <em>(existing unclaimed link — reused)</em>' : '';
+    // d.qrSvg is Worker-generated SVG built from the minted link (no user content) — safe to inline.
     out.innerHTML = '<p>Invitation for <strong>' + esc(d.egdName) + '</strong> (GoR ' + esc(String(d.gor)) + ')' + reused + ':</p>' +
+      (d.qrSvg ? '<div class="qr">' + d.qrSvg + '</div>' : '') +
       '<div class="linkrow"><input id="lnk" readonly value="' + esc(d.link) + '"><button id="copy">Copy</button></div>';
     var lnk = document.getElementById('lnk');
     document.getElementById('copy').addEventListener('click', function () {
@@ -314,12 +361,12 @@ function renderAdminPage() {
     qEl.focus();
   }
 
-  // Auto-verify admin from the stored account code, then reveal the tools.
+  // Auto-verify eligibility from the stored account code, then reveal the tools.
   (async function init() {
-    if (!code) { showGate('No onlymove account found in this browser. Open this page where you use the app.'); return; }
-    var r = await post('/admin/check', { code: code });
-    if (r.status === 403) { showGate(errMap.unauthorized); return; }
-    if (!r.data || !r.data.ok) { showGate('Could not verify admin access — reload to retry.'); return; }
+    if (!userId) { showGate('No onlymove account found in this browser. Open this page where you use the app.'); return; }
+    var r = await post('/invite/eligible', { userId: userId });
+    if (!r.data || !r.data.ok) { showGate('Could not verify access — reload to retry.'); return; }
+    if (!r.data.eligible) { showGate('Only registered leaderboard players can create invitations. Once you are on the leaderboard, this page unlocks.'); return; }
     wireTools();
   })();
 })();

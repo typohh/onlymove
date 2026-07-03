@@ -211,12 +211,16 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 -- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_egd_pin ON leaderboard(egd_pin);
 
--- Admin-issued registration invitations. A random 8-char opaque token recorded
--- alongside the target EGD PIN (no crypto). The recipient opens /register?t=<token>
--- in their PWA; the Worker looks the token up, binds their user_id to the PIN, and
--- marks it claimed (one-time use). egd_name/country_code/gor are fetched from EGD at
--- creation so the confirmation preview + claim need no live EGD call. Never expires;
--- deleted/revoked manually. See docs/leaderboard_plan.md.
+-- Registration invitations, issued by an admin (generate_invite.py / the /invite
+-- tool page) OR by any registered leaderboard member (the in-app Invite menu). A
+-- random 8-char opaque token recorded alongside the target EGD PIN (no crypto). The
+-- recipient opens /register?t=<token> in their PWA; the Worker looks the token up,
+-- binds their user_id to the PIN, and marks it claimed (one-time use).
+-- egd_name/country_code/gor are fetched from EGD at creation so the confirmation
+-- preview + claim need no live EGD call. Never expires; deleted/revoked manually.
+-- created_by_user_id is the account that minted the link — both the abuse-attribution
+-- key and the "who invited this person" record (NULL for an admin CLI invite, which
+-- has no user context). See docs/leaderboard_plan.md.
 CREATE TABLE IF NOT EXISTS invitation (
     invite_token       TEXT PRIMARY KEY,
     egd_pin            TEXT NOT NULL,
@@ -224,6 +228,10 @@ CREATE TABLE IF NOT EXISTS invitation (
     country_code       TEXT,
     gor                INTEGER,
     created_at         TEXT,
+    created_by_user_id TEXT,
     claimed_by_user_id TEXT,
     claimed_at         TEXT
 );
+-- MIGRATION for an existing deployment (run once against the live D1; the CREATE
+-- above already carries the column for a fresh DB):
+--   ALTER TABLE invitation ADD COLUMN created_by_user_id TEXT;

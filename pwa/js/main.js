@@ -83,6 +83,7 @@ import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButt
 import { hasPendingAccountSwitch, maybeFinishAccountSwitch, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { maybeHandleRegistration } from './registration.js';
+import { refreshInviteAccess } from './invite-access.js';
 import { performShare } from './share.js';
 import { APP_MODES } from './constants.js';
 
@@ -190,6 +191,9 @@ function wireMenu() {
         // pause label flip when the recall pause expires).
         updateAllUI();
         menuOverlay.classList.remove('menu-overlay-hidden');
+        // Catch the online-after-boot case: probe invite eligibility (no-op once
+        // confirmed) and re-paint to reveal the Invite item if it lands positive.
+        refreshInviteAccess(updateAllUI);
     };
     const closeMenu = () => menuOverlay.classList.add('menu-overlay-hidden');
     document.getElementById('menu-toggle').addEventListener('click', openMenu);
@@ -226,6 +230,11 @@ function wireMenu() {
     // menu-leaderboard is a real anchor to the standalone /leaderboard page
     // (target=_blank); let the browser navigate.
     document.getElementById('menu-leaderboard').addEventListener('click', () => {
+        closeMenu();
+    });
+    // menu-invite is a real anchor to the standalone /invite page (target=_blank),
+    // shown only for eligible accounts; let the browser navigate.
+    document.getElementById('menu-invite').addEventListener('click', () => {
         closeMenu();
     });
     // menu-about is a real anchor (target=_blank); let the browser navigate.
@@ -622,6 +631,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Static UI wiring (persistent elements, registered once).
     wireMenu();
+    // Probe once at boot whether this account may create leaderboard invitations,
+    // so eligible members find the Invite menu item already present (menu-open
+    // re-probes to cover an offline boot). One cheap point-read; hidden otherwise.
+    refreshInviteAccess(updateAllUI);
     initMotifBubble();
     wireRankDisplayTap();
     wireActionButtons();

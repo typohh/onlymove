@@ -1,8 +1,8 @@
 // pwa/src/handlers/page-shell.js
 //
 // Shared chrome for the Worker's server-rendered pages (/leaderboard,
-// /admin/invite): the base typography/layout CSS and the esc() helper each
-// page embeds in its inline <script>. Page-specific styling stays in the
+// /invite): the base typography/layout CSS and the esc() helper each page
+// embeds in its inline <script>. Page-specific styling stays in the
 // handlers; this owns only the pieces that shouldn't drift apart.
 
 export function baseCss(maxWidthPx) {

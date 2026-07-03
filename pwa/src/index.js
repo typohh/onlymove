@@ -11,7 +11,7 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
-import { handleAdminPage, handleAdminCheck, handleAdminCreate } from './handlers/admin-invite.js';
+import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
 import { reconcileBuffers } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -30,10 +30,11 @@ const WRITE_ROUTES = [
   { path: '/rank-survey', method: 'POST', limiter: 'RL_WRITE', handler: handleRankSurvey },
   { path: '/share-event', method: 'POST', limiter: 'RL_WRITE', handler: handleShareEvent },
   { path: '/register', method: 'POST', limiter: 'RL_WRITE', handler: handleRegister },
-  // Admin invite tool (account-code gated in the handler; EGD search is client-side).
-  // Rate-limited too, which bounds any code-guessing on top of the account-code check.
-  { path: '/admin/check', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCheck },
-  { path: '/admin/create-invite', method: 'POST', limiter: 'RL_WRITE', handler: handleAdminCreate },
+  // Invite tool (account-code gated in the handler — admins + registered leaderboard
+  // members; EGD search is client-side). Rate-limited too, which bounds any
+  // code-guessing on top of the account-code check.
+  { path: '/invite/eligible', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteEligible },
+  { path: '/invite/create', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteCreate },
 ];
 
 // GET routes, dispatched like WRITE_ROUTES (reads, so no limiter). Every entry
@@ -46,12 +47,17 @@ const GET_ROUTES = [
   { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
-  // Invitation preview (JSON) for the /register confirmation dialog. (GET /register
-  // itself is a navigation and falls through to the SPA, which reads ?t= and POSTs.)
-  { path: '/invite', handler: (request, env) => handleInvitePreview(request, env) },
-  // Admin invite generator page (HTML). Inert without a valid account code,
-  // which the POST endpoints verify.
-  { path: '/admin/invite', handler: (request, env) => handleAdminPage(env) },
+  // /invite is dual-purpose on the same path: with ?t=<token> it's the invitation
+  // preview (JSON) for the /register confirmation dialog; without a token it's the
+  // invite generator page (HTML). (GET /register itself is a navigation and falls
+  // through to the SPA, which reads ?t= and POSTs.)
+  { path: '/invite', handler: (request, env) =>
+      new URL(request.url).searchParams.has('t')
+        ? handleInvitePreview(request, env)
+        : handleInvitePage(env) },
+  // Legacy alias for the invite generator page. Inert without an eligible account
+  // code, which the POST endpoints verify.
+  { path: '/admin/invite', handler: (request, env) => handleInvitePage(env) },
 ];
 
 // Last-resort error boundary so a handler that throws (malformed JSON body, a
