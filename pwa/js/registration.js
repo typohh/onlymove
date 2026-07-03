@@ -28,10 +28,11 @@ const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
 // the generic retry message.
 function mapErrorMessage(error) {
     switch (error) {
-        case 'pin_taken': return 'This EGD id is already registered to another account';
-        case 'claimed':   return 'This invite link was already used';
-        case 'invalid':   return 'Invalid invite link';
-        default:          return 'Registration failed, please try again';
+        case 'pin_taken':     return 'This EGD id is already registered to another account';
+        case 'account_bound': return 'This account is already registered to a different EGD id';
+        case 'claimed':       return 'This invite link was already used';
+        case 'invalid':       return 'Invalid invite link';
+        default:              return 'Registration failed, please try again';
     }
 }
 

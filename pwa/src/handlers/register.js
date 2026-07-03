@@ -42,13 +42,24 @@ export async function handleRegister(request, env) {
         if (!inv) return jsonResponse({ ok: false, error: 'invalid' }, 404);
         if (inv.claimed_by_user_id) return jsonResponse({ ok: false, error: 'claimed' }, 409);
 
-        // 1:1 binding: reject if the PIN is already registered to a DIFFERENT account
-        // (UNIQUE(egd_pin) is the hard backstop; this gives a clean error message).
+        // 1:1 binding, enforced both directions:
+        //  - PIN side: reject if this invite's PIN is already registered to a DIFFERENT
+        //    account (UNIQUE(egd_pin) is the hard backstop; this gives a clean message).
         const existing = await env.DB.prepare(
             `SELECT user_id FROM leaderboard WHERE egd_pin = ?1`
         ).bind(inv.egd_pin).first();
         if (existing && existing.user_id !== userId) {
             return jsonResponse({ ok: false, error: 'pin_taken' }, 409);
+        }
+        //  - Account side: an account binds to exactly ONE EGD id, for life. If it
+        //    already has a row under a DIFFERENT pin, reject — rebinding would orphan
+        //    the old pin and let one account hop EGD identities. Re-claiming its OWN
+        //    pin is a harmless refresh (falls through to the idempotent upsert).
+        const selfRow = await env.DB.prepare(
+            `SELECT egd_pin FROM leaderboard WHERE user_id = ?1`
+        ).bind(userId).first();
+        if (selfRow && selfRow.egd_pin !== inv.egd_pin) {
+            return jsonResponse({ ok: false, error: 'account_bound' }, 409);
         }
 
         // Seed buffer + rank from the user's existing tsumego_reports so an
@@ -69,7 +80,10 @@ export async function handleRegister(request, env) {
                      this_week_max, prev_week_max, last_active)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,?11,?12,NULL,?6)
                  ON CONFLICT(user_id) DO UPDATE SET
-                    egd_pin=excluded.egd_pin, egd_name=excluded.egd_name,
+                    -- egd_pin is deliberately NOT updated: an account's EGD binding is
+                    -- immutable (the account_bound guard above already rejects a
+                    -- different pin, so any conflict here is the same pin anyway).
+                    egd_name=excluded.egd_name,
                     country_code=excluded.country_code, gor=excluded.gor,
                     gor_updated_at=excluded.gor_updated_at, buffer=excluded.buffer,
                     pred_egf_rank=excluded.pred_egf_rank, pred_egf_se=excluded.pred_egf_se,
