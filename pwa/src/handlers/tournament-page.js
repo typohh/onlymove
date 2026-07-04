@@ -345,7 +345,7 @@ function renderTournamentPage() {
         <span class="stone" aria-hidden="true"></span>
         <div>
           <div class="s-title">Ratko viikon ajan</div>
-          <div class="s-body">Ratko tsumegoja 13.–19.7. Paras (huippu) arviosi viikon aikana lasketaan turnaustulokseksi. Arvion saat, kun olet ratkonut vähintään 60 tehtävää — uutena pelaajana aloita siis ajoissa.</div>
+          <div class="s-body">Ratko tsumegoja 13.–19.7. Paras (huippu) arviosi viikon aikana lasketaan turnaustulokseksi. Arvio edellyttää yhteensä vähintään 60 ratkaistua tehtävää, jotka voit kerätä jo ennen turnausta — uutena pelaajana aloita siis ajoissa.</div>
         </div>
       </li>
     </ol>
