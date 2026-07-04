@@ -846,21 +846,28 @@ def main():
 
     all_ids = []
     all_sizes = []
-    Xs = []
     rs = []
-    for size, ids, X, ratings in parts:
+    # Preallocate the single float32 destination and copy each per-size chunk
+    # into its row block, releasing the chunk (both the loop var and the ref
+    # held in `parts`) the moment it lands. np.vstack instead keeps every
+    # per-size chunk live alongside the full result — ~2× the ~4.5GB matrix at
+    # peak; filling slices caps peak at the result plus one chunk. Staying in
+    # float32 halves the footprint vs float64 — randomized SVD does not need
+    # float64 and OLS on (rating, size_is_13, intercept) is well-conditioned at
+    # this N.
+    n_total = sum(len(ids) for _, ids, _, _ in parts)
+    d = parts[0][2].shape[1]
+    X = np.empty((n_total, d), dtype=np.float32)
+    row = 0
+    for i, (size, ids, Xi, ratings) in enumerate(parts):
+        n = len(ids)
+        X[row:row + n] = Xi
+        row += n
         all_ids.extend(ids)
-        all_sizes.append(np.full(len(ids), size, dtype=np.int32))
-        Xs.append(X)
+        all_sizes.append(np.full(n, size, dtype=np.int32))
         rs.append(ratings)
-    # Stack into a single float32 matrix and immediately release the per-size
-    # chunks (both Xs and the X refs held in `parts`). Staying in float32 here
-    # halves the data-matrix footprint vs float64 — randomized SVD does not
-    # need float64 and OLS on (rating, size_is_13, intercept) is well-conditioned
-    # at this N.
-    X = np.vstack(Xs)
-    del Xs
-    parts = [(size, ids, None, r) for size, ids, _, r in parts]
+        parts[i] = (size, ids, None, ratings)  # drop the chunk ref so it frees now
+    del Xi
     sizes_col = np.concatenate(all_sizes)
     ratings = np.concatenate(rs)
     print(f"\n  joint matrix: {X.shape[0]} problems × {X.shape[1]} features")
