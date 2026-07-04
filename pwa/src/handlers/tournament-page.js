@@ -356,7 +356,7 @@ function renderTournamentPage() {
 
   <section aria-labelledby="arvio">
     <h2 id="arvio">Miten arvio lasketaan</h2>
-    <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: arvio käyttää mediaaniaikaa, joka sietää yksittäiset poikkeamat.</p>
+    <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: yksittäiset erittäin pitkät tauot eivät heikennä arviotasi.</p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
