@@ -212,7 +212,7 @@ function renderInvitePage() {
 </head>
 <body>
 <h1>Invite a player</h1>
-<p class="sub">Anyone already on the onlymove leaderboard can invite others — not just admins. Search the European Go Database by name or PIN, pick the player, and share the link or QR code below. When they open it in their onlymove app it binds their account to that EGD identity and adds them to the leaderboard.</p>
+<p class="sub">As you are already on the leaderboard, you can invite others to it. Search the European Go Database by name or PIN, pick the player, and share the link or QR code below. When they open it in their onlymove app it binds their account to that EGD identity and adds them to the leaderboard.</p>
 <div id="gate">Checking access…</div>
 <div id="tools">
   <div class="searchrow">
