@@ -15,7 +15,8 @@ from utils.add_variations import (
 from utils.configurations import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
 from utils.helper import construct_initial_sgf
 from utils.katago_controller import KatagoController
-from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
+from utils.katago_queries import KatagoQueries
+from utils.coords import gtp_to_sgfmill_point
 from utils.models import get_model
 from utils.problem_finder import ProblemFinder
 from sgfmill import boards
@@ -201,7 +202,7 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     player = 'b'
                     for move in moves:
                         if move != "pass":
-                            row, col = katago_to_sgf_coords(move, queries.board_size)
+                            row, col = gtp_to_sgfmill_point(move, queries.board_size)
                             board.play(row, col, player)
                         player = 'w' if player == 'b' else 'b'
                     # Identity check BEFORE the expensive variation queries: a

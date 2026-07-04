@@ -50,9 +50,9 @@ from katago.game.gamestate import GameState
 from katago.train.load_model import load_model
 from katago.train.model_pytorch import ExtraOutputs
 
-from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
+from pipeline.benchmark_bots import parse_tsumego_sgf
 from utils.configurations import ALL_BOARD_SIZES
-from utils.katago_queries import gtp_to_xy
+from utils.coords import gtp_to_xy, sgf_to_gtp
 
 DEFAULT_CKPT = os.path.join(
     PROJECT_ROOT, "models",

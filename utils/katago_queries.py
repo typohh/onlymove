@@ -1,4 +1,7 @@
 from utils.configurations import RULES, KOMI
+# GTP_COLS re-exported here for back-compat (utils.problem_finder and others
+# import it from this module); the coordinate primitives live in utils.coords.
+from utils.coords import GTP_COLS, col_index_to_gtp_letter, gtp_letter_to_col_index
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",
@@ -136,9 +139,7 @@ class KatagoQueries:
         # Column: A=0, B=1, ..., I=8
         # Row: 1=8, 2=7, ..., 9=0
 
-        col_char = chr(ord('A') + col)
-        if col >= 8:  # Skip 'I'
-            col_char = chr(ord('A') + col + 1)
+        col_char = col_index_to_gtp_letter(col)
         row_char = str(self.board_size - row)
 
         return f"{col_char}{row_char}"
@@ -155,10 +156,8 @@ class KatagoQueries:
         col_char = move[0].upper()
         row_str = move[1:]
 
-        # Convert column character to index
-        col = ord(col_char) - ord('A')
-        if col_char > 'H':  # Skip 'I'
-            col -= 1
+        # Convert column character to index (I-skipped)
+        col = gtp_letter_to_col_index(col_char)
 
         # Convert row string to index
         row_num = int(row_str)
@@ -215,56 +214,6 @@ def _get_player_to_move_next(moves):
         return "B"
     else:
         return "W"
-
-
-def katago_to_sgf_coords(katago_move, board_size):
-    """
-    Converts a KataGo/GTP coordinate to an sgfmill (row, col) point.
-
-    sgfmill points count rows from the BOTTOM ((0,0) = lower-left), the same
-    origin as GTP rows (row 1 = bottom), so the row index is simply
-    `int(row_str) - 1`. This is the exact inverse of sgf_to_gtp: a stone written
-    with this function and read back with sgf_to_gtp (via sgfmill's point↔letter
-    serialisation) round-trips to the same GTP coordinate. (It previously used
-    `board_size - int(row_str)`, which stored every board vertically mirrored vs
-    KataGo's frame — harmless because Go is reflection-symmetric and every
-    consumer read the stored SGF consistently, but it made the writer and reader
-    non-inverse. Only affects newly generated SGFs; the existing corpus is
-    untouched and read the same way as before.)
-
-    Args:
-        katago_move (str): The move in KataGo's coordinate format (e.g., 'A1', 'B2').
-        board_size (int): The size of the board.
-
-    Returns:
-        tuple: The sgfmill (row, col) point, or None for a pass.
-    """
-    if katago_move == "pass":
-        return None
-
-    col_str = katago_move[0]
-    row_str = katago_move[1:]
-
-    col = ord(col_str.upper()) - ord('A')
-    if col_str.upper() >= 'I':
-        col -= 1
-    row = int(row_str) - 1
-
-    return row, col
-
-
-GTP_COLS = "ABCDEFGHJKLMNOPQRST"  # I-skipped, matching KataGo / GTP convention
-
-
-def gtp_to_xy(gtp_coord):
-    """Convert a GTP/KataGo coordinate (e.g. 'D4') to (x, y) with the GTP row 1
-    at the bottom (y=0). Returns None for a pass."""
-    if gtp_coord.lower() == "pass":
-        return None
-    col_letter = gtp_coord[0].upper()
-    x = GTP_COLS.index(col_letter)
-    y = int(gtp_coord[1:]) - 1  # GTP row 1 -> y=0 (bottom)
-    return x, y
 
 
 def _get_rank_str(rank):

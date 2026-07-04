@@ -1,7 +1,7 @@
 from sgfmill import sgf
 
 from utils.configurations import KOMI, RULES
-from utils.katago_queries import katago_to_sgf_coords
+from utils.coords import gtp_to_sgfmill_point
 
 
 def construct_initial_sgf(moves, solution, board_size):
@@ -12,11 +12,11 @@ def construct_initial_sgf(moves, solution, board_size):
     node = None
     for move in moves:
         node = game.extend_main_sequence()
-        node.set_move(player, katago_to_sgf_coords(move, board_size))
+        node.set_move(player, gtp_to_sgfmill_point(move, board_size))
         player = "w" if player == "b" else "b"
     if solution:
         answer = game.extend_main_sequence()
-        answer.set_move(player, katago_to_sgf_coords(solution, board_size))
+        answer.set_move(player, gtp_to_sgfmill_point(solution, board_size))
     else:
         answer = None
     return game, node, answer

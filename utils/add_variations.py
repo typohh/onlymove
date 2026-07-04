@@ -1,4 +1,5 @@
-from utils.katago_queries import KatagoQueries, katago_to_sgf_coords
+from utils.katago_queries import KatagoQueries
+from utils.coords import gtp_to_sgfmill_point
 from sgfmill import sgf
 
 PLAYOUTS_SHALLOW = 30
@@ -35,7 +36,7 @@ def get_child_move(node: sgf.Tree_node, color, move: str, board_size, has_to_exi
     - move: The move in KataGo coordinate format (e.g., "D4", "pass").
     - board_size: Board size, for KataGo→SGF coordinate conversion.
     """
-    target_move = katago_to_sgf_coords(move, board_size)
+    target_move = gtp_to_sgfmill_point(move, board_size)
 
     # Look for an existing child node with the same move
     for child in node:

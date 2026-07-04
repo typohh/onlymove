@@ -17,6 +17,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.configurations import ALL_BOARD_SIZES
+from utils.coords import sgf_to_gtp, sgfmill_point_to_sgf
 from utils.katago_controller import KatagoController
 from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_str
 from utils.models import MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODEL_HUMAN
@@ -41,40 +42,6 @@ class PropagatingThread(threading.Thread):
             raise self.exc
 
 
-def sgf_to_gtp(sgf_coord: str, size: int) -> str:
-    if sgf_coord == "tt":
-        return "pass"
-    col = ord(sgf_coord[0]) - ord('a')
-    row = ord(sgf_coord[1]) - ord('a')
-
-    def col_to_gtp(c):
-        letter = chr(ord('A') + c)
-        if letter >= 'I':
-            letter = chr(ord(letter) + 1)
-        return letter
-
-    gtp_col = col_to_gtp(col)
-    gtp_row = size - row
-    gtp_coord = f"{gtp_col}{gtp_row}"
-    if gtp_row < 0:
-        raise Exception(f"Invalid SGF coordinate: {sgf_coord}->{gtp_coord}")
-    return gtp_coord
-
-
-def point_to_sgf(point, size):
-    """Converts an sgfmill (row, col) point to an SGF coordinate string like 'pd'.
-
-    sgfmill points count rows from the BOTTOM ((0,0) = lower-left); an SGF
-    coordinate's row letter counts from the TOP. Flip the row (size-1-row) so
-    AB/AW setup stones resolve to the same square as move-node coordinates,
-    which come straight from the raw SGF (top-origin). Without the flip the
-    setup stones were vertically mirrored against the moves — latent only
-    because current tsumego SGFs place setup via move nodes and carry no
-    AB/AW."""
-    row, col = point
-    return f"{chr(ord('a') + col)}{chr(ord('a') + (size - 1 - row))}"
-
-
 def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
     """
     Correctly parses a tsumego SGF file by finding the node where the path branches.
@@ -87,7 +54,7 @@ def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
     for prop, color_char in [("AB", "B"), ("AW", "W")]:
         if root_node.has_property(prop):
             for point_tuple in root_node.get(prop):
-                sgf_string = point_to_sgf(point_tuple, size)
+                sgf_string = sgfmill_point_to_sgf(point_tuple, size)
                 setup_moves.append((color_char, sgf_to_gtp(sgf_string, size)))
 
     current_node = root_node

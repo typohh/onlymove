@@ -18,9 +18,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.configurations import ALL_BOARD_SIZES
-from utils.katago_queries import gtp_to_xy
+from utils.coords import gtp_to_xy, sgf_to_gtp
 from utils.ratings_io import FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_size_value_maps, load_value_map
-from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp
+from pipeline.benchmark_bots import parse_tsumego_sgf
 
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the
