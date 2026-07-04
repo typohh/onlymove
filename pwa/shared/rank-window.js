@@ -76,11 +76,32 @@ const X_CLAMP_LO = -15;
 const X_CLAMP_HI = 45;
 
 export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
-const WIN_ITARGET = 16;                       // design steady-state info — sets the SE floor only
+const WIN_ITARGET = 16;                       // design steady-state info — the CONSTANT SE-floor fallback
 const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
 const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
 const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
 const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
+
+// --- Rank-dependent SE floor for the UCB serve bonus ----------------------------
+// The serve bonus is k·(se − se_floor): serve above the estimate while the posterior
+// is loose, collapse to the user's OWN rank as it tightens. But "tight" is not a
+// global constant. The floor is the irreducible SE the window MLE would report with a
+// FULL window of problems AT the user's rank, each cleared at the 80% calibration
+// point — i.e. the SE at which serving MORE at-rank problems stops helping. That
+// summed Fisher information is Σw · P(1−P) · <slope²>: Σw the positional-weight mass of
+// a full window, P(1−P) the info factor at the 80% point (clean logistic — at 80% the
+// user sits on the sigmoid shoulder, off the 3PL floor/lapse), and <slope²> the mean
+// squared success-curve slope (rank space) of problems near the user's rank. Flat kyu
+// curves (small slope) genuinely can't pin a rank as tightly as sharp dan ones, so a
+// constant floor mis-scales by ~4× across the ladder and leaves flat-region users
+// perpetually served above their rank, never converging. The caller measures <slope²>
+// from the loaded corpus pool near the estimate and passes it via seFloorFn.
+export const WIN_STEADY_WEIGHT = (WIN_CAP + 1) / 2;   // Σ of the (M−age)/M ramp over a full window
+const WIN_CALIB_PQ = 0.8 * (1 - 0.8);                 // P(1−P) at the 80%-clear serve point
+export function seFloorForMeanSqSlope(meanSqSlope) {
+    const info = WIN_PRIOR_INFO + WIN_STEADY_WEIGHT * WIN_CALIB_PQ * meanSqSlope;
+    return info > 0 ? 1 / Math.sqrt(info) : Infinity;
+}
 
 // Weighted 4PL Newton for the internal rank R over the positionally-weighted window
 // (walking back from the newest: weight 1 at the newest, ~1/M at the oldest in-window,
@@ -118,7 +139,7 @@ export function windowMLE(attempts, refR) {
 // Public window rank estimate from PRE-FLATTENED attempts (oldest -> newest).
 // prevRankIndex warm-starts the fit; else the recent-mean fallback. Returns
 //   { rankIndex, se, serveRankIndex }   or null when there are no attempts.
-export function estimateWindowRankFromFlat(attempts, prevRankIndex) {
+export function estimateWindowRankFromFlat(attempts, prevRankIndex, seFloorFn = null) {
     if (!attempts.length) return null;
     let ref = prevRankIndex;
     if (!Number.isFinite(ref)) {
@@ -126,7 +147,15 @@ export function estimateWindowRankFromFlat(attempts, prevRankIndex) {
         ref = tail.reduce((s, a) => s + a.x, 0) / tail.length;
     }
     const { R, se } = windowMLE(attempts, ref);
-    const bonus = WIN_UCB_K * Math.max(0, se - WIN_SE_FLOOR);
+    // Rank-dependent floor from the caller (measured from the corpus pool near R);
+    // fall back to the constant only when it can't be measured yet (nothing loaded
+    // near the rank — e.g. the Worker, or a client before any shard has loaded).
+    let seFloor = WIN_SE_FLOOR;
+    if (seFloorFn) {
+        const f = seFloorFn(R);
+        if (Number.isFinite(f) && f > 0) seFloor = f;
+    }
+    const bonus = WIN_UCB_K * Math.max(0, se - seFloor);
     return { rankIndex: R, se, serveRankIndex: R + bonus };
 }
 

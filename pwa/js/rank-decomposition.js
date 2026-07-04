@@ -53,7 +53,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, applyM, flattenAttempt, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -430,10 +430,44 @@ function flattenAttempts(answerHistory) {
 //   se             — its posterior standard error (rank units)
 //   serveRankIndex — rankIndex + the uncertainty-scaled UCB serve bonus (large while
 //                    the posterior is loose, vanishing as it tightens); problem
-//                    SELECTION uses this, display uses rankIndex.
+//                    SELECTION uses this, display uses rankIndex. The bonus subtracts a
+//                    RANK-DEPENDENT floor (localSeFloor below): the irreducible SE a
+//                    full at-rank window would leave, set by the local corpus slope, so
+//                    serving collapses to the user's OWN rank at convergence on every
+//                    part of the ladder — not just where a constant floor happened to fit.
 // null when no usable (first-time, curve-mapped) attempt exists.
+// Rank-dependent UCB serve-bonus floor (see seFloorForMeanSqSlope in rank-window.js):
+// the irreducible SE the window MLE converges to once the user has a full window of
+// AT-their-rank problems. We estimate the local mean squared success-curve slope (rank
+// space) from the ≤50 corpus problems nearest the estimate that are ALREADY LOADED on
+// the active size — no fetch on the hot path; the selector's normal shard loading keeps
+// this pool warm and it self-refines as the user's rank drifts into new bands. slope²
+// is evaluated only on the 50 nearest (the expensive per-problem transform), not the
+// whole pool. Returns null when nothing is loaded yet (or the curve is missing), so the
+// estimator keeps the constant WIN_SE_FLOOR — a harmless fallback since se dominates the
+// bonus that early anyway.
+function localSeFloor(rankIndex) {
+    const pool = state.allProblems;
+    if (!pool || pool.length === 0) return null;
+    const curve = curveForSize(state.boardSize);
+    if (!curve) return null;
+    const target = rankIndex / TOTAL_RANKS;               // pool ranks are normalized 0..1
+    const nearest = pool
+        .slice()
+        .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target))
+        .slice(0, 50);
+    let sumSq = 0, n = 0;
+    for (const p of nearest) {
+        if (typeof p.rating !== 'number') continue;
+        const s = slopeInRankSpace(p.rating, p.slope, curve);
+        sumSq += s * s;
+        n++;
+    }
+    return n > 0 ? seFloorForMeanSqSlope(sumSq / n) : null;
+}
+
 export function estimateWindowRank(answerHistory, prevRankIndex) {
-    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex);
+    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex, localSeFloor);
 }
 
 // Coarse, regularly-spaced evaluation of the wide (skill) kernel. Used only to
