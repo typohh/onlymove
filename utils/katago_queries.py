@@ -219,14 +219,25 @@ def _get_player_to_move_next(moves):
 
 def katago_to_sgf_coords(katago_move, board_size):
     """
-    Converts KataGo coordinates to SGF coordinates.
+    Converts a KataGo/GTP coordinate to an sgfmill (row, col) point.
+
+    sgfmill points count rows from the BOTTOM ((0,0) = lower-left), the same
+    origin as GTP rows (row 1 = bottom), so the row index is simply
+    `int(row_str) - 1`. This is the exact inverse of sgf_to_gtp: a stone written
+    with this function and read back with sgf_to_gtp (via sgfmill's point↔letter
+    serialisation) round-trips to the same GTP coordinate. (It previously used
+    `board_size - int(row_str)`, which stored every board vertically mirrored vs
+    KataGo's frame — harmless because Go is reflection-symmetric and every
+    consumer read the stored SGF consistently, but it made the writer and reader
+    non-inverse. Only affects newly generated SGFs; the existing corpus is
+    untouched and read the same way as before.)
 
     Args:
         katago_move (str): The move in KataGo's coordinate format (e.g., 'A1', 'B2').
         board_size (int): The size of the board.
 
     Returns:
-        tuple: The move in SGF coordinate format (row, col).
+        tuple: The sgfmill (row, col) point, or None for a pass.
     """
     if katago_move == "pass":
         return None
@@ -237,7 +248,7 @@ def katago_to_sgf_coords(katago_move, board_size):
     col = ord(col_str.upper()) - ord('A')
     if col_str.upper() >= 'I':
         col -= 1
-    row = board_size - int(row_str)
+    row = int(row_str) - 1
 
     return row, col
 
