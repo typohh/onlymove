@@ -23,6 +23,7 @@ import pandas as pd
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
+SQLITE_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
 
 # Raw KataGo trunk activation layout (18 residual blocks × 384 channels), captured at
 # the correct move by pipeline.extract_activations. Feature index = layer*384 + channel.
@@ -55,18 +56,23 @@ def _contrastive_cache_path(size):
 
 def load_first_time_attempts():
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
-    columns [user_id, problem, success, size, created_at]."""
-    if not os.path.exists(SQL_PATH):
+    columns [user_id, problem, success, size, created_at].
+
+    Reads the canonical binary attempts/database.sqlite directly (opened
+    read-only) instead of replaying the ~290k-INSERT text dump into an in-memory
+    DB on every call: fetch_database keeps the two artifacts in sync and treats
+    the binary as the merge target, so this is the cheaper, equivalent source."""
+    if not os.path.exists(SQLITE_PATH):
         raise SystemExit(
-            f"Missing {SQL_PATH}. Run `python -m pipeline.fetch_database` first.")
-    con = sqlite3.connect(":memory:")
-    with open(SQL_PATH, "r") as f:
-        con.executescript(f.read())
-    df = pd.read_sql_query(
-        "SELECT user_id, problem, success, size, created_at "
-        "FROM tsumego_reports WHERE is_repeat = 0",
-        con)
-    con.close()
+            f"Missing {SQLITE_PATH}. Run `python -m pipeline.fetch_database` first.")
+    con = sqlite3.connect(f"file:{SQLITE_PATH}?mode=ro", uri=True)
+    try:
+        df = pd.read_sql_query(
+            "SELECT user_id, problem, success, size, created_at "
+            "FROM tsumego_reports WHERE is_repeat = 0",
+            con)
+    finally:
+        con.close()
     # Deduplicate to the earliest attempt per (user, problem).
     df = (df.sort_values("created_at")
             .drop_duplicates(["user_id", "problem"], keep="first")
