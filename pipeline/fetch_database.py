@@ -168,54 +168,56 @@ def _insert_rows(con, table, rows):
     )
 
 
+def _paged_pull(con, table, cursor_col, since, pwa_dir):
+    """Insert rows from the remote `table` in ascending `cursor_col` order,
+    paginated so no single wrangler response is unbounded. Returns the rows added.
+
+    Shared by both fetch loops, which differ only in the cursor column:
+      - whole-table refill uses `rowid` (aliased to __rid so it survives the `*`
+        expansion, then stripped before insert) starting at since=-1;
+      - the tsumego_reports incremental append uses the real AUTOINCREMENT `id`
+        column starting at the local MAX(id).
+    The generated SQL is byte-identical to the two prior hand-rolled loops."""
+    use_rowid = cursor_col == "rowid"
+    select = "rowid AS __rid, *" if use_rowid else "*"
+    cursor_key = "__rid" if use_rowid else cursor_col
+    last = since
+    total = 0
+    while True:
+        rows = _d1_query(
+            f'SELECT {select} FROM "{table}" '
+            f'WHERE {cursor_col} > {last} ORDER BY {cursor_col} LIMIT {FETCH_PAGE}',
+            pwa_dir,
+        )
+        if not rows:
+            break
+        last = rows[-1][cursor_key]
+        if use_rowid:
+            for r in rows:
+                r.pop("__rid", None)
+        _insert_rows(con, table, rows)
+        total += len(rows)
+        if len(rows) < FETCH_PAGE:
+            break
+    return total
+
+
 def _refill_whole_table(con, obj, schema, pwa_dir):
     """Drop, recreate from the remote CREATE SQL (+ its indexes), and refill a
-    small table wholesale. Recreating from the remote schema is what makes the
-    fetch tolerant of schema changes to these tables."""
+    small table wholesale (paginated by rowid). Recreating from the remote schema
+    is what makes the fetch tolerant of schema changes to these tables."""
     name = obj["name"]
     con.execute(f'DROP TABLE IF EXISTS "{name}"')
     con.execute(obj["sql"])
     for idx in schema:
         if idx["type"] == "index" and idx["tbl_name"] == name and idx["sql"]:
             con.execute(idx["sql"])
-
-    last_rowid = -1
-    total = 0
-    while True:
-        rows = _d1_query(
-            f'SELECT rowid AS __rid, * FROM "{name}" '
-            f'WHERE rowid > {last_rowid} ORDER BY rowid LIMIT {FETCH_PAGE}',
-            pwa_dir,
-        )
-        if not rows:
-            break
-        last_rowid = rows[-1]["__rid"]
-        for r in rows:
-            r.pop("__rid", None)
-        _insert_rows(con, name, rows)
-        total += len(rows)
-        if len(rows) < FETCH_PAGE:
-            break
-    return total
+    return _paged_pull(con, name, "rowid", -1, pwa_dir)
 
 
 def _fetch_incremental(con, table, since_id, pwa_dir):
     """Append rows with id > since_id, paginated by the AUTOINCREMENT id."""
-    last = since_id
-    total = 0
-    while True:
-        rows = _d1_query(
-            f'SELECT * FROM "{table}" WHERE id > {last} ORDER BY id LIMIT {FETCH_PAGE}',
-            pwa_dir,
-        )
-        if not rows:
-            break
-        last = rows[-1]["id"]
-        _insert_rows(con, table, rows)
-        total += len(rows)
-        if len(rows) < FETCH_PAGE:
-            break
-    return total
+    return _paged_pull(con, table, "id", since_id, pwa_dir)
 
 
 def _row_insert_lines(con, table, where=""):
