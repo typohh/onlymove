@@ -64,9 +64,6 @@ const PER_ATTEMPT_ERA_MS = Date.parse('2026-05-15T00:00:00Z');
 // and the timestamps agree within this window (local Date.now() at attempt vs
 // edge time at insert — normally seconds apart; the slack absorbs clock skew).
 const FUZZY_WINDOW_MS = 10 * 60 * 1000;
-// Background pulls (load / tab-visible / heartbeat) are throttled; an
-// up-to-date poll reads ~0 D1 rows but there's no reason to poll per minute.
-const MIN_PULL_INTERVAL_MS = 10 * 60 * 1000;
 // Pagination safety bound: 100 pages × 1000 rows covers any realistic history.
 const MAX_PAGES = 100;
 
@@ -240,9 +237,11 @@ function recomputeProblemChains(history, touchedProblems) {
 }
 
 let pullInFlight = false;
-let lastPullAt = 0;
 
-// Pull reports newer than the cursor and merge them. `mode` controls what the
+// Pull reports newer than the cursor and merge them. Deliberately unthrottled:
+// an up-to-date incremental poll reads ~0–1 D1 rows (idx_tsumego_reports_user_id),
+// so load / tab-visible / online can each pull freely — pullInFlight is the
+// only gate. `mode` controls what the
 // merge does to the rank estimate (see retrainAfterMerge): 'feed' (default,
 // ongoing sync), 'adopt' (account switch), 'reconcile' (one-off local-history
 // backfill — models only, never the rank; the merged rows are
@@ -251,9 +250,8 @@ let lastPullAt = 0;
 // { inserted, complete } — `complete` is true only if the pull drained the
 // server (no page failed mid-way), which the backfill requires before it may
 // upload anything.
-async function pullReports({ force = false, mode = 'feed', fromStart = false, rowSink = null } = {}) {
+async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } = {}) {
     if (pullInFlight) return { inserted: 0, complete: false };
-    if (!force && Date.now() - lastPullAt < MIN_PULL_INTERVAL_MS) return { inserted: 0, complete: false };
     pullInFlight = true;
     try {
         let sync = readSyncState();
@@ -327,8 +325,6 @@ async function pullReports({ force = false, mode = 'feed', fromStart = false, ro
             }
             if (!body.hasMore) { complete = true; break; }
         }
-
-        lastPullAt = Date.now();
 
         // Keep lastSeq (the seq-signal high-water) current from the latest
         // summary, so the next /report's userSeq is compared against the right
@@ -540,7 +536,7 @@ export async function maybeFinishAccountSwitch() {
     // returns capExceeded and no rows — the device adopts the account but stays
     // empty until incremental sync fills it (next day, when the cap resets).
     // Surface that to the caller so init can tell the user.
-    const result = await pullReports({ force: true, mode: 'adopt', fromStart: true });
+    const result = await pullReports({ mode: 'adopt', fromStart: true });
     if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
@@ -585,7 +581,7 @@ export function historyRefreshesLeftToday() {
 // models but leaves the rank loop untouched (the restored rows are ancient,
 // already reflected in the user's rank). Returns { ok, reason, restored, left }.
 export async function refreshHistoryFromServer() {
-    const result = await pullReports({ force: true, fromStart: true, mode: 'reconcile' });
+    const result = await pullReports({ fromStart: true, mode: 'reconcile' });
     if (result.capExceeded) {
         cacheRefreshesLeft(0);
         return { ok: false, reason: 'cap', left: 0 };
@@ -614,7 +610,7 @@ function maybeSignalPull() {
     const now = Date.now();
     if (now - lastSignalPullAt < SIGNAL_DEBOUNCE_MS) return;
     lastSignalPullAt = now;
-    pullReports({ force: true });
+    pullReports();
 }
 
 // Called from sendReport with the /report response's userSeq — the server's
@@ -689,7 +685,7 @@ export async function flushOutbox({ force = false } = {}) {
     try {
         // Claim everything the server already has. Uploading is only safe
         // against a COMPLETE view of the server's rows.
-        const { complete } = await pullReports({ force: true, mode: 'reconcile', fromStart: true });
+        const { complete } = await pullReports({ mode: 'reconcile', fromStart: true });
         if (!complete) return;  // incomplete view (network / daily cap) — retry later
 
         const candidates = collectUnackedEntries();
@@ -790,10 +786,13 @@ async function migrateIdCursor() {
 
 // Regular syncs: app load, tab becoming visible, and regaining connectivity.
 // No interval polling: an active session is kept in sync by the per-report seq
-// signal (checkSyncSignal). The outbox rides the load/visible/online pulls so
-// offline attempts upload as soon as connectivity returns, and a pull's own
-// digest check escalates to a reconcile if a gap is found. pullReports and the
-// outbox each throttle internally, so the three triggers can't pile up.
+// signal (checkSyncSignal). Each trigger pulls unthrottled — an up-to-date
+// incremental poll reads ~0–1 D1 rows, and pullInFlight collapses overlapping
+// triggers — so a session resume always merges (and can refresh the shown
+// problem) immediately. The outbox rides the same triggers so offline attempts
+// upload as soon as connectivity returns; it throttles internally (its flush
+// is a full fromStart pull, the expensive path), and a pull's own digest check
+// escalates to a reconcile if a gap is found.
 export function startBackgroundSync() {
     migrateIdCursor()
         .then(() => pullReports())
@@ -805,6 +804,6 @@ export function startBackgroundSync() {
         }
     });
     window.addEventListener('online', () => {
-        pullReports({ force: true }).then(() => flushOutbox({ force: true })).catch(() => {});
+        pullReports().then(() => flushOutbox({ force: true })).catch(() => {});
     });
 }
