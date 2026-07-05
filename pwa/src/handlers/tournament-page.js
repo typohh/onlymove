@@ -338,7 +338,7 @@ function renderTournamentPage() {
         <span class="stone" aria-hidden="true"></span>
         <div>
           <div class="s-title">Liitä tilisi</div>
-          <div class="s-body">Avaa linkki onlymove-sovelluksessa. Tilisi yhdistetään EGD-tunnukseesi ja pääset tulostaululle.</div>
+          <div class="s-body">Avaa saamasi kutsulinkki. Tilisi yhdistetään EGD-tunnukseesi ja pääset tulostaululle.</div>
         </div>
       </li>
       <li>
