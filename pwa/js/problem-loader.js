@@ -5,7 +5,8 @@ import * as Sentry from "@sentry/browser";
 import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
-import { displayOverlay } from './overlays.js';
+import { displayOverlay, fadeOverlay } from './overlays.js';
+import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates } from './model.js';
@@ -441,44 +442,66 @@ export async function advanceToNextProblem() {
     handleLoadFailure(lastError);
 }
 
-// After a sync merged foreign attempts (session resume on this device, or a
-// signal pull mid-session), re-run the normal "what should be on screen"
-// presentation: a due recall may have appeared from the merged history, or the
-// on-screen problem may have been solved on another device. The standing
-// challengeProblem is kept by default — a sync can never let the user dodge a
-// challenge that was selected for them; recalls merely delay it, and it stays
-// the next challenge they face. The single exception: the user completed that
-// exact problem on another client, so it now sits inside the recent-repeat
-// window (challengeAlreadyAnswered) and is no longer legal to serve as a novel
-// challenge — only then is it discarded and a fresh one selected. Only touches
-// the board when a problem is sitting idle in SOLVING mode — never mid-answer
-// sequence, in review/analysis, or over a linked (shared) problem.
+// After a session resume (tab-visible pull) or a sync that merged foreign
+// attempts, re-run the normal "what should be on screen" presentation: a due
+// recall may have appeared — from the merged history, or from time alone
+// while the tab was hidden — or the on-screen problem may have been solved on
+// another device. The standing challengeProblem is kept by default — a sync
+// can never let the user dodge a challenge that was selected for them; recalls
+// merely delay it, and it stays the next challenge they face. The single
+// exception: the user completed that exact problem on another client, so it
+// now sits inside the recent-repeat window (challengeAlreadyAnswered) and is
+// no longer legal to serve as a novel challenge — only then is it discarded
+// and a fresh one selected. Only touches the board when a problem is sitting
+// idle in SOLVING mode — never mid-answer sequence, in review/analysis, or
+// over a linked (shared) problem — and an actual swap goes through the
+// standard white fadeOverlay (with a short notice) so the board never changes
+// abruptly under the user.
+let refreshInFlight = false;
 export async function refreshShownProblemAfterSync() {
-    const shown = state.currentProblem;
-    if (!shown || shown.linked) return;
-    if (state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
+    // Overlapping triggers (a merge-driven refresh racing the tab-visible one)
+    // must not double-swap: the loser would rebuild the same recall at a fresh
+    // random orientation and visibly rotate the board.
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+        const shown = state.currentProblem;
+        if (!shown || shown.linked) return;
+        if (state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
 
-    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+        if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
 
-    const recall = await getDueRecallProblem();
-    const next = recall || state.challengeProblem;
-    if (!next) return;
+        const recall = await getDueRecallProblem();
+        const next = recall || state.challengeProblem;
+        if (!next) return;
 
-    // Re-check after the awaits: a click that landed mid-selection started the
-    // answer sequence, which owns the board now.
-    if (state.currentProblem !== shown || state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
+        // Re-check after the awaits: a click that landed mid-selection started
+        // the answer sequence, which owns the board now.
+        if (state.currentProblem !== shown || state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
 
-    // Selection landed on what's already on screen — leave it be (a repaint
-    // would reset the solve timer and re-randomize a recall's orientation).
-    if (next.filename === shown.filename) return;
+        // Selection landed on what's already on screen — leave it be (a repaint
+        // would reset the solve timer and re-randomize a recall's orientation).
+        if (next.filename === shown.filename) return;
 
-    // On a display failure fall forward like every other displayProblem
-    // caller: displayProblem mutates currentProblem before the SGF parse can
-    // throw, so bailing here would leave the board showing one problem while
-    // state points at another. advanceToNextProblem retries past the
-    // blacklisted problem and repaints something coherent.
-    try { displayProblem(next, APP_MODES.SOLVING); }
-    catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
+        // Commit: block clicks for the overlay's pre-swap window, then swap
+        // under a fade + notice (displayProblem re-enables clicks). GREY, not
+        // the answer-result colors: white = correct, red = wrong, and this is
+        // neither. On a display failure fall forward like every other
+        // displayProblem caller: displayProblem mutates currentProblem before
+        // the SGF parse can throw, so bailing would leave the board showing one
+        // problem while state points at another — advanceToNextProblem retries
+        // past the blacklisted problem and repaints something coherent.
+        setAcceptClicks(false);
+        await new Promise((resolve) => {
+            fadeOverlay(1500, async () => {
+                try { displayProblem(next, APP_MODES.SOLVING); }
+                catch (error) { reportLoadError(error, 0); await advanceToNextProblem(); }
+                finally { resolve(); }
+            }, null, getTerm('problemUpdated'), { background: 'rgb(128, 128, 128)', text: 'white' });
+        });
+    } finally {
+        refreshInFlight = false;
+    }
 }
 
 // Re-shows the current problem (it's already loaded underneath) — used when

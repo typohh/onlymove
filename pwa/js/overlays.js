@@ -159,18 +159,22 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
-export function fadeOverlay(duration, callback, stats = null) {
+// The default white fade is the established "correct answer / next problem"
+// cue (red = wrong answer) — callers signalling a NEUTRAL event (e.g. the
+// post-sync problem swap) pass their own colors so the fade isn't misread as
+// an answer result.
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'white', text: 'black' }) {
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: 'white', zIndex: '1000', opacity: '0',
+        backgroundColor: colors.background, zIndex: '1000', opacity: '0',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
     });
 
-    if (stats) {
-        const content = createOverlayContent(stats, '', 'black');
+    if (stats || message) {
+        const content = createOverlayContent(stats, message || '', colors.text);
         overlay.appendChild(content);
     }
 

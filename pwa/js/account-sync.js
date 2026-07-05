@@ -800,7 +800,16 @@ export function startBackgroundSync() {
         .catch(() => {});
     window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            pullReports().then(() => flushOutbox()).catch(() => {});
+            // Refresh the shown problem on EVERY resume, merge or not: a recall
+            // can enter its window from time alone while the tab was hidden
+            // (single-client case). Runs after the pull so a merged foreign
+            // batch is reflected too (a merge already fires the refresh itself;
+            // the second run no-ops via its in-flight/same-problem guards), and
+            // before the outbox flush, whose full-pull path is slow.
+            pullReports()
+                .then(() => refreshShownProblemAfterSync())
+                .then(() => flushOutbox())
+                .catch(() => {});
         }
     });
     window.addEventListener('online', () => {
