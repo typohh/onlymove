@@ -78,9 +78,20 @@ function showRegistrationConfirm({ token, egdName, count, dateStr }) {
                 }
                 if (pending.parentNode) pending.parentNode.removeChild(pending);
                 if (result && result.ok) {
+                    // Registered — drop the token so no later reload (SW takeover,
+                    // version reload, refresh) re-runs registration and re-prompts.
+                    stripInviteToken();
                     showToast(`Registered as ${result.egdName}`);
+                } else if (result) {
+                    // A definitive server rejection (claimed / pin_taken / account_bound /
+                    // invalid) won't change on retry, so drop the token too. 'claimed'
+                    // for a 1:1 invite means it's already done — show it neutrally.
+                    stripInviteToken();
+                    showToast(mapErrorMessage(result.error), { isError: result.error !== 'claimed' });
                 } else {
-                    showToast(mapErrorMessage(result && result.error), { isError: true });
+                    // Network failure only — keep the token in the URL so a reload can
+                    // retry the registration rather than silently dropping the invite.
+                    showToast(mapErrorMessage(null), { isError: true });
                 }
             };
 
@@ -90,6 +101,17 @@ function showRegistrationConfirm({ token, egdName, count, dateStr }) {
             ]));
         },
     });
+}
+
+// Remove the ?t=<token> invite param from the address bar without a navigation,
+// preserving the path, any other query params, and the hash. Mirrors cleanUrl()
+// in problem-loader.js for the linked-problem params.
+function stripInviteToken() {
+    const url = new URL(window.location);
+    if (!url.searchParams.has('t')) return;
+    url.searchParams.delete('t');
+    const next = url.pathname + url.search + url.hash;
+    window.history.replaceState({}, '', next);
 }
 
 /**
@@ -102,6 +124,15 @@ export async function maybeHandleRegistration() {
     const token = new URLSearchParams(window.location.search).get('t') || '';
     if (!TOKEN_RE.test(token)) return;
 
+    // The token deliberately STAYS in the URL through the async preview + confirm
+    // so a reload before the user decides re-shows the prompt: an auto-reload — an
+    // SW-takeover `controllerchange` reload (index.html), a version-mismatch
+    // maybeReload, a load-failure reload, or a manual refresh — must not silently
+    // drop the invitation. It is stripped only once the invite is DEFINITIVELY
+    // resolved (registered, or the server reports it already claimed / invalid),
+    // after which reloads stop re-prompting. (Stripping it up front instead would
+    // lose the registration if a reload fired while the modal was still open.)
+
     let preview = null;
     try {
         const res = await fetch(`/invite?t=${encodeURIComponent(token)}`);
@@ -110,10 +141,13 @@ export async function maybeHandleRegistration() {
         preview = null;
     }
     if (!preview || !preview.ok) {
-        // invalid / claimed / bad_request (or a network failure) — nothing to
-        // confirm. Surface a brief note so a stale or already-used link doesn't
-        // silently do nothing.
-        showToast(mapErrorMessage(preview && preview.error), { isError: true });
+        // A definitive server response (claimed / invalid / bad_request) is resolved,
+        // so strip the token — else a reload keeps re-surfacing the same dead link.
+        // A network failure (preview === null) keeps it so a reload retries the
+        // preview. 'claimed' means already-registered on a 1:1 invite → show neutral.
+        if (preview) stripInviteToken();
+        showToast(mapErrorMessage(preview && preview.error),
+                  { isError: !(preview && preview.error === 'claimed') });
         return;
     }
 
