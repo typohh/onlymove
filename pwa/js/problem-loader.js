@@ -441,6 +441,46 @@ export async function advanceToNextProblem() {
     handleLoadFailure(lastError);
 }
 
+// After a sync merged foreign attempts (session resume on this device, or a
+// signal pull mid-session), re-run the normal "what should be on screen"
+// presentation: a due recall may have appeared from the merged history, or the
+// on-screen problem may have been solved on another device. The standing
+// challengeProblem is kept by default — a sync can never let the user dodge a
+// challenge that was selected for them; recalls merely delay it, and it stays
+// the next challenge they face. The single exception: the user completed that
+// exact problem on another client, so it now sits inside the recent-repeat
+// window (challengeAlreadyAnswered) and is no longer legal to serve as a novel
+// challenge — only then is it discarded and a fresh one selected. Only touches
+// the board when a problem is sitting idle in SOLVING mode — never mid-answer
+// sequence, in review/analysis, or over a linked (shared) problem.
+export async function refreshShownProblemAfterSync() {
+    const shown = state.currentProblem;
+    if (!shown || shown.linked) return;
+    if (state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
+
+    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+
+    const recall = await getDueRecallProblem();
+    const next = recall || state.challengeProblem;
+    if (!next) return;
+
+    // Re-check after the awaits: a click that landed mid-selection started the
+    // answer sequence, which owns the board now.
+    if (state.currentProblem !== shown || state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
+
+    // Selection landed on what's already on screen — leave it be (a repaint
+    // would reset the solve timer and re-randomize a recall's orientation).
+    if (next.filename === shown.filename) return;
+
+    // On a display failure fall forward like every other displayProblem
+    // caller: displayProblem mutates currentProblem before the SGF parse can
+    // throw, so bailing here would leave the board showing one problem while
+    // state points at another. advanceToNextProblem retries past the
+    // blacklisted problem and repaints something coherent.
+    try { displayProblem(next, APP_MODES.SOLVING); }
+    catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
+}
+
 // Re-shows the current problem (it's already loaded underneath) — used when
 // leaving review (which painted the previous problem). The mode follows the
 // current problem: a linked/shared problem returns to LINKED view, otherwise

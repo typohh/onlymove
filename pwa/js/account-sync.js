@@ -46,6 +46,7 @@ import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields } from './backfill.js';
+import { refreshShownProblemAfterSync } from './problem-loader.js';
 import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
@@ -452,6 +453,17 @@ function retrainAfterMerge(insertedEntries, mode) {
         console.warn('account-sync: loop state update failed:', e);
     }
     updateAllUI();
+    // The merged history may have changed what should be on screen: the shown
+    // problem might have been solved on another device, or a recall may now be
+    // due. Re-runs the NORMAL presentation selection; the standing challenge
+    // is kept by default, and swapped for a fresh one only if the user
+    // completed that exact problem on another client (it is no longer legal to
+    // serve — see refreshShownProblemAfterSync). Fire-and-forget: no-ops
+    // during init (nothing shown yet — 'adopt' runs before the first problem
+    // load) or whenever the board isn't idle.
+    refreshShownProblemAfterSync().catch((e) => {
+        console.warn('account-sync: post-sync problem refresh failed:', e);
+    });
 }
 
 // Adopt another account on this device: wipe everything derived from the old
