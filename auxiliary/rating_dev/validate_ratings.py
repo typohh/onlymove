@@ -68,6 +68,42 @@ def clear_logit_vec(c, lapse=0.0):
 
 
 # ── survey-ρ metrics (the single definition; the trainer no longer carries a copy) ──────────────
+# Time-adjust yardstick knobs + the weighted-Spearman helper, inherited verbatim from the retired
+# fit_population_constants time fit (removed at 62fa3b033e when the production time fit moved into
+# map_rating_to_rank's joint objective). They live here now as EVAL-side constants: this bench
+# still scores a fresh run's own cross-fitted time-adjusted rho, independent of the shipped dock.
+TA_MIN_TIMED = 20          # timed novel attempts needed for a user's time feature
+TA_MIN_PAIRS = 50          # (user, server) survey pairs needed to fit alpha
+TA_MIN_SERVER_USERS = 5    # per-server minimum for a Spearman term
+TA_ALPHA_GRID = np.linspace(-1.5, 0.5, 81)   # rating units per log10-minute
+TA_CV_FOLDS = 5
+TA_CV_SEEDS = 10
+TA_AFK_CAP_S = 180.0       # drop AFK solving times from the median-time feature
+
+
+def _weighted_spearman(pairs, alpha):
+    """pairs: [(user, server, rating, rank_scalar, centered_feature)]. Per-server
+    Spearman(rating + alpha·feature, declared rank), user-count-weighted mean."""
+    from collections import defaultdict
+    from scipy.stats import spearmanr
+    by_server = defaultdict(list)
+    for _, server, rating, sc, f in pairs:
+        by_server[server].append((rating + alpha * f, sc))
+    acc, w = 0.0, 0.0
+    for rows_ in by_server.values():
+        if len(rows_) < TA_MIN_SERVER_USERS:
+            continue
+        r = np.array([x for x, _ in rows_])
+        s = np.array([y for _, y in rows_])
+        if np.ptp(r) == 0 or np.ptp(s) == 0:
+            continue
+        rho = spearmanr(r, s).statistic
+        if np.isfinite(rho):
+            acc += rho * len(rows_)
+            w += len(rows_)
+    return acc / w if w else np.nan
+
+
 def _user_log10_median_solve_min(sql_path, prefixes, afk_cap_ms, min_timed):
     """{user_prefix8: log10(median solving minutes)} over each user's NON-REPEAT, AFK-capped timed
     attempts (the same feature the client and fit_population_constants compute). Built from the
@@ -103,11 +139,7 @@ def _time_adjusted_rho(surveys, user_rating, sql_path):
     cross-fitted (alpha chosen on train folds, scored on held-out users) so the reported number is
     not optimistically self-tuned. Returns a dict (rho_base/rho/rho_insample/alpha/g1/n_users/
     n_pairs) or {note} when too sparse to fit."""
-    from collections import defaultdict
-    from pipeline.fit_population_constants import (
-        AFK_CAP_S, TA_MIN_TIMED, TA_MIN_PAIRS, TA_ALPHA_GRID, TA_CV_FOLDS, TA_CV_SEEDS,
-        _weighted_spearman)
-    tfeat = _user_log10_median_solve_min(sql_path, set(user_rating), AFK_CAP_S * 1000.0,
+    tfeat = _user_log10_median_solve_min(sql_path, set(user_rating), TA_AFK_CAP_S * 1000.0,
                                          TA_MIN_TIMED)
     common = [p for p in user_rating if p in tfeat]
     if len(common) < TA_MIN_PAIRS:
