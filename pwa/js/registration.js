@@ -23,6 +23,12 @@ import { postJson } from './net.js';
 // URL didn't come from a real invite link, so we don't even hit /invite.
 const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
 
+// Error codes that are DEFINITIVE — retrying the same token can never change the
+// outcome, so the invite token may be dropped from the URL. Anything else
+// ('server' from the /register catch-all, the dispatcher's generic 500 body, an
+// unrecognized code) is treated as transient: the token stays so a reload retries.
+const DEFINITIVE_ERRORS = new Set(['pin_taken', 'account_bound', 'claimed', 'invalid', 'bad_request']);
+
 // Map the locked /invite + /register error codes to a user-facing line. Anything
 // unrecognized (incl. 'server' / a network failure / no error field) falls to
 // the generic retry message.
@@ -82,16 +88,18 @@ function showRegistrationConfirm({ token, egdName, count, dateStr }) {
                     // version reload, refresh) re-runs registration and re-prompts.
                     stripInviteToken();
                     showToast(`Registered as ${result.egdName}`);
-                } else if (result) {
+                } else if (result && DEFINITIVE_ERRORS.has(result.error)) {
                     // A definitive server rejection (claimed / pin_taken / account_bound /
                     // invalid) won't change on retry, so drop the token too. 'claimed'
                     // for a 1:1 invite means it's already done — show it neutrally.
                     stripInviteToken();
                     showToast(mapErrorMessage(result.error), { isError: result.error !== 'claimed' });
                 } else {
-                    // Network failure only — keep the token in the URL so a reload can
-                    // retry the registration rather than silently dropping the invite.
-                    showToast(mapErrorMessage(null), { isError: true });
+                    // Transient failure (network error, the /register catch-all's
+                    // {error:'server'}, an unrecognized body) — keep the token in the
+                    // URL so a reload can retry the registration rather than silently
+                    // dropping the invite.
+                    showToast(mapErrorMessage(result && result.error), { isError: true });
                 }
             };
 
@@ -143,9 +151,12 @@ export async function maybeHandleRegistration() {
     if (!preview || !preview.ok) {
         // A definitive server response (claimed / invalid / bad_request) is resolved,
         // so strip the token — else a reload keeps re-surfacing the same dead link.
-        // A network failure (preview === null) keeps it so a reload retries the
-        // preview. 'claimed' means already-registered on a 1:1 invite → show neutral.
-        if (preview) stripInviteToken();
+        // A transient failure keeps it so a reload retries the preview: a network
+        // error (preview === null), but also a parsed non-definitive body — the
+        // dispatcher's error boundary answers a thrown D1 hiccup with a generic
+        // JSON 500, which must not kill the invite. 'claimed' means
+        // already-registered on a 1:1 invite → show neutral.
+        if (preview && DEFINITIVE_ERRORS.has(preview.error)) stripInviteToken();
         showToast(mapErrorMessage(preview && preview.error),
                   { isError: !(preview && preview.error === 'claimed') });
         return;
