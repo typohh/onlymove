@@ -81,6 +81,7 @@ import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
 import { hasPendingAccountSwitch, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
+import { initTabLock } from './tab-lock.js';
 import { showAccountModal } from './account-ui.js';
 import { maybeHandleRegistration } from './registration.js';
 import { refreshInviteAccess } from './invite-access.js';
@@ -621,6 +622,10 @@ function wireLifecycleRecovery() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     hideBootSplash();
+    // Single-active-tab guard: a second tab of the same origin must not run the
+    // app (both would serve the same challenge and clobber each other's
+    // localStorage writes). Blocked tabs show a takeover overlay and halt here.
+    if (!(await initTabLock())) return;
     logStartupVersions();
 
     updateBoardSize();

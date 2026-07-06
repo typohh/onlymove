@@ -4,8 +4,8 @@ import { state, updateUserRank, updateServeRank, updateAnswerHistory, getMergedA
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
-import { TOTAL_RANKS } from './constants.js';
-import { calculateAndStoreStatsResults, recallImpactWithRefine } from './model.js';
+import { TOTAL_RANKS, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, checkSyncSignal } from './account-sync.js';
 // EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale
@@ -17,6 +17,46 @@ import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { postJson } from './net.js';
 
+// --- Cross-tab duplicate guard --------------------------------------------
+// Two tabs of the same origin boot the same standing challenge, and each
+// records the solve as a NOVEL attempt. The tab lock (tab-lock.js) prevents
+// concurrent tabs where Web Locks exist; this is the record-time fallback.
+// At answer time, re-read the PERSISTED working set — another tab's write is
+// visible there but not in this tab's stale in-memory copy — and classify a
+// supposedly-novel attempt with the standard novelty window (the same
+// RECALL_CANDIDATE_HISTORY_LENGTH check that made the served problem novel to
+// begin with):
+//   - prior attempt within the minimum recall interval (MIN_RECALL_INTERVAL_MS,
+//     the recall model's ~18h stability floor): a same-session duplicate →
+//     'drop' (recorded nowhere, reported nowhere);
+//   - older prior attempt (a long-stale tab): a legitimate repeat →
+//     'repeat', so it never counts as a second first-time attempt.
+// Classified once per answer and memoized on the problem object so sendReport
+// and updateUserStats agree (updateUserStats appends to the persisted history,
+// so a second unmemoized read would see our own row).
+function classifyCrossTabAttempt(currentProblem) {
+    if (currentProblem.crossTabClass !== undefined) return currentProblem.crossTabClass;
+    let cls = 'record';
+    if (!currentProblem.isRepeat && !currentProblem.linked) {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('answerHistory') || 'null');
+            if (Array.isArray(parsed)) {
+                const problemId = tsumegoIdOf(currentProblem.filename);
+                const recent = parsed.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
+                let last = null;
+                for (let i = recent.length - 1; i >= 0; i--) {
+                    if (recent[i] && recent[i].problemId === problemId) { last = recent[i]; break; }
+                }
+                if (last) {
+                    cls = (Date.now() - (last.date || 0) < MIN_RECALL_INTERVAL_MS) ? 'drop' : 'repeat';
+                }
+            }
+        } catch { /* unreadable persisted history — record as-is */ }
+    }
+    currentProblem.crossTabClass = cls;
+    return cls;
+}
+
 export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
     // Linked-mode problems are rank-frozen URL-shares: updateUserStats already
     // early-returns on currentProblem.linked so they never enter local history,
@@ -25,6 +65,11 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     // "report to D1" and "enter local history" stay in lockstep — one source of
     // truth for "don't record this attempt".
     if (state.currentProblem?.linked) return;
+    // Cross-tab duplicate: 'drop' reports nowhere (the other tab's report
+    // already logged this problem minutes ago); 'repeat' reports honestly.
+    const crossTab = classifyCrossTabAttempt(state.currentProblem);
+    if (crossTab === 'drop') return;
+    if (crossTab === 'repeat') isRepeat = true;
     try {
         const problemId = tsumegoIdOf(state.currentProblem.filename);
         // Attach any GoR values fetched from EGD after a previous report advertised
@@ -137,6 +182,16 @@ export async function updateUserStats(isCorrect, {
         return {};
     }
 
+    // Cross-tab duplicate (see classifyCrossTabAttempt): 'drop' records
+    // nothing — another tab recorded this problem within the minimum recall
+    // interval; 'repeat' records honestly as a repeat attempt.
+    const crossTab = classifyCrossTabAttempt(currentProblem);
+    if (crossTab === 'drop') {
+        setCurrentSolvingStartTime(null);
+        return {};
+    }
+    const isRepeatAttempt = currentProblem.isRepeat || crossTab === 'repeat';
+
     const currentSessionTime = state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0;
     addToAccumulatedSolvingTime(currentSessionTime);
     const timeTaken = state.accumulatedSolvingTime;
@@ -146,7 +201,7 @@ export async function updateUserStats(isCorrect, {
     // The prior attempt on this problem — kept for the recall-impact overlay below
     // (its date gives the elapsed gap, its streak the r going into this attempt).
     let recallLastAnswer = null;
-    if (currentProblem.isRepeat) {
+    if (isRepeatAttempt) {
         const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
         recallLastAnswer = previousAnswers.length ? previousAnswers[previousAnswers.length - 1] : null;
         if (!isCorrect) {
@@ -182,7 +237,7 @@ export async function updateUserStats(isCorrect, {
         correct: isCorrect,
         date: Date.now(),
         successSinceFailure,
-        isRepeat: currentProblem.isRepeat || false,
+        isRepeat: isRepeatAttempt,
     };
     if (Array.isArray(currentProblem.embedding)) {
         // Quantize to 2 decimal places to keep localStorage footprint small.
@@ -248,7 +303,7 @@ export async function updateUserStats(isCorrect, {
     // retrain block (≤~2s, usually far less warm-started) because the overlay
     // cannot report the true value without first training on the answer.
     let recallImpact = null;
-    if (currentProblem.isRepeat) {
+    if (isRepeatAttempt) {
         // The genuine before/after the recall model produces from teaching it this
         // answer (generic average-difficulty problem), THEN — if the displayed delay
         // moved the wrong way for this answer — a few extra Adam steps one at a time
