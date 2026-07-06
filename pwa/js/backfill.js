@@ -773,13 +773,14 @@ async function rederiveTailRatings(size, problemParams) {
 //     from problem_params.bin (no shard fetch)
 //   - correct-move `embedding` inside the keep-last window, from the
 //     lookup-aligned sidecar (~130-byte Range per problem, no shard fetch)
-//   - `pickedCellIndex` derived from the reported move (`syncedMove`, present
-//     only on wrong NON-repeat attempts — new problems are served at
-//     orientation 0 = identity, so the reported coordinate matches the shard
-//     SGF; repeats are served randomly reoriented and unrecoverable). This is
-//     the one fill that still needs the shard ZIP (the SGF). The SGF root
-//     variations are the same order extraction/packaging use, so the index
-//     addresses the per-cell bin directly.
+//   - `pickedCellIndex` derived from the reported move (`syncedMove` — set on
+//     wrong attempts whose reported coordinate is in the canonical
+//     orientation-0 frame: all rows since CANONICAL_MOVE_ERA_MS, plus older
+//     non-repeats, which were always served at identity; see
+//     account-sync.mergeRowsForSize). This is the one fill that still needs
+//     the shard ZIP (the SGF). The SGF root variations are the same order
+//     extraction/packaging use, so the index addresses the per-cell bin
+//     directly.
 //   - `pickedEmbedding` via the per-cell bin, addressed by the zip's
 //     embeddings_index.json — fetched while that zip is open anyway.
 //
@@ -908,9 +909,17 @@ async function fillSyncedForSize(size, problemParams = null) {
     return filled;
 }
 
-// Map a reported board-notation move (orientation-0 frame) to the problem's
-// SGF root-variation index — the same `children.indexOf(moveNode)` the live
+// Map a reported board-notation move (canonical orientation-0 frame) to the
+// problem's variation index — the same `children.indexOf(moveNode)` the live
 // click path records, and the index the per-cell sidecar is keyed by.
+//
+// The tsumego SGFs are full game records: the main line builds the position
+// and the candidate first moves hang off the LAST main-line node, NOT the
+// root. Walk the single-child chain to that branch point exactly like the
+// live path (board.js loadSgf: `while (node.children.length === 1) next()`)
+// and the pipeline's parse_tsumego_sgf, so the derived index matches the
+// per-cell bin. (Indexing root.children instead — as this originally did —
+// found only the first main-line move, so every derivation returned -1.)
 async function cellIndexForMove(zip, problemId, move, size) {
     const xy = boardNotationToXy(move, size);
     if (!xy) return null;
@@ -918,7 +927,9 @@ async function cellIndexForMove(zip, problemId, move, size) {
     if (!sgfFile || typeof WGo === 'undefined') return null;
     try {
         const kifu = WGo.Kifu.fromSgf(await sgfFile.async('text'));
-        const children = (kifu && kifu.root && kifu.root.children) || [];
+        let node = kifu && kifu.root;
+        while (node && node.children && node.children.length === 1) node = node.children[0];
+        const children = (node && node.children) || [];
         return children.findIndex(c => c.move && c.move.x === xy.x && c.move.y === xy.y);
     } catch (_) {
         return null;

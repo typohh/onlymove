@@ -6,7 +6,7 @@ import { state, setAcceptClicks, setAppMode } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { displayOverlay, fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
-import { isCorrectMove, tsumegoIdOf, toBoardNotation } from './sgf.js';
+import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
 import { getTerm } from './i18n.js';
@@ -48,9 +48,18 @@ const buildReportPayload = (success, x, y) => {
     const problemId = tsumegoIdOf(currentProblem?.filename) ?? null;
     const prevs = problemId ? state.answerHistory.filter(a => a.problemId === problemId) : [];
     const reviewTime = prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
+    // Report the move in the CANONICAL orientation-0 frame. The board (and the
+    // in-memory kifu) live in the SERVED frame — for repeats a random D4
+    // reorientation, which no other device can map back — so the click is
+    // inverse-transformed through the problem's orientation before encoding.
+    // This makes the reported coordinate match the shard SGF for every
+    // attempt, letting cross-device sync derive the picked cell for repeats
+    // too (rows from before CANONICAL_MOVE_ERA_MS are served-frame; see
+    // account-sync.mergeRowsForSize for the legacy gate).
+    const canonical = toCanonicalXy(x, y, currentProblem?.orientation ?? 0, state.boardSize);
     return {
         success,
-        move: toBoardNotation(x, y, state.boardSize),
+        move: toBoardNotation(canonical.x, canonical.y, state.boardSize),
         timeUsed,
         reviewTime,
         isRepeat: !!currentProblem?.isRepeat,

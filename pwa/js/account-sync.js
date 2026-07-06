@@ -63,6 +63,18 @@ const SWITCH_FLAG_KEY = 'accountSwitchPending';
 // one-row-per-problem era — both the claim relaxation and the one-off local
 // history backfill key off it.
 const PER_ATTEMPT_ERA_MS = Date.parse('2026-05-15T00:00:00Z');
+// First moment every client reports the picked move in the CANONICAL
+// orientation-0 frame (buildReportPayload inverse-transforms the click through
+// the served orientation). Repeat rows from this era on carry a coordinate
+// that maps onto the shard SGF, so their picked cell is recoverable
+// cross-device; before it, repeats were reported in the SERVED frame (a random
+// D4 reorientation) and stay skipped. MUST sit comfortably AFTER the deploy
+// that ships canonical reporting — old bundles keep reporting served-frame
+// repeat moves until their graceful reload, and a served-frame coordinate
+// trusted as canonical can silently resolve to the WRONG variation. If that
+// deploy slips past this date, bump the date before deploying (skipping a few
+// extra days of repeat moves is harmless; trusting wrong-frame ones is not).
+const CANONICAL_MOVE_ERA_MS = Date.parse('2026-07-09T00:00:00Z');
 // Ack-less local entries are claimed by a server row when identity fields match
 // and the timestamps agree within this window (local Date.now() at attempt vs
 // edge time at insert — normally seconds apart; the slack absorbs clock skew).
@@ -180,12 +192,15 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
         // attempt; kept so recomputeProblemChains can diff consecutive synced
         // attempts into per-attempt reviewTime.
         if (typeof row.reviewTime === 'number') entry.syncedReviewTotal = row.reviewTime;
-        // The reported move is in the served board frame. New (non-repeat)
-        // problems are always served at orientation 0 — identity — so the
-        // coordinate maps straight onto the shard SGF and the backfill can
-        // derive pickedCellIndex from it. Repeats are served at a random
-        // orientation, unrecoverable from the report; skip those.
-        if (!row.success && !row.isRepeat && typeof row.move === 'string' && row.move !== 'pass') {
+        // Since CANONICAL_MOVE_ERA_MS every reported move is in the canonical
+        // orientation-0 frame (the client inverse-transforms the click through
+        // the served orientation), so the coordinate maps onto the shard SGF
+        // for every attempt and the backfill can derive pickedCellIndex from
+        // it — repeats included. Older rows are served-frame: non-repeats were
+        // always served at orientation 0 (identity — canonical anyway), but
+        // repeats were randomly reoriented and unrecoverable; skip those.
+        if (!row.success && typeof row.move === 'string' && row.move !== 'pass' &&
+            (!row.isRepeat || ts >= CANONICAL_MOVE_ERA_MS)) {
             entry.syncedMove = row.move;
         }
         newEntries.push(entry);

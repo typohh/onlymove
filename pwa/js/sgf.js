@@ -169,6 +169,20 @@ function transformCoordinates(x, y, transformation, size) {
     }
 }
 
+// Inverse of transformCoordinates for the same D4 transformation index: maps a
+// coordinate in the SERVED (reoriented) frame back to the canonical
+// orientation-0 frame. rotate90 (1) and rotate270 (3) are each other's
+// inverses; every other element of the group is self-inverse. Used by the
+// report path so the `move` sent to the server is canonical regardless of the
+// random orientation a repeat was served at.
+const INVERSE_TRANSFORMATION = [0, 3, 2, 1, 4, 5, 6, 7];
+
+export function toCanonicalXy(x, y, orientation, size) {
+    const t = Number.isInteger(orientation) && orientation >= 0 && orientation <= 7
+        ? INVERSE_TRANSFORMATION[orientation] : 0;
+    return transformCoordinates(x, y, t, size);
+}
+
 function transformKifuTree(node, transformation, size) {
     if (node.move) {
         const transformed = transformCoordinates(node.move.x, node.move.y, transformation, size);
