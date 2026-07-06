@@ -45,7 +45,7 @@ import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
-import { fillSyncedHistoryFields } from './backfill.js';
+import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
 import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
@@ -551,6 +551,11 @@ export async function maybeFinishAccountSwitch() {
     // wipes localStorage but can't await an async IDB clear before reload), so
     // drop it (and its eviction tracking) before pulling the new account's history.
     await clearHistoryTail();
+    // The device is history-less right now, and the pull's synced fill writes
+    // fields derived from the current corpus — stamp the data-version gates so
+    // the post-init version backfill doesn't mistake the freshly filled history
+    // for stale data and wipe + re-walk it.
+    stampVersionsForFreshHistory();
     // Adoption is a from-the-beginning full pull, so it counts against the daily
     // cap (capExceeded when spent) and can also fail on the network.
     const result = await pullReports({ mode: 'adopt', fromStart: true });

@@ -28,6 +28,7 @@ import * as Sentry from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
+    getMergedAnswerHistory,
     clearWeaknessModel,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
@@ -107,6 +108,27 @@ const STALE_FLAG_KEYS = (size) => [
 function persistAnswerHistory(size, snapshot) {
     const live = getAnswerHistoryForSize(size);
     setAnswerHistoryForSize(size, live.length >= snapshot.length ? live : snapshot);
+}
+
+// Stamp the three data-version gates at their CURRENT values when the device
+// holds no history yet. An empty history is trivially consistent with the
+// current corpus, and whatever gets written next (the account adoption's
+// synced fill) is derived from current-version assets. Without this an adopted
+// device boots stamp-less: backfillMissingEmbeddings right after adoption
+// treats the freshly filled history as stale, wipes its embeddings, and
+// re-walks the same shards a second time — doubling a walk that is already the
+// heaviest thing a new device does. No-op (returns false) if any history
+// exists; then the normal version gate decides.
+export function stampVersionsForFreshHistory() {
+    if (getMergedAnswerHistory().length > 0) return false;
+    const meta = EMBEDDING_META_INLINE;
+    const embeddingVersion = (typeof meta.embedding_version === 'string')
+        ? meta.embedding_version : 'unknown';
+    localStorage.setItem(EMBEDDING_VERSION_KEY, embeddingVersion);
+    if (RATINGS_VERSION !== null) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
+    const curveVersion = ratingRankCurveVersion(DEFAULT_BOARD_SIZE);
+    if (curveVersion !== null) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
+    return true;
 }
 
 export async function backfillMissingEmbeddings() {
@@ -728,44 +750,79 @@ async function rederiveTailRatings(size, problemParams) {
 // of reach of the working-set walk. Incremental pulls only merge recent rows
 // (working set), so they leave it false and skip the tail scan.
 export async function fillSyncedHistoryFields(sizes, { includeTail = false } = {}) {
+    // Rating fields come from the single problem_params.bin asset — the same
+    // source the version-driven rating refresh reads — loaded ONCE and shared
+    // by the working-set and tail fills. Routing them through the shard walk
+    // instead (as this used to) meant an adopted account's WHOLE career drove
+    // the walk: real 2k-attempt accounts span 100-374 shard zips (~2MB each),
+    // and downloading + unzipping hundreds of MB crashed the tab on low-memory
+    // devices. A null map (offline / fetch failure) just leaves skeletons for
+    // a later pull to fill.
+    let problemParams = null;
+    const needsParams = includeTail || sizes.some((size) =>
+        SUPPORTED_BOARD_SIZES.includes(size) &&
+        getAnswerHistoryForSize(size).some((a) =>
+            a && a.synced && a.problemId && typeof a.problemRating !== 'number'));
+    if (needsParams) problemParams = await loadProblemParams();
+
     let total = 0;
     for (const size of sizes) {
         if (!SUPPORTED_BOARD_SIZES.includes(size)) continue;
         try {
-            total += await fillSyncedForSize(size);
+            total += await fillSyncedForSize(size, problemParams);
         } catch (err) {
             console.error(`synced-fill[${size}] failed`, err);
             try { Sentry.captureException(err); } catch (_) {}
         }
     }
-    if (includeTail) total += (await fillSyncedTailFields(sizes)).filled;
+    if (includeTail) total += (await fillSyncedTailFields(sizes, problemParams)).filled;
     return total;
 }
 
-async function fillSyncedForSize(size) {
+async function fillSyncedForSize(size, problemParams = null) {
     const history = getAnswerHistoryForSize(size);
     if (!history || history.length === 0) return 0;
     const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
 
+    let filled = 0;
+    // Rating fields for EVERY synced entry straight from problem_params — no
+    // shard fetch. Ids absent from the corpus stay skeletons (the problem left
+    // the set), matching what the shard walk's lookup drop used to do.
+    if (problemParams) {
+        for (const a of history) {
+            if (!a || !a.synced || !a.problemId) continue;
+            if (typeof a.problemRating === 'number') continue;
+            const item = problemParams.get(a.problemId);
+            if (!item || typeof item.rating !== 'number') continue;
+            applyRatingFields(a, item, size);
+            filled++;
+        }
+    }
+
+    // The shard walk serves ONLY the in-window embedding/picked fields — they
+    // live inside the per-shard zips, and the keep-last window bounds how many
+    // shards this can touch regardless of how spread the full career is.
     const needIds = new Set();
-    for (let i = 0; i < history.length; i++) {
+    for (let i = startIdx; i < history.length; i++) {
         const a = history[i];
         if (!a || !a.synced || !a.problemId) continue;
-        const needsRating = typeof a.problemRating !== 'number';
-        const inWindow = i >= startIdx;
-        const needsEmbed = inWindow && !a.embedding;
-        const needsPickedIndex = inWindow && a.correct === false &&
+        const needsEmbed = !a.embedding;
+        const needsPickedIndex = a.correct === false &&
             typeof a.syncedMove === 'string' && typeof a.pickedCellIndex !== 'number';
-        const needsPicked = inWindow && a.correct === false &&
+        const needsPicked = a.correct === false &&
             !a.pickedEmbedding &&
             (typeof a.pickedCellIndex === 'number' || needsPickedIndex);
-        if (needsRating || needsEmbed || needsPickedIndex || needsPicked) {
+        if (needsEmbed || needsPickedIndex || needsPicked) {
             needIds.add(a.problemId);
         }
     }
-    if (needIds.size === 0) return 0;
-
-    let filled = 0;
+    if (needIds.size === 0) {
+        if (filled > 0) {
+            persistAnswerHistory(size, history);
+            console.log(`synced-fill[${size}]: filled ${filled} fields on synced entries`);
+        }
+        return filled;
+    }
     await walkShards(size, needIds, async ({ zip, items, zipFilename, shardIds }) => {
         const itemByProblem = new Map();
         for (const item of items) {
@@ -859,64 +916,48 @@ function applyRatingFields(e, item, size) {
     if (typeof item.floor === 'number') e.problemFloor = item.floor;
 }
 
-// Walk `size`'s shards for the given problem ids → Map(id → metadata item). Ids
-// absent from the corpus are omitted. `ok` is false only when the shard locator
-// couldn't be built (offline), so a caller can retry rather than treat the fill
-// as complete.
-async function fetchShardItems(size, ids) {
-    const out = new Map();
-    if (!ids || ids.size === 0) return { items: out, ok: true };
-    const ok = await walkShards(size, ids, async ({ items, shardIds }) => {
-        const want = new Set(shardIds);
-        for (const item of items) {
-            const id = tsumegoIdOf(item.filename);
-            if (want.has(id) && typeof item.rating === 'number') out.set(id, item);
-        }
-    }, (zipFilename, err) => {
-        console.warn(`synced-tail-fill[${size}]: shard ${zipFilename} failed:`, err);
-    });
-    return { items: out, ok };
-}
-
-// Fill one size's cold-tail synced skeletons. Returns { filled, ok }.
-async function fillSyncedTailForSize(size) {
+// Fill one size's cold-tail synced skeletons from problem_params (only the
+// rating fields — the tail never carries embeddings). Returns { filled, ok };
+// ok=false when the params map is unavailable (offline), so a caller can retry
+// rather than treat the fill as complete.
+async function fillSyncedTailForSize(size, problemParams) {
     const tail = await getTail();
     if (!tail || tail.length === 0) return { filled: 0, ok: true };
-    const need = new Set();
+    let needed = false;
     for (const e of tail) {
         if (!e || !e.synced || !e.problemId) continue;
         if (entrySize(e) !== size) continue;
-        if (typeof e.problemRating !== 'number') need.add(e.problemId);
+        if (typeof e.problemRating !== 'number') { needed = true; break; }
     }
-    if (need.size === 0) return { filled: 0, ok: true };
-
-    const { items, ok } = await fetchShardItems(size, need);
-    if (items.size === 0) return { filled: 0, ok };
+    if (!needed) return { filled: 0, ok: true };
+    if (!problemParams) return { filled: 0, ok: false };
 
     let filled = 0;
     await updateTail((entry) => {
-        if (!entry || typeof entry.problemRating === 'number') return null;
+        if (!entry || !entry.synced || typeof entry.problemRating === 'number') return null;
         if (entrySize(entry) !== size) return null;
-        const item = items.get(entry.problemId);
-        if (!item) return null;
+        const item = problemParams.get(entry.problemId);
+        if (!item || typeof item.rating !== 'number') return null;
         applyRatingFields(entry, item, size);
         filled++;
         return entry;
     });
     if (filled > 0) console.log(`synced-tail-fill[${size}]: filled ${filled} cold-tail entries`);
-    return { filled, ok };
+    return { filled, ok: true };
 }
 
 // Fill the cold tail's synced skeletons across sizes. Returns { filled, ok }
-// (ok=false if any needed size's shards couldn't be fetched). Exported so the
-// one-time tail migration can reuse it on already-damaged tails.
-export async function fillSyncedTailFields(sizes) {
+// (ok=false if the params asset couldn't be fetched while fills were needed).
+// Exported so the one-time tail migration can reuse it on already-damaged
+// tails; when the caller has no params map at hand, it is loaded here.
+export async function fillSyncedTailFields(sizes, problemParams = null) {
     let filled = 0;
     let ok = true;
+    if (!problemParams) problemParams = await loadProblemParams();
     for (const size of sizes) {
         if (!SUPPORTED_BOARD_SIZES.includes(size)) continue;
         try {
-            const r = await fillSyncedTailForSize(size);
+            const r = await fillSyncedTailForSize(size, problemParams);
             filled += r.filled;
             ok = ok && r.ok;
         } catch (err) {
