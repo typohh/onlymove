@@ -436,6 +436,317 @@ def cross_fitted_eval(pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS, boot=1000):
 
 
 # ---------------------------------------------------------------------------
+# --global-x: per-attempt time with ONE GLOBAL slope, inside the rating fit
+# ---------------------------------------------------------------------------
+# Grid of global per-attempt time slopes (rating units per decade of
+# above-own-norm time). 0 recovers the plain fit; the population b̄ sits ≈ −1.
+GLOBAL_B_GRID = np.linspace(-2.0, 1.0, 13)
+
+
+def fit_user_rating_time(rows, b, ratings, slopes, floors, lapse, ben_cap_ms):
+    """fit_user_rating with a FIXED global per-attempt time term: Newton MLE of
+    R in P_i = c + (1−c−λ)·σ(a·(R + b·x_i − r) + κ), x_i = log10(t_i) − the
+    user's median log10 time (0 for untimed/AFK-capped attempts, i.e. neutral).
+    rows: [(tid, success, time_ms_or_None)]. Returns (R, n) or (None, 0)."""
+    tr = [(ratings[t], s, tm, slopes.get(t), floors.get(t))
+          for t, s, tm in rows if t in ratings]
+    if len(tr) < MIN_ATTEMPTS:
+        return None, 0
+    rr = np.array([r for r, *_ in tr])
+    sc = np.array([s for _, s, *_ in tr], float)
+    tms = np.array([tm if (tm is not None and 0 < tm <= ben_cap_ms) else np.nan
+                    for _, _, tm, *_ in tr])
+    lt = np.log10(tms / 60000.0)
+    med = np.nanmedian(lt)
+    x = np.where(np.isfinite(lt) & np.isfinite(med), lt - med, 0.0)
+    sl = np.array([(a if (a is not None and np.isfinite(a) and a > 0)
+                    else LOGIT_PER_RATING) for *_, a, _ in tr])
+    c = np.array([min(max(f if (f is not None and np.isfinite(f)) else 0.0, 0.0),
+                      FLOOR_MAX) for *_, f in tr])
+    lam = max(0.0, float(lapse))
+    span = np.clip(1.0 - c - lam, 1e-6, 1.0)
+    q = np.clip((CALIBRATION_P - c) / span, 1e-6, 1.0 - 1e-6)
+    kappa = np.log(q / (1.0 - q))
+    R = float(rr.mean())
+    for _ in range(80):
+        praw = 1.0 / (1.0 + np.exp(-np.clip(sl * (R + b * x - rr) + kappa, -40, 40)))
+        p = np.clip(c + span * praw, 1e-9, 1.0 - 1e-9)
+        g = span * sl * praw * (1.0 - praw)
+        denom = p * (1.0 - p)
+        score = float(np.sum((sc - p) * g / denom))
+        info = float(np.sum(g * g / denom))
+        if info < 1e-9:
+            break
+        step = max(-1.0, min(1.0, score / info))
+        R += step
+        if abs(step) < 1e-6:
+            break
+    return float(R), len(tr)
+
+
+def global_x_eval(users, surveys, args, seeds=CV_SEEDS, folds=CV_FOLDS, boot=1000):
+    """Candidates where the per-attempt time enters the RATING FIT with one
+    global slope b (picked on train folds like every other coefficient; no
+    per-user parameter): R(b) alone and R(b) + the median-time dock, against
+    the plain-R base and the medtime reference — paired cross-fitted Spearman,
+    same protocol as cross_fitted_eval."""
+    surveys_l = surveys
+    merged_ratings, merged_slopes, merged_floors = {}, {}, {}
+    for s in SIZES:
+        merged_ratings.update(load_ratings(args.dir, s))
+        merged_slopes.update(load_slopes(args.dir, s))
+        merged_floors.update(load_floors(args.dir, s))
+    lapse = load_lapse(args.dir)
+    attempts = load_user_attempts(args.sqlite, set(surveys_l["user_id"].unique()))
+    ben_cap_ms = args.benefit_cap_s * 1000.0
+
+    # Precompute every user's rating at every grid slope (b=0 = the plain fit).
+    print(f"precomputing R(b) for {len(users)} users x {len(GLOBAL_B_GRID)} "
+          f"grid slopes ...")
+    Rb = {}   # pref -> {b: R}
+    for pref, u in users.items():
+        rows = attempts.get(pref)
+        if not rows or u["T"] is None:
+            continue
+        cur = {}
+        for b in GLOBAL_B_GRID:
+            R, n = fit_user_rating_time(rows, float(b), merged_ratings,
+                                        merged_slopes, merged_floors, lapse,
+                                        ben_cap_ms)
+            if R is None:
+                cur = None
+                break
+            cur[float(b)] = R
+        if cur:
+            Rb[pref] = cur
+    b0 = float(GLOBAL_B_GRID[np.argmin(np.abs(GLOBAL_B_GRID))])   # = 0.0
+    shifts = np.array([[cur[float(b)] - cur[b0] for b in GLOBAL_B_GRID]
+                       for cur in Rb.values()])
+    j = int(np.argmin(np.abs(GLOBAL_B_GRID + 1.0)))               # b = −1 column
+    print(f"rating shift R(b=−1) − R(0): sd {np.std(shifts[:, j]):.3f}, "
+          f"5/95% [{np.percentile(shifts[:, j], 5):+.3f}, "
+          f"{np.percentile(shifts[:, j], 95):+.3f}] rating units")
+
+    pairs = []   # (pref, server, g)  — R comes from Rb per candidate b
+    for _, row in surveys_l.iterrows():
+        pref = str(row["user_id"])[:8]
+        g = row.get("rank_scalar")
+        if pref not in Rb or g is None or np.isnan(float(g)):
+            continue
+        pairs.append((pref, row["server"], float(g)))
+    prefs = sorted({p for p, *_ in pairs})
+    # The medtime dock feature (T residualized on the b=0 rating, framework form).
+    R0 = np.array([Rb[p][b0] for p in prefs])
+    Tm = np.array([users[p]["T"] for p in prefs])
+    g1, g0 = np.polyfit(R0, Tm, 1)
+    Tres = {p: users[p]["T"] - (g0 + g1 * Rb[p][b0]) for p in prefs}
+
+    def pairs_at(b, idx):
+        return [(pairs[i][0], pairs[i][1], Rb[pairs[i][0]][float(b)],
+                 pairs[i][2]) for i in idx]
+
+    CANDS = ["base   R(0)", "medtime R(0)+aT", "xonly  R(b)", "x+med  R(b)+aT"]
+    adj = {c: np.zeros((seeds, len(pairs))) for c in CANDS}
+    picked = {c: [] for c in CANDS}
+    for seed in range(seeds):
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(prefs))
+        fold = {prefs[j2]: i % folds for i, j2 in enumerate(order)}
+        for kf in range(folds):
+            tr = [i for i, p in enumerate(pairs) if fold[p[0]] != kf]
+            te = [i for i, p in enumerate(pairs) if fold[p[0]] == kf]
+            if not te or len(tr) < 10:
+                continue
+            Tcol_tr = np.array([Tres[pairs[i][0]] for i in tr])
+            # pick coefficients on the train fold
+            best = {}
+            surf_med = weighted_spearman_grid(pairs_at(b0, tr), [Tcol_tr],
+                                              [ALPHA_GRID])
+            best["medtime R(0)+aT"] = (b0, float(ALPHA_GRID[int(np.nanargmax(surf_med))]))
+            sc_x, sc_xm = [], []
+            for b in GLOBAL_B_GRID:
+                pb = pairs_at(b, tr)
+                sc_x.append(weighted_spearman_grid(pb, [], []))
+                sc_xm.append(weighted_spearman_grid(pb, [Tcol_tr], [ALPHA_GRID]))
+            bi = int(np.nanargmax(sc_x))
+            best["xonly  R(b)"] = (float(GLOBAL_B_GRID[bi]), 0.0)
+            surf = np.array(sc_xm)
+            bi2, ai2 = np.unravel_index(int(np.nanargmax(surf)), surf.shape)
+            best["x+med  R(b)+aT"] = (float(GLOBAL_B_GRID[bi2]),
+                                      float(ALPHA_GRID[ai2]))
+            best["base   R(0)"] = (b0, 0.0)
+            for cname in CANDS:
+                b, alpha = best[cname]
+                picked[cname].append((b, alpha))
+                for i in te:
+                    p = pairs[i]
+                    adj[cname][seed, i] = Rb[p[0]][b] + alpha * Tres[p[0]]
+
+    def pooled_rho(name, idx, seed_list):
+        vals = []
+        for seed in seed_list:
+            sub = [(pairs[i][0], pairs[i][1], adj[name][seed, i], pairs[i][2])
+                   for i in idx]
+            vals.append(weighted_spearman_grid(sub, [], []))
+        return float(np.mean(vals))
+
+    full = list(range(len(pairs)))
+    rho = {c: pooled_rho(c, full, range(seeds)) for c in CANDS}
+    by_pref = defaultdict(list)
+    for i, p in enumerate(pairs):
+        by_pref[p[0]].append(i)
+    REF = "medtime R(0)+aT"
+    deltas = {c: [] for c in CANDS if c != REF}
+    for bnum in range(boot):
+        rng = np.random.default_rng(50000 + bnum)
+        pick = rng.choice(len(prefs), len(prefs), replace=True)
+        idx = [i for j2 in pick for i in by_pref[prefs[j2]]]
+        ref = pooled_rho(REF, idx, range(seeds))
+        for c in CANDS:
+            if c != REF:
+                deltas[c].append(pooled_rho(c, idx, range(seeds)) - ref)
+    print(f"\nGlobal per-attempt time slope INSIDE the rating fit "
+          f"({len(pairs)} declarations, {len(prefs)} timed users; "
+          f"{seeds}x{folds}-fold grouped by user, paired; {boot} bootstrap)")
+    print(f"{'candidate':<20}{'rho_cv':>8}{'Δ vs medtime [5,95]':>26}"
+          f"{'P(>med)':>9}   median picked (b, α)")
+    for c in CANDS:
+        pb = np.median([x[0] for x in picked[c]])
+        pa = np.median([x[1] for x in picked[c]])
+        lab = f"b={pb:+.2f}, α={pa:+.2f}"
+        if c == REF:
+            print(f"{c:<20}{rho[c]:>8.4f}{'(reference)':>26}{'':>9}   {lab}")
+        else:
+            d = np.array(deltas[c])
+            lo, mid, hi = np.percentile(d, [5, 50, 95])
+            print(f"{c:<20}{rho[c]:>8.4f}"
+                  f"{f'{mid:+.4f} [{lo:+.4f},{hi:+.4f}]':>26}"
+                  f"{float(np.mean(d > 0)):>9.2f}   {lab}")
+
+
+# ---------------------------------------------------------------------------
+# --dock-value: is the SHIPPED time dock earning its keep at all?
+# ---------------------------------------------------------------------------
+def dock_value(users, surveys, args, folds=CV_FOLDS, seeds=5, boot=1000):
+    """Paired grouped-by-user CV of the PRODUCTION consensus fit
+    (pipeline.map_rating_to_rank.fit_consensus, constants baked) with the time
+    term ON vs OFF (T zeroed in train and test). alpha is fit against the survey
+    inside the joint ordinal objective — there is no survey-free time signal
+    anywhere in the pipeline — so this asks whether that survey-fit alpha
+    GENERALIZES to held-out users: forward server-rank RMSE/MAE and ordinal NLL
+    on held-out declarations, user-cluster bootstrap CI on the paired deltas."""
+    from pipeline.map_rating_to_rank import (
+        fit_consensus as prod_fit_consensus, load_user_median_solve_minutes)
+    from utils.fit_rank_curves import interp_extrap_vec
+    from scipy.special import expit
+
+    med_min = load_user_median_solve_minutes(args.sqlite)  # production feature
+    user_logT = {p: float(np.log10(med_min[p])) for p in users
+                 if p in med_min and med_min[p] > 0}
+    center = (float(np.mean([user_logT[p] for p in users if p in user_logT]))
+              if user_logT else 0.0)
+    decls = []   # (pref, server, R, g, T_demeaned)
+    for _, row in surveys.iterrows():
+        pref = str(row["user_id"])[:8]
+        g = row.get("rank_scalar")
+        u = users.get(pref)
+        if u is None or g is None or np.isnan(float(g)):
+            continue
+        T = (user_logT[pref] - center) if pref in user_logT else 0.0
+        decls.append((pref, row["server"], u["R"], float(g), T))
+    prefs = sorted({d[0] for d in decls})
+    n_timed = len({d[0] for d in decls if d[4] != 0.0})
+    print(f"\n--dock-value: production consensus fit, time ON vs OFF "
+          f"({len(decls)} declarations, {len(prefs)} users, {n_timed} timed; "
+          f"{seeds}x{folds}-fold grouped by user, paired)")
+
+    def predict(fit, R, T, server, g):
+        """(squared_err, abs_err, nll) of one held-out declaration, or None if
+        this fold fit no coupling for its server."""
+        a, alpha, ys, _, server_fits = fit
+        thr_map = server_fits.get(server)
+        if not thr_map or len(thr_map) < 2:
+            return None
+        x = float(interp_extrap_vec(np.array([R + alpha * T]), a, ys)[0])
+        gs = sorted(thr_map)
+        thr = np.array([thr_map[k] for k in gs], float)
+        srv = np.array([k - 0.5 for k in gs], float)
+        o = np.argsort(thr)
+        pred = float(interp_extrap_vec(np.array([x]), thr[o], srv[o])[0])
+        if not np.isfinite(pred):
+            return None
+        g_min = gs[0] - 1
+        k = int(np.clip(round(g) - g_min, 0, len(gs)))
+        upper = expit(thr[k] - x) if k < len(gs) else 1.0
+        lower = expit(thr[k - 1] - x) if k > 0 else 0.0
+        nll = -float(np.log(max(upper - lower, 1e-12)))
+        return (pred - g) ** 2, abs(pred - g), nll
+
+    # per (variant, seed): {decl_index: (se, ae, nll)} — cross-fitted, paired
+    res = {v: [dict() for _ in range(seeds)] for v in ("time", "notime")}
+    alphas = []
+    for seed in range(seeds):
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(prefs))
+        fold = {prefs[j]: i % folds for i, j in enumerate(order)}
+        for kf in range(folds):
+            tr = [d for d in decls if fold[d[0]] != kf]
+            te = [(i, d) for i, d in enumerate(decls) if fold[d[0]] == kf]
+            if not te:
+                continue
+            fit_t = prod_fit_consensus([d[1:] for d in tr])
+            fit_0 = prod_fit_consensus([(s, R, g, 0.0) for _, s, R, g, _ in tr])
+            alphas.append(fit_t[1])
+            for i, (pref, server, R, g, T) in te:
+                pt = predict(fit_t, R, T, server, g)
+                p0 = predict(fit_0, R, 0.0, server, g)
+                if pt is None or p0 is None:
+                    continue                       # paired: skip in BOTH
+                res["time"][seed][i] = pt
+                res["notime"][seed][i] = p0
+
+    common = set.intersection(*[set(res[v][s]) for v in res for s in range(seeds)])
+    by_pref = defaultdict(list)
+    for i in common:
+        by_pref[decls[i][0]].append(i)
+    bprefs = sorted(by_pref)
+
+    def agg(v, idx):
+        se = np.mean([res[v][s][i][0] for s in range(seeds) for i in idx])
+        ae = np.mean([res[v][s][i][1] for s in range(seeds) for i in idx])
+        nll = np.mean([res[v][s][i][2] for s in range(seeds) for i in idx])
+        return np.sqrt(se), ae, nll
+
+    full = sorted(common)
+    print(f"in-sample production alpha (full data): "
+          f"{prod_fit_consensus([d[1:] for d in decls])[1]:+.3f}; "
+          f"median fold alpha {np.median(alphas):+.3f}")
+    stats = {v: agg(v, full) for v in ("time", "notime")}
+    print(f"\n{'variant':<10}{'fwdRMSE':>9}{'fwdMAE':>9}{'ordNLL':>9}   "
+          f"(held-out, {len(full)} scoreable declarations)")
+    for v in ("notime", "time"):
+        r, m, n = stats[v]
+        print(f"{v:<10}{r:>9.3f}{m:>9.3f}{n:>9.3f}")
+    deltas = {k: [] for k in ("rmse", "mae", "nll")}
+    for bnum in range(boot):
+        rng = np.random.default_rng(60000 + bnum)
+        pick = rng.choice(len(bprefs), len(bprefs), replace=True)
+        idx = [i for j in pick for i in by_pref[bprefs[j]]]
+        rt, mt, nt = agg("time", idx)
+        r0, m0, n0 = agg("notime", idx)
+        deltas["rmse"].append(rt - r0)
+        deltas["mae"].append(mt - m0)
+        deltas["nll"].append(nt - n0)
+    print(f"\npaired deltas time − notime (negative = the dock helps), "
+          f"user bootstrap [5/50/95]:")
+    for k in ("rmse", "mae", "nll"):
+        d = np.array(deltas[k])
+        lo, mid, hi = np.percentile(d, [5, 50, 95])
+        print(f"  {k:<5} {mid:+.4f} [{lo:+.4f}, {hi:+.4f}]  "
+              f"P(dock helps) {float(np.mean(d < 0)):.2f}")
+
+
+# ---------------------------------------------------------------------------
 # Descriptive stage
 # ---------------------------------------------------------------------------
 def describe(users, surveys, pairs, feats, args, boot=1000):
@@ -532,6 +843,14 @@ def main():
     ap.add_argument("--describe", action="store_true",
                     help="Print the b̂ distribution / reliability / residual-"
                          "regression existence checks (skips the CV eval).")
+    ap.add_argument("--dock-value", action="store_true",
+                    help="Paired CV of the PRODUCTION consensus fit with the "
+                         "time dock on vs off — does the survey-fit alpha "
+                         "generalize to held-out users at all?")
+    ap.add_argument("--global-x", action="store_true",
+                    help="Per-attempt time x_i with ONE GLOBAL slope inside "
+                         "the rating fit (no per-user b_u), vs the plain "
+                         "rating ± the median-time dock.")
     ap.add_argument("--boot", type=int, default=1000)
     ap.add_argument("--cv-seeds", type=int, default=CV_SEEDS)
     args = ap.parse_args()
@@ -545,6 +864,10 @@ def main():
 
     if args.describe:
         describe(users, surveys, pairs, feats, args, boot=args.boot)
+    elif args.dock_value:
+        dock_value(users, surveys, args, boot=args.boot)
+    elif args.global_x:
+        global_x_eval(users, surveys, args, seeds=args.cv_seeds, boot=args.boot)
     else:
         cross_fitted_eval(pairs, feats, seeds=args.cv_seeds, boot=args.boot)
     print("\n(no files written — research harness; production stays "
