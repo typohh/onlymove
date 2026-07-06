@@ -19,7 +19,8 @@ const SYNC_PAGE_LIMIT = 1000;
 // the stats eviction-recovery refresh, account adoption, and the outbox
 // reconcile all count. Each is a full per-user table scan; client-side counting
 // is bypassable by clearing localStorage, so the cap lives here. Incremental
-// syncs (real cursor) and existence/frontier probes (limit:1) don't count.
+// syncs (real cursor), existence/frontier probes (limit:1), and full pulls
+// that return NO rows (fresh empty accounts) don't count.
 const HISTORY_REFRESH_DAILY_CAP = 3;
 
 export async function handleSync(request, env) {
@@ -54,26 +55,24 @@ export async function handleSync(request, env) {
     // per-user scan. Capping the query itself (sinceId === 0) rather than a
     // client flag means it can't be bypassed. Probes (limit:1) and incremental
     // syncs skip it; page 2+ of a full pull carries a real cursor, so one pull
-    // counts once.
+    // counts once. Billing happens after the query, and only when rows were
+    // actually served: an empty result (a fresh account with no reports yet —
+    // a cursor-less device retries from 0 on every load/visibility trigger)
+    // reads ~0 rows and must not eat the day's slots.
     const isFullPull = sinceId === 0 && limit > 1;
-    let refreshesLeft;
+    const day = new Date().toISOString().slice(0, 10);
+    let fullPullUsed = 0;
     if (isFullPull) {
-      const day = new Date().toISOString().slice(0, 10);
       const row = await env.DB.prepare(
         `SELECT count FROM history_refresh_log WHERE user_id = ? AND day = ?`
       ).bind(data.userId, day).first();
-      const used = row ? row.count : 0;
-      if (used >= HISTORY_REFRESH_DAILY_CAP) {
+      fullPullUsed = row ? row.count : 0;
+      if (fullPullUsed >= HISTORY_REFRESH_DAILY_CAP) {
         return new Response(
           JSON.stringify({ reports: [], cursorId: sinceId, hasMore: false, capExceeded: true, refreshesLeft: 0 }),
           { status: 200, headers: syncHeaders }
         );
       }
-      await env.DB.prepare(
-        `INSERT INTO history_refresh_log (user_id, day, count) VALUES (?, ?, 1)
-         ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1`
-      ).bind(data.userId, day).run();
-      refreshesLeft = HISTORY_REFRESH_DAILY_CAP - (used + 1);
     }
 
     // Fetch one row past the page limit to detect truncation. id is unique, so
@@ -89,6 +88,19 @@ export async function handleSync(request, env) {
     if (rows.length > limit) {
       hasMore = true;
       rows = rows.slice(0, limit);
+    }
+
+    // Bill the full pull only now that we know it served something.
+    let refreshesLeft;
+    if (isFullPull) {
+      if (rows.length > 0) {
+        await env.DB.prepare(
+          `INSERT INTO history_refresh_log (user_id, day, count) VALUES (?, ?, 1)
+           ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1`
+        ).bind(data.userId, day).run();
+        fullPullUsed += 1;
+      }
+      refreshesLeft = HISTORY_REFRESH_DAILY_CAP - fullPullUsed;
     }
 
     const reports = rows.map((r) => ({

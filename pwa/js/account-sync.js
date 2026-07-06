@@ -538,6 +538,11 @@ export async function maybeFinishAccountSwitch() {
     // Surface that to the caller so init can tell the user.
     const result = await pullReports({ mode: 'adopt', fromStart: true });
     if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
+    // pullReports retrains (models + rank re-fit) only when it merged rows. If
+    // the adopt inserted nothing — capped, network failure, or the rows were
+    // already local — run the same update explicitly so the device never
+    // finishes a switch with models/rank derived from the pre-switch state.
+    if (result.inserted === 0) retrainAfterMerge([], 'adopt');
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
     // The synced fill above already filled the tail too (includeTail on a full
