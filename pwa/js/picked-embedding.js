@@ -56,6 +56,45 @@ function decodeFp16Buffer(arrayBuffer, K) {
     return out;
 }
 
+// Parse a Content-Range header ("bytes <start>-<end>/<total>"). Returns
+// { start, end, total } with total null for the unknown form ("*"), or null
+// when the header is absent/malformed.
+function parseContentRange(header) {
+    const m = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(header || '');
+    if (!m) return null;
+    return {
+        start: parseInt(m[1]),
+        end: parseInt(m[2]),
+        total: m[3] === '*' ? null : parseInt(m[3]),
+    };
+}
+
+// Resolve a Range response to the requested slice, defensively:
+//   - 206: the Content-Range start must match what we asked for — a
+//     misbehaving cache/proxy answering with a DIFFERENT range would otherwise
+//     silently decode some other cell's floats. Reject on mismatch or a
+//     missing/malformed header.
+//   - 200: the host ignored Range (wrangler dev's asset server; Cloudflare
+//     assets on a cache miss) and served the whole file — slice our bytes out.
+//   - Short reads fall through to decodeFp16Buffer's length check via null.
+async function sliceRangeResponse(resp, byteStart, byteLength) {
+    if (resp.status === 206) {
+        const cr = parseContentRange(resp.headers.get('Content-Range'));
+        if (!cr || cr.start !== byteStart) {
+            console.warn(`picked-embedding: 206 range mismatch (asked ${byteStart}, got ${cr ? cr.start : 'unparseable'})`);
+            return null;
+        }
+        return resp.arrayBuffer();
+    }
+    if (!resp.ok) return null;
+    const buf = await resp.arrayBuffer();
+    if (buf.byteLength > byteLength) {
+        if (byteStart + byteLength > buf.byteLength) return null;
+        return buf.slice(byteStart, byteStart + byteLength);
+    }
+    return buf;
+}
+
 // Internal: Range-fetch + decode given an already-resolved index entry. Used
 // by both the live (game-logic) and backfill paths so they share one network
 // + decode codepath.
@@ -75,19 +114,8 @@ async function fetchCellEmbeddingFromIndexEntry({
         const resp = await fetch(url, {
             headers: { Range: `bytes=${byteStart}-${byteEnd}` },
         });
-        // 206 Partial Content is the success status for Range. A host that
-        // ignores Range (wrangler dev's asset server does) serves the whole
-        // file with 200 — slice our cell out of it rather than decoding the
-        // first cell of the bin.
-        if (!resp.ok && resp.status !== 206) {
-            return null;
-        }
-        let buf = await resp.arrayBuffer();
-        if (resp.status === 200 && buf.byteLength > meta.bytes_per_cell) {
-            if (byteStart + meta.bytes_per_cell > buf.byteLength) return null;
-            buf = buf.slice(byteStart, byteStart + meta.bytes_per_cell);
-        }
-        return decodeFp16Buffer(buf, meta.K);
+        const buf = await sliceRangeResponse(resp, byteStart, meta.bytes_per_cell);
+        return buf ? decodeFp16Buffer(buf, meta.K) : null;
     } catch (_err) {
         return null;
     }
@@ -169,17 +197,27 @@ export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
             headers: { Range: `bytes=${byteStart}-${byteStart + bpc - 1}` },
         });
         if (!resp.ok && resp.status !== 206) return null;
+        const cr = resp.status === 206 ? parseContentRange(resp.headers.get('Content-Range')) : null;
+        if (resp.status === 206 && (!cr || cr.start !== byteStart)) {
+            // A 206 for some other range (misbehaving cache/proxy) would make
+            // every decoded row garbage — reject rather than mis-slice.
+            console.warn(`picked-embedding: sidecar 206 range mismatch (asked ${byteStart}, got ${cr ? cr.start : 'unparseable'})`);
+            return null;
+        }
         const body = await resp.arrayBuffer();
-        const m = /\/(\d+)\s*$/.exec(resp.headers.get('Content-Range') || '');
-        const total = resp.status === 206 ? (m ? parseInt(m[1]) : null) : body.byteLength;
+        // Row-alignment guard: the sidecar's byte length must equal lookup.txt's
+        // line count x row size, else the two files are from different packaging
+        // runs and every row address is wrong — poison it for the session.
+        const total = resp.status === 206 ? (cr ? cr.total : null) : body.byteLength;
         if (Number.isFinite(expectedRows) && Number.isFinite(total) && total !== expectedRows * bpc) {
             console.warn('picked-embedding: lookup.embeddings.bin size mismatches lookup.txt — skipping correct-move fills this session');
             correctSidecarBroken = true;
             return null;
         }
         if (resp.status === 200 && body.byteLength > bpc) {
-            // Host ignored Range (wrangler dev's asset server does) — keep the
-            // whole file and serve every later row from memory.
+            // Host ignored Range (wrangler dev's asset server does; Cloudflare
+            // assets on a cache miss) — keep the whole file and serve every
+            // later row from memory.
             correctSidecarFull = body;
             return rowFromWhole();
         }

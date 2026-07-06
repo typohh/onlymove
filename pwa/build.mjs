@@ -23,6 +23,12 @@ const DIST_DIR = 'dist';
 const STATIC_ASSETS = [
     'index.html',
     'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
+    // Workers-assets header rules (must sit at the dist root). The immutable
+    // Cache-Control rules on the content-hashed / ?v-busted data files are what
+    // let Cloudflare's edge cache store them — and cache HITS are the only path
+    // that serves 206 Range responses (the assets layer itself answers Range
+    // with 200 + the full body).
+    '_headers',
     'corners',
     'apple-touch-icon.png',
     'favicon.ico',
