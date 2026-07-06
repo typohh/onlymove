@@ -436,6 +436,126 @@ def cross_fitted_eval(pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS, boot=1000):
 
 
 # ---------------------------------------------------------------------------
+# --time-form: med_t^d with the exponent LEARNED (Box-Cox), vs the log dock
+# ---------------------------------------------------------------------------
+# Box-Cox exponents: d=0 is the shipped log form, d=1 linear-in-minutes,
+# d<0 inverse-like. The dock coefficient absorbs affine scale, so (m^d − 1)/d
+# ≡ m^d as a feature; each transformed feature is residualized on rating and
+# unit-SD standardized so ONE alpha grid serves every d.
+D_GRID = np.array([-1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0,
+                   3.0, 4.0, 6.0])
+
+
+def _boxcox(m, d):
+    m = np.asarray(m, float)
+    return np.log(m) if abs(d) < 1e-9 else (np.power(m, d) - 1.0) / d
+
+
+def time_form_eval(users, surveys, args, seeds=CV_SEEDS, folds=CV_FOLDS,
+                   boot=1000):
+    """Paired cross-fitted comparison of the log-form dock vs a LEARNED-exponent
+    power dock R + α·boxcox(med_min; d): (d, α) picked on train folds, scored
+    held-out — same protocol/folds as cross_fitted_eval."""
+    from pipeline.map_rating_to_rank import load_user_median_solve_minutes
+    med_min = load_user_median_solve_minutes(args.sqlite)
+    pairs = []
+    for _, row in surveys.iterrows():
+        pref = str(row["user_id"])[:8]
+        g = row.get("rank_scalar")
+        u = users.get(pref)
+        if (u is None or g is None or np.isnan(float(g))
+                or pref not in med_min or med_min[pref] <= 0):
+            continue
+        pairs.append((pref, row["server"], u["R"], float(g)))
+    prefs = sorted({p for p, *_ in pairs})
+    R = np.array([users[p]["R"] for p in prefs])
+    m = np.array([med_min[p] for p in prefs])
+
+    # Per-exponent feature: boxcox(med_min; d), residualized on rating, unit SD.
+    feat_of = {}
+    for d in D_GRID:
+        h = _boxcox(m, d)
+        g1, g0 = np.polyfit(R, h, 1)
+        res = h - (g0 + g1 * R)
+        sd = float(np.std(res)) or 1.0
+        feat_of[float(d)] = {p: float(v / sd) for p, v in zip(prefs, res)}
+
+    CANDS = ["base", "log dock (d=0)", "linear dock (d=1)", "square dock (d=2)",
+             "power dock (d learned)"]
+    adj = {c: np.zeros((seeds, len(pairs))) for c in CANDS}
+    picked_d, picked_a = [], []
+    for seed in range(seeds):
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(prefs))
+        fold = {prefs[j]: i % folds for i, j in enumerate(order)}
+        for kf in range(folds):
+            tr = [i for i, p in enumerate(pairs) if fold[p[0]] != kf]
+            te = [i for i, p in enumerate(pairs) if fold[p[0]] == kf]
+            if not te or len(tr) < 10:
+                continue
+            tr_pairs = [pairs[i] for i in tr]
+            coef = {"base": (0.0, 0.0)}
+            for lbl, dfix in (("log dock (d=0)", 0.0), ("linear dock (d=1)", 1.0),
+                              ("square dock (d=2)", 2.0)):
+                col = np.array([feat_of[dfix][pairs[i][0]] for i in tr])
+                surf = weighted_spearman_grid(tr_pairs, [col], [ALPHA_GRID])
+                coef[lbl] = (dfix, float(ALPHA_GRID[int(np.nanargmax(surf))]))
+            scores = []
+            for d in D_GRID:
+                col = np.array([feat_of[float(d)][pairs[i][0]] for i in tr])
+                scores.append(weighted_spearman_grid(tr_pairs, [col], [ALPHA_GRID]))
+            surf = np.array(scores)
+            di, ai = np.unravel_index(int(np.nanargmax(surf)), surf.shape)
+            coef["power dock (d learned)"] = (float(D_GRID[di]),
+                                              float(ALPHA_GRID[ai]))
+            picked_d.append(float(D_GRID[di]))
+            picked_a.append(float(ALPHA_GRID[ai]))
+            for c in CANDS:
+                d, alpha = coef[c]
+                for i in te:
+                    adj[c][seed, i] = (pairs[i][2]
+                                       + alpha * feat_of[d][pairs[i][0]])
+
+    def pooled_rho(name, idx, seed_list):
+        vals = []
+        for seed in seed_list:
+            sub = [(pairs[i][0], pairs[i][1], adj[name][seed, i], pairs[i][3])
+                   for i in idx]
+            vals.append(weighted_spearman_grid(sub, [], []))
+        return float(np.mean(vals))
+
+    full = list(range(len(pairs)))
+    rho = {c: pooled_rho(c, full, range(seeds)) for c in CANDS}
+    by_pref = defaultdict(list)
+    for i, p in enumerate(pairs):
+        by_pref[p[0]].append(i)
+    REF = "log dock (d=0)"
+    deltas = {c: [] for c in CANDS if c != REF}
+    for bnum in range(boot):
+        rng = np.random.default_rng(50000 + bnum)
+        pick = rng.choice(len(prefs), len(prefs), replace=True)
+        idx = [i for j in pick for i in by_pref[prefs[j]]]
+        ref = pooled_rho(REF, idx, range(seeds))
+        for c in deltas:
+            deltas[c].append(pooled_rho(c, idx, range(seeds)) - ref)
+    vc = {d: picked_d.count(d) for d in sorted(set(picked_d))}
+    print(f"\nLearned-exponent power dock med_t^d vs the log dock "
+          f"({len(pairs)} declarations, {len(prefs)} timed users; "
+          f"{seeds}x{folds}-fold grouped by user, paired; {boot} bootstrap)")
+    print(f"picked d over folds: {vc}  (0 = log; median α {np.median(picked_a):+.2f})")
+    print(f"{'candidate':<26}{'rho_cv':>8}{'Δ vs log dock [5,95]':>26}{'P(>log)':>9}")
+    for c in CANDS:
+        if c == REF:
+            print(f"{c:<26}{rho[c]:>8.4f}{'(reference)':>26}")
+        else:
+            d = np.array(deltas[c])
+            lo, mid, hi = np.percentile(d, [5, 50, 95])
+            print(f"{c:<26}{rho[c]:>8.4f}"
+                  f"{f'{mid:+.4f} [{lo:+.4f},{hi:+.4f}]':>26}"
+                  f"{float(np.mean(d > 0)):>9.2f}")
+
+
+# ---------------------------------------------------------------------------
 # --global-x: per-attempt time with ONE GLOBAL slope, inside the rating fit
 # ---------------------------------------------------------------------------
 # Grid of global per-attempt time slopes (rating units per decade of
@@ -851,6 +971,9 @@ def main():
                     help="Per-attempt time x_i with ONE GLOBAL slope inside "
                          "the rating fit (no per-user b_u), vs the plain "
                          "rating ± the median-time dock.")
+    ap.add_argument("--time-form", action="store_true",
+                    help="Learned-exponent power dock med_t^d (Box-Cox; d=0 "
+                         "recovers the shipped log form) vs the log dock.")
     ap.add_argument("--boot", type=int, default=1000)
     ap.add_argument("--cv-seeds", type=int, default=CV_SEEDS)
     args = ap.parse_args()
@@ -868,6 +991,8 @@ def main():
         dock_value(users, surveys, args, boot=args.boot)
     elif args.global_x:
         global_x_eval(users, surveys, args, seeds=args.cv_seeds, boot=args.boot)
+    elif args.time_form:
+        time_form_eval(users, surveys, args, seeds=args.cv_seeds, boot=args.boot)
     else:
         cross_fitted_eval(pairs, feats, seeds=args.cv_seeds, boot=args.boot)
     print("\n(no files written — research harness; production stays "

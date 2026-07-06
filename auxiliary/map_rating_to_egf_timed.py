@@ -155,10 +155,13 @@ def build_decls(args):
     m_xs, m_idx = load_rating_rank_curve(args.dir, size=str(SIZES[0]), offset=0.0)
     order = np.argsort(m_xs)
     m_xs, m_idx = m_xs[order], m_idx[order]
-    ta = load_time_adjust(args.dir)               # (alpha, g0, g1) or None
+    # load_time_adjust returns the CONSENSUS dock (alpha, center) — the old
+    # rank-residualized (alpha, g0, g1) form is retired, so express the shipped
+    # dock in the old machinery as g0=center, g1=0 (no rank line).
+    ta = load_time_adjust(args.dir)               # (alpha, center) or None
     if ta is None:
         print("  WARNING: no time_adjust block — R_prod falls back to R_raw")
-    alpha, g0, g1 = ta if ta else (0.0, 0.0, 0.0)
+    alpha, g0, g1 = (ta[0], ta[1], 0.0) if ta else (0.0, 0.0, 0.0)
 
     # first_time_only: mirror the production anchor + the client's first-time-only
     # estimator; repeats would inflate the 80%-clear rating this harness fits.
