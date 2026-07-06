@@ -74,7 +74,7 @@ const PER_ATTEMPT_ERA_MS = Date.parse('2026-05-15T00:00:00Z');
 // trusted as canonical can silently resolve to the WRONG variation. If that
 // deploy slips past this date, bump the date before deploying (skipping a few
 // extra days of repeat moves is harmless; trusting wrong-frame ones is not).
-const CANONICAL_MOVE_ERA_MS = Date.parse('2026-07-09T00:00:00Z');
+const CANONICAL_MOVE_ERA_MS = Date.parse('2026-07-07T00:00:00Z');
 // Ack-less local entries are claimed by a server row when identity fields match
 // and the timestamps agree within this window (local Date.now() at attempt vs
 // edge time at insert — normally seconds apart; the slack absorbs clock skew).
