@@ -67,9 +67,15 @@ const FUZZY_WINDOW_MS = 10 * 60 * 1000;
 // Pagination safety bound: 100 pages × 1000 rows covers any realistic history.
 const MAX_PAGES = 100;
 
+// The userId match is the only validity requirement — the state must belong to
+// the active account. (An earlier check also demanded the legacy created_at
+// `cursor` string, which the id-cursor redesign no longer writes; that rejected
+// every post-redesign state, so cursorId/lastSeq were discarded on every read
+// and each pull restarted from id 0 — a billed full pull per app-open that
+// capped most active accounts daily and killed the seq signal.)
 function readSyncState() {
     const parsed = readJSON(SYNC_STATE_KEY);
-    if (parsed && parsed.userId === state.userId && typeof parsed.cursor === 'string') {
+    if (parsed && parsed.userId === state.userId) {
         return parsed;
     }
     return null;
