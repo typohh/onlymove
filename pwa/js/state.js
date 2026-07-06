@@ -279,7 +279,7 @@ let _boardSize = (() => {
 // be crypto-strength — Math.random() is predictable. Existing ids are
 // grandfathered as-is. 8 chars of base36 ≈ 41 bits; enumeration is bounded by
 // the Worker's per-IP rate limits.
-const generateUserId = () => {
+export const generateUserId = () => {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
     if (globalThis.crypto && typeof crypto.getRandomValues === 'function') {
         let id = '';

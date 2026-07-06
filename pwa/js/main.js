@@ -80,7 +80,7 @@ import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
-import { hasPendingAccountSwitch, maybeFinishAccountSwitch, startBackgroundSync } from './account-sync.js';
+import { hasPendingAccountSwitch, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { maybeHandleRegistration } from './registration.js';
 import { refreshInviteAccess } from './invite-access.js';
@@ -391,25 +391,24 @@ function loadRequiredAssetsOrThrow() {
 // from local history: the pulled-and-re-anchored rank drives the first problem
 // selection, and the backfill below sees the rebuilt entries. Needs M (loaded
 // above) for the rank refill. No-op when there's no pending switch.
+// A FAILED adoption (daily cap / network) never half-adopts: account-sync falls
+// back to a fresh account id and reloads, leaving a notice we alert here on the
+// post-fallback boot.
 async function maybeFinishPendingAccountSwitch() {
+    const failReason = consumeAccountSwitchFailure();
+    if (failReason) {
+        alert(getTerm(failReason === 'cap' ? 'accountAdoptFailedCap' : 'accountAdoptFailedNetwork'));
+    }
     if (!hasPendingAccountSwitch()) return;
     // The full-history pull + shard field fill + retrain can take on the order
     // of a minute; say so instead of showing a bare spinner.
     showLoading(getTerm('accountRestoring'));
-    let switchResult = null;
     try {
-        switchResult = await maybeFinishAccountSwitch();
+        await maybeFinishAccountSwitch();
     } catch (e) {
         console.error('account switch pull failed:', e);
     } finally {
         hideLoading();
-    }
-    // Adoption counts against the daily full-history cap; if it was exceeded the
-    // device adopted the account but pulled no history (it fills via incremental
-    // sync once the cap resets). Tell the user rather than show a silently empty
-    // profile.
-    if (switchResult && switchResult.capExceeded) {
-        alert(getTerm('accountHistoryCapped'));
     }
 }
 

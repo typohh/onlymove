@@ -39,7 +39,7 @@ import {
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank,
     evictColdTail, clearHistoryTail, syncTailExpectedToActual,
-    SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
+    SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
 import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
@@ -467,20 +467,24 @@ function retrainAfterMerge(insertedEntries, mode) {
 // maybeFinishAccountSwitch, which pulls the full server history from ''.
 // Settings that aren't account-derived (board size, audio, language, corpus
 // version stamps) survive the wipe.
+// Everything derived from the current account's history — wiped on adoption
+// (switchAccount) and again when a failed adoption falls back to a fresh
+// account (maybeFinishAccountSwitch drops the partially merged rows).
+const ACCOUNT_WIPE_KEYS = [
+    'answerHistory', 'challengeProblem', 'previousProblem',
+    'userRank', 'serveRank',
+    'modelParams', 'adamState',
+    'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
+    'recallPausedUntil',
+    // The server-side recall schedule snapshot belongs to the old account;
+    // the new account's first upload must go replace-all.
+    'recallScheduleSnapshot',
+    SYNC_STATE_KEY,
+];
+
 export function switchAccount(newId) {
     if (!isValidAccountCode(newId) || newId === state.userId) return false;
-    const wipeKeys = [
-        'answerHistory', 'challengeProblem', 'previousProblem',
-        'userRank', 'serveRank',
-        'modelParams', 'adamState',
-        'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
-        'recallPausedUntil',
-        // The server-side recall schedule snapshot belongs to the old account;
-        // the new account's first upload must go replace-all.
-        'recallScheduleSnapshot',
-        SYNC_STATE_KEY,
-    ];
-    for (const k of wipeKeys) localStorage.removeItem(k);
+    for (const k of ACCOUNT_WIPE_KEYS) localStorage.removeItem(k);
     localStorage.setItem('userId', newId);
     writeSyncState({ userId: newId });
     localStorage.setItem(SWITCH_FLAG_KEY, '1');
@@ -522,6 +526,16 @@ export function hasPendingAccountSwitch() {
     return !!localStorage.getItem(SWITCH_FLAG_KEY);
 }
 
+// A failed adoption leaves a marker for the next boot's user notice ('cap' or
+// 'network'); main.js consumes it and alerts.
+const SWITCH_FAILED_KEY = 'accountSwitchFailed';
+
+export function consumeAccountSwitchFailure() {
+    const reason = localStorage.getItem(SWITCH_FAILED_KEY);
+    if (reason) localStorage.removeItem(SWITCH_FAILED_KEY);
+    return reason; // 'cap' | 'network' | null
+}
+
 // Called once during init, before the first problem load, so a just-switched
 // device serves problems matched to the pulled rank instead of rank 0.
 // Returns true if a switch was completed (caller may want a spinner around it).
@@ -532,16 +546,30 @@ export async function maybeFinishAccountSwitch() {
     // drop it (and its eviction tracking) before pulling the new account's history.
     await clearHistoryTail();
     // Adoption is a from-the-beginning full pull, so it counts against the daily
-    // cap. If the account has already used its full pulls today the server
-    // returns capExceeded and no rows — the device adopts the account but stays
-    // empty until incremental sync fills it (next day, when the cap resets).
-    // Surface that to the caller so init can tell the user.
+    // cap (capExceeded when spent) and can also fail on the network.
     const result = await pullReports({ mode: 'adopt', fromStart: true });
     if (typeof result.refreshesLeft === 'number') cacheRefreshesLeft(result.refreshesLeft);
+    // The adoption is only allowed to complete if the FULL history arrived: a
+    // half-adopted device would report under the account while serving from a
+    // blank (rank-0) profile. On failure fall back to a FRESH account id — the
+    // old account's local state was already wiped by switchAccount, so there is
+    // nothing to keep — drop any partially merged rows, leave the notice for
+    // the next boot's alert, and reload.
+    if (result.capExceeded || !result.complete) {
+        for (const k of ACCOUNT_WIPE_KEYS) localStorage.removeItem(k);
+        await clearHistoryTail();
+        const freshId = generateUserId();
+        localStorage.setItem('userId', freshId);
+        writeSyncState({ userId: freshId });
+        localStorage.setItem(SWITCH_FAILED_KEY, result.capExceeded ? 'cap' : 'network');
+        localStorage.removeItem(SWITCH_FLAG_KEY);
+        location.reload();
+        return { switched: false };
+    }
     // pullReports retrains (models + rank re-fit) only when it merged rows. If
-    // the adopt inserted nothing — capped, network failure, or the rows were
-    // already local — run the same update explicitly so the device never
-    // finishes a switch with models/rank derived from the pre-switch state.
+    // the completed adopt inserted nothing (rows already local), run the same
+    // update explicitly so the device never finishes a switch with models/rank
+    // derived from the pre-switch state.
     if (result.inserted === 0) retrainAfterMerge([], 'adopt');
     // The full pull lands the whole career in the working set; split it into the
     // working set + tail now, before the first problem load, freeing localStorage.
@@ -549,7 +577,7 @@ export async function maybeFinishAccountSwitch() {
     // pull), so the evicted rows carry their ratings.
     await evictColdTail();
     localStorage.removeItem(SWITCH_FLAG_KEY);
-    return { switched: true, capExceeded: !!result.capExceeded };
+    return { switched: true };
 }
 
 // --- Daily-capped full-history refresh (cap ENFORCED server-side) ---
