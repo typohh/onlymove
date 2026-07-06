@@ -55,8 +55,13 @@ coefficient should be a function of rating rather than one global alpha —
 adjusted = R + α·σ((R − r0)/w)·T with the logistic's center r0 (survey-rating
 quantiles), signed width w (negative = benefit concentrated on WEAKER players
 — the orientation is learned, not assumed), and α all picked on train folds.
-The flat production dock is ~nested at large |w|, and a linear-in-rating
-interaction R + α·T + β·(R_c·T) rides along as the simpler shape.
+The flat production dock is ~nested at large |w|. The gate is crossed with
+BOTH time forms — the shipped log10 median minutes and the --time-form
+positive lead's LINEAR median minutes — so the table answers whether the two
+leads compose: flat-log (prod reference), flat-linear, gate×log, gate×linear,
+plus a paired gate×linear-vs-flat-linear delta isolating the gate's
+contribution on top of the linear form. Gated candidates get a wider α grid
+(the first run saturated the flat grid's edge).
 
 Print-only research harness — writes nothing; production stays
 pipeline.map_rating_to_rank.
@@ -883,16 +888,23 @@ def dock_value(users, surveys, args, folds=CV_FOLDS, seeds=5, boot=1000):
 # LINEAR in α, so every gate is just another feature column for the existing
 # vectorized Spearman grid; the shape search is a loop over columns. w is
 # signed: w>0 = benefit grows with rating (the hypothesis), w<0 = shrinks.
+# The gate is crossed with both time forms: T = log10 median minutes (the
+# shipped dock) and M = LINEAR median minutes (the --time-form lead), each
+# residualized on rating; M is unit-SD standardized like time_form_eval's
+# columns. Gated candidates search GATE_ALPHA_GRID — wider than the flat
+# ALPHA_GRID because the gate concentrates the whole dock on a rating band
+# (the first run saturated the flat grid's −1.5 edge).
 GATE_W_GRID = [0.25, 0.5, 1.0, 2.0, 4.0]    # logistic width, rating units
 GATE_Q_GRID = np.linspace(0.05, 0.95, 10)   # centers = survey-rating quantiles
+GATE_ALPHA_GRID = np.linspace(-3.0, 1.0, 81)
 
 
 def rating_gate_eval(users, pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS,
                      boot=1000):
     """Paired cross-fitted test of a rating-gated med-time dock,
-    R + α·σ((R − r0)/w)·T, with (r0, w, α) learned per train fold, against the
-    flat production dock and a linear-in-rating interaction. Same protocol and
-    fold assignments as cross_fitted_eval."""
+    R + α·σ((R − r0)/w)·(T or M), with (r0, w, α) learned per train fold,
+    against the flat log dock (production) and the flat linear dock. Same
+    protocol and fold assignments as cross_fitted_eval."""
     prefs = sorted({p for p, *_ in pairs})
     Rmap = {p: users[p]["R"] for p in prefs}
     Rarr = np.array([Rmap[p] for p in prefs])
@@ -903,32 +915,35 @@ def rating_gate_eval(users, pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS,
     def sig(pref, r0, w):
         return 1.0 / (1.0 + np.exp(-np.clip((Rmap[pref] - r0) / w, -60, 60)))
 
-    Tof = {p: feats[p]["T"] for p in prefs}
-    # Linear interaction column: centered rating × T_resid, unit SD over users.
-    r_mean = float(Rarr.mean())
-    RT = {p: (Rmap[p] - r_mean) * Tof[p] for p in prefs}
-    sd_rt = float(np.std([RT[p] for p in prefs])) or 1.0
-    RTf = {p: RT[p] / sd_rt for p in prefs}
+    Tof = {p: feats[p]["T"] for p in prefs}        # log form (resid on rating)
+    # Linear form: median minutes = 10**T_raw, residualized on rating, unit SD
+    # (same construction as time_form_eval's d=1 column, same time source as T).
+    m_raw = np.array([10.0 ** users[p]["T"] for p in prefs])
+    g1, g0 = np.polyfit(Rarr, m_raw, 1)
+    m_res = m_raw - (g0 + g1 * Rarr)
+    sd_m = float(np.std(m_res)) or 1.0
+    Mof = {p: float(v / sd_m) for p, v in zip(prefs, m_res)}
 
-    def best_gate(idx):
-        """(rho, r0, w, alpha) maximizing the train-fold Spearman."""
+    def best_gate(idx, col_of):
+        """(rho, r0, w, alpha) maximizing the train-fold Spearman for the
+        given time-feature column dict."""
         tr_pairs = [pairs[i] for i in idx]
         best = (-np.inf, 0.0, 0.0, 0.0)
         for r0, w in gates:
-            col = np.array([sig(pairs[i][0], r0, w) * Tof[pairs[i][0]]
+            col = np.array([sig(pairs[i][0], r0, w) * col_of[pairs[i][0]]
                             for i in idx])
-            surf = weighted_spearman_grid(tr_pairs, [col], [ALPHA_GRID])
+            surf = weighted_spearman_grid(tr_pairs, [col], [GATE_ALPHA_GRID])
             gi = int(np.nanargmax(surf))
             if float(surf.ravel()[gi]) > best[0]:
                 best = (float(surf.ravel()[gi]), r0, w,
-                        float(ALPHA_GRID[gi]))
+                        float(GATE_ALPHA_GRID[gi]))
         return best
 
-    CANDS = ["base", "medtime  R+aT (prod form)", "lin-int  R+aT+b(Rc*T)",
-             "gate     R+a*sig((R-r0)/w)*T"]
+    CANDS = ["base", "med-log  R+aT (prod form)", "med-lin  R+aM (linear)",
+             "gate-log R+a*sig*T", "gate-lin R+a*sig*M"]
     REF = CANDS[1]
     adj = {c: np.zeros((seeds, len(pairs))) for c in CANDS}
-    picked_med, picked_lin, picked_gate = [], [], []
+    picked = {c: [] for c in CANDS}
     for seed in range(seeds):
         rng = np.random.default_rng(seed)
         order = rng.permutation(len(prefs))
@@ -939,26 +954,26 @@ def rating_gate_eval(users, pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS,
             if not te or len(tr) < 10:
                 continue
             tr_pairs = [pairs[i] for i in tr]
-            Tcol = np.array([Tof[pairs[i][0]] for i in tr])
-            surf = weighted_spearman_grid(tr_pairs, [Tcol], [ALPHA_GRID])
-            a_med = float(ALPHA_GRID[int(np.nanargmax(surf))])
-            picked_med.append(a_med)
-            RTcol = np.array([RTf[pairs[i][0]] for i in tr])
-            surf2 = weighted_spearman_grid(tr_pairs, [Tcol, RTcol],
-                                           [ALPHA_GRID, BETA_GRID])
-            ai, bi = np.unravel_index(int(np.nanargmax(surf2)), surf2.shape)
-            a_lin, b_lin = float(ALPHA_GRID[ai]), float(BETA_GRID[bi])
-            picked_lin.append((a_lin, b_lin))
-            _, r0b, wb, ab = best_gate(tr)
-            picked_gate.append((r0b, wb, ab))
+            flat = {}
+            for cname, col_of in ((REF, Tof), (CANDS[2], Mof)):
+                col = np.array([col_of[pairs[i][0]] for i in tr])
+                surf = weighted_spearman_grid(tr_pairs, [col], [ALPHA_GRID])
+                flat[cname] = float(ALPHA_GRID[int(np.nanargmax(surf))])
+                picked[cname].append(flat[cname])
+            gate = {}
+            for cname, col_of in ((CANDS[3], Tof), (CANDS[4], Mof)):
+                _, r0b, wb, ab = best_gate(tr, col_of)
+                gate[cname] = (r0b, wb, ab)
+                picked[cname].append((r0b, wb, ab))
             for i in te:
                 p = pairs[i][0]
                 adj["base"][seed, i] = pairs[i][2]
-                adj[REF][seed, i] = pairs[i][2] + a_med * Tof[p]
-                adj[CANDS[2]][seed, i] = (pairs[i][2] + a_lin * Tof[p]
-                                          + b_lin * RTf[p])
-                adj[CANDS[3]][seed, i] = (pairs[i][2]
-                                          + ab * sig(p, r0b, wb) * Tof[p])
+                adj[REF][seed, i] = pairs[i][2] + flat[REF] * Tof[p]
+                adj[CANDS[2]][seed, i] = pairs[i][2] + flat[CANDS[2]] * Mof[p]
+                for cname, col_of in ((CANDS[3], Tof), (CANDS[4], Mof)):
+                    r0b, wb, ab = gate[cname]
+                    adj[cname][seed, i] = (pairs[i][2]
+                                           + ab * sig(p, r0b, wb) * col_of[p])
 
     def pooled_rho(name, idx, seed_list):
         vals = []
@@ -973,56 +988,64 @@ def rating_gate_eval(users, pairs, feats, seeds=CV_SEEDS, folds=CV_FOLDS,
     by_pref = defaultdict(list)
     for i, p in enumerate(pairs):
         by_pref[p[0]].append(i)
-    deltas = {c: [] for c in CANDS if c != REF}
+    # Paired bootstrap deltas: every candidate vs the log reference, PLUS
+    # gate-lin vs flat-lin (does the gate add anything on top of linear?).
+    COMPARISONS = [(c, REF) for c in CANDS if c != REF] + [(CANDS[4], CANDS[2])]
+    deltas = {cmp: [] for cmp in COMPARISONS}
     for bnum in range(boot):
         rng = np.random.default_rng(50000 + bnum)
         pick = rng.choice(len(prefs), len(prefs), replace=True)
         idx = [i for j in pick for i in by_pref[prefs[j]]]
-        ref = pooled_rho(REF, idx, range(seeds))
-        for c in deltas:
-            deltas[c].append(pooled_rho(c, idx, range(seeds)) - ref)
+        r = {c: pooled_rho(c, idx, range(seeds)) for c in CANDS}
+        for a, b in COMPARISONS:
+            deltas[(a, b)].append(r[a] - r[b])
 
-    print(f"\nRating-gated med-time dock ({len(pairs)} declarations, "
-          f"{len(prefs)} timed users; {seeds}x{folds}-fold grouped by user, "
-          f"paired; {boot} user-bootstrap runs)")
-    print(f"{'candidate':<30}{'rho_cv':>8}{'Δ vs medtime [5,95]':>26}"
-          f"{'P(>med)':>9}")
+    print(f"\nRating-gated med-time dock x time form ({len(pairs)} "
+          f"declarations, {len(prefs)} timed users; {seeds}x{folds}-fold "
+          f"grouped by user, paired; {boot} user-bootstrap runs)")
+    print(f"{'candidate':<28}{'rho_cv':>8}{'Δ vs med-log [5,95]':>26}"
+          f"{'P(>ref)':>9}")
     for c in CANDS:
         if c == REF:
-            print(f"{c:<30}{rho[c]:>8.4f}{'(reference)':>26}")
+            print(f"{c:<28}{rho[c]:>8.4f}{'(reference)':>26}")
         else:
-            d = np.array(deltas[c])
+            d = np.array(deltas[(c, REF)])
             lo, mid, hi = np.percentile(d, [5, 50, 95])
-            print(f"{c:<30}{rho[c]:>8.4f}"
+            print(f"{c:<28}{rho[c]:>8.4f}"
                   f"{f'{mid:+.4f} [{lo:+.4f},{hi:+.4f}]':>26}"
                   f"{float(np.mean(d > 0)):>9.2f}")
+    d = np.array(deltas[(CANDS[4], CANDS[2])])
+    lo, mid, hi = np.percentile(d, [5, 50, 95])
+    print(f"\ngate-lin vs FLAT-lin (the gate's added value on the linear "
+          f"form): {mid:+.4f} [{lo:+.4f},{hi:+.4f}]  "
+          f"P(gate helps) {float(np.mean(d > 0)):.2f}")
 
-    # What shape did it learn?
-    r0s = np.array([g[0] for g in picked_gate])
-    ws = np.array([g[1] for g in picked_gate])
-    als = np.array([g[2] for g in picked_gate])
-    med_r0 = float(np.median(r0s))
-    print(f"\npicked gate over {len(picked_gate)} folds: "
-          f"increasing-in-rating {float(np.mean(ws > 0)):.0%} of folds; "
-          f"median r0 {med_r0:+.2f} rating "
-          f"(~{100 * float(np.mean(Rarr <= med_r0)):.0f}th pct of survey "
-          f"users), median |w| {float(np.median(np.abs(ws))):.2f}, "
-          f"median α {float(np.median(als)):+.2f}")
-    print(f"picked α (medtime) median {float(np.median(picked_med)):+.2f}; "
-          f"lin-int median (α, β) "
-          f"({float(np.median([x[0] for x in picked_lin])):+.2f}, "
-          f"{float(np.median([x[1] for x in picked_lin])):+.2f})")
-    in_rho, r0f, wf, af = best_gate(full)
-    print(f"in-sample full-data gate: r0 {r0f:+.2f}, w {wf:+.2f}, "
-          f"α {af:+.2f} (train rho {in_rho:.4f}); implied dock coefficient "
-          f"α·σ at survey rating deciles:")
-    qs = [10, 30, 50, 70, 90]
-    parts = []
-    for q in qs:
-        rq = float(np.percentile(Rarr, q))
-        s = 1.0 / (1.0 + np.exp(-np.clip((rq - r0f) / wf, -60, 60)))
-        parts.append(f"p{q} (R={rq:+.1f}): {af * s:+.2f}")
-    print("  " + "   ".join(parts))
+    # What shape did each gate learn?
+    for cname, col_of, unit in ((CANDS[3], Tof, "per log10-min"),
+                                (CANDS[4], Mof, f"per {sd_m:.1f} min (1 SD)")):
+        g = picked[cname]
+        r0s = np.array([x[0] for x in g])
+        ws = np.array([x[1] for x in g])
+        als = np.array([x[2] for x in g])
+        med_r0 = float(np.median(r0s))
+        print(f"\n{cname}: picked over {len(g)} folds — increasing-in-rating "
+              f"{float(np.mean(ws > 0)):.0%}; median r0 {med_r0:+.2f} "
+              f"(~{100 * float(np.mean(Rarr <= med_r0)):.0f}th pct), "
+              f"median |w| {float(np.median(np.abs(ws))):.2f}, "
+              f"median α {float(np.median(als)):+.2f} ({unit})")
+        in_rho, r0f, wf, af = best_gate(full, col_of)
+        qs = [10, 30, 50, 70, 90]
+        parts = []
+        for q in qs:
+            rq = float(np.percentile(Rarr, q))
+            s = 1.0 / (1.0 + np.exp(-np.clip((rq - r0f) / wf, -60, 60)))
+            parts.append(f"p{q}: {af * s:+.2f}")
+        print(f"  in-sample full-data: r0 {r0f:+.2f}, w {wf:+.2f}, "
+              f"α {af:+.2f} (train rho {in_rho:.4f}); α·σ at rating deciles: "
+              + "   ".join(parts))
+    print(f"flat picked α: med-log median "
+          f"{float(np.median(picked[REF])):+.2f}, med-lin median "
+          f"{float(np.median(picked[CANDS[2]])):+.2f} ({unit})")
 
 
 # ---------------------------------------------------------------------------
