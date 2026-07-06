@@ -93,7 +93,9 @@ export function computeUserCommunityBuckets(history, timeBins) {
         .filter(t => t > 0));
     if (reviewMed != null) out.review = binSeconds(reviewMed);
 
-    // Recall time: shortest failure→next-attempt gap that is ≥12h, per problem.
+    // Recall time: median novel→first-repeat gap ≥12h across problems — per
+    // problem the gap from the novel (first non-repeat) attempt, only when it
+    // FAILED, to the very next attempt (mirrors the Worker's recallDist).
     const RECALL_MIN_MS = 12 * 3600e3;
     const RECALL_HI = [24, 48, 72, 96, 120, Infinity].map(h => h * 3600e3);
     const seqByProblem = new Map();
@@ -101,19 +103,22 @@ export function computeUserCommunityBuckets(history, timeBins) {
         if (!a.problemId) continue;
         let seq = seqByProblem.get(a.problemId);
         if (!seq) { seq = []; seqByProblem.set(a.problemId, seq); }
-        seq.push({ t: a.date, success: !!a.correct });
+        seq.push({ t: a.date, success: !!a.correct, repeat: !!a.isRepeat });
     }
-    let recallMin = Infinity;
+    const recallGaps = [];
     for (const seq of seqByProblem.values()) {
         if (seq.length < 2) continue;
         seq.sort((x, y) => x.t - y.t);
-        for (let i = 1; i < seq.length; i++) {
-            if (seq[i - 1].success) continue;            // recall after a success — skip
-            const gap = seq[i].t - seq[i - 1].t;
-            if (gap >= RECALL_MIN_MS && gap < recallMin) recallMin = gap;
-        }
+        // A leading repeat means the novel attempt predates the 7-day window —
+        // that problem contributes nothing (same rule as the Worker).
+        const ni = seq.findIndex(e => !e.repeat);
+        if (ni < 0 || ni + 1 >= seq.length) continue;
+        if (seq[ni].success) continue;               // recall after a success — skip
+        const gap = seq[ni + 1].t - seq[ni].t;
+        if (gap >= RECALL_MIN_MS) recallGaps.push(gap);
     }
-    if (recallMin < Infinity) out.recall = RECALL_HI.findIndex(hi => recallMin < hi);
+    const recallMed = median(recallGaps);
+    if (recallMed != null) out.recall = RECALL_HI.findIndex(hi => recallMed < hi);
 
     // Answer-derived rank: mean internal-rank index of distinct first-time
     // problems → EGF scalar → label (the server's recipe, minus shard rounding;

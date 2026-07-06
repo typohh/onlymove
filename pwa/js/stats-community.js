@@ -131,7 +131,7 @@ export async function buildServerStatsPane(history = []) {
         pane.append(h, makeBarList(binHist(data.reviewHist, bucketSec), you.review));
     }
 
-    // Recall time: per user, the shortest failure→next-attempt gap (pre-binned
+    // Recall time: per user, the median novel→first-repeat gap (pre-binned
     // server-side). x = recall-time bin, y = users.
     if (data.recallDist && data.recallDist.some(b => b.value)) {
         const h = document.createElement('div');

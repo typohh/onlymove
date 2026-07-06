@@ -137,7 +137,7 @@ async function computeServerStats(env) {
       if (!pm) { pm = new Map(); userProblemSeq.set(r.user_id, pm); }
       let seq = pm.get(r.problem);
       if (!seq) { seq = []; pm.set(r.problem, seq); }
-      seq.push({ t: ts, success: !!r.success });
+      seq.push({ t: ts, success: !!r.success, repeat: !!r.is_repeat });
     }
 
     if (!r.is_repeat) {
@@ -178,15 +178,17 @@ async function computeServerStats(env) {
     reviewB.set(b, (reviewB.get(b) || 0) + 1);
   }
 
-  // Recall time, one sample per user: the SHORTEST failure→next-attempt gap
-  // across all their problems. Pre-binned server-side (the spans run minutes to
-  // days, so the fine solving/review buckets don't apply) and rendered with
-  // makeBarList like attemptsPerUserDist. Only gaps where the earlier attempt
-  // FAILED count (see userProblemSeq note); the 7-day window naturally bounds
-  // how long a gap we can observe, which is fine since we take the minimum.
-  // Gaps under 12h are ignored entirely (too short to be a meaningful recall
-  // interval), so the per-user value is the shortest failure→next-attempt gap
-  // that is at least 12h.
+  // Recall time, one sample per user: the MEDIAN novel→first-repeat gap across
+  // their problems. Per problem, the gap runs from the NOVEL (first non-repeat)
+  // attempt to the very next attempt on that problem, and only counts when the
+  // novel attempt FAILED (see userProblemSeq note — post-success intervals are
+  // set by the spaced-repetition schedule, not comparable). Pre-binned
+  // server-side (the spans run minutes to days, so the fine solving/review
+  // buckets don't apply) and rendered with makeBarList like
+  // attemptsPerUserDist. Gaps under 12h are ignored entirely (a same-session
+  // retry, not a meaningful recall interval). The 7-day window right-censors
+  // long gaps (a novel attempt whose first repeat falls outside the window
+  // contributes nothing), which biases the median slightly short — accepted.
   const RECALL_MIN_MS = 12 * 3600e3;
   const RECALL_BINS = [
     { hi: 24 * 3600e3, label: '<1d' },
@@ -198,18 +200,21 @@ async function computeServerStats(env) {
   ];
   const recallDist = RECALL_BINS.map(b => ({ label: b.label, value: 0 }));
   for (const pm of userProblemSeq.values()) {
-    let userMin = Infinity;
+    const gaps = [];
     for (const seq of pm.values()) {
       if (seq.length < 2) continue;
       seq.sort((a, b) => a.t - b.t);
-      for (let i = 1; i < seq.length; i++) {
-        if (seq[i - 1].success) continue;           // recall after a success — skip
-        const gap = seq[i].t - seq[i - 1].t;
-        if (gap >= RECALL_MIN_MS && gap < userMin) userMin = gap;
-      }
+      // The novel attempt must itself be in-window; a leading repeat means the
+      // novel attempt predates the window, so that problem contributes nothing.
+      const ni = seq.findIndex(e => !e.repeat);
+      if (ni < 0 || ni + 1 >= seq.length) continue;
+      if (seq[ni].success) continue;              // recall after a success — skip
+      const gap = seq[ni + 1].t - seq[ni].t;
+      if (gap >= RECALL_MIN_MS) gaps.push(gap);
     }
-    if (userMin < Infinity) {
-      const bi = RECALL_BINS.findIndex(b => userMin < b.hi);
+    const med = median(gaps);
+    if (med != null) {
+      const bi = RECALL_BINS.findIndex(b => med < b.hi);
       if (bi >= 0) recallDist[bi].value += 1;
     }
   }
