@@ -784,6 +784,15 @@ def compute_data_version(output_dir):
             h.update(f.read())
     except OSError:
         h.update(b"missing-problem-params")
+    # Fold the lookup-aligned correct-move embedding sidecar for the same reason —
+    # and because its row alignment against lookup.txt is only guaranteed within
+    # one packaging run, both must always cache-bust together.
+    ce = os.path.join(output_dir, "tsumegos", "lookup.embeddings.bin")
+    try:
+        with open(ce, "rb") as f:
+            h.update(f.read())
+    except OSError:
+        h.update(b"missing-correct-embeddings")
     return h.hexdigest()[:16]
 
 
@@ -815,6 +824,57 @@ def emit_problem_params(output_dir):
         f.write(b"".join(chunks))
     print(f"  wrote problem_params.bin ({len(chunks)} problems, "
           f"{len(chunks) * 16} bytes) at {out_path}")
+    return out_path
+
+
+def emit_correct_embeddings(output_dir):
+    """Correct-move embedding sidecar ALIGNED TO lookup.txt: row i is the K-dim
+    fp16 correct-cell embedding of the problem on lookup.txt line i (lookup is
+    sorted by id and covers both sizes, so the line index doubles as the row
+    address). The PWA already fetches + parses lookup.txt in every flow that
+    needs embeddings, so a backfill Range-fetches the one ~K*2-byte row per
+    problem instead of downloading the ~2MB shard zip whose metadata.json
+    carries the same vector. No keys, no offsets, no per-shard state — and no
+    shard rebuild: like problem_params.bin this is re-emitted from the source
+    CSV every run.
+
+    Row alignment is the whole contract: MUST be emitted after the final
+    lookup.txt write of the run, and both files fold into data_version so a
+    client can never cache a mismatched pair (the client additionally checks
+    the file size against its line count via Content-Range). An id missing
+    from per_problem.csv (frozen-shard corpus drift) gets an ALL-ZEROS row,
+    which the client treats as absent."""
+    lookup_path = os.path.join(output_dir, "lookup.txt")
+    with open(lookup_path, "r", encoding="utf-8") as f:
+        lookup_ids = [line.split()[0] for line in f if line.strip()]
+
+    per_problem = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
+    df = pd.read_csv(per_problem)
+    embed_cols = sorted(
+        [c for c in df.columns if c.startswith("embed_")],
+        key=lambda c: int(c.split("_")[1]),
+    )
+    vec_by_id = {
+        tid: np.asarray(vals, dtype=EMBEDDING_DTYPE)
+        for tid, vals in zip(df["tsumego_id"], df[embed_cols].to_numpy())
+    }
+
+    K = len(embed_cols)
+    zeros = np.zeros(K, dtype=EMBEDDING_DTYPE)
+    missing = 0
+    rows = []
+    for tid in lookup_ids:
+        vec = vec_by_id.get(tid)
+        if vec is None:
+            vec = zeros
+            missing += 1
+        rows.append(vec.tobytes())
+
+    out_path = os.path.join(output_dir, "tsumegos", "lookup.embeddings.bin")
+    with open(out_path, "wb") as f:
+        f.write(b"".join(rows))
+    print(f"  wrote lookup.embeddings.bin ({len(rows)} rows x {K * EMBEDDING_BYTES_PER_FLOAT} B"
+          f"{f', {missing} missing ids zero-filled' if missing else ''}) at {out_path}")
     return out_path
 
 
@@ -897,6 +957,20 @@ if __name__ == "__main__":
               "embeddings-absent sentinel path; shards frozen)")
     else:
         emit_problem_params(OUTPUT_DIR)
+
+    # Correct-move embedding sidecar, row-aligned to the (now final) lookup.txt.
+    # Same sentinel rule: with embeddings/ absent the source CSV is gone and
+    # lookup.txt is unchanged from the prior run, so the existing sidecar still
+    # aligns — keep it rather than emitting a mismatched one.
+    print("\n--- correct-move embeddings ---")
+    ce_path = os.path.join(OUTPUT_DIR, "tsumegos", "lookup.embeddings.bin")
+    if _embeddings_dir()[0] is None or any_sentinel:
+        print("  keeping existing lookup.embeddings.bin (embeddings/ absent or "
+              "a size took the sentinel path)"
+              if os.path.exists(ce_path) else
+              "  skipping lookup.embeddings.bin (embeddings/ absent, no existing file)")
+    else:
+        emit_correct_embeddings(OUTPUT_DIR)
 
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently

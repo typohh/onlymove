@@ -31,8 +31,11 @@
 // Merged rows become skeleton entries (problemId/correct/date/timeTaken/
 // isRepeat + review accounting); the model fields (rating/rank/slope/floor/
 // embeddings, picked-move cell index from the reported move) are filled by
-// fillSyncedHistoryFields (backfill.js) over the same shard walk
-// the version-driven backfill uses.
+// fillSyncedHistoryFields (backfill.js) from the same sources the
+// version-driven backfill uses: problem_params.bin for ratings, the
+// lookup-aligned correct-move sidecar for embeddings, and a shard-zip walk
+// only for the syncedMove -> pickedCellIndex derivation + picked-embedding
+// fill.
 
 import {
     state,

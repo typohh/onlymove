@@ -5,11 +5,13 @@
 //
 //   1. Embedding fill (last MODEL_INPUT_HISTORY_LENGTH entries only)
 //      Triggered by `embedding_version` change in embedding_meta.json.
-//      Walks the shard zips (embeddings live in metadata.json + per-cell
-//      sidecars): wipes any stale embeddings, then fills `embedding` +
-//      optional `pickedEmbedding` for entries inside the keep window.
-//      Older entries get their embedding fields stripped to keep
-//      localStorage bounded.
+//      Wipes any stale embeddings, then fills `embedding` from the
+//      lookup-aligned correct-move sidecar (tsumegos/lookup.embeddings.bin,
+//      one ~130-byte Range per problem — no shard zips) and optional
+//      `pickedEmbedding` via each shard's per-cell bin (byte offsets live in
+//      the zip's embeddings_index.json, so only shards carrying a picked
+//      need are downloaded). Older entries get their embedding fields
+//      stripped to keep localStorage bounded.
 //
 //   2. Rating refresh (all history entries, no keep-window cap)
 //      Triggered by `ratings_version` change. Reads the single
@@ -34,13 +36,13 @@ import {
 } from './state.js';
 import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
-import { fetchPickedEmbeddingWithIndexEntry } from './picked-embedding.js';
+import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail } from './history-store.js';
-import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
+import { boardNotationToXy } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -400,6 +402,58 @@ async function fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, si
     return false;
 }
 
+// Binary-search the id-sorted lookup.txt lines ("id zipHash size") for a
+// problem id; returns its LINE INDEX — which is also the problem's row address
+// in the lookup-aligned correct-move sidecar — or -1 when unknown.
+function lookupLineIndex(lines, tsumegoId) {
+    let lo = 0;
+    let hi = lines.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const id = lines[mid].slice(0, 8);
+        if (id === tsumegoId) return mid;
+        if (id < tsumegoId) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+
+// Correct-move `embedding` fills via the lookup-aligned sidecar
+// (tsumegos/lookup.embeddings.bin): one ~130-byte Range fetch per distinct
+// problem — repeats share a memoized fetch — and NO shard zips (the same
+// vector used to be read from each shard's metadata.json, which meant
+// downloading the whole ~2MB zip per touched shard). Entries are mutated in
+// place; returns the fill count. Fills that can't resolve (lookup/sidecar
+// unavailable, id gone from the corpus) are skipped; a later fill run retries.
+const CORRECT_FILL_CONCURRENCY = 8;
+async function fillCorrectEmbeddingsViaSidecar(entries) {
+    const needy = entries.filter((a) => a && a.problemId && !a.embedding);
+    if (needy.length === 0) return 0;
+    const lines = await fetchLookupLines();
+    if (!lines) return 0;
+    const vecByProblem = new Map();
+    const vecFor = (pid) => {
+        if (!vecByProblem.has(pid)) {
+            vecByProblem.set(pid, (async () => {
+                const row = lookupLineIndex(lines, pid);
+                if (row < 0) return null;
+                const vec = await fetchCorrectEmbedding(row, lines.length);
+                return Array.isArray(vec) ? quantizeEmbedding(vec) : null;
+            })());
+        }
+        return vecByProblem.get(pid);
+    };
+    let filled = 0;
+    await mapWithConcurrency(needy, CORRECT_FILL_CONCURRENCY, async (a) => {
+        const vec = await vecFor(a.problemId);
+        if (vec && !a.embedding) {
+            a.embedding = vec.slice();
+            filled++;
+        }
+    });
+    return filled;
+}
+
 // Load + decode the single problem_params.bin asset into
 // Map<hexId, {rating, slope, floor}>. This is the rating refresh's source (rating/
 // slope/floor for EVERY problem, both boards, no embeddings), replacing the shard
@@ -487,12 +541,16 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         let totalFilled = 0;
         let totalFilledPicked = 0;
         if (embeddingsChanged) {
-            const needIdsForEmbed = collectEmbeddingNeedIds(history, startIdx);
             stripOldEmbeddingFields(size, history, startIdx);
-            if (needIdsForEmbed.size > 0) {
-                const r = await walkEmbeddingShards(size, history, startIdx, needIdsForEmbed);
-                totalFilled = r.filled;
-                totalFilledPicked = r.filledPicked;
+            // Correct-move embeddings straight from the lookup-aligned sidecar —
+            // zero shard zips. Only pickedEmbedding still lives in the per-shard
+            // bins (addressed by the STORED pickedCellIndex, which the wipe
+            // keeps — it's an SGF-structure index, independent of the fit), so
+            // the zip walk shrinks to shards carrying such a need.
+            totalFilled = await fillCorrectEmbeddingsViaSidecar(history.slice(startIdx));
+            const pickedNeedIds = collectPickedNeedIds(history, startIdx);
+            if (pickedNeedIds.size > 0) {
+                totalFilledPicked = await walkPickedShards(size, history, startIdx, pickedNeedIds);
             }
         }
 
@@ -610,22 +668,21 @@ async function tailHasRowsForSize(size) {
     return false;
 }
 
-// Embedding needs: last KEEP_EMBEDDING_LAST entries with missing fields. These
-// drive the shard walk (embeddings live in metadata.json + the per-cell
-// sidecars; problem_params carries none).
-function collectEmbeddingNeedIds(history, startIdx) {
-    const needIdsForEmbed = new Set();
+// Picked-embedding needs: in-window wrong attempts with a stored
+// pickedCellIndex but no pickedEmbedding. These are the only embedding fills
+// that still drive a shard-zip walk — the per-problem byte offsets live in the
+// zip's embeddings_index.json. (Correct-move embeddings come from the
+// lookup-aligned sidecar; ratings from problem_params.)
+function collectPickedNeedIds(history, startIdx) {
+    const ids = new Set();
     for (let i = startIdx; i < history.length; i++) {
         const a = history[i];
-        const needsCorrect = !a.embedding;
-        const needsPicked = (
-            a.correct === false &&
-            typeof a.pickedCellIndex === 'number' &&
-            !a.pickedEmbedding
-        );
-        if (a.problemId && (needsCorrect || needsPicked)) needIdsForEmbed.add(a.problemId);
+        if (a && a.problemId && a.correct === false &&
+            typeof a.pickedCellIndex === 'number' && !a.pickedEmbedding) {
+            ids.add(a.problemId);
+        }
     }
-    return needIdsForEmbed;
+    return ids;
 }
 
 // Strip stray embeddings from entries older than the keep window —
@@ -647,52 +704,29 @@ function stripOldEmbeddingFields(size, history, startIdx) {
     }
 }
 
-// Embedding shard walk (problem_params has no embeddings, so this stays on the
-// zips). The caller skips it entirely when nothing in the keep window needs a
-// fill — so a ratings-only refresh never fetches a shard. Fills correct-move
-// `embedding` from each shard's metadata.json and `pickedEmbedding` via the
-// per-cell sidecar; returns the two fill counts.
-async function walkEmbeddingShards(size, history, startIdx, needIdsForEmbed) {
-    let filled = 0;
+// Picked-embedding shard walk: the per-problem byte offsets for the per-cell
+// bins live in each zip's embeddings_index.json, so this is the one embedding
+// fill still on the zips. The caller skips it entirely when nothing in the
+// keep window needs a fill.
+async function walkPickedShards(size, history, startIdx, pickedNeedIds) {
     let filledPicked = 0;
-    await walkShards(size, needIdsForEmbed, async ({ zip, items, zipFilename }) => {
-        const embeddingByProblem = new Map();
-        for (const item of items) {
-            if (Array.isArray(item.embedding)) {
-                // Quantize to 2 decimals to keep localStorage small.
-                embeddingByProblem.set(tsumegoIdOf(item.filename), quantizeEmbedding(item.embedding));
-            }
-        }
-
-        for (let i = startIdx; i < history.length; i++) {
-            const a = history[i];
-            if (!a.embedding && embeddingByProblem.has(a.problemId)) {
-                a.embedding = embeddingByProblem.get(a.problemId);
-                filled++;
-            }
-        }
-
-        // Picked-move backfill: same shard, Range-fetched per-cell
-        // sidecar. Skipped silently for shards that don't ship one
-        // (older builds) or when there are no eligible attempts.
+    await walkShards(size, pickedNeedIds, async ({ zip, zipFilename }) => {
         const indexPayload = await parseEmbeddingsIndex(zip, (e) => {
             console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
         });
-        if (indexPayload && indexPayload.problems) {
-            // Sequential per-entry WITHIN the shard: Range
-            // requests are cheap (~256B), and with shards
-            // running SHARD_WALK_CONCURRENCY-wide this bounds
-            // the total in-flight request count.
-            for (let i = startIdx; i < history.length; i++) {
-                if (await fillPickedEmbeddingFromSidecar(history[i], { indexPayload, zipFilename, size })) {
-                    filledPicked++;
-                }
+        if (!indexPayload || !indexPayload.problems) return;
+        // Sequential per-entry WITHIN the shard: Range requests are cheap
+        // (~256B), and with shards running SHARD_WALK_CONCURRENCY-wide this
+        // bounds the total in-flight request count.
+        for (let i = startIdx; i < history.length; i++) {
+            if (await fillPickedEmbeddingFromSidecar(history[i], { indexPayload, zipFilename, size })) {
+                filledPicked++;
             }
         }
     }, (zipFilename, err) => {
         console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
     });
-    return { filled, filledPicked };
+    return filledPicked;
 }
 
 // Re-derive the cold tail from problem_params (ratings change only). Present
@@ -732,18 +766,22 @@ async function rederiveTailRatings(size, problemParams) {
 
 // --- Synced-entry field fill (account-sync) ----------------------------------
 // account-sync merges /sync rows as skeleton entries: problemId, correct, date,
-// timing — none of the model fields. This walk fills them from the shards,
-// independent of the version bookkeeping above (the versions haven't changed;
-// the ENTRIES are new):
-//   - rating/rank/slope/quality/floor for every synced entry missing them
-//   - correct-move `embedding` inside the keep-last window
+// timing — none of the model fields. This fills them, independent of the
+// version bookkeeping above (the versions haven't changed; the ENTRIES are
+// new):
+//   - rating/rank/slope/quality/floor for every synced entry missing them,
+//     from problem_params.bin (no shard fetch)
+//   - correct-move `embedding` inside the keep-last window, from the
+//     lookup-aligned sidecar (~130-byte Range per problem, no shard fetch)
 //   - `pickedCellIndex` derived from the reported move (`syncedMove`, present
 //     only on wrong NON-repeat attempts — new problems are served at
 //     orientation 0 = identity, so the reported coordinate matches the shard
-//     SGF; repeats are served randomly reoriented and unrecoverable). The SGF
-//     root variations are the same order extraction/packaging use, so the
-//     index addresses the per-cell sidecar directly.
-//   - `pickedEmbedding` via the sidecar, same as the version-driven walk.
+//     SGF; repeats are served randomly reoriented and unrecoverable). This is
+//     the one fill that still needs the shard ZIP (the SGF). The SGF root
+//     variations are the same order extraction/packaging use, so the index
+//     addresses the per-cell bin directly.
+//   - `pickedEmbedding` via the per-cell bin, addressed by the zip's
+//     embeddings_index.json — fetched while that zip is open anyway.
 //
 // `includeTail` (set on a full pull) also fills synced skeletons that landed in
 // the IndexedDB cold tail — a full pull evicts its old rows there mid-pull, out
@@ -799,20 +837,30 @@ async function fillSyncedForSize(size, problemParams = null) {
         }
     }
 
-    // The shard walk serves ONLY the in-window embedding/picked fields — they
-    // live inside the per-shard zips, and the keep-last window bounds how many
-    // shards this can touch regardless of how spread the full career is.
+    // Correct-move embeddings for in-window synced entries via the
+    // lookup-aligned sidecar — a ~130-byte Range per distinct problem, no zips.
+    const embedNeedy = [];
+    for (let i = startIdx; i < history.length; i++) {
+        const a = history[i];
+        if (a && a.synced && a.problemId && !a.embedding) embedNeedy.push(a);
+    }
+    filled += await fillCorrectEmbeddingsViaSidecar(embedNeedy);
+
+    // The zip walk remains ONLY where the zip's contents are genuinely needed:
+    // deriving pickedCellIndex from a synced move coordinate (needs the SGF)
+    // and the picked-embedding fill (byte offsets live in the zip's
+    // embeddings_index.json). Wrong attempts are a minority and skew
+    // rank-local, so this walk touches a fraction of the shards the correct
+    // fills used to.
     const needIds = new Set();
     for (let i = startIdx; i < history.length; i++) {
         const a = history[i];
-        if (!a || !a.synced || !a.problemId) continue;
-        const needsEmbed = !a.embedding;
-        const needsPickedIndex = a.correct === false &&
+        if (!a || !a.synced || !a.problemId || a.correct !== false) continue;
+        const needsPickedIndex =
             typeof a.syncedMove === 'string' && typeof a.pickedCellIndex !== 'number';
-        const needsPicked = a.correct === false &&
-            !a.pickedEmbedding &&
+        const needsPicked = !a.pickedEmbedding &&
             (typeof a.pickedCellIndex === 'number' || needsPickedIndex);
-        if (needsEmbed || needsPickedIndex || needsPicked) {
+        if (needsPickedIndex || needsPicked) {
             needIds.add(a.problemId);
         }
     }
@@ -823,43 +871,29 @@ async function fillSyncedForSize(size, problemParams = null) {
         }
         return filled;
     }
-    await walkShards(size, needIds, async ({ zip, items, zipFilename, shardIds }) => {
-        const itemByProblem = new Map();
-        for (const item of items) {
-            itemByProblem.set(tsumegoIdOf(item.filename), item);
-        }
+    await walkShards(size, needIds, async ({ zip, zipFilename, shardIds }) => {
         // A parse failure = shard without a usable sidecar index; the
         // picked-embedding fill below just skips (no console line).
         const indexPayload = await parseEmbeddingsIndex(zip);
         const idsHere = new Set(shardIds);
 
-        for (let i = 0; i < history.length; i++) {
+        for (let i = startIdx; i < history.length; i++) {
             const a = history[i];
             if (!a || !a.synced || !idsHere.has(a.problemId)) continue;
-            const item = itemByProblem.get(a.problemId);
-            if (!item) continue;
-            const inWindow = i >= startIdx;
 
-            if (typeof a.problemRating !== 'number' && typeof item.rating === 'number') {
-                applyRatingFields(a, item, size);
-                filled++;
-            }
-
-            if (inWindow && !a.embedding && Array.isArray(item.embedding)) {
-                a.embedding = quantizeEmbedding(item.embedding);
-                filled++;
-            }
-
-            if (inWindow && a.correct === false && typeof a.syncedMove === 'string') {
+            if (a.correct === false && typeof a.syncedMove === 'string' &&
+                typeof a.pickedCellIndex !== 'number') {
                 const idx = await cellIndexForMove(zip, a.problemId, a.syncedMove, size);
                 if (typeof idx === 'number' && idx >= 0) a.pickedCellIndex = idx;
+            }
+            if (a.correct === false && typeof a.syncedMove === 'string') {
                 // One-shot either way: an unresolvable move (illegal after a
                 // corpus change, parse failure) would otherwise re-walk this
                 // shard on every sync.
                 delete a.syncedMove;
             }
 
-            if (inWindow && await fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size })) {
+            if (await fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size })) {
                 filled++;
             }
         }

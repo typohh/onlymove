@@ -25,6 +25,7 @@
 // or coordinate flips is required client-side.
 
 import { state, embeddingsIndexCache } from './state.js';
+import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
 
 // Convert one fp16 (uint16 representation) to a JS number, per IEEE 754 half-
 // precision. JS doesn't ship a native Float16Array yet (Stage 3 proposal), and
@@ -74,13 +75,18 @@ async function fetchCellEmbeddingFromIndexEntry({
         const resp = await fetch(url, {
             headers: { Range: `bytes=${byteStart}-${byteEnd}` },
         });
-        // 206 Partial Content is the success status for Range. Some hosts may
-        // serve 200 with the full body if Range is ignored — both arrayBuffer
-        // decodes to the same K floats off the front; we accept either.
+        // 206 Partial Content is the success status for Range. A host that
+        // ignores Range (wrangler dev's asset server does) serves the whole
+        // file with 200 — slice our cell out of it rather than decoding the
+        // first cell of the bin.
         if (!resp.ok && resp.status !== 206) {
             return null;
         }
-        const buf = await resp.arrayBuffer();
+        let buf = await resp.arrayBuffer();
+        if (resp.status === 200 && buf.byteLength > meta.bytes_per_cell) {
+            if (byteStart + meta.bytes_per_cell > buf.byteLength) return null;
+            buf = buf.slice(byteStart, byteStart + meta.bytes_per_cell);
+        }
         return decodeFp16Buffer(buf, meta.K);
     } catch (_err) {
         return null;
@@ -88,8 +94,20 @@ async function fetchCellEmbeddingFromIndexEntry({
 }
 
 function getMeta() {
-    const meta = state.embeddingMeta;
-    if (!meta || typeof meta.K !== 'number' || typeof meta.bytes_per_cell !== 'number') return null;
+    let meta = state.embeddingMeta;
+    if (!meta || typeof meta.K !== 'number' || typeof meta.bytes_per_cell !== 'number') {
+        // state.embeddingMeta is populated by backfillMissingEmbeddings, which
+        // runs AFTER the account-adoption synced fill — fall back to the
+        // build-time inlined meta (data-version.js) so fills that run earlier
+        // in boot aren't silently skipped. Same K/dtype/bytes_per_cell values.
+        const m = EMBEDDING_META_INLINE;
+        meta = (m && typeof m.K === 'number') ? {
+            K: m.K,
+            dtype: typeof m.dtype === 'string' ? m.dtype : 'float16',
+            bytes_per_cell: typeof m.bytes_per_cell === 'number' ? m.bytes_per_cell : m.K * 2,
+        } : null;
+    }
+    if (!meta) return null;
     if (meta.dtype && meta.dtype !== 'float16') {
         console.warn(`picked-embedding: unsupported dtype ${meta.dtype}; skipping`);
         return null;
@@ -116,6 +134,80 @@ export async function fetchPickedEmbedding({
     return fetchCellEmbeddingFromIndexEntry({
         boardSize, zipFilename, indexEntry, cellIndex, meta,
     });
+}
+
+// Correct-move sidecar: tsumegos/lookup.embeddings.bin — row i is the K-dim
+// fp16 correct-cell embedding of lookup.txt line i (both sizes; emitted
+// row-aligned by package_for_pwa.emit_correct_embeddings). Range-fetches one
+// row so backfills never need the shard zip for a correct-move embedding.
+//
+// `expectedRows` (the caller's lookup.txt line count) guards row alignment:
+// the 206's Content-Range total must equal expectedRows * bytes_per_cell.
+// data_version cache-busting already pins lookup.txt and the sidecar to the
+// same packaging run, so a mismatch means a half-updated server mid-session —
+// every row address would be garbage, so the sidecar is poisoned for the rest
+// of the session rather than retried. Returns null for a missing/absent row
+// (an all-zeros row is the packaging placeholder for an id with no embedding).
+let correctSidecarBroken = false;
+let correctSidecarFull = null;   // whole-file ArrayBuffer when the host ignores Range
+let correctSidecarProbe = null;  // first request in flight; later calls wait on it
+export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
+    if (correctSidecarBroken) return null;
+    const meta = getMeta();
+    if (!meta) return null;
+    if (!Number.isInteger(rowIndex) || rowIndex < 0) return null;
+    const bpc = meta.bytes_per_cell;
+    const byteStart = rowIndex * bpc;
+
+    const rowFromWhole = () => {
+        if (!correctSidecarFull || byteStart + bpc > correctSidecarFull.byteLength) return null;
+        return correctSidecarFull.slice(byteStart, byteStart + bpc);
+    };
+
+    const fetchRow = async () => {
+        const resp = await fetch(`tsumegos/lookup.embeddings.bin?v=${DATA_VERSION}`, {
+            headers: { Range: `bytes=${byteStart}-${byteStart + bpc - 1}` },
+        });
+        if (!resp.ok && resp.status !== 206) return null;
+        const body = await resp.arrayBuffer();
+        const m = /\/(\d+)\s*$/.exec(resp.headers.get('Content-Range') || '');
+        const total = resp.status === 206 ? (m ? parseInt(m[1]) : null) : body.byteLength;
+        if (Number.isFinite(expectedRows) && Number.isFinite(total) && total !== expectedRows * bpc) {
+            console.warn('picked-embedding: lookup.embeddings.bin size mismatches lookup.txt — skipping correct-move fills this session');
+            correctSidecarBroken = true;
+            return null;
+        }
+        if (resp.status === 200 && body.byteLength > bpc) {
+            // Host ignored Range (wrangler dev's asset server does) — keep the
+            // whole file and serve every later row from memory.
+            correctSidecarFull = body;
+            return rowFromWhole();
+        }
+        return body;
+    };
+
+    try {
+        let buf;
+        if (correctSidecarFull) {
+            buf = rowFromWhole();
+        } else if (correctSidecarProbe) {
+            // First request probes Range support; waiting on it means a
+            // Range-less host costs ONE full download, not one per row.
+            await correctSidecarProbe;
+            buf = correctSidecarFull ? rowFromWhole()
+                : (correctSidecarBroken ? null : await fetchRow());
+        } else {
+            const p = fetchRow();
+            correctSidecarProbe = p.then(() => {}, () => {});
+            buf = await p;
+        }
+        if (!buf) return null;
+        const vec = decodeFp16Buffer(buf, meta.K);
+        if (!vec || vec.every((v) => v === 0)) return null;
+        return vec;
+    } catch (_err) {
+        return null;
+    }
 }
 
 // Backfill path: called from backfill.js when iterating shards. The
