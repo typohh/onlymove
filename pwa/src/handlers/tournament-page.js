@@ -85,7 +85,7 @@ function renderTournamentPage(rows) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#16130d">
 <title>onlymove-turnaus · 13.–19. heinäkuuta 2026</title>
-<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026 rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville — Viime minuutin treenit go kongressia varten.">
+<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026 rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville. Samalla mahdollisuus valmistautua go kongressia varten.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="onlymove-turnaus · 13.–19. heinäkuuta 2026">
 <meta property="og:description" content="Viikon mittainen tsumego-turnaus rahapalkinnoilla. Paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville.">
@@ -361,7 +361,7 @@ function renderTournamentPage(rows) {
 
     <h1>onlymove-turnaus</h1>
     <p class="dates">13.–19. heinäkuuta 2026</p>
-    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — Viime minuutin treenit go kongressia varten.</p>
+    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Samalla mahdollisuus valmistautua go kongressia varten.</p>
 
     <div class="hoshi" aria-hidden="true"><span></span></div>
 
