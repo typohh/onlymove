@@ -29,11 +29,14 @@ export async function runRecallNotifications(env) {
   // out to that user's devices below. The IN-subquery scopes the
   // recall_schedule read to subscribed users.
   const due = await env.DB.prepare(
+    // exit_at <= ?1 + ?2 (not exit_at - ?2 <= ?1): the arithmetic must stay off
+    // the column so the partial index idx_recall_due_exit(exit_at) stays usable
+    // — the column-side form is a full scan of every un-notified row.
     `SELECT user_id, problem_id, enter_at, exit_at,
             enter_notified_at, exit_notified_at, updated_at
      FROM recall_schedule
      WHERE ((enter_notified_at IS NULL AND enter_at <= ?1)
-         OR (exit_notified_at  IS NULL AND exit_at - ?2 <= ?1 AND exit_at > ?1))
+         OR (exit_notified_at  IS NULL AND exit_at <= ?1 + ?2 AND exit_at > ?1))
        AND user_id IN (SELECT user_id FROM push_subscriptions)`
   ).bind(now, TWO_HOURS_MS).all();
 
@@ -43,9 +46,13 @@ export async function runRecallNotifications(env) {
   // delta-since-last-cron-tick — the user wants to see their total pending
   // load, not just what newly entered in the last hour.
   const backlog = await env.DB.prepare(
+    // Scoped to subscribed users like the due query above — the counts are only
+    // ever read for users being notified, and without the scope this scans every
+    // user's schedule rows hourly.
     `SELECT user_id, COUNT(*) AS n
      FROM recall_schedule
      WHERE enter_at <= ?1 AND exit_at > ?1
+       AND user_id IN (SELECT user_id FROM push_subscriptions)
      GROUP BY user_id`
   ).bind(now).all();
   const backlogByUser = new Map();

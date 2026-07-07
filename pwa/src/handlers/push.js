@@ -1,10 +1,25 @@
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
 
+// Format-only validation (same policy as the other write endpoints): the
+// endpoint must be a real https URL — the recall cron fetch()es it on every due
+// tick, so a garbage/attacker-chosen value would otherwise be dialed forever —
+// and the fields must fit sane length caps so a spoofed body can't stuff the
+// row. Real push endpoints run ~100-400 chars; the keys are fixed-size base64url
+// (p256dh ~88, auth ~24).
+function isValidEndpoint(e) {
+  if (typeof e !== 'string' || e.length === 0 || e.length > 1024) return false;
+  try { return new URL(e).protocol === 'https:'; } catch { return false; }
+}
+function isValidKey(k, max) {
+  return typeof k === 'string' && k.length > 0 && k.length <= max && /^[A-Za-z0-9_=-]+$/.test(k);
+}
+
 export async function handleSubscribe(request, env) {
   const data = await request.json();
   const sub = data && data.subscription;
-  if (!isValidUserId(data?.userId) || !sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
+  if (!isValidUserId(data?.userId) || !sub || !isValidEndpoint(sub.endpoint)
+      || !isValidKey(sub.keys?.p256dh, 256) || !isValidKey(sub.keys?.auth, 256)) {
     return jsonResponse({ error: 'Invalid body' }, 400);
   }
   const now = Date.now();

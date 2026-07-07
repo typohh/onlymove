@@ -8,6 +8,19 @@ import { CORS_HEADERS, jsonResponse } from './http.js';
 
 const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 
+// Per-isolate recompute dedup: right after a deploy every Community-tab open
+// sees a version-stale blob, and without this each concurrent request would run
+// its own full 7-day window scan (the D1 read cost the created_at index exists
+// to bound) until the first one commits. One in-flight compute per isolate;
+// concurrent callers await the same promise.
+let computeInFlight = null;
+function computeServerStatsOnce(env) {
+  if (!computeInFlight) {
+    computeInFlight = computeServerStats(env).finally(() => { computeInFlight = null; });
+  }
+  return computeInFlight;
+}
+
 // Serve the cached server-wide stats. Lazily (re)computes when nothing is
 // cached yet OR the cache was produced by an older code version (so a deploy
 // that changes the computation refreshes on the next read, not 24h later); the
@@ -20,7 +33,7 @@ export async function handleServerStats(env) {
     if (row && row.data) {
       try { stale = JSON.parse(row.data).version !== APP_VERSION; } catch { stale = true; }
     }
-    const body = stale ? JSON.stringify(await computeServerStats(env)) : row.data;
+    const body = stale ? JSON.stringify(await computeServerStatsOnce(env)) : row.data;
     return new Response(body, {
       status: 200,
       // The worker already serves from a D1 cache and manages freshness (daily
@@ -47,7 +60,7 @@ export async function maybeComputeServerStats(env) {
     }
     const last = row?.computed_at ? Date.parse(row.computed_at) : 0;
     if (staleVersion || Date.now() - last >= 23 * 3600 * 1000) {
-      await computeServerStats(env);
+      await computeServerStatsOnce(env);
     }
   } catch (err) {
     console.error('Error computing server stats:', err);
