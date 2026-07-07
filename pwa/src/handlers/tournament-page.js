@@ -144,7 +144,9 @@ function renderTournamentPage(rows) {
   }
 
   /* ---- hero ---- */
-  header.hero { text-align: center; padding: 3.5rem 0 2.5rem; }
+  /* no bottom padding: the hero ends with the participants table, and the
+     following hoshi divider's own margin provides the section gap */
+  header.hero { text-align: center; padding: 3.5rem 0 0; }
   .board-art { width: min(300px, 74vw); height: auto; margin: 1.6rem auto .4rem; display: block; }
   h1 {
     font-family: var(--serif); font-weight: 600;
@@ -229,7 +231,7 @@ function renderTournamentPage(rows) {
 
   /* ---- embedded participants table (inside the hero, above the CTAs) ---- */
   /* left-aligned like the other sections, against the hero's centered text */
-  .lb { margin: 0 0 2.4rem; text-align: left; }
+  .lb { margin: 0; text-align: left; }
   .lb .lead { margin-bottom: 1.1rem; }
   .lb-toggle { display: inline-flex; border: 1px solid rgba(206,176,83,.35); border-radius: 999px; overflow: hidden; margin: .2rem 0 1.1rem; }
   .lb-toggle button {
