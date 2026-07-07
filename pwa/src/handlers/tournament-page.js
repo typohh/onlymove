@@ -407,14 +407,13 @@ function renderTournamentPage(rows) {
         <div class="place"><span class="medal second"></span><span class="lbl">2. sija</span><span class="amt">10 €</span></div>
       </div>
     </div>
-    <p class="prize-note">Osallistuminen on ilmaista.</p>
+    <p class="prize-note">Osallistuminen on ilmaista. Turnaus on avoin suomalaisille ja Suomessa asuville.</p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
 
   <section aria-labelledby="osallistu">
     <h2 id="osallistu">Näin osallistut</h2>
-    <p class="lead">Turnaus on avoin suomalaisille ja Suomessa asuville.</p>
     <ol class="steps">
       <li>
         <span class="stone" aria-hidden="true"></span>
