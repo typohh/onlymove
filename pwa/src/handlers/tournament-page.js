@@ -5,7 +5,8 @@
 // gold-on-dark goban identity. Registered before the SPA fallback in src/index.js.
 // Embeds a compact participants table in the hero (the same readLeaderboardRows the
 // /leaderboard page computes from, one timeframe auto-picked by tournament phase);
-// the full /leaderboard page stays separate and is linked from the hero CTA + footer.
+// the full /leaderboard page stays separate and is linked from the page-closing
+// CTA row + footer.
 
 // Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is the
 // onlymove app-icon board position, restyled in gold-on-dark, with one black stone
@@ -256,17 +257,6 @@ function renderTournamentPage(rows) {
   .lb .name { overflow: hidden; text-overflow: ellipsis; max-width: 14rem; display: inline-block; vertical-align: bottom; }
   .lb .empty { color: var(--faint); text-align: center; padding: 1.6rem 0; }
 
-  /* ---- EGC band ---- */
-  .egc {
-    display: flex; gap: 1rem; align-items: center;
-    border: 1px solid var(--panel-line); border-radius: 16px; padding: 1.15rem 1.25rem;
-    background: linear-gradient(100deg, rgba(206,176,83,.08), transparent 70%), var(--bg-lift);
-  }
-  .egc .egc-mark { flex: none; width: 40px; height: 40px; }
-  .egc .egc-k { font-family: var(--mono); font-size: .7rem; letter-spacing: .18em; text-transform: uppercase; color: var(--gold); opacity: .8; }
-  .egc p { margin: .15rem 0 0; color: var(--mist); font-size: .95rem; }
-  .egc strong { color: var(--ink); }
-
   /* ---- footer ---- */
   footer { margin: 3.4rem 0 3rem; padding-top: 1.6rem; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: .88rem; }
   footer .org { color: var(--mist); }
@@ -401,11 +391,6 @@ function renderTournamentPage(rows) {
         </table>
       </div>
     </section>
-
-    <div class="cta-row">
-      <a class="btn btn-primary" href="/">Avaa onlymove <span class="arrow" aria-hidden="true">→</span></a>
-      <a class="btn btn-ghost" href="/leaderboard">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
-    </div>
   </header>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
@@ -468,17 +453,10 @@ function renderTournamentPage(rows) {
     <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: yksittäiset erittäin pitkät tauot eivät heikennä arviotasi.</p>
   </section>
 
-  <div class="hoshi" aria-hidden="true"><span></span></div>
-
-  <section aria-labelledby="egc">
-    <div class="egc">
-      <svg class="egc-mark" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><circle cx="20" cy="20" r="14" fill="none" stroke="#CEB053" stroke-width="3"/><circle cx="20" cy="20" r="4.5" fill="#CEB053"/></svg>
-      <div>
-        <div class="egc-k" id="egc">Ennen kongressia</div>
-        <p><strong>Euroopan Go-kongressi alkaa 25. heinäkuuta.</strong> Käytä turnausviikko taitojen hiomiseen — ratkaisurutiini pysyy tuoreena, kun kisa pitää sinut liikkeellä.</p>
-      </div>
-    </div>
-  </section>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="/">Avaa onlymove <span class="arrow" aria-hidden="true">→</span></a>
+    <a class="btn btn-ghost" href="/leaderboard">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
+  </div>
 
   <footer>
     <p class="org">Järjestäjä: <b>Henry Hemming</b></p>
