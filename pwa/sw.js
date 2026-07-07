@@ -68,7 +68,15 @@ self.addEventListener('activate', event => {
     const runtimeCache = await caches.open(RUNTIME_CACHE_NAME);
     const requests = await runtimeCache.keys();
     await Promise.all(requests.map(req => {
-      const v = new URL(req.url).searchParams.get('v');
+      const url = new URL(req.url);
+      // Cross-origin and dynamic-API entries were cached by older SW versions (the
+      // fetch handler no longer intercepts either) — drop the dead weight.
+      if (url.origin !== self.location.origin
+          || ['/server-stats', '/push/vapid-public-key', '/invite'].includes(url.pathname)) {
+        console.log('Pruning no-longer-intercepted cache entry:', req.url);
+        return runtimeCache.delete(req);
+      }
+      const v = url.searchParams.get('v');
       if (v && v !== VERSION && v !== DATA_VERSION) {
         console.log('Pruning stale versioned cache entry:', req.url);
         return runtimeCache.delete(req);
@@ -143,6 +151,28 @@ self.addEventListener('fetch', event => {
 
     // Only handle HTTP/HTTPS requests to avoid issues with chrome-extension or other schemes
     if (!request.url.startsWith('http')) {
+        return;
+    }
+
+    const requestUrl = new URL(request.url);
+
+    // Never intercept cross-origin requests (e.g. the client-side EGD GoR fetch in
+    // gor-refresh.js): they carry no ?v cache-buster, so the cache-first strategy
+    // below would freeze third-party data forever (and the activate-time prune only
+    // removes ?v-stamped entries, so the frozen copy would survive every deploy).
+    // Let the browser handle them normally.
+    if (requestUrl.origin !== self.location.origin) {
+        return;
+    }
+
+    // Same-origin dynamic Worker GETs: the response changes server-side while the
+    // URL doesn't (the hourly-recomputed community-stats blob, an invite's claim
+    // state, a rotated VAPID key), so cache-first would freeze the first response
+    // for the life of the cache entry (/server-stats?v=APP_VERSION survives the
+    // prune for the whole deploy; the other two have no ?v and survive forever).
+    // Let the browser hit the network directly — the Worker already sets the
+    // appropriate Cache-Control on these.
+    if (['/server-stats', '/push/vapid-public-key', '/invite'].includes(requestUrl.pathname)) {
         return;
     }
 
