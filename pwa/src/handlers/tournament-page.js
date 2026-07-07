@@ -3,9 +3,9 @@
 // GET /tournament — a standalone, directly-linkable, server-rendered landing page
 // for the onlymove Go tournament (Finnish audience). Styled to match onlymove's
 // gold-on-dark goban identity. Registered before the SPA fallback in src/index.js.
-// Embeds a compact tournament standings table (the same readLeaderboardRows the
+// Embeds a compact participants table in the hero (the same readLeaderboardRows the
 // /leaderboard page computes from, one timeframe auto-picked by tournament phase);
-// the full /leaderboard page stays separate and is linked from the section + footer.
+// the full /leaderboard page stays separate and is linked from the hero CTA + footer.
 
 // Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is the
 // onlymove app-icon board position, restyled in gold-on-dark, with one black stone
@@ -45,7 +45,7 @@ export async function handleTournament(env) {
 function tournamentPhase(nowMs) {
     const nowWeek = weekIdAt(nowMs);
     if (nowWeek < TOURNAMENT_WEEK) {
-        return { tf: 0, medals: false, note: 'Turnaus alkaa 13.7. — taulukko näyttää osallistujien tämänhetkiset arviot.' };
+        return { tf: 0, medals: false, note: 'Turnaus alkaa 13.7. — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
     }
     if (nowWeek === TOURNAMENT_WEEK) {
         return { tf: 1, medals: true, note: 'Turnaus käynnissä — sija määräytyy viikon huippuarvion mukaan.' };
@@ -53,7 +53,7 @@ function tournamentPhase(nowMs) {
     if (nowWeek === TOURNAMENT_WEEK + 1) {
         return { tf: 2, medals: true, note: 'Turnauksen lopputulokset, 13.–19. heinäkuuta 2026.' };
     }
-    return { tf: 0, medals: false, note: 'Turnaus on päättynyt — taulukko näyttää pelaajien tämänhetkiset arviot.' };
+    return { tf: 0, medals: false, note: 'Turnaus on päättynyt — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
 }
 
 function renderTournamentPage(rows) {
@@ -111,7 +111,6 @@ function renderTournamentPage(rows) {
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
-  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body {
     margin: 0;
     font-family: var(--sans);
@@ -227,7 +226,10 @@ function renderTournamentPage(rows) {
   .note-body { color: var(--mist); }
   .note-body strong { color: var(--ink); font-weight: 600; }
 
-  /* ---- embedded tournament standings ---- */
+  /* ---- embedded participants table (inside the hero, above the CTAs) ---- */
+  /* left-aligned like the other sections, against the hero's centered text */
+  .lb { margin: 0 0 2.4rem; text-align: left; }
+  .lb .lead { margin-bottom: 1.1rem; }
   .lb-toggle { display: inline-flex; border: 1px solid rgba(206,176,83,.35); border-radius: 999px; overflow: hidden; margin: .2rem 0 1.1rem; }
   .lb-toggle button {
     font: inherit; font-size: .92rem; padding: .42rem .95rem; border: 0; background: transparent;
@@ -253,10 +255,6 @@ function renderTournamentPage(rows) {
   .lb td.val.progress { font-family: var(--mono); font-weight: 400; color: var(--faint); }
   .lb .name { overflow: hidden; text-overflow: ellipsis; max-width: 14rem; display: inline-block; vertical-align: bottom; }
   .lb .empty { color: var(--faint); text-align: center; padding: 1.6rem 0; }
-  .lb-note { color: var(--faint); font-size: .85rem; margin: 1rem 0 0; }
-  .lb-more { margin: .5rem 0 0; font-size: .92rem; }
-  .lb-more a { color: var(--gold); text-decoration: none; }
-  .lb-more a:hover { color: var(--gold-lite); text-decoration: underline; }
 
   /* ---- EGC band ---- */
   .egc {
@@ -379,9 +377,34 @@ function renderTournamentPage(rows) {
     <h1>onlymove-turnaus</h1>
     <p class="dates">13.–19. heinäkuuta 2026</p>
     <p class="tagline">Viikon mittainen tsumego-turnaus. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.</p>
+
+    <div class="hoshi" aria-hidden="true"><span></span></div>
+
+    <section aria-labelledby="ilmoittautuneet" class="lb">
+      <h2 id="ilmoittautuneet">Ilmoittautuneet</h2>
+      <p class="lead">${phase.note}</p>
+      <div class="lb-toggle" role="group" aria-label="sarja">
+        <button id="mAbs" aria-pressed="true">Absoluuttinen</button>
+        <button id="mRel" aria-pressed="false">Suhteellinen</button>
+      </div>
+      <div class="lb-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="player">Pelaaja</th>
+              <th>GoR</th>
+              <th id="estHead">onlymove</th>
+            </tr>
+          </thead>
+          <tbody id="lbRows"></tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="cta-row">
       <a class="btn btn-primary" href="/">Avaa onlymove <span class="arrow" aria-hidden="true">→</span></a>
-      <a class="btn btn-ghost" href="#tulostaulu">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost" href="/leaderboard">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
     </div>
   </header>
 
@@ -435,33 +458,7 @@ function renderTournamentPage(rows) {
         </div>
       </li>
     </ol>
-    <p class="col-note">Tulokset näkyvät alla olevassa tulostaulussa: turnauksen aikana taulukko näyttää viikon huippuarvion ja turnauksen päätyttyä lopputulokset. Voit vaihtaa absoluuttisen ja suhteellisen sarjan välillä.</p>
-  </section>
-
-  <div class="hoshi" aria-hidden="true"><span></span></div>
-
-  <section aria-labelledby="tulostaulu" class="lb">
-    <h2 id="tulostaulu">Tulostaulu</h2>
-    <p class="lead">${phase.note}</p>
-    <div class="lb-toggle" role="group" aria-label="sarja">
-      <button id="mAbs" aria-pressed="true">Absoluuttinen</button>
-      <button id="mRel" aria-pressed="false">Suhteellinen</button>
-    </div>
-    <div class="lb-table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th class="player">Pelaaja</th>
-            <th>GoR</th>
-            <th id="estHead">onlymove</th>
-          </tr>
-        </thead>
-        <tbody id="lbRows"></tbody>
-      </table>
-    </div>
-    <p class="lb-note">Absoluuttinen = onlymove-arvio GoR-asteikolla. Suhteellinen = arvio miinus oma GoR-lukusi. Uusi pelaaja näkee arvion sijasta edistymisensä kohti vaadittua ${RANK_START_MIN} ratkaistua tehtävää.</p>
-    <p class="lb-more"><a href="/leaderboard">Koko tulostaulu (kaikki aikavälit ja järjestäminen) →</a></p>
+    <p class="col-note">Tulokset näkyvät sivun alussa olevassa Ilmoittautuneet-taulukossa: turnauksen aikana taulukko näyttää viikon huippuarvion ja turnauksen päätyttyä lopputulokset. Voit vaihtaa absoluuttisen ja suhteellisen sarjan välillä.</p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
