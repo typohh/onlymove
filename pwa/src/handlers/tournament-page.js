@@ -368,7 +368,7 @@ function renderTournamentPage(rows) {
 
     <h1>onlymove-turnaus</h1>
     <p class="dates">13.–19. heinäkuuta 2026</p>
-    <p class="tagline">Viikon mittainen tsumego-turnaus. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.</p>
+    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoin. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.</p>
 
     <div class="hoshi" aria-hidden="true"><span></span></div>
 
