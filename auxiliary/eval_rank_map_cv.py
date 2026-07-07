@@ -19,8 +19,16 @@ user-rating covariate and in whether the fit integrates over its standard error)
                 career; every block with >= MIN_ATTEMPTS rated attempts becomes its own
                 training row anchored to the user's declared rank (nearest-in-time
                 declaration per server when they filed several — "no drift unless a
-                survey says otherwise"). Rows are weighted so each declaration
-                contributes total weight 1 regardless of career length.
+                survey says otherwise"). Rows are weighted EQUALLY per block, normalized
+                so each declaration contributes total weight 1 regardless of career
+                length. NOTE: equal-per-block underweights the career's edge eras — an
+                interior attempt sits in 2 overlapping blocks, the first/last ~30 days
+                in only 1 — see blocks-mass.
+  blocks-mass   blocks, but each block is weighted by the ATTEMPT MASS it holds: every
+                attempt's unit mass is split equally over the blocks containing it, a
+                block's weight is the mass sum, and the declaration is normalized to
+                total weight 1. Every attempt then counts exactly once regardless of
+                the overlap coverage (fixes the edge-era underweighting above).
   blocks-raw    blocks with NO per-declaration weight normalization (each block weight 1)
                 — probes whether heavy users' extra pseudo-rows help or bias.
 
@@ -142,8 +150,9 @@ def window_rows(att, uid, t_end, days):
 
 
 def user_blocks(att, fitter, uid):
-    """[(t_center, R, se)] for every overlapping BLOCK_DAYS block with a fittable
-    rating; empty careers fall back to nothing (caller falls back to career)."""
+    """[(t_center, R, se, lo, hi)] for every overlapping BLOCK_DAYS block with a
+    fittable rating ([lo, hi) = the attempt-index range, for coverage-mass weights);
+    empty careers fall back to nothing (caller falls back to career)."""
     times, rows = att[uid]
     if len(times) == 0:
         return []
@@ -157,8 +166,19 @@ def user_blocks(att, fitter, uid):
         seen.add((lo, hi))
         fit = fitter.fit(rows[lo:hi])
         if fit is not None:
-            out.append((float((times[lo] + times[hi - 1]) / 2), fit[0], fit[1]))
+            out.append((float((times[lo] + times[hi - 1]) / 2), fit[0], fit[1], lo, hi))
     return out
+
+
+def block_masses(blks, n_attempts):
+    """Attempt-mass per block: each attempt's unit mass is split equally over the
+    blocks covering it; a block's mass is the sum over its attempts. Attempts no
+    kept block covers (e.g. sparse gaps below MIN_ATTEMPTS) simply carry no mass."""
+    cov = np.zeros(n_attempts)
+    for _, _, _, lo, hi in blks:
+        cov[lo:hi] += 1
+    inv = np.where(cov > 0, 1.0 / np.maximum(cov, 1), 0.0)
+    return [float(np.sum(inv[lo:hi])) for _, _, _, lo, hi in blks]
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +333,11 @@ def main():
     ap.add_argument("--sqlite", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
     ap.add_argument("--reps", type=int, default=6)
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--variants", default=None,
+                    help="comma-list of variant names to run (default: all). Foldings "
+                         "are seed-deterministic, so runs with the same --reps/--folds "
+                         "are paired-comparable across invocations via the career "
+                         "baseline.")
     args = ap.parse_args()
 
     print("Loading surveys + ratings + attempts ...")
@@ -383,10 +408,14 @@ def main():
                         se if eiv else 0.0, 1.0))
         return out
 
-    def block_decls(uids, eiv, normalize):
+    def block_decls(uids, eiv, mode):
+        """mode: 'equal' (1/n per block), 'mass' (attempt-mass, normalized to 1 per
+        declaration), 'raw' (weight 1 per block, no normalization)."""
         out = []
         for uid in uids:
-            blks = blocks_by_user[uid] or [(0.0, career[uid][0], career[uid][1])]
+            n_att = len(att[uid][1])
+            blks = blocks_by_user[uid] or [(0.0, career[uid][0], career[uid][1], 0, n_att)]
+            masses = block_masses(blks, n_att)
             udecl = surveys[surveys["user_id"] == uid]
             for server, srows in udecl.groupby("server"):
                 srows = srows.sort_values("t")
@@ -394,25 +423,32 @@ def main():
                 dg = srows["rank_scalar"].to_numpy(float)
                 # nearest-in-time declaration anchors each block (no drift otherwise)
                 assign = defaultdict(list)
-                for (tc, R, se) in blks:
+                for (tc, R, se, _, _), m in zip(blks, masses):
                     j = int(np.argmin(np.abs(dt - tc)))
-                    assign[j].append((R, se))
+                    assign[j].append((R, se, m))
                 for j, brs in assign.items():
-                    w = 1.0 / len(brs) if normalize else 1.0
-                    for R, se in brs:
+                    mass_tot = sum(m for _, _, m in brs)
+                    for R, se, m in brs:
+                        w = (1.0 if mode == "raw" else
+                             1.0 / len(brs) if mode == "equal" else
+                             (m / mass_tot if mass_tot > 0 else 1.0 / len(brs)))
                         out.append((server, R, float(dg[j]), T_of[uid],
                                     se if eiv else 0.0, w))
         return out
 
+    # eiv was measurably worse across every covariate in the first full run
+    # (see the memory/report); keep only career+eiv as the recorded control.
     VARIANTS = [
         ("career",      lambda u: point_decls(u, career, False)),
         ("career+eiv",  lambda u: point_decls(u, career, True)),
         ("win120",      lambda u: point_decls(u, win, False)),
-        ("win120+eiv",  lambda u: point_decls(u, win, True)),
-        ("blocks",      lambda u: block_decls(u, False, True)),
-        ("blocks+eiv",  lambda u: block_decls(u, True, True)),
-        ("blocks-raw",  lambda u: block_decls(u, False, False)),
+        ("blocks",      lambda u: block_decls(u, False, "equal")),
+        ("blocks-mass", lambda u: block_decls(u, False, "mass")),
+        ("blocks-raw",  lambda u: block_decls(u, False, "raw")),
     ]
+    if args.variants:
+        keep = set(args.variants.split(","))
+        VARIANTS = [v for v in VARIANTS if v[0] in keep]
     LENSES = [("career-lens", career), ("win120-lens", win)]
 
     # --- sanity: se=0/w=1 reproduces production fit_consensus -------------------
