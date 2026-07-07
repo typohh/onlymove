@@ -218,13 +218,6 @@ function renderTournamentPage(rows) {
   ol.steps .stone::before { content: counter(step); }
   ol.steps .s-title { font-weight: 600; color: var(--ink); }
   ol.steps .s-body { color: var(--mist); font-size: .95rem; margin-top: .1rem; }
-  .col-note {
-    margin: 1.3rem 0 0; padding: .85rem 1rem; border-left: 2px solid var(--gold-deep);
-    background: rgba(206,176,83,.05); border-radius: 0 10px 10px 0;
-    color: var(--mist); font-size: .92rem;
-  }
-  .col-note code { font-family: var(--mono); color: var(--gold-lite); font-size: .88em; }
-
   /* ---- scoring note ---- */
   .note-body { color: var(--mist); }
   .note-body strong { color: var(--ink); font-weight: 600; }
@@ -445,7 +438,6 @@ function renderTournamentPage(rows) {
         </div>
       </li>
     </ol>
-    <p class="col-note">Tulokset näkyvät sivun alussa olevassa Ilmoittautuneet-taulukossa: turnauksen aikana taulukko näyttää viikon huippuarvion ja turnauksen päätyttyä lopputulokset. Voit vaihtaa absoluuttisen ja suhteellisen sarjan välillä.</p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
