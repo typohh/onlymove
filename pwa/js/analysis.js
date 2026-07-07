@@ -267,6 +267,17 @@ async function requestAndDisplayAnalysis() {
         if (state.appMode === APP_MODES.ANALYZING && bestMoveSgf) {
             const currentSgfCheck = getCurrentSgf();
             if (currentSgfCheck === sgf) {
+                // The server can answer a literal "pass" — there is no board
+                // coordinate to decode (charCodeAt on "pass" fabricates (15, 0):
+                // a phantom node whose hint marker renders nowhere). Show the
+                // score with no on-board hint instead.
+                if (bestMoveSgf === 'pass' || bestMoveSgf.length < 2) {
+                    setAnalysisHintMove(null);
+                    setCandidateMoves([]);
+                    updateAnalysisUI(score, null);
+                    redraw();
+                    return;
+                }
                 const bestMove = {
                     x: bestMoveSgf.charCodeAt(0) - 97,
                     y: bestMoveSgf.charCodeAt(1) - 97,

@@ -123,6 +123,10 @@ async function buildProblem(raw, { isRepeat, linked, orientation }) {
         rank: raw.rank,
         quality: raw.quality || 0,
         slope: raw.slope,
+        // Per-problem 3PL guessing floor — user-stats records it as problemFloor
+        // (the rank estimator's Δ-coupled floor discount reads it; omitting it
+        // made clampFloor treat every live attempt as floor 0).
+        floor: raw.floor,
         embedding: raw.embedding,
         isRepeat,
         orientation: reoriented.orientation,
@@ -155,9 +159,22 @@ async function loadZipMetadata() {
     }
 }
 
-async function loadZipProblems(zipFilename) {
-    if (state.loadedZips[zipFilename]) return;
+// In-flight de-dup: loadedZips[zipFilename] is only set AFTER the fetch+parse
+// awaits, so two concurrent loads of the same shard (fetchSgfFromZip racing a
+// backgroundLoadCloserZip) would both pass the loaded check and push the
+// shard's problems into the pool twice — double selection weight, double
+// memory — for the rest of the session.
+const zipLoadsInFlight = new Map();
+function loadZipProblems(zipFilename) {
+    if (state.loadedZips[zipFilename]) return Promise.resolve();
+    if (zipLoadsInFlight.has(zipFilename)) return zipLoadsInFlight.get(zipFilename);
+    const p = doLoadZipProblems(zipFilename)
+        .finally(() => zipLoadsInFlight.delete(zipFilename));
+    zipLoadsInFlight.set(zipFilename, p);
+    return p;
+}
 
+async function doLoadZipProblems(zipFilename) {
     const cacheKey = `tsumegos/${state.boardSize}/${zipFilename}`;
     let zipResponse;
     try {
@@ -347,19 +364,39 @@ function handleLoadFailure(lastError) {
 // (re)assigned: on first load, and whenever the challenge itself is attempted
 // (completeCurrentProblem). Retries past bad SGFs, blacklisting each.
 export async function assignNewChallenge() {
-    await loadZipMetadata();
+    // The selection below belongs to THIS size: a size switch during the awaits
+    // must not store an old-size problem into the new size's challenge bucket
+    // (it would later be reported with the wrong size and a mis-framed
+    // canonical move).
+    const sizeAtStart = state.boardSize;
+    // A failed metadata fetch (offline) flows into the normal failure path —
+    // the caller's challenge-less handling ends in handleLoadFailure, which
+    // restores clicks — instead of escaping as an unhandled rejection that
+    // leaves the board frozen (acceptClicks false).
+    try {
+        await loadZipMetadata();
+    } catch (error) {
+        console.error('assignNewChallenge: metadata load failed:', error);
+        return state.challengeProblem;
+    }
     let lastError = null;
     for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
         let raw = selectChallengeCandidate();
         if (!raw) {
             const closestZip = findClosestUnloadedZip();
             if (!closestZip) { lastError = new Error('No zip files found in metadata.'); break; }
-            await loadZipProblems(closestZip.filename);
+            try {
+                await loadZipProblems(closestZip.filename);
+            } catch (error) {
+                console.error('assignNewChallenge: zip load failed:', error);
+                return state.challengeProblem;
+            }
             raw = selectChallengeCandidate();
             if (!raw) { lastError = new Error('Failed to select a challenge after loading zip.'); break; }
         }
         try {
             const problem = await buildProblem(raw, { isRepeat: false, linked: false });
+            if (state.boardSize !== sizeAtStart) return state.challengeProblem;
             setChallengeProblem(problem);
             return problem;
         } catch (error) {

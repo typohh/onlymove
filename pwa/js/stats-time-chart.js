@@ -99,6 +99,9 @@ export function buildTimeUsageChart(history = state.answerHistory) {
     // line out of the window.
     const hiVals = [];
     for (const grid of [sGrid, rGrid]) if (grid) for (const e of grid) if (e) hiVals.push(Math.max(e.hi, e.mid));
+    // Grids can exist with EVERY point absent (all below the ESS floor) — an
+    // empty quantile would NaN-poison the whole frame; drop the pane instead.
+    if (hiVals.length === 0) return null;
     hiVals.sort((a, b) => a - b);
     const rawHigh = Math.max(quantileSorted(hiVals, 0.90) * 1.05, 1);
     const yLow = 0;

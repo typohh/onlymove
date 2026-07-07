@@ -119,7 +119,12 @@ export async function disableNotifications() {
         try { await sub.unsubscribe(); } catch {}
     }
     try {
-        await postJson('/push/unsubscribe', { userId: state.userId, endpoint });
+        // No endpoint = nothing identifiable to remove for THIS device. POSTing
+        // without one would hit the Worker's legacy account-wide fallback and
+        // delete EVERY device's subscription for the account; a stale server row
+        // for this device is instead cleaned by the cron's dead-endpoint
+        // handling (the push service 404/410s it).
+        if (endpoint) await postJson('/push/unsubscribe', { userId: state.userId, endpoint });
     } catch {}
 }
 

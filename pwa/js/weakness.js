@@ -179,7 +179,9 @@ export async function trainWeakness() {
             return;
         }
         state.weaknessParams = params;
-        state.weaknessAdam = adam;
+        // (adam is NOT persisted: every retrain starts fresh moments at line
+        // ~110, so storing it was a dead localStorage write per attempt. The
+        // clear/wipe paths still remove legacy weaknessAdam blobs.)
 
         // Laplace-approx posterior cov. H = X' diag(p(1-p)) X + diag(lam_vec);
         // posterior cov ≈ H^-1. We pull out the per-axis 2x2 block on
