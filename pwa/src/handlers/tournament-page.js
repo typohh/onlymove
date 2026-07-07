@@ -1,9 +1,11 @@
 // pwa/src/handlers/tournament-page.js
 //
 // GET /tournament — a standalone, directly-linkable, server-rendered landing page
-// for the onlymove Go tournament (Finnish audience). Static content (no D1), styled
-// to match onlymove's gold-on-dark goban identity. Registered before the SPA
-// fallback in src/index.js. Links out to /leaderboard and the app front page (/).
+// for the onlymove Go tournament (Finnish audience). Styled to match onlymove's
+// gold-on-dark goban identity. Registered before the SPA fallback in src/index.js.
+// Embeds a compact tournament standings table (the same readLeaderboardRows the
+// /leaderboard page computes from, one timeframe auto-picked by tournament phase);
+// the full /leaderboard page stays separate and is linked from the section + footer.
 
 // Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is the
 // onlymove app-icon board position, restyled in gold-on-dark, with one black stone
@@ -12,8 +14,21 @@
 // recurring structural marks. Content is Finnish; the tournament is for Finnish
 // players. Copy is intentionally plain and instructional.
 
-export async function handleTournament() {
-    return new Response(renderTournamentPage(), {
+import { readLeaderboardRows, weekIdAt, RANK_START_MIN } from '../leaderboard.js';
+import { ESC_SNIPPET, numAbs, numRel, flag } from './page-shell.js';
+
+// Monday 13.7.2026 00:00 UTC — the tournament week (Monday-UTC week bucketing,
+// same weekIdAt the leaderboard's week rollover uses).
+const TOURNAMENT_WEEK = weekIdAt(Date.UTC(2026, 6, 13));
+
+export async function handleTournament(env) {
+    let rows = [];
+    try {
+        rows = await readLeaderboardRows(env);
+    } catch (e) {
+        console.error('tournament leaderboard read failed:', e);
+    }
+    return new Response(renderTournamentPage(rows), {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
@@ -22,7 +37,46 @@ export async function handleTournament() {
     });
 }
 
-function renderTournamentPage() {
+// The standings section shows ONE timeframe, picked by where "now" sits relative
+// to the tournament week: a preview of current estimates before, the this-week
+// peak during (the live tournament standing), the frozen last-week peak the week
+// after (the final results). Later than that the week data has rolled off the
+// leaderboard's two-week window, so it falls back to current estimates.
+function tournamentPhase(nowMs) {
+    const nowWeek = weekIdAt(nowMs);
+    if (nowWeek < TOURNAMENT_WEEK) {
+        return { tf: 0, medals: false, note: 'Turnaus alkaa 13.7. — taulukko näyttää osallistujien tämänhetkiset arviot.' };
+    }
+    if (nowWeek === TOURNAMENT_WEEK) {
+        return { tf: 1, medals: true, note: 'Turnaus käynnissä — sija määräytyy viikon huippuarvion mukaan.' };
+    }
+    if (nowWeek === TOURNAMENT_WEEK + 1) {
+        return { tf: 2, medals: true, note: 'Turnauksen lopputulokset, 13.–19. heinäkuuta 2026.' };
+    }
+    return { tf: 0, medals: false, note: 'Turnaus on päättynyt — taulukko näyttää pelaajien tämänhetkiset arviot.' };
+}
+
+function renderTournamentPage(rows) {
+    const phase = tournamentPhase(Date.now());
+    const tf = phase.tf;
+    // One row per registered player, only the phase's timeframe: abs = estimated
+    // GoR, rel = the GoR gap (the two prize series). GoR follows the timeframe —
+    // the frozen last-week GoR when showing last-week peaks (tf 2), else current.
+    const data = rows.map((r) => {
+        const gorRaw = tf === 2 ? r.prevWeekGor : r.gor;
+        const row = {
+            name: r.name || '—',
+            flag: flag(r.country),
+            gor: Number.isFinite(gorRaw) ? gorRaw : null,
+            abs: numAbs([r.currentAbs, r.thisWeekAbs, r.prevWeekAbs][tf]),
+            rel: numRel([r.currentRel, r.thisWeekRel, r.prevWeekRel][tf]),
+        };
+        // Not yet ranked: attempts/threshold progress replaces the estimate (abs/rel
+        // null → sorts last), same convention as the /leaderboard page.
+        if (!r.ranked) row.progress = Math.min(r.novelCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
+        return row;
+    });
+    const json = JSON.stringify(data).replace(/</g, '\\u003c');
     return `<!doctype html>
 <html lang="fi">
 <head>
@@ -57,6 +111,7 @@ function renderTournamentPage() {
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body {
     margin: 0;
     font-family: var(--sans);
@@ -171,6 +226,37 @@ function renderTournamentPage() {
   /* ---- scoring note ---- */
   .note-body { color: var(--mist); }
   .note-body strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- embedded tournament standings ---- */
+  .lb-toggle { display: inline-flex; border: 1px solid rgba(206,176,83,.35); border-radius: 999px; overflow: hidden; margin: .2rem 0 1.1rem; }
+  .lb-toggle button {
+    font: inherit; font-size: .92rem; padding: .42rem .95rem; border: 0; background: transparent;
+    color: var(--mist); cursor: pointer; white-space: nowrap;
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .lb-toggle button[aria-pressed="true"] { background: var(--gold); color: #17130a; font-weight: 600; }
+  .lb-toggle button:focus-visible { outline: 2px solid var(--gold-lite); outline-offset: -2px; }
+  .lb-table-wrap { overflow-x: auto; }
+  .lb table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .lb th, .lb td { padding: .55rem .5rem; text-align: right; white-space: nowrap; }
+  .lb th.player, .lb td.pl { text-align: left; width: 99%; }
+  .lb thead th {
+    font-family: var(--mono); font-size: .68rem; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--gold); opacity: .8; border-bottom: 1px solid var(--line);
+  }
+  .lb tbody tr { border-bottom: 1px solid var(--line-soft); }
+  .lb td.pos { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .lb td.pos .medal { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: .4rem; }
+  .lb td.gor { color: var(--mist); font-variant-numeric: tabular-nums; }
+  .lb td.val { font-family: var(--mono); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .lb td.val.progress { font-family: var(--mono); font-weight: 400; color: var(--faint); }
+  .lb .name { overflow: hidden; text-overflow: ellipsis; max-width: 14rem; display: inline-block; vertical-align: bottom; }
+  .lb .empty { color: var(--faint); text-align: center; padding: 1.6rem 0; }
+  .lb-note { color: var(--faint); font-size: .85rem; margin: 1rem 0 0; }
+  .lb-more { margin: .5rem 0 0; font-size: .92rem; }
+  .lb-more a { color: var(--gold); text-decoration: none; }
+  .lb-more a:hover { color: var(--gold-lite); text-decoration: underline; }
 
   /* ---- EGC band ---- */
   .egc {
@@ -295,7 +381,7 @@ function renderTournamentPage() {
     <p class="tagline">Viikon mittainen tsumego-turnaus. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="/">Avaa onlymove <span class="arrow" aria-hidden="true">→</span></a>
-      <a class="btn btn-ghost" href="/leaderboard">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost" href="#tulostaulu">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
     </div>
   </header>
 
@@ -349,7 +435,33 @@ function renderTournamentPage() {
         </div>
       </li>
     </ol>
-    <p class="col-note">Tulokset näkyvät tulostaulun viikkosarakkeessa: turnauksen aikana kohdassa <code>This week peak</code> ja sen päätyttyä <code>Last week peak</code>. Voit vaihtaa <code>Absolute</code>- ja <code>Relative</code>-näkymien välillä.</p>
+    <p class="col-note">Tulokset näkyvät alla olevassa tulostaulussa: turnauksen aikana taulukko näyttää viikon huippuarvion ja turnauksen päätyttyä lopputulokset. Voit vaihtaa absoluuttisen ja suhteellisen sarjan välillä.</p>
+  </section>
+
+  <div class="hoshi" aria-hidden="true"><span></span></div>
+
+  <section aria-labelledby="tulostaulu" class="lb">
+    <h2 id="tulostaulu">Tulostaulu</h2>
+    <p class="lead">${phase.note}</p>
+    <div class="lb-toggle" role="group" aria-label="sarja">
+      <button id="mAbs" aria-pressed="true">Absoluuttinen</button>
+      <button id="mRel" aria-pressed="false">Suhteellinen</button>
+    </div>
+    <div class="lb-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th class="player">Pelaaja</th>
+            <th>GoR</th>
+            <th id="estHead">onlymove</th>
+          </tr>
+        </thead>
+        <tbody id="lbRows"></tbody>
+      </table>
+    </div>
+    <p class="lb-note">Absoluuttinen = onlymove-arvio GoR-asteikolla. Suhteellinen = arvio miinus oma GoR-lukusi. Uusi pelaaja näkee arvion sijasta edistymisensä kohti vaadittua ${RANK_START_MIN} ratkaistua tehtävää.</p>
+    <p class="lb-more"><a href="/leaderboard">Koko tulostaulu (kaikki aikavälit ja järjestäminen) →</a></p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
@@ -382,6 +494,57 @@ function renderTournamentPage() {
   </footer>
 
 </div>
+<script>
+(function () {
+  var DATA = ${json};
+  var MEDALS = ${phase.medals ? 'true' : 'false'};
+  var mode = 'abs';   // 'abs' | 'rel' — the two prize series
+  ${ESC_SNIPPET}
+  var tbody = document.getElementById('lbRows');
+
+  // Absolute = plain estimated GoR; relative = signed GoR gap vs the player's own GoR.
+  function fmt(v) {
+    if (v === null || v === undefined) return '—';
+    return mode === 'rel' ? (v >= 0 ? '+' : '−') + Math.abs(v) : String(v);
+  }
+  // Active series descending; rows without a value (idle week / not yet ranked) last.
+  function cmp(a, b) {
+    var va = a[mode], vb = b[mode];
+    var na = (va === null || va === undefined), nb = (vb === null || vb === undefined);
+    if (na && nb) return 0;
+    if (na) return 1;
+    if (nb) return -1;
+    return vb - va;
+  }
+  function render() {
+    document.getElementById('estHead').textContent = mode === 'abs' ? 'onlymove' : 'Ero';
+    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">Ei pelaajia vielä.</td></tr>'; return; }
+    var sorted = DATA.slice().sort(cmp);
+    tbody.innerHTML = sorted.map(function (r, i) {
+      // Gold/outline dots on the top two — the prize places — only while the shown
+      // timeframe IS the tournament standing (during the week + the results week).
+      var medal = MEDALS && !r.progress && r[mode] !== null && i < 2
+        ? '<span class="medal ' + (i === 0 ? 'first' : 'second') + '" aria-hidden="true"></span>' : '';
+      var val = r.progress
+        ? '<td class="val progress">' + esc(r.progress) + '</td>'
+        : '<td class="val">' + fmt(r[mode]) + '</td>';
+      return '<tr><td class="pos">' + medal + (i + 1) + '</td>' +
+        '<td class="pl">' + (r.flag ? r.flag + ' ' : '') + '<span class="name">' + esc(r.name) + '</span></td>' +
+        '<td class="gor">' + (r.gor === null ? '—' : r.gor) + '</td>' +
+        val + '</tr>';
+    }).join('');
+  }
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mAbs').setAttribute('aria-pressed', m === 'abs');
+    document.getElementById('mRel').setAttribute('aria-pressed', m === 'rel');
+    render();
+  }
+  document.getElementById('mAbs').onclick = function () { setMode('abs'); };
+  document.getElementById('mRel').onclick = function () { setMode('rel'); };
+  render();
+})();
+</script>
 </body>
 </html>`;
 }

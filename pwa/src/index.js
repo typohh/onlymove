@@ -48,8 +48,9 @@ const GET_ROUTES = [
   { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
-  // Standalone tournament landing page (HTML, Finnish, static).
-  { path: '/tournament', handler: () => handleTournament() },
+  // Standalone tournament landing page (HTML, Finnish; embeds the tournament
+  // standings read from the leaderboard table).
+  { path: '/tournament', handler: (request, env) => handleTournament(env) },
   // /invite is dual-purpose on the same path: with ?t=<token> it's the invitation
   // preview (JSON) for the /register confirmation dialog; without a token it's the
   // invite generator page (HTML). (GET /register itself is a navigation and falls

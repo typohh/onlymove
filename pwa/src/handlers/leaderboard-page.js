@@ -10,7 +10,7 @@
 // and any header sorts. See docs/leaderboard_plan.md.
 
 import { readLeaderboardRows, RANK_START_MIN } from '../leaderboard.js';
-import { baseCss, ESC_SNIPPET } from './page-shell.js';
+import { baseCss, ESC_SNIPPET, numAbs, numRel, flag } from './page-shell.js';
 
 export async function handleLeaderboard(env) {
     let rows = [];
@@ -28,18 +28,9 @@ export async function handleLeaderboard(env) {
     });
 }
 
-// The estimate is an EGF rank scalar; display it as GoR — the inverse of the
-// Worker's gorToRankScalar (1k=2000, 1d=2100, ~100 GoR/stone). Relative mode
-// shows the GoR gap (estimated GoR − actual GoR) = exactly 100× the scalar diff.
-const scalarToGor = (v) => Math.round(2000 + 100 * v);
-// Numeric values the client both sorts by AND formats. Absolute = estimated GoR;
-// relative = the GoR gap (estimated − actual GoR) = 100× the scalar diff. null
-// where a timeframe has no data (an idle week) → the client renders "—" and sorts
-// it last regardless of direction.
-const numAbs = (v) => (Number.isFinite(v) ? scalarToGor(v) : null);
-const numRel = (v) => (Number.isFinite(v) ? Math.round(100 * v) : null);
-const flag = (cc) => (typeof cc === 'string' && cc.length === 2)
-    ? cc.toUpperCase().replace(/./g, (c) => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)) : '';
+// numAbs/numRel/flag come from page-shell.js (shared with the /tournament page's
+// embedded standings). Absolute = estimated GoR; relative = the GoR gap
+// (estimated − actual GoR) = 100× the scalar diff.
 
 function renderPage(rows) {
     // Per timeframe [current, thisWeekPeak, lastWeekPeak]: the GoR to show, the
