@@ -81,14 +81,15 @@ export function calculatePercentile(sortedArr, target) {
 // correctness head); it only fits LN_C. No IS_NOVEL indicator.
 const NEG_LN_080 = -Math.log(0.80); // 0.22314 — t/S at the 0.80 window-open
 const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
+export const MIN_RECALL_HOURS = 6;
 // Stability floor/ceiling (days). Floor keeps a just-failed problem from coming
-// due sooner than ~18h; ceiling guards against runaway intervals/overflow.
-const MIN_STABILITY_DAYS = (18 / 24) / NEG_LN_080;
+// due sooner than the minimum recall hours; ceiling guards against runaway intervals/overflow.
+const MIN_STABILITY_DAYS = (MIN_RECALL_HOURS / 24) / NEG_LN_080;
 const MAX_STABILITY_DAYS = 365;
 // The floor expressed as the earliest a repeat can come due (ms) — the minimum
 // recall interval. Exported for the cross-tab duplicate guard (user-stats.js):
 // a second attempt closer than this can never be a legitimate recall.
-export const MIN_RECALL_INTERVAL_MS = MIN_STABILITY_DAYS * NEG_LN_080 * 24 * 3600 * 1000;
+export const MIN_RECALL_INTERVAL_MS = MIN_RECALL_HOURS * 3600 * 1000;
 // Retention constants — loaded at boot from the fitted population_constants.json (a
 // MANDATORY asset; main.js aborts if it can't load) via applyRetentionConstants().
 // NO baked fallback: the pipeline always ships a valid file (fit_population_constants

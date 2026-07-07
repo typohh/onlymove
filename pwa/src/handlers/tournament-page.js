@@ -361,7 +361,7 @@ function renderTournamentPage(rows) {
 
     <h1>onlymove-turnaus</h1>
     <p class="dates">13.–19. heinäkuuta 2026</p>
-    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoilla. Kaksi sarjaa: paras ylisuoriutuminen GoR-lukuihin nähden sekä absoluuttisesti paras suoriutuminen.<br><br>Samalla hyvä mahdollisuus valmistautua go-kongressia varten.</p>
+    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoilla. Kaksi sarjaa: paras ylisuoriutuminen GoR-lukuihin nähden sekä absoluuttisesti paras suoriutuminen.</p>
 
     <div class="hoshi" aria-hidden="true"><span></span></div>
 

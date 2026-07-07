@@ -198,13 +198,13 @@ async function computeServerStats(env) {
   // set by the spaced-repetition schedule, not comparable). Pre-binned
   // server-side (the spans run minutes to days, so the fine solving/review
   // buckets don't apply) and rendered with makeBarList like
-  // attemptsPerUserDist. Gaps under 12h are ignored entirely (a same-session
+  // attemptsPerUserDist. Gaps under 6h are ignored entirely (a same-session
   // retry, not a meaningful recall interval). The 7-day window right-censors
   // long gaps (a novel attempt whose first repeat falls outside the window
   // contributes nothing), which biases the median slightly short — accepted.
-  const RECALL_MIN_MS = 12 * 3600e3;
+  const RECALL_MIN_MS = 6 * 3600e3;
   const RECALL_BINS = [
-    { hi: 24 * 3600e3, label: '<1d' },
+    { hi: 24 * 3600e3, label: '6h–1d' },
     { hi: 48 * 3600e3, label: '1–2d' },
     { hi: 72 * 3600e3, label: '2–3d' },
     { hi: 96 * 3600e3, label: '3–4d' },

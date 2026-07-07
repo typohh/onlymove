@@ -84,6 +84,13 @@ export function performShare() {
     // Record that a share link was generated (fire-and-forget analytics).
     recordShareEvent({ type: 'create', problemId: tsumegoId });
 
+    let clipboardImageSupported = false;
+    try {
+        clipboardImageSupported = !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
+    } catch {
+        clipboardImageSupported = false;
+    }
+
     const copyToClipboard = () => {
         const copied = () => showToast(getTerm('linkCopied'));
         const localFallback = () => { if (legacyCopy(shareUrl)) copied(); else showShareUrlFallback(shareUrl); };
@@ -106,6 +113,20 @@ export function performShare() {
         }
         localFallback();
         return Promise.resolve();
+    };
+
+    const copyImageToClipboard = (file) => {
+        const copied = () => showToast(getTerm('imageReady'));
+        const active = !navigator.userActivation || navigator.userActivation.isActive;
+        if (!active) {
+            showToast(getTerm('shareFailed'), { isError: true });
+            return Promise.resolve();
+        }
+        const item = new ClipboardItem({ [file.type]: file });
+        return navigator.clipboard.write([item]).then(copied).catch(err => {
+            console.error('Failed to copy image: ', err);
+            showToast(getTerm('shareFailed'), { isError: true });
+        });
     };
 
     const shareLink = () => {
@@ -159,7 +180,7 @@ export function performShare() {
                 const p = document.createElement('p');
                 p.textContent = getTerm('imageReady');
                 const btn = document.createElement('button');
-                btn.className = 'btn';
+                btn.className = 'btn menu-item';
                 btn.textContent = getTerm('share');
                 btn.addEventListener('click', () => {
                     close();
@@ -242,8 +263,14 @@ export function performShare() {
                 reportShareRefusal('image', err);
                 if (err.name === 'NotAllowedError') return offerReadyShare(data);
                 showToast(getTerm('shareFailed'), { isError: true });
+                if (clipboardImageSupported) {
+                    return copyImageToClipboard(file);
+                }
                 return shareLink();
             });
+        }
+        if (clipboardImageSupported) {
+            return copyImageToClipboard(file);
         }
         return shareLink();
     };
@@ -277,18 +304,21 @@ export function performShare() {
         // intentionally presents three equal-width options.
         const mkBtn = (term, action) => {
             const btn = document.createElement('button');
-            btn.className = 'btn';
+            btn.className = 'btn menu-item';
             btn.textContent = getTerm(term);
             return [btn, action];
         };
         showModal({
             onDismiss: releaseGuard,
             build: (modal, close) => {
-                for (const [btn, action] of [
-                    mkBtn('shareBoth', shareBoth),
-                    mkBtn('shareLink', shareLink),
-                    mkBtn('shareImage', shareImage),
-                ]) {
+                const buttons = [];
+                if (filesSupported) {
+                    buttons.push(mkBtn('shareBoth', shareBoth));
+                }
+                buttons.push(mkBtn('shareLink', shareLink));
+                buttons.push(mkBtn('shareImage', shareImage));
+
+                for (const [btn, action] of buttons) {
                     btn.addEventListener('click', () => { close(); action().finally(releaseGuard); });
                     modal.appendChild(btn);
                 }
@@ -305,7 +335,7 @@ export function performShare() {
         filesSupported = false;
     }
 
-    if (filesSupported) {
+    if (filesSupported || clipboardImageSupported) {
         showShareChooser();
     } else {
         shareLink().finally(releaseGuard);

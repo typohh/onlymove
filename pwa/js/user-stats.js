@@ -27,7 +27,7 @@ import { postJson } from './net.js';
 // RECALL_CANDIDATE_HISTORY_LENGTH check that made the served problem novel to
 // begin with):
 //   - prior attempt within the minimum recall interval (MIN_RECALL_INTERVAL_MS,
-//     the recall model's ~18h stability floor): a same-session duplicate →
+//     the recall model's ~6h stability floor): a same-session duplicate →
 //     'drop' (recorded nowhere, reported nowhere);
 //   - older prior attempt (a long-stale tab): a legitimate repeat →
 //     'repeat', so it never counts as a second first-time attempt.

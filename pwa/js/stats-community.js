@@ -134,11 +134,11 @@ export async function buildServerStatsPane(history = []) {
     // Recall time: per user, the median novel→first-repeat gap (pre-binned
     // server-side). x = recall-time bin, y = users.
     if (data.recallDist && data.recallDist.some(b => b.value)) {
-        const h = document.createElement('div');
-        h.className = 'server-stats-heading';
-        h.textContent = getTerm('statsRecallTime');
-        pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value })), you.recall));
-    }
+         const h = document.createElement('div');
+         h.className = 'server-stats-heading';
+         h.textContent = getTerm('statsRecallTime');
+         pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value })), you.recall));
+     }
 
     // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
     // per active user (answer-derived from the last 7 days), so render as-is.

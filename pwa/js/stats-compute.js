@@ -93,10 +93,10 @@ export function computeUserCommunityBuckets(history, timeBins) {
         .filter(t => t > 0));
     if (reviewMed != null) out.review = binSeconds(reviewMed);
 
-    // Recall time: median novel→first-repeat gap ≥12h across problems — per
+    // Recall time: median novel→first-repeat gap ≥6h across problems — per
     // problem the gap from the novel (first non-repeat) attempt, only when it
     // FAILED, to the very next attempt (mirrors the Worker's recallDist).
-    const RECALL_MIN_MS = 12 * 3600e3;
+    const RECALL_MIN_MS = 6 * 3600e3;
     const RECALL_HI = [24, 48, 72, 96, 120, Infinity].map(h => h * 3600e3);
     const seqByProblem = new Map();
     for (const a of recent) {
