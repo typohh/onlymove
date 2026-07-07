@@ -7,7 +7,7 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "dev": "node build.mjs --watch --with-wrangler",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "node deploy.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.19.2"
