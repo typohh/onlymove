@@ -53,13 +53,6 @@ export function maybeShowRankSurvey() {
     if (state.reloadPending) return;
     if (tickCount < 2) return;
 
-    // TEMPORARY: show survey after every problem for local testing
-    const TESTING = true;
-    if (TESTING) {
-        showRankSurvey();
-        return;
-    }
-
     const lastShown = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
     if (Number.isFinite(lastShown) && Date.now() - lastShown < COOLDOWN_MS) return;
     if (totalAnswerCount() < MIN_ANSWERS) return;
