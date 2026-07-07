@@ -96,3 +96,9 @@ npm run deploy     # publish to Cloudflare Workers
 - **Weakness Recommender**: Augments logistic regression using a FastICA-rotated $K$-dim embedding ($K=64$).
 - FastICA uses a skew contrast (positive tail has the motif, negative tail is Gaussian baseline).
 - **Cache Busting**: Asset fetches use `?v=${DATA_VERSION}` where `DATA_VERSION` is a content hash of `metadata.json` files and is inlined in `embedding_meta.json`.
+
+---
+
+## Interaction Rules
+- **Responding to Questions**: If the user asks a question, provide a textual explanation or suggestions rather than making code changes.
+

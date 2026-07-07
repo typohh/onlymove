@@ -52,11 +52,33 @@ export function maybeShowRankSurvey() {
     // and just skip until the reload settles.
     if (state.reloadPending) return;
     if (tickCount < 2) return;
+
+    // TEMPORARY: show survey after every problem for local testing
+    const TESTING = true;
+    if (TESTING) {
+        showRankSurvey();
+        return;
+    }
+
     const lastShown = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
     if (Number.isFinite(lastShown) && Date.now() - lastShown < COOLDOWN_MS) return;
     if (totalAnswerCount() < MIN_ANSWERS) return;
     showRankSurvey();
 }
+
+const isMobile = window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 768;
+
+let activePopover = null;
+const closeActivePopover = () => {
+    if (activePopover) {
+        activePopover.remove();
+        activePopover = null;
+    }
+};
+
+const handleDocumentClick = () => {
+    closeActivePopover();
+};
 
 function showRankSurvey() {
     if (dialogOpen) return;
@@ -69,6 +91,10 @@ function showRankSurvey() {
     const noneLabel = getTerm('rankSurveyNone');
     const rankOptions = buildRankOptions();
     const selects = {};
+    const selectedRanks = {};
+    for (const server of SERVERS) {
+        selectedRanks[server] = '';
+    }
 
     let modalApi;
     // Commit the cooldown only here, on actual user click. If the user never
@@ -76,6 +102,8 @@ function showRankSurvey() {
     // next stable session.
     const closeWithCooldown = () => {
         localStorage.setItem(STORAGE_KEY, String(Date.now()));
+        document.removeEventListener('click', handleDocumentClick);
+        closeActivePopover();
         modalApi.close();
         dialogOpen = false;
     };
@@ -88,46 +116,196 @@ function showRankSurvey() {
 
             const grid = modalRankGrid();
 
+            // Timeout to prevent the current opening click event from triggering the close handler
+            setTimeout(() => {
+                document.addEventListener('click', handleDocumentClick);
+            }, 0);
+
             for (const server of SERVERS) {
                 const label = document.createElement('label');
                 label.textContent = server;
                 label.className = 'modal-rank-label';
 
-                const select = document.createElement('select');
-                select.style.padding = '0.5vmin 0.8vmin';
-                select.style.borderRadius = 'var(--radius)';
-                select.style.background = '#444';
-                select.style.color = '#fff';
-                select.style.border = '0.2vmin solid #555';
-                select.style.fontSize = 'inherit';
-                select.style.width = '8em';
-                select.style.boxSizing = 'border-box';
+                if (isMobile) {
+                    const select = document.createElement('select');
+                    select.style.padding = '0.5vmin 0.8vmin';
+                    select.style.borderRadius = 'var(--radius)';
+                    select.style.background = '#444';
+                    select.style.color = '#fff';
+                    select.style.border = '0.2vmin solid #555';
+                    select.style.fontSize = 'inherit';
+                    select.style.width = '8em';
+                    select.style.boxSizing = 'border-box';
 
-                const blank = document.createElement('option');
-                blank.value = '';
-                blank.textContent = noneLabel;
-                select.appendChild(blank);
-                for (const r of rankOptions) {
-                    const opt = document.createElement('option');
-                    opt.value = r;
-                    opt.textContent = r;
-                    select.appendChild(opt);
+                    const blank = document.createElement('option');
+                    blank.value = '';
+                    blank.textContent = noneLabel;
+                    select.appendChild(blank);
+                    for (const r of rankOptions) {
+                        const opt = document.createElement('option');
+                        opt.value = r;
+                        opt.textContent = r;
+                        select.appendChild(opt);
+                    }
+
+                    const id = `rank-survey-${server.toLowerCase()}`;
+                    select.id = id;
+                    label.htmlFor = id;
+
+                    selects[server] = select;
+                    grid.appendChild(label);
+                    grid.appendChild(select);
+                } else {
+                    // Desktop Custom Popover Dropdown Button
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-inline';
+                    btn.style.padding = '0.5vmin 1.2vmin';
+                    btn.style.borderRadius = 'var(--radius)';
+                    btn.style.background = '#444';
+                    btn.style.color = '#fff';
+                    btn.style.border = '0.2vmin solid #555';
+                    btn.style.fontSize = 'inherit';
+                    btn.style.width = '8em';
+                    btn.style.boxSizing = 'border-box';
+                    btn.style.textAlign = 'left';
+                    btn.style.cursor = 'pointer';
+                    btn.style.display = 'flex';
+                    btn.style.justifyContent = 'space-between';
+                    btn.style.alignItems = 'center';
+                    btn.style.textTransform = 'none';
+                    btn.style.fontWeight = 'normal';
+
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = noneLabel;
+                    const arrowSpan = document.createElement('span');
+                    arrowSpan.textContent = '▼';
+                    arrowSpan.style.fontSize = '0.8em';
+                    arrowSpan.style.color = '#888';
+                    btn.appendChild(textSpan);
+                    btn.appendChild(arrowSpan);
+
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+
+                        if (activePopover && activePopover.dataset.server === server) {
+                            closeActivePopover();
+                            return;
+                        }
+                        closeActivePopover();
+
+                        // Create centered card overlay inside a dark backdrop
+                        const backdrop = document.createElement('div');
+                        backdrop.style.position = 'fixed';
+                        backdrop.style.inset = '0';
+                        backdrop.style.background = 'rgba(0,0,0,0.5)';
+                        backdrop.style.zIndex = '20000';
+                        backdrop.style.display = 'flex';
+                        backdrop.style.justifyContent = 'center';
+                        backdrop.style.alignItems = 'center';
+                        backdrop.dataset.server = server;
+
+                        const picker = document.createElement('div');
+                        picker.style.fontSize = window.getComputedStyle(modal).fontSize;
+                        picker.style.background = '#333';
+                        picker.style.border = '0.2vmin solid #555';
+                        picker.style.borderRadius = 'var(--radius)';
+                        picker.style.boxShadow = '0 1vmin 3vmin rgba(0,0,0,0.6)';
+                        picker.style.width = '240px';
+                        picker.style.maxWidth = '90vw';
+                        picker.style.display = 'flex';
+                        picker.style.flexDirection = 'column';
+                        picker.style.boxSizing = 'border-box';
+                        picker.style.overflow = 'hidden';
+
+                        const header = document.createElement('div');
+                        header.textContent = server;
+                        header.style.padding = '1.2vmin 2vmin';
+                        header.style.fontWeight = 'bold';
+                        header.style.background = '#2a2a2a';
+                        header.style.borderBottom = '1px solid #444';
+                        header.style.textAlign = 'center';
+                        header.style.fontSize = '1.1em';
+                        picker.appendChild(header);
+
+                        const list = document.createElement('div');
+                        list.style.overflowY = 'auto';
+                        list.style.maxHeight = '50vh';
+                        list.style.display = 'flex';
+                        list.style.flexDirection = 'column';
+
+                        const addOption = (val, labelText) => {
+                            const opt = document.createElement('div');
+                            opt.textContent = labelText;
+                            opt.style.padding = '0.8vmin 2vmin';
+                            opt.style.cursor = 'pointer';
+                            opt.style.color = '#fff';
+                            opt.style.textAlign = 'center';
+                            opt.style.boxSizing = 'border-box';
+
+                            if (selectedRanks[server] === val) {
+                                opt.style.background = '#555';
+                                opt.style.fontWeight = 'bold';
+                            }
+
+                            opt.addEventListener('mouseenter', () => {
+                                opt.style.background = '#444';
+                            });
+                            opt.addEventListener('mouseleave', () => {
+                                if (selectedRanks[server] === val) {
+                                    opt.style.background = '#555';
+                                } else {
+                                    opt.style.background = 'transparent';
+                                }
+                            });
+
+                            opt.addEventListener('click', (ev) => {
+                                ev.stopPropagation();
+                                selectedRanks[server] = val;
+                                textSpan.textContent = labelText;
+                                closeActivePopover();
+                            });
+
+                            list.appendChild(opt);
+                        };
+
+                        addOption('', noneLabel);
+                        for (const r of rankOptions) {
+                            addOption(r, r);
+                        }
+
+                        picker.appendChild(list);
+                        backdrop.appendChild(picker);
+
+                        backdrop.addEventListener('click', (ev) => {
+                            if (ev.target === backdrop) {
+                                closeActivePopover();
+                            }
+                        });
+
+                        document.body.appendChild(backdrop);
+                        activePopover = backdrop;
+
+                        // Scroll selected rank into view
+                        setTimeout(() => {
+                            const targetText = selectedRanks[server] || noneLabel;
+                            const children = Array.from(list.children);
+                            const match = children.find(c => c.textContent === targetText);
+                            if (match) {
+                                match.scrollIntoView({ block: 'nearest' });
+                            }
+                        }, 0);
+                    });
+
+                    grid.appendChild(label);
+                    grid.appendChild(btn);
                 }
-
-                const id = `rank-survey-${server.toLowerCase()}`;
-                select.id = id;
-                label.htmlFor = id;
-
-                selects[server] = select;
-                grid.appendChild(label);
-                grid.appendChild(select);
             }
             modal.appendChild(grid);
 
             const submit = () => {
                 const ranks = {};
                 for (const server of SERVERS) {
-                    const v = selects[server].value;
+                    const v = isMobile ? selects[server].value : selectedRanks[server];
                     if (v) ranks[server] = v;
                 }
                 // Fire and forget. Cooldown is committed regardless — a dropped
@@ -147,3 +325,4 @@ function showRankSurvey() {
         },
     });
 }
+
