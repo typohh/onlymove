@@ -460,7 +460,7 @@ function renderTournamentPage(rows) {
       <a href="/leaderboard">Tulostaulu</a>
       <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>
     </div>
-    <p class="fine">Turnaus on avoin suomalaisille ja Suomessa asuville. Järjestäjä pidättää oikeuden hylätä osallistujan epäillyn vilpin vuoksi.</p>
+    <p class="fine">Järjestäjä pidättää oikeuden hylätä osallistujan epäillyn vilpin vuoksi.</p>
   </footer>
 
 </div>
