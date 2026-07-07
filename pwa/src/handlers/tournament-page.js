@@ -85,10 +85,10 @@ function renderTournamentPage(rows) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#16130d">
 <title>onlymove-turnaus · 13.–19. heinäkuuta 2026</title>
-<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.">
+<meta name="description" content="Viikon mittainen tsumego-turnaus 13.–19.7.2026 rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville — treeniä Euroopan Go-kongressia varten.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="onlymove-turnaus · 13.–19. heinäkuuta 2026">
-<meta property="og:description" content="Viikon mittainen tsumego-turnaus. Paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville.">
+<meta property="og:description" content="Viikon mittainen tsumego-turnaus rahapalkinnoilla. Paras arvioitu vahvuutesi ratkaisee. Ilmainen, avoin suomalaisille ja Suomessa asuville.">
 <meta property="og:url" content="https://onlymove.net/tournament">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23CEB053'/%3E%3C/svg%3E">
 <style>
@@ -361,7 +361,7 @@ function renderTournamentPage(rows) {
 
     <h1>onlymove-turnaus</h1>
     <p class="dates">13.–19. heinäkuuta 2026</p>
-    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoin. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — hyvä tapa hioa taitoja ennen Euroopan Go-kongressia.</p>
+    <p class="tagline">Viikon mittainen, ilmainen tsumego-turnaus rahapalkinnoilla. Ratko go-tehtäviä, ja paras arvioitu vahvuutesi ratkaisee — treeniä Euroopan Go-kongressia varten.</p>
 
     <div class="hoshi" aria-hidden="true"><span></span></div>
 
@@ -444,7 +444,7 @@ function renderTournamentPage(rows) {
 
   <section aria-labelledby="arvio">
     <h2 id="arvio">Miten arvio lasketaan</h2>
-    <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: yksittäiset erittäin pitkät tauot eivät heikennä arviotasi.</p>
+    <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: yksittäiset erittäin pitkät ratkaisuajat eivät heikennä arviotasi.</p>
   </section>
 
   <div class="hoshi" aria-hidden="true"><span></span></div>
