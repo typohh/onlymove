@@ -41,7 +41,7 @@ import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank,
-    evictColdTail, clearHistoryTail, syncTailExpectedToActual,
+    evictColdTail, clearHistoryTail, syncTailExpectedToActual, isUnackedReportable,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
 import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
@@ -50,7 +50,7 @@ import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
-import { getTailServerCreatedAtSet, getTailDigestInfo } from './history-store.js';
+import { getTailServerCreatedAtSet, getTailDigestInfo, getTail } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
 import { postJson } from './net.js';
@@ -339,9 +339,14 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
             }
 
             // Advance the id cursor. Never move it backwards: a fromStart pull
-            // walks through old ids the normal cursor is already past.
+            // walks through old ids the normal cursor is already past. Re-read
+            // the sync state at each write — checkSyncSignal advances lastSeq
+            // concurrently during the awaits above, and writing back the stale
+            // object captured at pull start would regress it (self-correcting,
+            // but it repeatedly defeats the signal debounce during long pulls).
             if (Number.isInteger(body.cursorId) && body.cursorId > sinceId) {
                 sinceId = body.cursorId;
+                sync = readSyncState() || sync;
                 if (!Number.isInteger(sync.cursorId) || body.cursorId > sync.cursorId) {
                     sync.cursorId = body.cursorId;
                     writeSyncState(sync);
@@ -352,24 +357,40 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
 
         // Keep lastSeq (the seq-signal high-water) current from the latest
         // summary, so the next /report's userSeq is compared against the right
-        // baseline.
+        // baseline. (Fresh re-read: same stale-object concern as above.)
+        sync = readSyncState() || sync;
         if (lastBody && Number.isFinite(lastBody.serverSeq) &&
             (!Number.isFinite(sync.lastSeq) || lastBody.serverSeq > sync.lastSeq)) {
             sync.lastSeq = lastBody.serverSeq;
             writeSyncState(sync);
         }
 
+        // Fill model fields (incl. problemQuality, which the loop feed below
+        // reads) before touching the loop state. A full pull also fills the
+        // cold tail (its old rows were just evicted there). Runs on EVERY pull,
+        // not just when rows merged: a fill that failed mid-way (network drop
+        // between the pull and the params/lookup fetches, e.g. during adoption)
+        // leaves skeleton entries with no later insert to re-trigger it — the
+        // next pull heals them here. Cheap when nothing is missing (the fill
+        // scans before it fetches anything).
+        let healedFills = 0;
+        try {
+            healedFills = await fillSyncedHistoryFields(
+                insertedEntries.length > 0 ? [...touchedSizes] : SUPPORTED_BOARD_SIZES,
+                { includeTail: startedFromBeginning });
+        } catch (e) {
+            console.warn('account-sync: field fill failed (next pull retries):', e);
+        }
+
         if (insertedEntries.length > 0) {
             console.log(`account-sync: merged ${insertedEntries.length} foreign attempts (sizes: ${[...touchedSizes].join(', ')})`);
-            try {
-                // Fill model fields (incl. problemQuality, which the loop feed
-                // below reads) before touching the loop state. A full pull also
-                // fills the cold tail (its old rows were just evicted there).
-                await fillSyncedHistoryFields([...touchedSizes], { includeTail: startedFromBeginning });
-            } catch (e) {
-                console.warn('account-sync: field fill failed (next app load retries):', e);
-            }
             retrainAfterMerge(insertedEntries, mode);
+        } else if (healedFills > 0) {
+            // A previously-failed fill just completed: entries that were
+            // rating-less skeletons (dropped from every estimate) now carry
+            // their fields, so the models and rank must recompute.
+            console.log(`account-sync: healed ${healedFills} skeleton fields from an earlier failed fill`);
+            retrainAfterMerge([], 'feed');
         }
 
         // Cheap divergence backstop: after an incremental feed pull, confirm the
@@ -414,19 +435,41 @@ async function computeLocalDigest() {
     return { ackedCount, idSum, allHaveId };
 }
 
+// What (if anything) diverges between the local digest and the server summary:
+// 'gap' (fewer acked rows than the server's user_seq), 'content' (same count,
+// different Σ rowHash), or null (in sync / not checkable).
+function digestMismatch(serverSeq, serverDigest, { ackedCount, idSum, allHaveId }) {
+    if (ackedCount < serverSeq) return 'gap';
+    if (allHaveId && ackedCount === serverSeq && Number.isFinite(serverDigest) && idSum !== serverDigest) return 'content';
+    return null;
+}
+
+// A divergence a full reconcile already failed to close (a permanently
+// unmergeable server row, e.g. an exact created_at collision the merge can't
+// claim). Remembered so the SAME divergence doesn't escalate every pull into a
+// daily-capped full pull forever; any change in the server or local digest
+// values produces a new signature and re-checks.
+const DIGEST_GAP_ACCEPTED_KEY = 'syncDigestGapAccepted';
+
 // Backstop divergence check (after an incremental pull). serverSeq null = the
 // server's latest row isn't seeded yet (no post-migration report); skip.
 async function checkInSync(serverSeq, serverDigest) {
     if (!Number.isFinite(serverSeq)) return;
-    const { ackedCount, idSum, allHaveId } = await computeLocalDigest();
-    if (ackedCount < serverSeq) {
-        console.log(`account-sync: digest gap (acked ${ackedCount} < server ${serverSeq}) — full reconcile`);
-        await refreshHistoryFromServer();
+    const local = await computeLocalDigest();
+    const kind = digestMismatch(serverSeq, serverDigest, local);
+    if (!kind) {
+        localStorage.removeItem(DIGEST_GAP_ACCEPTED_KEY);
         return;
     }
-    if (allHaveId && ackedCount === serverSeq && Number.isFinite(serverDigest) && idSum !== serverDigest) {
-        console.log(`account-sync: digest content mismatch (Σ ${idSum} != server ${serverDigest}) — full reconcile`);
-        await refreshHistoryFromServer();
+    const sig = `${serverSeq}|${serverDigest}|${local.ackedCount}|${local.idSum}`;
+    if (localStorage.getItem(DIGEST_GAP_ACCEPTED_KEY) === sig) return;
+    console.log(`account-sync: digest ${kind} (acked ${local.ackedCount}/Σ ${local.idSum} vs server ${serverSeq}/Σ ${serverDigest}) — full reconcile`);
+    const r = await refreshHistoryFromServer();
+    // Remember the divergence only when a COMPLETED reconcile failed to close
+    // it (a cap-exceeded / failed pull never ran, so it proves nothing).
+    if (r && r.ok && digestMismatch(serverSeq, serverDigest, await computeLocalDigest())) {
+        console.warn('account-sync: reconcile did not close the digest divergence — accepting it until the digest changes');
+        localStorage.setItem(DIGEST_GAP_ACCEPTED_KEY, sig);
     }
 }
 
@@ -503,6 +546,9 @@ const ACCOUNT_WIPE_KEYS = [
     // The server-side recall schedule snapshot belongs to the old account;
     // the new account's first upload must go replace-all.
     'recallScheduleSnapshot',
+    // Both are bookkeeping about the OLD account's history/tail.
+    'syncTailFillPending',
+    'syncDigestGapAccepted',
     SYNC_STATE_KEY,
 ];
 
@@ -734,11 +780,20 @@ function collectUnackedEntries() {
     return out;
 }
 
+// "No un-acked backlog" is only truthful once the one-time tail rescue below
+// has run — before it, un-acked rows stranded in the cold tail are invisible
+// to the working-set scan, and the flag would advertise a device as safe to
+// adopt while adoption would silently drop that deep history.
+function markOutboxDone() {
+    if (!localStorage.getItem(OUTBOX_TAIL_RESCUE_KEY)) return;
+    localStorage.setItem(OUTBOX_DONE_KEY, '1');
+}
+
 export async function flushOutbox({ force = false } = {}) {
     if (collectUnackedEntries().length === 0) {
         // Nothing to flush — the device's history is fully server-side, so it's
         // safe to adopt elsewhere (ui.js reads this to reveal the Account menu).
-        localStorage.setItem(OUTBOX_DONE_KEY, '1');
+        markOutboxDone();
         return;
     }
     if (!force && Date.now() - lastOutboxRunAt < OUTBOX_MIN_INTERVAL_MS) return;
@@ -752,7 +807,7 @@ export async function flushOutbox({ force = false } = {}) {
 
         const candidates = collectUnackedEntries();
         if (candidates.length === 0) {
-            localStorage.setItem(OUTBOX_DONE_KEY, '1');
+            markOutboxDone();
             return;
         }
 
@@ -809,10 +864,61 @@ export async function flushOutbox({ force = false } = {}) {
             }
         }
 
-        localStorage.setItem(OUTBOX_DONE_KEY, '1');
+        markOutboxDone();
         console.log(`account-sync: outbox flushed ${rows.length} attempts to the server`);
     } catch (e) {
         console.warn('account-sync: outbox flush failed (will retry):', e);
+    }
+}
+
+// --- One-time outbox tail rescue (remove the flag once all clients have run) --
+// Before evictColdTail held back un-acked rows (state.isUnackedReportable), an
+// offline attempt or a pre-PER_ATTEMPT_ERA gap row could be evicted to the
+// IndexedDB tail — where the outbox (working-set-only by design) could never
+// see it again, while OUTBOX_DONE_KEY was still set off the clean working set.
+// COPY any such rows back into the working set (append-only on purpose: no
+// tail rewrite, so there is no crash/eviction race — the stale un-acked tail
+// copy stays behind and is absorbed by the standing (problemId, date) de-dup
+// in getMergedFullAnswerHistory / the digest's acked-only counting). The
+// standing outbox then claims/uploads them, and the now ack-aware eviction
+// re-evicts them once acked. Idempotent + flag-gated.
+const OUTBOX_TAIL_RESCUE_KEY = 'outboxTailRescue_v1';
+
+async function rescueUnackedTailRows() {
+    if (localStorage.getItem(OUTBOX_TAIL_RESCUE_KEY)) return;
+    try {
+        const tail = await getTail();
+        const unacked = tail.filter((e) => isUnackedReportable(e));
+        if (unacked.length === 0) {
+            // Nothing stranded (or no tail at all — an unavailable IDB means the
+            // tail is unreachable for the outbox too, so there is nothing to do).
+            localStorage.setItem(OUTBOX_TAIL_RESCUE_KEY, '1');
+            return;
+        }
+        let moved = 0;
+        const bySize = new Map();
+        for (const e of unacked) {
+            const size = SUPPORTED_BOARD_SIZES.includes(e.size) ? e.size : DEFAULT_BOARD_SIZE;
+            if (!bySize.has(size)) bySize.set(size, []);
+            bySize.get(size).push(e);
+        }
+        for (const [size, entries] of bySize) {
+            const history = getAnswerHistoryForSize(size);
+            const seen = new Set(history.map((a) => `${a.problemId}|${a.date}`));
+            const add = entries.filter((e) => !seen.has(`${e.problemId}|${e.date}`));
+            if (add.length > 0) {
+                setAnswerHistoryForSize(size, history.concat(add));
+                moved += add.length;
+            }
+        }
+        localStorage.setItem(OUTBOX_TAIL_RESCUE_KEY, '1');
+        if (moved > 0) {
+            // There IS a backlog now — the flag may have been lying.
+            localStorage.removeItem(OUTBOX_DONE_KEY);
+            console.log(`account-sync: rescued ${moved} un-acked attempts from the cold tail into the outbox`);
+        }
+    } catch (e) {
+        console.warn('account-sync: tail rescue failed (retrying next load):', e);
     }
 }
 
@@ -857,6 +963,7 @@ async function migrateIdCursor() {
 // escalates to a reconcile if a gap is found.
 export function startBackgroundSync() {
     migrateIdCursor()
+        .then(() => rescueUnackedTailRows())
         .then(() => pullReports())
         .then(() => flushOutbox())
         .catch(() => {});

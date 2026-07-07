@@ -189,17 +189,27 @@ export async function backfillMissingEmbeddings() {
         ].filter(Boolean).join('+');
         const t0 = performance.now();
         console.log(`backfill: triggered (${changed} changed; ratings_version=${RATINGS_VERSION}) — re-deriving stored history`);
+        let allOk = true;
         for (const size of SUPPORTED_BOARD_SIZES) {
-            const filled = await backfillForSize(size, {
+            const { count, ok } = await backfillForSize(size, {
                 embeddingsChanged, ratingsChanged, curveChanged, serverEmbeddingVersion,
             });
-            if (filled > 0) sizesFilled.push(size);
+            if (count > 0) sizesFilled.push(size);
+            if (!ok) allOk = false;
         }
-        // Stamp the single versions ONCE, only now that every size has persisted.
-        if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
-        if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
-        if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
-        console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'})`);
+        // Stamp the single versions ONCE, only now that every size has persisted —
+        // and only when every size actually completed. A failed size (offline
+        // problem_params fetch, shard-walk exception) leaves the stamps untouched so
+        // the whole backfill re-runs idempotently on the next load; stamping over a
+        // failure would freeze stale per-attempt rating/slope/floor under a matching
+        // version (and, on an embedding refit, lock in wiped-but-never-refilled
+        // embeddings, since the wipe runs before the fills can fail).
+        if (allOk) {
+            if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
+            if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
+            if (curveChanged) localStorage.setItem(RANK_CURVE_VERSION_KEY, curveVersion);
+        }
+        console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'}${allOk ? '' : '; INCOMPLETE — versions left un-stamped, retrying next load'})`);
     }
 
     // Retrain the single shared weakness model if any size refreshed, a prune changed
@@ -494,18 +504,27 @@ async function loadProblemParams() {
 // size has returned and persisted, so a shutdown mid-loop leaves nothing stamped and
 // the whole backfill re-runs idempotently.
 //
+// Returns { count, ok }: `count` is the number of entries rewritten (drives the
+// weakness retrain); `ok: false` means this size's re-derive did NOT complete
+// (params fetch failed, or an exception mid-walk) — the caller must then leave
+// the version stamps untouched so the run retries on the next load.
+//
 // Orchestrates the per-size steps in a fixed order; each step lives in its own
 // helper directly below, in execution order.
 async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveChanged, serverEmbeddingVersion }) {
     try {
         const history = getAnswerHistoryForSize(size);
+        // The working set can hold NONE of this size's rows (a lapsed size whose
+        // whole career sits in the IndexedDB cold tail — the unified working set
+        // keeps only the most-recent attempts across BOTH sizes), but the
+        // full-career chart still reads the tail, so the tail remap/re-derive
+        // below run even when this size's working-set view is empty. Only the
+        // working-set passes and the embedding fills (model inputs are
+        // working-set-only by design) are gated on it.
+        const hasWorkingSet = !!(history && history.length > 0);
 
         if (embeddingsChanged) {
             wipeStaleEmbeddings(size, history, serverEmbeddingVersion);
-        }
-
-        if (!history || history.length === 0) {
-            return 0;
         }
 
         // Curve-only refit: ranks shift but raw ratings don't, so no shard
@@ -513,34 +532,35 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         // refreshes both, so skip these to avoid a double pass.
         let curveRankUpdated = 0;
         if (curveChanged && !ratingsChanged) {
-            curveRankUpdated = remapCurveOnlyWorkingSet(size, history);
+            if (hasWorkingSet) curveRankUpdated = remapCurveOnlyWorkingSet(size, history);
             await remapCurveOnlyTail(size);
         }
-
-        // Ratings refresh reads the single problem_params.bin asset (rating/slope/
-        // floor by id, both boards) — built ONCE per size, replacing the shard walk
-        // for the rating fields. Embeddings still walk the shards below. Null on a
-        // transient fetch failure -> bail so the version stays un-stamped and retries
-        // on the next load.
-        let problemParams = null;
-        if (ratingsChanged) {
-            problemParams = await loadProblemParams();
-            if (!problemParams) return curveRankUpdated;
-        }
-
-        const totalRatingsUpdated = ratingsChanged
-            ? rewriteWorkingSetRatings(size, history, problemParams)
-            : 0;
 
         // Does the cold tail carry this size's rows to re-derive? (ratings change
         // only). Decided BEFORE the long embedding walk; the tail rows themselves
         // are rewritten from problem_params after it.
         const tailNeedsRederive = ratingsChanged && await tailHasRowsForSize(size);
 
-        const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
+        // Ratings refresh reads the single problem_params.bin asset (rating/slope/
+        // floor by id, both boards) — built ONCE per size, replacing the shard walk
+        // for the rating fields. Embeddings still walk the shards below. Null on a
+        // transient fetch failure -> bail so the version stays un-stamped and retries
+        // on the next load. Skipped when this size has no rows anywhere (neither
+        // working set nor tail).
+        let problemParams = null;
+        if (ratingsChanged && (hasWorkingSet || tailNeedsRederive)) {
+            problemParams = await loadProblemParams();
+            if (!problemParams) return { count: curveRankUpdated, ok: false };
+        }
+
+        const totalRatingsUpdated = (ratingsChanged && hasWorkingSet)
+            ? rewriteWorkingSetRatings(size, history, problemParams)
+            : 0;
+
         let totalFilled = 0;
         let totalFilledPicked = 0;
-        if (embeddingsChanged) {
+        if (embeddingsChanged && hasWorkingSet) {
+            const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
             stripOldEmbeddingFields(size, history, startIdx);
             // Correct-move embeddings straight from the lookup-aligned sidecar —
             // zero shard zips. Only pickedEmbedding still lives in the per-shard
@@ -562,11 +582,11 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         if (tailNeedsRederive && problemParams) {
             await rederiveTailRatings(size, problemParams);
         }
-        return totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated;
+        return { count: totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated, ok: true };
     } catch (err) {
         console.error(`backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
-        return 0;
+        return { count: 0, ok: false };
     }
 }
 
@@ -788,7 +808,16 @@ async function rederiveTailRatings(size, problemParams) {
 // the IndexedDB cold tail — a full pull evicts its old rows there mid-pull, out
 // of reach of the working-set walk. Incremental pulls only merge recent rows
 // (working set), so they leave it false and skip the tail scan.
+// An includeTail fill that didn't complete (params fetch failed mid-adoption,
+// tab killed). Incremental pulls never pass includeTail, so without this marker
+// the tail's synced skeletons would stay unfilled until the next full pull —
+// the marker makes every subsequent fill resume the tail until it succeeds.
+const SYNC_TAIL_FILL_PENDING_KEY = 'syncTailFillPending';
+
 export async function fillSyncedHistoryFields(sizes, { includeTail = false } = {}) {
+    if (localStorage.getItem(SYNC_TAIL_FILL_PENDING_KEY)) includeTail = true;
+    if (includeTail) localStorage.setItem(SYNC_TAIL_FILL_PENDING_KEY, '1');
+
     // Rating fields come from the single problem_params.bin asset — the same
     // source the version-driven rating refresh reads — loaded ONCE and shared
     // by the working-set and tail fills. Routing them through the shard walk
@@ -814,7 +843,14 @@ export async function fillSyncedHistoryFields(sizes, { includeTail = false } = {
             try { Sentry.captureException(err); } catch (_) {}
         }
     }
-    if (includeTail) total += (await fillSyncedTailFields(sizes, problemParams)).filled;
+    if (includeTail) {
+        // A resumed tail fill may involve sizes the triggering pull didn't
+        // touch, so always scan every size (each size's scan is cheap and
+        // no-ops when nothing is missing).
+        const r = await fillSyncedTailFields(SUPPORTED_BOARD_SIZES, problemParams);
+        total += r.filled;
+        if (r.ok) localStorage.removeItem(SYNC_TAIL_FILL_PENDING_KEY);
+    }
     return total;
 }
 

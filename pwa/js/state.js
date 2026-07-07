@@ -133,17 +133,33 @@ const TAIL_EXPECTED_KEY = 'historyTailExpected';
 // when there is actually a tail worth protecting).
 const PERSIST_REQUESTED_KEY = 'historyPersistRequested';
 
+// A row the offline outbox still needs to upload: reportable (real problem id)
+// but never acked by the server. account-sync's outbox scan and fuzzy claim
+// only see the working set, so such a row must never be evicted to the cold
+// tail — once there it would be permanently un-uploadable.
+export function isUnackedReportable(a) {
+    return !!a && !a.serverCreatedAt
+        && typeof a.problemId === 'string' && /^[0-9a-f]{8}$/.test(a.problemId);
+}
+
 // Move attempts beyond the cap into the IndexedDB tail, OLDEST first.
 // Crash-safe: append to IDB and confirm BEFORE trimming the in-memory /
 // localStorage working set, so a kill mid-evict leaves a (de-duped) copy in
 // both rather than a gap. Removes exactly the appended rows by reference, so a
-// concurrent append during the await is preserved.
+// concurrent append during the await is preserved. Un-acked reportable rows are
+// held back (the working set stays slightly over the cap until they're acked
+// and a later evict moves them) — a consequence is that the tail's internal
+// order is only approximately date-ordered; every tail consumer either sorts
+// (getMergedFullAnswerHistory) or is order-independent.
 export async function evictColdTail() {
     if (evicting) return;
     if (unifiedHistory.length <= ANSWER_HISTORY_WORKING_SET) return;
     evicting = true;
     try {
-        const overflow = unifiedHistory.slice(0, unifiedHistory.length - ANSWER_HISTORY_WORKING_SET);
+        const overflow = unifiedHistory
+            .slice(0, unifiedHistory.length - ANSWER_HISTORY_WORKING_SET)
+            .filter(a => !isUnackedReportable(a));
+        if (overflow.length === 0) return;
         const ok = await appendTail(overflow);
         if (!ok) return; // IDB unavailable — keep the rows in the working set
         const overflowSet = new Set(overflow);
