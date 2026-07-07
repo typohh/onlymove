@@ -20,6 +20,23 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
   * The user's rating is their 80%-CLEAR rating (CALIBRATION_P), pooled across boards
     (`fit_user_rating`, full 4PL with each problem's own slope/floor + the global
     ceiling λ) — the SAME quantity the client computes, so the loop stays closed.
+  * ANCHORS ARE CAREER-SEGMENT RATINGS, NOT ONE POOLED RATING PER USER. Each user's
+    first-time attempts are cut into overlapping 2-month blocks (BLOCK_DAYS stepped
+    BLOCK_STEP); every block with ≥ MIN_ATTEMPTS joined attempts gets its own
+    80%-clear rating and becomes an anchor row, attached to the user's
+    nearest-in-time declaration per server ("no rank drift unless a survey says
+    otherwise" — surveys only began 2026-05, so old attempt eras carry the same
+    declared rank). Rows are weighted by ATTEMPT MASS — each attempt's unit mass is
+    split over the blocks covering it, so the overlap can't double-count an era and
+    the career's edge eras aren't underweighted — and normalized so each declaration
+    contributes total weight 1 regardless of career length. A user with no fittable
+    block (never MIN_ATTEMPTS inside one window) falls back to the pooled career
+    rating as a single anchor. Validated by paired 50-folding CV
+    (auxiliary.eval_rank_map_cv): held-out NLL −0.04±0.01 and deep-kyu MAE 5.2→4.2
+    ranks vs the pooled-career anchor, dan band unchanged. The same harness tested
+    integrating each rating's Fisher CI into the likelihood (errors-in-variables)
+    and REJECTED it — declaration noise dominates, so it over-steepens the curve and
+    is consistently worse held-out.
   * RATINGS ARE TIME-ADJUSTED THROUGHOUT THE MAPPING. Each declaration's effective
     rating is `rating + α·(log10(median solve min) − center)`, with the slope α fit
     JOINTLY in the same objective (it is identified — the time feature is per-user
@@ -71,8 +88,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rank_surveys import (  # noqa: E402
-    SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
-    load_rank_surveys, scalar_to_rank,
+    SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, scalar_to_rank,
 )
 from utils.statistics_shapes import fit_shape  # noqa: E402
 from utils.fit_rank_curves import (  # noqa: E402
@@ -95,8 +111,10 @@ LAMBDA_TIME = 0.1           # light ridge keeping the learned time slope bounded
 EGF_LO, EGF_HI = -20, 10    # consensus-rank boundary range the curve spans
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
 EXTEND_TO = 9               # force each server range to cover at least up to 9d
-MIN_SERVER_SAMPLES = 3      # skip a server with fewer pooled declarations
-MIN_ATTEMPTS = 20           # drop survey users with fewer pooled attempts
+MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
+MIN_ATTEMPTS = 20           # drop survey users (and career blocks) with fewer attempts
+BLOCK_DAYS = 60             # career-segment anchor blocks: window length ...
+BLOCK_STEP = 30             # ... and step (overlapping; see the docstring)
 
 # Solve-time feature (server side): non-repeat, timed, AFK-capped median over the
 # most-recent WORKING_SET attempts, in minutes. This approximates but no longer
@@ -165,6 +183,57 @@ def load_user_median_solve_minutes(sqlite_path):
     return out
 
 
+def load_timed_attempts(sqlite_path, user_ids):
+    """{user_id: (created_days ascending np.array, [(tsumego_id, success), ...]
+    aligned)} — first-time attempts with event times (the block anchors need them;
+    the .sql regex loader doesn't carry timestamps)."""
+    ids = sorted(user_ids)
+    con = sqlite3.connect(sqlite_path)
+    try:
+        q = ("SELECT user_id, problem, success, created_at FROM tsumego_reports "
+             "WHERE (is_repeat IS NULL OR is_repeat != 1) AND user_id IN ({})"
+             .format(",".join("?" * len(ids))))
+        df = pd.read_sql_query(q, con, params=ids)
+    finally:
+        con.close()
+    df["t"] = (pd.to_datetime(df["created_at"], utc=True, format="mixed")
+               .astype("int64") / 86400e9)
+    df = df.sort_values("t")
+    return {uid: (grp["t"].to_numpy(),
+                  list(zip(grp["problem"].tolist(), grp["success"].astype(int).tolist())))
+            for uid, grp in df.groupby("user_id")}
+
+
+def block_ratings(times, rows, ratings, slopes, floors, lapse):
+    """[(t_center_days, rating, attempt_mass)] — one 80%-clear rating per
+    overlapping BLOCK_DAYS window stepped BLOCK_STEP through the user's career
+    (windows below MIN_ATTEMPTS joined attempts are skipped). mass = each attempt's
+    unit mass split equally over the blocks covering it, so every attempt counts
+    exactly once however the grid overlaps. Empty list = no fittable block; the
+    caller falls back to the pooled career rating."""
+    if len(times) == 0:
+        return []
+    spans, seen = [], set()
+    for s in np.arange(times[0], times[-1] + 1e-9, BLOCK_STEP):
+        lo = int(np.searchsorted(times, s, side="left"))
+        hi = int(np.searchsorted(times, s + BLOCK_DAYS, side="right"))
+        if hi - lo < MIN_ATTEMPTS or (lo, hi) in seen:
+            continue
+        seen.add((lo, hi))
+        R, n = fit_user_rating(rows[lo:hi], ratings, min_n=MIN_ATTEMPTS,
+                               slopes=slopes, floors=floors, lapse=lapse)
+        if R is not None and n >= MIN_ATTEMPTS:
+            spans.append((lo, hi, R))
+    if not spans:
+        return []
+    cov = np.zeros(len(rows))
+    for lo, hi, _ in spans:
+        cov[lo:hi] += 1
+    inv = np.where(cov > 0, 1.0 / np.maximum(cov, 1), 0.0)
+    return [(float((times[lo] + times[hi - 1]) / 2), R, float(np.sum(inv[lo:hi])))
+            for lo, hi, R in spans]
+
+
 # ---------------------------------------------------------------------------
 # The consensus fit
 # ---------------------------------------------------------------------------
@@ -178,15 +247,17 @@ def _curve_arrays():
 
 def _bucket(decls):
     """One coupling block per server (EGF included): rating, declared-category index k,
-    the de-meaned time feature T, the identity-line target, and n (reliability weight)."""
+    the de-meaned time feature T, the identity-line target, and the per-row weight w
+    (block anchors normalize each declaration's rows to total weight 1; a plain
+    4-tuple row defaults to w=1)."""
     rows_by = defaultdict(list)
-    for server, R, g, T in decls:
-        rows_by[server].append((R, int(round(g)), T))
+    for server, R, g, T, *w in decls:
+        rows_by[server].append((R, int(round(g)), T, float(w[0]) if w else 1.0))
     blocks = {}
     for server, rows in rows_by.items():
-        if len(rows) < MIN_SERVER_SAMPLES:
+        if sum(w for *_, w in rows) < MIN_SERVER_SAMPLES:
             continue
-        declared = [g for _, g, _ in rows]
+        declared = [g for _, g, _, _ in rows]
         g_min = min(declared) - RANK_PADDING
         g_max = max(max(declared) + RANK_PADDING, EXTEND_TO)
         K = g_max - g_min
@@ -198,16 +269,20 @@ def _bucket(decls):
             "g_min": g_min, "g_max": g_max,
             "baseline": np.ones(K - 1) if K > 1 else np.array([]),
             "identity": np.array([g - 0.5 for g in gs], float),
-            "rating": np.array([r for r, _, _ in rows], float),
-            "T": np.array([t for _, _, t in rows], float),
-            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _ in rows], int)}
+            "rating": np.array([r for r, _, _, _ in rows], float),
+            "T": np.array([t for _, _, t, _ in rows], float),
+            "w": np.array([w for _, _, _, w in rows], float),
+            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _ in rows], int)}
     return blocks
 
 
 def fit_consensus(decls):
     """Jointly fit the rating→consensus curve M, the global time slope α, and the
-    per-server couplings (EGF included). Returns (a, alpha, ys, egf_thr_ranks, server_fits)
-    where `a` are the rating values at each consensus boundary `ys`."""
+    per-server couplings (EGF included). decls rows are (server, rating, declared
+    scalar, T[, weight]) — weight defaults to 1 for a plain one-row-per-declaration
+    anchor. Returns (a, alpha, ys, egf_thr_ranks, server_fits) where `a` are the
+    rating values at each consensus boundary `ys`."""
+    decls = [d if len(d) == 5 else (*d, 1.0) for d in decls]
     egf_thr_ranks, ys, S, dS = _curve_arrays()
     nseg = len(dS)
     blocks = _bucket(decls)
@@ -216,8 +291,8 @@ def fit_consensus(decls):
 
     # Init the curve affine from a POOLED linear pre-fit over all declarations (no server
     # privileged), then express it in the shape's (α_c, log β) parameterisation.
-    all_R = np.array([R for _, R, _, _ in decls], float)
-    all_g = np.array([g for _, _, g, _ in decls], float)
+    all_R = np.array([R for _, R, _, _, _ in decls], float)
+    all_g = np.array([g for _, _, g, _, _ in decls], float)
     beta, alpha_c = np.polyfit(all_R, all_g, 1)
     if beta <= 0:
         beta = 1e-3
@@ -249,9 +324,9 @@ def fit_consensus(decls):
             blk = blocks[server]
             thr = _unpack_thresholds(params[st:st + n], blk["baseline"])
             x_int = interp_extrap_vec(blk["rating"] + alpha * blk["T"], a, ys)
-            nll += ordinal_nll_vec(thr, x_int, blk["k"])
+            nll += ordinal_nll_vec(thr, x_int, blk["k"], blk["w"])
             pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
-            w = float(len(blk["k"]))                       # reliability weight = n
+            w = float(np.sum(blk["w"]))     # reliability weight = declaration weight
             w_off += w * float(np.mean(thr - blk["identity"]))
             w_tot += w
         if nseg:
@@ -303,8 +378,12 @@ def main():
     surveys = load_rank_surveys(args.sql)
     if surveys is None or surveys.empty:
         sys.exit("No rank_surveys rows found — cannot fit the mapping.")
-    surveys = latest_per_user_server(surveys)
-    print(f"  {len(surveys)} latest declarations from {surveys['user_id'].nunique()} users")
+    # EVERY declaration anchors (weight 1 each; its blocks split that weight) —
+    # a re-survey is a new anchor at its own time, not a replacement.
+    surveys = surveys[surveys["rank_scalar"].notna()].copy()
+    surveys["t_days"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
+                         .astype("int64") / 86400e9)
+    print(f"  {len(surveys)} declarations from {surveys['user_id'].nunique()} users")
 
     merged_ratings, merged_slopes, merged_floors = {}, {}, {}
     for s in SIZES:
@@ -314,67 +393,83 @@ def main():
     if not merged_ratings:
         sys.exit("No per-problem ratings found — run train_rating first.")
     lapse = load_lapse(args.dir)
-    # first_time_only: the client's rank estimator anchors on first-time attempts,
-    # so build the survey anchor from novel problems too — repeats' spaced-repetition
-    # success rate would otherwise inflate review-heavy users' 80%-clear ratings.
-    attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),
-                                       first_time_only=True)
+    # First-time attempts only: the client's rank estimator anchors on first-time
+    # attempts, so build the survey anchor from novel problems too — repeats'
+    # spaced-repetition success rate would otherwise inflate review-heavy users'
+    # 80%-clear ratings. (Both boards land in one time-ordered list; the ratings
+    # dicts are merged across sizes, so pooling is implicit.)
+    attempts = load_timed_attempts(args.sqlite, set(surveys["user_id"].unique()))
     med_min = load_user_median_solve_minutes(args.sqlite)
 
-    # Each user's 80%-clear rating (pooled across boards) + their log10 median solve time.
-    print(f"\nEstimating each user's {int(CALIBRATION_P * 100)}%-clear rating "
-          f"(pooled, 4PL, λ={lapse:.4f}) ...")
-    user_R, user_logT = {}, {}
+    # Per-user career-block ratings (see docstring) + the log10 median solve time.
+    print(f"\nEstimating {int(CALIBRATION_P * 100)}%-clear ratings per {BLOCK_DAYS}d "
+          f"career block (pooled boards, 4PL, λ={lapse:.4f}) ...")
+    user_blocks, user_logT, fallbacks = {}, {}, 0
     for uid in surveys["user_id"].unique():
-        pref = uid[:8]
-        pooled = []
-        for s in SIZES:
-            pooled.extend(attempts.get((pref, s), []))
-        if len(pooled) < MIN_ATTEMPTS:
-            continue
-        R, n = fit_user_rating(pooled, merged_ratings, min_n=MIN_ATTEMPTS,
+        times, rows = attempts.get(uid, (np.zeros(0), []))
+        R, n = fit_user_rating(rows, merged_ratings, min_n=MIN_ATTEMPTS,
                                slopes=merged_slopes, floors=merged_floors, lapse=lapse)
-        if R is not None and n >= MIN_ATTEMPTS:
-            user_R[pref] = R
-            if pref in med_min and med_min[pref] > 0:
-                user_logT[pref] = float(np.log10(med_min[pref]))
-    timed = [user_logT[p] for p in user_R if p in user_logT]
-    center = float(np.mean(timed)) if timed else 0.0   # the time dock's zero point
-    print(f"  {len(user_R)} users with a usable rating; {len(timed)} with a time feature "
-          f"(center = log10 median min {center:+.3f}, {10**center*60:.0f}s)")
-
-    # Declarations: (server, rating, declared scalar, de-meaned time feature). Users
-    # without a usable time feature get T=0 (no time term).
-    decls = []
-    for _, row in surveys.iterrows():
-        pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
-        if pref not in user_R or g is None or pd.isna(g):
+        if R is None or n < MIN_ATTEMPTS:
             continue
-        T = (user_logT[pref] - center) if pref in user_logT else 0.0
-        decls.append((row["server"], user_R[pref], float(g), T))
-    n_egf = sum(1 for d in decls if d[0] == "EGF")
-    print(f"\nConsensus fit over {len(decls)} declarations "
-          f"[{n_egf} EGF, now a coupling like any server; cubic shape prior "
-          f"λ_shape={LAMBDA_SHAPE}, server λ={SERVER_LAMBDA}, gauge weight={GAUGE_WEIGHT}]")
+        blks = block_ratings(times, rows, merged_ratings, merged_slopes,
+                             merged_floors, lapse)
+        if not blks:   # sparse career: never MIN_ATTEMPTS inside one block window
+            blks = [(float(np.mean(times)), R, 1.0)]
+            fallbacks += 1
+        user_blocks[uid] = blks
+        pref = uid[:8]
+        if pref in med_min and med_min[pref] > 0:
+            user_logT[uid] = float(np.log10(med_min[pref]))
+    timed = [user_logT[u] for u in user_blocks if u in user_logT]
+    center = float(np.mean(timed)) if timed else 0.0   # the time dock's zero point
+    nblk = [len(b) for b in user_blocks.values()]
+    print(f"  {len(user_blocks)} users with a usable rating ({fallbacks} career "
+          f"fallbacks; blocks/user median {int(np.median(nblk))}, max {max(nblk)}); "
+          f"{len(timed)} with a time feature (center = log10 median min "
+          f"{center:+.3f}, {10 ** center * 60:.0f}s)")
+
+    # Anchor rows: (server, block rating, declared scalar, de-meaned time feature,
+    # weight). Each block attaches to the user's nearest-in-time declaration on that
+    # server, and a declaration's rows are attempt-mass-normalized to total weight 1.
+    # Users without a usable time feature get T=0 (no time term).
+    decls = []
+    for (uid, server), srows in (surveys[surveys["user_id"].isin(user_blocks)]
+                                 .groupby(["user_id", "server"])):
+        T = (user_logT[uid] - center) if uid in user_logT else 0.0
+        dt = srows["t_days"].to_numpy(float)
+        dg = srows["rank_scalar"].to_numpy(float)
+        assign = defaultdict(list)
+        for tc, R, m in user_blocks[uid]:
+            assign[int(np.argmin(np.abs(dt - tc)))].append((R, m))
+        for j, brs in assign.items():
+            mass = sum(m for _, m in brs)
+            for R, m in brs:
+                decls.append((server, R, float(dg[j]), T,
+                              m / mass if mass > 0 else 1.0 / len(brs)))
+    w_egf = sum(d[4] for d in decls if d[0] == "EGF")
+    print(f"\nConsensus fit over {len(decls)} anchor rows, "
+          f"{sum(d[4] for d in decls):.0f} declaration-weight [{w_egf:.0f} EGF, a "
+          f"coupling like any server; cubic shape prior λ_shape={LAMBDA_SHAPE}, "
+          f"server λ={SERVER_LAMBDA}, gauge weight={GAUGE_WEIGHT}]")
 
     a, alpha, ys, egf_thr_ranks, server_fits = fit_consensus(decls)
     print(f"  learned time slope α = {alpha:+.4f} rating per de-meaned log10-min")
 
-    # In-sample EGF calibration check (EGF is now forward-mapped through its coupling).
-    egf = [(R, g, T) for srv, R, g, T in decls if srv == "EGF"]
+    # In-sample EGF calibration check (EGF is now forward-mapped through its
+    # coupling); weighted so it reads in declaration units, not block-row counts.
+    egf = [(R, g, T, w) for srv, R, g, T, w in decls if srv == "EGF"]
     if "EGF" in server_fits and len(egf) >= 2 and len(server_fits["EGF"]) >= 2:
         gs = sorted(server_fits["EGF"])
         our = np.array([server_fits["EGF"][k] for k in gs], float)
         srv = np.array([k - 0.5 for k in gs], float)
         order = np.argsort(our)
-        R = np.array([r for r, _, _ in egf]); gdec = np.array([g for _, g, _ in egf])
-        T = np.array([t for _, _, t in egf])
+        R = np.array([r for r, _, _, _ in egf]); gdec = np.array([g for _, g, _, _ in egf])
+        T = np.array([t for _, _, t, _ in egf]); W = np.array([w for _, _, _, w in egf])
         x_int = interp_extrap_vec(R + alpha * T, a, ys)
         pred = interp_extrap_vec(x_int, our[order], srv[order])
         res = pred - gdec
-        print(f"  EGF-coupling calibration: RMSE {np.sqrt(np.mean(res ** 2)):.2f} | "
-              f"bias {res.mean():+.2f} ranks")
+        print(f"  EGF-coupling calibration: RMSE {np.sqrt(np.average(res ** 2, weights=W)):.2f} | "
+              f"bias {np.average(res, weights=W):+.2f} ranks")
 
     # --- write rating_to_rank.json (both board keys identical) + time_adjust ---
     curve = {"ratings": [float(r) for r in a],

@@ -99,7 +99,7 @@ def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
     return float(R), len(rows)
 
 
-def ordinal_nll_vec(tau, x, k):
+def ordinal_nll_vec(tau, x, k, w=None):
     """Vectorized cumulative-link negative log-likelihood.
 
       P(declared = category k | x), thresholds τ (length K, ascending):
@@ -108,12 +108,14 @@ def ordinal_nll_vec(tau, x, k):
         k = K      : 1 − expit(τ_{K−1} − x)
 
     tau : (K,) thresholds in x units.  x : (n,) abilities.  k : (n,) ints in
-    [0, K] (category = declared rank − range minimum)."""
+    [0, K] (category = declared rank − range minimum).  w : optional (n,)
+    per-row weights (the block-anchored production mapping normalizes each
+    declaration's rows to total weight 1); None = unweighted."""
     K = tau.shape[0]
     upper = np.where(k < K, expit(tau[np.minimum(k, K - 1)] - x), 1.0)
     lower = np.where(k > 0, expit(tau[np.maximum(k - 1, 0)] - x), 0.0)
-    p = np.clip(upper - lower, 1e-12, 1.0)
-    return -float(np.sum(np.log(p)))
+    logs = np.log(np.clip(upper - lower, 1e-12, 1.0))
+    return -float(np.sum(logs if w is None else w * logs))
 
 
 def interp_extrap_vec(x, xs, ys):
