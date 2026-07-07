@@ -453,6 +453,8 @@ function renderTournamentPage(rows) {
     <p class="note-body">onlymove arvioi vahvuutesi viimeaikaisten ratkaisujesi perusteella. Myös <strong>tehtävään käytetty aika vaikuttaa arvioon</strong> — nopeat oikeat vastaukset kertovat suuremmasta vahvuudesta. Sinun ei kuitenkaan tarvitse murehtia poikkeuksellisen pitkiä aikoja, esimerkiksi jos sovellus jää auki: yksittäiset erittäin pitkät tauot eivät heikennä arviotasi.</p>
   </section>
 
+  <div class="hoshi" aria-hidden="true"><span></span></div>
+
   <div class="cta-row">
     <a class="btn btn-primary" href="/">Avaa onlymove <span class="arrow" aria-hidden="true">→</span></a>
     <a class="btn btn-ghost" href="/leaderboard">Tulostaulu <span class="arrow" aria-hidden="true">→</span></a>
