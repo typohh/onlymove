@@ -38,7 +38,7 @@ A **contradiction** = the displayed change's sign opposes the answer:
 | rank | first-time | correct ⇒ ≥0, miss ⇒ ≤0 | correct→down / miss→up |
 | recall delay | repeat | correct ⇒ later (+), miss ⇒ sooner (−) | correct→sooner / miss→later |
 
-The recall delay saturates at the `MIN_STABILITY` floor (18 h) for weak users and
+The recall delay saturates at the `MIN_STABILITY` floor (6 h) for weak users and
 the `MAX_STABILITY` ceiling (365 d) for very durable items — there the overlay shows
 `+0 s` and cannot contradict. The report therefore splits the repeat regime into
 floor / middle / ceiling and reports the contradiction rate **among middle-regime

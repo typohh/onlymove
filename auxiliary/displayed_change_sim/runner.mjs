@@ -55,15 +55,15 @@ const WORKING_SET = 3000;                 // ANSWER_HISTORY_WORKING_SET in const
 const RANK_VISIBLE_STONES = 0.0005;       // overlays: rankChange*29 toFixed(3) ⇒ ≥0.001
 const RANK_CLEAR_STONES = 0.01;           // a clearly-perceptible rank move
 const RECALL_VISIBLE_S = 0.5;             // overlays: round(|Δh|*3600) ⇒ ≥1 s
-// freshFailureReviewHours saturation rails (model.js MIN/MAX_STABILITY_DAYS):
-//   floor = (18/24)/(-ln .8) days → 18 h ;  ceil = 365 days → 365·24·(-ln .8) h
-const RECALL_FLOOR_H = 18;
-const RECALL_CEIL_H = 365 * 24 * -Math.log(0.8);   // ≈ 1954.7 h
 
 // ---- math global (mathjs UMD), needed by model.calculateResultsAndStdErrors ----
 vm.runInThisContext(readFileSync(path.join(REPO, 'pwa', 'lib', 'math.min.js'), 'utf8'));
 
 const E = await import(pathToFileURL(BUNDLE).href);
+// freshFailureReviewHours saturation rails (model.js MIN/MAX_STABILITY_DAYS):
+//   floor = (MIN_RECALL_HOURS/24)/(-ln .8) days → MIN_RECALL_HOURS h ;  ceil = 365 days → 365·24·(-ln .8) h
+const RECALL_FLOOR_H = E.MIN_RECALL_HOURS;
+const RECALL_CEIL_H = 365 * 24 * -Math.log(0.8);   // ≈ 1954.7 h
 E.loadPopulationConstants();              // real boot path: KAPPA/Z0/GROWTH/LN_C_PRIOR + biases
 
 const data = JSON.parse(readFileSync(INPUT, 'utf8'));
@@ -299,7 +299,7 @@ function reportBlock(label, a) {
   L.push(`        by answer:  correct→down ${pct(a.rank_contra_raw_correct, a.rank_correct)}   wrong→up ${pct(a.rank_contra_raw_wrong, a.rank_n - a.rank_correct)}`);
   L.push(`      integer-rank label moves: n=${a.rank_dirmove_n}  wrong-way ${pct(a.rank_dirflip, a.rank_dirmove_n)}`);
   L.push(`    REPEAT (recall delay): n=${a.rec_n}  ready=${a.rec_ready}  correct=${pct(a.rec_correct, a.rec_n)}`);
-  L.push(`      displayed-delay regime:  floor(18h)=${pct(a.rec_floor, a.rec_ready)}  ceil(365d)=${pct(a.rec_ceil, a.rec_ready)}  middle=${pct(a.rec_mid, a.rec_ready)}`);
+  L.push(`      displayed-delay regime:  floor(${RECALL_FLOOR_H}h)=${pct(a.rec_floor, a.rec_ready)}  ceil(365d)=${pct(a.rec_ceil, a.rec_ready)}  middle=${pct(a.rec_mid, a.rec_ready)}`);
   L.push(`        (floor/ceil are saturated ⇒ overlay shows "+0 s"; only the middle regime moves)`);
   L.push(`      contradiction (sign opposes answer):`);
   L.push(`        raw sign           ${pct(a.rec_contra_raw, a.rec_ready)}  (of ready repeats)`);
