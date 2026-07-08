@@ -667,6 +667,25 @@ export function setAnswerHistoryForSize(size, history) {
     reconcileSize(size, history);
 }
 
+// LIVE references to the whole unified working set (both sizes, date order).
+// For the sync layer only: the mirror migration needs to match every local
+// entry (not a per-size filtered view) against the server's rows, and the
+// id-first merge builds its dedup index from it. Mutations to the returned
+// entry objects land in the real array; persist via the setters.
+export function getWorkingSetEntries() {
+    return [...unifiedHistory];
+}
+
+// Replace the ENTIRE unified working set in one step (mirror migration: the
+// rebuilt post-split working set). Persists, but deliberately does NOT
+// schedule an eviction — the caller has already split working set vs tail and
+// written the tail itself.
+export function replaceUnifiedHistory(entries) {
+    unifiedHistory = [...entries].sort((x, y) => (x.date || 0) - (y.date || 0));
+    invalidateActiveView();
+    persistUnifiedHistory();
+}
+
 // Read-only WORKING-SET union (both sizes), each entry tagged with its `size`
 // and sorted by date. The shared recall + weakness models train on this (they
 // slice the last ≤MODEL_INPUT_HISTORY_LENGTH, so the working set suffices). The

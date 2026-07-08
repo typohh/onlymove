@@ -12,15 +12,29 @@
 // (serverSeq/serverDigest = user_seq + Σ rowHash(id)) rides along as a backstop,
 // escalating to a full reconcile if a gap is ever found.
 //
+// LOCAL REPRESENTATION IS MIRROR-BY-ID (post migrateMirrorById): the acked
+// history is a 1:1 mirror of the server's rows keyed by serverId; identity is
+// the row id, serverCreatedAt is event-time metadata. Merging therefore needs
+// no timestamp dedup, and the digest matches the server BY CONSTRUCTION —
+// duplicate created_at rows on the server (accidental double-uploads) are
+// held either as entries or as absorbed-id receipts, never silently dropped
+// (silently dropping them was the old permanent digest-divergence loop).
+// Devices whose migration hasn't completed yet run the legacy timestamp-dedup
+// merge below until it does.
+//
 //   - cursorId only ever advances from /sync PULLS, never from this device's own
 //     report acks. Advancing on acks would let a concurrent foreign row with a
 //     lower id slip behind the cursor forever.
-//   - The device's own rows are recognized on pull by exact serverCreatedAt
-//     match: /report echoes its server-stamped created_at and sendReport stamps
-//     it on the matching answerHistory entry (recordReportAck).
+//   - The device's own rows are recognized on pull by their id (legacy path:
+//     exact serverCreatedAt match): /report echoes its server-stamped
+//     created_at + row id and sendReport stamps both on the matching
+//     answerHistory entry (recordReportAck).
 //   - Entries whose ack was lost (offline attempt, response dropped) are
 //     claimed fuzzily: same (problemId, correct, isRepeat), no serverCreatedAt
-//     yet, nearest local date within ±10 min, greedy 1-1.
+//     yet, nearest local date within ±10 min, greedy 1-1. On the id-first
+//     path the claim is tried for EVERY un-held row — never preempted by a
+//     timestamp match (that preemption made the outbox re-upload rows whose
+//     acked twin's stamp sat in the cold tail: the server-side dup mint).
 //
 // On an EXISTING device cursorId initializes to the current frontier (the
 // migrateIdCursor() probe adopts serverMaxId — "now" in id space), since local
@@ -42,15 +56,16 @@ import {
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank,
     evictColdTail, clearHistoryTail, syncTailExpectedToActual, isUnackedReportable,
+    getWorkingSetEntries, replaceUnifiedHistory,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
-import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
+import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY, ANSWER_HISTORY_WORKING_SET } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
-import { getTailServerCreatedAtSet, getTailDigestInfo, getTail } from './history-store.js';
+import { getTailSyncIndex, getTailDigestInfo, getTail, replaceTail } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
 import { postJson } from './net.js';
@@ -81,6 +96,89 @@ const CANONICAL_MOVE_ERA_MS = Date.parse('2026-07-07T00:00:00Z');
 const FUZZY_WINDOW_MS = 10 * 60 * 1000;
 // Pagination safety bound: 100 pages × 1000 rows covers any realistic history.
 const MAX_PAGES = 100;
+
+// --- Mirror-by-id representation -------------------------------------------
+// Once migrated (migrateMirrorById), the device's acked history is a 1:1
+// MIRROR of the server's rows keyed by serverId: identity is the row id, and
+// serverCreatedAt is event-time metadata only. Merging then needs no
+// timestamp dedup at all — a row is "had" iff its id is held — which makes
+// the digest consistent BY CONSTRUCTION (server-side duplicate created_at
+// rows, the cause of the perpetual reconcile loop, are simply represented).
+// Identical-content duplicate copies are not materialized as visible entries:
+// their ids go into the ABSORBED-ID RECEIPT list below, which the digest
+// counts alongside real entries. Un-migrated devices keep the legacy
+// timestamp-dedup merge until their (cap-aware, resumable) migration runs.
+const MIRROR_MIGRATED_KEY = 'mirrorByIdMigrated_v1';
+// Receipt ids: server rows represented locally only as "a redundant identical
+// copy of an entry we hold" (same user/problem/outcome/created_at — accidental
+// double-uploads). Counted by computeLocalDigest and by the merge's dedup, so
+// they can neither re-merge as visible duplicates nor leave a digest gap.
+// Account-derived → wiped on switchAccount (ACCOUNT_WIPE_KEYS).
+const ABSORBED_IDS_KEY = 'syncAbsorbedIds';
+
+function isMirrorMigrated() {
+    return !!localStorage.getItem(MIRROR_MIGRATED_KEY);
+}
+
+function readAbsorbedIds() {
+    const arr = readJSON(ABSORBED_IDS_KEY);
+    return Array.isArray(arr) ? arr.filter((v) => Number.isFinite(v)) : [];
+}
+
+function persistAbsorbedIds(ids) {
+    if (ids.length === 0) return;
+    const set = new Set(readAbsorbedIds());
+    for (const id of ids) set.add(id);
+    writeJSON(ABSORBED_IDS_KEY, [...set]);
+}
+
+// Does this server row describe the same attempt as the (acked) local entry?
+// The identical-content test behind absorbing a duplicate copy: problem and
+// outcome must match; is_repeat too, except for pre-per-attempt-era rows where
+// the column didn't exist. Deliberately ignores time_used/review_time — the
+// known double-uploads differ there occasionally, and the identity fields are
+// what make the copy redundant.
+function rowMatchesEntryContent(row, ts, entry) {
+    if (entry.problemId !== row.problem) return false;
+    if (!!entry.correct !== !!row.success) return false;
+    if (ts >= PER_ATTEMPT_ERA_MS && !!entry.isRepeat !== !!row.isRepeat) return false;
+    return true;
+}
+
+// Build the local skeleton entry for a server row nothing local claimed.
+// Shared by the legacy merge, the id-first merge, and the mirror migration;
+// fillSyncedHistoryFields later fills the model fields.
+function buildSyncedEntry(row, ts, size) {
+    const entry = {
+        problemId: row.problem,
+        correct: !!row.success,
+        date: ts,
+        size,
+        serverCreatedAt: row.createdAt,
+        serverId: Number.isFinite(row.id) ? row.id : undefined,
+        timeTaken: typeof row.timeUsed === 'number' ? row.timeUsed : 0,
+        reviewTime: 0,
+        accumulatedReview: typeof row.reviewTime === 'number' ? row.reviewTime : 0,
+        isRepeat: !!row.isRepeat,
+        synced: true,
+    };
+    // The row's review_time is the problem's CUMULATIVE review before this
+    // attempt; kept so recomputeProblemChains can diff consecutive synced
+    // attempts into per-attempt reviewTime.
+    if (typeof row.reviewTime === 'number') entry.syncedReviewTotal = row.reviewTime;
+    // Since CANONICAL_MOVE_ERA_MS every reported move is in the canonical
+    // orientation-0 frame (the client inverse-transforms the click through
+    // the served orientation), so the coordinate maps onto the shard SGF
+    // for every attempt and the backfill can derive pickedCellIndex from
+    // it — repeats included. Older rows are served-frame: non-repeats were
+    // always served at orientation 0 (identity — canonical anyway), but
+    // repeats were randomly reoriented and unrecoverable; skip those.
+    if (!row.success && typeof row.move === 'string' && row.move !== 'pass' &&
+        (!row.isRepeat || ts >= CANONICAL_MOVE_ERA_MS)) {
+        entry.syncedMove = row.move;
+    }
+    return entry;
+}
 
 // The userId match is the only validity requirement — the state must belong to
 // the active account. (An earlier check also demanded the legacy created_at
@@ -176,34 +274,7 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
             continue;
         }
 
-        const entry = {
-            problemId: row.problem,
-            correct: !!row.success,
-            date: ts,
-            serverCreatedAt: row.createdAt,
-            serverId: Number.isFinite(row.id) ? row.id : undefined,
-            timeTaken: typeof row.timeUsed === 'number' ? row.timeUsed : 0,
-            reviewTime: 0,
-            accumulatedReview: typeof row.reviewTime === 'number' ? row.reviewTime : 0,
-            isRepeat: !!row.isRepeat,
-            synced: true,
-        };
-        // The row's review_time is the problem's CUMULATIVE review before this
-        // attempt; kept so recomputeProblemChains can diff consecutive synced
-        // attempts into per-attempt reviewTime.
-        if (typeof row.reviewTime === 'number') entry.syncedReviewTotal = row.reviewTime;
-        // Since CANONICAL_MOVE_ERA_MS every reported move is in the canonical
-        // orientation-0 frame (the client inverse-transforms the click through
-        // the served orientation), so the coordinate maps onto the shard SGF
-        // for every attempt and the backfill can derive pickedCellIndex from
-        // it — repeats included. Older rows are served-frame: non-repeats were
-        // always served at orientation 0 (identity — canonical anyway), but
-        // repeats were randomly reoriented and unrecoverable; skip those.
-        if (!row.success && typeof row.move === 'string' && row.move !== 'pass' &&
-            (!row.isRepeat || ts >= CANONICAL_MOVE_ERA_MS)) {
-            entry.syncedMove = row.move;
-        }
-        newEntries.push(entry);
+        newEntries.push(buildSyncedEntry(row, ts, size));
     }
 
     if (newEntries.length === 0) {
@@ -211,6 +282,95 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
         return newEntries;
     }
 
+    const merged = history.concat(newEntries).sort((a, b) => (a.date || 0) - (b.date || 0));
+    recomputeProblemChains(merged, new Set(newEntries.map((e) => e.problemId)));
+    setAnswerHistoryForSize(size, merged);
+    return newEntries;
+}
+
+// Id-first merge (mirror-by-id devices). Identity is the row id: a row is
+// "had" iff its id is in the working set, the tail, or the absorbed receipts —
+// no timestamp dedup. Rows not held first try the fuzzy claim against
+// UN-ACKED entries (deliberately unconditional: the legacy merge's
+// stamp-dedup preempted the claim, which is exactly how the outbox re-uploaded
+// rows whose acked twin's stamp sat in the tail). A row that claims nothing
+// but is an identical-content copy of an acked entry with the same stamp is a
+// redundant duplicate: its id is absorbed as a receipt instead of becoming a
+// visible duplicate entry. Everything else is inserted as a skeleton.
+// `absorbedSet` is the pull-wide receipt set (mutated here, persisted too).
+function mergeRowsForSizeById(size, rows, tailIndex, absorbedSet) {
+    const history = getAnswerHistoryForSize(size);
+    const wsIds = new Set();
+    const wsByStamp = new Map();
+    const noteStamp = (a) => {
+        if (!a.serverCreatedAt) return;
+        let list = wsByStamp.get(a.serverCreatedAt);
+        if (!list) { list = []; wsByStamp.set(a.serverCreatedAt, list); }
+        list.push(a);
+    };
+    for (const a of history) {
+        if (Number.isFinite(a.serverId)) wsIds.add(a.serverId);
+        noteStamp(a);
+    }
+
+    let claimed = 0;
+    const newlyAbsorbed = [];
+    const newEntries = [];
+    for (const row of rows) {
+        if (typeof row.createdAt !== 'string' || typeof row.problem !== 'string') continue;
+        if (Number.isFinite(row.id) &&
+            (wsIds.has(row.id) || tailIndex.ids.has(row.id) || absorbedSet.has(row.id))) continue;
+        const ts = Date.parse(row.createdAt);
+        if (!Number.isFinite(ts)) continue;
+
+        // Fuzzy claim — greedy nearest-by-date 1-1 against un-acked locals.
+        let best = null;
+        let bestGap = FUZZY_WINDOW_MS;
+        for (const a of history) {
+            if (a.serverCreatedAt || !rowMatchesEntryContent(row, ts, a)) continue;
+            const gap = Math.abs((a.date || 0) - ts);
+            if (gap < bestGap) { best = a; bestGap = gap; }
+        }
+        if (best) {
+            best.serverCreatedAt = row.createdAt;
+            if (Number.isFinite(row.id)) {
+                best.serverId = row.id;
+                wsIds.add(row.id);
+            }
+            noteStamp(best);
+            claimed++;
+            continue;
+        }
+
+        // Redundant identical copy of a row we already hold? Absorb the id as
+        // a receipt. A same-stamp entry with DIFFERENT content is a genuine
+        // same-millisecond collision — falls through to a real insert. The
+        // working-set list is already this size's view; tail twins carry their
+        // own size (missing = the pre-size-column default, 9).
+        if (Number.isFinite(row.id)) {
+            const twins = wsByStamp.get(row.createdAt);
+            const tailTwins = tailIndex.stamps.get(row.createdAt);
+            const tailSize = (t) => SUPPORTED_BOARD_SIZES.includes(t.size) ? t.size : DEFAULT_BOARD_SIZE;
+            const isTwin = (twins && twins.some((a) => rowMatchesEntryContent(row, ts, a))) ||
+                (tailTwins && tailTwins.some((t) => tailSize(t) === size && rowMatchesEntryContent(row, ts, t)));
+            if (isTwin) {
+                newlyAbsorbed.push(row.id);
+                absorbedSet.add(row.id);
+                continue;
+            }
+        }
+
+        const entry = buildSyncedEntry(row, ts, size);
+        if (Number.isFinite(row.id)) wsIds.add(row.id);
+        noteStamp(entry);
+        newEntries.push(entry);
+    }
+
+    persistAbsorbedIds(newlyAbsorbed);
+    if (newEntries.length === 0) {
+        if (claimed > 0) setAnswerHistoryForSize(size, history);
+        return newEntries;
+    }
     const merged = history.concat(newEntries).sort((a, b) => (a.date || 0) - (b.date || 0));
     recomputeProblemChains(merged, new Set(newEntries.map((e) => e.problemId)));
     setAnswerHistoryForSize(size, merged);
@@ -304,9 +464,14 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
         // Dedup against the cold tail too, not just the working set. Snapshot it
         // once up front: rows evicted DURING this pull were merged this pull (so
         // already in the working-set known-set), and /sync pages are disjoint by
-        // cursor, so no row re-arrives within one pull.
-        let tailKnown = null;
-        try { tailKnown = await getTailServerCreatedAtSet(); } catch (_) { tailKnown = null; }
+        // cursor, so no row re-arrives within one pull. One cursor pass serves
+        // both representations: ids + per-stamp content for the id-first merge,
+        // the stamp set for the legacy one.
+        const mirrored = isMirrorMigrated();
+        const absorbedSet = mirrored ? new Set(readAbsorbedIds()) : null;
+        let tailIndex = null;
+        try { tailIndex = await getTailSyncIndex(); } catch (_) { tailIndex = null; }
+        if (!tailIndex) tailIndex = { ids: new Set(), stampSet: new Set(), stamps: new Map() };
         for (let page = 0; page < MAX_PAGES; page++) {
             const res = await postJson('/sync', { userId: sync.userId, sinceId });
             if (!res.ok) break;
@@ -331,7 +496,9 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
                 // against them (it needs every server row, incl. the already-
                 // claimed pre-era originals the merge skips).
                 if (rowSink) rowSink(size, rows);
-                const inserted = mergeRowsForSize(size, rows, tailKnown);
+                const inserted = mirrored
+                    ? mergeRowsForSizeById(size, rows, tailIndex, absorbedSet)
+                    : mergeRowsForSize(size, rows, tailIndex.stampSet);
                 if (inserted.length > 0) {
                     insertedEntries.push(...inserted);
                     touchedSizes.add(size);
@@ -425,6 +592,13 @@ async function computeLocalDigest() {
         ackedCount++;
         if (Number.isFinite(a.serverId)) idSum += rowHash(a.serverId);
         else allHaveId = false;
+    }
+    // Absorbed receipts are server rows we hold as "redundant identical copy
+    // of an entry" (see ABSORBED_IDS_KEY) — counted like entries, so the
+    // digest matches the server exactly despite the collapse.
+    for (const id of readAbsorbedIds()) {
+        ackedCount++;
+        idSum += rowHash(id);
     }
     try {
         const t = await getTailDigestInfo();
@@ -546,9 +720,12 @@ const ACCOUNT_WIPE_KEYS = [
     // The server-side recall schedule snapshot belongs to the old account;
     // the new account's first upload must go replace-all.
     'recallScheduleSnapshot',
-    // Both are bookkeeping about the OLD account's history/tail.
+    // All bookkeeping about the OLD account's history/tail. (The mirror
+    // MIGRATED flag is NOT wiped — it describes this device's data
+    // representation, and an empty post-wipe history is trivially a mirror.)
     'syncTailFillPending',
     'syncDigestGapAccepted',
+    ABSORBED_IDS_KEY,
     SYNC_STATE_KEY,
 ];
 
@@ -952,6 +1129,233 @@ async function migrateIdCursor() {
     localStorage.setItem(ID_CURSOR_MIGRATED_KEY, '1');
 }
 
+// --- One-time mirror-by-id migration (see the MIRROR_MIGRATED_KEY note) -----
+// Brings the device's acked history onto the id-keyed mirror representation.
+//
+// Cheap path (most devices — young accounts, post-redesign adopters): every
+// acked entry already carries its serverId, so the local set IS a mirror —
+// set the flag, zero server reads. Any dup-twin rows the device lacks are
+// healed later by the standing digest check + an id-first reconcile, which
+// absorbs identical copies as receipts rather than visible duplicates.
+//
+// Full path (legacy histories with id-less acked entries): one raw from-0
+// pull (counts against the daily full-pull cap; capExceeded/network failure →
+// flag stays unset, retried next boot), then a pure rebuild: match every
+// local entry to a server row (by id, then exact stamp + identical content,
+// then the fuzzy claim against un-acked locals), absorb identical twin rows
+// as receipts, keep unmatched locals as outbox/local-only rows, and DROP
+// unmatched copies of attempts the mirror already holds (the rescue-era stale
+// duplicates — re-uploading those is exactly how the server dups were minted).
+// The rebuild is a pure function of (server rows, local entries), so a crash
+// anywhere before the flag write just redoes it.
+async function migrateMirrorById() {
+    if (isMirrorMigrated()) return;
+
+    const ackedNoId = (a) => a && a.serverCreatedAt && !Number.isFinite(a.serverId);
+    let tailProbe;
+    try { tailProbe = await getTail(); } catch (_) { tailProbe = []; }
+    if (!getWorkingSetEntries().some(ackedNoId) && !tailProbe.some(ackedNoId)) {
+        localStorage.setItem(MIRROR_MIGRATED_KEY, '1');
+        localStorage.setItem(ID_CURSOR_MIGRATED_KEY, '1');
+        console.log('account-sync: mirror-by-id migration — already id-complete');
+        return;
+    }
+
+    if (pullInFlight) return; // a pull owns the network; retry next boot
+    pullInFlight = true;
+    let stats = null;
+    try {
+        // Raw from-0 pull: collect every server row, no merging.
+        const rows = [];
+        let sinceId = 0;
+        let complete = false;
+        let lastBody = null;
+        for (let page = 0; page < MAX_PAGES; page++) {
+            const res = await postJson('/sync', { userId: state.userId, sinceId });
+            if (!res.ok) return;
+            const body = await res.json().catch(() => null);
+            if (!body || !Array.isArray(body.reports)) return;
+            lastBody = body;
+            if (typeof body.refreshesLeft === 'number') cacheRefreshesLeft(body.refreshesLeft);
+            if (body.capExceeded) {
+                console.log('account-sync: mirror migration deferred (daily full-pull cap spent) — retrying next boot');
+                return;
+            }
+            rows.push(...body.reports);
+            if (Number.isInteger(body.cursorId) && body.cursorId > sinceId) sinceId = body.cursorId;
+            if (!body.hasMore) { complete = true; break; }
+        }
+        if (!complete) return;
+
+        // Snapshot locals AFTER the pull: the matching + rebuild below is one
+        // synchronous block, so a solve that lands during the (long) pull is
+        // in this snapshot and can't be clobbered by the swap.
+        let tail;
+        try { tail = await getTail(); } catch (_) { tail = []; }
+        const built = buildMirror(rows, getWorkingSetEntries(), tail);
+
+        // Swap: tail first (one transaction), then the working set, then the
+        // sync bookkeeping, then the flag — a crash between any two steps
+        // leaves the flag unset and the whole migration redoes idempotently.
+        // Same split rule as the steady-state eviction (cap + un-acked
+        // hold-back). A concurrently-firing eviction timer can at worst
+        // re-append a few working-set rows to the tail as exact duplicates —
+        // absorbed by the standing (problemId, date) de-dup, never a loss.
+        const cut = Math.max(0, built.entries.length - ANSWER_HISTORY_WORKING_SET);
+        let wsRows = built.entries;
+        if (cut > 0) {
+            const tailRows = built.entries.slice(0, cut).filter((a) => !isUnackedReportable(a));
+            const ok = await replaceTail(tailRows);
+            if (ok) {
+                const tailSet = new Set(tailRows);
+                wsRows = built.entries.filter((a) => !tailSet.has(a));
+            }
+            // IDB unavailable: keep everything in the working set, same
+            // degradation as the steady-state eviction.
+        } else {
+            await replaceTail([]);
+        }
+        replaceUnifiedHistory(wsRows);
+        await syncTailExpectedToActual();
+        persistAbsorbedIds(built.absorbed);
+
+        const sync = readSyncState() || { userId: state.userId };
+        if (!Number.isInteger(sync.cursorId) || sinceId > sync.cursorId) sync.cursorId = sinceId;
+        if (lastBody && Number.isFinite(lastBody.serverSeq) &&
+            (!Number.isFinite(sync.lastSeq) || lastBody.serverSeq > sync.lastSeq)) {
+            sync.lastSeq = lastBody.serverSeq;
+        }
+        writeSyncState(sync);
+        localStorage.setItem(MIRROR_MIGRATED_KEY, '1');
+        localStorage.setItem(ID_CURSOR_MIGRATED_KEY, '1'); // subsumed: cursor set from the drained frontier
+        stats = { rows: rows.length, ...built.counts };
+        console.log(`account-sync: mirror-by-id migration complete — ${stats.rows} rows, matched ${stats.matched}, +${stats.skeletons} new, ${stats.absorbed} absorbed, ${stats.dropped} stale local copies dropped, ${stats.outbox} left for the outbox`);
+    } catch (e) {
+        console.warn('account-sync: mirror migration failed (retrying next boot):', e);
+    } finally {
+        pullInFlight = false;
+    }
+    if (!stats) return;
+    // Fill the rebuilt history's model fields (skeletons + tail) and silently
+    // recompute the models/rank, exactly like a merge would.
+    try {
+        await fillSyncedHistoryFields(SUPPORTED_BOARD_SIZES, { includeTail: true });
+    } catch (e) {
+        console.warn('account-sync: post-migration field fill failed (next pull retries):', e);
+    }
+    retrainAfterMerge([], 'feed');
+}
+
+// The pure rebuild behind migrateMirrorById: match local entries to server
+// rows and return the new unified history plus the receipt ids. Matching per
+// row, in id order: exact serverId → exact stamp + identical content (pre-id
+// acked entries) → fuzzy claim against un-acked locals (lost acks and
+// pre-sync-era live history). A row matching nothing is either a redundant
+// identical twin of an already-matched entry (→ absorbed receipt) or genuinely
+// new to this device (→ synced skeleton). Local entries no row claimed lose
+// any stale stamps; copies of attempts the mirror already holds are dropped,
+// the rest kept (outbox / local-only).
+function buildMirror(rows, ws, tail) {
+    const pool = [];
+    for (const a of tail) if (a) pool.push(a.size != null ? a : { ...a, size: DEFAULT_BOARD_SIZE });
+    for (const a of ws) if (a) pool.push(a.size != null ? a : { ...a, size: DEFAULT_BOARD_SIZE });
+
+    const byServerId = new Map();
+    const byStamp = new Map();
+    const noteStamp = (a) => {
+        let list = byStamp.get(a.serverCreatedAt);
+        if (!list) { list = []; byStamp.set(a.serverCreatedAt, list); }
+        list.push(a);
+    };
+    for (const a of pool) {
+        if (Number.isFinite(a.serverId)) byServerId.set(a.serverId, a);
+        if (a.serverCreatedAt) noteStamp(a);
+    }
+
+    const claimed = new Set();
+    const mirror = [];
+    const absorbed = [];
+    const skeletons = [];
+    for (const row of rows) {
+        if (typeof row.createdAt !== 'string' || typeof row.problem !== 'string') continue;
+        const ts = Date.parse(row.createdAt);
+        if (!Number.isFinite(ts)) continue;
+        const size = SUPPORTED_BOARD_SIZES.includes(row.size) ? row.size : DEFAULT_BOARD_SIZE;
+
+        let e = Number.isFinite(row.id) ? byServerId.get(row.id) : null;
+        if (e && !claimed.has(e)) {
+            claimed.add(e);
+            e.serverCreatedAt = row.createdAt; // authoritative refresh
+            mirror.push(e);
+            continue;
+        }
+
+        const stampCands = byStamp.get(row.createdAt);
+        e = stampCands && stampCands.find((a) =>
+            !claimed.has(a) && a.size === size && rowMatchesEntryContent(row, ts, a));
+        if (e) {
+            claimed.add(e);
+            if (Number.isFinite(row.id)) e.serverId = row.id;
+            mirror.push(e);
+            continue;
+        }
+
+        let best = null;
+        let bestGap = FUZZY_WINDOW_MS;
+        for (const a of pool) {
+            if (claimed.has(a) || a.serverCreatedAt || a.size !== size) continue;
+            if (!rowMatchesEntryContent(row, ts, a)) continue;
+            const gap = Math.abs((a.date || 0) - ts);
+            if (gap < bestGap) { best = a; bestGap = gap; }
+        }
+        if (best) {
+            claimed.add(best);
+            best.serverCreatedAt = row.createdAt;
+            if (Number.isFinite(row.id)) best.serverId = row.id;
+            noteStamp(best);
+            mirror.push(best);
+            continue;
+        }
+
+        if (Number.isFinite(row.id) && stampCands &&
+            stampCands.some((a) => claimed.has(a) && a.size === size && rowMatchesEntryContent(row, ts, a))) {
+            absorbed.push(row.id);
+            continue;
+        }
+
+        const entry = buildSyncedEntry(row, ts, size);
+        claimed.add(entry);
+        noteStamp(entry);
+        mirror.push(entry);
+        skeletons.push(entry);
+    }
+
+    const mirroredKeys = new Set(mirror.map((a) => `${a.problemId}|${a.date}`));
+    const kept = [];
+    let dropped = 0;
+    for (const a of pool) {
+        if (claimed.has(a)) continue;
+        if (a.serverCreatedAt !== undefined) delete a.serverCreatedAt;
+        if (a.serverId !== undefined) delete a.serverId;
+        if (a.problemId && mirroredKeys.has(`${a.problemId}|${a.date}`)) { dropped++; continue; }
+        kept.push(a);
+    }
+
+    const entries = mirror.concat(kept).sort((x, y) => (x.date || 0) - (y.date || 0));
+    recomputeProblemChains(entries, new Set(skeletons.map((s) => s.problemId)));
+    return {
+        entries,
+        absorbed,
+        counts: {
+            matched: mirror.length - skeletons.length,
+            skeletons: skeletons.length,
+            absorbed: absorbed.length,
+            dropped,
+            outbox: kept.filter((a) => isUnackedReportable(a)).length,
+        },
+    };
+}
+
 // Regular syncs: app load, tab becoming visible, and regaining connectivity.
 // No interval polling: an active session is kept in sync by the per-report seq
 // signal (checkSyncSignal). Each trigger pulls unthrottled — an up-to-date
@@ -962,8 +1366,13 @@ async function migrateIdCursor() {
 // is a full fromStart pull, the expensive path), and a pull's own digest check
 // escalates to a reconcile if a gap is found.
 export function startBackgroundSync() {
+    // Migration order matters: the tail rescue first (so stranded un-acked
+    // tail rows participate in the mirror rebuild's matching), then the mirror
+    // migration (which subsumes the id-cursor migration when its full path
+    // runs), then the normal pull + outbox on the resulting representation.
     migrateIdCursor()
         .then(() => rescueUnackedTailRows())
+        .then(() => migrateMirrorById())
         .then(() => pullReports())
         .then(() => flushOutbox())
         .catch(() => {});

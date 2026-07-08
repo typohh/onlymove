@@ -166,30 +166,45 @@ export async function getTailDigestInfo() {
     });
 }
 
-// Just the serverCreatedAt values present in the tail (cheap cursor scan — no
-// full row array). The sync merge dedups against this so a re-pull of rows long
-// since evicted to the tail can't re-insert them as duplicates. Empty set if
-// unavailable.
-export async function getTailServerCreatedAtSet() {
+// One cursor pass building everything the sync merge needs to know about the
+// tail: the acked row ids (id-first dedup), the serverCreatedAt stamp set
+// (legacy timestamp dedup), and per-stamp identity fields (the id-first merge's
+// identical-content check, which decides whether a same-timestamp server row is
+// a redundant duplicate copy to absorb or a genuine same-millisecond collision
+// to insert). Stamps can collide (that's the point), so `stamps` maps a stamp
+// to the LIST of rows carrying it. Empty index if IDB is unavailable — the
+// merge then dedups against the working set only, same degradation as before.
+export async function getTailSyncIndex() {
     const db = await openDB();
-    const set = new Set();
-    if (!db) return set;
+    const index = { ids: new Set(), stampSet: new Set(), stamps: new Map() };
+    if (!db) return index;
     return new Promise((resolve) => {
         let req;
         try {
             req = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
         } catch {
-            resolve(set);
+            resolve(index);
             return;
         }
         req.onsuccess = () => {
             const cursor = req.result;
-            if (!cursor) { resolve(set); return; }
+            if (!cursor) { resolve(index); return; }
             const v = cursor.value;
-            if (v && v.serverCreatedAt) set.add(v.serverCreatedAt);
+            if (v && v.serverCreatedAt) {
+                index.stampSet.add(v.serverCreatedAt);
+                if (Number.isFinite(v.serverId)) index.ids.add(v.serverId);
+                let list = index.stamps.get(v.serverCreatedAt);
+                if (!list) { list = []; index.stamps.set(v.serverCreatedAt, list); }
+                list.push({
+                    problemId: v.problemId,
+                    correct: !!v.correct,
+                    isRepeat: !!v.isRepeat,
+                    size: v.size,
+                });
+            }
             cursor.continue();
         };
-        req.onerror = () => resolve(set);
+        req.onerror = () => resolve(index);
     });
 }
 
