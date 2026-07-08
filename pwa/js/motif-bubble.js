@@ -9,8 +9,11 @@
 // motif only above MIN_Z and show at most MAX_MOTIFS, highest first. Labels are
 // localized via the shared i18n resolver, falling back to English.
 //
-// The bubble is a position:fixed overlay (see style.css) — it never participates
-// in #main-container's flex flow, so it can never resize or shift the board.
+// Layout (see style.css): in landscape the bubble is a plain in-flow block in
+// the controls column, below the buttons, always fully visible. In portrait it
+// is a position:fixed overlay (out of the row flow, so it can never resize or
+// shift the board) parked below the controls; its tab lifts it over the board.
+// The "why this move" title lives in the tab bar itself, not in the content.
 
 import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
@@ -33,7 +36,7 @@ const isPortrait = () => window.matchMedia('(max-aspect-ratio: 125/100)').matche
  * measure it here and feed the CSS via custom properties:
  *   --mb-park-top : viewport-y just below the buttons (parked top edge)
  *   --mb-lift     : translateY that lands the bubble's centre at screen centre
- * Landscape ignores both (it's pure-CSS, board-relative). No-op unless the
+ * Landscape ignores both (the bubble is in-flow there). No-op unless the
  * bubble is currently visible in portrait.
  */
 export function refreshMotifBubbleMetrics() {
@@ -83,13 +86,12 @@ export function populateMotifBubble(problem) {
     const motifs = topMotifs(problem && problem.embedding);
     _hasMotifs = motifs.length > 0;
 
+    // The title lives in the tab bar; set it here so it follows the language.
+    const tabLabel = el('motif-bubble-tab-label');
+    if (tabLabel) tabLabel.textContent = getTerm('motifTitle');
+
     content.textContent = '';
     if (_hasMotifs) {
-        const title = document.createElement('div');
-        title.className = 'motif-bubble-title';
-        title.textContent = getTerm('motifTitle');
-        content.appendChild(title);
-
         const ul = document.createElement('ul');
         ul.className = 'motif-bubble-list';
         for (const m of motifs) {

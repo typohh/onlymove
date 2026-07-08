@@ -226,13 +226,18 @@ const updateSolvingModeUI = () => {
         }
     }
 
-    // About (button2) and Stats (button3) live in the hamburger menu now;
-    // their DOM nodes stay so the menu items can dispatch clicks through them.
+    // About (button2) lives in the hamburger menu now.
     document.getElementById('button2').style.display = 'none';
-    document.getElementById('button3').style.display = 'none';
 
     // Show button4 as Install button
     updateInstallButton();
+
+    // The Share button stays visible in every mode (so button positions
+    // don't jump on mode switches) but only acts on the problem under
+    // review — disabled here, enabled in analysis mode.
+    const shareButton = document.getElementById('button-share');
+    shareButton.textContent = getTerm('share');
+    shareButton.classList.add('disabled');
 
     updateMenuItems();
 }
@@ -283,10 +288,13 @@ const updateAnalysisModeUI = () => {
         undoLink.classList.add('disabled');
     }
 
-    // Share (button3) and Ignore (button4) live in the hamburger menu now;
-    // their DOM nodes stay so the menu items can dispatch clicks through them.
-    document.getElementById('button3').style.display = 'none';
+    // Ignore lives in the hamburger menu; button4 has no analyzing-mode role.
     document.getElementById('button4').style.display = 'none';
+
+    // Share acts on the problem under review, so this is where it enables.
+    const shareButton = document.getElementById('button-share');
+    shareButton.textContent = getTerm('share');
+    shareButton.classList.remove('disabled');
 
     updateMenuItems();
 }

@@ -363,6 +363,14 @@ function wireActionButtons() {
             handleInstallClick();
         }
     });
+
+    // Share button — same action as the hamburger menu's Share item; always
+    // visible, disabled outside analysis mode.
+    document.getElementById('button-share').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (e.target.classList.contains('disabled')) return;
+        performShare();
+    });
 }
 
 // M (rating→rank) and the population constants are inlined into the bundle at

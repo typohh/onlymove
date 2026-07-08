@@ -81,8 +81,22 @@
         <a href="#" id="menu-toggle-h" class="btn horizontal-only" role="button" tabindex="0">Menu</a>
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>
-        <a href="#" id="button3" class="btn"></a>
         <a href="#" id="button4" class="btn"></a>
+        <!-- Share, always the last button in both layouts (so button
+             positions don't jump when switching modes); ui.js disables it
+             outside review mode. -->
+        <a href="#" id="button-share" class="btn" role="button" tabindex="0"></a>
+        <!-- Review-mode "why this move" bubble. In landscape it's a plain
+             in-flow block below the buttons (always fully visible, exactly
+             the buttons' width); in portrait it's a position:fixed overlay
+             parked below the controls whose tab lifts it over the board
+             (see style.css + motif-bubble.js). -->
+        <div id="motif-bubble" class="motif-bubble motif-bubble-hidden" aria-hidden="true">
+          <div id="motif-bubble-content" class="motif-bubble-content"></div>
+          <button id="motif-bubble-tab" class="motif-bubble-tab" type="button">
+            <span id="motif-bubble-tab-label" class="motif-bubble-tab-label"></span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -115,12 +129,6 @@
       </div>
     </div>
 
-    <!-- Review-mode motif bubble. position:fixed overlay — never a flex child,
-         so it can never resize or shift the board (see style.css). -->
-    <div id="motif-bubble" class="motif-bubble motif-bubble-hidden" aria-hidden="true">
-      <div id="motif-bubble-content" class="motif-bubble-content"></div>
-      <button id="motif-bubble-tab" class="motif-bubble-tab" type="button" aria-label="motif"></button>
-    </div>
   </div>
 
   <script type="text/javascript">
