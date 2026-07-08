@@ -462,6 +462,15 @@ body {
         width: 100%;
         max-height: 40vh;
         transition: none;
+        /* Match the buttons' tucked-under-the-board look: z-index auto so
+           the board (z 2) and its shadow paint over the left edge (as a
+           flex item the base z-index 6 would otherwise apply and lift it
+           above the board), square left corners, and no floating-card
+           border/shadow of its own. */
+        z-index: auto;
+        border-radius: 0 var(--radius) var(--radius) 0;
+        border: none;
+        box-shadow: none;
     }
     .motif-bubble-tab {
         pointer-events: none;
