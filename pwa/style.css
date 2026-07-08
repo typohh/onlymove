@@ -1,6 +1,16 @@
 /* --- General Body and Layout --- */
 :root {
     --radius: 1.5vmin;
+    /* Height reserved below the controls in squarish so the motif bubble's
+       "why this move" tab bar is on-screen at all times: the tab
+       (~6.5vmin content + 0.4vmin borders) plus its 1vmin park gap. */
+    --mb-tab-reserve: 8vmin;
+    /* The main column's width cap (= board width in squarish). 84vh was
+       calibrated so title + board + controls exactly fill the viewport
+       height; the tab reserve now comes out of the board too. Squarish
+       #main-container width and every column-proportional font/size below
+       derive from this one value. */
+    --main-col-cap: calc(84vh - var(--mb-tab-reserve));
 }
 
 html, body {
@@ -27,7 +37,7 @@ body {
     align-items: center;
     width: 100%;
     box-sizing: border-box;
-    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+    font-size: calc(0.035 * min(var(--main-col-cap), 100vw));
     background-color: transparent;
 }
 
@@ -69,7 +79,7 @@ body {
     justify-content: space-between;
     align-items: center;
     box-sizing: border-box;
-    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+    font-size: calc(0.035 * min(var(--main-col-cap), 100vw));
     background-color: transparent;
     width: 100%;
 }
@@ -181,6 +191,14 @@ body {
         flex-direction: column;
         width: 100%;
         height: 100%;
+        /* Reserve the motif-bubble tab strip at the screen bottom. This
+           lives here (portrait AND squarish), not in the squarish override:
+           the column is vertically centered (base justify-content), so both
+           modes must center in the SAME padded box — a squarish-only
+           reserve shifted content up by half the reserve when crossing the
+           portrait/squarish cutoff. */
+        padding-bottom: var(--mb-tab-reserve);
+        box-sizing: border-box;
     }
     #title-container {
         order: 1;
@@ -226,11 +244,14 @@ body {
     }
 }
 
-/* --- MODE 2 Override: \"SQUARISH\" LAYOUT --- */
-@media (min-aspect-ratio: 84/100) and (max-aspect-ratio: 125/100) {
+/* --- MODE 2 Override: \"SQUARISH\" LAYOUT ---
+   Only the width cap changes here; centering and the tab reserve are
+   identical to portrait (see the MODE 1&2 block), so the cutoff only needs
+   width continuity: it is the aspect where 100vw equals the cap (at w/h =
+   84/108, 1vmin = 1vw, so 84vh - 8vmin = 77.8vh = 100vw). */
+@media (min-aspect-ratio: 84/108) and (max-aspect-ratio: 125/100) {
     #main-container {
-        width: 84vh;
-        justify-content: center;
+        width: var(--main-col-cap);
     }
     #board-container {
        flex-grow: 0;
@@ -331,7 +352,7 @@ body {
     border: 0.2vmin solid #555;
     border-radius: var(--radius);
     box-shadow: 0 1vmin 3vmin rgba(0, 0, 0, 0.45);
-    font-size: calc(0.03 * min(0.84 * 100vh, 100vw));
+    font-size: calc(0.03 * min(var(--main-col-cap), 100vw));
     overflow: hidden;
     transition: transform 0.28s ease;
 }
@@ -404,8 +425,12 @@ body {
    the board). The fallbacks keep it sane for the frame before JS runs. */
 @media (max-aspect-ratio: 125/100) {
     .motif-bubble {
-        left: 1vmin;
-        right: 1vmin;
+        /* Match the buttons' width, not the display width: inset to the
+           centered main column (capped at --main-col-cap in squarish) plus
+           the 1vmin the buttons are padded in by. On narrow screens the
+           column is the full viewport and this collapses to plain 1vmin. */
+        left: max(1vmin, calc(50vw - var(--main-col-cap) / 2 + 1vmin));
+        right: max(1vmin, calc(50vw - var(--main-col-cap) / 2 + 1vmin));
         bottom: auto;
         top: var(--mb-park-top, 62vh);
         transform: translateY(0);
@@ -484,7 +509,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1.5vmin;
-    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+    font-size: calc(0.035 * min(var(--main-col-cap), 100vw));
 }
 
 #ios-install-title {
@@ -537,7 +562,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1vmin;
-    font-size: calc(0.035 * min(0.84 * 100vh, 100vw));
+    font-size: calc(0.035 * min(var(--main-col-cap), 100vw));
 }
 
 .menu-item {
@@ -1005,8 +1030,8 @@ body {
 }
 
 .capture-count {
-    width: calc(min(0.84 * 100vh, 100vw) / 10);
-    height: calc(min(0.84 * 100vh, 100vw) / 10);
+    width: calc(min(var(--main-col-cap), 100vw) / 10);
+    height: calc(min(var(--main-col-cap), 100vw) / 10);
     border-radius: 50%;
     display: flex;
     justify-content: center;
@@ -1018,8 +1043,8 @@ body {
 }
 
 .capture-score {
-    width: calc(min(0.84 * 100vh, 100vw) / 14);
-    height: calc(min(0.84 * 100vh, 100vw) / 14);
+    width: calc(min(var(--main-col-cap), 100vw) / 14);
+    height: calc(min(var(--main-col-cap), 100vw) / 14);
     border-radius: 50%;
     border: 0.2vmin solid white;
     display: flex;

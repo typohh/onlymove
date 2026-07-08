@@ -304,7 +304,6 @@ const updateMenuItems = () => {
     const pauseItem = document.getElementById('menu-pause-recalls');
     const aboutItem = document.getElementById('menu-about');
     const statsItem = document.getElementById('menu-stats');
-    const shareItem = document.getElementById('menu-share');
     const ignoreItem = document.getElementById('menu-ignore');
     const reviewGroup = document.getElementById('menu-group-review');
 
@@ -346,13 +345,11 @@ const updateMenuItems = () => {
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');
 
-    // Review group — Share/Ignore act on the problem under review, so the whole
-    // category only appears in analysis mode.
+    // Review group — Ignore acts on the problem under review, so the whole
+    // category only appears in analysis mode. (Share lives in the main
+    // button row, not the menu.)
     if (state.appMode === APP_MODES.ANALYZING) {
         reviewGroup.style.display = '';
-
-        shareItem.textContent = getTerm('share');
-        shareItem.classList.remove('disabled');
 
         // Ignore: enabled only when there's a current problem and it's a
         // retry/recall (matches the analysis-mode ignore-button rule).

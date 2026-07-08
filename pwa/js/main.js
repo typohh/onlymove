@@ -252,11 +252,6 @@ function wireMenu() {
         closeMenu();
         showAccountModal();
     });
-    document.getElementById('menu-share').addEventListener('click', (e) => {
-        e.preventDefault();
-        closeMenu();
-        performShare();
-    });
     document.getElementById('menu-ignore').addEventListener('click', (e) => {
         e.preventDefault();
         if (e.currentTarget.classList.contains('disabled')) return;
