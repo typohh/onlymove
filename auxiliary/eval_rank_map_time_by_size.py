@@ -18,6 +18,11 @@ production blocks-mass anchors; they differ ONLY in the time features):
   pooled+frac13  pooled time + the user's 13x13 timed-attempt fraction (de-meaned)
                  as a second covariate — isolates whether the size MIX itself
                  carries rank signal beyond the pooled time.
+  norm-fit       production aggregation unchanged (ONE pooled median, one alpha),
+                 but each 13x13 attempt's time is divided by a DATA-DERIVED size
+                 multiplier before the median (the within-user paired median gap,
+                 fit over ALL DB users with both sizes timed, not just survey users).
+  norm-2x        same, with a fixed 2x multiplier for 13x13.
 
 Feature availability mirrors production: a user is "timed" iff their pooled
 working-set count >= MIN_TIMED (20); per-size features additionally need
@@ -67,12 +72,9 @@ MIN_TIMED_SIZE = 10
 # Per-user solve-time stats, split by board size (same working-set window +
 # filters as production load_user_median_solve_minutes, but keeping `size`).
 # ---------------------------------------------------------------------------
-def load_user_time_stats(sqlite_path):
-    """{user_prefix8: {"pooled": log10 med min or None,
-                       "by_size": {9: (log10 med min, n_timed), 13: ...},
-                       "frac13": fraction of timed attempts on 13x13}}
-    over each user's most-recent WORKING_SET attempts; pooled needs MIN_TIMED,
-    a size slot needs MIN_TIMED_SIZE."""
+def load_user_timed_lists(sqlite_path):
+    """{user_prefix8: [(time_ms, size), ...]} — the timed non-repeat attempts inside
+    each user's most-recent WORKING_SET window (ALL DB users; production filters)."""
     con = sqlite3.connect(sqlite_path)
     try:
         cur = con.execute("SELECT user_id, is_repeat, time_used, size FROM tsumego_reports "
@@ -82,10 +84,30 @@ def load_user_time_stats(sqlite_path):
             windows[uid[:8]].append((rep, t, sz))
     finally:
         con.close()
+    return {pref: [(float(t), sz) for (rep, t, sz) in rows
+                   if not rep and t is not None and 0 < float(t) <= AFK_CAP_MS]
+            for pref, rows in windows.items()}
+
+
+def fit_size_multiplier(timed_lists):
+    """The data-derived 13x13→9x9 time factor: mean within-user paired
+    log10(median13/median9) over every DB user with MIN_TIMED_SIZE timed attempts
+    on both sizes. Returns (multiplier, n_users)."""
+    gaps = []
+    for ts in timed_lists.values():
+        by = {sz: [t for t, s in ts if s == sz] for sz in SIZES}
+        if all(len(by[sz]) >= MIN_TIMED_SIZE for sz in SIZES):
+            gaps.append(np.log10(np.median(by[13])) - np.log10(np.median(by[9])))
+    if not gaps:
+        return 1.0, 0
+    return float(10 ** np.mean(gaps)), len(gaps)
+
+
+def user_time_stats(timed_lists):
+    """{user_prefix8: {"pooled": log10 med min, "by_size": {sz: (log10 med min, n)},
+    "frac13": ...}} — pooled needs MIN_TIMED, a size slot needs MIN_TIMED_SIZE."""
     out = {}
-    for pref, rows in windows.items():
-        ts = [(float(t), sz) for (rep, t, sz) in rows
-              if not rep and t is not None and 0 < float(t) <= AFK_CAP_MS]
+    for pref, ts in timed_lists.items():
         if len(ts) < MIN_TIMED:
             continue
         allts = [t for t, _ in ts]
@@ -100,9 +122,23 @@ def load_user_time_stats(sqlite_path):
     return out
 
 
-def build_feature_defs(users, time_stats):
+def normalized_pooled_medians(timed_lists, mult13):
+    """{user_prefix8: log10 med min} with each 13x13 time divided by mult13 before
+    the ONE pooled median — production aggregation, size-normalized times."""
+    out = {}
+    for pref, ts in timed_lists.items():
+        if len(ts) < MIN_TIMED:
+            continue
+        norm = [t / mult13 if sz == 13 else t for t, sz in ts]
+        out[pref] = float(np.log10(np.median(norm) / 60000.0))
+    return out
+
+
+def build_feature_defs(users, time_stats, norm_medians=None):
     """Per-variant per-user feature vectors. Returns {variant: ({uid: np.array(F)}, F)}.
-    Centers are population means over the timed users (full-data, like production)."""
+    Centers are population means over the timed users (full-data, like production).
+    norm_medians: {name: {pref8: log10 med}} adds one single-feature variant each
+    (the size-normalized pooled medians; same user availability as pooled)."""
     timed = [u for u in users if u[:8] in time_stats]
     c_pool = float(np.mean([time_stats[u[:8]]["pooled"] for u in timed])) if timed else 0.0
     c_size = {}
@@ -130,13 +166,18 @@ def build_feature_defs(users, time_stats):
         T_two[u] = np.array([dem.get(sz, 0.0) for sz in SIZES])
         T_pf[u] = np.array([st["pooled"] - c_pool, st["frac13"] - c_f13])
     zero1 = {u: np.zeros(1) for u in users}
-    return {
+    variants = {
         "notime":        (zero1, 1),
         "pooled":        (T_pool, 1),
         "size-adj":      (T_adj, 1),
         "two-alpha":     (T_two, 2),
         "pooled+frac13": (T_pf, 2),
-    }, dict(c_pool=c_pool, c_size=c_size, c_f13=c_f13, n_timed=len(timed))
+    }
+    for name, med in (norm_medians or {}).items():
+        c = float(np.mean([med[u[:8]] for u in timed if u[:8] in med])) if timed else 0.0
+        variants[name] = ({u: (np.array([med[u[:8]] - c]) if u[:8] in med
+                               else np.zeros(1)) for u in users}, 1)
+    return variants, dict(c_pool=c_pool, c_size=c_size, c_f13=c_f13, n_timed=len(timed))
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +316,11 @@ def main():
     ap.add_argument("--sqlite", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
     ap.add_argument("--reps", type=int, default=6)
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--variants", default=None,
+                    help="comma-list of variant names to run (default: all). Foldings "
+                         "are seed-deterministic, so runs with the same --reps/--folds "
+                         "are paired-comparable across invocations via the pooled "
+                         "baseline.")
     args = ap.parse_args()
 
     print("Loading surveys + ratings + attempts ...")
@@ -295,7 +341,13 @@ def main():
 
     users_all = sorted(surveys["user_id"].unique())
     att = load_attempts_sqlite(args.sqlite, users_all)
-    time_stats = load_user_time_stats(args.sqlite)
+    timed_lists = load_user_timed_lists(args.sqlite)
+    time_stats = user_time_stats(timed_lists)
+    mult13, n_mult = fit_size_multiplier(timed_lists)
+    print(f"  size multiplier (13x13/9x9 within-user paired median, ALL DB users "
+          f"with both sizes): {mult13:.3f}x from {n_mult} users")
+    norm_medians = {"norm-fit": normalized_pooled_medians(timed_lists, mult13),
+                    "norm-2x": normalized_pooled_medians(timed_lists, 2.0)}
 
     career, blocks_by_user = {}, {}
     for uid in users_all:
@@ -308,7 +360,11 @@ def main():
         blocks_by_user[uid] = user_blocks(att, fitter, uid)
     users = sorted(career)
 
-    feats, info = build_feature_defs(users, time_stats)
+    feats, info = build_feature_defs(users, time_stats, norm_medians)
+    if args.variants:
+        keep = set(args.variants.split(","))
+        keep.add("pooled")   # the paired-diff baseline is always needed
+        feats = {k: v for k, v in feats.items() if k in keep}
     n_both = sum(1 for u in users if len(time_stats.get(u[:8], {}).get("by_size", {})) == 2)
     n_913 = {sz: sum(1 for u in users if sz in time_stats.get(u[:8], {}).get("by_size", {}))
              for sz in SIZES}
@@ -353,7 +409,8 @@ def main():
         alpha = fitres[1]
         label = {"notime": "(unused feature)", "pooled": "alpha_pooled",
                  "size-adj": "alpha_sizeadj", "two-alpha": "alpha9, alpha13",
-                 "pooled+frac13": "alpha_pooled, beta_frac13(rating/unit-frac)"}[vname]
+                 "pooled+frac13": "alpha_pooled, beta_frac13(rating/unit-frac)",
+                 }.get(vname, "alpha")
         print(f"  {vname:<14} {label}: {np.round(alpha, 4)}")
 
     # --- CV -------------------------------------------------------------------
