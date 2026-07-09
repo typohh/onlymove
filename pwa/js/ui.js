@@ -16,6 +16,19 @@ import { getTerm, getDescriptiveRank } from './i18n.js';
 const isInstalled = () =>
     window.matchMedia('(display-mode: standalone)').matches ||
     window.navigator.standalone === true;
+
+/**
+ * Returns true on iOS/iPadOS. Only iOS lacks a native install prompt AND uses
+ * the Safari Share → Add to Home Screen flow; every other prompt-less browser
+ * (Vanadium/GrapheneOS, Firefox, other Chromium forks that don't fire
+ * beforeinstallprompt) installs via its own menu, so those must NOT be shown the
+ * Safari instructions. iPadOS 13+ reports a Mac UA, so also check touch points.
+ */
+const isIOS = () => {
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+};
 import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
@@ -48,9 +61,13 @@ export function updateCapturesUI() {
 const boardContainer = document.getElementById('board-container');
 
 /**
- * Shows an iOS-style modal with step-by-step instructions to add to Home Screen.
+ * Shows a modal with step-by-step instructions to install the app manually,
+ * used when no native install prompt is available. The instructions are
+ * platform-specific: iOS gets the Safari Share flow; every other prompt-less
+ * browser (Vanadium/GrapheneOS, Firefox, …) gets the generic browser-menu flow.
  */
-const showIosInstallModal = () => {
+const showManualInstallModal = () => {
+    const instructionsKey = isIOS() ? 'installIosInstructions' : 'installManualInstructions';
     showModal({
         build: (modal, close) => {
             modal.appendChild(modalTitle(getTerm('installIosTitle')));
@@ -58,7 +75,7 @@ const showIosInstallModal = () => {
             const instructions = document.createElement('div');
             instructions.id = 'ios-install-instructions';
             // Replace literal \n with line breaks
-            getTerm('installIosInstructions').split('\n').forEach((line, i, arr) => {
+            getTerm(instructionsKey).split('\n').forEach((line, i, arr) => {
                 instructions.appendChild(document.createTextNode(line));
                 if (i < arr.length - 1) instructions.appendChild(document.createElement('br'));
             });
@@ -99,8 +116,10 @@ export const handleInstallClick = async () => {
             console.log(`User response to install prompt: ${outcome}`);
             setDeferredInstallPrompt(null);
         } else {
-            // No native prompt (Safari/iOS, or Chrome before the event fires).
-            showIosInstallModal();
+            // No native prompt: iOS Safari, prompt-less browsers (Vanadium/
+            // GrapheneOS, Firefox), or Chrome before the event fires. The modal
+            // picks iOS vs. generic browser-menu instructions by platform.
+            showManualInstallModal();
         }
         await refreshNotifState();
         updateInstallButton();
