@@ -22,7 +22,22 @@ production blocks-mass anchors; they differ ONLY in the time features):
                  but each 13x13 attempt's time is divided by a DATA-DERIVED size
                  multiplier before the median (the within-user paired median gap,
                  fit over ALL DB users with both sizes timed, not just survey users).
-  norm-2x        same, with a fixed 2x multiplier for 13x13.
+  norm-2x        same, with a fixed 2x multiplier for 13x13 (kept for the record; a
+                 2x correction overshoots the real ~1.28x gap and halves the learned
+                 slope — flawed by construction, excluded from default runs).
+  norm-add       same aggregation, ADDITIVE correction: subtract the data-derived
+                 constant (median within-user med13-med9 gap, ~3.6s — the "scan the
+                 whole board once" story; the free affine fit med13 ≈ 3-5s +
+                 (1.10-1.20)*med9 sits between pure-additive and pure-multiplicative)
+                 from each 13x13 attempt time, clamped at 1s so the median/log stay
+                 positive.
+
+Metrics: held-out ordinal NLL, MAE/RMSE of predicted vs declared server rank, and
+SPEARMAN of predicted vs declared (per folding, paired diffs vs pooled). The band
+breakdown slices pooled errors by declared band AND by the user's timed-size
+profile (9-only / 13-only / both / untimed) — the size corrections mostly move
+single-size users (a dual user's pooled median barely shifts), so 13-only vs
+9-only relative bias is the slice where a size effect must show up.
 
 Feature availability mirrors production: a user is "timed" iff their pooled
 working-set count >= MIN_TIMED (20); per-size features additionally need
@@ -48,6 +63,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import expit
+from scipy.stats import spearmanr
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -122,14 +138,31 @@ def user_time_stats(timed_lists):
     return out
 
 
-def normalized_pooled_medians(timed_lists, mult13):
-    """{user_prefix8: log10 med min} with each 13x13 time divided by mult13 before
-    the ONE pooled median — production aggregation, size-normalized times."""
+def fit_size_offset_ms(timed_lists):
+    """The data-derived ADDITIVE 13x13→9x9 correction: median within-user
+    (median13 - median9) gap in ms over the dual-size users. Returns (ms, n)."""
+    gaps = []
+    for ts in timed_lists.values():
+        by = {sz: [t for t, s in ts if s == sz] for sz in SIZES}
+        if all(len(by[sz]) >= MIN_TIMED_SIZE for sz in SIZES):
+            gaps.append(np.median(by[13]) - np.median(by[9]))
+    if not gaps:
+        return 0.0, 0
+    return float(np.median(gaps)), len(gaps)
+
+
+def normalized_pooled_medians(timed_lists, mult13=1.0, sub13_ms=0.0):
+    """{user_prefix8: log10 med min} with each 13x13 time divided by mult13 and/or
+    shifted down by sub13_ms (clamped at 1s) before the ONE pooled median —
+    production aggregation, size-normalized times."""
     out = {}
     for pref, ts in timed_lists.items():
         if len(ts) < MIN_TIMED:
             continue
-        norm = [t / mult13 if sz == 13 else t for t, sz in ts]
+        # clamp only on the additive path (subtraction can cross 0; pure division
+        # cannot, and norm-fit stays bit-identical to its earlier definition)
+        norm = [(max(t - sub13_ms, 1000.0) if sub13_ms > 0 else t) / mult13
+                if sz == 13 else t for t, sz in ts]
         out[pref] = float(np.log10(np.median(norm) / 60000.0))
     return out
 
@@ -282,10 +315,12 @@ def fit_consensus_vec(decls, F):
 
 
 def evaluate(fitres, eval_rows):
-    """eval_rows: [(server, R, g, Tvec)]. Returns (nll[], err[], g[])."""
+    """eval_rows: [(server, R, g, Tvec, tag)]. Returns (nll[], err[], g[], tags[])
+    over the rows whose server has a fitted coupling; tag is opaque caller context
+    (the user's timed-size profile)."""
     a, alpha, ys, server_fits = fitres
-    nlls, errs, gdecl = [], [], []
-    for server, R, g, T in eval_rows:
+    nlls, errs, gdecl, tags = [], [], [], []
+    for server, R, g, T, tag in eval_rows:
         thr = server_fits.get(server)
         if not thr or len(thr) < 2:
             continue
@@ -304,7 +339,8 @@ def evaluate(fitres, eval_rows):
         pred = float(interp_extrap_vec(np.array([x]), tau[order], srv_scalar[order])[0])
         errs.append(pred - g)
         gdecl.append(g)
-    return np.array(nlls), np.array(errs), np.array(gdecl)
+        tags.append(tag)
+    return np.array(nlls), np.array(errs), np.array(gdecl), tags
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +380,13 @@ def main():
     timed_lists = load_user_timed_lists(args.sqlite)
     time_stats = user_time_stats(timed_lists)
     mult13, n_mult = fit_size_multiplier(timed_lists)
-    print(f"  size multiplier (13x13/9x9 within-user paired median, ALL DB users "
-          f"with both sizes): {mult13:.3f}x from {n_mult} users")
-    norm_medians = {"norm-fit": normalized_pooled_medians(timed_lists, mult13),
-                    "norm-2x": normalized_pooled_medians(timed_lists, 2.0)}
+    off13, n_off = fit_size_offset_ms(timed_lists)
+    print(f"  size corrections (within-user paired medians, ALL DB users with both "
+          f"sizes): multiplicative {mult13:.3f}x, additive {off13 / 1000:.1f}s "
+          f"({n_mult} users)")
+    norm_medians = {"norm-fit": normalized_pooled_medians(timed_lists, mult13=mult13),
+                    "norm-2x": normalized_pooled_medians(timed_lists, mult13=2.0),
+                    "norm-add": normalized_pooled_medians(timed_lists, sub13_ms=off13)}
 
     career, blocks_by_user = {}, {}
     for uid in users_all:
@@ -363,8 +402,20 @@ def main():
     feats, info = build_feature_defs(users, time_stats, norm_medians)
     if args.variants:
         keep = set(args.variants.split(","))
-        keep.add("pooled")   # the paired-diff baseline is always needed
-        feats = {k: v for k, v in feats.items() if k in keep}
+    else:
+        keep = set(feats) - {"norm-2x"}   # flawed by construction; opt-in only
+    keep.add("pooled")   # the paired-diff baseline is always needed
+    feats = {k: v for k, v in feats.items() if k in keep}
+
+    def size_profile(uid):
+        by = time_stats.get(uid[:8], {}).get("by_size", {})
+        if len(by) == 2:
+            return "both"
+        if 9 in by:
+            return "9-only"
+        if 13 in by:
+            return "13-only"
+        return "untimed"
     n_both = sum(1 for u in users if len(time_stats.get(u[:8], {}).get("by_size", {})) == 2)
     n_913 = {sz: sum(1 for u in users if sz in time_stats.get(u[:8], {}).get("by_size", {}))
              for sz in SIZES}
@@ -415,7 +466,7 @@ def main():
 
     # --- CV -------------------------------------------------------------------
     fold_means = defaultdict(list)
-    pooled_errs = defaultdict(lambda: ([], []))
+    pooled_errs = defaultdict(lambda: ([], [], []))
     n_folds_total = 0
     for rep in range(args.reps):
         rng = np.random.default_rng(1000 + rep)
@@ -431,16 +482,22 @@ def main():
                 if fitres is None:
                     continue
                 eval_rows = [(row["server"], career[row["user_id"]][0],
-                              float(row["rank_scalar"]), T_of[row["user_id"]])
+                              float(row["rank_scalar"]), T_of[row["user_id"]],
+                              size_profile(row["user_id"]))
                              for _, row in test_latest.iterrows()]
-                nll, err, gdecl = evaluate(fitres, eval_rows)
+                nll, err, gdecl, tags = evaluate(fitres, eval_rows)
                 if len(nll) == 0:
                     continue
                 fold_means[(vname, "nll")].append(float(np.mean(nll)))
                 fold_means[(vname, "mae")].append(float(np.mean(np.abs(err))))
                 fold_means[(vname, "rmse")].append(float(np.sqrt(np.mean(err ** 2))))
+                if len(gdecl) >= 3 and np.std(gdecl) > 0:
+                    pred = err + gdecl
+                    fold_means[(vname, "spearman")].append(
+                        float(spearmanr(pred, gdecl).statistic))
                 pooled_errs[vname][0].extend(err.tolist())
                 pooled_errs[vname][1].extend(gdecl.tolist())
+                pooled_errs[vname][2].extend(tags)
         print(f"  rep {rep + 1}/{args.reps} done")
 
     def paired(vname, metric, base="pooled"):
@@ -455,23 +512,27 @@ def main():
     print(f"\n===== paired CV over {n_folds_total} foldings "
           f"({args.folds}-fold x {args.reps} reps), {len(latest)} eval declarations, "
           f"baseline = pooled (production) =====")
-    print(f"{'variant':<14} {'NLL':>8} {'MAE':>7} {'RMSE':>7} | "
-          f"{'ΔNLL vs pooled':>17} {'ΔMAE':>14}")
+    print(f"{'variant':<14} {'NLL':>8} {'MAE':>7} {'RMSE':>7} {'SPEAR':>7} | "
+          f"{'ΔNLL vs pooled':>17} {'ΔMAE':>14} {'ΔSPEAR':>16}")
     for vname in VARIANTS:
         nll = np.mean(fold_means[(vname, "nll")])
         mae = np.mean(fold_means[(vname, "mae")])
         rmse = np.mean(fold_means[(vname, "rmse")])
+        sp = np.mean(fold_means[(vname, "spearman")])
         dn = paired(vname, "nll")
         dm = paired(vname, "mae")
+        ds = paired(vname, "spearman")
         dn_s = f"{dn[0]:+.4f}±{dn[1]:.4f}" if dn else "-"
         dm_s = f"{dm[0]:+.4f}±{dm[1]:.4f}" if dm else "-"
-        print(f"{vname:<14} {nll:8.4f} {mae:7.4f} {rmse:7.4f} | {dn_s:>17} {dm_s:>14}")
+        ds_s = f"{ds[0]:+.4f}±{ds[1]:.4f}" if ds else "-"
+        print(f"{vname:<14} {nll:8.4f} {mae:7.4f} {rmse:7.4f} {sp:7.4f} | "
+              f"{dn_s:>17} {dm_s:>14} {ds_s:>16}")
 
     print("\n--- band breakdown (pooled held-out errors) ---")
     print(f"{'variant':<14} {'dan MAE':>8} {'dan bias':>9} {'kyu MAE':>8} {'kyu bias':>9} "
           f"{'<=10k MAE':>9}")
     for vname in VARIANTS:
-        errs, gdecl = pooled_errs[vname]
+        errs, gdecl, _ = pooled_errs[vname]
         errs, gdecl = np.array(errs), np.array(gdecl)
         dan, kyu, deep = gdecl >= 1, gdecl < 1, gdecl <= -9
         def mae_bias(m):
@@ -482,6 +543,33 @@ def main():
         km, kb = mae_bias(kyu)
         pm, _ = mae_bias(deep)
         print(f"{vname:<14} {dm_:>8} {db:>9} {km:>8} {kb:>9} {pm:>9}")
+
+    # The slice that matters for a SIZE effect: single-size users. A size correction
+    # barely moves a dual user's pooled median; it shifts 13-only users relative to
+    # 9-only users. Look at the RELATIVE bias (13-only minus 9-only).
+    profiles = ["9-only", "13-only", "both", "untimed"]
+    _, _, tags0 = pooled_errs[VARIANTS[0]]
+    cnt = {p: tags0.count(p) for p in profiles}
+    print(f"\n--- timed-size-profile breakdown (pooled held-out errors; "
+          f"declaration rows: {cnt}) ---")
+    print(f"{'variant':<14}" + "".join(f" {p + ' MAE':>12} {p + ' bias':>13}"
+                                       for p in profiles[:3])
+          + f" {'rel bias 13-9':>14}")
+    for vname in VARIANTS:
+        errs, _, tags = pooled_errs[vname]
+        errs = np.array(errs)
+        tags = np.array(tags)
+        cells, bias = [], {}
+        for p in profiles[:3]:
+            m = tags == p
+            if m.sum() == 0:
+                cells.append(f"{'-':>12} {'-':>13}")
+                continue
+            bias[p] = float(np.mean(errs[m]))
+            cells.append(f"{np.mean(np.abs(errs[m])):12.3f} {bias[p]:+13.3f}")
+        rel = (f"{bias['13-only'] - bias['9-only']:+14.3f}"
+               if "13-only" in bias and "9-only" in bias else f"{'-':>14}")
+        print(f"{vname:<14}" + "".join(cells) + rel)
 
     # dual-size-user slice: the only users the size split can actually move
     both_users = {u for u in users
@@ -497,9 +585,9 @@ def main():
         if fitres is None:
             continue
         eval_rows = [(row["server"], career[row["user_id"]][0],
-                      float(row["rank_scalar"]), T_of[row["user_id"]])
+                      float(row["rank_scalar"]), T_of[row["user_id"]], None)
                      for _, row in latest[both_ids].iterrows()]
-        nll, err, gdecl = evaluate(fitres, eval_rows)
+        nll, err, gdecl, _ = evaluate(fitres, eval_rows)
         print(f"{vname:<14} {np.mean(np.abs(err)):7.4f} {np.mean(err):+8.4f}")
 
 
