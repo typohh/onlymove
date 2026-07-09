@@ -15,14 +15,16 @@ export async function handleRankSurvey(request, env) {
     }
 
     const createdAt = new Date().toISOString();
+    // Country is Cloudflare's edge geo-IP, not something the client can report.
+    const country = (request.cf && request.cf.country) ? request.cf.country : null;
     const statements = [];
     for (const server of SURVEY_SERVERS) {
       const rank = data.ranks[server];
       if (typeof rank !== 'string') continue;
       if (!SURVEY_RANK_RE.test(rank)) continue;
       statements.push(env.DB.prepare(
-        'INSERT INTO rank_surveys (user_id, server, rank, created_at) VALUES (?, ?, ?, ?)'
-      ).bind(data.userId, server, rank, createdAt));
+        'INSERT INTO rank_surveys (user_id, server, rank, created_at, country) VALUES (?, ?, ?, ?, ?)'
+      ).bind(data.userId, server, rank, createdAt, country));
     }
 
     if (statements.length > 0) await env.DB.batch(statements);

@@ -24,11 +24,14 @@ SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 # other server, not the identity/calibration hub it was in the retired model.
 SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA"]
 
-# INSERT INTO "rank_surveys" ("id","user_id","server","rank","created_at")
-#   VALUES(123,'<redacted-user-id>…','OGS','5k','2025-09-12T…');
+# INSERT INTO "rank_surveys" VALUES(123,'<redacted-user-id>…','OGS','5k','2025-09-12T…');
+# country is an optional LAST column (quoted, or NULL, or absent on a pre-country
+# dump) — see the schema note; capture it but keep created_at at a fixed group.
 RANK_SURVEY_RE = re.compile(
     r"INSERT INTO [\"`]?rank_surveys[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
-    r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'\);"
+    r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'"
+    r"(?:,(?:NULL|'([^']*)'))?"
+    r"\);"
 )
 
 # Captures: user_id, problem, success, size (optional), is_repeat (optional).
@@ -67,9 +70,10 @@ def scalar_to_rank(v):
 
 
 def load_rank_surveys(sql_path):
-    """Return DataFrame [user_id, server, rank, rank_scalar, created_at].
-    Survey duplicates per (user, server) are kept; downstream code picks
-    the most recent."""
+    """Return DataFrame [user_id, server, rank, rank_scalar, created_at, country].
+    country is Cloudflare's edge geo-IP recorded server-side (None on pre-country
+    rows/dumps). Survey duplicates per (user, server) are kept; downstream code
+    picks the most recent."""
     if not os.path.exists(sql_path):
         raise FileNotFoundError(
             f"{sql_path} not found. Run `./.venv/bin/python3 "
@@ -80,13 +84,14 @@ def load_rank_surveys(sql_path):
             m = RANK_SURVEY_RE.match(line)
             if not m:
                 continue
-            user_id, server, rank, created_at = m.groups()
+            user_id, server, rank, created_at, country = m.groups()
             rows.append({
                 "user_id": user_id,
                 "server": server,
                 "rank": rank,
                 "rank_scalar": rank_to_scalar(rank),
                 "created_at": created_at,
+                "country": country,
             })
     return pd.DataFrame(rows)
 

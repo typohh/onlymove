@@ -133,14 +133,22 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_exit
 -- One row per (user, server) rank declaration. The client surveys the user
 -- every ~2 months once they have a meaningful answer history; each submission
 -- inserts one row per non-empty server selection. Older rows stay so we can
--- track rank drift over time.
+-- track rank drift over time. country is Cloudflare's edge geo-IP
+-- (request.cf.country), filled server-side (same as share_events); null for
+-- older clients / when unavailable. It is the LAST column on purpose: an
+-- ALTER ... ADD COLUMN on the live D1 appends it last, and the fetch_database
+-- dump is positional VALUES() in column order, so CREATE order must match the
+-- migrated order or the .sql parser (utils/rank_surveys.py) misreads columns.
 CREATE TABLE IF NOT EXISTS rank_surveys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     server TEXT NOT NULL,
     rank TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    country TEXT
 );
+-- For an existing deployment, run once against the live D1:
+--   ALTER TABLE rank_surveys ADD COLUMN country TEXT;
 
 -- One row per share-link event. event_type is 'create' (user generated a share
 -- link) or 'open' (someone arrived via a shared link). referrer is the client's
