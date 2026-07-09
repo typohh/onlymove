@@ -134,11 +134,14 @@ const TAIL_EXPECTED_KEY = 'historyTailExpected';
 const PERSIST_REQUESTED_KEY = 'historyPersistRequested';
 
 // A row the offline outbox still needs to upload: reportable (real problem id)
-// but never acked by the server. account-sync's outbox scan and fuzzy claim
-// only see the working set, so such a row must never be evicted to the cold
-// tail — once there it would be permanently un-uploadable.
+// but never acked by the server. account-sync's outbox scan and claim only see
+// the working set, so such a row must never be evicted to the cold tail — once
+// there it would be permanently un-uploadable. Acked = carries a serverId
+// (client-time-era acks stamp the id only) OR a legacy serverCreatedAt (pre-era
+// stamp acks, stripped by migrateClientTime); the OR keeps the predicate
+// correct on every entry shape regardless of which migrations have run.
 export function isUnackedReportable(a) {
-    return !!a && !a.serverCreatedAt
+    return !!a && !a.serverCreatedAt && !Number.isFinite(a.serverId)
         && typeof a.problemId === 'string' && /^[0-9a-f]{8}$/.test(a.problemId);
 }
 

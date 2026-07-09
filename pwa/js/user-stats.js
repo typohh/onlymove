@@ -7,7 +7,7 @@ import { quantizeEmbedding } from './math-utils.js';
 import { TOTAL_RANKS, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './model.js';
 import { trainWeakness } from './weakness.js';
-import { recordReportAck, checkSyncSignal } from './account-sync.js';
+import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
 // EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale
 // PINs, we fetch their GoR from EGD (the Worker can't) and send it on the next report.
 import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
@@ -57,7 +57,7 @@ function classifyCrossTabAttempt(currentProblem) {
     return cls;
 }
 
-export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false } = {}) {
+export async function sendReport({ success, move = null, timeUsed = null, reviewTime = null, isRepeat = false, at = null } = {}) {
     // Linked-mode problems are rank-frozen URL-shares: updateUserStats already
     // early-returns on currentProblem.linked so they never enter local history,
     // and they must not be logged to D1 either (no rank-frozen share attempt
@@ -72,10 +72,14 @@ export async function sendReport({ success, move = null, timeUsed = null, review
     if (crossTab === 'repeat') isRepeat = true;
     try {
         const problemId = tsumegoIdOf(state.currentProblem.filename);
-        // Attach any GoR values fetched from EGD after a previous report advertised
-        // stale PINs (leaderboard refresh; the Worker can't fetch EGD itself).
+        // The attempt's event time — minted in the click handler and shared
+        // verbatim with the answerHistory entry's `date` (updateUserStats), so
+        // the inserted row's created_at equals the local entry EXACTLY. The
+        // server inserts it verbatim or refuses with a bound error (below);
+        // it never rewrites it.
+        const sentAt = Number.isFinite(at) ? at : Date.now();
         const gorUpdates = takePendingGorUpdates();
-        const res = await postJson('/report', {
+        const payload = {
             userId: state.userId,
             problem: problemId,
             success,
@@ -84,24 +88,49 @@ export async function sendReport({ success, move = null, timeUsed = null, review
             timeUsed,
             reviewTime,
             isRepeat,
+            createdAt: new Date(sentAt).toISOString(),
+            // GoR values fetched from EGD after a previous report advertised
+            // stale PINs (leaderboard refresh; the Worker can't fetch EGD itself).
             ...(gorUpdates ? { gorUpdates } : {}),
-        });
+        };
+        let res = await postJson('/report', payload);
         const serverVersion = res.headers.get('X-App-Version');
         if (serverVersion && serverVersion !== APP_VERSION) {
             setReloadPending(true);
         }
-        // The Worker echoes its server-stamped created_at + row id; stamping
-        // them on the matching answerHistory entry lets account-sync pulls
-        // recognize this device's own rows (serverCreatedAt = dedup key,
-        // serverId = id-cursor/digest key). userSeq is the per-profile attempt
-        // count: if it jumps past what this device expects, another device
-        // wrote → pull (the seq sync signal).
+        // Timestamp refused (this device's clock is out of bounds): self-correct
+        // ONCE to the server's clock and resend. The entry's date is rebased AND
+        // PERSISTED before the resend (rebaseUnackedEntryDate) — from the moment
+        // the server could hold the corrected row, the local entry already
+        // carries the identical date, so an abrupt kill anywhere leaves
+        // entry === row and the next pull's exact claim heals it. If the rebase
+        // can't find the entry or the resend fails, the entry stays un-acked and
+        // the outbox's backfill route (with its own per-row correction) picks it
+        // up later — a permanent refusal never sits retrying in this hot path.
+        let ackAt = sentAt;
+        if (!res.ok && res.status === 400) {
+            const errBody = await res.json().catch(() => null);
+            if (errBody && (errBody.error === 'future_timestamp' || errBody.error === 'stale_timestamp') &&
+                typeof errBody.serverNow === 'string') {
+                const correctedAt = Date.parse(errBody.serverNow);
+                if (Number.isFinite(correctedAt) &&
+                    await rebaseUnackedEntryDate(problemId, sentAt, correctedAt)) {
+                    ackAt = correctedAt;
+                    res = await postJson('/report', { ...payload, createdAt: errBody.serverNow });
+                }
+            }
+        }
+        // On ack, stamp the row id on the matching answerHistory entry (serverId
+        // is identity, and its presence = acked; there is no createdAt echo — the
+        // accepted value is the one this client sent). userSeq is the per-profile
+        // attempt count: if it jumps past what this device expects, another
+        // device wrote → pull (the seq sync signal).
         if (res.ok) {
             const body = await res.json().catch(() => null);
-            if (body && typeof body.createdAt === 'string') {
-                recordReportAck(problemId, body.createdAt, body.serverId);
+            if (body) {
+                recordReportAck(problemId, ackAt, body.serverId);
+                checkSyncSignal(body.userSeq);
             }
-            if (body) checkSyncSignal(body.userSeq);
             // Server advertised registered PINs whose GoR is stale this week — fetch
             // them from EGD now; they ride the next report back (see gor-refresh.js).
             if (body && Array.isArray(body.refreshPins)) requestGorRefresh(body.refreshPins);
@@ -172,6 +201,9 @@ export async function updateUserStats(isCorrect, {
     pickedCellIndex = null,
     pickedEmbedding = null,
     pickedEmbeddingPromise = null,
+    // The event time minted in the click handler — the SAME ms sendReport put
+    // in the report's createdAt, so entry.date === the server row exactly.
+    at = null,
 } = {}) {
     const currentProblem = state.currentProblem;
 
@@ -235,7 +267,7 @@ export async function updateUserStats(isCorrect, {
         reviewTime: 0,
         accumulatedReview,
         correct: isCorrect,
-        date: Date.now(),
+        date: Number.isFinite(at) ? at : Date.now(),
         successSinceFailure,
         isRepeat: isRepeatAttempt,
     };

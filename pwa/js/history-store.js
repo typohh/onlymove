@@ -135,10 +135,26 @@ export async function getTail() {
     });
 }
 
-// One cold-tail scan for the sync digest: how many tail rows are acked
-// (serverCreatedAt present), the Σ rowHash(serverId) over those that carry a
-// serverId, and whether every acked row has one (allHaveId=false disables the
-// content check, leaving the count check). Defensive: empty info on any error.
+// Acked = carries a serverId OR a legacy serverCreatedAt stamp (see
+// state.isUnackedReportable — same OR, correct on every entry shape). The
+// acked row's server-side event time in ms: post-client-time-era entries have
+// date === created_at by construction; legacy un-migrated entries still carry
+// the edge stamp in serverCreatedAt, so prefer it when present.
+function isAcked(v) {
+    return !!v && (!!v.serverCreatedAt || Number.isFinite(v.serverId));
+}
+function ackedEventMs(v) {
+    if (v.serverCreatedAt) {
+        const ts = Date.parse(v.serverCreatedAt);
+        if (Number.isFinite(ts)) return ts;
+    }
+    return v.date;
+}
+
+// One cold-tail scan for the sync digest: how many tail rows are acked, the
+// Σ rowHash(serverId) over those that carry a serverId, and whether every
+// acked row has one (allHaveId=false disables the content check, leaving the
+// count check). Defensive: empty info on any error.
 export async function getTailDigestInfo() {
     const db = await openDB();
     const info = { ackedCount: 0, idSum: 0, allHaveId: true };
@@ -155,7 +171,7 @@ export async function getTailDigestInfo() {
             const cursor = req.result;
             if (!cursor) { resolve(info); return; }
             const v = cursor.value;
-            if (v && v.serverCreatedAt) {
+            if (isAcked(v)) {
                 info.ackedCount++;
                 if (Number.isFinite(v.serverId)) info.idSum += rowHash(v.serverId);
                 else info.allHaveId = false;
@@ -168,15 +184,16 @@ export async function getTailDigestInfo() {
 
 // One cursor pass building everything the sync merge needs to know about the
 // tail: the acked row ids (id-first dedup), the serverCreatedAt stamp set
-// (legacy timestamp dedup), and per-stamp identity fields (the id-first merge's
-// identical-content check, which decides whether a same-timestamp server row is
-// a redundant duplicate copy to absorb or a genuine same-millisecond collision
-// to insert). Stamps can collide (that's the point), so `stamps` maps a stamp
-// to the LIST of rows carrying it. Empty index if IDB is unavailable — the
-// merge then dedups against the working set only, same degradation as before.
+// (legacy timestamp dedup, un-migrated devices only), and per-event-ms identity
+// fields (`dates` — the id-first merge's identical-content check, which decides
+// whether a same-timestamp server row is a redundant duplicate copy to absorb
+// or a genuine same-millisecond collision to insert). Event times can collide
+// (that's the point), so `dates` maps a ms value to the LIST of acked rows
+// carrying it. Empty index if IDB is unavailable — the merge then dedups
+// against the working set only, same degradation as before.
 export async function getTailSyncIndex() {
     const db = await openDB();
-    const index = { ids: new Set(), stampSet: new Set(), stamps: new Map() };
+    const index = { ids: new Set(), stampSet: new Set(), dates: new Map() };
     if (!db) return index;
     return new Promise((resolve) => {
         let req;
@@ -190,17 +207,20 @@ export async function getTailSyncIndex() {
             const cursor = req.result;
             if (!cursor) { resolve(index); return; }
             const v = cursor.value;
-            if (v && v.serverCreatedAt) {
-                index.stampSet.add(v.serverCreatedAt);
+            if (isAcked(v)) {
+                if (v.serverCreatedAt) index.stampSet.add(v.serverCreatedAt);
                 if (Number.isFinite(v.serverId)) index.ids.add(v.serverId);
-                let list = index.stamps.get(v.serverCreatedAt);
-                if (!list) { list = []; index.stamps.set(v.serverCreatedAt, list); }
-                list.push({
-                    problemId: v.problemId,
-                    correct: !!v.correct,
-                    isRepeat: !!v.isRepeat,
-                    size: v.size,
-                });
+                const ms = ackedEventMs(v);
+                if (Number.isFinite(ms)) {
+                    let list = index.dates.get(ms);
+                    if (!list) { list = []; index.dates.set(ms, list); }
+                    list.push({
+                        problemId: v.problemId,
+                        correct: !!v.correct,
+                        isRepeat: !!v.isRepeat,
+                        size: v.size,
+                    });
+                }
             }
             cursor.continue();
         };

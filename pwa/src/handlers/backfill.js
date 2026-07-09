@@ -29,15 +29,34 @@ export async function handleReportBackfill(request, env) {
     if (!env.DB) {
       return new Response('Database not configured', { status: 500, headers });
     }
-    const maxCreated = new Date(Date.now() - 3600 * 1000).toISOString();
+    // PER-ROW rejection, never a whole-batch 400: one out-of-bounds row (a
+    // future-clocked device's entry) must not jam every other entry's upload
+    // forever — the pre-2026-07 whole-batch behavior was a latent stuck-outbox.
+    // Rejected rows are returned in `rejected` so the client can self-correct
+    // ('future_timestamp' → re-stamp the entry to serverNow and retry next
+    // flush) or discard ('invalid' — malformed junk). Refuse-never-rewrite:
+    // a silently substituted stamp would desync the row from the client's
+    // entry, the exact duplicate-minting precondition the plan outlaws.
+    const nowMs = Date.now();
+    const maxCreated = new Date(nowMs - 3600 * 1000).toISOString();
+    const serverNow = new Date(nowMs).toISOString();
     const stmts = [];
-    for (const r of data.reports) {
-      const createdAt = (typeof r.createdAt === 'string' &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(r.createdAt) &&
-          r.createdAt > BACKFILL_MIN_CREATED && r.createdAt < maxCreated)
-        ? r.createdAt : null;
-      if (!isValidProblemId(r.problem) || typeof r.success !== 'boolean' || !createdAt) {
-        return new Response('Invalid request body', { status: 400, headers });
+    const stmtIndex = [];   // request index of each statement, for id alignment
+    const rejected = [];
+    data.reports.forEach((r, i) => {
+      if (!isValidProblemId(r.problem) || typeof r.success !== 'boolean' ||
+          typeof r.createdAt !== 'string' ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(r.createdAt) ||
+          r.createdAt <= BACKFILL_MIN_CREATED) {
+        rejected.push({ i, error: 'invalid' });
+        return;
+      }
+      // Too recent / future-dated (createdAt must be >= 1h old so backfill
+      // never collides with live reporting; a genuinely future stamp lands
+      // here too and the client re-stamps it to serverNow).
+      if (r.createdAt >= maxCreated) {
+        rejected.push({ i, error: 'future_timestamp', serverNow });
+        return;
       }
       // Same lazy-seeded user_seq/running_sum INSERT as /report (one source of
       // truth: attempt-insert.js), so a backfilled/outbox-flushed row keeps the
@@ -50,14 +69,18 @@ export async function handleReportBackfill(request, env) {
       const { size, timeUsed, reviewTime } = coerceAttemptFields(r);
       stmts.push(prepareAttemptInsert(env, {
         userId: data.userId, problem: r.problem, success: r.success,
-        createdAt, size, move: null, timeUsed, reviewTime, isRepeat: r.isRepeat,
+        createdAt: r.createdAt, size, move: null, timeUsed, reviewTime, isRepeat: r.isRepeat,
       }));
-    }
-    const results = await env.DB.batch(stmts);
-    // Inserted ids in request order, so the client can stamp serverId on each
-    // flushed entry (the digest key).
-    const ids = results.map((res) => (res && res.results && res.results[0]) ? res.results[0].id : null);
-    return new Response(JSON.stringify({ inserted: stmts.length, ids }), { status: 201, headers });
+      stmtIndex.push(i);
+    });
+    const results = stmts.length ? await env.DB.batch(stmts) : [];
+    // Inserted ids aligned to REQUEST order (rejected slots stay null), so the
+    // client can stamp serverId on each flushed entry (the digest key).
+    const ids = data.reports.map(() => null);
+    results.forEach((res, j) => {
+      ids[stmtIndex[j]] = (res && res.results && res.results[0]) ? res.results[0].id : null;
+    });
+    return new Response(JSON.stringify({ inserted: stmts.length, ids, rejected }), { status: 201, headers });
   } catch (error) {
     console.error('Error handling report backfill:', error);
     return new Response('Internal server error', { status: 500, headers });

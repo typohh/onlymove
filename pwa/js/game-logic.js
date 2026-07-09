@@ -42,7 +42,12 @@ const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show th
 // prior the same coefficient is shrunk toward — they must stay in lockstep.
 
 
-const buildReportPayload = (success, x, y) => {
+// `at` is the attempt's event time (ms), minted ONCE per answer in the click
+// handler and shared verbatim between the report payload (createdAt) and the
+// answerHistory entry (date, via updateUserStats) — the client owns the event
+// time and the server inserts it as created_at, so row and entry match EXACTLY
+// (the basis of account-sync's exact own-row matching; no fuzzy window).
+const buildReportPayload = (success, x, y, at) => {
     const currentProblem = state.currentProblem;
     const timeUsed = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
     const problemId = tsumegoIdOf(currentProblem?.filename) ?? null;
@@ -63,13 +68,15 @@ const buildReportPayload = (success, x, y) => {
         timeUsed,
         reviewTime,
         isRepeat: !!currentProblem?.isRepeat,
+        at,
     };
 };
 
 const handleCorrectAnswer = async (x, y) => {
     setAppMode(APP_MODES.SOLVING);
-    sendReport(buildReportPayload(true, x, y));
-    const stats = await updateUserStats(true);
+    const at = Date.now();
+    sendReport(buildReportPayload(true, x, y, at));
+    const stats = await updateUserStats(true, { at });
 
     // Move the solved problem into the previous slot and — if it was the standing
     // challenge — reselect one NOW. challengeProblem is persisted, so once it's
@@ -118,10 +125,12 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     playNextMove();
     playStoneSound();
 
-    sendReport(buildReportPayload(false, x, y));
+    const at = Date.now();
+    sendReport(buildReportPayload(false, x, y, at));
     const stats = await updateUserStats(false, {
         pickedCellIndex: moveIndex,
         pickedEmbeddingPromise,
+        at,
     });
 
     // Calculate overlay duration and message based on time spent

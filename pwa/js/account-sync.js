@@ -22,19 +22,26 @@
 // Devices whose migration hasn't completed yet run the legacy timestamp-dedup
 // merge below until it does.
 //
+// EVENT TIME IS CLIENT-OWNED (docs/client_owned_event_time_plan.md): the client
+// mints one timestamp per attempt, stores it as the entry's `date`, and sends it
+// as /report's createdAt; the server inserts it VERBATIM or refuses (never
+// rewrites), so row.created_at === entry.date exactly and own-row matching is
+// exact. Pre-CLIENT_TIME_ERA_MS rows are edge-stamped and keep a fuzzy fallback.
+//
 //   - cursorId only ever advances from /sync PULLS, never from this device's own
 //     report acks. Advancing on acks would let a concurrent foreign row with a
 //     lower id slip behind the cursor forever.
-//   - The device's own rows are recognized on pull by their id (legacy path:
-//     exact serverCreatedAt match): /report echoes its server-stamped
-//     created_at + row id and sendReport stamps both on the matching
-//     answerHistory entry (recordReportAck).
+//   - The device's own rows are recognized on pull by their id: /report returns
+//     the row id and sendReport stamps it on the matching answerHistory entry
+//     (recordReportAck; serverId presence = acked). Un-migrated legacy-merge
+//     devices also store the ISO stamp (their dedup key).
 //   - Entries whose ack was lost (offline attempt, response dropped) are
-//     claimed fuzzily: same (problemId, correct, isRepeat), no serverCreatedAt
-//     yet, nearest local date within ±10 min, greedy 1-1. On the id-first
-//     path the claim is tried for EVERY un-held row — never preempted by a
-//     timestamp match (that preemption made the outbox re-upload rows whose
-//     acked twin's stamp sat in the cold tail: the server-side dup mint).
+//     claimed EXACTLY for client-time-era rows (created_at === date), with the
+//     greedy ±10-min fuzzy match kept only for pre-era edge-stamped rows. On
+//     the id-first path the claim is tried for EVERY un-held row — never
+//     preempted by a timestamp match (that preemption made the outbox
+//     re-upload rows whose acked twin's stamp sat in the cold tail: the
+//     server-side dup mint).
 //
 // On an EXISTING device cursorId initializes to the current frontier (the
 // migrateIdCursor() probe adopts serverMaxId — "now" in id space), since local
@@ -65,7 +72,7 @@ import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
-import { getTailSyncIndex, getTailDigestInfo, getTail, replaceTail } from './history-store.js';
+import { getTailSyncIndex, getTailDigestInfo, getTail, replaceTail, updateTail } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
 import { postJson } from './net.js';
@@ -90,9 +97,23 @@ const PER_ATTEMPT_ERA_MS = Date.parse('2026-05-15T00:00:00Z');
 // deploy slips past this date, bump the date before deploying (skipping a few
 // extra days of repeat moves is harmless; trusting wrong-frame ones is not).
 const CANONICAL_MOVE_ERA_MS = Date.parse('2026-07-07T00:00:00Z');
-// Ack-less local entries are claimed by a server row when identity fields match
-// and the timestamps agree within this window (local Date.now() at attempt vs
-// edge time at insert — normally seconds apart; the slack absorbs clock skew).
+// First moment every row's created_at is CLIENT-OWNED event time (the client
+// mints one timestamp per attempt, sends it as /report createdAt, and stores
+// the same ms as the entry's date — docs/client_owned_event_time_plan.md).
+// Rows from this era on match their local entry EXACTLY (created_at === date),
+// so own-row claims need no fuzzy window; rows before it are edge-stamped
+// (server clock at insert, seconds off the client's date), so claims against
+// them keep the ±10-min fuzzy fallback below. MUST sit AFTER the deploy that
+// ships client stamping (same rule as CANONICAL_MOVE_ERA_MS: a too-early
+// constant would deny pre-switch lost-ack rows their fuzzy claim and the
+// outbox would re-upload them as duplicates; a late constant is harmless —
+// fuzzy on a client-stamped row is a no-op because the exact claim runs
+// first). Set minutes ahead of the actual 2026-07-09 00:47 UTC deploy.
+const CLIENT_TIME_ERA_MS = Date.parse('2026-07-09T00:50:00Z');
+// Ack-less local entries are claimed by a PRE-CLIENT-TIME-ERA server row when
+// identity fields match and the timestamps agree within this window (local
+// Date.now() at attempt vs edge time at insert — normally seconds apart; the
+// slack absorbs clock skew). Era rows use exact date === created_at instead.
 const FUZZY_WINDOW_MS = 10 * 60 * 1000;
 // Pagination safety bound: 100 pages × 1000 rows covers any realistic history.
 const MAX_PAGES = 100;
@@ -118,6 +139,26 @@ const ABSORBED_IDS_KEY = 'syncAbsorbedIds';
 
 function isMirrorMigrated() {
     return !!localStorage.getItem(MIRROR_MIGRATED_KEY);
+}
+
+// --- Client-owned event time helpers ----------------------------------------
+// Acked = carries a serverId (client-time-era acks) OR a legacy serverCreatedAt
+// (pre-era stamp acks; stripped by migrateClientTime). Same OR as
+// state.isUnackedReportable — correct on every entry shape.
+function isAckedEntry(a) {
+    return !!a.serverCreatedAt || Number.isFinite(a.serverId);
+}
+
+// An acked entry's server-side event time in ms: client-time-era entries have
+// date === created_at by construction; legacy un-migrated entries still carry
+// the edge stamp in serverCreatedAt, so prefer it when present. Twin/receipt
+// detection keys on this, so it works on both shapes.
+function ackedEventMs(a) {
+    if (a.serverCreatedAt) {
+        const ts = Date.parse(a.serverCreatedAt);
+        if (Number.isFinite(ts)) return ts;
+    }
+    return a.date;
 }
 
 function readAbsorbedIds() {
@@ -154,7 +195,6 @@ function buildSyncedEntry(row, ts, size) {
         correct: !!row.success,
         date: ts,
         size,
-        serverCreatedAt: row.createdAt,
         serverId: Number.isFinite(row.id) ? row.id : undefined,
         timeTaken: typeof row.timeUsed === 'number' ? row.timeUsed : 0,
         reviewTime: 0,
@@ -162,6 +202,11 @@ function buildSyncedEntry(row, ts, size) {
         isRepeat: !!row.isRepeat,
         synced: true,
     };
+    // A synced entry's date IS the row's created_at, so migrated devices don't
+    // store the redundant ISO copy; the legacy merge (un-migrated devices)
+    // still keys its dedup on it, and an id-less row needs it as the acked
+    // marker either way.
+    if (!isMirrorMigrated() || !Number.isFinite(row.id)) entry.serverCreatedAt = row.createdAt;
     // The row's review_time is the problem's CUMULATIVE review before this
     // attempt; kept so recomputeProblemChains can diff consecutive synced
     // attempts into per-attempt reviewTime.
@@ -204,27 +249,68 @@ export function isValidAccountCode(code) {
     return typeof code === 'string' && /^[A-Za-z0-9_-]{8}$/.test(code);
 }
 
-// Stamp the server-side created_at + row id onto the answerHistory entry the
-// report described, so pulls can skip this device's own rows (serverCreatedAt
-// is the dedup key; serverId is the id-cursor / digest key). Called from
-// sendReport with the /report response. The entry is created by updateUserStats
-// microtasks after sendReport fires, normally long before the network roundtrip
-// returns — the one retry covers the pathological ordering.
-export function recordReportAck(problemId, createdAt, serverId = null) {
+// Stamp the acked row id onto the answerHistory entry the report described, so
+// pulls can skip this device's own rows (serverId is the identity / digest key;
+// its presence = acked). `atMs` is the event time sendReport sent as createdAt —
+// the entry was created with the SAME ms as its date, so the match is exact.
+// On a device still on the legacy merge (mirror migration deferred) the ISO
+// stamp is also stored, since that merge's dedup is keyed on serverCreatedAt.
+// Called from sendReport with the /report response. The entry is created by
+// updateUserStats microtasks after sendReport fires, normally long before the
+// network roundtrip returns — the one retry covers the pathological ordering.
+export function recordReportAck(problemId, atMs, serverId = null) {
     const attach = () => {
         const history = state.answerHistory;
+        // Exact event-time match first; fall back to the newest un-acked entry
+        // for the same problem (legacy behavior) so an ack is never dropped.
+        let target = null;
         for (let i = history.length - 1; i >= 0; i--) {
             const a = history[i];
-            if (a.problemId === problemId && !a.serverCreatedAt) {
-                a.serverCreatedAt = createdAt;
-                if (Number.isFinite(serverId)) a.serverId = serverId;
-                updateAnswerHistory(history);
-                return true;
-            }
+            if (a.problemId !== problemId || isAckedEntry(a)) continue;
+            if (a.date === atMs) { target = a; break; }
+            if (!target) target = a;
         }
-        return false;
+        if (!target) return false;
+        if (Number.isFinite(serverId)) target.serverId = serverId;
+        if (!isMirrorMigrated() || !Number.isFinite(serverId)) {
+            // Legacy-merge devices key their dedup on the stamp; also the
+            // fallback acked marker if the response somehow carried no id.
+            target.serverCreatedAt = new Date(atMs).toISOString();
+        }
+        updateAnswerHistory(history);
+        return true;
     };
     if (!attach()) setTimeout(attach, 1500);
+}
+
+// Rebase a not-yet-acked entry's event time to the server's clock and PERSIST,
+// before sendReport resends a bound-refused report with the corrected
+// timestamp. Persist-first is the crash-safety invariant: from the moment the
+// server could hold the corrected row, the local entry already carries the
+// identical date, so an abrupt kill anywhere (mid-resend, before the ack)
+// leaves entry === row and the next pull's exact claim heals it — never a
+// duplicate. Same attach-or-retry pattern as recordReportAck (the entry is
+// created by updateUserStats after sendReport fires; the refusal roundtrip
+// normally means it exists by now). Resolves true when an entry was rebased.
+export function rebaseUnackedEntryDate(problemId, fromMs, toMs) {
+    const attach = () => {
+        const history = state.answerHistory;
+        let target = null;
+        for (let i = history.length - 1; i >= 0; i--) {
+            const a = history[i];
+            if (a.problemId !== problemId || isAckedEntry(a)) continue;
+            if (a.date === fromMs) { target = a; break; }
+            if (!target) target = a;
+        }
+        if (!target) return false;
+        target.date = toMs;
+        updateAnswerHistory(history);
+        return true;
+    };
+    return new Promise((resolve) => {
+        if (attach()) { resolve(true); return; }
+        setTimeout(() => resolve(attach()), 1500);
+    });
 }
 
 // Merge one page of /sync rows into the given size's answerHistory.
@@ -290,27 +376,32 @@ function mergeRowsForSize(size, rows, tailKnown = null) {
 
 // Id-first merge (mirror-by-id devices). Identity is the row id: a row is
 // "had" iff its id is in the working set, the tail, or the absorbed receipts —
-// no timestamp dedup. Rows not held first try the fuzzy claim against
-// UN-ACKED entries (deliberately unconditional: the legacy merge's
-// stamp-dedup preempted the claim, which is exactly how the outbox re-uploaded
-// rows whose acked twin's stamp sat in the tail). A row that claims nothing
-// but is an identical-content copy of an acked entry with the same stamp is a
-// redundant duplicate: its id is absorbed as a receipt instead of becoming a
-// visible duplicate entry. Everything else is inserted as a skeleton.
-// `absorbedSet` is the pull-wide receipt set (mutated here, persisted too).
+// no timestamp dedup. Rows not held first try the claim against UN-ACKED
+// entries (deliberately unconditional: the legacy merge's stamp-dedup
+// preempted the claim, which is exactly how the outbox re-uploaded rows whose
+// acked twin's stamp sat in the tail). The claim is EXACT for client-time-era
+// rows (created_at === the recording entry's date by construction) and falls
+// back to the greedy ±10-min fuzzy match only for pre-era edge-stamped rows.
+// A row that claims nothing but is an identical-content copy of an acked entry
+// with the same event time is a redundant duplicate: its id is absorbed as a
+// receipt instead of becoming a visible duplicate entry. Everything else is
+// inserted as a skeleton. `absorbedSet` is the pull-wide receipt set (mutated
+// here, persisted too).
 function mergeRowsForSizeById(size, rows, tailIndex, absorbedSet) {
     const history = getAnswerHistoryForSize(size);
     const wsIds = new Set();
-    const wsByStamp = new Map();
-    const noteStamp = (a) => {
-        if (!a.serverCreatedAt) return;
-        let list = wsByStamp.get(a.serverCreatedAt);
-        if (!list) { list = []; wsByStamp.set(a.serverCreatedAt, list); }
+    const wsByDate = new Map();   // acked event ms -> entries (twin detection)
+    const noteAcked = (a) => {
+        if (!isAckedEntry(a)) return;
+        const ms = ackedEventMs(a);
+        if (!Number.isFinite(ms)) return;
+        let list = wsByDate.get(ms);
+        if (!list) { list = []; wsByDate.set(ms, list); }
         list.push(a);
     };
     for (const a of history) {
         if (Number.isFinite(a.serverId)) wsIds.add(a.serverId);
-        noteStamp(a);
+        noteAcked(a);
     }
 
     let claimed = 0;
@@ -323,33 +414,44 @@ function mergeRowsForSizeById(size, rows, tailIndex, absorbedSet) {
         const ts = Date.parse(row.createdAt);
         if (!Number.isFinite(ts)) continue;
 
-        // Fuzzy claim — greedy nearest-by-date 1-1 against un-acked locals.
+        // Exact claim: a client-time-era lost-ack row equals its local entry's
+        // date to the millisecond.
         let best = null;
-        let bestGap = FUZZY_WINDOW_MS;
         for (const a of history) {
-            if (a.serverCreatedAt || !rowMatchesEntryContent(row, ts, a)) continue;
-            const gap = Math.abs((a.date || 0) - ts);
-            if (gap < bestGap) { best = a; bestGap = gap; }
+            if (isAckedEntry(a) || !rowMatchesEntryContent(row, ts, a)) continue;
+            if (a.date === ts) { best = a; break; }
+        }
+        // Pre-era rows are edge-stamped (seconds off the recording client's
+        // date) — greedy nearest-by-date 1-1 fuzzy fallback, era-gated so it
+        // ages out with the pre-switch corpus.
+        if (!best && ts < CLIENT_TIME_ERA_MS) {
+            let bestGap = FUZZY_WINDOW_MS;
+            for (const a of history) {
+                if (isAckedEntry(a) || !rowMatchesEntryContent(row, ts, a)) continue;
+                const gap = Math.abs((a.date || 0) - ts);
+                if (gap < bestGap) { best = a; bestGap = gap; }
+            }
         }
         if (best) {
-            best.serverCreatedAt = row.createdAt;
             if (Number.isFinite(row.id)) {
                 best.serverId = row.id;
                 wsIds.add(row.id);
+            } else {
+                best.serverCreatedAt = row.createdAt;   // fallback acked marker
             }
-            noteStamp(best);
+            noteAcked(best);
             claimed++;
             continue;
         }
 
         // Redundant identical copy of a row we already hold? Absorb the id as
-        // a receipt. A same-stamp entry with DIFFERENT content is a genuine
-        // same-millisecond collision — falls through to a real insert. The
-        // working-set list is already this size's view; tail twins carry their
-        // own size (missing = the pre-size-column default, 9).
+        // a receipt. A same-event-time entry with DIFFERENT content is a
+        // genuine same-millisecond collision — falls through to a real insert.
+        // The working-set list is already this size's view; tail twins carry
+        // their own size (missing = the pre-size-column default, 9).
         if (Number.isFinite(row.id)) {
-            const twins = wsByStamp.get(row.createdAt);
-            const tailTwins = tailIndex.stamps.get(row.createdAt);
+            const twins = wsByDate.get(ts);
+            const tailTwins = tailIndex.dates.get(ts);
             const tailSize = (t) => SUPPORTED_BOARD_SIZES.includes(t.size) ? t.size : DEFAULT_BOARD_SIZE;
             const isTwin = (twins && twins.some((a) => rowMatchesEntryContent(row, ts, a))) ||
                 (tailTwins && tailTwins.some((t) => tailSize(t) === size && rowMatchesEntryContent(row, ts, t)));
@@ -362,7 +464,7 @@ function mergeRowsForSizeById(size, rows, tailIndex, absorbedSet) {
 
         const entry = buildSyncedEntry(row, ts, size);
         if (Number.isFinite(row.id)) wsIds.add(row.id);
-        noteStamp(entry);
+        noteAcked(entry);
         newEntries.push(entry);
     }
 
@@ -471,7 +573,7 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
         const absorbedSet = mirrored ? new Set(readAbsorbedIds()) : null;
         let tailIndex = null;
         try { tailIndex = await getTailSyncIndex(); } catch (_) { tailIndex = null; }
-        if (!tailIndex) tailIndex = { ids: new Set(), stampSet: new Set(), stamps: new Map() };
+        if (!tailIndex) tailIndex = { ids: new Set(), stampSet: new Set(), dates: new Map() };
         for (let page = 0; page < MAX_PAGES; page++) {
             const res = await postJson('/sync', { userId: sync.userId, sinceId });
             if (!res.ok) break;
@@ -588,7 +690,7 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
 async function computeLocalDigest() {
     let ackedCount = 0, idSum = 0, allHaveId = true;
     for (const a of getMergedAnswerHistory()) {
-        if (!a.serverCreatedAt) continue;
+        if (!isAckedEntry(a)) continue;
         ackedCount++;
         if (Number.isFinite(a.serverId)) idSum += rowHash(a.serverId);
         else allHaveId = false;
@@ -941,13 +1043,14 @@ const OUTBOX_MIN_INTERVAL_MS = 30 * 60 * 1000;
 let lastOutboxRunAt = 0;
 
 // Local entries provably reportable but never acked: real problem id, a sane
-// historical date (≥1h old, so nothing in-flight), and no serverCreatedAt.
+// historical date (≥1h old, so nothing in-flight), and not acked (no serverId,
+// no legacy serverCreatedAt).
 function collectUnackedEntries() {
     const out = [];
     const cutoff = Date.now() - 3600 * 1000;
     for (const size of SUPPORTED_BOARD_SIZES) {
         for (const a of getAnswerHistoryForSize(size)) {
-            if (!a || a.serverCreatedAt) continue;
+            if (!a || isAckedEntry(a)) continue;
             if (typeof a.problemId !== 'string' || !/^[0-9a-f]{8}$/.test(a.problemId)) continue;
             if (typeof a.date !== 'number' || !(a.date < cutoff)) continue;
             out.push({ entry: a, size });
@@ -988,20 +1091,26 @@ export async function flushOutbox({ force = false } = {}) {
             return;
         }
 
-        // created_at must be unique per user: the sync dedup set is keyed on
-        // the timestamp, so collisions (same-ms entries, or a clash with an
-        // existing acked row) get nudged forward 1ms at a time.
+        // created_at must be unique per user (twin/receipt detection compares
+        // exact event times), so collisions — same-ms entries, or a clash with
+        // an existing acked row — get nudged forward 1ms at a time. The nudge
+        // is written back to entry.date too: the uploaded created_at must equal
+        // the entry's date EXACTLY (the exact-match invariant).
         const taken = new Set();
         for (const size of SUPPORTED_BOARD_SIZES) {
             for (const a of getAnswerHistoryForSize(size)) {
-                if (a && a.serverCreatedAt) taken.add(a.serverCreatedAt);
+                if (!a || !isAckedEntry(a)) continue;
+                const ms = ackedEventMs(a);
+                if (Number.isFinite(ms)) taken.add(new Date(ms).toISOString());
             }
         }
+        const nudgedSizes = new Set();
         const rows = candidates.map(({ entry, size }) => {
             let ts = entry.date;
             let iso = new Date(ts).toISOString();
             while (taken.has(iso)) iso = new Date(++ts).toISOString();
             taken.add(iso);
+            if (ts !== entry.date) { entry.date = ts; nudgedSizes.add(size); }
             return {
                 entry,
                 size,
@@ -1018,6 +1127,14 @@ export async function flushOutbox({ force = false } = {}) {
                 },
             };
         });
+        // Persist any nudged dates BEFORE uploading: the uploaded created_at
+        // must equal the PERSISTED entry date, or an abrupt kill between the
+        // POST and the post-batch persist leaves entry.date one ms off the
+        // server row — the exact claim then misses and the next flush would
+        // re-upload it as a duplicate.
+        for (const size of nudgedSizes) {
+            setAnswerHistoryForSize(size, getAnswerHistoryForSize(size));
+        }
 
         for (let i = 0; i < rows.length; i += OUTBOX_BATCH) {
             const batch = rows.slice(i, i + OUTBOX_BATCH);
@@ -1028,20 +1145,52 @@ export async function flushOutbox({ force = false } = {}) {
             }
             const body = await res.json().catch(() => null);
             const ids = (body && Array.isArray(body.ids)) ? body.ids : [];
-            // Stamp serverCreatedAt (dedup key) + serverId (digest / id-cursor
-            // key) per batch so a later failure never re-uploads what landed.
+            // Stamp serverId (identity / digest key; its presence = acked) per
+            // batch so a later failure never re-uploads what landed. Devices
+            // still on the legacy merge also store the ISO stamp (their dedup
+            // key); a slot with no id gets it as the fallback acked marker.
             const sizesTouched = new Set();
+            const discard = new Set();
             batch.forEach((b, j) => {
-                b.entry.serverCreatedAt = b.report.createdAt;
                 if (Number.isFinite(ids[j])) b.entry.serverId = ids[j];
+                if (!isMirrorMigrated() || !Number.isFinite(ids[j])) {
+                    b.entry.serverCreatedAt = b.report.createdAt;
+                }
                 sizesTouched.add(b.size);
             });
+            // Per-row rejections: 'future_timestamp' (this device's clock ran
+            // ahead when the entry was recorded, or the row is <1h old) →
+            // self-correct the entry's date to the server's clock so the next
+            // flush retries inside bounds; 'invalid' (malformed junk) →
+            // discard the entry outright. Either way the rejected slot carries
+            // no id, so the unconditional stamp above must not run for it.
+            const rejected = (body && Array.isArray(body.rejected)) ? body.rejected : [];
+            for (const rej of rejected) {
+                const b = batch[rej.i];
+                if (!b) continue;
+                delete b.entry.serverCreatedAt;   // not acked — undo the stamp
+                if (rej.error === 'future_timestamp') {
+                    const serverNowMs = Date.parse(rej.serverNow || '');
+                    if (Number.isFinite(serverNowMs) && b.entry.date > serverNowMs) {
+                        b.entry.date = serverNowMs;
+                    }
+                    // else: merely <1h old — it ages into the window by itself.
+                } else {
+                    discard.add(b.entry);
+                }
+                sizesTouched.add(b.size);
+            }
             for (const size of sizesTouched) {
-                setAnswerHistoryForSize(size, getAnswerHistoryForSize(size));
+                let history = getAnswerHistoryForSize(size);
+                if (discard.size) history = history.filter((a) => !discard.has(a));
+                setAnswerHistoryForSize(size, history);
             }
         }
 
-        markOutboxDone();
+        // A rejected-and-corrected entry is still un-acked (it retries next
+        // flush once its corrected date ages past the 1h window), so "done"
+        // only when nothing reportable remains.
+        if (collectUnackedEntries().length === 0) markOutboxDone();
         console.log(`account-sync: outbox flushed ${rows.length} attempts to the server`);
     } catch (e) {
         console.warn('account-sync: outbox flush failed (will retry):', e);
@@ -1356,6 +1505,63 @@ function buildMirror(rows, ws, tail) {
     };
 }
 
+// --- One-time client-time migration (remove the flag once all clients have run) -
+// Folds the legacy serverCreatedAt field into `date` so the exact-match regime
+// covers the whole history at once, instead of waiting years for legacy acked
+// entries to age out of the 3000-entry working set. For every acked entry that
+// carries a stamp: rebase date := Date.parse(serverCreatedAt) (a transit-seconds
+// shift for locally-recorded acks, zero for synced skeletons — every consumer of
+// date is indifferent to seconds) and strip the field. Tail first, then the
+// working set, then the flag — a crash between steps re-runs idempotently (a
+// rebase of an already-stripped entry is a no-op), and doing BOTH stores in one
+// pass preserves the (problemId, date) de-dup at the tail boundary
+// (getMergedFullAnswerHistory). Requires the mirror migration to have run
+// (acked entries all carry serverId, so stripping the stamp can't un-ack them);
+// retried next boot otherwise. All local — no network, no cap.
+const CLIENT_TIME_MIGRATED_KEY = 'clientTimeMigrated_v1';
+
+function rebaseEntryToStamp(a) {
+    if (!a || !a.serverCreatedAt) return false;
+    const ts = Date.parse(a.serverCreatedAt);
+    if (Number.isFinite(ts) && Number.isFinite(a.serverId)) {
+        a.date = ts;
+        delete a.serverCreatedAt;
+        return true;
+    }
+    // Unparsable stamp, or an acked-by-stamp-only entry (no id — the mirror
+    // migration should have left none): keep the stamp as the acked marker.
+    return false;
+}
+
+async function migrateClientTime() {
+    if (localStorage.getItem(CLIENT_TIME_MIGRATED_KEY)) return;
+    if (!isMirrorMigrated()) return;   // mirror first (may be cap-deferred); retry next boot
+    try {
+        // Tail first: an IN-PLACE cursor rebase in ONE IDB transaction
+        // (updateTail) — it never deletes rows, so a concurrently-firing
+        // eviction append can't be clobbered (a getTail-snapshot + replaceTail
+        // would race it and LOSE the appended rows), and an abrupt kill
+        // mid-walk aborts the transaction leaving the old tail intact.
+        // Rebase shifts are transit-seconds, far below any real inter-attempt
+        // gap, so the tail's insertion≈date order is preserved without a sort.
+        const tailOk = await updateTail((a) => (rebaseEntryToStamp(a) ? a : null));
+        if (!tailOk) return;   // IDB unavailable/errored — retry next boot (the
+                               // un-migrated shape is fully supported meanwhile)
+        const ws = getWorkingSetEntries();
+        let wsChanged = false;
+        for (const a of ws) if (rebaseEntryToStamp(a)) wsChanged = true;
+        if (wsChanged) {
+            replaceUnifiedHistory([...ws].sort((x, y) => (x.date || 0) - (y.date || 0)));
+        }
+        localStorage.setItem(CLIENT_TIME_MIGRATED_KEY, '1');
+        if (wsChanged) {
+            console.log('account-sync: client-time migration complete — dates rebased onto server stamps');
+        }
+    } catch (e) {
+        console.warn('account-sync: client-time migration failed (retrying next boot):', e);
+    }
+}
+
 // Regular syncs: app load, tab becoming visible, and regaining connectivity.
 // No interval polling: an active session is kept in sync by the per-report seq
 // signal (checkSyncSignal). Each trigger pulls unthrottled — an up-to-date
@@ -1369,10 +1575,14 @@ export function startBackgroundSync() {
     // Migration order matters: the tail rescue first (so stranded un-acked
     // tail rows participate in the mirror rebuild's matching), then the mirror
     // migration (which subsumes the id-cursor migration when its full path
-    // runs), then the normal pull + outbox on the resulting representation.
+    // runs), then the client-time rebase (needs the mirror's serverId
+    // coverage; must run before any id-first merge so the exact/twin checks
+    // see rebased dates), then the normal pull + outbox on the resulting
+    // representation.
     migrateIdCursor()
         .then(() => rescueUnackedTailRows())
         .then(() => migrateMirrorById())
+        .then(() => migrateClientTime())
         .then(() => pullReports())
         .then(() => flushOutbox())
         .catch(() => {});
