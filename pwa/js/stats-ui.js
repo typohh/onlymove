@@ -169,8 +169,16 @@ export async function showDetailedStats() {
             }
         }
 
-        const novelProblemCount = new Set(merged.filter(p => !p.isRepeat).map(p => p.problemId)).size;
-        resultText += getTerm('statsNovelProblems', { count: novelProblemCount }) + '\n';
+        // Distinct novel problems attempted, split per board size on one line —
+        // 9×9 and 13×13 are disjoint corpora, so the pooled count hid how much
+        // of each the user has worked through.
+        const novelCountForSize = (size) => new Set(
+            merged.filter(p => !p.isRepeat && p.size === size).map(p => p.problemId)
+        ).size;
+        resultText += getTerm('statsNovelProblemsBySize', {
+            count9: novelCountForSize(9),
+            count13: novelCountForSize(13),
+        }) + '\n';
 
         const slippedProblemCount = getRecallCandidates({
             lowerProbabilityBound: 0,
