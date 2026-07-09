@@ -16,10 +16,13 @@
 // picked-move embedding from the sidecar (or backfilled later) let the
 // model disambiguate the two.
 //
-// Recommendation scoring of a candidate problem uses β_correct + β_picked
-// applied to the candidate's correct-move embedding — algebraically what
-// you'd get by assuming "user will pick correctly" on the unseen problem.
-// Equivalently this matches the diff-form's β_c' coefficient.
+// Recommendation scoring of a candidate problem uses the CONTRAST
+// β_correct − β_picked applied to the candidate's correct-move embedding
+// (see weaknessScore for the full rationale). That contrast is the identified
+// over/under weakness direction — the same thing the Weaknesses pane's level-2
+// sign test estimates — so a correct-move-only score becomes direction-aware:
+// it up-weights motifs the user underplays / is bad at and down-weights motifs
+// the user overplays, with no thresholds.
 //
 // Model ridge-regularized: β shrunk toward 0, so before there's enough
 // signal the scorer returns 0 (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
@@ -254,10 +257,27 @@ export async function trainWeakness() {
 // Returns alignment with user's weakness directions for a candidate problem.
 // Positive = mine for this; negative = user is strong here. 0 if no model.
 //
-// Under the augmented model we score with β_correct + β_picked applied to
-// the candidate's correct-move embedding. Mathematically this is what the
-// model predicts under the "user plays correctly" assumption (picked = correct
-// for the unseen candidate). Equivalently equal to the diff-form's β_c'.
+// Scores the CONTRAST β_correct − β_picked against the candidate's correct-move
+// embedding. β_correct is the position-difficulty coefficient (effect of the
+// correct move's motif) and β_picked is the move-SELECTION coefficient (effect
+// of the move the user actually picked). Their contrast is the model-identified
+// over/under direction of the weakness — the continuous analogue of the
+// Weaknesses pane's level-2 picked−correct sign test — and it sets the tilt on
+// a candidate whose correct move loads on motif k:
+//   - underplay / bad-at a motif → β_correct < 0, β_picked ≥ 0 → contrast < 0
+//     → up-weight (drill finding / handling the motif);
+//   - overplay a motif → β_correct > 0, β_picked < 0 → contrast > 0
+//     → down-weight (stop rewarding the instinct).
+//
+// Equivalently this treats the "generic wrong move" as −correct_emb (to first
+// order the user, when wrong, plays away from the correct move along the weak
+// axis), which is candidate-varying and so — unlike a fixed generic move —
+// actually informs selection. β_picked must enter with THIS sign: the old sum
+// β_correct + β_picked applied β_picked to the correct move directly, a category
+// error that inverts the overplay case (it up-weights the very motif-k-correct
+// problems an overplayer should see LESS of). The per-axis empirical-Bayes prior
+// shrinks β_picked toward 0 with no picking signal, so the contrast degrades
+// gracefully to β_correct alone when there's no direction to read.
 export function weaknessScore(problem) {
     const params = state.weaknessParams;  // shared across sizes
     if (!params || params.length < 4) return 0;
@@ -266,7 +286,10 @@ export function weaknessScore(problem) {
     if (!problem.embedding || problem.embedding.length !== K) return 0;
     let score = 0;
     for (let k = 0; k < K; k++) {
-        const betaEff = params[2 + k] + params[2 + K + k];
+        // β_correct[k] − β_picked[k]: the identified over/under weakness
+        // direction (see the note above on why β_picked enters with a MINUS,
+        // not the inverted + of the old sum).
+        const betaEff = params[2 + k] - params[2 + K + k];
         score += -betaEff * problem.embedding[k];
     }
     return score;
