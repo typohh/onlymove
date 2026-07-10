@@ -15,10 +15,14 @@ import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
-// Rank is emitted only once the buffer holds this many usable novel attempts (the
-// first 60 are INCLUDED in the fit; the gate only delays emitting a rank). A user
-// with pred_egf_rank NULL is still LISTED on the board — the page shows their
-// attempts/RANK_START_MIN progress instead of a rank (see readLeaderboardRows).
+// Rank is emitted only once the buffer holds this many VALID (still-in-corpus) novel
+// attempts — the exact set computeRank fits — so hitting the threshold always coincides
+// with a rank being ready. A user with pred_egf_rank NULL (fewer than RANK_START_MIN
+// valid attempts) is still LISTED on the board; the page shows their VALID-attempt count
+// / RANK_START_MIN as progress instead of a rank (see readLeaderboardRows). The count is
+// the valid one, NOT the raw buffer length, so it can never read "60/60" without a rank:
+// problems that leave the corpus drop out of the count, and it climbs back to 60 only as
+// the player solves more still-in-corpus problems (each such report recomputes the rank).
 export const RANK_START_MIN = 60;
 const TIME_MIN_TIMED = 20;              // >= this many valid solve times for a time dock
 export const BUFFER_CAP = WIN_CAP;      // 500 — the buffer + the rank window share it
@@ -92,8 +96,9 @@ export function gorToRankScalar(gor) {
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
 // flattens through the SHARED transform, runs the SHARED window estimator, then
 // time-adjusts (weighted-median solve time over the same window) and maps to EGF.
-// Returns { predEgfRank, se } — predEgfRank NULL when fewer than RANK_START_MIN
-// usable attempts (no rank yet).
+// Returns { predEgfRank, se, usable } — `usable` is the count of buffered attempts still
+// in the corpus (what the fit uses AND what the progress readout shows); predEgfRank is
+// NULL when usable < RANK_START_MIN.
 export function computeRank(buffer, params) {
     const flat = [];
     const times = [];
@@ -106,13 +111,13 @@ export function computeRank(buffer, params) {
         flat.push(f);
         times.push(Number.isFinite(e.t) ? e.t : NaN);
     }
-    if (flat.length < RANK_START_MIN) return { predEgfRank: null, se: null };
+    if (flat.length < RANK_START_MIN) return { predEgfRank: null, se: null, usable: flat.length };
 
     // No server-side warm-start: the window MLE is a pure function of the recent
     // history (the prior is weak, WIN_PRIOR_SD = 4, vs hundreds of attempts), so the
     // recent-mean fallback converges to the same R the client's prev-rank seed does.
     const est = estimateWindowRankFromFlat(flat, NaN);
-    if (!est) return { predEgfRank: null, se: null };
+    if (!est) return { predEgfRank: null, se: null, usable: flat.length };
 
     let rankIndex = est.rankIndex;
     const medMs = weightedMedianOverWindow(times, TIME_MIN_TIMED);
@@ -123,7 +128,7 @@ export function computeRank(buffer, params) {
             * (Math.log10(medMs / 60000) - TIME_ADJUST.center_log10_min);
         rankIndex = rankIndexAfterRatingDelta(rankIndex, deltaRating);
     }
-    return { predEgfRank: internalIndexToEgf(rankIndex), se: est.se };
+    return { predEgfRank: internalIndexToEgf(rankIndex), se: est.se, usable: flat.length };
 }
 
 // --- week bucketing (Monday-00:00-UTC week) -------------------------------------
@@ -347,39 +352,64 @@ export async function reconcileBuffers(env) {
 // derived absolute + relative for current / this-week / last-week (relative =
 // rank − gor_rank; current + this-week use the live gor_rank, previous-week its
 // frozen prev_week_gor_rank). A not-yet-ranked player carries `ranked: false` +
-// `novelCount` (buffered novel attempts, < RANK_START_MIN) so the page shows their
-// attempts/RANK_START_MIN progress in place of a rank.
+// `usableCount` (buffered novel attempts STILL IN THE CORPUS, < RANK_START_MIN) so the
+// page shows their valid-attempts/RANK_START_MIN progress in place of a rank.
 export async function readLeaderboardRows(env) {
     if (!env.DB) return [];
     const res = await env.DB.prepare(
-        // buffer is only needed to count an UNRANKED row's attempts; the CASE returns
-        // NULL for ranked rows so their (up to 500-entry) blob isn't shipped to the Worker.
+        // buffer is needed to (re)compute an UNRANKED row's rank on read; the CASE
+        // returns NULL for ranked rows so their (up to 500-entry) blob isn't shipped.
         `SELECT egd_name, country_code, gor, gor_rank, prev_week_gor_rank,
                 pred_egf_rank, week_id, this_week_max, prev_week_max,
                 CASE WHEN pred_egf_rank IS NULL THEN buffer ELSE NULL END AS buffer
            FROM leaderboard`
     ).all();
+    const rows = (res && res.results) || [];
+    // An unranked row is (re)computed on read: this both (a) reports the current VALID
+    // (still-in-corpus) attempt count for the progress readout — the count shrinks as
+    // problems leave the corpus and climbs back only as the player solves more, so it
+    // never reads "60/60" without a rank — and (b) surfaces a rank the instant the valid
+    // count reaches RANK_START_MIN, without waiting for the weekly reconcile cron.
+    // params is the per-isolate cached asset; load it only if some row needs it.
+    let params = null;
+    if (rows.some((r) => !Number.isFinite(r.pred_egf_rank) && r.buffer)) {
+        try { params = await getProblemParams(env); }
+        catch (e) { console.error('leaderboard params load failed:', e); }
+    }
     const nowWeek = weekIdAt(Date.now());
-    return ((res && res.results) || []).map((r) => {
-        // Not yet ranked: show progress toward the rank-start threshold instead of a
-        // rank. novelCount is the buffered novel-attempt count — exact here because an
-        // unranked user has < RANK_START_MIN (< BUFFER_CAP) attempts, so nothing is
-        // dropped by the cap. (Only the tiny corpus-drop case could make it lag the
-        // usable count by a couple; harmless for a progress readout.)
-        if (!Number.isFinite(r.pred_egf_rank)) {
+    return rows.map((r) => {
+        // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
+        // the buffer. usableCount (valid in-corpus attempts, what the fit uses) drives
+        // the progress readout while the row is unranked (< RANK_START_MIN valid).
+        let predEgfRank = Number.isFinite(r.pred_egf_rank) ? r.pred_egf_rank : null;
+        let usableCount = 0;
+        if (predEgfRank === null && r.buffer) {
+            const buf = parseBuffer(r.buffer);
+            if (params) {
+                const c = computeRank(buf, params);
+                usableCount = c.usable;
+                if (Number.isFinite(c.predEgfRank)) predEgfRank = c.predEgfRank;
+            } else {
+                usableCount = buf.length;   // params unavailable: fall back to raw count
+            }
+        }
+        if (predEgfRank === null) {
             return {
                 name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: r.gor_rank,
-                prevWeekGor: null, ranked: false, novelCount: parseBuffer(r.buffer).length,
+                prevWeekGor: null, ranked: false, usableCount,
                 currentAbs: null, thisWeekAbs: null, prevWeekAbs: null,
                 currentRel: null, thisWeekRel: null, prevWeekRel: null,
             };
         }
         let thisMax = r.this_week_max, prevMax = r.prev_week_max, prevGor = r.prev_week_gor_rank;
         if (r.week_id === nowWeek - 1) {
-            prevMax = r.this_week_max; prevGor = r.gor_rank; thisMax = r.pred_egf_rank;
+            prevMax = r.this_week_max; prevGor = r.gor_rank; thisMax = predEgfRank;
         } else if (r.week_id !== nowWeek) {
-            prevMax = null; prevGor = null; thisMax = r.pred_egf_rank;
+            prevMax = null; prevGor = null; thisMax = predEgfRank;
         }
+        // A row ranked only just now on read (was NULL, no stored week peak yet) has no
+        // this_week_max — fall back to the current estimate until a report/cron rolls it.
+        if (!Number.isFinite(thisMax)) thisMax = predEgfRank;
         const gr = r.gor_rank;
         const rel = (v, g) => (Number.isFinite(v) && Number.isFinite(g)) ? v - g : null;
         // Frozen last-week GoR as an integer (inverse of gorToRankScalar) so the page
@@ -388,8 +418,8 @@ export async function readLeaderboardRows(env) {
         return {
             name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: gr, prevWeekGor,
             ranked: true,
-            currentAbs: r.pred_egf_rank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
-            currentRel: rel(r.pred_egf_rank, gr), thisWeekRel: rel(thisMax, gr),
+            currentAbs: predEgfRank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
+            currentRel: rel(predEgfRank, gr), thisWeekRel: rel(thisMax, gr),
             prevWeekRel: rel(prevMax, prevGor),
         };
     });

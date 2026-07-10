@@ -48,14 +48,13 @@ function renderPage(rows) {
             abs: [numAbs(r.currentAbs), numAbs(r.thisWeekAbs), numAbs(r.prevWeekAbs)],
             rel: [numRel(r.currentRel), numRel(r.thisWeekRel), numRel(r.prevWeekRel)],
         };
-        // Not yet ranked: the onlymove column shows attempts/threshold progress
+        // Not yet ranked: the onlymove column shows valid-attempts/threshold progress
         // instead of an estimate, so it's obvious they haven't qualified. abs/rel are
         // all null → this row sorts last in the estimate sort (missing values do).
-        // Clamp the numerator to the threshold so a row whose rank hasn't been
-        // recomputed yet (e.g. a 60–99-attempt user right after the threshold was
-        // lowered, before their next report/cron re-ranks them) reads "60/60", never
-        // an impossible ">60/60". In steady state novelCount < RANK_START_MIN anyway.
-        if (!r.ranked) row.progress = Math.min(r.novelCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
+        // usableCount is the VALID (still-in-corpus) attempt count — the exact set the
+        // rank fit needs — so it reaches RANK_START_MIN only when a rank is ready (never
+        // a "60/60" without one). The Math.min is a defensive guard against ">60/60".
+        if (!r.ranked) row.progress = Math.min(r.usableCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
         return row;
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');

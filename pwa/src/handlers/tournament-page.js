@@ -72,9 +72,9 @@ function renderTournamentPage(rows) {
             abs: numAbs([r.currentAbs, r.thisWeekAbs, r.prevWeekAbs][tf]),
             rel: numRel([r.currentRel, r.thisWeekRel, r.prevWeekRel][tf]),
         };
-        // Not yet ranked: attempts/threshold progress replaces the estimate (abs/rel
-        // null → sorts last), same convention as the /leaderboard page.
-        if (!r.ranked) row.progress = Math.min(r.novelCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
+        // Not yet ranked: valid-attempts/threshold progress replaces the estimate
+        // (abs/rel null → sorts last), same convention as the /leaderboard page.
+        if (!r.ranked) row.progress = Math.min(r.usableCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
         return row;
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');
