@@ -10,6 +10,7 @@ from utils.add_variations import (
     CALM_UTILITY_OVERRIDE,
     VariationDepthExceeded,
     add_shallow_variations,
+    first_move_is_well_formed,
     generate_variations_directly_to_sgf,
 )
 from utils.configurations import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
@@ -53,6 +54,7 @@ class Stats:
         self.problems_found = 0
         self.failures_to_create = 0
         self.duplicate_ids_skipped = 0
+        self.malformed_discarded = 0
         self.worker_errors = 0
         self.number_of_moves = RunningStats()
         self.start_time = time.time()
@@ -84,6 +86,9 @@ class Stats:
 
     def add_duplicate_id_skipped(self):
         self.duplicate_ids_skipped += 1
+
+    def add_malformed_discarded(self):
+        self.malformed_discarded += 1
 
     def add_worker_error(self):
         self.worker_errors += 1
@@ -117,6 +122,8 @@ class Stats:
         }
         if self.duplicate_ids_skipped:
             stats["Duplicate ids skipped"] = self.duplicate_ids_skipped
+        if self.malformed_discarded:
+            stats["Malformed discarded"] = self.malformed_discarded
         if self.worker_errors:
             stats["Worker errors (skipped)"] = self.worker_errors
 
@@ -217,8 +224,6 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                                   f"(this or another size); not overwriting")
                         continue
 
-                    STATS.add_problem_found(len(moves))
-
                     # 1. Construct initial SGF
                     game,node,answer = construct_initial_sgf(moves, solution, queries.board_size)
 
@@ -234,6 +239,19 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     add_shallow_variations(queries, node, moves)
 
                     STATS.set_state("other")
+                    # Discard malformed problems: a well-posed tsumego has exactly
+                    # one first move that wins on BOTH winrate and score, with every
+                    # other candidate losing on both. Multi-solution, seki/half-point
+                    # (no both-positive move), and winrate/score-disagreement positions
+                    # break the client's single-canonical-answer contract
+                    # (findBestMoveFromChildren), so they are never written to the corpus.
+                    if not first_move_is_well_formed(node):
+                        STATS.add_malformed_discarded()
+                        with print_lock:
+                            print(f"[skip] {filename}: not a single-solution problem; discarding")
+                        continue
+
+                    STATS.add_problem_found(len(moves))
                     os.makedirs(OUTPUT_DIR, exist_ok=True)
                     with open(os.path.join(OUTPUT_DIR, filename), "w", encoding="utf-8") as f:
                         f.write(game.serialise(None).decode())

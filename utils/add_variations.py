@@ -1,6 +1,65 @@
+import re
+
 from utils.katago_queries import KatagoQueries
 from utils.coords import gtp_to_sgfmill_point
 from sgfmill import sgf
+
+# Parses a variation comment written as "{winrate}%/{score}" (e.g. "60.6%/-0.5")
+# back into its two numbers. Both are stored from BLACK's perspective
+# (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK), matching the format
+# set on every var_node's "C" property below.
+_EVAL_COMMENT_RE = re.compile(r"(-?[\d.]+)%/(-?[\d.]+)")
+
+
+def parse_eval_comment(comment):
+    """(winrate, score) from a "{winrate}%/{score}" comment, or None if unparseable."""
+    if not comment:
+        return None
+    m = _EVAL_COMMENT_RE.search(comment)
+    if not m:
+        return None
+    return float(m.group(1)), float(m.group(2))
+
+
+def first_move_is_well_formed(node):
+    """True iff the problem's first-move decision has exactly ONE canonical answer.
+
+    Among the candidate first moves (the children of the problem position `node`
+    that carry an evaluation comment), the position must have exactly one clean
+    WIN for the side to move — winrate > 50% AND score > 0 from the mover's
+    perspective — and every other candidate must be a clean LOSS (winrate < 50%
+    AND score < 0). Anything else is discarded:
+      - two or more winners  → the problem has multiple solutions,
+      - zero winners         → seki / half-point / dame (no move both-positive),
+      - a winrate/score disagreement on any move (e.g. 60.6%/-0.5) → ambiguous.
+    Winrate/score comments are black-perspective, so they are flipped when White
+    is the side to move. Moves without a parseable comment (and passes) are
+    ignored, matching the corpus audit that defined this invariant.
+    """
+    if node is None:
+        return False
+    winners = 0
+    ambiguous = 0
+    for child in node:
+        colour, _ = child.get_move()
+        if colour is None:  # pass or a property-only node
+            continue
+        comment = child.get("C") if child.has_property("C") else None
+        ev = parse_eval_comment(comment)
+        if ev is None:
+            continue
+        winrate_black, score_black = ev
+        black_to_move = colour == "b"
+        mover_winrate = winrate_black if black_to_move else 100.0 - winrate_black
+        mover_score = score_black if black_to_move else -score_black
+        if mover_winrate > 50 and mover_score > 0:
+            winners += 1
+        elif mover_winrate < 50 and mover_score < 0:
+            pass  # clean loss
+        else:
+            ambiguous += 1
+    return winners == 1 and ambiguous == 0
+
 
 PLAYOUTS_SHALLOW = 30
 PLAYOUTS = 30
