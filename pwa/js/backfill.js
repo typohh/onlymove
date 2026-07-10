@@ -40,6 +40,7 @@ import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './pic
 import { fetchLookupLines } from './problem-loader.js';
 import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
+import { detectRatingsCorrection } from './corrections-notice.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail } from './history-store.js';
 import { boardNotationToXy } from './sgf.js';
@@ -171,6 +172,21 @@ export async function backfillMissingEmbeddings() {
         && localStorage.getItem(RATINGS_VERSION_KEY) !== RATINGS_VERSION;
     const curveChanged = curveVersion !== null
         && localStorage.getItem(RANK_CURVE_VERSION_KEY) !== curveVersion;
+
+    // Arm the one-time "ratings/ranks were corrected" notice. The version-CHANGED
+    // flags are the whole signal — deliberately NOT also gated on a non-null prior
+    // stamp. A freshly-adopted device is already excluded because
+    // maybeFinishAccountSwitch stamps the CURRENT versions before pulling history
+    // (account-sync.js), so its ratings/curve are unchanged (flags false); a
+    // brand-new device is excluded by the < MIN_ATTEMPTS gate inside detect (and
+    // gets stamped on this same first load). That leaves null-stamp-with-history =
+    // a returning user who predates the stamp — who SHOULD be told their ranks
+    // moved, and a non-null guard would wrongly silence. Runs BEFORE the stamps
+    // are advanced below; the overlay fires from main.js at the end of this chain.
+    detectRatingsCorrection({
+        ratingsCorrected: ratingsChanged,
+        curveCorrected: curveChanged,
+    });
 
     // Strip stale fields off entries whose problem left the corpus, before the rating
     // walk (which can't refresh them — the shard is gone).

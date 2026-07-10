@@ -132,6 +132,10 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         }
 
     } else { // This is the simple message overlay
+        const content = document.createElement('div');
+        Object.assign(content.style, {
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+        });
         if (message) {
             const messageElement = document.createElement('div');
             Object.assign(messageElement.style, {
@@ -139,8 +143,9 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
                 fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
             });
             messageElement.textContent = message;
-            overlay.appendChild(messageElement);
+            content.appendChild(messageElement);
         }
+        overlay.appendChild(content);
         document.body.appendChild(overlay);
 
         // Fast fade in/out for messages
@@ -149,13 +154,31 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
             overlay.style.opacity = '0.9';
         });
 
-        setTimeout(() => {
+        const dismiss = () => {
             overlay.style.opacity = '0';
             setTimeout(() => {
                 overlay.remove();
                 if (callback) callback();
             }, 300);
-        }, duration);
+        };
+
+        if (buttonText) {
+            // A confirm button holds the message up until the user acknowledges
+            // it, rather than auto-dismissing after `duration`. Same look as the
+            // failed-problem overlay's button above.
+            const button = document.createElement('button');
+            button.textContent = buttonText;
+            Object.assign(button.style, {
+                marginTop: '20px', padding: '10px 20px',
+                fontSize: `${boardContainer.offsetWidth / 30}px`, cursor: 'pointer',
+                border: '1px solid white', borderRadius: '5px',
+                backgroundColor: 'transparent', color: 'white', fontWeight: 'bold',
+            });
+            button.onclick = dismiss;
+            content.appendChild(button);
+        } else {
+            setTimeout(dismiss, duration);
+        }
     }
 }
 

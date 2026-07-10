@@ -74,7 +74,8 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 }
 
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem } from './problem-loader.js';
-import { backfillMissingEmbeddings } from './backfill.js';
+import { backfillMissingEmbeddings, stampVersionsForFreshHistory } from './backfill.js';
+import { maybeShowRatingsCorrectionNotice } from './corrections-notice.js';
 import { loadRatingRankMap } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
@@ -674,7 +675,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         .catch(() => {})
         .then(() => dedupTailExact())
         .catch(() => {})
-        .then(() => backfillMissingEmbeddings());
+        // Seed a genuinely-fresh device (empty history, after the tail settles) to
+        // the CURRENT data versions BEFORE the version gate reads them. This is what
+        // guarantees a brand-new user is never shown the "ratings corrected" notice:
+        // with current stamps its ratingsChanged/curveChanged are false, so the
+        // notice is excluded structurally — not left to the attempt-count gate, which
+        // a new user can cross (play 2, reload) before the backfill stamps them.
+        // No-op once any history exists, so an established/returning user's real
+        // stamps still drive the notice. (The account-switch flow already calls this
+        // for adopted devices; this covers the normal first boot.)
+        .then(() => stampVersionsForFreshHistory())
+        .then(() => backfillMissingEmbeddings())
+        // After the re-derive that actually shifted stored ranks, surface the
+        // one-time "ratings corrected" notice (armed inside the backfill) over
+        // the already-corrected board. Guarded to established users only.
+        .then(() => maybeShowRatingsCorrectionNotice())
+        .catch(() => {});
 
     maybeInitWindowRankOnce();
 
