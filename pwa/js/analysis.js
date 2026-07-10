@@ -8,7 +8,7 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { getScoreFromComment, getWinrateFromComment } from './sgf.js';
+import { getScoreFromComment, getWinrateFromComment, findBestMoveFromChildren } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 import { populateMotifBubble } from './motif-bubble.js';
 
@@ -198,8 +198,15 @@ async function requestAndDisplayAnalysis() {
             let displayChild;
             let candidatesToShow;
             if (isBlackToPlay) {
-                displayChild = bestChild;
-                candidatesToShow = [{ x: bestChild.move.x, y: bestChild.move.y }];
+                // Show the SAME move the solve path accepts as correct
+                // (findBestMoveFromChildren — winrate-best, score tie-break), NOT
+                // children[0]. A minority of problems have the generator's
+                // first-listed variation be a losing move (e.g. 53dee5db:
+                // children[0]=lg 60.6%/-0.5 loses, real answer ji 78.5%/+2.3), and
+                // trusting document order marked that losing move as the solution —
+                // disagreeing with what isCorrectMove would accept.
+                displayChild = findBestMoveFromChildren(children) || bestChild;
+                candidatesToShow = [{ x: displayChild.move.x, y: displayChild.move.y }];
             } else if (sgfChildrenLeadingToEnd.length > 0) {
                 // Comments are reported with reportAnalysisWinratesAs = BLACK, so
                 // white's best = lowest winrate / lowest score among the candidates.

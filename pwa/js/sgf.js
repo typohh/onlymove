@@ -64,7 +64,7 @@ export function getWinrateFromComment(comment) {
  * @param {Array} children - Array of SGF nodes (all the same side to move).
  * @returns {object|null} - The winning move node, or null if there are none.
  */
-function findBestMoveFromChildren(children) {
+export function findBestMoveFromChildren(children) {
     if (!children || children.length === 0) {
         return null;
     }
