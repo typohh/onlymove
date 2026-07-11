@@ -53,7 +53,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -468,6 +468,40 @@ function localSeFloor(rankIndex) {
 
 export function estimateWindowRank(answerHistory, prevRankIndex) {
     return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex, localSeFloor);
+}
+
+// The front-page (window) rank as it evolved across history: the SAME positional
+// window 4PL MLE the live headline uses (windowMLE over the trailing WIN_CAP
+// first-time attempts), re-evaluated at each of `times`. A pure function of
+// decomp.attempts — already flattened to internal-rank space and time-sorted by
+// flattenAttempts — so its RIGHT endpoint reproduces the live front-page rank
+// (state.userRank·TOTAL_RANKS) exactly, and the Rank chart can draw the headline's
+// own trajectory alongside the slow skill line. `times` MUST be ascending; the
+// return is aligned 1:1 with `times`, each element the internal-rank index or null
+// (no first-time attempt exists yet at that time). Only the trailing WIN_CAP
+// attempts affect windowMLE, so we pass just that suffix — bit-identical to the
+// whole prefix (both have M = min(prefixLen, WIN_CAP)) but O(WIN_CAP) per point.
+// Each point warm-starts from the previous (the fit converges regardless; this
+// only saves Newton steps).
+export function windowRankSeries(decomp, times) {
+    const out = new Array(times.length).fill(null);
+    const attempts = decomp && decomp.attempts;
+    if (!attempts || !attempts.length) return out;
+    let idx = 0;            // count of attempts with t <= the current grid time
+    let ref = NaN;          // warm-start from the previous evaluated point
+    for (let i = 0; i < times.length; i++) {
+        while (idx < attempts.length && attempts[idx].t <= times[i]) idx++;
+        if (idx === 0) continue;   // no first-time attempt yet
+        const prefix = attempts.slice(Math.max(0, idx - WIN_CAP), idx);
+        let r = ref;
+        if (!Number.isFinite(r)) {
+            const tail = prefix.slice(-Math.min(prefix.length, 20));
+            r = tail.reduce((s, a) => s + a.x, 0) / tail.length;
+        }
+        const { R } = windowMLE(prefix, r);
+        if (Number.isFinite(R)) { out[i] = R; ref = R; }
+    }
+    return out;
 }
 
 // Coarse, regularly-spaced evaluation of the wide (skill) kernel. Used only to

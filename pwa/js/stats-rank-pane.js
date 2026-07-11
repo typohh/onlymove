@@ -8,7 +8,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { evaluateAt, rankIndexAfterRatingDelta } from './rank-decomposition.js';
+import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries } from './rank-decomposition.js';
 import { getPopulationConstants } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel, rankIndexToLabel } from '../shared/rank-math.js';
@@ -139,6 +139,16 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         e.delta = d;
     }
 
+    // Front-page rank over time: the live headline's window MLE reconstructed
+    // across history (windowRankSeries), evaluated at the SAME grid times as the
+    // skill line so each point reuses that time's display transform + time-adjust
+    // delta. In internal-rank index space (onlymove); its right endpoint equals
+    // the current front-page rank. This is a DIFFERENT, more reactive estimator
+    // than the slow skill line S(t) — plotted so the user can see the actual
+    // displayed rank's trajectory, not just the smoothed skill trend.
+    const winSeries = windowRankSeries(decomp, gridEvals.map(e => e.t));
+    for (let i = 0; i < gridEvals.length; i++) gridEvals[i].win = winSeries[i];
+
     // Server selector — sits INSIDE the chart title ("[server ▾] rank since
     // <date>"). "OnlyMove" shows the raw, untimed internal rank (no time
     // adjustment). Every other option shows the rank as it
@@ -203,6 +213,9 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
+    // Front-page (window) rank line: amber + dashed so it reads distinctly against
+    // the solid blue skill line even where the two nearly coincide.
+    const FRONTPAGE_STROKE = '#f59e0b';
     const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
     const legendItems = [
         { kind: 'dot', color: DOT_CORRECT, text: getTerm('statsLegendCorrect') },
@@ -211,6 +224,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     if (gridEvals.length >= 2) {
         legendItems.push(
             { kind: 'line', color: SKILL_STROKE, text: getTerm('statsLegendRank') },
+            { kind: 'line', color: FRONTPAGE_STROKE, text: getTerm('statsLegendFrontPageRank') },
             { kind: 'band', color: SKILL_FILL_INNER, text: getTerm('statsLegend95Confidence') },
             { kind: 'band', color: SKILL_FILL_OUTER, text: getTerm('statsLegendDailyVariance') },
         );
@@ -231,6 +245,15 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             const iu = skillToDisplay(e.S + innerHalf(e), e.delta);
             const id = skillToDisplay(e.S - innerHalf(e), e.delta);
             if ([S, up, dn, iu, id].every(Number.isFinite)) gd.push({ t: e.t, S, up, dn, iu, id });
+        }
+
+        // Front-page rank line in display space (same transform + per-time delta
+        // as the skill line, so it reacts to the server dropdown identically).
+        const winPts = [];
+        for (const e of gridEvals) {
+            if (typeof e.win !== 'number' || !Number.isFinite(e.win)) continue;
+            const y = skillToDisplay(e.win, e.delta);
+            if (Number.isFinite(y)) winPts.push({ t: e.t, y });
         }
 
         // Readout = the current rank (the line's right endpoint) in the selected
@@ -259,6 +282,9 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         // problem difficulties. Dots outside this window are dropped below.
         let bandMin = Infinity, bandMax = -Infinity;
         for (const g of gd) { bandMin = Math.min(bandMin, g.dn); bandMax = Math.max(bandMax, g.up); }
+        // Keep the front-page line in view — it can wander a little outside the
+        // skill band (it's a more reactive estimator).
+        for (const w of winPts) { bandMin = Math.min(bandMin, w.y); bandMax = Math.max(bandMax, w.y); }
         if (!Number.isFinite(bandMin)) {
             // No decomposition — fall back to the scatter range.
             const ys = dots.map(d => d.y).slice().sort((a, b) => a - b);
@@ -327,6 +353,18 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             svg.appendChild(svgEl('polyline', {
                 points: skillPts, fill: 'none', stroke: SKILL_STROKE,
                 'stroke-width': '1.5', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke',
+            }));
+        }
+
+        // Front-page rank line drawn last (on top), dashed so the skill line still
+        // reads through where they overlap. No band — it's the point estimate the
+        // headline shows.
+        if (winPts.length >= 2) {
+            const winLine = winPts.map(w => `${xOf(w.t).toFixed(1)},${yOf(w.y).toFixed(1)}`).join(' ');
+            svg.appendChild(svgEl('polyline', {
+                points: winLine, fill: 'none', stroke: FRONTPAGE_STROKE,
+                'stroke-width': '1.5', 'stroke-linejoin': 'round', 'stroke-dasharray': '4 3',
+                'vector-effect': 'non-scaling-stroke',
             }));
         }
 
