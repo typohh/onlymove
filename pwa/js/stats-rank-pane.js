@@ -213,8 +213,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const SKILL_FILL_OUTER = 'rgba(59,130,246,0.10)';
     const SKILL_FILL_INNER = 'rgba(59,130,246,0.22)';
     const SKILL_STROKE = '#2563eb';
-    // Front-page (window) rank line: amber + dashed so it reads distinctly against
-    // the solid blue skill line even where the two nearly coincide.
+    // Front-page (window) rank line: amber, distinct from the blue skill line.
     const FRONTPAGE_STROKE = '#f59e0b';
     const DOT_CORRECT = '#50b450', DOT_WRONG = '#dc5050';
     const legendItems = [
@@ -256,10 +255,12 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             if (Number.isFinite(y)) winPts.push({ t: e.t, y });
         }
 
-        // Readout = the current rank (the line's right endpoint) in the selected
-        // server's scale. Hidden when there's no skill curve (too little data).
-        if (gd.length >= 1) {
-            const cur = gd[gd.length - 1].S;
+        // Readout = the FRONT-PAGE rank (the amber line's right endpoint = the
+        // window MLE the home page shows) in the selected server's scale — so the
+        // text matches the front page for OnlyMove (time-adjusted + translated for
+        // other servers). Hidden when there's too little data for the line.
+        if (winPts.length >= 1) {
+            const cur = winPts[winPts.length - 1].y;
             const lower = Math.floor(cur);
             readout.textContent = getTerm('statsSelectedServerRank', {
                 server: selectedServer,
@@ -356,14 +357,13 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             }));
         }
 
-        // Front-page rank line drawn last (on top), dashed so the skill line still
-        // reads through where they overlap. No band — it's the point estimate the
-        // headline shows.
+        // Front-page rank line drawn last (on top), solid. No band — it's the
+        // point estimate the headline shows.
         if (winPts.length >= 2) {
             const winLine = winPts.map(w => `${xOf(w.t).toFixed(1)},${yOf(w.y).toFixed(1)}`).join(' ');
             svg.appendChild(svgEl('polyline', {
                 points: winLine, fill: 'none', stroke: FRONTPAGE_STROKE,
-                'stroke-width': '1.5', 'stroke-linejoin': 'round', 'stroke-dasharray': '4 3',
+                'stroke-width': '1.5', 'stroke-linejoin': 'round',
                 'vector-effect': 'non-scaling-stroke',
             }));
         }
