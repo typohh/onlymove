@@ -283,9 +283,9 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         // problem difficulties. Dots outside this window are dropped below.
         let bandMin = Infinity, bandMax = -Infinity;
         for (const g of gd) { bandMin = Math.min(bandMin, g.dn); bandMax = Math.max(bandMax, g.up); }
-        // Keep the front-page line in view — it can wander a little outside the
-        // skill band (it's a more reactive estimator).
-        for (const w of winPts) { bandMin = Math.min(bandMin, w.y); bandMax = Math.max(bandMax, w.y); }
+        // The front-page line deliberately does NOT widen the y-range — the window
+        // focuses on the skill band, and the front-page line clips at the chart
+        // edge where it wanders outside it.
         if (!Number.isFinite(bandMin)) {
             // No decomposition — fall back to the scatter range.
             const ys = dots.map(d => d.y).slice().sort((a, b) => a - b);
