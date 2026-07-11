@@ -31,6 +31,11 @@ user-rating covariate and in whether the fit integrates over its standard error)
                 the overlap coverage (fixes the edge-era underweighting above).
   blocks-raw    blocks with NO per-declaration weight normalization (each block weight 1)
                 — probes whether heavy users' extra pseudo-rows help or bias.
+  *+rob         same declarations, but FIT with the production contamination mixture
+                (ordinal_nll_vec eps=EPS_CONTAMINATION: with probability eps a
+                declaration is junk, uniform over categories). Scoring stays the plain
+                ordinal NLL for every variant, so the paired diffs isolate the fit
+                change.
 
 Protocol: 5-fold CV by USER, repeated with several seeds; every variant is fit and
 scored on the SAME foldings (paired). Held-out declarations (latest per user-server,
@@ -63,8 +68,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from pipeline.map_rating_to_rank import (  # noqa: E402
-    GAUGE_WEIGHT, LAMBDA_SHAPE, LAMBDA_TIME, MIN_ATTEMPTS, MIN_SERVER_SAMPLES,
-    RANK_PADDING, EXTEND_TO, SERVER_LAMBDA, SIZES, _curve_arrays, fit_consensus,
+    EPS_CONTAMINATION, GAUGE_WEIGHT, LAMBDA_SHAPE, LAMBDA_TIME, MIN_ATTEMPTS,
+    MIN_SERVER_SAMPLES, RANK_PADDING, EXTEND_TO, SERVER_LAMBDA, SIZES,
+    _curve_arrays, fit_consensus,
     load_floors, load_ratings, load_slopes, load_user_median_solve_minutes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
@@ -216,8 +222,10 @@ def _bucket_w(decls):
     return blocks
 
 
-def fit_consensus_cv(decls):
-    """decls: [(server, R, g, T, se, w)]. Returns (a, alpha, ys, server_fits)."""
+def fit_consensus_cv(decls, eps=0.0):
+    """decls: [(server, R, g, T, se, w)]. Returns (a, alpha, ys, server_fits).
+    eps: contamination-mixture weight on a uniform-over-categories junk component
+    (matches ordinal_nll_vec's eps; production fits with EPS_CONTAMINATION)."""
     egf_thr_ranks, ys, S, dS = _curve_arrays()
     nseg = len(dS)
     blocks = _bucket_w(decls)
@@ -271,6 +279,8 @@ def fit_consensus_cv(decls):
             lower = np.where((kk > 0)[:, None],
                              expit(thr[np.maximum(kk - 1, 0)][:, None] - x_int), 0.0)
             p = np.clip(upper - lower, 1e-12, 1.0) @ gh_w
+            if eps > 0.0:
+                p = (1.0 - eps) * p + eps / (K + 1)
             nll += -float(np.sum(blk["w"] * np.log(np.clip(p, 1e-12, 1.0))))
             pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
             wsrv = float(np.sum(blk["w"]))
@@ -338,6 +348,17 @@ def main():
                          "are seed-deterministic, so runs with the same --reps/--folds "
                          "are paired-comparable across invocations via the career "
                          "baseline.")
+    ap.add_argument("--rob-eps", default=None,
+                    help="comma-list of extra contamination eps values to sweep; each "
+                         "adds a blocks-mass+rob@<eps> variant (fit with that eps, "
+                         "scored plain like everything else).")
+    ap.add_argument("--drop-eval", default=None,
+                    help="comma-list of userprefix8:server declarations to drop from "
+                         "the EVAL set only (training keeps them). For scoring on "
+                         "honest declarations when the eval set is known to contain "
+                         "junk — e.g. the contamination-posterior>0.5 rows from "
+                         "auxiliary.check_mapped_vs_declared_rank. Applied identically "
+                         "to every variant, so paired diffs stay fair.")
     args = ap.parse_args()
 
     print("Loading surveys + ratings + attempts ...")
@@ -438,27 +459,43 @@ def main():
 
     # eiv was measurably worse across every covariate in the first full run
     # (see the memory/report); keep only career+eiv as the recorded control.
+    # +rob = fit with the production contamination mixture (EPS_CONTAMINATION);
+    # scoring stays the plain ordinal NLL for every variant so diffs are paired.
     VARIANTS = [
-        ("career",      lambda u: point_decls(u, career, False)),
-        ("career+eiv",  lambda u: point_decls(u, career, True)),
-        ("win120",      lambda u: point_decls(u, win, False)),
-        ("blocks",      lambda u: block_decls(u, False, "equal")),
-        ("blocks-mass", lambda u: block_decls(u, False, "mass")),
-        ("blocks-raw",  lambda u: block_decls(u, False, "raw")),
+        ("career",          lambda u: point_decls(u, career, False), 0.0),
+        ("career+eiv",      lambda u: point_decls(u, career, True), 0.0),
+        ("career+rob",      lambda u: point_decls(u, career, False), EPS_CONTAMINATION),
+        ("win120",          lambda u: point_decls(u, win, False), 0.0),
+        ("blocks",          lambda u: block_decls(u, False, "equal"), 0.0),
+        ("blocks-mass",     lambda u: block_decls(u, False, "mass"), 0.0),
+        ("blocks-mass+rob", lambda u: block_decls(u, False, "mass"), EPS_CONTAMINATION),
+        ("blocks-raw",      lambda u: block_decls(u, False, "raw"), 0.0),
     ]
     if args.variants:
         keep = set(args.variants.split(","))
         VARIANTS = [v for v in VARIANTS if v[0] in keep]
+    if args.rob_eps:
+        for tok in args.rob_eps.split(","):
+            VARIANTS.append((f"blocks-mass+rob@{tok}",
+                             lambda u: block_decls(u, False, "mass"), float(tok)))
     LENSES = [("career-lens", career), ("win120-lens", win)]
 
-    # --- sanity: se=0/w=1 reproduces production fit_consensus -------------------
+    # --- sanity: se=0/w=1/eps=EPS_CONTAMINATION reproduces production fit_consensus
     prod_decls = [(s, R, g, T) for (s, R, g, T, _, _) in point_decls(users, career, False)]
     a_p, al_p, ys_p, _, _ = fit_consensus(prod_decls)
-    a_c, al_c, _, _ = fit_consensus_cv(point_decls(users, career, False))
+    a_c, al_c, _, _ = fit_consensus_cv(point_decls(users, career, False),
+                                       eps=EPS_CONTAMINATION)
     print(f"  sanity vs production fit: max|Δcurve| = {np.max(np.abs(a_p - a_c)):.2e}, "
           f"|Δalpha| = {abs(al_p - al_c):.2e}")
 
     # --- CV ---------------------------------------------------------------------
+    drop_eval = set()
+    if args.drop_eval:
+        drop_eval = {tuple(tok.split(":", 1)) for tok in args.drop_eval.split(",")}
+        n_dropped = sum((row["user_id"][:8], row["server"]) in drop_eval
+                        for _, row in latest.iterrows())
+        print(f"  eval-only drop: {n_dropped} declarations matched of "
+              f"{len(drop_eval)} requested (training keeps them)")
     fold_means = defaultdict(list)   # (variant, lens, metric) -> per-folding means
     pooled = defaultdict(lambda: ([], []))  # (variant, lens) -> (errs, gdecl) pooled
     n_folds_total = 0
@@ -474,9 +511,10 @@ def main():
                 eval_rows[lens_name] = [
                     (row["server"], cov[row["user_id"]][0], float(row["rank_scalar"]),
                      T_of[row["user_id"]])
-                    for _, row in latest[latest["user_id"].isin(test_set)].iterrows()]
-            for vname, builder in VARIANTS:
-                fitres = fit_consensus_cv(builder(train_users))
+                    for _, row in latest[latest["user_id"].isin(test_set)].iterrows()
+                    if (row["user_id"][:8], row["server"]) not in drop_eval]
+            for vname, builder, veps in VARIANTS:
+                fitres = fit_consensus_cv(builder(train_users), eps=veps)
                 if fitres is None:
                     continue
                 for lens_name, _ in LENSES:
@@ -505,9 +543,9 @@ def main():
           f"({args.folds}-fold x {args.reps} reps), {len(latest)} eval declarations =====")
     for lens_name, _ in LENSES:
         print(f"\n--- lens: {lens_name} (held-out point covariate) ---")
-        print(f"{'variant':<12} {'NLL':>8} {'MAE':>7} {'RMSE':>7} | "
+        print(f"{'variant':<16} {'NLL':>8} {'MAE':>7} {'RMSE':>7} | "
               f"{'ΔNLL vs career':>17} {'ΔMAE':>14}")
-        for vname, _ in VARIANTS:
+        for vname, _, _ in VARIANTS:
             key = (vname, lens_name)
             nll = np.mean(fold_means[(vname, lens_name, 'nll')])
             mae = np.mean(fold_means[(vname, lens_name, 'mae')])
@@ -516,12 +554,27 @@ def main():
             dm = paired(vname, lens_name, "mae")
             dn_s = f"{dn[0]:+.4f}±{dn[1]:.4f}" if dn else "-"
             dm_s = f"{dm[0]:+.4f}±{dm[1]:.4f}" if dm else "-"
-            print(f"{vname:<12} {nll:8.4f} {mae:7.4f} {rmse:7.4f} | {dn_s:>17} {dm_s:>14}")
+            print(f"{vname:<16} {nll:8.4f} {mae:7.4f} {rmse:7.4f} | {dn_s:>17} {dm_s:>14}")
+
+    # direct paired diff of each +rob variant against its eps=0 twin
+    names = [v[0] for v in VARIANTS]
+    rob_pairs = [(n, n.split("+rob")[0]) for n in names
+                 if "+rob" in n and n.split("+rob")[0] in names]
+    if rob_pairs:
+        print("\n--- robust (contamination eps) vs plain, paired ---")
+        for rob, base in rob_pairs:
+            for lens_name, _ in LENSES:
+                dn = paired(rob, lens_name, "nll", base=base)
+                dm = paired(rob, lens_name, "mae", base=base)
+                if dn is None:
+                    continue
+                print(f"{rob:<16} vs {base:<12} [{lens_name}]  "
+                      f"ΔNLL {dn[0]:+.4f}±{dn[1]:.4f}  ΔMAE {dm[0]:+.4f}±{dm[1]:.4f}")
 
     print("\n--- band breakdown (pooled held-out errors, career-lens) ---")
-    print(f"{'variant':<12} {'dan MAE':>8} {'dan bias':>9} {'kyu MAE':>8} {'kyu bias':>9} "
+    print(f"{'variant':<16} {'dan MAE':>8} {'dan bias':>9} {'kyu MAE':>8} {'kyu bias':>9} "
           f"{'<=10k MAE':>9}")
-    for vname, _ in VARIANTS:
+    for vname, _, _ in VARIANTS:
         errs, gdecl = pooled[(vname, "career-lens")]
         errs, gdecl = np.array(errs), np.array(gdecl)
         dan, kyu, deep = gdecl >= 1, gdecl < 1, gdecl <= -9
@@ -532,7 +585,7 @@ def main():
         dm, db = mae_bias(dan)
         km, kb = mae_bias(kyu)
         pm, _ = mae_bias(deep)
-        print(f"{vname:<12} {dm:>8} {db:>9} {km:>8} {kb:>9} {pm:>9}")
+        print(f"{vname:<16} {dm:>8} {db:>9} {km:>8} {kb:>9} {pm:>9}")
 
 
 if __name__ == "__main__":

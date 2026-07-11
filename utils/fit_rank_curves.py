@@ -99,7 +99,7 @@ def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
     return float(R), len(rows)
 
 
-def ordinal_nll_vec(tau, x, k, w=None):
+def ordinal_nll_vec(tau, x, k, w=None, eps=0.0):
     """Vectorized cumulative-link negative log-likelihood.
 
       P(declared = category k | x), thresholds τ (length K, ascending):
@@ -110,11 +110,21 @@ def ordinal_nll_vec(tau, x, k, w=None):
     tau : (K,) thresholds in x units.  x : (n,) abilities.  k : (n,) ints in
     [0, K] (category = declared rank − range minimum).  w : optional (n,)
     per-row weights (the block-anchored production mapping normalizes each
-    declaration's rows to total weight 1); None = unweighted."""
+    declaration's rows to total weight 1); None = unweighted.
+
+    eps : contamination mixture (robust-IRT). With probability eps the
+    declaration is junk — a lie/misclick, uniform over the K+1 categories:
+    P_mix = (1−eps)·P_ordinal + eps/(K+1). Caps any single row's NLL at
+    −log(eps/(K+1)) and sends its gradient smoothly to 0, so an impossible
+    declaration stops steering the fit while merely improbable ones keep
+    most of their weight. eps=0 = the plain ordinal likelihood."""
     K = tau.shape[0]
     upper = np.where(k < K, expit(tau[np.minimum(k, K - 1)] - x), 1.0)
     lower = np.where(k > 0, expit(tau[np.maximum(k - 1, 0)] - x), 0.0)
-    logs = np.log(np.clip(upper - lower, 1e-12, 1.0))
+    p = np.clip(upper - lower, 1e-12, 1.0)
+    if eps > 0.0:
+        p = (1.0 - eps) * p + eps / (K + 1)
+    logs = np.log(p)
     return -float(np.sum(logs if w is None else w * logs))
 
 

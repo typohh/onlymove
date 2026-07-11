@@ -54,6 +54,7 @@ from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
+from scipy.special import expit
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -64,7 +65,7 @@ from utils.rank_surveys import (  # noqa: E402
     load_rank_surveys, scalar_to_rank,
 )
 from pipeline.map_rating_to_rank import (  # noqa: E402
-    SIZES, load_floors, load_ratings, load_slopes,
+    EPS_CONTAMINATION, SIZES, load_floors, load_ratings, load_slopes,
 )
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
@@ -184,6 +185,29 @@ def internal_to_server(server, internal_scalar, server_curves):
     return float(interp_extrap_vec(np.array([internal_scalar]), our, srv)[0])
 
 
+def junk_posterior(server, declared_scalar, x, server_curves):
+    """P(this declaration is junk | data) under the fit's contamination mixture.
+
+    The rank_map knots ARE the fitted ordinal thresholds (`our` = τ at each
+    server category boundary, `server` = the g−0.5 boundary scalars), so the
+    declared category's likelihood is reconstructed exactly:
+    P_ordinal = expit(τ_up − x) − expit(τ_lo − x), and the posterior is
+    (ε/N) / ((1−ε)·P_ordinal + ε/N) with N = len(τ)+1 categories and x the
+    time-adjusted internal rank (what the fit anchored on). None for a server
+    without a coupling."""
+    if server not in server_curves:
+        return None
+    tau, srv = server_curves[server]
+    g = int(round(declared_scalar))
+    K = len(tau)
+    k = int(np.searchsorted(srv, g))     # boundaries below the declared category
+    upper = expit(tau[k] - x) if k < K else 1.0
+    lower = expit(tau[k - 1] - x) if k > 0 else 0.0
+    p = max(float(upper - lower), 1e-12)
+    junk = EPS_CONTAMINATION / (K + 1)
+    return junk / ((1.0 - EPS_CONTAMINATION) * p + junk)
+
+
 # ---------------------------------------------------------------------------
 # Error reporting
 # ---------------------------------------------------------------------------
@@ -229,12 +253,13 @@ def _print_full_listing(df):
             continue
         print(f"\n{server}  (n={len(sub)})")
         print(f"{'user':<10}{'rating':>8}{'time':>8}{'onlymove':>9}{'declared':>9}"
-              f"{'predicted':>10}{'err':>7}")
+              f"{'predicted':>10}{'err':>7}  junk")
         for _, r in sub.iterrows():
             tstr = f"{r['median_min']*60:.0f}s" if pd.notna(r['median_min']) else "-"
+            jstr = ("!" if r["p_junk"] > 0.5 else "") if pd.notna(r["p_junk"]) else ""
             print(f"{r['prefix']:<10}{r['our_R']:>+8.2f}{tstr:>8}{r['our_label']:>9}"
                   f"{r['declared_rank']:>9}{r['pred_server_label']:>10}"
-                  f"{r['err_server']:>+7.1f}")
+                  f"{r['err_server']:>+7.1f}  {jstr}")
 
 
 # Internal-rank bands (scalar: 1k=0, 1d=1). Half-open [lo, hi).
@@ -350,7 +375,9 @@ def main():
         # Server prediction translates from the TIME-ADJUSTED internal, so a timed
         # server (EGF included) differs from the raw header rank by the dock.
         pred_server = internal_to_server(r["server"], ours_adj, server_curves)
+        p_junk = junk_posterior(r["server"], float(g), ours_adj, server_curves)
         rows.append({
+            "p_junk": p_junk,
             "prefix": pref,
             "server": r["server"],
             "declared_rank": r["rank"],
@@ -378,10 +405,25 @@ def main():
           f"{df['server'].nunique()} servers  "
           f"[{len(deltas)} time-adjusted, {len(user_R) - len(deltas)} raw]" + note)
 
+    # Suspect declarations under the fit's contamination mixture: posterior
+    # P(junk) > 0.5 means the fitted model finds the declaration likelier to be
+    # a lie/misclick than a real rank. They stay in the CSV/listing but are
+    # excluded from the "excl junk" aggregate rows.
+    suspect = df["p_junk"].fillna(0.0) > 0.5
+    clean = df[~suspect]
+
     # err = predicted server rank − declared server rank (ranks; + = we rate stronger)
     print("\nerr = predicted − declared  (ranks; + = we rate them stronger)")
     _stat_header()
     _print_stat_row("OVERALL", _stats(df["err_server"]))
+    _print_stat_row("OVERALL excl junk", _stats(clean["err_server"]))
+    if suspect.any():
+        print(f"\nsuspect declarations (contamination posterior > 0.5, "
+              f"eps={EPS_CONTAMINATION:.3f}):")
+        for _, r in df[suspect].sort_values("p_junk", ascending=False).iterrows():
+            print(f"  {r['prefix']:<10}{r['server']:<9}declared {r['declared_rank']:>4}"
+                  f"  onlymove {r['our_label']:>4}  err {r['err_server']:>+6.1f}"
+                  f"  P(junk)={r['p_junk']:.2f}")
 
     print("\nby onlymove rank band")
     _stat_header()

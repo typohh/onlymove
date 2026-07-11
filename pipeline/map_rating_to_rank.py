@@ -59,6 +59,21 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
   * EGF IS JUST ANOTHER SERVER. Every server, EGF included, gets free ordinal thresholds
     (a cumulative-link coupling, uniform-spacing prior SERVER_LAMBDA). The consensus
     rank is the hub; each server couples off it.
+  * ROBUST TO JUNK DECLARATIONS. Each declaration's ordinal likelihood is a
+    contamination mixture: with probability EPS_CONTAMINATION the declaration is
+    junk (a lie/misclick — e.g. a lone Fox 6d declared on an account measuring
+    ~19k), uniform over that server's categories. This caps a junk row's NLL and
+    sends its gradient to 0 instead of letting it steer the coupling; honest
+    extreme declarations (merely improbable, often cross-server-consistent) keep
+    most of their weight. EPS IS DELIBERATELY SMALL: the paired CV
+    (auxiliary.eval_rank_map_cv, the +rob variants, scored on honest declarations
+    only via --drop-eval) shows held-out NLL degrades MONOTONICALLY in eps — the
+    plain logistic's linear tails already bound junk influence, so a large junk
+    floor lets the fit over-sharpen its couplings (worse calibration, point
+    metrics ~neutral): +0.014±0.010 nats/declaration at 0.5%, +0.021±0.009 at 1%,
+    +0.041±0.011 at 2.5%. 0.5% is the accepted compromise — near-neutral NLL
+    while still capping any single junk row's pull at −log(eps/N) ≈ 8.7 nats
+    (vs ~19 unbounded). Don't raise it without re-running that CV.
   * THE GAUGE. With no server privileged the consensus scale is only defined up to a
     monotone reparameterisation. We pin it by a VERY WEAK penalty on the
     reliability-weighted (by declaration count) mean coupling offset toward identity
@@ -107,6 +122,8 @@ RATING_SHAPE = "cubic"      # statistics.txt shape used as the curve's prior MEA
 LAMBDA_SHAPE = 0.3          # GENTLE shape prior (the all-server latent isn't kyu-starved)
 SERVER_LAMBDA = 5.0         # uniform-spacing prior on each server coupling
 GAUGE_WEIGHT = 1.0          # VERY WEAK pin on the n-weighted mean coupling offset → 0
+EPS_CONTAMINATION = 0.005   # P(a declaration is junk) — robust mixture; small ON PURPOSE
+                            # (held-out NLL degrades monotonically in eps, see docstring)
 LAMBDA_TIME = 0.1           # light ridge keeping the learned time slope bounded
 EGF_LO, EGF_HI = -20, 10    # consensus-rank boundary range the curve spans
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
@@ -324,7 +341,8 @@ def fit_consensus(decls):
             blk = blocks[server]
             thr = _unpack_thresholds(params[st:st + n], blk["baseline"])
             x_int = interp_extrap_vec(blk["rating"] + alpha * blk["T"], a, ys)
-            nll += ordinal_nll_vec(thr, x_int, blk["k"], blk["w"])
+            nll += ordinal_nll_vec(thr, x_int, blk["k"], blk["w"],
+                                   eps=EPS_CONTAMINATION)
             pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
             w = float(np.sum(blk["w"]))     # reliability weight = declaration weight
             w_off += w * float(np.mean(thr - blk["identity"]))
