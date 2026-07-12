@@ -1,0 +1,12 @@
+[
+    {
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "net.onlymove.twa",
+            "sha256_cert_fingerprints": [
+                "BA:F8:1C:85:9E:77:50:37:B0:4C:D6:96:0A:03:9B:F8:7C:6A:D6:79:B8:0A:29:BC:9B:B3:32:C8:02:26:12:71"
+            ]
+        }
+    }
+]

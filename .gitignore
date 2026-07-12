@@ -90,6 +90,14 @@ embeddings/joint/ica_stability.json
 # are not (mirrors how the heavy inputs stay but packaged outputs don't).
 /ratings/
 
+# Android TWA wrapper (Bubblewrap). Only twa-manifest.json is tracked: the
+# whole Gradle project + store_icon.png are regenerated from it via
+# `bubblewrap update`, and android.keystore is the Play upload signing key —
+# NEVER commit it. Back the keystore + its passwords up outside git (a lost
+# upload key is recoverable through Play App Signing; a leaked one is not).
+/android/*
+!/android/twa-manifest.json
+
 # Vast.ai orchestration
 orchestration_state.json
 .env

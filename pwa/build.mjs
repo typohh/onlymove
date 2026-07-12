@@ -22,7 +22,12 @@ const INLINED_DATA_FILES = [
 const DIST_DIR = 'dist';
 const STATIC_ASSETS = [
     'index.html',
-    'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html',
+    'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html', 'privacy.html',
+    // Digital Asset Links for the Play Store TWA (net.onlymove.twa): must be
+    // served at /.well-known/assetlinks.json or the Android app shows the
+    // browser URL bar. Carries the upload-key fingerprint + the Play App
+    // Signing fingerprint (the cert Play actually signs releases with).
+    '.well-known',
     // Workers-assets header rules (must sit at the dist root). The immutable
     // Cache-Control rules on the content-hashed / ?v-busted data files are what
     // let Cloudflare's edge cache store them — and cache HITS are the only path
