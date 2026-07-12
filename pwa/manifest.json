@@ -47,13 +47,13 @@
         {
             "src": "horizontal.png",
             "type": "image/png",
-            "sizes": "3153x1926",
+            "sizes": "1920x1080",
             "form_factor": "wide"
         },
         {
             "src": "vertical.png",
             "type": "image/png",
-            "sizes": "1057x1789",
+            "sizes": "1080x1920",
             "form_factor": "narrow"
         }
     ]
