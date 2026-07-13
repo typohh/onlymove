@@ -27,9 +27,11 @@
 //
 // Related one-off assets (ImageMagick, not part of this script):
 //   feature graphic: convert horizontal.png -crop 1080x527+285+276 +repage -resize 1024x500! feature-graphic.png
-//   PC logo:         convert ../pwa/icon-512.png -alpha set -fill none -fuzz 2% \
+//   PC logo (600x400): convert ../pwa/icon-512.png -alpha set -fill none -fuzz 2% \
 //                      -draw "matte 0,0 floodfill" -draw "matte 511,0 floodfill" \
-//                      -draw "matte 0,511 floodfill" -draw "matte 511,511 floodfill" pc-logo-512.png
+//                      -draw "matte 0,511 floodfill" -draw "matte 511,511 floodfill" \
+//                      -trim +repage -resize 380x380 -background none -gravity center \
+//                      -extent 600x400 pc-logo-600x400.png
 //
 // Gotchas encoded below (learned the hard way):
 //   - The shown problem persists across reloads by design, so pausing recalls
