@@ -71,7 +71,8 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rating_features import (  # noqa: E402
     _cache_ids_path, build_profiles, load_first_time_attempts,
-    load_joint_activations, load_joint_bot_winrate, load_joint_move_features,
+    load_joint_activations, load_joint_bot_winrate, load_joint_game_phase,
+    load_joint_move_features,
 )
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
@@ -225,15 +226,25 @@ def main():
     # (zero after the pooled z-score).
     mv, nmv = load_joint_move_features(SIZES, tids_by_size)
     zero_mv = np.zeros(nmv, dtype=np.float32)
-    fdim = k + nb + nmv + 1                                   # act ⊕ bw ⊕ move ⊕ size_is_13 indicator
+    # game-phase raw components [moves_before_position, main_line_len] (shared source with the
+    # secondary-axis work — utils.rating_features.load_joint_game_phase). Metric-neutral on the
+    # held-out suite (paired A/B 2026-07-13: logloss 0.4964->0.4969, survey-rho within jitter) but
+    # included by FEATURE-PARITY POLICY: the rating model and the secondary-axis models train from
+    # the same data sources. Appended after move, before the size indicator (dropout ranges valid);
+    # no dedicated dropout (2 smooth columns cannot fingerprint problems).
+    ph, nph = load_joint_game_phase(SIZES, tids_by_size)
+    zero_ph = np.zeros(nph, dtype=np.float32)
+    fdim = k + nb + nmv + nph + 1                             # act ⊕ bw ⊕ move ⊕ phase ⊕ size_is_13
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
-        feat[i] = np.concatenate([act[key], bw[key], mv.get(key, zero_mv),
+        feat[i] = np.concatenate([act[key], bw[key], mv.get(key, zero_mv), ph.get(key, zero_ph),
                                   [1.0 if key[0] == 13 else 0.0]])
     n_mv_miss = sum(1 for key in keys if key not in mv)
+    n_ph_miss = sum(1 for key in keys if key not in ph)
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
           f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
-          f"(act {k} + bot {nb} + move {nmv} ({n_mv_miss} imputed) + size_is_13)")
+          f"(act {k} + bot {nb} + move {nmv} ({n_mv_miss} imputed) + phase {nph} "
+          f"({n_ph_miss} imputed) + size_is_13)")
 
     # --- HUMAN first-time attempts, pooled, shared 2-month profiles (no size in profile id) ---
     df = load_first_time_attempts()
