@@ -154,7 +154,7 @@ def load_attempts(db_path):
     return rows
 
 
-def resolve_picked_embeddings(rows, emb, size_of, k):
+def resolve_picked_embeddings(rows, emb, size_of, k, axes=None):
     """For every WRONG attempt, the picked-move embedding from the per-cell npz.
     Returns (dict (problem, move) -> vec, dict tid -> mean legal-cell embedding,
     drop counters). The cell mean is the null pick for the alignment test in
@@ -177,6 +177,8 @@ def resolve_picked_embeddings(rows, emb, size_of, k):
             embs = np.asarray(data["embeddings"], dtype=np.float32)
             xys = np.asarray(data["xys"])
         xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
+        if axes is not None:
+            embs = embs[:, axes]
         if embs.shape[0]:
             cell_mean[tid] = embs.mean(axis=0)
         for move in moves:
@@ -259,6 +261,11 @@ def main():
                     help="run the temperature-sweep pool at every Nth eval attempt")
     ap.add_argument("--temperatures", default="0,0.25,0.5,1,2",
                     help="comma-separated T values for the selection sweep")
+    ap.add_argument("--top-axes", type=int, default=0,
+                    help="restrict the model to the N axes with the largest "
+                         "between-user variance (smallest weakness_axis_lambda); "
+                         "0 = all axes. Tests whether a low-K model estimates "
+                         "fast enough to gain forward power.")
     ap.add_argument("--json", help="write full per-user results to this JSON file")
     args = ap.parse_args()
 
@@ -269,9 +276,19 @@ def main():
     assert len(lam_axis) == K, f"axis lambda K mismatch ({len(lam_axis)} vs {K})"
     print(f"corpus: {len(emb)} problems with embeddings, K={K}")
 
+    axes = None
+    if args.top_axes and args.top_axes < K:
+        axes = np.sort(np.argsort(lam_axis)[:args.top_axes])
+        tau = np.sqrt(2.0 / lam_axis[axes])
+        print(f"top-{args.top_axes} axes by between-user variance: {list(axes)} "
+              f"(tau {', '.join(f'{t:.3f}' for t in tau)})")
+        emb = {i: v[axes] for i, v in emb.items()}
+        lam_axis = lam_axis[axes]
+        K = args.top_axes
+
     rows = load_attempts(args.db)
     print(f"reports: {len(rows)} novel move-carrying rows")
-    picked, cell_mean, dropped = resolve_picked_embeddings(rows, emb, size_of, K)
+    picked, cell_mean, dropped = resolve_picked_embeddings(rows, emb, size_of, K, axes)
     print(f"picked-move embeddings resolved: {len(picked)} distinct (problem, move); "
           f"dropped: {dropped['pass']} pass, {dropped['no_cell']} unmapped cell, "
           f"{dropped['no_npz']} missing npz")
