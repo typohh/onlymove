@@ -65,17 +65,14 @@ from auxiliary.eval_score_gap_axis import (  # noqa: E402
 # the same module pipeline.train_rating loads its feature blocks from, so the
 # rating trainer and this prototype stay in sync by construction.
 from utils.rating_features import (  # noqa: E402
-    CACHE_DIR, load_game_phase, load_tightness_gaps, phase_ratio_z, zscore_neglog,
+    CACHE_DIR, load_backend_problem_params, load_game_phase, load_tightness_gaps,
+    phase_ratio_z, zscore_neglog,
 )
-
-PARAMS_BIN = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "problem_params.bin")
-
 
 # ------------------------------------------------------------------ features
 def build_problem_features():
     """tid -> feature vector (z-scored later); plus tid -> rank and the 3 scalars."""
     import csv
-    import struct
 
     emb = {}
     with open(os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")) as f:
@@ -102,11 +99,11 @@ def build_problem_features():
     f_ph = phase_ratio_z(phase)
 
     prank = load_ranks()
-    raw = open(PARAMS_BIN, "rb").read()
-    rsf = {}
-    for off in range(0, len(raw) - 15, 16):
-        pid = raw[off:off + 4].hex()
-        rsf[pid] = np.array(struct.unpack_from("<fff", raw, off + 4), dtype=np.float32)
+    # rating/slope/floor from the BACKEND ratings/ CSVs (the stage before
+    # package_for_pwa) — same values packaging copies, but fresh the moment
+    # pipeline.train_rating finishes and immune to a stale dist.
+    rsf = {t: np.array(v, dtype=np.float32)
+           for t, v in load_backend_problem_params().items()}
 
     feats, scalars, rank = {}, {}, {}
     for t in emb:

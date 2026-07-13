@@ -410,3 +410,50 @@ def load_joint_game_phase(sizes, tids_by_size):
     X = np.array(rows, dtype=np.float64)
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, 2
+
+
+# --------------------------------------------------------------------------------
+# Backend rating outputs (ratings/<size>/*.csv — the stage BEFORE package_for_pwa).
+# Model-development consumers (auxiliary.rating_dev.*, the axis batteries) read
+# THESE, not pwa/tsumegos/problem_params.bin: same values (packaging just copies),
+# but available the moment training finishes and immune to a stale/half-packaged
+# dist. Client-replica harnesses (leaderboard replay, eval_weakness_forward) keep
+# reading the shipped files on purpose — bit-fidelity to what clients see IS
+# their job.
+
+RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
+
+
+def load_backend_problem_params(sizes=(9, 13)):
+    """tid -> (rating, slope, floor) from ratings/<size>/tsumego_{ratings,quality,
+    floor}_final.csv. Fails loud on a missing file (run pipeline.train_rating)."""
+    out = {}
+    for size in sizes:
+        d = os.path.join(RATINGS_DIR, str(size))
+        frames = {}
+        for name, col in (("tsumego_ratings_final.csv", "rating"),
+                          ("tsumego_quality_final.csv", "quality"),
+                          ("tsumego_floor_final.csv", None)):
+            path = os.path.join(d, name)
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"{path} missing — run pipeline.train_rating first")
+            frames[name] = pd.read_csv(path)
+        r = frames["tsumego_ratings_final.csv"].set_index("tsumego_id")["rating"]
+        q = frames["tsumego_quality_final.csv"].set_index("tsumego_id")["quality"]
+        fdf = frames["tsumego_floor_final.csv"].set_index("tsumego_id")
+        f = fdf[fdf.columns[0]]
+        for tid in r.index:
+            if tid in q.index and tid in f.index:
+                out[str(tid)] = (float(r[tid]), float(q[tid]), float(f[tid]))
+    return out
+
+
+def load_backend_rank_curve():
+    """The backend rating->rank curve (ratings/rating_to_rank.json, one shared
+    curve written to both size keys by pipeline.map_rating_to_rank)."""
+    import json as _json
+    path = os.path.join(RATINGS_DIR, "rating_to_rank.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} missing — run pipeline.map_rating_to_rank first")
+    m = _json.load(open(path))
+    return m["9"] if "9" in m else next(iter(m.values()))

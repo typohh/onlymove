@@ -48,7 +48,6 @@ import argparse
 import json
 import os
 import sqlite3
-import struct
 import sys
 from collections import defaultdict
 
@@ -60,8 +59,6 @@ if PROJECT_ROOT not in sys.path:
 
 DB_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
-PARAMS_BIN = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "problem_params.bin")
-CURVE_JSON = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json")
 
 WINDOW = 500
 EVAL_BLOCK = 50
@@ -73,6 +70,7 @@ RANK_NORM = 29.0
 # data-source home shared with pipeline.train_rating and auxiliary.rating_dev.*)
 # — this script keeps thin aliases so its CLI and importers are unchanged.
 from utils.rating_features import (  # noqa: E402
+    load_backend_problem_params, load_backend_rank_curve,
     load_game_phase, load_tightness_gaps, zscore_neglog,
 )
 
@@ -80,15 +78,15 @@ load_feature = load_tightness_gaps
 
 
 def load_ranks():
-    raw = open(PARAMS_BIN, "rb").read()
-    curve = json.load(open(CURVE_JSON))["9"]
+    """tid -> normalized problemRank from the BACKEND rating outputs (ratings/
+    CSVs + ratings/rating_to_rank.json — the stage before package_for_pwa), so
+    the axis batteries and the residual-axes trainer always see the freshly
+    trained ratings, never a stale/half-packaged dist. (Client-replica
+    harnesses read pwa/tsumegos on purpose; this is model-development code.)"""
+    params = load_backend_problem_params()
+    curve = load_backend_rank_curve()
     xs = np.array(curve["ratings"]); ys = np.array(curve["rank_indices"])
-    prank = {}
-    for off in range(0, len(raw) - 15, 16):
-        pid = raw[off:off + 4].hex()
-        r, = struct.unpack_from("<f", raw, off + 4)
-        prank[pid] = float(np.interp(r, xs, ys)) / RANK_NORM
-    return prank
+    return {t: float(np.interp(v[0], xs, ys)) / RANK_NORM for t, v in params.items()}
 
 
 def irls(X, y, ridge=1e-6, w0=None):
