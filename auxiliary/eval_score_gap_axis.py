@@ -47,10 +47,12 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 
@@ -80,6 +82,87 @@ def load_feature(kind):
         for t, v in zip(tids, g):
             gap[str(t)] = float(v)
     return gap
+
+
+CMT_RE = re.compile(rb"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
+
+
+def _game_phase_one(path):
+    """(n_setup, prefix_moves, main_len) for one tsumego SGF.
+
+    prefix = the linear move chain from root to the branch point (the game that
+    led to the contested position); main_len = non-pass moves on the principal
+    line (first-child chain) of the CORRECT first move — the child with the best
+    winrate comment, score breaking ties (same choice as the PWA's
+    findBestMoveFromChildren / cache_move_features slot 0). The principal line
+    terminates in passes by construction.
+    """
+    import sgfmill.sgf
+    with open(path, "rb") as f:
+        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
+    root = game.get_root()
+    n_setup = sum(len(root.get(p)) for p in ("AB", "AW") if root.has_property(p))
+    node = root
+    prefix = 0
+    while len(node) == 1:
+        if node.has_property("B") or node.has_property("W"):
+            prefix += 1
+        node = node[0]
+    if node is not root and (node.has_property("B") or node.has_property("W")):
+        prefix += 1                     # the branch node itself carries a move
+    # correct first move among the children
+    best, best_key = None, None
+    for child in node:
+        if not (child.has_property("B") or child.has_property("W")):
+            continue
+        cmt = child.get_raw("C") if child.has_property("C") else b""
+        m = CMT_RE.search(cmt or b"")
+        if not m:
+            continue
+        key = (float(m.group(1)), float(m.group(2)))
+        if best_key is None or key > best_key:
+            best, best_key = child, key
+    main_len = 0
+    cur = best
+    while cur is not None:
+        _color, mv = cur.get_raw_move() if (cur.has_property("B") or cur.has_property("W")) else (None, None)
+        if mv is not None and mv != b"" and mv != b"tt":
+            main_len += 1
+        cur = cur[0] if len(cur) else None
+    return n_setup, prefix, main_len
+
+
+def _game_phase_chunk(paths):
+    out = {}
+    for p in paths:
+        tid = os.path.basename(p)[:-4]
+        try:
+            out[tid] = _game_phase_one(p)
+        except Exception:
+            out[tid] = None
+    return out
+
+
+def load_game_phase(rebuild=False):
+    """tid -> (n_setup, prefix, main_len), cached per size in _signal_cache."""
+    res = {}
+    for size in (9, 13):
+        cache = os.path.join(CACHE_DIR, f"game_phase_{size}.json")
+        if os.path.exists(cache) and not rebuild:
+            res.update({t: (*v, size) for t, v in json.load(open(cache)).items()})
+            continue
+        sgf_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        paths = [os.path.join(sgf_dir, n) for n in os.listdir(sgf_dir) if n.endswith(".sgf")]
+        print(f"parsing {len(paths)} SGFs for size {size} (cached to {cache}) ...")
+        got = {}
+        with ProcessPoolExecutor() as ex:
+            futs = [ex.submit(_game_phase_chunk, paths[i:i + 500]) for i in range(0, len(paths), 500)]
+            for fu in as_completed(futs):
+                got.update(fu.result())
+        got = {t: v for t, v in got.items() if v is not None}
+        json.dump(got, open(cache, "w"))
+        res.update({t: (*v, size) for t, v in got.items()})
+    return res
 
 
 def load_ranks():
@@ -214,7 +297,9 @@ def run_joint(min_attempts):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--feature", choices=("score_gap", "wr_gap", "joint"), default="score_gap")
+    ap.add_argument("--feature", choices=("score_gap", "wr_gap", "joint", "game_phase"),
+                    default="score_gap")
+    ap.add_argument("--rebuild-phase-cache", action="store_true")
     ap.add_argument("--min-attempts", type=int, default=400,
                     help="split-half needs this many usable attempts (default 400)")
     args = ap.parse_args()
@@ -223,8 +308,27 @@ def main():
         run_joint(args.min_attempts)
         return
 
-    gap_raw = load_feature(args.feature)
     prank = load_ranks()
+    if args.feature == "game_phase":
+        # total game length at resolution = setup stones + prefix moves + main
+        # line; z-scored WITHIN each board size (raw counts aren't comparable
+        # across 9x9/13x13), positive = later in the game.
+        phase = load_game_phase(args.rebuild_phase_cache)
+        totals = {t: v[0] + v[1] + v[2] for t, v in phase.items()}
+        fz = {}
+        for size in (9, 13):
+            ids = [t for t, v in phase.items() if v[3] == size]
+            vals = np.array([totals[t] for t in ids])
+            mu, sd = vals.mean(), vals.std()
+            fz.update({t: (totals[t] - mu) / sd for t in ids})
+        gap_raw = totals
+        comp = np.array([phase[t][:3] for t in phase])
+        print("game_phase components (setup, prefix, main) means: "
+              f"{comp.mean(axis=0).round(1)}; total quantiles "
+              f"{np.percentile(list(totals.values()), [5, 25, 50, 75, 95]).round(0)}")
+        f_label = "f > 0 = later in the game"
+    else:
+        gap_raw = load_feature(args.feature)
 
     con = sqlite3.connect(DB_PATH)
     rows = con.execute(
@@ -236,18 +340,19 @@ def main():
     ).fetchall()
     con.close()
 
-    # pooled z of -log1p(gap) (clip tiny negatives: solution picked by winrate,
-    # so a rare negative score gap is real but off-hypothesis; fold to 0)
-    vals = np.array([-np.log1p(max(v, 0.0)) for v in gap_raw.values()])
-    mu, sd = vals.mean(), vals.std()
-    fz = {t: (-np.log1p(max(v, 0.0)) - mu) / sd for t, v in gap_raw.items()}
-    g_arr = np.array(list(gap_raw.values()))
+    if args.feature != "game_phase":
+        # pooled z of -log1p(gap) (clip tiny negatives: solution picked by winrate,
+        # so a rare negative score gap is real but off-hypothesis; fold to 0)
+        vals = np.array([-np.log1p(max(v, 0.0)) for v in gap_raw.values()])
+        mu, sd = vals.mean(), vals.std()
+        fz = {t: (-np.log1p(max(v, 0.0)) - mu) / sd for t, v in gap_raw.items()}
+        f_label = "f > 0 = tight margin, counting matters"
+        g_arr = np.array(list(gap_raw.values()))
+        print(f"raw gap quantiles: {np.percentile(g_arr, [5, 25, 50, 75, 95]).round(2)}")
     print(f"feature = {args.feature}; corpus coverage {len(gap_raw)} problems")
-    print(f"raw gap quantiles: {np.percentile(g_arr, [5, 25, 50, 75, 95]).round(2)}")
     rk = np.array([prank[t] for t in gap_raw if t in prank])
     fv = np.array([fz[t] for t in gap_raw if t in prank])
-    print(f"corr(f, problemRank) = {np.corrcoef(fv, rk)[0, 1]:+.3f}  "
-          f"(f > 0 = tight margin, counting matters)\n")
+    print(f"corr(f, problemRank) = {np.corrcoef(fv, rk)[0, 1]:+.3f}  ({f_label})\n")
 
     by_user = defaultdict(list)
     for user, problem, success, t_used in rows:
