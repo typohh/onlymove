@@ -297,7 +297,8 @@ def run_joint(min_attempts):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--feature", choices=("score_gap", "wr_gap", "joint", "game_phase"),
+    ap.add_argument("--feature",
+                    choices=("score_gap", "wr_gap", "joint", "game_phase", "phase_ratio"),
                     default="score_gap")
     ap.add_argument("--rebuild-phase-cache", action="store_true")
     ap.add_argument("--min-attempts", type=int, default=400,
@@ -309,7 +310,24 @@ def main():
         return
 
     prank = load_ranks()
-    if args.feature == "game_phase":
+    if args.feature == "phase_ratio":
+        # main/(prefix+main): the share of the game still ahead as continuation.
+        # THE combination that carries the person-signal the raw total cancels
+        # (prefix/main correlate -0.53 across the corpus while users load on
+        # them same-signed; see the game_phase finding). Keeps kappa ~ +0.17
+        # (z 5.6) beyond personalized wr/score tightness.
+        phase = load_game_phase(args.rebuild_phase_cache)
+        ratio = {t: v[2] / max(v[0] + v[1] + v[2], 1) for t, v in phase.items()}
+        fz = {}
+        for size in (9, 13):
+            ids = [t for t, v in phase.items() if v[3] == size]
+            vals = np.array([ratio[t] for t in ids])
+            fz.update({t: (ratio[t] - vals.mean()) / vals.std() for t in ids})
+        gap_raw = ratio
+        print("phase ratio main/(prefix+main) quantiles: "
+              f"{np.percentile(list(ratio.values()), [5, 25, 50, 75, 95]).round(2)}")
+        f_label = "f > 0 = continuation is a larger share (position arose earlier)"
+    elif args.feature == "game_phase":
         # total game length at resolution = setup stones + prefix moves + main
         # line; z-scored WITHIN each board size (raw counts aren't comparable
         # across 9x9/13x13), positive = later in the game.
@@ -340,7 +358,7 @@ def main():
     ).fetchall()
     con.close()
 
-    if args.feature != "game_phase":
+    if args.feature not in ("game_phase", "phase_ratio"):
         # pooled z of -log1p(gap) (clip tiny negatives: solution picked by winrate,
         # so a rare negative score gap is real but off-hypothesis; fold to 0)
         vals = np.array([-np.log1p(max(v, 0.0)) for v in gap_raw.values()])
