@@ -33,6 +33,7 @@ from utils.rating_features import (  # noqa: F401,E402  (build_profiles/load_joi
     build_profiles,
     load_joint_activations,
     load_joint_bot_winrate,
+    load_joint_game_phase,
     load_joint_move_features,
 )
 

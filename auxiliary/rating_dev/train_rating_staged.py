@@ -92,7 +92,7 @@ if PROJECT_ROOT not in sys.path:
 # promote load_joint_*/build_profiles + the activation-cache helpers into utils/.
 from auxiliary.rating_dev.model_comparison import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate,
-    load_joint_move_features,
+    load_joint_game_phase, load_joint_move_features,
 )
 from utils.rating_features import _cache_ids_path, load_first_time_attempts  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
@@ -628,6 +628,15 @@ def main():
                          "between the bot-winrate columns and the size indicator, so --act-dropout "
                          "/ --bw-dropout are unaffected. The scorable problem set is unchanged "
                          "(problems missing a move-feature row are mean-imputed).")
+    ap.add_argument("--phase-features", action=argparse.BooleanOptionalAction, default=False,
+                    help="Append the game-phase RAW-component block "
+                         "[moves_before_position, main_line_len] "
+                         "(utils.rating_features.load_joint_game_phase; z-scored, 2 cols) after "
+                         "the move block. Motivated by the residual-MIRT r-head finding "
+                         "(kappa +0.109 of predictable residual difficulty on a surface "
+                         "including these; auxiliary.rating_dev.train_residual_axes). Not in the "
+                         "production config; no dedicated dropout (2 smooth columns cannot "
+                         "fingerprint problems).")
     ap.add_argument("--diff-hidden", type=int, nargs="*", default=[128, 64])
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--act-dropout", type=float, default=0.0,
@@ -1099,18 +1108,28 @@ def main():
     # a problem missing a row is mean-imputed (zero after the pooled z-score).
     mv, nmv = (load_joint_move_features(SIZES, tids_by_size) if use_mv else ({}, 0))
     zero_mv = np.zeros(nmv, dtype=np.float32)
-    fdim = (k if use_act else 0) + (nb if use_bw else 0) + nmv + 1  # + size_is_13 board indicator
+    # --phase-features: appended AFTER move and BEFORE the size indicator, so every existing
+    # block-dropout column range (act :k, bw, move — all indexed from the front) stays valid.
+    use_ph = args.phase_features
+    ph, nph = (load_joint_game_phase(SIZES, tids_by_size) if use_ph else ({}, 0))
+    zero_ph = np.zeros(nph, dtype=np.float32)
+    fdim = (k if use_act else 0) + (nb if use_bw else 0) + nmv + nph + 1  # + size_is_13 indicator
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
         blocks = ([act[key]] if use_act else []) + ([bw[key]] if use_bw else [])
         if use_mv:
             blocks.append(mv.get(key, zero_mv))
+        if use_ph:
+            blocks.append(ph.get((key[0], key[1]), zero_ph))
         feat[i] = np.concatenate(blocks + [[1.0 if key[0] == 13 else 0.0]])
     n_mv_miss = sum(1 for key in keys if key not in mv) if use_mv else 0
+    n_ph_miss = sum(1 for key in keys if key not in ph) if use_ph else 0
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
           f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
-          f"[{args.features}{'+move' if use_mv else ''}] (act {k if use_act else 0} + bot "
-          f"{nb if use_bw else 0}{f' + move {nmv} ({n_mv_miss} imputed)' if use_mv else ''} "
+          f"[{args.features}{'+move' if use_mv else ''}{'+phase' if use_ph else ''}] "
+          f"(act {k if use_act else 0} + bot "
+          f"{nb if use_bw else 0}{f' + move {nmv} ({n_mv_miss} imputed)' if use_mv else ''}"
+          f"{f' + phase {nph} ({n_ph_miss} imputed)' if use_ph else ''} "
           f"+ size_is_13)")
 
     botf_t = None
