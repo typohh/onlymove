@@ -5,7 +5,8 @@
             "namespace": "android_app",
             "package_name": "net.onlymove.twa",
             "sha256_cert_fingerprints": [
-                "BA:F8:1C:85:9E:77:50:37:B0:4C:D6:96:0A:03:9B:F8:7C:6A:D6:79:B8:0A:29:BC:9B:B3:32:C8:02:26:12:71"
+                "BA:F8:1C:85:9E:77:50:37:B0:4C:D6:96:0A:03:9B:F8:7C:6A:D6:79:B8:0A:29:BC:9B:B3:32:C8:02:26:12:71",
+                "2B:EA:7A:B3:48:9A:EA:86:07:C3:32:80:2D:F1:A7:34:20:8F:12:30:C3:D1:3A:75:2D:B9:A8:76:0B:D6:F6:D5"
             ]
         }
     }
