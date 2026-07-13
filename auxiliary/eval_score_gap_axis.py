@@ -47,12 +47,10 @@ Usage:
 import argparse
 import json
 import os
-import re
 import sqlite3
 import struct
 import sys
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 
@@ -71,98 +69,14 @@ WARMUP = 120
 RANK_NORM = 29.0
 
 
-def load_feature(kind):
-    """tid -> raw gap value. score_gap: solution score - best-alt score (points,
-    side to move). wr_gap: solution logit-winprob - best-alt logit-winprob."""
-    gap = {}
-    for size in (9, 13):
-        d = np.load(os.path.join(CACHE_DIR, f"move_evals_{size}.npz"))
-        tids, feats = d["tids"], d["feats"]
-        g = feats[:, 1] - feats[:, 3] if kind == "score_gap" else feats[:, 0] - feats[:, 2]
-        for t, v in zip(tids, g):
-            gap[str(t)] = float(v)
-    return gap
+# The feature/cache implementations live in utils.rating_features (the production
+# data-source home shared with pipeline.train_rating and auxiliary.rating_dev.*)
+# — this script keeps thin aliases so its CLI and importers are unchanged.
+from utils.rating_features import (  # noqa: E402
+    load_game_phase, load_tightness_gaps, zscore_neglog,
+)
 
-
-CMT_RE = re.compile(rb"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
-
-
-def _game_phase_one(path):
-    """(n_setup, prefix_moves, main_len) for one tsumego SGF.
-
-    prefix = the linear move chain from root to the branch point (the game that
-    led to the contested position); main_len = non-pass moves on the principal
-    line (first-child chain) of the CORRECT first move — the child with the best
-    winrate comment, score breaking ties (same choice as the PWA's
-    findBestMoveFromChildren / cache_move_features slot 0). The principal line
-    terminates in passes by construction.
-    """
-    import sgfmill.sgf
-    with open(path, "rb") as f:
-        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
-    root = game.get_root()
-    n_setup = sum(len(root.get(p)) for p in ("AB", "AW") if root.has_property(p))
-    node = root
-    prefix = 0
-    while len(node) == 1:
-        if node.has_property("B") or node.has_property("W"):
-            prefix += 1
-        node = node[0]
-    if node is not root and (node.has_property("B") or node.has_property("W")):
-        prefix += 1                     # the branch node itself carries a move
-    # correct first move among the children
-    best, best_key = None, None
-    for child in node:
-        if not (child.has_property("B") or child.has_property("W")):
-            continue
-        cmt = child.get_raw("C") if child.has_property("C") else b""
-        m = CMT_RE.search(cmt or b"")
-        if not m:
-            continue
-        key = (float(m.group(1)), float(m.group(2)))
-        if best_key is None or key > best_key:
-            best, best_key = child, key
-    main_len = 0
-    cur = best
-    while cur is not None:
-        _color, mv = cur.get_raw_move() if (cur.has_property("B") or cur.has_property("W")) else (None, None)
-        if mv is not None and mv != b"" and mv != b"tt":
-            main_len += 1
-        cur = cur[0] if len(cur) else None
-    return n_setup, prefix, main_len
-
-
-def _game_phase_chunk(paths):
-    out = {}
-    for p in paths:
-        tid = os.path.basename(p)[:-4]
-        try:
-            out[tid] = _game_phase_one(p)
-        except Exception:
-            out[tid] = None
-    return out
-
-
-def load_game_phase(rebuild=False):
-    """tid -> (n_setup, prefix, main_len), cached per size in _signal_cache."""
-    res = {}
-    for size in (9, 13):
-        cache = os.path.join(CACHE_DIR, f"game_phase_{size}.json")
-        if os.path.exists(cache) and not rebuild:
-            res.update({t: (*v, size) for t, v in json.load(open(cache)).items()})
-            continue
-        sgf_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
-        paths = [os.path.join(sgf_dir, n) for n in os.listdir(sgf_dir) if n.endswith(".sgf")]
-        print(f"parsing {len(paths)} SGFs for size {size} (cached to {cache}) ...")
-        got = {}
-        with ProcessPoolExecutor() as ex:
-            futs = [ex.submit(_game_phase_chunk, paths[i:i + 500]) for i in range(0, len(paths), 500)]
-            for fu in as_completed(futs):
-                got.update(fu.result())
-        got = {t: v for t, v in got.items() if v is not None}
-        json.dump(got, open(cache, "w"))
-        res.update({t: (*v, size) for t, v in got.items()})
-    return res
+load_feature = load_tightness_gaps
 
 
 def load_ranks():
@@ -203,12 +117,6 @@ def irls(X, y, ridge=1e-6, w0=None):
     Wd = p * (1 - p) + 1e-9
     cov = np.linalg.inv(X.T @ (X * Wd[:, None]) + ridge * np.eye(X.shape[1]))
     return w, np.sqrt(np.diag(cov))
-
-
-def zscore_neglog(gap):
-    v = np.array([-np.log1p(max(x, 0.0)) for x in gap.values()])
-    mu, sd = v.mean(), v.std()
-    return {t: (-np.log1p(max(x, 0.0)) - mu) / sd for t, x in gap.items()}
 
 
 def run_joint(min_attempts):

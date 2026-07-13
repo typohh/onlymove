@@ -19,7 +19,9 @@ Model (attempt-level):
                                                             between-user variance)
                        + sum_k g_k(x_p) * v_u[k]          (secondary axes)
 
-    x_p = [joint-ICA emb (64), move evals (20), wr/sc tightness + phase ratio (3),
+    x_p = [joint-ICA emb (64), move evals (20), game-phase RAW components
+           (moves-before-position, main-line length — the net can build the
+           ratio itself; tightness gaps are already move-eval slots),
            rating, slope, floor, rank]  (z-scored)
     r, g: shared MLP trunk with dropout (the rating backbone's overfit lesson),
     v_u ~ N(0, I) prior, centered per axis (r carries any mean).
@@ -57,8 +59,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.eval_score_gap_axis import (  # noqa: E402
-    DB_PATH, CACHE_DIR, WINDOW, EVAL_BLOCK, WARMUP,
-    load_feature, load_game_phase, load_ranks, zscore_neglog, irls,
+    DB_PATH, WINDOW, EVAL_BLOCK, WARMUP, load_ranks, irls,
+)
+# Data sources come from the shared production home (utils.rating_features) —
+# the same module pipeline.train_rating loads its feature blocks from, so the
+# rating trainer and this prototype stay in sync by construction.
+from utils.rating_features import (  # noqa: E402
+    CACHE_DIR, load_game_phase, load_tightness_gaps, phase_ratio_z, zscore_neglog,
 )
 
 PARAMS_BIN = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "problem_params.bin")
@@ -84,15 +91,15 @@ def build_problem_features():
         for t, v in zip(d["tids"], d["feats"]):
             moves[str(t)] = v.astype(np.float32)
 
-    f_sc = zscore_neglog(load_feature("score_gap"))
-    f_wr = zscore_neglog(load_feature("wr_gap"))
+    # NETWORK inputs carry the RAW game-phase components [moves-before, main-line]
+    # (the net can construct main/(prefix+main) itself if useful); the derived
+    # scalar forms below feed only the EVAL baseline (conditional kappa vs the
+    # personalized hand-crafted axes). Tightness gaps are NOT separate network
+    # inputs — their components are already slots of the move-eval block.
+    f_sc = zscore_neglog(load_tightness_gaps("score_gap"))
+    f_wr = zscore_neglog(load_tightness_gaps("wr_gap"))
     phase = load_game_phase()
-    ratio = {t: v[2] / max(v[0] + v[1] + v[2], 1) for t, v in phase.items()}
-    f_ph = {}
-    for size in (9, 13):
-        ids = [t for t, v in phase.items() if v[3] == size]
-        vals = np.array([ratio[t] for t in ids])
-        f_ph.update({t: (ratio[t] - vals.mean()) / vals.std() for t in ids})
+    f_ph = phase_ratio_z(phase)
 
     prank = load_ranks()
     raw = open(PARAMS_BIN, "rb").read()
@@ -104,9 +111,10 @@ def build_problem_features():
     feats, scalars, rank = {}, {}, {}
     for t in emb:
         if t in moves and t in f_sc and t in f_wr and t in f_ph and t in prank and t in rsf:
+            ph = phase[t]
             feats[t] = np.concatenate([
                 emb[t], moves[t],
-                [f_wr[t], f_sc[t], f_ph[t]],
+                [ph[0] + ph[1], ph[2]],
                 rsf[t], [prank[t]],
             ]).astype(np.float32)
             scalars[t] = np.array([f_wr[t], f_sc[t], f_ph[t]], dtype=np.float32)

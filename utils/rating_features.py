@@ -248,3 +248,165 @@ def load_joint_move_features(sizes, tids_by_size):
     X = np.array(rows, dtype=np.float64)
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, ncol
+
+
+# --------------------------------------------------------------------------------
+# Scalar problem axes: tightness gaps (from the move-eval cache) and game phase
+# (from the SGFs, cached). These are the forward-validated per-user axes of
+# docs/scalar_weakness_axes.md AND candidate rating-model features (the residual-
+# MIRT prototype's r head found predictable residual difficulty on exactly this
+# surface — see auxiliary.rating_dev.train_residual_axes). Living here keeps the
+# production trainer (pipeline.train_rating), the experiment surface
+# (auxiliary.rating_dev.*) and the axis analyses (auxiliary.eval_score_gap_axis)
+# on ONE set of definitions: same caches, same transforms, in sync by construction.
+
+
+def _game_phase_cache_path(size):
+    return os.path.join(CACHE_DIR, f"game_phase_{size}.json")
+
+
+def _game_phase_one(path):
+    """(n_setup, prefix_moves, main_len) for one tsumego SGF.
+
+    prefix = the linear move chain from root to the branch point (the game that
+    led to the contested position); main_len = non-pass moves on the principal
+    line (first-child chain) of the CORRECT first move — the child with the best
+    winrate comment, score breaking ties (the same choice as the PWA's
+    findBestMoveFromChildren / cache_move_features slot 0). The principal line
+    terminates in passes by construction."""
+    import re as _re
+    import sgfmill.sgf
+    cmt_re = _re.compile(rb"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
+    with open(path, "rb") as f:
+        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
+    root = game.get_root()
+    n_setup = sum(len(root.get(p)) for p in ("AB", "AW") if root.has_property(p))
+    node = root
+    prefix = 0
+    while len(node) == 1:
+        if node.has_property("B") or node.has_property("W"):
+            prefix += 1
+        node = node[0]
+    if node is not root and (node.has_property("B") or node.has_property("W")):
+        prefix += 1                     # the branch node itself carries a move
+    best, best_key = None, None
+    for child in node:
+        if not (child.has_property("B") or child.has_property("W")):
+            continue
+        m = cmt_re.search((child.get_raw("C") if child.has_property("C") else b"") or b"")
+        if not m:
+            continue
+        key = (float(m.group(1)), float(m.group(2)))
+        if best_key is None or key > best_key:
+            best, best_key = child, key
+    main_len = 0
+    cur = best
+    while cur is not None:
+        if cur.has_property("B") or cur.has_property("W"):
+            _color, mv = cur.get_raw_move()
+            if mv is not None and mv != b"" and mv != b"tt":
+                main_len += 1
+        cur = cur[0] if len(cur) else None
+    return n_setup, prefix, main_len
+
+
+def _game_phase_chunk(paths):
+    out = {}
+    for p in paths:
+        tid = os.path.basename(p)[:-4]
+        try:
+            out[tid] = _game_phase_one(p)
+        except Exception:
+            out[tid] = None
+    return out
+
+
+def load_game_phase(rebuild=False, sizes=(9, 13)):
+    """tid -> (n_setup, prefix_moves, main_len, size); cached per size in the
+    signal cache (multiprocess SGF parse on first build)."""
+    import json as _json
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    res = {}
+    for size in sizes:
+        cache = _game_phase_cache_path(size)
+        if os.path.exists(cache) and not rebuild:
+            res.update({t: (*v, size) for t, v in _json.load(open(cache)).items()})
+            continue
+        sgf_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        paths = [os.path.join(sgf_dir, n) for n in os.listdir(sgf_dir) if n.endswith(".sgf")]
+        print(f"parsing {len(paths)} SGFs for size {size} (cached to {cache}) ...")
+        got = {}
+        with ProcessPoolExecutor() as ex:
+            futs = [ex.submit(_game_phase_chunk, paths[i:i + 500]) for i in range(0, len(paths), 500)]
+            for fu in as_completed(futs):
+                got.update(fu.result())
+        got = {t: v for t, v in got.items() if v is not None}
+        _json.dump(got, open(cache, "w"))
+        res.update({t: (*v, size) for t, v in got.items()})
+    return res
+
+
+def load_tightness_gaps(kind, sizes=(9, 13)):
+    """tid -> RAW best-vs-second-best gap from the move-eval cache.
+    kind='score_gap': solution score − best-alt score (points, side to move);
+    kind='wr_gap': solution logit-winprob − best-alt logit-winprob."""
+    gap = {}
+    for size in sizes:
+        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"move-feature cache {path} missing — run "
+                f"`./.venv/bin/python3 -m pipeline.cache_move_features` first")
+        d = np.load(path, allow_pickle=False)
+        feats = d["feats"]
+        g = feats[:, 1] - feats[:, 3] if kind == "score_gap" else feats[:, 0] - feats[:, 2]
+        for t, v in zip(d["tids"].tolist(), g):
+            gap[str(t)] = float(v)
+    return gap
+
+
+def zscore_neglog(gap):
+    """The tightness transform: z of −log1p(max(gap, 0)) — positive = TIGHT margin.
+    (Negative score gaps are real but off-hypothesis; folded to 0.)"""
+    v = np.array([-np.log1p(max(x, 0.0)) for x in gap.values()])
+    mu, sd = v.mean(), v.std()
+    return {t: (-np.log1p(max(x, 0.0)) - mu) / sd for t, x in gap.items()}
+
+
+def phase_ratio_z(phase=None):
+    """tid -> z (per board size) of main/(prefix+main) — the share of the game
+    still ahead as continuation; the game-phase form that carries the per-user
+    signal (the raw total self-cancels; see docs/scalar_weakness_axes.md)."""
+    if phase is None:
+        phase = load_game_phase()
+    ratio = {t: v[2] / max(v[0] + v[1] + v[2], 1) for t, v in phase.items()}
+    fz = {}
+    for size in (9, 13):
+        ids = [t for t, v in phase.items() if v[3] == size]
+        vals = np.array([ratio[t] for t in ids])
+        fz.update({t: (ratio[t] - vals.mean()) / vals.std() for t in ids})
+    return fz
+
+
+def load_joint_game_phase(sizes, tids_by_size):
+    """Game-phase RAW COMPONENTS as a trainer-convention feature block:
+    [moves_before_position (setup stones + prefix moves), main_line_len] per
+    problem, pooled column z-score like the other load_joint_* blocks. Returns
+    {(size, tid): vec(2)}, n_cols. Deliberately the raw components, NOT the
+    derived main/(prefix+main) ratio — a network can construct the ratio (or a
+    better combination) itself, and the raw sum/level also carries the board-
+    fullness information the ratio drops. (The score/winrate tightness gaps are
+    NOT a block here for the same reason: their components are already slots of
+    load_joint_move_features.) The derived scalar forms used by the linear axis
+    analyses live in zscore_neglog / phase_ratio_z below."""
+    phase = load_game_phase(sizes=sizes)
+    keys, rows = [], []
+    for size in sizes:
+        for t in tids_by_size[size]:
+            v = phase.get(t)
+            if v is not None:
+                keys.append((size, t))
+                rows.append([v[0] + v[1], v[2]])
+    X = np.array(rows, dtype=np.float64)
+    X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
+    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, 2
