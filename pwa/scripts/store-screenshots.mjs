@@ -17,6 +17,7 @@
 //   node scripts/store-screenshots.mjs seed          # one-time: adopt ACCOUNT into a fresh profile
 //   node scripts/store-screenshots.mjs shoot en      # phone set for one language
 //   node scripts/store-screenshots.mjs shootpc en    # desktop/PC set for one language
+//   node scripts/store-screenshots.mjs pcfeature     # text-free 16:9 board clip for the PC feature graphic
 //   node scripts/store-screenshots.mjs all           # seed + shoot + shootpc for all languages
 //
 // Output files per language (en/ko/ja/zh):
@@ -241,16 +242,37 @@ async function shootpc(lang) {
     console.log(`${lang}: shootpc done`);
 }
 
+// "Google Play Games on PC" feature graphic: 16:9, sides 720-7680 px, and it
+// must contain NO TEXT — so it is a board-only clip (no header, no buttons),
+// captured at dpr 3 for native sharpness. 720x405 CSS @ dpr 3 = 2160x1215.
+async function pcfeature() {
+    fs.mkdirSync(path.dirname(path.join(OUT, '..', 'pc-feature.png')), { recursive: true });
+    const page = await newPage({ width: 1280, height: 720, dpr: 3 });
+    await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+    await snoozePrompts(page);
+    await page.reload({ waitUntil: 'networkidle2' });
+    await sleep(8000);
+    await page.screenshot({
+        path: path.join(OUT, '..', 'pc-feature.png'),
+        clip: { x: 190, y: 157, width: 720, height: 405 },
+    });
+    await page.close();
+    console.log('pcfeature done (2160x1215)');
+}
+
 if (stage === 'seed') {
     await seed();
 } else if (stage === 'shoot') {
     await shoot(langArg || 'en');
 } else if (stage === 'shootpc') {
     await shootpc(langArg || 'en');
+} else if (stage === 'pcfeature') {
+    await pcfeature();
 } else if (stage === 'all') {
     await seed();
     for (const lang of LANGS) await shoot(lang);
     for (const lang of LANGS) await shootpc(lang);
+    await pcfeature();
 } else {
     console.error(`unknown stage: ${stage} (use seed | shoot <lang> | shootpc <lang> | all)`);
     process.exit(1);
