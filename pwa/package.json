@@ -10,7 +10,8 @@
     "deploy": "node deploy.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.19.2"
+    "esbuild": "^0.19.2",
+    "puppeteer-core": "^25.3.0"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^1.0.2",
