@@ -11,7 +11,7 @@ import { getTerm } from './i18n.js';
 import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank } from './rank-decomposition.js';
 import { getPopulationConstants } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
-import { rankScalarToLabel, rankIndexToLabel } from '../shared/rank-math.js';
+import { rankScalarToLabel, rankIndexToLabel, rankProgress } from '../shared/rank-math.js';
 import {
     svgEl, makeChartSvg, hGridLine, buildLegend,
     hideOverlappingYTicks, observeResize,
@@ -275,12 +275,14 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         // other servers). Hidden when there's too little data for the line.
         if (winPts.length >= 1) {
             const cur = winPts[winPts.length - 1].y;
-            const lower = Math.floor(cur);
+            // Shared decimal-rank → {label, percent, nextLabel} (round band,
+            // progress from the band's lower edge; GoR/EGF-consistent).
+            const { label, percent, nextLabel } = rankProgress(cur, displayLabel);
             readout.textContent = getTerm('statsSelectedServerRank', {
                 server: selectedServer,
-                cur: displayLabel(lower),
-                pct: Math.round((cur - lower) * 100),
-                next: displayLabel(lower + 1),
+                cur: label,
+                pct: percent,
+                next: nextLabel,
             });
             readout.hidden = false;
         } else {
@@ -311,16 +313,19 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         let yLow = bandMin - Y_PAD;
         if (yHigh <= yLow) yHigh = yLow + 1;
 
-        // Grid lines mark the rank CUTOFFS (integer boundaries); each label sits
-        // BETWEEN its two bounding lines (at r+0.5) so it reads as "this band is
-        // rank X". Overlapping labels get hidden after layout (see below).
+        // Grid lines mark the rank CUTOFFS (round-band boundaries, at the
+        // half-integers); each label sits AT the integer band center between two
+        // cutoffs, so it reads as "this band is rank X". Round bands (rank n spans
+        // [n-0.5, n+0.5)) match the GoR/EGF convention and getDescriptiveRank.
+        // Overlapping labels get hidden after layout (see below).
         const gridLines = [];
-        for (let r = Math.ceil(yLow); r <= Math.floor(yHigh); r++) gridLines.push(r);
+        for (let n = Math.floor(yLow); n <= Math.ceil(yHigh); n++) {
+            const cut = n + 0.5;
+            if (cut >= yLow && cut <= yHigh) gridLines.push(cut);
+        }
         const labelTicks = [];
-        for (let r = Math.floor(yLow); r <= Math.ceil(yHigh); r++) {
-            const mid = r + 0.5;
-            if (mid < yLow || mid > yHigh) continue;
-            labelTicks.push({ pos: mid, text: displayLabel(r) });
+        for (let n = Math.ceil(yLow); n <= Math.floor(yHigh); n++) {
+            labelTicks.push({ pos: n, text: displayLabel(n) });
         }
 
         const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;

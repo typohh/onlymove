@@ -16,7 +16,7 @@
 import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
-import { interpExtrap, rankScalarToLabel, rankIndexToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
+import { interpExtrap, rankScalarToLabel, rankIndexToLabel, RANK_INDEX_OFFSET, rankProgress } from '../shared/rank-math.js';
 import { rankIndexAfterRatingDelta } from './rank-decomposition.js';
 import { timeAdjustDeltaRating } from './population-constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
@@ -107,14 +107,14 @@ export async function showRankTranslation() {
             modal.appendChild(caption);
 
             // One system per row: bold name on the left, "<rank> (<progress>%)" on
-            // the right. `value` is the continuous rank; `band` is its floor;
-            // progress is the fractional position within the band; and `labelFor`
-            // turns an integer band into its label (index-space for OnlyMove,
-            // ladder-clamped server-scalar for the servers). The percentage is a
-            // smaller, muted span so the rank itself stays the focus.
+            // the right. rankProgress (shared/rank-math.js) is THE decimal-rank →
+            // {label, percent} decomposition — round band, progress from the band's
+            // lower edge, GoR/EGF-consistent. `labelFor` selects the label space
+            // (index for OnlyMove, ladder-clamped server-scalar for the servers).
+            // The percentage is a smaller, muted span so the rank stays the focus.
             const grid = modalRankGrid();
             const addRow = (name, value, labelFor) => {
-                const band = Math.floor(value);
+                const { label: rankLabel, percent } = rankProgress(value, labelFor);
                 const label = document.createElement('div');
                 label.textContent = name;
                 label.className = 'modal-rank-label';
@@ -123,9 +123,9 @@ export async function showRankTranslation() {
                 // without this the value inherits center and narrower rows (e.g. a
                 // 1-digit percent) drift right, opening an uneven gap after the name.
                 val.style.textAlign = 'left';
-                val.textContent = labelFor(band) + ' ';
+                val.textContent = rankLabel + ' ';
                 const pct = document.createElement('span');
-                pct.textContent = `(${Math.round((value - band) * 100)}%)`;
+                pct.textContent = `(${percent}%)`;
                 pct.style.fontSize = '0.8em';
                 pct.style.opacity = '0.6';
                 val.appendChild(pct);
