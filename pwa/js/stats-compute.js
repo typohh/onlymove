@@ -9,7 +9,6 @@
 
 import { TOTAL_RANKS, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
-import { TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
 
 // Display bins in SECONDS over the server's fine-bucket histogram (the
@@ -139,54 +138,6 @@ export function computeUserCommunityBuckets(history, timeBins) {
     return out;
 }
 
-// A TIME-VARYING version of medianNovelSolveMinutes: the kernel-weighted median
-// (in minutes) of the SAME capped-novel timed series the population time-adjust
-// alpha was fit against, evaluated at any t. Smoothed at the skill kernel's
-// ~30-day scale so the correction tracks the slow skill line, not session noise.
-// Where a window has thin timed support the estimate is shrunk toward the
-// whole-history median (empirical Bayes in log-minute space) — so the adjusted
-// line stays CONTINUOUS, degrading smoothly to today's single-scalar correction
-// rather than breaking. NB the inclusion rule (non-repeat, >0, AFK-capped) must
-// match user_median_log10_minutes in fit_population_constants — the Time tab's
-// solving series is broader (repeats, no AFK cap), so we reuse the SMOOTHER idea
-// here, not that series. Returns null (no time adjustment possible) when the
-// whole history has fewer than TIME_ADJUST_MIN_TIMED timed attempts.
-const TIME_ADJUST_TAU_MS = 30 * 24 * 3600 * 1000;   // matches TAU_S_MS (skill kernel)
-const TIME_ADJUST_SHRINK_ESS = 8;                   // log-space shrink prior, in attempts
-export function makeMedianSolveMinutesAt(history) {
-    const pts = history
-        .filter(p => !p.isRepeat && Number.isFinite(p.timeTaken)
-            && p.timeTaken > 0 && p.timeTaken <= TIME_ADJUST_AFK_CAP_MS
-            && typeof p.date === 'number')
-        .map(p => ({ t: p.date, v: p.timeTaken }))
-        .sort((a, b) => a.t - b.t);
-    if (pts.length < TIME_ADJUST_MIN_TIMED) return null;
-    const ts = pts.map(p => p.t);
-    const sortedAll = pts.map(p => p.v).slice().sort((a, b) => a - b);
-    const gm = sortedAll.length % 2 ? sortedAll[sortedAll.length >> 1]
-        : (sortedAll[(sortedAll.length >> 1) - 1] + sortedAll[sortedAll.length >> 1]) / 2;
-    const globalLog = Math.log10(gm / 60000);
-
-    return (t) => {
-        let W = 0, sumW2 = 0;
-        const pairs = [];
-        for (let i = 0; i < pts.length; i++) {
-            const d = (t - ts[i]) / TIME_ADJUST_TAU_MS;
-            if (Math.abs(d) > 4) continue;
-            const w = gaussianWeight(d);
-            W += w; sumW2 += w * w;
-            pairs.push({ v: pts[i].v, w });
-        }
-        if (W <= 0 || pairs.length < 2) return Math.pow(10, globalLog);
-        const ess = (W * W) / sumW2;
-        pairs.sort((a, b) => a.v - b.v);
-        const localLog = Math.log10(weightedQuantile(pairs, W, 0.5) / 60000);
-        // Shrink the local median toward the global one by effective sample size.
-        const wl = ess / (ess + TIME_ADJUST_SHRINK_ESS);
-        return Math.pow(10, wl * localLog + (1 - wl) * globalLog);
-    };
-}
-
 // Kernel-weighted median line + a weighted-quantile spread band on a regular
 // t-grid (the Time chart's solving/review smoother, buildTimeUsageChart).
 // `pts` is [{t, v}] ascending by t; the grid spans [t0, t0 + tSpan] at
@@ -194,18 +145,12 @@ export function makeMedianSolveMinutesAt(history) {
 // {t, mid, lo, hi}, with null at grid points with too little nearby data
 // (those break the line), or null outright when the series is too short.
 //
-// This shares the gaussian-kernel + effective-sample-size + weightedQuantile
-// shape with makeMedianSolveMinutesAt above, but the two DELIBERATELY differ
-// and are kept as separate functions rather than one parameterized smoother:
-//   - inclusion: the chart's series is broader (repeats included, no AFK cap),
-//     while the time-adjust smoother mirrors fit_population_constants'
-//     capped-novel rule;
-//   - window: ±3.5·bw via binary search on a caller-chosen (span-relative)
-//     bandwidth, vs the fixed 30-day tau truncated at ±4;
-//   - thin data: the ESS gate yields a GAP (null grid point), vs an
-//     empirical-Bayes shrink toward the whole-history median (always a value);
-//   - output: three raw quantiles (25/50/75%) in value space, vs a single
-//     log-space-shrunk median scalar.
+// The chart's series is broad (repeats included, no AFK cap); the window is
+// ±3.5·bw via binary search on a caller-chosen (span-relative) bandwidth; thin
+// data yields a GAP (null grid point) via the ESS gate; the output is three raw
+// quantiles (25/50/75%) in value space. (The rank-tab time-adjust median is a
+// different, positional-window computation — windowMedianSolveMinutesSeries in
+// rank-decomposition.js — matched to the rank fit, not this chart smoother.)
 export function kernelQuantileGrid(pts, { t0, tSpan, bw, gridPoints, essMin }) {
     if (pts.length < 4) return null;
     const ts = pts.map(p => p.t);

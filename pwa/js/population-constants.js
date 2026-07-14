@@ -14,6 +14,7 @@
 
 import { applyRetentionConstants, setTimeBias } from './model.js';
 import { weightedMedianOverWindow } from '../shared/rank-window.js';
+import { flattenAttempts } from './rank-decomposition.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/population_constants.json).
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
@@ -53,23 +54,20 @@ export function loadPopulationConstants() {
 // solve time — only its variance (fewer effective samples) and recency, so the shipped
 // alpha/center (fit against median solve time) still apply as-is; no refit needed.
 // Dropping the upper/AFK cap likewise leaves the median value unchanged (a median is
-// robust to idle-tab outliers). TIME_ADJUST_AFK_CAP_MS is no longer read here, but
-// stats-compute's makeMedianSolveMinutesAt (the Time-chart smoother) still applies
-// it, so the two median-solve-time computations deliberately diverge on AFK handling.
-export const TIME_ADJUST_AFK_CAP_MS = 180000;
+// robust to idle-tab outliers), so there is no AFK cap on ANY rank time-adjust
+// (front page, modal, Rank tab, leaderboard) — one weighting everywhere.
 export const TIME_ADJUST_MIN_TIMED = 20;
 
-// Median solving time in minutes: a positional-weighted median over the SAME last-500
-// novel window (and the same (M − age)/M weights) as the front-page rank fit — see
-// shared/rank-window.js. Filter + sort to match rank-decomposition.js flattenAttempts
-// (first-time only, date-ascending) so the weights line up; the shared helper drops
-// non-positive / non-finite times (no upper/AFK cap) and returns null below
-// TIME_ADJUST_MIN_TIMED valid times.
+// Median solving time in minutes: a positional-weighted median over the SAME
+// flattened sample the rank fit uses — flattenAttempts (first-time only, curve-
+// mapped, date-ascending). Extracting the solve times from flattenAttempts' OWN
+// output (not an independent novel filter) is load-bearing: flattenAttempts drops
+// novel attempts that can't be rating-mapped, so pulling times from `.src` keeps the
+// (M − age)/M positional weights aligned 1:1 with windowMLE — the time median and the
+// rank it docks are over the exact same weighted sample, never a mismatch. The shared
+// helper drops non-positive / non-finite times and returns null below MIN_TIMED valid.
 export function medianNovelSolveMinutes(history) {
-    const times = history
-        .filter(p => typeof p.date === 'number' && !p.isRepeat && !p.linked)
-        .sort((a, b) => a.date - b.date)
-        .map(p => p.timeTaken);
+    const times = flattenAttempts(history).map(f => f.src?.timeTaken);
     const medMs = weightedMedianOverWindow(times, TIME_ADJUST_MIN_TIMED);
     return medMs === null ? null : medMs / 60000;
 }

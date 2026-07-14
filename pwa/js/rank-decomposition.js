@@ -53,7 +53,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -375,7 +375,7 @@ function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
 // LOGIT_PER_RATING constant. `problemRating` holds the raw rating (legacy entries
 // may carry a separate `problemRawRating`). Attempts whose size curve is missing
 // fall back to the stored problemRank with a representative slope, or are dropped.
-function flattenAttempts(answerHistory) {
+export function flattenAttempts(answerHistory) {
     return answerHistory
         .filter(a => typeof a.date === 'number' && !a.isRepeat && !a.linked)
         .map(a => {
@@ -500,6 +500,30 @@ export function windowRankSeries(decomp, times) {
         }
         const { R } = windowMLE(prefix, r);
         if (Number.isFinite(R)) { out[i] = R; ref = R; }
+    }
+    return out;
+}
+
+// The median solve time (MINUTES) as it evolved across history — the exact time
+// counterpart of windowRankSeries. At each of `times` it takes the SAME trailing
+// WIN_CAP window of decomp.attempts and runs weightedMedianOverWindow with the SAME
+// (M − age)/M positional weights the rank fit uses, so the Rank-tab time-dock is over
+// the identical weighted sample as the rank line it docks — never a mismatch. Solve
+// times come from each flattened attempt's `.src` (the original answer). `times` MUST
+// be ascending; the return aligns 1:1 with `times` (null where < minTimed valid times
+// in the window). `minTimed` is passed in (population-constants' TIME_ADJUST_MIN_TIMED)
+// to keep this module free of a population-constants import.
+export function windowMedianSolveMinutesSeries(decomp, times, minTimed) {
+    const out = new Array(times.length).fill(null);
+    const attempts = decomp && decomp.attempts;
+    if (!attempts || !attempts.length) return out;
+    let idx = 0;
+    for (let i = 0; i < times.length; i++) {
+        while (idx < attempts.length && attempts[idx].t <= times[i]) idx++;
+        if (idx === 0) continue;
+        const prefix = attempts.slice(Math.max(0, idx - WIN_CAP), idx);
+        const medMs = weightedMedianOverWindow(prefix.map(a => a.src?.timeTaken), minTimed);
+        if (medMs !== null) out[i] = medMs / 60000;
     }
     return out;
 }

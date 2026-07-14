@@ -8,8 +8,8 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank } from './rank-decomposition.js';
-import { getPopulationConstants } from './population-constants.js';
+import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
+import { getPopulationConstants, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel, rankIndexToLabel, rankProgress } from '../shared/rank-math.js';
 import {
@@ -17,13 +17,13 @@ import {
     hideOverlappingYTicks, observeResize,
     makeChartFrame, buildYAxis, buildPlotRow, chartViewBoxHeight,
 } from './chart-svg.js';
-import { makeMedianSolveMinutesAt } from './stats-compute.js';
 import { getLogitPerRank, MODEL_INDICES } from './model.js';
 
 // medianNovelSolveMinutes + the TIME_ADJUST_* feature constants + the scalar
-// timeAdjustDeltaRating live in population-constants.js (one definition, shared
-// with the rank-translation modal); the time-varying makeMedianSolveMinutesAt
-// smoother lives in stats-compute.js. Both are imported above.
+// timeAdjustDeltaRating live in population-constants.js (one definition, shared with
+// the rank-translation modal). The Rank-tab chart's per-time median uses
+// windowMedianSolveMinutesSeries (rank-decomposition.js) — the exact time counterpart
+// of windowRankSeries, over the same positional window — so the dock matches the rank.
 
 // The rank decomposition text (long-term skill + drift + session swing) and
 // the relative 13x13 readout, built as part of the Rank tab pane
@@ -129,23 +129,28 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     }
 
     // Per-grid time-adjustment shift (RATING units), used only for the timed
-    // (non-onlymove) server views: the skill line is corrected for the user's
-    // typical solving time AT THAT POINT IN TIME — medMin varies over history, so
-    // the correction is temporal — since practice here is untimed while server
-    // ranks reflect timed play. alpha + center are population constants (produced by
-    // map_rating_to_rank, read through fit_population_constants); the dock is the same
-    // single global log-time slope around `center` the modal uses, only with a temporal
-    // median. Where time data is thin the shift degrades smoothly to the whole-history
-    // correction (see makeMedianSolveMinutesAt). delta = 0 (constants or timed data
-    // unavailable) ⇒ the timed view becomes pure rank translation with no time correction.
+    // (non-onlymove) server views: the rank line is corrected for the user's typical
+    // solving time AT THAT POINT IN TIME (medMin varies over history, so the
+    // correction is temporal) — practice here is untimed while server ranks reflect
+    // timed play. The median at each grid time is windowMedianSolveMinutesSeries: the
+    // SAME trailing WIN_CAP window and (M − age)/M positional weights as
+    // windowRankSeries, over the SAME decomp.attempts — so the dock and the rank it
+    // docks share one weighted sample (no temporal-kernel-vs-count-window mismatch;
+    // this replaced the old makeMedianSolveMinutesAt Gaussian-in-time smoother). alpha
+    // + center are population constants (map_rating_to_rank via fit_population_constants).
+    // delta = 0 (constants or timed data unavailable) ⇒ the timed view is pure rank
+    // translation with no time correction.
     const ta = getPopulationConstants()?.time_adjust;
-    const medAt = makeMedianSolveMinutesAt(history);
     const haveTimeAdjust = !!(ta && Number.isFinite(ta.alpha_per_log10_min)
-        && Number.isFinite(ta.center_log10_min) && medAt);
-    for (const e of gridEvals) {
+        && Number.isFinite(ta.center_log10_min));
+    const medSeries = haveTimeAdjust
+        ? windowMedianSolveMinutesSeries(decomp, gridEvals.map(e => e.t), TIME_ADJUST_MIN_TIMED)
+        : null;
+    for (let i = 0; i < gridEvals.length; i++) {
+        const e = gridEvals[i];
         let d = 0;
-        if (haveTimeAdjust) {
-            const m = medAt(e.t);
+        if (medSeries) {
+            const m = medSeries[i];
             if (Number.isFinite(m) && m > 0) {
                 d = ta.alpha_per_log10_min * (Math.log10(m) - ta.center_log10_min);
             }
