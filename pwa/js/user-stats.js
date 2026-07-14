@@ -5,6 +5,7 @@ import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { TOTAL_RANKS, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { rankBand } from '../shared/rank-math.js';
 import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
@@ -172,10 +173,9 @@ function scheduleIdle(fn, timeout = 2000) {
 }
 
 const getRankInfo = (rating) => {
-    const rankValue = rating * TOTAL_RANKS;
-    const rankIndex = Math.floor(rankValue);
-    const progress = (rankValue - rankIndex) * 100;
-    return { rankIndex, progress };
+    // rankBand (round) so a rank-up/down fires exactly when the DISPLAYED label
+    // changes (getDescriptiveRank rounds); flooring would trip it half a band off.
+    return { rankIndex: rankBand(rating * TOTAL_RANKS) };
 }
 
 // Match (by problemId + creation date) the just-recorded answer entry and
