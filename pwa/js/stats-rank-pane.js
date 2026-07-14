@@ -8,7 +8,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries } from './rank-decomposition.js';
+import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank } from './rank-decomposition.js';
 import { getPopulationConstants } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel, rankIndexToLabel } from '../shared/rank-math.js';
@@ -32,6 +32,20 @@ import { getLogitPerRank, MODEL_INDICES } from './model.js';
 // state.statsResults (already computed by the time this runs).
 export function buildRankSummaryText(history, decomp) {
     let rankText = '';
+
+    // 95% CI on the front-page rank, from the window-MLE posterior standard error.
+    // `se` is already in internal-rank-index units (= stones = ranks; see
+    // shared/rank-window.js), so 1.96·se is directly "in ranks". Warm-start the
+    // refit at the current rank so it reproduces the front-page estimate. Sits
+    // first, right under the reactive current-rank readout (this line used to live
+    // in the front-page rank-translation modal). Omitted until there's usable
+    // history / a valid current rank.
+    const rankValue = (typeof state.userRank === 'number' && Number.isFinite(state.userRank))
+        ? state.userRank * TOTAL_RANKS : null;
+    const rankEst = rankValue !== null ? estimateWindowRank(history, rankValue) : null;
+    if (rankEst && Number.isFinite(rankEst.se)) {
+        rankText += getTerm('rankConfidenceFormat', { ci: (1.96 * rankEst.se).toFixed(2) }) + '\n';
+    }
 
     // Two-component rank decomposition (R = skill S + form M). Gives a
     // long-term-trend number and a session-to-session swing number that can't

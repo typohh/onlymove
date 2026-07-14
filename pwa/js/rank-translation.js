@@ -17,7 +17,7 @@ import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
 import { TOTAL_RANKS, APP_MODES } from './constants.js';
 import { interpExtrap, rankScalarToLabel, rankIndexToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
-import { rankIndexAfterRatingDelta, estimateWindowRank } from './rank-decomposition.js';
+import { rankIndexAfterRatingDelta } from './rank-decomposition.js';
 import { timeAdjustDeltaRating } from './population-constants.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
 // rank_map.json is inlined at build time (like rating_to_rank.json in
@@ -52,34 +52,21 @@ export const RANK_TRANSLATION_SERVERS = Object.keys(RANK_MAP || {});
 
 // internal-rank INDEX (~0..29, floor(rating·29) scale) → that server's CONTINUOUS
 // rank scalar (1k=0, 1d=1) via its rank_map coupling. Returns null if the server has
-// no usable curve. This is the scalar form of serverRanksFor (which returns rounded
-// labels) — the Rank chart needs the continuous value to place the skill line.
+// no usable curve. This is the CONTINUOUS translated value — the Rank chart needs it
+// to place the skill line, and the translation modal floors it to a band + progress.
 //
 // Always the HONEST translated value — there is no rank-ladder clamp here. A
 // hidden cap once lived in this function and silently pinned every above-9d value
 // to the 8d-9d border: harmless for a rank LABEL but wrong for the Rank chart,
 // which plots problem difficulties that extrapolate far past 9d and relies on its
 // own band-focused y-window to drop the out-of-range ones. The label-ceiling cap
-// now lives at the one place that builds labels (serverRanksFor → boundServerScalar).
+// now lives at the one place that builds labels (the modal row, via boundServerScalar).
 export function internalIndexToServerScalar(rankIndex, server) {
     if (!Number.isFinite(rankIndex)) return null;
     const ourScalar = rankIndex - RANK_INDEX_OFFSET;
     const c = RANK_MAP && RANK_MAP[server];
     if (!c || !Array.isArray(c.our) || !Array.isArray(c.server) || c.our.length < 2) return null;
     return interpExtrap(ourScalar, c.our, c.server);
-}
-
-// {server: label} translating the (already time-adjusted) CONTINUOUS internal
-// rank INDEX through each server's curve via internalIndexToServerScalar — so a
-// weak vs strong same-band player can land on different server ranks. EGF is one
-// of these couplings now, timed like the rest (no identity special-case).
-function serverRanksFor(adjRankIndex) {
-    const out = {};
-    for (const server of RANK_TRANSLATION_SERVERS) {
-        const s = internalIndexToServerScalar(adjRankIndex, server);
-        if (Number.isFinite(s)) out[server] = rankScalarToLabel(boundServerScalar(s));
-    }
-    return out;
 }
 
 export async function showRankTranslation() {
@@ -91,82 +78,75 @@ export async function showRankTranslation() {
 
     const history = getMergedAnswerHistory();
     const rankValue = rating * TOTAL_RANKS;       // continuous internal-rank index
-    const rankIndex = Math.floor(rankValue);      // own-rank band (for the header)
-    const key = rankIndexToLabel(rankIndex);
 
-    // 95% CI half-width on the displayed rank, from the window-MLE posterior
-    // standard error. `se` is already in internal-rank-index units (= stones =
-    // ranks; see shared/rank-window.js), so 1.96·se is directly "in ranks" — no
-    // /TOTAL_RANKS or logit conversion. Warm-start the refit at the current rank
-    // so it reproduces the front-page estimate. null until there's usable history
-    // (the CI line is then omitted).
-    const rankEst = estimateWindowRank(history, rankValue);
-    const ciHalfRanks = rankEst && Number.isFinite(rankEst.se) ? 1.96 * rankEst.se : null;
+    // The 95% CI on the rank now lives in the stats Rank tab (buildRankSummaryText
+    // in stats-rank-pane.js), not here.
 
-    // The header keeps the raw, untimed onlymove (consensus) rank; the server
-    // translations — EGF among them — are TIME-ADJUSTED: practice here is untimed
-    // while server ranks reflect timed play, so a slow solver's untimed rank
-    // overstates their timed strength. Same single-point correction the Rank-chart
-    // server views use (whole-history median solve time → rating delta → mapped via M).
+    // OnlyMove keeps the raw, untimed consensus rank; the server translations —
+    // EGF among them — are TIME-ADJUSTED: practice here is untimed while server
+    // ranks reflect timed play, so a slow solver's untimed rank overstates their
+    // timed strength. Same single-point correction the Rank-chart server views use
+    // (whole-history median solve time → rating delta → mapped via M).
     const deltaRating = timeAdjustDeltaRating(history);
     const adjusted = deltaRating !== null;
     const adjValue = adjusted ? rankIndexAfterRatingDelta(rankValue, deltaRating) : rankValue;
     const adjIndex = Number.isFinite(adjValue) ? adjValue : rankValue;
 
-    const servers = serverRanksFor(adjIndex);
-
     showModal({
         build: (modal, close) => {
-            // Our own rank as "<rank>, <progress>% towards <next rank>", shown
-            // above the other-server translation. Progress is the fractional
-            // position within the current rank band; the next rank is one step
-            // stronger (higher index).
-            const progress = document.createElement('div');
-            progress.style.textAlign = 'center';
-            progress.style.marginBottom = '1vmin';
-            progress.style.fontWeight = 'bold';
-            progress.textContent = getTerm('rankProgressFormat', {
-                rank: key,
-                percent: Math.round((rankValue - rankIndex) * 100),
-                nextRank: rankIndexToLabel(rankIndex + 1),
-            });
-            modal.appendChild(progress);
-
-            // Second line: the 95% CI on the rank, phrased as a continuation of the
-            // progress line above ("…, with a 95% confidence interval of ± x.xx
-            // ranks"). Omitted when the posterior SE isn't available yet.
-            if (ciHalfRanks !== null) {
-                const ci = document.createElement('div');
-                ci.style.textAlign = 'center';
-                ci.style.marginBottom = '1vmin';
-                ci.style.fontSize = '0.85em';
-                ci.style.opacity = '0.75';
-                ci.textContent = getTerm('rankConfidenceFormat', {
-                    ci: ciHalfRanks.toFixed(2),
-                });
-                modal.appendChild(ci);
-            }
-
             modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
 
-            if (servers && Object.keys(servers).length > 0) {
-                const grid = modalRankGrid();
-                for (const [server, rank] of Object.entries(servers)) {
-                    const label = document.createElement('div');
-                    label.textContent = server;
-                    label.className = 'modal-rank-label';
-                    const val = document.createElement('div');
-                    val.textContent = rank;
-                    grid.appendChild(label);
-                    grid.appendChild(val);
-                }
-                modal.appendChild(grid);
-            } else {
-                const empty = document.createElement('div');
-                empty.style.textAlign = 'center';
-                empty.textContent = getTerm('rankTranslationEmpty');
-                modal.appendChild(empty);
+            // Caption under the header explaining the parenthetical percentage on
+            // each row; small + muted so it reads as a note, not a heading.
+            const caption = document.createElement('div');
+            caption.textContent = getTerm('rankProgressCaption');
+            caption.style.textAlign = 'center';
+            caption.style.fontSize = '0.8em';
+            caption.style.opacity = '0.6';
+            caption.style.marginBottom = '1vmin';
+            modal.appendChild(caption);
+
+            // One system per row: bold name on the left, "<rank> (<progress>%)" on
+            // the right. `value` is the continuous rank; `band` is its floor;
+            // progress is the fractional position within the band; and `labelFor`
+            // turns an integer band into its label (index-space for OnlyMove,
+            // ladder-clamped server-scalar for the servers). The percentage is a
+            // smaller, muted span so the rank itself stays the focus.
+            const grid = modalRankGrid();
+            const addRow = (name, value, labelFor) => {
+                const band = Math.floor(value);
+                const label = document.createElement('div');
+                label.textContent = name;
+                label.className = 'modal-rank-label';
+                const val = document.createElement('div');
+                // Left-align: the grid sits inside a text-align:center modal, so
+                // without this the value inherits center and narrower rows (e.g. a
+                // 1-digit percent) drift right, opening an uneven gap after the name.
+                val.style.textAlign = 'left';
+                val.textContent = labelFor(band) + ' ';
+                const pct = document.createElement('span');
+                pct.textContent = `(${Math.round((value - band) * 100)}%)`;
+                pct.style.fontSize = '0.8em';
+                pct.style.opacity = '0.6';
+                val.appendChild(pct);
+                grid.appendChild(label);
+                grid.appendChild(val);
+            };
+
+            // OnlyMove is one ranking system among the servers, listed first. Its
+            // rank is the raw, untimed index scale, so labels come straight off the
+            // internal-index ladder (no clamp — see internalIndexToServerScalar).
+            addRow('OnlyMove', rankValue, rankIndexToLabel);
+
+            // Then each server: the time-adjusted rank translated through its
+            // coupling to a continuous server scalar, labels ladder-clamped.
+            const serverLabel = band => rankScalarToLabel(boundServerScalar(band));
+            for (const server of RANK_TRANSLATION_SERVERS) {
+                const s = internalIndexToServerScalar(adjIndex, server);
+                if (Number.isFinite(s)) addRow(server, s, serverLabel);
             }
+
+            modal.appendChild(grid);
 
             modal.appendChild(modalButtonRow([
                 modalButton(getTerm('rankTranslationClose'), close),

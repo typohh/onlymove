@@ -143,11 +143,10 @@ const localization = {
     rankSurveyNone: '无',
     rankSurveySubmit: '提交',
     rankSurveyDismiss: '稍后再说',
-    rankTranslationTitle: '你在其他平台的段级位',
-    rankTranslationEmpty: '暂无对应此棋力的平台估计。',
+    rankTranslationTitle: '你在各平台的段级位',
     rankTranslationClose: '关闭',
-    rankProgressFormat: '{rank}，升到 {nextRank} 进度 {percent}%',
-    rankConfidenceFormat: '95% 置信区间为 ± {ci} 子'
+    rankProgressCaption: '（升到下一段级位的进度）',
+    rankConfidenceFormat: '您的段位估计精度为 ± {ci} 子（95% 置信区间）。'
   },
   ja: {
     kyu: '級',
@@ -289,11 +288,10 @@ const localization = {
     rankSurveyNone: 'なし',
     rankSurveySubmit: '送信',
     rankSurveyDismiss: '後で',
-    rankTranslationTitle: '他サーバーでのあなたの段級位',
-    rankTranslationEmpty: 'この棋力に対応するサーバーの推定はまだありません。',
+    rankTranslationTitle: '各サーバーでのあなたの段級位',
     rankTranslationClose: '閉じる',
-    rankProgressFormat: '{rank}、{nextRank} への進捗 {percent}%',
-    rankConfidenceFormat: '95% 信頼区間 ± {ci} 子'
+    rankProgressCaption: '（次のランクへの進捗）',
+    rankConfidenceFormat: 'あなたのランクは ± {ci} 子の精度で推定されています（95% 信頼区間）。'
   },
   ko: {
     kyu: '급',
@@ -435,11 +433,10 @@ const localization = {
     rankSurveyNone: '없음',
     rankSurveySubmit: '제출',
     rankSurveyDismiss: '나중에',
-    rankTranslationTitle: '다른 서버에서의 내 급/단',
-    rankTranslationEmpty: '아직 이 실력에 해당하는 서버 추정치가 없습니다.',
+    rankTranslationTitle: '각 서버에서의 내 급/단',
     rankTranslationClose: '닫기',
-    rankProgressFormat: '{rank}, {nextRank}까지 {percent}% 진행',
-    rankConfidenceFormat: '95% 신뢰구간 ± {ci} 점'
+    rankProgressCaption: '(다음 급/단까지의 진행도)',
+    rankConfidenceFormat: '당신의 랭크는 ± {ci} 점 이내로 추정됩니다 (95% 신뢰구간).'
   },
   en: {
     kyu: 'kyu',
@@ -594,11 +591,10 @@ const localization = {
     rankSurveyNone: 'None',
     rankSurveySubmit: 'Submit',
     rankSurveyDismiss: 'Not now',
-    rankTranslationTitle: 'Your rank on other servers',
-    rankTranslationEmpty: 'No server estimate for this rank yet.',
+    rankTranslationTitle: 'Your rank on each server',
     rankTranslationClose: 'Close',
-    rankProgressFormat: '{rank}, {percent}% progress towards {nextRank}',
-    rankConfidenceFormat: 'with a 95% confidence interval of ± {ci} ranks'
+    rankProgressCaption: '(progress towards next rank)',
+    rankConfidenceFormat: 'Your rank is estimated to within ± {ci} ranks (95% confidence).'
   }
 };
 
