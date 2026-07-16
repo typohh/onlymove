@@ -85,7 +85,6 @@ export function maybeShowRatingsCorrectionNotice() {
         0,                       // duration ignored once buttonText is set
         null,                    // no post-dismiss callback
         GREY,
-        null,                    // no stats block — plain message + button
         getTerm('ratingsCorrectedButton'),
     );
 }

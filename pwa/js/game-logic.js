@@ -2,9 +2,9 @@
 
 import * as Sentry from "@sentry/browser";
 
-import { state, setAcceptClicks, setAppMode } from './state.js';
+import { state, setAcceptClicks, setAppMode, setReviewStartTime } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
-import { displayOverlay, fadeOverlay } from './overlays.js';
+import { fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
@@ -188,18 +188,25 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
         }
     }
 
-    await new Promise((resolve) => displayOverlay(message, duration, resolve, undefined, stats, buttonText));
+    // Show the red result overlay and, under its cover, transition into review:
+    // completeCurrentProblem moves the failed problem into the previous slot,
+    // clears currentProblem (so review-exit advances to a fresh selection and a
+    // mid-review reload can't resume the already-answered problem) and
+    // reselects the challenge — the next-problem PREFETCH — then
+    // enterAnalysisMode paints the review board. The overlay holds until that
+    // work is done, so it never lifts onto a stale board; the NEXT problem is
+    // deliberately NOT loaded here — redisplayCurrentProblem selects it when
+    // the user leaves review (behind a grey loading fade if selection is slow).
+    await fadeOverlay(duration, async () => {
+        await completeCurrentProblem();
+        await enterAnalysisMode();
+    }, stats, message, { background: 'rgba(139, 0, 0, 0.9)', text: 'white' }, { buttonText });
 
-    // Move the failed problem into the previous slot (reselecting the challenge
-    // if it was one), then load the NEXT problem underneath as currentProblem.
-    await completeCurrentProblem();
-    await advanceToNextProblem();
-    // advanceToNextProblem re-enabled clicks while appMode is still SOLVING; keep
-    // them disabled across the SOLVING→ANALYZING flip so a tap landing in that
-    // window can't be mis-routed as a solving-mode action. enterAnalysisMode
-    // re-enables once it has switched to ANALYZING and paints the previous problem.
-    setAcceptClicks(false);
-    await enterAnalysisMode();
+    // The review clock starts when the user can actually SEE the review board:
+    // enterAnalysisMode stamped reviewStartTime at the under-cover paint, which
+    // would bill the overlay hold (indefinite on the button-gated rushing
+    // nudge) as review time.
+    setReviewStartTime(Date.now());
 }
 
 export function handleBoardClick(x, y) {

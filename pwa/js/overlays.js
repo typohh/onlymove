@@ -85,7 +85,10 @@ function createOverlayContent(stats, message, textColor) {
     return container;
 }
 
-export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', stats = null, buttonText = null) {
+// Simple message overlay (errors, notices). The answer-result overlay with the
+// rank-change stats block is fadeOverlay below (which holds through the swap);
+// this one just shows a message and auto-dismisses (or waits for the button).
+export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', buttonText = null) {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     Object.assign(overlay.style, {
@@ -94,91 +97,51 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         alignItems: 'center', zIndex: '1000', opacity: '0'
     });
 
-    if (stats) { // This is the "failed problem" overlay
-        const content = createOverlayContent(stats, message, 'white');
-        overlay.appendChild(content);
-        document.body.appendChild(overlay);
-
-        requestAnimationFrame(() => {
-            overlay.style.transition = `opacity 0.5s ease-out`; // Faster fade-in
-            requestAnimationFrame(() => {
-                overlay.style.opacity = '0.9';
-            });
+    const content = document.createElement('div');
+    Object.assign(content.style, {
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+    });
+    if (message) {
+        const messageElement = document.createElement('div');
+        Object.assign(messageElement.style, {
+            color: 'white', fontWeight: 'bold', textAlign: 'center',
+            fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
         });
+        messageElement.textContent = message;
+        content.appendChild(messageElement);
+    }
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
 
-        const dismiss = () => {
+    // Fast fade in/out for messages
+    overlay.style.transition = 'opacity 0.3s ease-in-out';
+    requestAnimationFrame(() => {
+        overlay.style.opacity = '0.9';
+    });
+
+    const dismiss = () => {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
             overlay.remove();
             if (callback) callback();
-        };
+        }, 300);
+    };
 
-        if (buttonText) {
-            const button = document.createElement('button');
-            button.textContent = buttonText;
-            Object.assign(button.style, {
-                marginTop: '20px',
-                padding: '10px 20px',
-                fontSize: `${boardContainer.offsetWidth / 30}px`,
-                cursor: 'pointer',
-                border: '1px solid white',
-                borderRadius: '5px',
-                backgroundColor: 'transparent',
-                color: 'white',
-                fontWeight: 'bold',
-            });
-            button.onclick = dismiss;
-            content.appendChild(button);
-        } else {
-            setTimeout(dismiss, duration);
-        }
-
-    } else { // This is the simple message overlay
-        const content = document.createElement('div');
-        Object.assign(content.style, {
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
+    if (buttonText) {
+        // A confirm button holds the message up until the user acknowledges
+        // it, rather than auto-dismissing after `duration`.
+        const button = document.createElement('button');
+        button.textContent = buttonText;
+        Object.assign(button.style, {
+            marginTop: '20px', padding: '10px 20px',
+            fontSize: `${boardContainer.offsetWidth / 30}px`, cursor: 'pointer',
+            border: '1px solid white', borderRadius: '5px',
+            backgroundColor: 'transparent', color: 'white', fontWeight: 'bold',
         });
-        if (message) {
-            const messageElement = document.createElement('div');
-            Object.assign(messageElement.style, {
-                color: 'white', fontWeight: 'bold', textAlign: 'center',
-                fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
-            });
-            messageElement.textContent = message;
-            content.appendChild(messageElement);
-        }
-        overlay.appendChild(content);
-        document.body.appendChild(overlay);
-
-        // Fast fade in/out for messages
-        overlay.style.transition = 'opacity 0.3s ease-in-out';
-        requestAnimationFrame(() => {
-            overlay.style.opacity = '0.9';
-        });
-
-        const dismiss = () => {
-            overlay.style.opacity = '0';
-            setTimeout(() => {
-                overlay.remove();
-                if (callback) callback();
-            }, 300);
-        };
-
-        if (buttonText) {
-            // A confirm button holds the message up until the user acknowledges
-            // it, rather than auto-dismissing after `duration`. Same look as the
-            // failed-problem overlay's button above.
-            const button = document.createElement('button');
-            button.textContent = buttonText;
-            Object.assign(button.style, {
-                marginTop: '20px', padding: '10px 20px',
-                fontSize: `${boardContainer.offsetWidth / 30}px`, cursor: 'pointer',
-                border: '1px solid white', borderRadius: '5px',
-                backgroundColor: 'transparent', color: 'white', fontWeight: 'bold',
-            });
-            button.onclick = dismiss;
-            content.appendChild(button);
-        } else {
-            setTimeout(dismiss, duration);
-        }
+        button.onclick = dismiss;
+        content.appendChild(button);
+    } else {
+        setTimeout(dismiss, duration);
     }
 }
 
@@ -186,7 +149,12 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
 // cue (red = wrong answer) — callers signalling a NEUTRAL event (e.g. the
 // post-sync problem swap) pass their own colors so the fade isn't misread as
 // an answer result.
-export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'white', text: 'black' }) {
+// With `buttonText` the overlay is additionally held until the user taps the
+// button (the min-duration gate is skipped — the button IS the dismissal);
+// the swap gate still applies, so it can never lift onto an unready board.
+// Returns a promise that resolves when the fade-out starts, i.e. when the
+// board underneath becomes visible to the user.
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'white', text: 'black' }, { buttonText = null } = {}) {
     const overlay = document.createElement('div');
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
@@ -196,8 +164,31 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         alignItems: 'center',
     });
 
-    if (stats || message) {
+    let buttonClicked = Promise.resolve();
+    if (stats || message || buttonText) {
         const content = createOverlayContent(stats, message || '', colors.text);
+        if (buttonText) {
+            buttonClicked = new Promise((resolve) => {
+                const button = document.createElement('button');
+                button.textContent = buttonText;
+                Object.assign(button.style, {
+                    marginTop: '20px',
+                    padding: '10px 20px',
+                    fontSize: `${boardContainer.offsetWidth / 30}px`,
+                    cursor: 'pointer',
+                    border: `1px solid ${colors.text}`,
+                    borderRadius: '5px',
+                    backgroundColor: 'transparent',
+                    color: colors.text,
+                    fontWeight: 'bold',
+                });
+                button.onclick = () => {
+                    button.disabled = true;
+                    resolve();
+                };
+                content.appendChild(button);
+            });
+        }
         overlay.appendChild(content);
     }
 
@@ -218,9 +209,11 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         .then(() => (callback ? callback() : undefined));
     // ...but stay up at least `duration` so the transition never flickers when
     // the load is instant (cached problem).
-    const minDisplay = new Promise(resolve => setTimeout(resolve, duration));
+    const minDisplay = buttonText
+        ? Promise.resolve()
+        : new Promise(resolve => setTimeout(resolve, duration));
 
-    Promise.all([swapped, minDisplay]).catch(() => {}).then(() => {
+    return Promise.all([swapped, minDisplay, buttonClicked]).catch(() => {}).then(() => {
         overlay.style.transition = 'opacity 0.5s ease-in-out';
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 500);

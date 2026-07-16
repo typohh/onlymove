@@ -440,12 +440,12 @@ async function getDueRecallProblem() {
     }
 }
 
-// Shows the next problem the user should work on: a due recall if one exists,
-// otherwise the standing challenge (assigned first if absent). The single entry
-// point for "I need a problem on screen" — used on load, after a solve, on
-// notification-with-no-recall, etc. Recalls never disturb challengeProblem.
-export async function advanceToNextProblem() {
-    setAcceptClicks(false);
+// Selects (but does not display) the next problem the user should work on: a
+// due recall if one exists, otherwise the standing challenge (assigned first if
+// absent). Never throws; returns null when nothing could be selected — the
+// display phase then runs the failure path. Recalls never disturb
+// challengeProblem.
+async function selectNextProblem() {
     try {
         await loadZipMetadata();
     } catch (_) { /* fall through; empty-challenge path handles total failure */ }
@@ -457,8 +457,15 @@ export async function advanceToNextProblem() {
     if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
 
     const recall = await getDueRecallProblem();
-    if (recall) {
-        try { displayProblem(recall, APP_MODES.SOLVING); return; }
+    return recall || state.challengeProblem;
+}
+
+// Paints a selected problem, falling forward past failures: a bad recall falls
+// back to the challenge; a bad challenge is blacklisted and a fresh one
+// reselected (up to MAX_LOAD_ATTEMPTS).
+async function displayNextProblem(next) {
+    if (next && next.isRepeat) {
+        try { displayProblem(next, APP_MODES.SOLVING); return; }
         catch (error) { reportLoadError(error, 0); /* fall back to challenge */ }
     }
 
@@ -477,6 +484,42 @@ export async function advanceToNextProblem() {
     }
 
     handleLoadFailure(lastError);
+}
+
+// Shows the next problem the user should work on: a due recall if one exists,
+// otherwise the standing challenge. The single entry point for "I need a
+// problem on screen" — used on load, after a solve, on
+// notification-with-no-recall, etc.
+export async function advanceToNextProblem() {
+    setAcceptClicks(false);
+    await displayNextProblem(await selectNextProblem());
+}
+
+// Review-exit advance: after a wrong answer the next problem is deliberately
+// NOT loaded before review (review starts under the red overlay with nothing
+// underneath — see completeCurrentProblem/_handleIncorrectMoveSequence), so
+// selection happens only now, when the user leaves review. The common case —
+// prefetched challenge, in-pool recall — settles within the grace window and
+// paints directly, matching the old instant redisplay. Only when selection is
+// still in flight after the grace period (e.g. a due recall's shard has to be
+// downloaded) does a grey "loading next problem" fade cover the wait, held up
+// until the swap has painted so it never lifts onto the stale review board.
+const SELECT_GRACE_MS = 150;
+async function advanceAfterReview() {
+    setAcceptClicks(false);
+    let settled = false;
+    const selection = selectNextProblem().finally(() => { settled = true; });
+    await Promise.race([selection, new Promise(resolve => setTimeout(resolve, SELECT_GRACE_MS))]);
+    if (settled) {
+        await displayNextProblem(await selection);
+        return;
+    }
+    await new Promise((resolve) => {
+        fadeOverlay(500, async () => {
+            try { await displayNextProblem(await selection); }
+            finally { resolve(); }
+        }, null, getTerm('loadingNextProblem'), { background: 'rgb(128, 128, 128)', text: 'white' });
+    });
 }
 
 // After a session resume (tab-visible pull) or a sync that merged foreign
@@ -544,9 +587,12 @@ export async function refreshShownProblemAfterSync() {
 // Re-shows the current problem (it's already loaded underneath) — used when
 // leaving review (which painted the previous problem). The mode follows the
 // current problem: a linked/shared problem returns to LINKED view, otherwise
-// SOLVING. Falls forward to a fresh advance if there's nothing to redisplay.
+// SOLVING. A null currentProblem is the normal post-answer review exit (the
+// answered problem was cleared by completeCurrentProblem and no next problem
+// was loaded underneath) — advance to a freshly selected problem, behind a
+// grey loading fade if selection is slow.
 export async function redisplayCurrentProblem() {
-    if (!state.currentProblem) return advanceToNextProblem();
+    if (!state.currentProblem) return advanceAfterReview();
     const mode = state.currentProblem.linked ? APP_MODES.LINKED : APP_MODES.SOLVING;
     try { displayProblem(state.currentProblem, mode); }
     catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
@@ -597,6 +643,12 @@ export async function returnToChallenge() {
 export async function completeCurrentProblem() {
     const done = state.currentProblem;
     setPreviousProblem(done);
+    // The attempt is recorded — there is no problem to "return to" anymore.
+    // Clear the on-screen slot (and with it the sessionStorage resume slot)
+    // BEFORE the challenge reselection awaits: a reload landing anywhere in
+    // the post-answer transition must fall through to a fresh advance at boot,
+    // never resume — i.e. re-serve — the already-answered problem.
+    setCurrentProblem(null);
     if (done && !done.isRepeat && !done.linked) {
         await assignNewChallenge();
     }

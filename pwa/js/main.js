@@ -156,8 +156,9 @@ async function handleSizeToggle(next) {
 }
 
 // Ignore the just-reviewed problem (reachable from the analysis-mode hamburger
-// menu): mark the matching answerHistory entry, then exit analysis and reveal
-// the current problem (loaded underneath).
+// menu): mark the matching answerHistory entry, then exit analysis — back to
+// the untouched problem for a voluntary review, or on to a freshly selected
+// one after a wrong answer (see redisplayCurrentProblem).
 async function performIgnore() {
     if (!await showConfirm(getTerm('ignoreConfirm'))) return;
     const problem = state.previousProblem;
@@ -321,8 +322,11 @@ function wireActionButtons() {
                 }
                 setReviewStartTime(null);
             }
-            // Reveal the current problem (loaded underneath while reviewing the
-            // previous one); redisplay sets the mode from currentProblem.linked.
+            // Leave review: a voluntary review (entered from solving) still has
+            // the untouched problem loaded underneath and redisplays it; after a
+            // wrong answer there is none (currentProblem was cleared when the
+            // attempt completed), so redisplay advances to a freshly selected
+            // problem instead. The mode follows currentProblem.linked.
             redisplayCurrentProblem();
             updateAllUI();
         }
