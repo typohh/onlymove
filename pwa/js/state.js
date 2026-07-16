@@ -555,6 +555,31 @@ export function setReloadPending(pending) {
 }
 
 let reloadInFlight = false;
+
+// Resolves once the registration's incoming worker (installing/waiting)
+// reaches 'activated' — i.e. the NEW worker now controls what a reload will
+// fetch — or after timeoutMs as a fallback. 'redundant' (install failed, or
+// superseded by an even newer worker) also resolves rather than hanging. No
+// incoming worker resolves immediately: the update check found nothing new
+// (or it already activated), so there is nothing to wait for.
+function waitForSwActivation(reg, timeoutMs) {
+    return new Promise((resolve) => {
+        const incoming = reg.installing || reg.waiting;
+        if (!incoming) return resolve();
+        const timer = setTimeout(finish, timeoutMs);
+        function finish() {
+            clearTimeout(timer);
+            incoming.removeEventListener('statechange', check);
+            resolve();
+        }
+        function check() {
+            if (incoming.state === 'activated' || incoming.state === 'redundant') finish();
+        }
+        incoming.addEventListener('statechange', check);
+        check();
+    });
+}
+
 async function maybeReload() {
     if (reloadInFlight) return;
     if (!state.reloadPending) return;
@@ -563,7 +588,21 @@ async function maybeReload() {
     reloadInFlight = true;
     try {
         const reg = await navigator.serviceWorker?.getRegistration?.();
-        await reg?.update?.();
+        if (reg) {
+            await reg.update?.();
+            // Wait for the updated worker to take over BEFORE reloading, so a
+            // single reload picks up the new hashed bundles. Without the wait
+            // the reload is served cache-first by the OLD worker (still the
+            // old bundle), and the new worker's later takeover fires
+            // index.html's controllerchange listener — a second visible
+            // reload, typically on the next tab resume. The takeover itself
+            // (clients.claim → controllerchange) may start the reload during
+            // this wait; racing our own location.reload() below is harmless —
+            // pending navigations coalesce into one. On timeout (slow install)
+            // we reload anyway, degrading to the old two-step behavior instead
+            // of hanging between problems.
+            await waitForSwActivation(reg, 10000);
+        }
     } catch (_) {}
     location.reload();
 }
