@@ -2,7 +2,7 @@
 
 import * as Sentry from "@sentry/browser";
 
-import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem } from './state.js';
+import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem, getMergedAnswerHistory } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
 import { displayOverlay, fadeOverlay } from './overlays.js';
@@ -420,6 +420,22 @@ function challengeAlreadyAnswered() {
     return state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH).some(a => a.problemId === id);
 }
 
+// Deterministic uniform [0,1) from a string: FNV-1a 32-bit with a murmur3
+// finalizer mix (the raw FNV low bits are too regular for a threshold compare).
+function hashToUnit(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    h ^= h >>> 16;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return (h >>> 0) / 0x100000000;
+}
+
 // Stochastic recall gate: with probability recallServeShare() a serve decision
 // admits a due recall; otherwise the novel challenge is served even though a
 // recall is due (the skipped recall stays in its window and can win a later
@@ -431,15 +447,37 @@ function challengeAlreadyAnswered() {
 // costs no shard fetch); P(recall | one is due) = share either way since the
 // roll is independent of dueness. Notification clicks (?recall=1, main.js)
 // deliberately bypass this — the user explicitly came for a recall.
+//
+// The roll is DETERMINISTIC — hashed from (most-due candidate id, last
+// recorded attempt date), not Math.random(). refreshShownProblemAfterSync
+// re-runs this gate on EVERY tab-visible resume, so an independent roll there
+// would compound: n task-switches over an idle novel give the due recall
+// 1−(1−share)^n chances to swap onto the board instead of share. Seeded, a
+// resume re-derives the SAME outcome as the serve decision it re-runs (same
+// candidate, same history ⇒ same seed). Every new attempt — local or a synced
+// foreign one — appends a fresh client-minted date, re-seeding the roll, so
+// genuine serve decisions remain independent Bernoulli(share) draws and the
+// equilibrium math is untouched. (The share itself drifts with wall-clock
+// trailing-week volume, so a long idle can still flip the comparison — rare,
+// and the next attempt re-seeds anyway.)
 function recallGateAllows() {
     // Fail open (serve the recall): selectNextProblem's never-throws contract
     // must not hinge on the share estimator, and the pre-gate behavior is the
     // safe default.
-    let share;
-    try { share = recallServeShare(); }
-    catch (error) { console.error('recall share estimation failed:', error); return true; }
-    if (share == null) return true;
-    return Math.random() < share;
+    try {
+        const share = recallServeShare();
+        if (share == null) return true;
+        // Same cheap sync selection as selectRecallCandidate — no shard fetch.
+        const candidates = getRecallCandidates();
+        if (candidates.length === 0) return true; // nothing due — outcome moot
+        candidates.sort((a, b) => a.recallRate - b.recallRate);
+        const merged = getMergedAnswerHistory();
+        const lastDate = (merged.length && merged[merged.length - 1].date) || 0;
+        return hashToUnit(`${candidates[0].problemId}|${lastDate}`) < share;
+    } catch (error) {
+        console.error('recall gate failed; serving the recall:', error);
+        return true;
+    }
 }
 
 // Builds the most-due recall as a ready problem, or null when none is due or it
@@ -577,6 +615,10 @@ export async function refreshShownProblemAfterSync() {
         // recall already on screen keeps its ungated re-selection (most-due may
         // have shifted, or it fell out of dueness → challenge), so a resume
         // roll can never visibly swap a served recall back out for a novel.
+        // The roll itself is deterministic (seeded on candidate + last attempt,
+        // see recallGateAllows), so a no-merge resume re-derives the serve
+        // decision's own outcome — repeated task switching can't re-roll a
+        // gated-out recall onto the board.
         const recall = (shown.isRepeat || recallGateAllows()) ? await getDueRecallProblem() : null;
         const next = recall || state.challengeProblem;
         if (!next) return;
