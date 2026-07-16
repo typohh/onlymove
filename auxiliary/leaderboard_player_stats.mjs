@@ -7,6 +7,10 @@
 //   - median solve time over their novel attempts
 //   - their onlymove rank   (the untimed front-page window MLE, decimal)
 //   - their EGF rank         (the time-adjusted leaderboard rank, decimal)
+// Then a summary CORRELATING onlymove's predicted EGF strength against each player's
+// real EGD GoR — Pearson + Spearman (+ MAE / bias), over all players and the
+// production ≥60-novel cohort. Pearson r is affine-invariant, so these scalar-space
+// figures equal the predicted-GoR vs actual-GoR correlations.
 //
 // The two ranks are computed BIT-IDENTICALLY to production: this script
 // esbuild-bundles the shared window estimator (pwa/shared/rank-window.js) +
@@ -24,7 +28,7 @@
 //
 // Usage:
 //   node auxiliary/leaderboard_player_stats.mjs            # table, strongest first
-//   node auxiliary/leaderboard_player_stats.mjs --json     # machine-readable JSON
+//   node auxiliary/leaderboard_player_stats.mjs --json     # machine-readable JSON ({ correlations, players })
 //   node auxiliary/leaderboard_player_stats.mjs --user <redacted-user-id>   # limit (repeatable)
 
 import { execFileSync } from 'node:child_process';
@@ -168,6 +172,53 @@ function medianStr(ms) {
 function pad(s, n) { s = String(s); return s.length >= n ? s : s + ' '.repeat(n - s.length); }
 function padl(s, n) { s = String(s); return s.length >= n ? s : ' '.repeat(n - s.length) + s; }
 
+// --- correlation helpers (Pearson + tie-aware Spearman) -------------------------
+function pearson(xs, ys) {
+    const n = Math.min(xs.length, ys.length);
+    if (n < 2) return NaN;
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+    mx /= n; my /= n;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < n; i++) {
+        const dx = xs[i] - mx, dy = ys[i] - my;
+        sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+    }
+    const d = Math.sqrt(sxx * syy);
+    return d > 0 ? sxy / d : NaN;
+}
+// Fractional ranks with ties averaged (so Spearman handles equal values correctly).
+function rankdata(a) {
+    const order = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
+    const ranks = new Array(a.length);
+    for (let i = 0; i < order.length;) {
+        let j = i;
+        while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
+        const avg = (i + j) / 2 + 1;   // 1-based average rank over the tie block
+        for (let k = i; k <= j; k++) ranks[order[k][1]] = avg;
+        i = j + 1;
+    }
+    return ranks;
+}
+function spearman(xs, ys) { return pearson(rankdata(xs), rankdata(ys)); }
+
+// Correlation + error summary over [predicted, actual] pairs.
+function corrStats(pairs) {
+    const xs = pairs.map((p) => p[0]);
+    const ys = pairs.map((p) => p[1]);
+    const errs = pairs.map((p) => p[0] - p[1]);
+    const n = pairs.length;
+    const mean = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+    return {
+        n,
+        pearson: pearson(xs, ys),
+        spearman: spearman(xs, ys),
+        mae: n ? mean(errs.map(Math.abs)) : NaN,
+        bias: n ? mean(errs) : NaN,
+        rmse: n ? Math.sqrt(mean(errs.map((e) => e * e))) : NaN,
+    };
+}
+
 async function main() {
     if (!fs.existsSync(DB_PATH)) {
         console.error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database`);
@@ -242,7 +293,20 @@ async function main() {
     // Strongest first by onlymove rank; unranked (null) sink to the bottom.
     out.sort((a, b) => (b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity));
 
-    if (asJson) { console.log(JSON.stringify(out, null, 2)); return; }
+    // --- correlations: onlymove's predicted strength vs the player's real EGD GoR ---
+    // Pearson r is invariant under the affine GoR<->scalar map (gor = 2000 + 100·scalar),
+    // so these scalar-space numbers ARE the predicted-GoR vs actual-GoR correlations.
+    const RANKED_MIN = mod.RANK_START_MIN;   // production's ≥60-novel-attempt rank gate
+    const fin = (v) => Number.isFinite(v);
+    const pairsOf = (key, gate) => out
+        .filter((p) => fin(p[key]) && fin(p.realEgfRank) && (!gate || p.usableNovel >= RANKED_MIN))
+        .map((p) => [p[key], p.realEgfRank]);
+    const correlations = {
+        estVsRealEgf: { all: corrStats(pairsOf('estEgfRank', false)), ranked: corrStats(pairsOf('estEgfRank', true)) },
+        onlymoveVsRealEgf: { all: corrStats(pairsOf('onlymoveRank', false)), ranked: corrStats(pairsOf('onlymoveRank', true)) },
+    };
+
+    if (asJson) { console.log(JSON.stringify({ correlations, players: out }, null, 2)); return; }
 
     const W = { name: 20, s9: 8, s13: 8, med: 9, om: 15, est: 15, real: 15 };
     console.log(
@@ -267,6 +331,23 @@ async function main() {
         + `real EGF  = the player's actual EGD strength derived from their live GoR ((GoR−2000)/100).\n`
         + `Model ranks are shown for EVERYONE (the production ≥60-novel-attempt gate is dropped here); `
         + `players below that threshold are low-confidence — see se in --json.`);
+
+    // --- correlation summary --------------------------------------------------------
+    const fc = (v) => (Number.isFinite(v) ? v.toFixed(3) : '  —  ');
+    const fe = (v) => (Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}` : '—');
+    const corrLine = (label, c, withErr) => {
+        let s = `    ${pad(label, 10)} n=${padl(c.n, 4)}   Pearson r=${fc(c.pearson)}   Spearman ρ=${fc(c.spearman)}`;
+        if (withErr) s += `   MAE=${fe(c.mae)}   bias=${fe(c.bias)} stones`;
+        return s;
+    };
+    console.log('\nCorrelations — onlymove prediction vs actual EGD strength (real GoR)');
+    console.log('(Pearson r is affine-invariant: scalar-space r == predicted-GoR vs actual-GoR r.)\n');
+    console.log('  est. EGF (time-adjusted GoR prediction) vs real EGF:');
+    console.log(corrLine('all', correlations.estVsRealEgf.all, true));
+    console.log(corrLine(`≥${RANKED_MIN} novel`, correlations.estVsRealEgf.ranked, true));
+    console.log('  onlymove headline (untimed, not EGF-mapped) vs real EGF — association only:');
+    console.log(corrLine('all', correlations.onlymoveVsRealEgf.all, false));
+    console.log(corrLine(`≥${RANKED_MIN} novel`, correlations.onlymoveVsRealEgf.ranked, false));
 }
 
 await main();
