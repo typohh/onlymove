@@ -540,6 +540,20 @@ body {
     margin-top: 0.5vmin;
 }
 
+/* Google Play store button in the Android manual-install modal — the primary
+   action, so it carries the Play brand green rather than the neutral .btn grey. */
+#play-store-install {
+    align-self: center;
+    border-radius: var(--radius);
+    padding: 0.9vmin 3vmin;
+    font-size: inherit;
+    background-color: #01875f;
+    color: #fff;
+}
+#play-store-install:hover {
+    background-color: #026e4d;
+}
+
 @media (prefers-color-scheme: light) {
     #ios-install-modal {
         background-color: #f0f0f0;

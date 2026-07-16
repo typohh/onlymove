@@ -30,6 +30,34 @@ const isIOS = () => {
     return /iPad|iPhone|iPod/.test(ua) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 };
+
+/**
+ * Returns true on Android. Only there is the Play Store TWA (net.onlymove.twa)
+ * a usable install target, so the store button in the manual-install modal is
+ * gated on this.
+ */
+const isAndroid = () => /Android/.test(navigator.userAgent || '');
+
+// The Play Store listing for the bubblewrapped TWA (net.onlymove.twa) — the
+// same web app, wrapped. Offered as the reliable install path on Android when
+// no native beforeinstallprompt fired.
+const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=net.onlymove.twa';
+
+/**
+ * True when the Play Store TWA is already installed on the device while the user
+ * browses in a normal Chrome tab (declared via related_applications in
+ * manifest.json). Chromium-Android only; resolves false — never throws —
+ * everywhere else, so installed-detection degrades to display-mode alone.
+ */
+const hasInstalledStoreApp = async () => {
+    try {
+        if (!navigator.getInstalledRelatedApps) return false;
+        const apps = await navigator.getInstalledRelatedApps();
+        return apps.some((a) => a.platform === 'play' && a.id === 'net.onlymove.twa');
+    } catch {
+        return false;
+    }
+};
 import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
@@ -73,6 +101,22 @@ const showManualInstallModal = () => {
         build: (modal, close) => {
             modal.appendChild(modalTitle(getTerm('installIosTitle')));
 
+            // On Android the Play Store TWA is the reliable install path when no
+            // native prompt fired (Firefox, Samsung Internet, Vanadium, …). Offer
+            // it as the primary action; the browser-menu instructions stay below
+            // as a fallback for Google-Play-less devices (e.g. GrapheneOS).
+            if (isAndroid()) {
+                const storeBtn = document.createElement('a');
+                storeBtn.id = 'play-store-install';
+                storeBtn.className = 'btn';
+                storeBtn.href = PLAY_STORE_URL;
+                storeBtn.target = '_blank';
+                storeBtn.rel = 'noopener';
+                storeBtn.textContent = getTerm('installPlayStore');
+                storeBtn.addEventListener('click', close);
+                modal.appendChild(storeBtn);
+            }
+
             const instructions = document.createElement('div');
             instructions.id = 'ios-install-instructions';
             // Replace literal \n with line breaks
@@ -98,7 +142,10 @@ const showManualInstallModal = () => {
 let notifState = { installed: false, permission: 'default', subscribed: false };
 
 export async function refreshNotifState() {
-    notifState.installed = isInstalled();
+    // display-mode covers running inside the TWA / installed PWA; the related-app
+    // probe additionally treats "TWA installed, browsing in Chrome" as installed
+    // so we don't nag those users (and don't invite a duplicate WebAPK install).
+    notifState.installed = isInstalled() || await hasInstalledStoreApp();
     notifState.permission = notificationPermission();
     notifState.subscribed = supportsNotifications() ? !!(await getCurrentSubscription()) : false;
 }

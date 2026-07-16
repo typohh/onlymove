@@ -37,6 +37,14 @@
     "launch_handler": {
         "client_mode": "navigate-existing"
     },
+    "related_applications": [
+        {
+            "platform": "play",
+            "id": "net.onlymove.twa",
+            "url": "https://play.google.com/store/apps/details?id=net.onlymove.twa"
+        }
+    ],
+    "prefer_related_applications": false,
     "categories": [
         "games",
         "education"
