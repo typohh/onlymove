@@ -82,10 +82,15 @@ export function calculatePercentile(sortedArr, target) {
 const NEG_LN_080 = -Math.log(0.80); // 0.22314 — t/S at the 0.80 window-open
 const NEG_LN_060 = -Math.log(0.60); // 0.51083 — t/S at the 0.60 window-close
 export const MIN_RECALL_HOURS = 6;
-// Stability floor/ceiling (days). Floor keeps a just-failed problem from coming
-// due sooner than the minimum recall hours; ceiling guards against runaway intervals/overflow.
+// Stability floor (days). Floor keeps a just-failed problem from coming due
+// sooner than the minimum recall hours. There is deliberately NO ceiling: the
+// streak's exponential stability growth is what graduates a learned problem —
+// its due date eventually falls beyond the RECALL_CANDIDATE_HISTORY_LENGTH
+// working window and it leaves the recall pool. (A 365-day ceiling here used to
+// turn that graduation into a perpetual ~81-day recycle, so the pool could only
+// grow; overflow needs no ceiling — lnS is a small linear form, and the
+// !isFinite fallback below covers degenerate params.)
 const MIN_STABILITY_DAYS = (MIN_RECALL_HOURS / 24) / NEG_LN_080;
-const MAX_STABILITY_DAYS = 365;
 // The floor expressed as the earliest a repeat can come due (ms) — the minimum
 // recall interval. Exported for the cross-tab duplicate guard (user-stats.js):
 // a second attempt closer than this can never be a legitimate recall.
@@ -209,8 +214,10 @@ function lnStabilityForRepeat(features, params, floor) {
 // Clamped stability (days) for scheduling/prediction.
 function stabilityDaysForRepeat(features, params, floor) {
     const S = Math.exp(lnStabilityForRepeat(features, params, floor));
-    if (!isFinite(S)) return MAX_STABILITY_DAYS;
-    return Math.min(MAX_STABILITY_DAYS, Math.max(MIN_STABILITY_DAYS, S));
+    // Degenerate params (NaN) → never-due: R(t) = exp(-t/∞) = 1, so the
+    // problem is simply not a candidate (buildRecallSchedule skips it too).
+    if (!isFinite(S)) return Infinity;
+    return Math.max(MIN_STABILITY_DAYS, S);
 }
 
 // Window-open delay (hours) for a just-failed (r=0, no prior review) repeat at a
@@ -259,6 +266,72 @@ export function recentFailureWindowHours(params, history, { userRank, days = 7, 
     hrs.sort((x, y) => x - y);
     const m = hrs.length >> 1;
     return hrs.length % 2 ? hrs[m] : (hrs[m - 1] + hrs[m]) / 2;
+}
+
+// --- Recall serving share (constant-volume equilibrium) -----------------------
+// Target: keep the user's total daily volume at its own trailing-week average A
+// while recalls and novels balance. At volume A the working-window guillotine
+// (RECALL_CANDIDATE_HISTORY_LENGTH attempts) falls at ladder rung
+//   k = ln(WINDOW / (A · τ0_days)) / GROWTH
+// where τ0 is the user's own base window-open delay (their fitted stability at
+// r=0, so between-user memory variance is priced in). A problem entering the
+// ladder is expected to consume
+//   E = (x^-k − 1) / (1 − x),   x = 0.80 (retention at window open = per-serve
+//                                success probability, resets included)
+// recall serves before it graduates past the window, and with e = ladder
+// entries per novel serve (recent failed-below-rank fraction) the balanced
+// recall:novel ratio is ρ = e·E. Serving a due recall with probability
+// ρ/(1+ρ) — else the standing challenge — holds the mix at that equilibrium in
+// expectation: a pool above it produces more dues than the share serves and the
+// excess ages out unserved; a pool below it lets novels refill it. Returns the
+// share in [0,1], or null when the inputs aren't estimable yet (no model, no
+// volume, too few recent novels, no rank) — callers then always serve due
+// recalls, the pre-gate behavior.
+const X_SERVE = 0.8;                    // retention at the R=0.80 window open
+const SHARE_WEEK_MS = 7 * 24 * 3600e3;  // volume-target window
+const SHARE_NOVEL_SAMPLE = 200;         // entry-rate sample (recent novels)
+const SHARE_MIN_NOVELS = 20;            // below this the rate is noise → null
+export function recallServeShare() {
+    const params = state.modelParams;
+    if (typeof state.userRank !== 'number') return null;
+    const history = getMergedAnswerHistory();
+    if (!Array.isArray(history) || history.length === 0) return null;
+
+    const cutoff = Date.now() - SHARE_WEEK_MS;
+    let weekCount = 0;
+    for (let i = history.length - 1; i >= 0; i--) {
+        const d = history[i].date;
+        if (typeof d !== 'number' || d < cutoff) break;
+        weekCount++;
+    }
+    if (weekCount === 0) return null;
+    const volumePerDay = weekCount / 7;
+
+    let tau0Hours = recentFailureWindowHours(params, history, { userRank: state.userRank });
+    if (tau0Hours == null) tau0Hours = freshFailureReviewHours(params, { userRank: state.userRank });
+    if (tau0Hours == null || !(tau0Hours > 0)) return null;
+
+    // Ladder entries per novel serve: only a FAILED novel below the user's rank
+    // gets successSinceFailure defined + passes the candidate rank filter.
+    let novels = 0, entries = 0;
+    for (let i = history.length - 1; i >= 0 && novels < SHARE_NOVEL_SAMPLE; i--) {
+        const a = history[i];
+        if (a.isRepeat) continue;
+        novels++;
+        if (!a.correct && typeof a.problemRank === 'number' && a.problemRank < state.userRank) entries++;
+    }
+    if (novels < SHARE_MIN_NOVELS) return null;
+    const entryRate = entries / novels;
+
+    const k = Math.log(RECALL_CANDIDATE_HISTORY_LENGTH / (volumePerDay * (tau0Hours / 24))) / GROWTH;
+    if (!isFinite(k)) return null;
+    // k ≤ 0: the FIRST due-interval already outlives the working window at this
+    // volume — a served recall could never survive to a second serve, so the
+    // equilibrium share is genuinely 0.
+    if (k <= 0) return 0;
+    const expectedServes = (Math.pow(X_SERVE, -k) - 1) / (1 - X_SERVE);
+    const rho = entryRate * expectedServes;
+    return rho / (1 + rho);
 }
 
 // Builds the training feature vector for history row i (board-independent).

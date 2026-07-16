@@ -9,7 +9,7 @@ import { displayOverlay, fadeOverlay } from './overlays.js';
 import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
-import { getRecallCandidates } from './model.js';
+import { getRecallCandidates, recallServeShare } from './model.js';
 import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize, slopeToQuality } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
@@ -420,6 +420,28 @@ function challengeAlreadyAnswered() {
     return state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH).some(a => a.problemId === id);
 }
 
+// Stochastic recall gate: with probability recallServeShare() a serve decision
+// admits a due recall; otherwise the novel challenge is served even though a
+// recall is due (the skipped recall stays in its window and can win a later
+// roll, or ages out — that pruning is the equilibrium's decay channel). The
+// share is the constant-volume balance point for the user's own trailing-week
+// volume and memory (see model.js recallServeShare); while it is not yet
+// estimable (null), due recalls always win — the pre-gate behavior. Rolled
+// once per serve decision, BEFORE the recall is built (a gated-out recall
+// costs no shard fetch); P(recall | one is due) = share either way since the
+// roll is independent of dueness. Notification clicks (?recall=1, main.js)
+// deliberately bypass this — the user explicitly came for a recall.
+function recallGateAllows() {
+    // Fail open (serve the recall): selectNextProblem's never-throws contract
+    // must not hinge on the share estimator, and the pre-gate behavior is the
+    // safe default.
+    let share;
+    try { share = recallServeShare(); }
+    catch (error) { console.error('recall share estimation failed:', error); return true; }
+    if (share == null) return true;
+    return Math.random() < share;
+}
+
 // Builds the most-due recall as a ready problem, or null when none is due or it
 // can't be loaded (caller falls back to the challenge).
 async function getDueRecallProblem() {
@@ -456,7 +478,7 @@ async function selectNextProblem() {
     // challengeAlreadyAnswered.)
     if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
 
-    const recall = await getDueRecallProblem();
+    const recall = recallGateAllows() ? await getDueRecallProblem() : null;
     return recall || state.challengeProblem;
 }
 
@@ -551,7 +573,11 @@ export async function refreshShownProblemAfterSync() {
 
         if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
 
-        const recall = await getDueRecallProblem();
+        // The gate applies only to INTRODUCING a recall over an idle novel — a
+        // recall already on screen keeps its ungated re-selection (most-due may
+        // have shifted, or it fell out of dueness → challenge), so a resume
+        // roll can never visibly swap a served recall back out for a novel.
+        const recall = (shown.isRepeat || recallGateAllows()) ? await getDueRecallProblem() : null;
         const next = recall || state.challengeProblem;
         if (!next) return;
 
