@@ -96,6 +96,23 @@ const MIN_ATTEMPTS = 20;        // below this, no decomposition
 const WIDE_GRID_POINTS = 120;   // coarse skill grid for residual interpolation
 const SUPPORT_EFFN = 10;        // effective-N floor for "supported" skill range
 
+// The wide (30-day) skill grid is a kernel-weighted MLE; a career with tens of
+// attempts a day is enormously oversampled for a month-scale kernel, so the fit is
+// run on frequency-weighted BINS instead of raw attempts. The binning is 2-D — a
+// TIME slice (WIDE_TIME_BINS equal-count contiguous ranges — dense stretches get
+// finer slices, all far shorter than the 30-day kernel) crossed with an x (rank)
+// bucket of width WIDE_X_BIN. Binning by x too is load-bearing: attempts scatter
+// ±2–3 ranks even between neighbours (problems are served across a band), so a
+// pure time-bin's mean-x would lose real curvature and BIAS the logistic (Jensen);
+// a narrow x-bucket keeps each cell near-constant in x, so its (mean x, success
+// rate, count) is an unbiased binomial sufficient statistic. The count rides as
+// poolLogistic's FREQUENCY weight `f` (not a magnitude weight), preserving BOTH the
+// point estimate and its measurement SE. Validated: skill-line deviation ≤ ~0.05
+// rank vs the unthinned fit on real dense histories. The narrow/session fits and
+// the exact evaluateAt run on the FULL attempts (f = 1) — only the wide grid bins.
+const WIDE_TIME_BINS = 200;    // equal-count time slices fed to the thinned wide fit
+const WIDE_X_BIN = 0.33;       // internal-rank width of each x-bucket within a slice
+
 // σ_M is session-to-session variance: it needs several INDEPENDENT sessions in
 // the τ_V window to estimate reliably. With few, a local window's estimate is
 // noise (or one isolated session blows the band into a spike). So the local
@@ -104,6 +121,14 @@ const SUPPORT_EFFN = 10;        // effective-N floor for "supported" skill range
 // their local value. SESSION_CORR_MS de-duplicates within-session near-copies.
 const SESSION_CORR_MS = TAU_M_MS * Math.SQRT2;  // within-session correlation length
 const SIGMA_PRIOR_SESSIONS = 8;  // shrinkage prior strength, in effective sessions
+// A gap larger than this ends a session (starts a new one). Set near the within-
+// session correlation length (SESSION_CORR_MS ≈ 5.66h) so the hard clustering
+// matches the smooth Gaussian down-weighting the old per-attempt multiplicity
+// applied — attempts closer than this were counted as ~the same sitting, farther
+// as independent sessions — but rounded to 6h, an even divisor of the day (≤4
+// sittings/day) rather than the √2 coincidence. Validated a wash vs 5.66h on real
+// heavy histories (session counts and σ_M band within noise of each other).
+const SESSION_GAP_MS = 6 * HOUR_MS;
 
 // ---------------------------------------------------------------------------
 // M: rating → rank map (pwa/tsumegos/rating_to_rank.json), per board size.
@@ -246,11 +271,16 @@ function poolLogistic(attempts, t0, tau, linear = false) {
     const hi = lowerBound(attempts, t0 + win + 1, a => a.t);
     if (hi <= lo) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
 
+    // `f` is an optional per-attempt FREQUENCY weight (this row stands for f real
+    // attempts — used by the thinned wide grid). It enters linearly everywhere
+    // (Σf·w, Σf·w², score, Fisher info, sandwich meat Σf·w²·v), so a thinned+
+    // reweighted fit reproduces the unthinned point estimate AND its SE. Absent ⇒ 1.
     let sumW = 0, sumW2 = 0, sumWx = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
-        sumW += w; sumW2 += w * w; sumWx += w * attempts[j].x;
+        const fw = (attempts[j].f || 1) * w;
+        sumW += fw; sumW2 += fw * w; sumWx += fw * attempts[j].x;
     }
     if (sumW <= 0) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
     const effN = (sumW * sumW) / sumW2;
@@ -269,13 +299,14 @@ function poolLogistic(attempts, t0, tau, linear = false) {
         for (let j = lo; j < hi; j++) {
             const w = gaussianWeight((attempts[j].t - t0) / tau);
             if (w <= 0) continue;
+            const fw = (attempts[j].f || 1) * w;
             const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
             const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
             let p = c + span * praw;
             if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
             const g = span * slope * praw * (1 - praw);   // dP/dR
-            score += w * (attempts[j].correct - p) * g / (p * (1 - p));
-            info += w * g * g / (p * (1 - p));
+            score += fw * (attempts[j].correct - p) * g / (p * (1 - p));
+            info += fw * g * g / (p * (1 - p));
         }
         if (info < 1e-9) break;
         let step = score / info;
@@ -285,18 +316,19 @@ function poolLogistic(attempts, t0, tau, linear = false) {
         if (Math.abs(step) < 1e-6) break;
     }
 
-    // Sandwich SE: Var ≈ Σ w²v / (Σ wv)², v = (dP/dR)²/(P(1−P)) (4PL Fisher info).
+    // Sandwich SE: Var ≈ Σ f·w²·v / (Σ f·w·v)², v = (dP/dR)²/(P(1−P)) (4PL Fisher info).
     let A = 0, B = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
+        const fw = (attempts[j].f || 1) * w;
         const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
         const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
         let p = c + span * praw;
         if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
         const g = span * slope * praw * (1 - praw);
         const v = g * g / (p * (1 - p));
-        A += w * v; B += w * w * v;
+        A += fw * v; B += fw * w * v;
     }
     const se = A > 0 ? Math.sqrt(B) / A : Infinity;
     return { R, se, effN, drift: 0 };
@@ -320,13 +352,14 @@ function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
             const u = (attempts[j].t - t0) / tau;
             const w = gaussianWeight(u);
             if (w <= 0) continue;
+            const fw = (attempts[j].f || 1) * w;
             const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
             const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
             let p = c + span * praw;
             if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
             const g = span * slope * praw * (1 - praw);     // dP/dR
-            const wv = w * g * g / (p * (1 - p));           // weighted Fisher info
-            const sc = w * (attempts[j].correct - p) * g / (p * (1 - p));
+            const wv = fw * g * g / (p * (1 - p));          // weighted Fisher info
+            const sc = fw * (attempts[j].correct - p) * g / (p * (1 - p));
             Sa += sc;  Sb += sc * u;
             Iaa += wv; Iab += wv * u; Ibb += wv * u * u;
         }
@@ -340,20 +373,21 @@ function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
         if (a < X_CLAMP_LO) a = X_CLAMP_LO; else if (a > X_CLAMP_HI) a = X_CLAMP_HI;
         if (Math.abs(da) < 1e-6 && Math.abs(db) < 1e-6) break;
     }
-    // 2×2 sandwich SE of the intercept: bread B = Σ w·v·JJᵀ + ridge, meat
-    // M = Σ w²·v·JJᵀ (J=[1,u]); Cov₀₀ = (B_bb²·M_aa − 2 B_ab B_bb M_ab + B_ab² M_bb)/detB².
+    // 2×2 sandwich SE of the intercept: bread B = Σ f·w·v·JJᵀ + ridge, meat
+    // M = Σ f·w²·v·JJᵀ (J=[1,u]); Cov₀₀ = (B_bb²·M_aa − 2 B_ab B_bb M_ab + B_ab² M_bb)/detB².
     let Baa = 0, Bab = 0, Bbb = SLOPE_PRIOR_INFO, Maa = 0, Mab = 0, Mbb = 0;
     for (let j = lo; j < hi; j++) {
         const u = (attempts[j].t - t0) / tau;
         const w = gaussianWeight(u);
         if (w <= 0) continue;
+        const fw = (attempts[j].f || 1) * w;
         const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
         const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
         let p = c + span * praw;
         if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
         const g = span * slope * praw * (1 - praw);
         const v = g * g / (p * (1 - p));
-        const wv = w * v, w2v = w * w * v;
+        const wv = fw * v, w2v = fw * w * v;
         Baa += wv;  Bab += wv * u;  Bbb += wv * u * u;
         Maa += w2v; Mab += w2v * u; Mbb += w2v * u * u;
     }
@@ -546,6 +580,45 @@ function buildWideGrid(attempts, points) {
     return grid;
 }
 
+// Thin a time-sorted attempt array to frequency-weighted 2-D (time × x) BINS for
+// the wide-grid fit (see WIDE_TIME_BINS / WIDE_X_BIN). Each cell aggregates its
+// members to their MEAN (t, x, slope, floor) with a FRACTIONAL success rate
+// `correct` and `f` = the cell count — the exact binomial sufficient statistic for
+// a logistic bin, so poolLogistic's f·(correct − p) = successes − f·p and
+// f·g²/(P(1−P)) reproduce the cell's full score and Fisher information. The x-bin
+// keeps each cell near-constant in x (no Jensen bias from averaging scattered x);
+// the ×f frequency weight keeps the SE faithful. Returns the array unchanged
+// (f defaults to 1) when there aren't enough attempts for binning to help.
+function thinForWide(attempts) {
+    const N = attempts.length;
+    if (N <= WIDE_TIME_BINS * 4) return attempts;
+    const out = [];
+    for (let k = 0; k < WIDE_TIME_BINS; k++) {
+        const lo = Math.floor(k * N / WIDE_TIME_BINS);
+        const hi = Math.floor((k + 1) * N / WIDE_TIME_BINS);
+        if (hi <= lo) continue;
+        const cells = new Map();   // x-bucket index → running sums
+        for (let j = lo; j < hi; j++) {
+            const a = attempts[j];
+            const xb = Math.round(a.x / WIDE_X_BIN);
+            let c = cells.get(xb);
+            if (!c) { c = { st: 0, sx: 0, ss: 0, sfl: 0, sc: 0, n: 0 }; cells.set(xb, c); }
+            c.st += a.t; c.sx += a.x; c.ss += a.slope; c.sfl += a.floor; c.sc += a.correct; c.n++;
+        }
+        for (const c of cells.values()) {
+            const floor = c.sfl / c.n;
+            out.push({
+                t: c.st / c.n, x: c.sx / c.n, slope: c.ss / c.n, floor,
+                correct: c.sc / c.n,          // fractional success rate over the cell
+                kappa: clearKappa(floor),     // recomputed from the mean floor
+                f: c.n,
+            });
+        }
+    }
+    out.sort((p, q) => p.t - q.t);   // cells from adjacent slices interleave slightly
+    return out;
+}
+
 // Linear interpolation of a precomputed ascending grid on field `key`.
 function interpGrid(grid, t, key) {
     const n = grid.length;
@@ -558,33 +631,41 @@ function interpGrid(grid, t, key) {
     return grid[a][key] + (grid[b][key] - grid[a][key]) * u;
 }
 
-// Form residual at each attempt time: r = narrow-kernel skill − wide-kernel
-// skill (internal-rank space), with v = the narrow estimator's measurement
-// variance and w = its effective sample size (reliability weight for the σ_M²
-// fit). The sign of r is kept (`up`) so the swing can be fit separately above
-// (r ≥ 0, good days) and below (r < 0, bad days) long-term skill. Each residual
-// also gets `m`, its within-session multiplicity (≈ how many residuals belong to
-// the same sitting): residuals from one session are near-duplicates, so dividing
-// by m lets us count INDEPENDENT sessions downstream.
+// Form residuals — ONE per SESSION (a contiguous run of attempts with < SESSION_
+// GAP_MS between neighbours), not one per attempt. r = narrow-kernel skill −
+// wide-kernel skill (internal-rank space) evaluated at the session's centre; v is
+// the narrow estimator's measurement variance there. The sign of r is kept (`up`)
+// so the swing can be fit separately above (r ≥ 0, good days) and below (r < 0,
+// bad days) long-term skill.
+//
+// Why per session: σ_M is a session-TO-session variance, so a session is one
+// draw. The old code evaluated the narrow kernel at every attempt (~O(N) fits,
+// each near-identical to its session-mates) and then divided each residual by an
+// O(N²)-computed within-session multiplicity m to recover one INDEPENDENT session
+// — two halves of a single "collapse a sitting to one observation" mechanism.
+// Evaluating once per session does that directly: m ≡ 1, no multiplicity scan, a
+// handful-hundred fits instead of tens of thousands. A large session still counts
+// more PRECISELY (its narrow fit pools more attempts ⇒ smaller v ⇒ larger ML
+// weight 1/(σ_M²+v)²), which is the right way for size to matter — not as extra
+// session mass. Attempts arrive time-sorted, so sessions are a single linear pass.
 function buildResidualTrack(attempts, wideGrid) {
     const resid = [];
-    for (let j = 0; j < attempts.length; j++) {
-        const tj = attempts[j].t;
-        const nj = poolLogistic(attempts, tj, TAU_M_MS);
+    let s = 0;
+    while (s < attempts.length) {
+        let e = s + 1;
+        while (e < attempts.length && attempts[e].t - attempts[e - 1].t < SESSION_GAP_MS) e++;
+        // Centre = mean attempt time; the 4h narrow kernel centred there pools the
+        // whole sitting (evaluated over the FULL attempts, so the fit is exact).
+        let sumT = 0;
+        for (let j = s; j < e; j++) sumT += attempts[j].t;
+        const tc = sumT / (e - s);
+        s = e;
+        const nj = poolLogistic(attempts, tc, TAU_M_MS);
         if (!Number.isFinite(nj.R)) continue;
-        const Rw = interpGrid(wideGrid, tj, 'R');
+        const Rw = interpGrid(wideGrid, tc, 'R');
         if (!Number.isFinite(Rw)) continue;
         const r = nj.R - Rw;
-        resid.push({ t: tj, r2: r * r, up: r >= 0, v: nj.se * nj.se, w: nj.effN });
-    }
-    for (let i = 0; i < resid.length; i++) {
-        let m = 0;
-        for (let j = 0; j < resid.length; j++) {
-            const dd = (resid[i].t - resid[j].t) / SESSION_CORR_MS;
-            if (Math.abs(dd) > KERNEL_TRUNC_SIGMA) continue;
-            m += gaussianWeightUntruncated(dd);
-        }
-        resid[i].m = m;
+        resid.push({ t: tc, r2: r * r, up: r >= 0, v: nj.se * nj.se, w: nj.effN, m: 1 });
     }
     return resid;
 }
@@ -695,17 +776,21 @@ function globalPerformanceSigma(resid) {
 function decompose(attempts) {
     if (attempts.length < MIN_ATTEMPTS) return null;
 
-    // Coarse wide track (for residual interpolation only) + per-attempt form
-    // residuals. The decomp carries enough to evaluate S, seS and σ_M(t)
-    // continuously at any t via evaluateAt — no bucket grid.
-    const wideGrid = buildWideGrid(attempts, WIDE_GRID_POINTS);
+    // Coarse wide track (for residual interpolation AND the chart's dense skill
+    // line) + per-attempt form residuals. The decomp carries enough to evaluate
+    // S, seS and σ_M(t) continuously at any t: the wide kernel exactly via
+    // evaluateAt, or interpolated from wideGrid via evaluateOnGrid (the dense
+    // render path — the 30-day kernel is locally linear over the grid spacing, so
+    // interpolating S/seS matches the exact fit to well under a rank while sparing
+    // the per-point re-fit). wideGrid is kept on the decomp for that path.
+    const wideGrid = buildWideGrid(thinForWide(attempts), WIDE_GRID_POINTS);
     const resid = buildResidualTrack(attempts, wideGrid);
 
     // Global σ_M (point + 95% upper bound) — also the shrinkage target the
     // time-varying band pulls toward, so it must be on the decomp before any
     // evaluateAt call. Already in internal-rank units (the working coordinate).
     const gp = globalPerformanceSigma(resid);
-    const decomp = { attempts, resid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
+    const decomp = { attempts, resid, wideGrid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
 
     // Current skill reads the last "supported" grid point — the latest with
     // ≥ SUPPORT_EFFN effective pooled attempts (and a finite estimate).
@@ -763,5 +848,33 @@ export function evaluateAt(decomp, t) {
         sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
         sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
         effNS: sk.effN,
+    };
+}
+
+// Dense-render evaluation: same result shape as evaluateAt, but S and its
+// measurement SE seS are INTERPOLATED from the precomputed wideGrid instead of
+// re-running the wide-kernel local-linear MLE at t. The wide (30-day) kernel is
+// locally linear over the grid spacing — the exact property buildResidualTrack
+// already relies on — so the interpolated skill line and inner band match the
+// exact fit to well under a rank, while the per-point wide MLE (by far the
+// costliest part of the chart on dense histories) is skipped entirely. Only the
+// directional performance swing (localPerformanceVar) is still computed per point.
+// Falls back to the exact evaluateAt when the grid is absent (older decomp shape).
+// Used by the Rank chart's 300-point grid; the exact evaluateAt stays for the
+// single "current skill" readout, where precision matters and cost is trivial.
+export function evaluateOnGrid(decomp, t) {
+    if (!decomp) return null;
+    const { wideGrid, resid } = decomp;
+    if (!wideGrid || wideGrid.length < 2) return evaluateAt(decomp, t);
+    const S = interpGrid(wideGrid, t, 'R');
+    if (!Number.isFinite(S)) return null;
+    const seS = interpGrid(wideGrid, t, 'se');
+    const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
+    return {
+        S,                                // skill, internal-rank index (interpolated)
+        seS,                              // measurement SE, rank units (interpolated)
+        sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
+        sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
+        effNS: NaN,                       // not used by the chart render path
     };
 }

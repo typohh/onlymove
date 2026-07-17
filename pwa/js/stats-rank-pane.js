@@ -8,7 +8,7 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { evaluateAt, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
+import { evaluateOnGrid, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
 import { getPopulationConstants, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
 import { rankScalarToLabel, rankIndexToLabel, rankProgress } from '../shared/rank-math.js';
@@ -101,9 +101,12 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
     // Two-kernel rank decomposition: see rank-decomposition.js. We evaluate the
     // skill smoother Ŝ(t), its measurement SE seS(t), and the time-varying
-    // performance swing σ_M(t) continuously on a regular t-grid (the kernels are
-    // exact functions of t — no bucketing, no interpolation between sparse
-    // attempt timestamps), so line and bands shape correctly across gaps.
+    // performance swing σ_M(t) on a regular t-grid, so line and bands shape
+    // correctly across gaps. The skill line + inner band are read via
+    // evaluateOnGrid, which interpolates S/seS from the decomp's precomputed
+    // wideGrid (the 30-day kernel is locally linear over the grid spacing) rather
+    // than re-running the wide MLE at each of the 300 points; σ_M(t) is still an
+    // exact per-point estimate.
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
@@ -123,7 +126,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     if (decomp) {
         for (let i = 0; i < GRID_POINTS; i++) {
             const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
-            const e = evaluateAt(decomp, t);
+            const e = evaluateOnGrid(decomp, t);
             if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaUp: e.sigmaUp, sigmaDown: e.sigmaDown });
         }
     }
