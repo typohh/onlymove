@@ -178,14 +178,23 @@ export const handleInstallClick = async () => {
     // (when already subscribed / blocked) is a no-op — the button is
     // visually disabled in those terminal states.
     if (notifState.permission === 'denied') return;
-    if (notifState.permission === 'granted' && notifState.subscribed) return;
+    if (notifState.subscribed) return;
 
+    let result = null;
     try {
-        await enableNotifications();
+        result = await enableNotifications();
     } catch (err) {
         console.error('enableNotifications failed:', err);
     }
     await refreshNotifState();
+    // Inside the TWA, Notification.permission is delegated to the Android app
+    // and the renderer's cached value can still read 'default' right after the
+    // user accepts the native dialog — so trust the enable flow's own outcome
+    // (it holds the live subscription) over the re-read.
+    if (result?.ok) {
+        notifState.permission = 'granted';
+        notifState.subscribed = true;
+    }
     updateInstallButton();
 };
 
@@ -207,7 +216,12 @@ const updateInstallButton = () => {
         btn.classList.add('disabled');
         return;
     }
-    if (notifState.permission === 'granted' && notifState.subscribed) {
+    // A live push subscription implies granted permission, even when the
+    // permission property disagrees: in the TWA the delegated
+    // Notification.permission can keep reporting 'default' after the Android
+    // grant, so requiring 'granted' here would pin the button on "Notify"
+    // forever despite working reminders.
+    if (notifState.subscribed) {
         btn.textContent = getTerm('reminders');
         btn.classList.add('disabled');
         return;

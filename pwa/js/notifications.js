@@ -235,9 +235,12 @@ export async function uploadSchedule({ force = false } = {}) {
 }
 
 // Uploads the schedule only if the user already has notifications enabled.
-// Avoids pinging the Worker for users who never opted in.
+// Avoids pinging the Worker for users who never opted in. Opted-in is judged
+// by the push subscription existing, NOT by Notification.permission — in the
+// TWA the delegated permission property can keep reading 'default' after the
+// Android grant, and gating on it silently stopped all schedule uploads (and
+// the last_seen_at mid-session-suppression watermark) for TWA sessions.
 export async function maybeUploadSchedule(opts) {
-    if (notificationPermission() !== 'granted') return;
     const sub = await getCurrentSubscription();
     if (!sub) return;
     return uploadSchedule(opts);
