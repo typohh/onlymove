@@ -311,6 +311,7 @@ function cleanUrl() {
 // currentProblem, paints the board, resets the solve timer, re-enables clicks.
 // Throws if the SGF won't load so the caller can blacklist + reselect.
 function displayProblem(problem, appMode) {
+    abandonExampleReviewIfActive();
     setCurrentProblem(problem);
     setAppMode(appMode);
     // Keep a shared problem's deep-link in the address bar so a reload re-enters
@@ -783,6 +784,108 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
         console.error(`Error loading tsumego by ID ${tsumegoId}:`, error);
         return false;
     }
+}
+
+// --- In-instance example review (stats Weaknesses pane) ---------------------
+//
+// Weakness-example links review a past problem inside the running instance —
+// a spawned tab would land on the single-active-tab lock overlay (tab-lock.js).
+// The example is staged as a TEMPORARY previousProblem so every analysis-mode
+// consumer (rank label, motif bubble, share, ignore gating) coherently acts on
+// it, and the swap is undone on exit so "Review" after closing stats still
+// reviews the true previous problem. The context is in-memory only: an example
+// review never survives a reload (the stats modal it returns to is gone too).
+let exampleReview = null;
+
+export function isExampleReviewActive() { return exampleReview !== null; }
+
+// Stages `tsumegoId` for review: loads its shard (switching board size if the
+// example lives on the other board — the on-screen problem is saved for the
+// way back), swaps it into previousProblem, and remembers how to restore
+// everything. Returns true when staged (the caller then enters analysis mode);
+// false leaves all state as it was. `onExit` re-shows the hidden stats modal
+// after a normal exit; `onAbandon` discards it after a side-door exit (see
+// abandonExampleReviewIfActive).
+export async function beginExampleReview(tsumegoId, { onExit, onAbandon } = {}) {
+    // A second example opened from a re-opened stats modal (menu → Stats is
+    // reachable from analysis mode) chains: unwind the prior swap, but keep
+    // restoring to the board size / on-screen problem from BEFORE the first
+    // example. The prior modal was already superseded by the one this click
+    // came from, so its callbacks are dropped without firing.
+    const prior = exampleReview;
+    exampleReview = null;
+    if (prior && state.boardSize === prior.exampleSize) {
+        setPreviousProblem(prior.previousProblem);
+    }
+    const saved = prior
+        ? { boardSize: prior.boardSize, currentProblem: prior.currentProblem, onExit, onAbandon }
+        : { boardSize: state.boardSize, currentProblem: state.currentProblem, onExit, onAbandon };
+    try {
+        const lookupResult = await findZipIdForTsumegoId(tsumegoId);
+        if (!lookupResult) throw new Error(`No tsumego with id ${tsumegoId}`);
+        const { zipId, size } = lookupResult;
+        if (size && size !== state.boardSize) setBoardSize(size);
+        await loadZipMetadata();
+        const zipFilename = state.zipMetadata.find(z => z.filename.startsWith(zipId))?.filename;
+        if (!zipFilename) throw new Error(`Zip file for tsumego ID ${tsumegoId} not found`);
+        await loadZipProblems(zipFilename);
+        const raw = state.allProblems.find(p => p.filename === `${tsumegoId}.sgf`)
+            || { filename: `${tsumegoId}.sgf`, zipFilename, rating: 0, rank: 0, quality: 0 };
+        // linked: view-only — nothing about this detour is ever recorded.
+        const problem = await buildProblem(raw, { isRepeat: false, linked: true, orientation: 0 });
+        // previousProblem is per-size, so capture the bucket being clobbered
+        // only now, after any size switch above.
+        saved.previousProblem = state.previousProblem;
+        saved.exampleSize = state.boardSize;
+        setPreviousProblem(problem);
+        exampleReview = saved;
+        return true;
+    } catch (error) {
+        reportLoadError(error, 0);
+        // Undo a size switch that happened before the failure.
+        if (state.boardSize !== saved.boardSize) {
+            setBoardSize(saved.boardSize);
+            setCurrentProblem(saved.currentProblem);
+        }
+        return false;
+    }
+}
+
+// Exits an example review: restores the swapped previousProblem (and board
+// size / on-screen problem after a cross-size example), repaints what was on
+// screen before the detour, then hands control back to the stats panel via
+// onExit. Called from main.js's button1 analysis-exit branch.
+export async function endExampleReview() {
+    const saved = exampleReview;
+    // Cleared before the repaint: displayProblem below must not read this as
+    // a side-door exit (abandonExampleReviewIfActive).
+    exampleReview = null;
+    if (!saved) return;
+    setPreviousProblem(saved.previousProblem);
+    if (state.boardSize !== saved.boardSize) {
+        setBoardSize(saved.boardSize);
+        setCurrentProblem(saved.currentProblem);
+    }
+    await redisplayCurrentProblem();
+    if (saved.onExit) saved.onExit();
+}
+
+// Any problem painted while an example review is staged means the user left
+// through a side door (e.g. the always-available board-size menu item, which
+// advances to a fresh problem) — drop the stale context so a later analysis
+// exit can't restore a bygone stats panel, and let the owner discard its
+// hidden modal. The previousProblem swap is unwound only when we're still on
+// the example's board (the setter writes the active size's bucket); a
+// side-door that already switched boards leaves the example as that size's
+// reviewable previous — harmless, and replaced on the next completed problem.
+function abandonExampleReviewIfActive() {
+    const saved = exampleReview;
+    if (!saved) return;
+    exampleReview = null;
+    if (state.boardSize === saved.exampleSize) {
+        setPreviousProblem(saved.previousProblem);
+    }
+    if (saved.onAbandon) saved.onAbandon();
 }
 
 // Fetches the global lookup.txt corpus manifest (one "id zipHash size" row

@@ -280,11 +280,33 @@ function combineChartWithText(chartElement, text, lead = null) {
 // before this is called (under the "constructing charts" overlay), so tab
 // switching is pure show/hide and instant. Tabs with null content are dropped,
 // and the tab bar is omitted when only one pane remains.
+// The open (possibly hidden) stats modal — hidden while an in-instance
+// weakness-example review holds the board (stats-weaknesses.js), restored
+// with its full DOM state (active tab, scroll, expanded lists) on exit.
+let activeStatsModal = null;
+
+// Hide/restore around an example review; discard when the review is abandoned
+// through a side door (problem-loader.js's abandonExampleReviewIfActive) so a
+// stale modal can't linger hidden in the DOM.
+export function hideStatsModal() {
+    if (activeStatsModal) activeStatsModal.backdrop.style.display = 'none';
+}
+export function restoreStatsModal() {
+    if (activeStatsModal) activeStatsModal.backdrop.style.display = '';
+}
+export function discardStatsModal() {
+    if (activeStatsModal) activeStatsModal.close();
+}
+
 function showStatsModal(tabs) {
     const entries = tabs
         .filter(t => t.content)
         .map(t => ({ label: t.label, node: t.content }));
     if (entries.length === 0) return;
+
+    // A modal still hidden behind an example review is superseded by a freshly
+    // opened one (menu → Stats is reachable from analysis mode).
+    if (activeStatsModal) activeStatsModal.close();
 
     const backdrop = document.createElement('div');
     backdrop.className = 'stats-modal-backdrop';
@@ -299,8 +321,11 @@ function showStatsModal(tabs) {
     const close = () => {
         document.removeEventListener('keydown', onKey);
         backdrop.remove();
+        if (activeStatsModal && activeStatsModal.backdrop === backdrop) activeStatsModal = null;
     };
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    // Escape must not close the modal while it's hidden behind an example
+    // review — the review's exit would then have nothing to restore.
+    const onKey = (e) => { if (e.key === 'Escape' && backdrop.style.display !== 'none') close(); };
     closeBtn.onclick = close;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.addEventListener('keydown', onKey);
@@ -333,6 +358,7 @@ function showStatsModal(tabs) {
     card.append(tabbar, body, closeBtn);
     backdrop.appendChild(card);
     document.body.appendChild(backdrop);
+    activeStatsModal = { backdrop, close };
 
     renderTabbar();
     renderBody();

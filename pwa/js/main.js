@@ -73,7 +73,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem } from './problem-loader.js';
+import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem, isExampleReviewActive, endExampleReview } from './problem-loader.js';
 import { backfillMissingEmbeddings, stampVersionsForFreshHistory } from './backfill.js';
 import { maybeShowRatingsCorrectionNotice } from './corrections-notice.js';
 import { loadRatingRankMap } from './rank-decomposition.js';
@@ -277,15 +277,6 @@ function wireActionButtons() {
     // Handle button1 click - behavior depends on current mode
     document.getElementById('button1').addEventListener('click', (e) => {
         e.preventDefault();
-        // Stats-panel example links carry close_on_next=1 (see model.js's
-        // populateExamplesList). Tapping button1 in that spawned window
-        // closes it instead of continuing the session, so paging through
-        // examples on an installed PWA doesn't accumulate Android instances.
-        const closeOnNext = new URLSearchParams(window.location.search).get('close_on_next') === '1';
-        if (closeOnNext) {
-            window.close();
-            return;
-        }
         if (state.appMode === APP_MODES.LINKED) {
             // In view mode, button1 exits the shared problem back to the user's
             // standing challenge (which was never disturbed by the detour).
@@ -312,6 +303,16 @@ function wireActionButtons() {
             // Lock against a fast double-tap re-entering before loadTsumego
             // re-enables clicks once the next problem is actually ready.
             setAcceptClicks(false);
+            // A stats-panel example review is unrecorded (the example's attempt
+            // is an old history entry, not the last answer, so the review-time
+            // attribution below would credit the wrong problem): drop the
+            // timer, restore the pre-detour state, and re-show the hidden
+            // stats modal over the untouched problem.
+            if (isExampleReviewActive()) {
+                setReviewStartTime(null);
+                endExampleReview();
+                return;
+            }
             if (state.reviewStartTime !== null) {
                 const reviewTime = Date.now() - state.reviewStartTime;
                 const answerHistory = [...state.answerHistory];
@@ -441,7 +442,7 @@ function parseUrlIntent() {
         // If id is present but o is missing, default to 0 (user request)
         orientation = 0;
     }
-    return { urlParams, tsumegoId, wantsRecall, orientation, orientationParam };
+    return { tsumegoId, wantsRecall, orientation, orientationParam };
 }
 
 // Resolve board size before any tsumego load. Order of precedence:
@@ -474,7 +475,7 @@ async function resolveInitialBoardSize(tsumegoId) {
 // recall on a plain open. hideLoading() is left to the caller (after first
 // paint). The URL is cleaned by displayProblem (only for non-linked problems, so
 // a shared problem's deep-link survives a reload) — see cleanUrl in problem-loader.
-async function loadInitialProblem({ urlParams, tsumegoId, wantsRecall, orientation, orientationParam }) {
+async function loadInitialProblem({ tsumegoId, wantsRecall, orientation, orientationParam }) {
     // Spinner over the initial problem load (fetching/parsing the zip archive)
     // so cold loads don't sit on a blank board. Lifted after the first paint.
     showLoading();
@@ -486,11 +487,8 @@ async function loadInitialProblem({ urlParams, tsumegoId, wantsRecall, orientati
             // problem. Either way the standing challenge is untouched and resumes
             // when the user exits (returnToChallenge). An explicit ?o=N still wins
             // (the share-link contract). Record the open with referrer for
-            // analytics — but skip internal stats-panel example links
-            // (close_on_next=1) so they don't inflate the share 'open' count.
-            if (urlParams.get('close_on_next') !== '1') {
-                recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
-            }
+            // analytics.
+            recordShareEvent({ type: 'open', problemId: tsumegoId, referrer: document.referrer || null });
             const explicitOrientation = orientationParam !== null;
             const isRecall = getRecallCandidates().some(c => c.problemId === tsumegoId);
             const effectiveOrientation = (isRecall && !explicitOrientation) ? null : orientation;

@@ -6,11 +6,18 @@
 // Rendering-only — the numeric example selection (findExamplesForIssue) and the
 // probit threshold live in stats-compute.js.
 
-import { state } from './state.js';
+import { state, setAcceptClicks } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
 import { getRecallCandidates } from './model.js';
+import { beginExampleReview } from './problem-loader.js';
+import { enterAnalysisMode } from './analysis.js';
+import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
+
+// Guards the example-link click handler against a double-tap racing the async
+// shard load — the second activation would nest a begin inside the first.
+let exampleOpenInFlight = false;
 
 // Builds the "Likely issues" DOM block consumed by showDetailedStats. Each
 // surfaced (axis k, category) issue is one row with a toggle that lazily
@@ -187,17 +194,37 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     for (const ex of shown) {
         const link = document.createElement('a');
         link.className = 'stats-issue-example-link';
-        link.href = `?id=${encodeURIComponent(ex.problemId)}&o=0&close_on_next=1`;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        // Primary-click goes through window.open() so the spawned tab is
-        // script-opened — window.close() in the spawned window is only
-        // permitted when the opener was a script. Modifier-click and
-        // middle-click fall through to the native target=_blank behavior.
-        link.addEventListener('click', (e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        // In-instance review: a spawned tab would land on the tab-lock overlay,
+        // so the example opens over this instance in analysis mode. The stats
+        // modal hides (DOM intact) and reappears when the review exits via the
+        // analysis Exit button (main.js → endExampleReview). No href — every
+        // activation routes through this handler.
+        link.addEventListener('click', async (e) => {
             e.preventDefault();
-            window.open(link.href, '_blank', 'noopener');
+            if (exampleOpenInFlight) return;
+            // A post-answer transition owns the board (acceptClicks false) —
+            // entering a review over it would race the in-flight load.
+            if (!state.acceptClicks) return;
+            exampleOpenInFlight = true;
+            // Lock the board for the async shard load: once the modal hides,
+            // the problem underneath would otherwise take stray clicks until
+            // enterAnalysisMode (which re-enables clicks) takes over.
+            setAcceptClicks(false);
+            try {
+                hideStatsModal();
+                const staged = await beginExampleReview(ex.problemId, {
+                    onExit: restoreStatsModal,
+                    onAbandon: discardStatsModal,
+                });
+                if (!staged) {
+                    restoreStatsModal();
+                    setAcceptClicks(true);
+                    return;
+                }
+                await enterAnalysisMode();
+            } finally {
+                exampleOpenInFlight = false;
+            }
         });
         const sizeLabel = (ex.size === 9 || ex.size === 13) ? `${ex.size}x${ex.size} · ` : '';
         link.textContent = `${ex.problemId} · ${sizeLabel}${formatSignalStrength(issue.quadrant, ex.ec, ex.ep)}`;
