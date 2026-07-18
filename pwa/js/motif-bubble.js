@@ -55,8 +55,11 @@ export function refreshMotifBubbleMetrics() {
 }
 
 /**
- * Top motifs of a correct-move embedding: labeled components whose score clears
- * MIN_Z, highest first, capped at MAX_MOTIFS. Returns localized label strings.
+ * Top motifs of a correct-move embedding: labeled components whose |score|
+ * clears MIN_Z, strongest first, capped at MAX_MOTIFS. The axes are BIPOLAR
+ * (residual skill axes, 2026-07-18): a large NEGATIVE loading is the
+ * negative-tail motif, not "no motif" — each side uses its own label, and a
+ * side left unnamed in labels.json is skipped. Returns localized strings.
  */
 function topMotifs(embedding) {
     const labels = state.embeddingLabels;
@@ -64,10 +67,11 @@ function topMotifs(embedding) {
     const scored = [];
     for (let k = 0; k < embedding.length; k++) {
         const v = embedding[k];
-        if (!(v >= MIN_Z)) continue;
-        const text = localizedMotif(labels[String(k)]);
+        if (!Number.isFinite(v) || !(Math.abs(v) >= MIN_Z)) continue;
+        const text = localizedMotif(labels[String(k)],
+                                    v >= 0 ? 'positive' : 'negative');
         if (!text) continue;
-        scored.push({ v, text });
+        scored.push({ v: Math.abs(v), text });
     }
     scored.sort((a, b) => b.v - a.v);
     return scored.slice(0, MAX_MOTIFS).map((m) => m.text);

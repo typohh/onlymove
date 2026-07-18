@@ -52,9 +52,15 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     const weaknessSe = state.weaknessSe;
     const weaknessAxisCov = state.weaknessAxisCov;
     const labelMap = state.embeddingLabels || {};
-    const labelFor = (k) => {
+    // side: which TAIL of the bipolar axis the weakness sits on. A negative-
+    // side weakness is only surfaced when that tail is actually named
+    // (labelFor returns null then and the axis is skipped) — some axes only
+    // carry a motif on one side (labels.json v4).
+    const labelFor = (k, side = 'positive') => {
         const entry = labelMap[String(k)];
-        return localizedMotif(entry) || getTerm('statsStyleFallback', { k });
+        const text = localizedMotif(entry, side);
+        if (text) return text;
+        return side === 'positive' ? getTerm('statsStyleFallback', { k }) : null;
     };
     const PHRASES = {
         tooMuch:   (l) => getTerm('statsIssueTooMuch', { motif: l }),
@@ -85,7 +91,12 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
 
     const K = (weaknessParams.length - 2) / 2;
 
-    // Level 1: flag axes whose identified sum coefficient is credibly negative.
+    // Level 1: flag axes whose identified sum coefficient is credibly non-zero
+    // in EITHER direction — the axes are BIPOLAR (residual skill axes,
+    // 2026-07-18): a credibly NEGATIVE sum = weak at the positive-tail motif,
+    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. The negative
+    // side only surfaces when that tail is named in labels.json; an unnamed
+    // tail has nothing actionable to say and is skipped.
     const flagged = [];
     for (let k = 0; k < K; k++) {
         const mu_c = weaknessParams[2 + k];
@@ -96,21 +107,31 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
         const varSum = var_c + var_p + 2 * cov;
         if (!(varSum > 0)) continue;
-        const pWeak = normCdf(-(mu_c + mu_p) / Math.sqrt(varSum));
-        if (pWeak >= WEAK_PROB_THRESHOLD) flagged.push({ k, p: pWeak });
+        const pWeakPos = normCdf(-(mu_c + mu_p) / Math.sqrt(varSum));
+        if (pWeakPos >= WEAK_PROB_THRESHOLD) {
+            flagged.push({ k, p: pWeakPos, side: 'positive' });
+        } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD
+                   && labelFor(k, 'negative')) {
+            flagged.push({ k, p: 1 - pWeakPos, side: 'negative' });
+        }
     }
 
     // Level 2: qualify each flagged axis's direction from the paired
     // picked-vs-correct contrast; inconclusive stays "inconsistently".
+    // pOver is P(picked loads HIGHER than correct on axis k) — overshoot
+    // toward the POSITIVE tail. For a negative-side weakness the named motif
+    // is the negative pole, so over/under invert.
     const directions = computeAxisDirections(history, flagged.map(f => f.k));
-    const issues = flagged.map(({ k, p }) => {
+    const issues = flagged.map(({ k, p, side }) => {
         let quadrant = 'badAt';
         const dir = directions.get(k);
         if (dir && dir.nPos + dir.nNeg >= MIN_DIRECTION_N) {
-            if (dir.pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
-            else if (1 - dir.pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
+            const pOver = side === 'negative' ? 1 - dir.pOver : dir.pOver;
+            if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
+            else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
         }
-        return { k, quadrant, p, sentence: PHRASES[quadrant](labelFor(k)) };
+        return { k, side, quadrant, p,
+                 sentence: PHRASES[quadrant](labelFor(k, side)) };
     });
     issues.sort((a, b) => b.p - a.p);
 
@@ -181,7 +202,8 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     // axes, and probit(1) = Infinity would demand impossible evidence and
     // blank the examples list for exactly the most confident issues.
     const threshold = probit(Math.min(issue.p, 0.99));
-    const examples = findExamplesForIssue(history, issue.k, issue.quadrant, recallSet, threshold);
+    const examples = findExamplesForIssue(history, issue.k, issue.quadrant, recallSet,
+                                          threshold, issue.side === 'negative' ? -1 : 1);
     if (examples.length === 0) {
         const none = document.createElement('div');
         none.className = 'stats-issue-examples-empty';

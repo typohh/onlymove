@@ -275,7 +275,11 @@ export function computeAxisDirections(history, flaggedKs) {
 // even though the latter should be backed by stronger per-attempt evidence.
 // Embeddings are unit-variance per component (skew-ICA standardized), so the
 // gate and the score are directly interpretable on the σ scale.
-export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0) {
+// `sign` (+1/−1) selects which TAIL of the bipolar axis the issue names:
+// −1 mirrors the axis so a negative-tail issue ("weak at the negative-pole
+// motif") reads its evidence with ec/d inverted — the same three quadrant
+// shapes then apply verbatim on the mirrored axis.
+export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, threshold = 0, sign = 1) {
     const t = Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
     const byId = new Map();
     for (const a of answerHistory) {
@@ -286,8 +290,8 @@ export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, th
         if (excludedIds && excludedIds.has(a.problemId)) continue;
         if (!Array.isArray(a.embedding) || a.embedding.length <= k) continue;
         if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length <= k) continue;
-        const ec = a.embedding[k];
-        const ep = a.pickedEmbedding[k];
+        const ec = sign * a.embedding[k];
+        const ep = sign * a.pickedEmbedding[k];
         if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;
         const d = ep - ec;
         let score;

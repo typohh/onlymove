@@ -625,12 +625,14 @@ function getLang() {
  * canonical English `positive` string when no translation exists for the
  * active language. Used by the review-mode motif bubble and the stats page.
  */
-export function localizedMotif(component) {
+export function localizedMotif(component, side = 'positive') {
   if (!component) return null;
   const lang = getLang();
-  return (component.positive_i18n && component.positive_i18n[lang])
-    || component.positive
-    || null;
+  // Axes are BIPOLAR (labels.json v4): either tail may carry a named motif,
+  // and some axes name only one side (the other stays null → caller skips).
+  const i18n = side === 'negative' ? component.negative_i18n : component.positive_i18n;
+  const text = side === 'negative' ? component.negative : component.positive;
+  return (i18n && i18n[lang]) || text || null;
 }
 
 export function getTerm(key, params) {
