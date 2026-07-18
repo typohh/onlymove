@@ -74,6 +74,9 @@ from utils.rating_features import (  # noqa: E402
     load_joint_activations, load_joint_bot_winrate, load_joint_game_phase,
     load_joint_move_features,
 )
+from utils.slope_calibration import (  # noqa: E402
+    apply_slope_scale, fit_slope_scale, load_client_lapse,
+)
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 
@@ -346,6 +349,27 @@ def main():
     lo, hi = np.percentile(rating, [WINSOR, 100 - WINSOR])
     rating = np.clip(rating, lo, hi)                          # percentile winsor (robustness)
     theta = theta_full[:n_profiles]
+
+    # ---- held-out global slope calibration (docs/scalar_weakness_axes.md, 2026-07-18) ----
+    # The joint MLE's per-problem slopes come out uniformly too shallow (errors-in-variables:
+    # noisy per-profile theta attenuates discrimination), so a single global multiplier s on
+    # the slopes is fit OUT-OF-SAMPLE here — client-replica walk-forward LL, golden-section;
+    # in-sample refitting would re-absorb the attenuation to s = 1. Mode choice measured
+    # (A/B 2026-07-18): scaling the SLOPE with the shipped rating kept as the 80%-clear
+    # anchor (+1.90 mnat at s~1.3) beats re-deriving the anchor toward the 50%-point
+    # (+1.68) — so ratings stay untouched and only the quality/slope column is scaled.
+    # s is recalculated every run, never hardcoded; ordering matters: rating is derived
+    # from the UNSCALED slope above (it anchors the curve the calibration steepens).
+    cal = fit_slope_scale(
+        load_first_time_attempts(),
+        {keys[i][1]: (float(rating[i]), float(a_all[i]), float(c_all[i]))
+         for i in range(len(keys))},
+        load_client_lapse(lam), mode="slope")
+    print(f"  slope calibration: s = {cal['s']:.3f} "
+          f"(+{cal['gain_mnat_per_attempt']:.2f} mnat/attempt held-out, "
+          f"{cal['n_users']} users / {cal['n_heldout']} attempts)")
+    _, a_all = apply_slope_scale(rating, a_all, c_all, cal["s"], cal["mode"],
+                                 load_client_lapse(lam))
     os.makedirs(OUT_DIR, exist_ok=True)
     for s in SIZES:
         sel = [i for i, (sz, _) in enumerate(keys) if sz == s]
@@ -368,7 +392,10 @@ def main():
                   "n_attempts": [int(natt.get(i, 0)) for i in range(n_profiles)]}).to_csv(
         os.path.join(OUT_DIR, "user_theta.csv"), index=False)
     with open(os.path.join(OUT_DIR, "rating_constants.json"), "w") as f:
-        json.dump({"fat_finger_rate": round(lam, 4)}, f, indent=2)
+        json.dump({"fat_finger_rate": round(lam, 4),
+                   "slope_scale": cal["s"], "slope_scale_mode": cal["mode"],
+                   "slope_scale_gain_mnat": round(cal["gain_mnat_per_attempt"], 3)},
+                  f, indent=2)
     config = {"features": "bw_act", "move_features": True, "pca_dim": PCA_DIM,
               "diff_hidden": list(DIFF_HIDDEN), "dropout": DROPOUT, "act_dropout": ACT_DROPOUT,
               "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,

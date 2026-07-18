@@ -29,7 +29,14 @@ Model (attempt-level):
     block the rating NN consumes, plus its OUTPUTS (rating/slope/floor/rank).
     The skew-ICA embedding (embeddings/joint/) is deliberately NOT an input —
     the production form of this model must never depend on the motif pipeline.
-    r, g: shared MLP trunk with dropout (the rating backbone's overfit lesson),
+    r: MLP trunk with dropout (the rating backbone's overfit lesson).
+    g: 2026-07-18 FIXED REGIMEN — a direct LINEAR head on the features with
+       unit-RMS columns, lenient mutual+r orthogonality penalty (0.5), and the
+       first 3 axes warm-started at the hand-crafted scalar directions. The
+       original trunk-shared free-scale g provably failed to learn directions
+       known to be forward-valid (docs/scalar_weakness_axes.md follow-up 4):
+       free loading scale subsidized r-cloning, the r-dominated trunk bottleneck
+       hid non-r features, and the v=0 init deadlocked weak directions.
     v_u ~ N(0, I) prior, centered per axis (r carries any mean).
 
 Training/eval protocol (per docs/scalar_weakness_axes.md metrics):
@@ -150,7 +157,7 @@ def load_attempts():
 
 # ------------------------------------------------------------------ training
 def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
-               ortho=False):
+               ortho_weight=0.5, g_init=None):
     import torch
     import torch.nn as nn
     torch.manual_seed(seed)
@@ -174,14 +181,27 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
         nn.Linear(64, 32), nn.ReLU(), nn.Dropout(0.3),
     ).to(device)
     head_r = nn.Linear(32, 1).to(device)
-    head_g = nn.Linear(32, k_axes).to(device)
+    # FIX 2 (2026-07-18 regimen): g is a DIRECT LINEAR head on the raw
+    # features, not a head on the shared trunk — the 64->32 bottleneck is
+    # shaped by the r head's ~100x-larger gradient, so a trunk-based g could
+    # only combine r-relevant features (the scalar existence proof: known
+    # forward-valid directions in the input space stayed unlearned). Linear
+    # loadings are also interpretable in feature space and warm-startable.
+    g_lin = nn.Linear(F.shape[1], k_axes, bias=False).to(device)
+    if g_init is not None:
+        with torch.no_grad():
+            g_lin.weight[:g_init.shape[0]].copy_(
+                torch.tensor(g_init, dtype=torch.float32, device=device))
     alpha = torch.zeros(n_u, device=device, requires_grad=True)
     beta = torch.zeros(n_u, device=device, requires_grad=True)
     v = torch.zeros(n_u, k_axes, device=device, requires_grad=True)
 
     opt = torch.optim.Adam([
-        {"params": list(trunk.parameters()) + list(head_r.parameters())
-                   + list(head_g.parameters()), "lr": 1e-3, "weight_decay": 1e-4},
+        {"params": list(trunk.parameters()) + list(head_r.parameters()),
+         "lr": 1e-3, "weight_decay": 1e-4},
+        # no weight decay on g: columns are RMS-normalized in the forward, so
+        # decay would only rotate, not shrink
+        {"params": list(g_lin.parameters()), "lr": 1e-3},
         {"params": [alpha, beta], "lr": 1e-2},
         {"params": [v], "lr": 1e-2},
     ])
@@ -195,8 +215,14 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
             idx = perm[i:i + batch]
             u, p, y = U[idx], P[idx], Y[idx]
             h = trunk(X[p])
-            gh = head_g(h)
             rh = head_r(h)
+            gh = g_lin(X[p])
+            # FIX 1: unit-RMS columns — the v ~ N(0, I) prior is only honest
+            # when loadings cannot absorb scale (with free ||g_k|| one axis
+            # dodges shrinkage by inflating loadings while v shrinks, and K
+            # clones of a strong direction split v to 1/K the prior cost —
+            # the observed r-cloning).
+            gh = gh / (gh.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
             logit = (alpha[u] + beta[u] * RANK[p]
                      + rh.squeeze(-1)
                      + (gh * v[u]).sum(-1))
@@ -209,17 +235,20 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
             loss = bce(logit, y) \
                 + 0.5 * ((v[u] ** 2).sum(dim=1) / counts[u]).sum() / len(idx) \
                 + 10.0 * (v.mean(dim=0) ** 2).sum()
-            if ortho:
+            if ortho_weight > 0:
                 # Deflation: axes mutually orthogonal AND orthogonal to the r
                 # direction (batch-level centered cosines) — 2026-07-18 showed
                 # unconstrained axes collapse onto correlated copies of r, so
                 # this forces the capacity to look beyond difficulty
                 # sensitivity. Batch (8192) estimates the corpus cosines well.
+                # Weight scale: at full collapse the summed squared cosines are
+                # O(K) — weight 10 made the penalty dominate the ~0.47 BCE and
+                # crushed the r head too; sub-1 weights are the lenient regime.
                 M = torch.cat([gh, rh], dim=1)
                 Mc = M - M.mean(dim=0, keepdim=True)
                 Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
                 Cm = Mn.T @ Mn
-                loss = loss + 10.0 * ((Cm - torch.eye(
+                loss = loss + ortho_weight * ((Cm - torch.eye(
                     Cm.shape[0], device=Cm.device)) ** 2).sum()
             opt.zero_grad()
             loss.backward()
@@ -230,9 +259,10 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
 
     with torch.no_grad():
         trunk.eval()
-        h = trunk(X)
-        g_all = head_g(h).cpu().numpy()          # (n_problems, K)
-        r_all = head_r(h).squeeze(-1).cpu().numpy()
+        g_all = g_lin(X)
+        g_all = (g_all / (g_all.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
+                 ).cpu().numpy()                 # (n_problems, K), corpus-RMS-normed
+        r_all = head_r(trunk(X)).squeeze(-1).cpu().numpy()
         # scale axes so v ~ unit variance across train users -> loadings carry
         # the magnitude (kappa is scale-invariant; this is for readability)
         sd = v.std(dim=0).cpu().numpy()
@@ -321,7 +351,9 @@ def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse
     axes are scored only on what they add beyond it (a user's window fit on an
     r-aligned column otherwise re-learns the population correction itself)."""
     acc = {"off": [], "axes": [], "off_sca": [], "axes_sca": [], "y": [], "r": [],
-           "off4": [], "axes4": [], "off4_sca": [], "axes4_sca": []}
+           "off4": [], "axes4": [], "off4_sca": [], "axes4_sca": [],
+           "sca4": [], "off4_ax": [], "sca4_ax": [],
+           "s0_4": [], "s1_4": [], "s2_4": []}
     all_r0 = np.array([v[0] for v in params.values()])
     grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
     for u in eval_users:
@@ -352,8 +384,10 @@ def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse
         X_b = X_ax[:, :2]
         X_sca = np.column_stack([np.ones(len(a)), rk, S])
         X_full = np.column_stack([np.ones(len(a)), rk, S, G])
+        X_solo = [np.column_stack([np.ones(len(a)), rk, S[:, j]]) for j in range(3)]
         w_ax = w_b = w_sca = w_full = None
         w4_ax = w4_b = w4_sca = w4_full = None
+        w4_solo = [None, None, None]
         for t0 in range(WARMUP, len(a), EVAL_BLOCK):
             lo = max(0, t0 - WINDOW)
             hi = min(t0 + EVAL_BLOCK, len(a))
@@ -374,6 +408,9 @@ def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse
                 w4_b = irls_off(X_b[lo:t0], y[lo:t0], o_tr, w0=w4_b)
                 w4_sca = irls_off(X_sca[lo:t0], y[lo:t0], o_tr, w0=w4_sca)
                 w4_full = irls_off(X_full[lo:t0], y[lo:t0], o_tr, w0=w4_full)
+                for j in range(3):
+                    w4_solo[j] = irls_off(X_solo[j][lo:t0], y[lo:t0], o_tr,
+                                          w0=w4_solo[j])
             except np.linalg.LinAlgError:
                 continue
             off = np.clip(X_b[t0:hi] @ w_b, -35, 35)
@@ -385,6 +422,11 @@ def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse
             acc["axes4"].append(X_ax[t0:hi, 2:] @ w4_ax[2:])
             acc["off4_sca"].append(np.clip(o_ev + X_sca[t0:hi] @ w4_sca, -35, 35))
             acc["axes4_sca"].append(X_full[t0:hi, 5:] @ w4_full[5:])
+            acc["sca4"].append(X_sca[t0:hi, 2:] @ w4_sca[2:])
+            acc["off4_ax"].append(np.clip(o_ev + X_ax[t0:hi] @ w4_ax, -35, 35))
+            acc["sca4_ax"].append(X_full[t0:hi, 2:5] @ w4_full[2:5])
+            for j in range(3):
+                acc[f"s{j}_4"].append(X_solo[j][t0:hi, 2:] @ w4_solo[j][2:])
             acc["y"].append(y[t0:hi])
             # population r head: collected for a kappa fit at the fold level
             # (raw addition would conflate scale/centering with signal — the
@@ -401,9 +443,15 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--no-act", action="store_true",
                     help="ablation: drop the joint-PCA activation block from the features")
-    ap.add_argument("--ortho", action="store_true",
-                    help="deflation: penalize axis loadings toward mutual orthogonality "
-                         "AND orthogonality to the r direction (batch-level cosines)")
+    ap.add_argument("--ortho-weight", type=float, default=0.5,
+                    help="deflation penalty weight: axes toward mutual orthogonality AND "
+                         "orthogonality to r (batch-level cosines). 0 disables; 10 was "
+                         "the hard regime that crushed the trunk; 0.5 = lenient default")
+    ap.add_argument("--warm-start", choices=["scalars", "none"], default="scalars",
+                    help="FIX 3: seed the first 3 axes at the ridge regression of the "
+                         "hand-crafted scalars [wr, sc, phase] onto the features — breaks "
+                         "the v=0 bootstrap deadlock and probes representation vs "
+                         "optimization (do seeded axes survive training?)")
     args = ap.parse_args()
 
     import torch
@@ -420,6 +468,18 @@ def main():
     F = np.stack([feats[t] for t in tids])
     F = (F - F.mean(axis=0)) / (F.std(axis=0) + 1e-9)
     print(f"problems with full features: {len(tids)}; feature dim {F.shape[1]}")
+
+    S_mat = np.stack([scalars[t] for t in tids])          # (n, 3): [wr, sc, phase]
+    g_init = None
+    if args.warm_start == "scalars":
+        k_seed = min(3, args.k)
+        G0 = np.linalg.solve(F.T @ F + 10.0 * np.eye(F.shape[1]),
+                             F.T @ S_mat[:, :k_seed])     # (fdim, k_seed) ridge fits
+        g_init = (G0 / (np.linalg.norm(G0, axis=0, keepdims=True) + 1e-9)).T
+        r2 = [float(np.corrcoef(F @ G0[:, j], S_mat[:, j])[0, 1] ** 2)
+              for j in range(k_seed)]
+        print(f"warm-start seeds: linear-R^2 of scalars on features = "
+              f"{' '.join(f'{v:.2f}' for v in r2)}")
 
     rows = load_attempts()
     by_user = defaultdict(list)
@@ -441,9 +501,17 @@ def main():
         print(f"\n--- fold {fold}: train {len(train_users)} users, eval {len(eval_users)} ---")
         g, r, v, uids = train_fold(train_users, by_user, F, tid_index,
                                    args.k, args.epochs, args.seed, device,
-                                   ortho=args.ortho)
+                                   ortho_weight=args.ortho_weight, g_init=g_init)
         save[f"g_fold{fold}"] = g
         save[f"r_fold{fold}"] = r
+        # regimen diagnostics: did the axes stay off r, and did the seeded
+        # axes survive training (representation-vs-optimization probe)?
+        rcl = r - r.mean()
+        for kk in range(g.shape[1]):
+            cs = " ".join(f"{np.corrcoef(g[:, kk], S_mat[:, j])[0, 1]:+.2f}"
+                          for j in range(3))
+            print(f"  axis {kk}: corr(r) {np.corrcoef(g[:, kk], rcl)[0, 1]:+.2f}"
+                  f" | corr(wr/sc/ph) {cs}")
         res = eval_fold(eval_users, by_user, g, r, scalars, rank, params,
                         tid_index, lapse)
         if not res:
@@ -465,6 +533,13 @@ def main():
             ("kappa(axes | 4PL+popr)  <- differential go/no-go", res2["off4"], res2["axes4"]),
             ("kappa(axes | 4PL+popr + scalars)", res2["off4_sca"], res2["axes4_sca"]),
             ("kappa(r | 4PL+popr)  [sanity ~0]", res2["off4"], rc2),
+            # head-to-head: the 3 hand-crafted scalars scored SYMMETRICALLY to
+            # the K learned axes (same protocol, same folds) + per-scalar solo
+            ("kappa(scalars(3) | 4PL)", res["off4"], res["sca4"]),
+            ("kappa(scalars | 4PL + axes)", res["off4_ax"], res["sca4_ax"]),
+            ("kappa(wr-gap solo | 4PL)", res["off4"], res["s0_4"]),
+            ("kappa(score-gap solo | 4PL)", res["off4"], res["s1_4"]),
+            ("kappa(phase-ratio solo | 4PL)", res["off4"], res["s2_4"]),
         ]
         print(f"fold {fold}: held-out n={len(res['y'])}")
         row = []
@@ -485,7 +560,11 @@ def main():
             k, se = ivw(m, s)
             print(f"{name:<52s} = {k:+.3f} +- {se:.3f} (z {k / se:+.1f})")
 
-    suffix = "_ortho" if args.ortho else ""
+    suffix = "_v2"                       # the 2026-07-18 fixed regimen
+    if args.ortho_weight != 0.5:
+        suffix += f"_ow{args.ortho_weight:g}"
+    if args.warm_start == "none":
+        suffix += "_noseed"
     out = os.path.join(CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}{suffix}.npz")
     np.savez_compressed(out, tids=np.array(tids), **save)
     print(f"\nsaved loadings -> {out}")
