@@ -143,6 +143,31 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
         keys = list(zip(d["key_size"].tolist(), d["key_tid"].tolist()))
         print(f"  joint-PCA: cache hit {os.path.basename(cpath)} ({Z.shape[0]} problems, k={k})")
         return {key: Z[i] for i, key in enumerate(keys)}, k
+    return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath)[:2]
+
+
+def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
+    """The full joint-PCA TRANSFORM (not just the projected values): raw 6912-dim
+    activation vector -> standardize (m1, s1) -> PCA components C -> standardize
+    (m2, s2). Needed to project arbitrary (non-correct) CELLS into the same
+    activation space — pipeline.build_axes' per-cell fanout. Reads the basis from
+    the joint-PCA cache; a pre-basis cache file (older format) is refit in place."""
+    cpath = _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed)
+    if os.path.exists(cpath):
+        d = np.load(cpath, allow_pickle=False)
+        if "basis_m1" in d.files:
+            return {"m1": d["basis_m1"], "s1": d["basis_s1"], "C": d["basis_C"],
+                    "pca_mean": d["basis_pca_mean"],
+                    "m2": d["basis_m2"], "s2": d["basis_s2"]}
+        print("  joint-PCA: cache predates basis storage — refitting to capture it")
+    return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath)[2]
+
+
+def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath):
+    """Fit + cache the joint PCA; returns ({key: vec}, k, basis dict)."""
+    import json as _json
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
     Xparts, keys = [], []
     for size in sizes:
         ids = _json.load(open(_cache_ids_path(size)))
@@ -160,19 +185,33 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
         Xparts.append(X[finite])
         keys += [(size, t) for t in usable]
     X = np.vstack(Xparts)
-    X = StandardScaler().fit_transform(X)
+    sc1 = StandardScaler().fit(X)
+    X = sc1.transform(X)
     k = min(pca_dim, X.shape[1], X.shape[0])
-    Z = PCA(n_components=k, random_state=seed, svd_solver="randomized").fit_transform(X)
-    Z = StandardScaler().fit_transform(Z).astype(np.float32)
+    pca = PCA(n_components=k, random_state=seed, svd_solver="randomized").fit(X)
+    P = pca.transform(X)
+    sc2 = StandardScaler().fit(P)
+    Z = sc2.transform(P).astype(np.float32)
+    # The full transform chain (pca.transform subtracts pca.mean_ first):
+    #   z = ( ((x - m1)/s1 - pca_mean) @ C.T - m2 ) / s2
+    basis = {"m1": sc1.mean_.astype(np.float32),
+             "s1": sc1.scale_.astype(np.float32),
+             "C": pca.components_.astype(np.float32),
+             "pca_mean": pca.mean_.astype(np.float32),
+             "m2": sc2.mean_.astype(np.float32),
+             "s2": sc2.scale_.astype(np.float32)}
     if cpath:
         tmp = f"{cpath}.tmp{os.getpid()}.npz"
         np.savez(tmp, Z=Z, k=k,
                  key_size=np.array([s for s, _ in keys], dtype=np.int16),
-                 key_tid=np.array([t for _, t in keys]))
+                 key_tid=np.array([t for _, t in keys]),
+                 basis_m1=basis["m1"], basis_s1=basis["s1"], basis_C=basis["C"],
+                 basis_m2=basis["m2"], basis_s2=basis["s2"],
+                 basis_pca_mean=basis["pca_mean"])
         os.replace(tmp, cpath)
         print(f"  joint-PCA: computed + cached {os.path.basename(cpath)} "
               f"({Z.shape[0]} problems, k={k})")
-    return {key: Z[i] for i, key in enumerate(keys)}, k
+    return {key: Z[i] for i, key in enumerate(keys)}, k, basis
 
 
 def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):

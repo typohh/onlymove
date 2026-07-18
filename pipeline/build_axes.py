@@ -1,0 +1,307 @@
+"""Build the per-problem SKILL AXES shipped to the PWA (replaces the retired
+skew-ICA build_embedding pipeline, 2026-07-18 — validation in
+docs/scalar_weakness_axes.md).
+
+Trains the supervised residual-axes model (utils.residual_axes: fixed regimen,
+literal rating-trainer feature parity, incremental K selected by held-out
+walk-forward LL gain), then writes the same artifact contract the packaging
+step consumes — so pipeline.package_for_pwa and the PWA client are unchanged
+in format, only K shrinks from 64 to the selected axis count:
+
+  embeddings/joint/per_problem.csv        tsumego_id, size, embed_0..embed_{K-1}
+  embeddings/joint/per_cell/<size>/<tid>.npz   embeddings (n_cells, K) fp16 + xys
+  embeddings/joint/axes.npz               model + content-hash embedding_version
+  embeddings/joint/labels.json            v4 — TWO-TAILED labels (see below)
+  embeddings/joint/label_anchors.npz      frozen per-motif loading anchors
+
+Per-cell values: the axes are linear in the trainer features and only the
+joint-PCA activation block varies per cell, so a cell's axis value is the
+problem's shipped value plus a weighted delta of (cell activation z − correct
+cell activation z) — every other feature block is position-level and constant.
+
+Labels are TWO-TAILED (v4): each component may name its positive tail, its
+negative tail, or both — some axes only have a nameable motif on one side.
+Axes keep their identity across refits via frozen per-motif loading anchors
+(corr >= 0.8 over shared problems, greedy 1-1); an axis matching an anchor
+with NEGATIVE correlation is sign-flipped to the anchor's canonical
+orientation before anything is written, so labels never swap sides. Unmatched
+axes get fresh motif ids with null labels — pipeline.package_for_pwa REFUSES
+to ship while any component is entirely unlabeled (name it in labels.json).
+
+Usage: ./.venv/bin/python3 -m pipeline.build_axes     (no flags — production)
+"""
+
+import hashlib
+import json
+import os
+import sys
+from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from utils.residual_axes import select_and_fit  # noqa: E402
+from utils.rating_features import (  # noqa: E402
+    _cache_ids_path, load_joint_activation_basis,
+)
+
+OUT_DIR = os.path.join(PROJECT_ROOT, "embeddings", "joint")
+ANCHOR_MATCH_MIN = 0.8
+LABELS_SPACE = "residual_axes_v1"
+PER_CELL_WORKERS = os.cpu_count() or 4
+
+_W = None  # per-cell worker state
+
+
+# ------------------------------------------------------------------ anchors/labels
+def _load_labels_and_anchors():
+    """Current-space labels.json + anchors; an ICA-era labels.json is archived
+    and a fresh bank started (the spaces are incommensurable)."""
+    lpath = os.path.join(OUT_DIR, "labels.json")
+    apath = os.path.join(OUT_DIR, "label_anchors.npz")
+    labels = None
+    if os.path.exists(lpath):
+        with open(lpath) as f:
+            labels = json.load(f)
+        if labels.get("space") != LABELS_SPACE:
+            legacy = os.path.join(OUT_DIR, "labels_legacy_ica.json")
+            os.replace(lpath, legacy)
+            print(f"  archived pre-axes labels.json -> {legacy}")
+            labels = None
+    if labels is None:
+        labels = {"version": 4, "space": LABELS_SPACE,
+                  "_doc": ("Two-tailed axis labels. components[k] names the "
+                           "k-th shipped axis: positive/negative label either "
+                           "tail's motif (null = unnamed; at least ONE tail "
+                           "must be named for package_for_pwa to ship). bank "
+                           "persists labels for motifs absent from the "
+                           "current fit. Anchors (label_anchors.npz) freeze "
+                           "each motif's loading direction; edit TEXT here, "
+                           "never anchors."),
+                  "bank": {}, "components": []}
+    anchors = {"tids": None, "ids": [], "M": None}
+    if os.path.exists(apath) and labels["bank"]:
+        d = np.load(apath, allow_pickle=False)
+        if "tids" in d.files:
+            anchors = {"tids": [str(t) for t in d["tids"]],
+                       "ids": [str(i) for i in d["ids"]], "M": d["M"]}
+    return labels, anchors
+
+
+def _match_axes_to_anchors(loadings, tids, anchors):
+    """Greedy 1-1 |corr| matching of new axes to frozen anchors on shared
+    problems. Returns per-axis (motif_id or None, sign)."""
+    k = loadings.shape[1]
+    if anchors["M"] is None or not anchors["ids"]:
+        return [(None, 1.0)] * k
+    tid_index = {t: i for i, t in enumerate(tids)}
+    common = [(i, tid_index[t]) for i, t in enumerate(anchors["tids"])
+              if t in tid_index]
+    ai = np.array([c[0] for c in common])
+    ni = np.array([c[1] for c in common])
+    A = anchors["M"][:, ai]                     # (n_anchors, n_common)
+    N = loadings[ni, :].T                       # (k, n_common)
+    Az = (A - A.mean(1, keepdims=True)) / (A.std(1, keepdims=True) + 1e-9)
+    Nz = (N - N.mean(1, keepdims=True)) / (N.std(1, keepdims=True) + 1e-9)
+    C = Nz @ Az.T / Az.shape[1]                 # (k, n_anchors) corr
+    out = [(None, 1.0)] * k
+    used = set()
+    order = np.dstack(np.unravel_index(
+        np.argsort(-np.abs(C), axis=None), C.shape))[0]
+    for kk, aa in order:
+        if abs(C[kk, aa]) < ANCHOR_MATCH_MIN:
+            break
+        if out[kk][0] is not None or aa in used:
+            continue
+        out[kk] = (anchors["ids"][aa], 1.0 if C[kk, aa] >= 0 else -1.0)
+        used.add(aa)
+    return out
+
+
+def _update_labels(labels, anchors, loadings, tids, matches):
+    """Materialize components for this fit; bank new motifs; extend anchors
+    with the new motifs' frozen directions. Returns (labels, anchors)."""
+    prev_by_motif = {c.get("motif_id"): c for c in labels.get("components", [])
+                     if c.get("motif_id")}
+    # bank the previous components' text (curation done since last run)
+    for mid, comp in prev_by_motif.items():
+        b = labels["bank"].setdefault(mid, {})
+        for f in ("positive", "positive_i18n", "negative", "negative_i18n"):
+            b[f] = comp.get(f)
+    components = []
+    new_ids = []
+    for k in range(loadings.shape[1]):
+        mid, _sign = matches[k]
+        if mid is None:
+            mid = "ax_" + hashlib.sha256(
+                loadings[:, k].tobytes()).hexdigest()[:8]
+            labels["bank"].setdefault(
+                mid, {"positive": None, "positive_i18n": None,
+                      "negative": None, "negative_i18n": None})
+            new_ids.append((mid, k))
+        b = labels["bank"][mid]
+        components.append({"motif_id": mid,
+                           "positive": b.get("positive"),
+                           "positive_i18n": b.get("positive_i18n"),
+                           "negative": b.get("negative"),
+                           "negative_i18n": b.get("negative_i18n")})
+    labels["components"] = components
+    # extend anchors with the new motifs, frozen at THIS fit's direction
+    # (existing anchor rows are NEVER rewritten — the anti-drift invariant)
+    if new_ids:
+        if anchors["M"] is None:
+            anchors = {"tids": list(tids), "ids": [],
+                       "M": np.zeros((0, len(tids)), dtype=np.float32)}
+        tid_index = {t: i for i, t in enumerate(tids)}
+        idx = [tid_index.get(t) for t in anchors["tids"]]
+        rows = []
+        for mid, k in new_ids:
+            rows.append(np.array(
+                [loadings[i, k] if i is not None else 0.0 for i in idx],
+                dtype=np.float32))
+            anchors["ids"].append(mid)
+        anchors["M"] = np.vstack([anchors["M"]] + [r[None, :] for r in rows])
+    return labels, anchors
+
+
+# ------------------------------------------------------------------ per-cell fanout
+def _init_worker(basis_path, delta_w, prob_vals, act_dir_by_size):
+    global _W
+    d = np.load(basis_path, allow_pickle=False)
+    basis = {"m1": d["basis_m1"], "s1": d["basis_s1"], "C": d["basis_C"],
+             "pca_mean": d["basis_pca_mean"], "m2": d["basis_m2"],
+             "s2": d["basis_s2"]}
+    _W = (basis, delta_w, prob_vals, act_dir_by_size)
+
+
+def _project_one(task):
+    size, tid = task
+    basis, delta_w, prob_vals, act_dir_by_size = _W
+    src = os.path.join(act_dir_by_size[size], tid + ".npz")
+    out_dir = os.path.join(OUT_DIR, "per_cell", str(size))
+    with np.load(src, allow_pickle=False) as d:
+        cand = np.asarray(d["candidates"], dtype=np.float32)
+        xys = np.asarray(d["xys"], dtype=np.int32)
+        ci = int(d["correct_idx"])
+    z = (cand - basis["m1"]) / basis["s1"]
+    z = (z - basis["pca_mean"]) @ basis["C"].T
+    z = (z - basis["m2"]) / basis["s2"]
+    delta = (z - z[ci][None, :]) @ delta_w                  # (n_cells, K)
+    vals = (prob_vals[tid][None, :] + delta).astype(np.float16)
+    tmp = os.path.join(out_dir, f".{tid}.tmp.npz")
+    np.savez_compressed(tmp, embeddings=vals, xys=xys)
+    os.replace(tmp, os.path.join(out_dir, tid + ".npz"))
+    return 1
+
+
+def write_per_cell(fit, tid_size):
+    """Fan the axis projection out to every legal cell of every problem."""
+    from pipeline.train_rating import PCA_DIM, SEED as PCA_SEED, SIZES
+    tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
+    load_joint_activation_basis(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
+    # basis is cached in the joint-PCA npz; workers re-open it directly
+    from utils.rating_features import _joint_pca_cache_path
+    basis_path = _joint_pca_cache_path(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
+
+    act_dim = fit["act_dim"]
+    # delta weights: d(shipped value)/d(activation z), per axis —
+    # W acts on F standardized by feat_sd; loadings scale by v_sd/rms; the
+    # shipped value further standardizes by axis_sd.
+    scale = fit["v_sd"] / (fit["rms"] * fit["axis_sd"])       # (K,)
+    delta_w = (fit["W"][:, :act_dim] / fit["feat_sd"][None, :act_dim]).T \
+        * scale[None, :]                                      # (act_dim, K)
+    prob_vals = {t: fit["loadings"][i]
+                 for i, t in enumerate(fit["tids"])}
+    act_dir_by_size = {s: os.path.join(PROJECT_ROOT, "activations", str(s))
+                       for s in SIZES}
+    tasks = [(tid_size[t], t) for t in fit["tids"]]
+    for s in SIZES:
+        os.makedirs(os.path.join(OUT_DIR, "per_cell", str(s)), exist_ok=True)
+    done = 0
+    with ProcessPoolExecutor(
+            max_workers=PER_CELL_WORKERS, initializer=_init_worker,
+            initargs=(basis_path, delta_w.astype(np.float32), prob_vals,
+                      act_dir_by_size)) as ex:
+        for _ in ex.map(_project_one, tasks, chunksize=200):
+            done += 1
+            if done % 20000 == 0:
+                print(f"  per-cell: {done}/{len(tasks)}", flush=True)
+    print(f"  per-cell: {done}/{len(tasks)} written")
+
+
+# ------------------------------------------------------------------ main
+def main():
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    fit = select_and_fit(device=device)
+    tids = fit["tids"]
+
+    labels, anchors = _load_labels_and_anchors()
+    matches = _match_axes_to_anchors(fit["loadings"], tids, anchors)
+    # canonical orientation: flip any axis that matched an anchor negatively,
+    # BEFORE anything is written — labels never swap sides
+    for k, (mid, sign) in enumerate(matches):
+        if sign < 0:
+            fit["loadings"][:, k] *= -1.0
+            fit["W"][k, :] *= -1.0
+            matches[k] = (mid, 1.0)
+    labels, anchors = _update_labels(labels, anchors, fit["loadings"], tids,
+                                     matches)
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    # per_problem.csv — same contract packaging always read
+    from pipeline.train_rating import SIZES
+    tid_size = {}
+    for s in SIZES:
+        for t in json.load(open(_cache_ids_path(s))):
+            tid_size[t] = s
+    import csv
+    k_sel = fit["k_sel"]
+    pp = os.path.join(OUT_DIR, "per_problem.csv")
+    with open(pp + ".tmp", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["tsumego_id", "size"] + [f"embed_{i}" for i in range(k_sel)])
+        for i, t in enumerate(tids):
+            w.writerow([t, tid_size[t]]
+                       + [f"{v:.5f}" for v in fit["loadings"][i]])
+    os.replace(pp + ".tmp", pp)
+
+    # axes.npz — the model + the content-hash version packaging ships
+    h = hashlib.sha256()
+    for arr in (fit["W"], fit["feat_mu"], fit["feat_sd"], fit["axis_mu"],
+                fit["axis_sd"], fit["rms"], fit["v_sd"]):
+        h.update(np.ascontiguousarray(arr).tobytes())
+    version = h.hexdigest()[:12]
+    np.savez_compressed(
+        os.path.join(OUT_DIR, "axes.npz"),
+        embedding_version=np.array(version),
+        k=np.array(k_sel), act_dim=np.array(fit["act_dim"]),
+        W=fit["W"], rms=fit["rms"], v_sd=fit["v_sd"],
+        feat_mu=fit["feat_mu"], feat_sd=fit["feat_sd"],
+        axis_mu=fit["axis_mu"], axis_sd=fit["axis_sd"],
+        gains_k=np.array(sorted(fit["gains"])),
+        gains=np.array([fit["gains"][k] for k in sorted(fit["gains"])]),
+        motif_ids=np.array([m for m, _ in matches]))
+
+    with open(os.path.join(OUT_DIR, "labels.json"), "w") as f:
+        json.dump(labels, f, indent=2, ensure_ascii=False)
+    np.savez_compressed(
+        os.path.join(OUT_DIR, "label_anchors.npz"),
+        tids=np.array(anchors["tids"]), ids=np.array(anchors["ids"]),
+        M=anchors["M"])
+
+    write_per_cell(fit, tid_size)
+
+    unlabeled = [i for i, c in enumerate(labels["components"])
+                 if not (c.get("positive") or c.get("negative"))]
+    print(f"\nbuild_axes complete: K={k_sel}, embedding_version={version}")
+    if unlabeled:
+        print(f"  NOTE: axes {unlabeled} are UNLABELED — package_for_pwa will "
+              f"refuse to ship until labels.json names at least one tail of each")
+
+
+if __name__ == "__main__":
+    main()

@@ -48,11 +48,11 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     """Load pre-projected per-cell embeddings for one tsumego in the order the
     PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells). A missing,
     corrupt, or SGF-inconsistent .npz RAISES — packaging requires a per-cell projection
-    for every problem (build_embedding fills the whole corpus), so a gap is a hard
+    for every problem (build_axes fills the whole corpus), so a gap is a hard
     error, never silently skipped.
 
     Reads embeddings/joint/per_cell/<size>/<tid>.npz, written upstream by
-    build_embedding.write_per_cell_projections. Those rows are in *extraction
+    pipeline.build_axes (per-cell fanout). Those rows are in *extraction
     order*, which is board-scan order (sorted by (y, x)) — NOT the order the PWA
     uses. The PWA recovers a picked move's cell index via
     children.indexOf(moveNode), i.e. SGF root-variation document order, then
@@ -74,12 +74,12 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     (~60× the npz read), so it's the hot path — parallelize the caller, don't
     skip this. reorder_by_sgf=False ships the npz rows as-is and is ONLY correct
     if the .npz has been pre-reordered into SGF-variation order upstream; on the
-    current build_embedding output (board-scan order) it produces a corrupt bin.
+    current build_axes output (board-scan order) it produces a corrupt bin.
     """
     if not os.path.exists(per_cell_path):
         raise FileNotFoundError(
             f"missing per-cell projection {per_cell_path} — corpus and per_cell/ are "
-            f"out of sync; run build_embedding")
+            f"out of sync; run pipeline.build_axes")
 
     # A file that exists but won't load is corruption, not a coverage gap — let it
     # propagate and abort the run rather than silently dropping the sidecar.
@@ -226,7 +226,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
         {output_dir}/lookup.txt   (merged across sizes; rows: "id zipHash size")
 
     When per_cell_dir is supplied (pre-projected per-problem .npz files written
-    by build_embedding.write_per_cell_projections), each shard also gets:
+    by pipeline.build_axes (per-cell fanout)), each shard also gets:
       - a sibling .embeddings.bin with fp16 per-cell K-dim vectors concatenated
         in SGF variation order, one tsumego after another;
       - embeddings_index.json inside the zip listing {tid: {offset, n_cells}}.
@@ -407,15 +407,17 @@ def _embeddings_dir():
 
 
 def _read_embedding_version(embed_dir):
-    """The content-hash embedding_version stamped into pca.npz by build_embedding
-    (the PWA reads it to auto-invalidate localStorage on refits), or None."""
-    pca_path = os.path.join(embed_dir, "pca.npz")
-    if not os.path.exists(pca_path):
+    """The content-hash embedding_version stamped into axes.npz by
+    pipeline.build_axes (the residual-axes model that replaced the ICA
+    embedding, 2026-07-18; the PWA reads it to auto-invalidate localStorage
+    on refits), or None."""
+    axes_path = os.path.join(embed_dir, "axes.npz")
+    if not os.path.exists(axes_path):
         return None
-    # A present pca.npz that won't load is corruption — let it abort rather than
+    # A present axes.npz that won't load is corruption — let it abort rather than
     # silently shipping embedding_meta with a null version (which disables the PWA's
     # embedding-cache invalidation).
-    with np.load(pca_path, allow_pickle=False) as arc:
+    with np.load(axes_path, allow_pickle=False) as arc:
         if "embedding_version" in arc.files:
             return str(arc["embedding_version"].item())
     return None
@@ -433,7 +435,7 @@ BIN_FORMAT_REV = 2
 
 
 def shipped_embedding_version(embed_dir):
-    """embedding_version as shipped to the client: the pca.npz content hash with
+    """embedding_version as shipped to the client: the axes.npz content hash with
     the bin-format rev appended. The pca hash alone can't see sidecar-layout
     changes (same PCA, different bin bytes), so both invalidation consumers —
     the PWA's embedding wipe and the shard-build inputs hash — must use THIS,
@@ -460,10 +462,10 @@ def load_embeddings(board_size, meta_only=False):
     """
     embed_dir, is_joint = _embeddings_dir()
     if embed_dir is None:
-        # The whole embeddings artifact is missing (build_embedding never ran) — a
+        # The whole embeddings artifact is missing (build_axes never ran) — a
         # misconfigured run, not a per-problem coverage gap. Abort.
         raise FileNotFoundError(
-            "no embeddings at embeddings/joint/per_problem.csv — run build_embedding")
+            "no embeddings at embeddings/joint/per_problem.csv — run pipeline.build_axes")
 
     per_problem = os.path.join(embed_dir, "per_problem.csv")
     # meta_only: read just the header to count K columns, skip the row map.
@@ -487,6 +489,19 @@ def load_embeddings(board_size, meta_only=False):
     if os.path.exists(labels_path):
         with open(labels_path, "r", encoding="utf-8") as f:
             labels = json.load(f)
+
+    # SHIP GATE: every axis must have at least one tail named. An unlabeled
+    # component means build_axes grew a new axis from fresh data — name it in
+    # embeddings/joint/labels.json (positive and/or negative) before shipping.
+    comps = (labels or {}).get("components", [])
+    unlabeled = [i for i, c in enumerate(comps)
+                 if not ((c or {}).get("positive") or (c or {}).get("negative"))]
+    if len(comps) != K or unlabeled:
+        raise SystemExit(
+            f"REFUSING to package: axis labels incomplete "
+            f"({len(comps)} components for K={K}; unlabeled axes {unlabeled}). "
+            f"Name at least one tail of each axis in embeddings/joint/labels.json "
+            f"and re-run.")
 
     embedding_meta = {
         "K": K,
@@ -712,7 +727,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
             return None, None, None
         raise FileNotFoundError(
             f"no embeddings at embeddings/joint/ AND no existing "
-            f"shards in {zip_dir} — run build_embedding first")
+            f"shards in {zip_dir} — run pipeline.build_axes first")
 
     if (not force and prev and have_zips
             and prev.get("inputs_hash") == inputs_hash
@@ -741,7 +756,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
 
     if not os.path.isdir(PER_CELL_DIR):
         raise FileNotFoundError(
-            f"no per_cell dir at {PER_CELL_DIR} — run build_embedding")
+            f"no per_cell dir at {PER_CELL_DIR} — run pipeline.build_axes")
     per_cell_arg = PER_CELL_DIR
 
     print(f"  building shards ...")
@@ -884,7 +899,7 @@ if __name__ == "__main__":
         "--no-sgf-reorder", dest="reorder_by_sgf", action="store_false",
         help="ship per-cell embeddings in raw npz (board-scan) order instead of "
              "reordering to SGF-variation order. ONLY correct if the .npz files "
-             "have been pre-reordered upstream; on current build_embedding "
+             "have been pre-reordered upstream; on current build_axes "
              "output this produces a corrupt picked-move sidecar. Default off.")
     parser.add_argument(
         "--workers", type=int, default=None,

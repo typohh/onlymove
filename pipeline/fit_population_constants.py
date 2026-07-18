@@ -123,7 +123,14 @@ MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
 # Bayes (group 4 / fit_weakness_axis_priors). These are the shared inputs.
 # Board-independent (9x9+13x13 pooled), the embedding axes being joint.
 WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
-WEAKNESS_K_EMBED = 64
+
+
+def _weakness_k_embed():
+    """Axis count K, from the per_problem.csv header — the axis set grows with
+    data (pipeline.build_axes selects K incrementally), so it is never fixed."""
+    with open(WEAKNESS_EMBED_CSV, newline="") as f:
+        header = csv.DictReader(f).fieldnames or []
+    return sum(1 for c in header if c.startswith("embed_"))
 WEAKNESS_TOTAL_RANKS = 29.0          # problemRank = M(rating) / TOTAL_RANKS (matches the client)
 
 # --- Per-axis weakness prior (weakness_axis_lambda; empirical Bayes, see group 5) ---
@@ -442,7 +449,8 @@ def load_problem_embeddings(needed):
     Empty if the CSV is absent — the per-axis fit then raises (no fallback)."""
     if not os.path.exists(WEAKNESS_EMBED_CSV):
         return {}
-    cols = [f"embed_{i}" for i in range(WEAKNESS_K_EMBED)]
+    k_embed = _weakness_k_embed()
+    cols = [f"embed_{i}" for i in range(k_embed)]
     out = {}
     with open(WEAKNESS_EMBED_CSV, newline="") as f:
         reader = csv.DictReader(f)
@@ -457,7 +465,7 @@ def load_problem_embeddings(needed):
                 vec = np.array([float(row[c]) for c in cols], float)
             except (TypeError, ValueError, KeyError):
                 continue
-            if vec.shape[0] == WEAKNESS_K_EMBED and np.all(np.isfinite(vec)):
+            if vec.shape[0] == k_embed and np.all(np.isfinite(vec)):
                 out[key] = vec
     return out
 
@@ -524,7 +532,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
     if len(data) < WEAKNESS_EB_MIN_USERS:
         return None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "
                       f"attempts (<{WEAKNESS_EB_MIN_USERS}) — no per-axis prior")
-    K = WEAKNESS_K_EMBED
+    K = _weakness_k_embed()
     d = 2 + K
     # tau^2 bounds in client-lambda terms (lambda_k = 2/tau_k^2).
     tau2_lo, tau2_hi = 2.0 / WEAKNESS_EB_LAMBDA_MAX, 2.0 / WEAKNESS_EB_LAMBDA_MIN
@@ -681,7 +689,7 @@ def main():
     if wa is None:
         raise RuntimeError(
             f"could not fit weakness_axis_lambda ({wa_info}). It is mandatory and has "
-            f"no fallback — fix the inputs (run map_rating_to_rank + build_embedding, "
+            f"no fallback — fix the inputs (run map_rating_to_rank + build_axes, "
             f"or wait for more attempts) and re-run. Not shipping without it.")
     out["weakness_axis_lambda"] = wa
     print(f"  {wa_info}")

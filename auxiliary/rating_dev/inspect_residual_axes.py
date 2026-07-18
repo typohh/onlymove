@@ -53,6 +53,25 @@ from utils.rating_features import CACHE_DIR  # noqa: E402
 
 # ---- artifact loading ---------------------------------------------------
 
+def load_per_problem_csv(path):
+    """Production-axes mode: components straight from pipeline.build_axes'
+    embeddings/joint/per_problem.csv (one fit, canonical orientation — the
+    shipped loadings, exactly what labels.json names)."""
+    import csv as _csv
+    tids, rows = [], []
+    with open(path, newline="") as f:
+        reader = _csv.reader(f)
+        header = next(reader)
+        cols = [i for i, c in enumerate(header) if c.startswith("embed_")]
+        for row in reader:
+            tids.append(row[0])
+            rows.append([float(row[i]) for i in cols])
+    M = np.array(rows, dtype=np.float64)
+    components = [(f"ax{k}", f"axis {k} (production)", M[:, k])
+                  for k in range(M.shape[1])]
+    return tids, components
+
+
 def load_axes_npz(path):
     """Return (tids list, components list of (key, title, scores ndarray)).
 
@@ -238,6 +257,12 @@ def main():
                         help="seed used at training time — picks the default npz (default 0)")
     parser.add_argument("--npz", default=None,
                         help="explicit path to a residual_axes_*.npz (overrides --k/--seed)")
+    parser.add_argument("--per-problem", nargs="?", default=None,
+                        const=os.path.join(PROJECT_ROOT, "embeddings", "joint",
+                                           "per_problem.csv"),
+                        help="PRODUCTION mode: render the shipped axes from "
+                             "pipeline.build_axes' per_problem.csv (default "
+                             "path if no value given) — the labeling workflow")
     parser.add_argument("--n", type=int, default=10,
                         help="N top problems per tail in --no-html mode (default 10)")
     parser.add_argument("--host", default="http://localhost:8787",
@@ -259,13 +284,19 @@ def main():
     if args.html and args.size == "all":
         args.size = "9"
 
-    npz_path = args.npz or os.path.join(
-        CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}.npz")
-    if not os.path.exists(npz_path):
-        raise SystemExit(
-            f"missing {npz_path}; run auxiliary.rating_dev.train_residual_axes first "
-            f"(or point --npz at an existing artifact)")
-    tids, components = load_axes_npz(npz_path)
+    if args.per_problem:
+        npz_path = args.per_problem
+        if not os.path.exists(npz_path):
+            raise SystemExit(f"missing {npz_path}; run pipeline.build_axes first")
+        tids, components = load_per_problem_csv(npz_path)
+    else:
+        npz_path = args.npz or os.path.join(
+            CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}.npz")
+        if not os.path.exists(npz_path):
+            raise SystemExit(
+                f"missing {npz_path}; run auxiliary.rating_dev.train_residual_axes first "
+                f"(or point --npz at an existing artifact)")
+        tids, components = load_axes_npz(npz_path)
     source = os.path.basename(npz_path)
 
     lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
