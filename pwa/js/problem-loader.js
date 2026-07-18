@@ -10,8 +10,8 @@ import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates, recallServeShare } from './model.js';
-import { weaknessScore, WEAKNESS_TEMPERATURE } from './weakness.js';
-import { normalizedRankForSize, slopeToQuality } from './rank-decomposition.js';
+import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
+import { normalizedRankForSize, slopeToQuality, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
 
 function weightedRandomSelect(items, weightFn) {
@@ -91,14 +91,25 @@ function selectChallengeCandidate() {
         }
     }
 
-    // Weight by quality, modulated by alignment with the user's weakness vector.
-    // weaknessScore returns 0 until the per-component model has trained, so the
-    // cold-start path here matches the prior pure-quality selection.
-    return weightedRandomSelect(candidateProblems, p => {
-        const q = Math.max(0, p.quality || 0);
-        const w = weaknessScore(p);
-        return q * Math.exp(WEAKNESS_TEMPERATURE * w);
-    });
+    // TWO-REGIME weighting (2026-07-18; replaced the quality·exp(T·score)
+    // product, which balanced two incommensurable units with one opaque
+    // constant). While the rank estimate is still converging, serve for
+    // INFORMATION: weight by quality = slope² (Fisher information — the pool
+    // is difficulty-matched so P(1−P) is ~constant). Once converged
+    // (rankConverged: se < 2× the local floor), serve for PERSONALIZATION:
+    // weight by the weakness softmax alone, in its own calibrated units. The
+    // regimes partition where the physics does — slope-priority only changes
+    // the served set while the local pool is FRESH (a moving user), because a
+    // user parked in a band consumes its high-slope tail and converges to the
+    // band average regardless; and that fresh phase is exactly when se is
+    // still high. Boundary flapping between consecutive picks is a harmless
+    // soft blend. Falls back to the information regime while the weakness
+    // model is untrained (flat zero scores would otherwise sample uniformly).
+    if (rankConverged() && weaknessModelReady()) {
+        return weightedRandomSelect(candidateProblems,
+            p => Math.exp(WEAKNESS_TEMPERATURE * weaknessScore(p)));
+    }
+    return weightedRandomSelect(candidateProblems, p => Math.max(0, p.quality || 0));
 }
 
 // Turns a raw pool candidate into a ready-to-display problem object: fetches the

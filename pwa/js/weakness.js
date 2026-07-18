@@ -278,6 +278,13 @@ export async function trainWeakness() {
 // problems an overplayer should see LESS of). The per-axis empirical-Bayes prior
 // shrinks β_picked toward 0 with no picking signal, so the contrast degrades
 // gracefully to β_correct alone when there's no direction to read.
+// Whether the shared weakness model has trained parameters at all — the
+// two-regime selector falls back to the information (slope²) regime when this
+// is false, rather than sampling uniformly over flat zero scores.
+export function weaknessModelReady() {
+    return Array.isArray(state.weaknessParams) && state.weaknessParams.length >= 4;
+}
+
 export function weaknessScore(problem) {
     const params = state.weaknessParams;  // shared across sizes
     if (!params || params.length < 4) return 0;

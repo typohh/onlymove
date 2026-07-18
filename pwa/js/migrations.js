@@ -13,7 +13,7 @@
 //     module's private sync-state + frontier-probe helpers, so it lives with the sync
 //     subsystem and runs from startBackgroundSync() before the first pull.
 
-import { state, updateAnswerHistory, updateUserRank, updateServeRank, setModelParams, setAdamState, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
+import { state, updateAnswerHistory, updateUserRank, updateServeRank, updateRankSe, setModelParams, setAdamState, getMergedAnswerHistory, syncTailExpectedToActual, SUPPORTED_BOARD_SIZES } from './state.js';
 import { getTail, replaceTail } from './history-store.js';
 import { fillSyncedTailFields } from './backfill.js';
 import { estimateWindowRank } from './rank-decomposition.js';
@@ -225,6 +225,7 @@ export function maybeInitWindowRankOnce() {
         if (est) {
             updateUserRank(est.rankIndex / TOTAL_RANKS);
             updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+            updateRankSe(est.se);
         }
     } catch (e) {
         console.warn('one-time window-rank init failed:', e);

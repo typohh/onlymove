@@ -1,6 +1,6 @@
 // js/user-stats.js
 
-import { state, updateUserRank, updateServeRank, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateUserRank, updateServeRank, updateRankSe, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -310,6 +310,7 @@ export async function updateUserStats(isCorrect, {
     if (est) {
         updateUserRank(est.rankIndex / TOTAL_RANKS);
         updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+        updateRankSe(est.se);
     }
     // The just-answered problem is moved into the previous slot, and the
     // challenge reselected if it was one, by completeCurrentProblem() in the

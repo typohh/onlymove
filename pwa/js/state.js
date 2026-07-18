@@ -250,6 +250,10 @@ const shared = {
     // normalized 0..1 units. Problem SELECTION serves near serveRank (slightly harder
     // while the rank estimate is still uncertain); everything DISPLAYED reads userRank.
     serveRank: readJSON('serveRank', null),
+    // Posterior SE of the window rank estimate (rank-index units), stored with
+    // each re-fit. Selection's two-regime switch reads it: information regime
+    // while se >= 2x the local floor, personalization (weakness) after.
+    rankSe: readJSON('rankSe', null),
     modelParams: readJSON('modelParams', null),
     adamState: readJSON('adamState', null),
     weaknessParams: readJSON('weaknessParams', null),
@@ -438,6 +442,14 @@ export const state = {
     set serveRank(v) {
         shared.serveRank = v;
         writeJSON('serveRank', v);
+    },
+
+    get rankSe() {
+        return typeof shared.rankSe === 'number' ? shared.rankSe : null;
+    },
+    set rankSe(v) {
+        shared.rankSe = v;
+        writeJSON('rankSe', v);
     },
 
     get challengeProblem() {
@@ -637,6 +649,10 @@ export function updateUserRank(rank) {
 
 export function updateServeRank(rank) {
     state.serveRank = rank;
+}
+
+export function updateRankSe(se) {
+    state.rankSe = (typeof se === 'number' && Number.isFinite(se)) ? se : null;
 }
 
 export function setChallengeProblem(problem) {

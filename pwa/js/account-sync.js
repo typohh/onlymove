@@ -786,6 +786,7 @@ function retrainAfterMerge(insertedEntries, mode) {
             if (est) {
                 updateUserRank(est.rankIndex / TOTAL_RANKS);
                 updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+                updateRankSe(est.se);
             }
         }
     } catch (e) {
@@ -815,7 +816,7 @@ function retrainAfterMerge(insertedEntries, mode) {
 // account (maybeFinishAccountSwitch drops the partially merged rows).
 const ACCOUNT_WIPE_KEYS = [
     'answerHistory', 'challengeProblem', 'previousProblem',
-    'userRank', 'serveRank',
+    'userRank', 'serveRank', 'rankSe',
     'modelParams', 'adamState',
     'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
     'recallPausedUntil',

@@ -504,6 +504,23 @@ export function estimateWindowRank(answerHistory, prevRankIndex) {
     return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex, localSeFloor);
 }
 
+// Two-regime selection switch (problem-loader.js): the rank estimate counts as
+// CONVERGED once its posterior SE is within 2x the local irreducible floor —
+// "known to ~a stone", good enough to serve against. Information scales as
+// 1/se², so this fires at ~1/4 of terminal information: deliberately early,
+// because past this point extra rank information is worth less than weakness
+// personalization (and a user parked in a band depletes its high-slope tail
+// anyway, so slope-priority stops changing the served set). Fails CLOSED
+// (not converged → information regime) when no se is stored yet or the local
+// pool can't price a floor — matching the pre-regime behavior.
+export function rankConverged() {
+    const se = state.rankSe;
+    if (typeof se !== 'number' || !Number.isFinite(se)) return false;
+    const floor = localSeFloor(state.userRank * TOTAL_RANKS);
+    if (typeof floor !== 'number' || !(floor > 0)) return false;
+    return se < 2 * floor;
+}
+
 // The front-page (window) rank as it evolved across history: the SAME positional
 // window 4PL MLE the live headline uses (windowMLE over the trailing WIN_CAP
 // first-time attempts), re-evaluated at each of `times`. A pure function of
