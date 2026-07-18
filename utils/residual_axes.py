@@ -70,6 +70,22 @@ CALIBRATION_P = 0.8
 
 
 # ------------------------------------------------------------------ features
+def corpus_tid_size():
+    """tid -> board size from the tsumegos/<size>/ SGF sets — the GROUND TRUTH
+    corpus. Never derive size membership from the activation-cache id lists:
+    they are incremental and can carry stale ids from purged problems, and a
+    tid landing in both lists silently mis-sizes its features and its
+    per_problem.csv row (the 000d0d75 packaging abort, 2026-07-18)."""
+    from pipeline.train_rating import SIZES
+    out = {}
+    for s in SIZES:
+        d = os.path.join(PROJECT_ROOT, "tsumegos", str(s))
+        for f in os.listdir(d):
+            if f.endswith(".sgf"):
+                out[f[:-4]] = s
+    return out
+
+
 def build_axis_features():
     """Literal rating-trainer feature parity. Returns (feats, scalars, rank,
     params, act_dim): feats tid -> raw feature vec (z-scored by the caller),
@@ -94,10 +110,15 @@ def build_axis_features():
     rsf = {t: np.array(v, dtype=np.float32)
            for t, v in load_backend_problem_params().items()}
 
+    tid_size = corpus_tid_size()
     feats, scalars, rank, params = {}, {}, {}, {}
     for key in act:
         size, t = key
         t = str(t)
+        # corpus filter: skip cache entries whose tid isn't actually a problem
+        # of this size (stale ids from purges; see corpus_tid_size)
+        if tid_size.get(t) != size:
+            continue
         if (key not in bw or t not in f_sc or t not in f_wr or t not in f_ph
                 or t not in rsf):
             continue

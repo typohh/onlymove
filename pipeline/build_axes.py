@@ -252,12 +252,11 @@ def main():
                                      matches)
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    # per_problem.csv — same contract packaging always read
-    from pipeline.train_rating import SIZES
-    tid_size = {}
-    for s in SIZES:
-        for t in json.load(open(_cache_ids_path(s))):
-            tid_size[t] = s
+    # per_problem.csv — same contract packaging always read. tid->size comes
+    # from the SGF corpus (corpus_tid_size), NEVER the cache id lists — a stale
+    # cache id in the other size's list would mis-size the row (000d0d75).
+    from utils.residual_axes import corpus_tid_size
+    tid_size = corpus_tid_size()
     import csv
     k_sel = fit["k_sel"]
     pp = os.path.join(OUT_DIR, "per_problem.csv")
