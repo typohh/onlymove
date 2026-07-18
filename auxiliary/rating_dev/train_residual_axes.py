@@ -149,7 +149,8 @@ def load_attempts():
 
 
 # ------------------------------------------------------------------ training
-def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device):
+def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device,
+               ortho=False):
     import torch
     import torch.nn as nn
     torch.manual_seed(seed)
@@ -194,9 +195,11 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device)
             idx = perm[i:i + batch]
             u, p, y = U[idx], P[idx], Y[idx]
             h = trunk(X[p])
+            gh = head_g(h)
+            rh = head_r(h)
             logit = (alpha[u] + beta[u] * RANK[p]
-                     + head_r(h).squeeze(-1)
-                     + (head_g(h) * v[u]).sum(-1))
+                     + rh.squeeze(-1)
+                     + (gh * v[u]).sum(-1))
             # v prior N(0, I): 0.5*||v_u||^2 ONCE per user per epoch — each
             # attempt carries its user's prior share 1/n_u, so shrinkage
             # relaxes as a user's data grows (a fixed-per-attempt prior would
@@ -206,6 +209,18 @@ def train_fold(train_users, by_user, F, tid_index, k_axes, epochs, seed, device)
             loss = bce(logit, y) \
                 + 0.5 * ((v[u] ** 2).sum(dim=1) / counts[u]).sum() / len(idx) \
                 + 10.0 * (v.mean(dim=0) ** 2).sum()
+            if ortho:
+                # Deflation: axes mutually orthogonal AND orthogonal to the r
+                # direction (batch-level centered cosines) — 2026-07-18 showed
+                # unconstrained axes collapse onto correlated copies of r, so
+                # this forces the capacity to look beyond difficulty
+                # sensitivity. Batch (8192) estimates the corpus cosines well.
+                M = torch.cat([gh, rh], dim=1)
+                Mc = M - M.mean(dim=0, keepdim=True)
+                Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
+                Cm = Mn.T @ Mn
+                loss = loss + 10.0 * ((Cm - torch.eye(
+                    Cm.shape[0], device=Cm.device)) ** 2).sum()
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -296,8 +311,15 @@ def offset_kappa(off, sc, yy):
     return w[1], se
 
 
-def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse):
-    """Walk-forward on held-out users with frozen loadings. Returns pooled arrays."""
+def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse,
+              extra=None):
+    """Walk-forward on held-out users with frozen loadings. Returns pooled arrays.
+
+    extra: optional per-problem logit offset (array aligned with tid_index),
+    added to the 4PL offset in both the walk-forward fits and the eval rows —
+    used to bake the population kappa*r correction into the baseline so the
+    axes are scored only on what they add beyond it (a user's window fit on an
+    r-aligned column otherwise re-learns the population correction itself)."""
     acc = {"off": [], "axes": [], "off_sca": [], "axes_sca": [], "y": [], "r": [],
            "off4": [], "axes4": [], "off4_sca": [], "axes4_sca": []}
     all_r0 = np.array([v[0] for v in params.values()])
@@ -320,6 +342,12 @@ def eval_fold(eval_users, by_user, g, r, scalars, rank, params, tid_index, lapse
         span = np.maximum(1.0 - C - lapse, 1e-6)
         q = np.clip((0.8 - C) / span, 1e-6, 1 - 1e-6)
         kap = np.log(q / (1 - q))
+        # extra enters INSIDE the 4PL as an inner-logit shift (equivalently a
+        # rating shift of -extra/slope — exactly how a shipped kappa*r
+        # correction would reach the client), not as a post-hoc logit add
+        # outside the floor/ceiling.
+        if extra is not None:
+            kap = kap + np.array([extra[tid_index[t]] for t in tids])
         X_ax = np.column_stack([np.ones(len(a)), rk, G])
         X_b = X_ax[:, :2]
         X_sca = np.column_stack([np.ones(len(a)), rk, S])
@@ -373,6 +401,9 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--no-act", action="store_true",
                     help="ablation: drop the joint-PCA activation block from the features")
+    ap.add_argument("--ortho", action="store_true",
+                    help="deflation: penalize axis loadings toward mutual orthogonality "
+                         "AND orthogonality to the r direction (batch-level cosines)")
     args = ap.parse_args()
 
     import torch
@@ -409,7 +440,8 @@ def main():
         eval_users = [u for u in users if fold_of[u] == fold]
         print(f"\n--- fold {fold}: train {len(train_users)} users, eval {len(eval_users)} ---")
         g, r, v, uids = train_fold(train_users, by_user, F, tid_index,
-                                   args.k, args.epochs, args.seed, device)
+                                   args.k, args.epochs, args.seed, device,
+                                   ortho=args.ortho)
         save[f"g_fold{fold}"] = g
         save[f"r_fold{fold}"] = r
         res = eval_fold(eval_users, by_user, g, r, scalars, rank, params,
@@ -417,6 +449,12 @@ def main():
         if not res:
             continue
         rc = res["r"] - res["r"].mean()
+        # second pass with the population kappa*r correction baked into the
+        # baseline (as a rating shift): what the axes add beyond a SHIPPED r.
+        k_r4, _ = offset_kappa(res["off4"], rc, res["y"])
+        res2 = eval_fold(eval_users, by_user, g, r, scalars, rank, params,
+                         tid_index, lapse, extra=k_r4 * (r - r.mean()))
+        rc2 = res2["r"] - res2["r"].mean()
         metrics = [
             ("kappa(joint axes | rank baseline)", res["off"], res["axes"]),
             ("kappa(axes | personalized wr/sc/phase)", res["off_sca"], res["axes_sca"]),
@@ -424,6 +462,9 @@ def main():
             ("kappa(joint axes | 4PL baseline)", res["off4"], res["axes4"]),
             ("kappa(axes | 4PL + scalars)  <- strict go/no-go", res["off4_sca"], res["axes4_sca"]),
             ("kappa(r head | 4PL baseline) <- shippable-r gate", res["off4"], rc),
+            ("kappa(axes | 4PL+popr)  <- differential go/no-go", res2["off4"], res2["axes4"]),
+            ("kappa(axes | 4PL+popr + scalars)", res2["off4_sca"], res2["axes4_sca"]),
+            ("kappa(r | 4PL+popr)  [sanity ~0]", res2["off4"], rc2),
         ]
         print(f"fold {fold}: held-out n={len(res['y'])}")
         row = []
@@ -444,7 +485,8 @@ def main():
             k, se = ivw(m, s)
             print(f"{name:<52s} = {k:+.3f} +- {se:.3f} (z {k / se:+.1f})")
 
-    out = os.path.join(CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}.npz")
+    suffix = "_ortho" if args.ortho else ""
+    out = os.path.join(CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}{suffix}.npz")
     np.savez_compressed(out, tids=np.array(tids), **save)
     print(f"\nsaved loadings -> {out}")
 
