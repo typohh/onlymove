@@ -172,6 +172,30 @@ function medianStr(ms) {
 function pad(s, n) { s = String(s); return s.length >= n ? s : s + ' '.repeat(n - s.length); }
 function padl(s, n) { s = String(s); return s.length >= n ? s : ' '.repeat(n - s.length) + s; }
 
+// --- current-week day columns ---------------------------------------------------
+// Days of the ONGOING week (Monday .. today) in LOCAL time, so each column matches
+// "today" for whoever runs it (the machine here is EEST = the Finnish tournament TZ).
+// created_at is stored as ISO-8601 UTC, so the per-day SQL groups on
+// date(created_at,'localtime') to bucket by the same local calendar day.
+const DAYW = 7;
+const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function localDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;   // 'YYYY-MM-DD', lexically comparable + matches SQLite date()
+}
+function currentWeekDays() {
+    const now = new Date();
+    const isoDow = (now.getDay() + 6) % 7;   // 0=Mon .. 6=Sun
+    const days = [];
+    for (let i = 0; i <= isoDow; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - isoDow + i);
+        days.push({ date: localDateStr(d), label: `${WEEKDAY[i]} ${d.getDate()}` });
+    }
+    return days;
+}
+
 // --- correlation helpers (Pearson + tie-aware Spearman) -------------------------
 function pearson(xs, ys) {
     const n = Math.min(xs.length, ys.length);
@@ -278,15 +302,36 @@ async function main() {
     );
     const medBy = new Map(meds.map((m) => [m.user_id, m]));
 
+    // Attempts (all reports, incl. repeats) per LOCAL calendar day of the ongoing week.
+    const weekDays = currentWeekDays();
+    const weekStart = weekDays[0].date;
+    const perDayRows = sqliteJson(
+        `SELECT user_id, date(created_at, 'localtime') AS d, COUNT(*) AS n
+           FROM tsumego_reports
+          WHERE date(created_at, 'localtime') >= '${weekStart}'
+            AND user_id IN (SELECT user_id FROM leaderboard)
+          GROUP BY user_id, d`
+    );
+    const perDayBy = new Map();   // user_id -> { 'YYYY-MM-DD': n }
+    for (const dr of perDayRows) {
+        if (!perDayBy.has(dr.user_id)) perDayBy.set(dr.user_id, {});
+        perDayBy.get(dr.user_id)[dr.d] = dr.n;
+    }
+
     const out = rows.map((r) => {
         const { onlymoveRank, egfRank, se, usable } = mod.computeRankBoth(parseBuffer(r.buffer), params);
         const c = countBy.get(r.user_id) || { 9: 0, 13: 0 };
         const md = medBy.get(r.user_id) || {};
+        const perDayObj = perDayBy.get(r.user_id) || {};
+        const perDay = {};
+        let weekTotal = 0;
+        for (const d of weekDays) { const n = perDayObj[d.date] || 0; perDay[d.date] = n; weekTotal += n; }
         const realEgfRank = mod.gorToRankScalar(r.gor);   // from the player's live EGD GoR
         return {
             userId: r.user_id, name: r.egd_name || r.user_id, gor: r.gor,
             novel9: c[9] || 0, novel13: c[13] || 0,
             medianMs: Number.isFinite(md.median_ms) ? md.median_ms : null,
+            perDay, weekTotal,
             onlymoveRank, estEgfRank: egfRank, realEgfRank, se, usableNovel: usable,
         };
     });
@@ -308,17 +353,21 @@ async function main() {
 
     if (asJson) { console.log(JSON.stringify({ correlations, players: out }, null, 2)); return; }
 
-    const W = { name: 20, s9: 8, s13: 8, med: 9, om: 15, est: 15, real: 15 };
+    const W = { name: 20, s9: 8, s13: 8, med: 9, wk: 7, om: 15, est: 15, real: 15 };
+    const dayHeader = weekDays.map((d) => padl(d.label, DAYW)).join('');
+    const dayCells = (p) => weekDays.map((d) => padl((p.perDay[d.date] || 0).toLocaleString('en-US'), DAYW)).join('');
     console.log(
         pad('Player', W.name) + padl('9×9', W.s9) + padl('13×13', W.s13)
-        + padl('median', W.med) + '  ' + pad('onlymove', W.om) + pad('est. EGF', W.est) + pad('real EGF', W.real));
-    console.log('─'.repeat(W.name + W.s9 + W.s13 + W.med + 2 + W.om + W.est + W.real));
+        + padl('median', W.med) + '  ' + dayHeader + padl('wk', W.wk) + '  '
+        + pad('onlymove', W.om) + pad('est. EGF', W.est) + pad('real EGF', W.real));
+    console.log('─'.repeat(W.name + W.s9 + W.s13 + W.med + 2 + weekDays.length * DAYW + W.wk + 2 + W.om + W.est + W.real));
     for (const p of out) {
         console.log(
             pad(p.name, W.name)
             + padl(p.novel9.toLocaleString('en-US'), W.s9)
             + padl(p.novel13.toLocaleString('en-US'), W.s13)
             + padl(medianStr(p.medianMs), W.med) + '  '
+            + dayCells(p) + padl(p.weekTotal.toLocaleString('en-US'), W.wk) + '  '
             + pad(rankStr(mod, p.onlymoveRank), W.om)
             + pad(rankStr(mod, p.estEgfRank), W.est)
             + pad(rankStr(mod, p.realEgfRank), W.real));
@@ -326,6 +375,7 @@ async function main() {
     console.log(
         `\n${out.length} leaderboard player(s). "novel" = distinct-attempt (is_repeat=0) count over all history; `
         + `median = median solve time over novel timed attempts.\n`
+        + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (${weekStart}→today); wk = week total so far.\n`
         + `onlymove  = untimed front-page window rank.\n`
         + `est. EGF  = time-adjusted leaderboard rank (the model's estimate of EGF strength).\n`
         + `real EGF  = the player's actual EGD strength derived from their live GoR ((GoR−2000)/100).\n`
