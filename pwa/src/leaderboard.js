@@ -449,11 +449,14 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         );
     }
     // Latest declaration per (user, server) — one pass over the (small)
-    // rank_surveys table; stitched onto rows in JS below.
+    // rank_surveys table; stitched onto rows in JS below. `country` is a bare
+    // column alongside MAX(id), so SQLite returns it from the latest row (same
+    // documented bare-column behavior the invitation JOIN relies on): the 'EGD'
+    // heartbeat carries the EGD federation code, other servers the geo-IP country.
     const [res, declRes] = await Promise.all([
         stmt.all(),
         env.DB.prepare(
-            `SELECT user_id, server, rank, MAX(id) FROM rank_surveys
+            `SELECT user_id, server, rank, country, MAX(id) FROM rank_surveys
               GROUP BY user_id, server`
         ).all(),
     ]);
@@ -503,20 +506,28 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         }
         // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
         // every mappable declaration (GoR included) back-maps through its server's
-        // inverse coupling into the internal-rank range. Skipped entirely for a
-        // hidden user — their declared ranks are exactly what they've opted to hide.
+        // inverse coupling into the internal-rank range. Country is harvested in the
+        // same pass — the 'EGD' heartbeat's country is the EGD federation code (the
+        // most reliable, since it comes from EGD), a human survey's is Cloudflare
+        // geo-IP. All skipped entirely for a hidden user — their declared ranks and
+        // country are exactly what they've opted to hide.
         let gor = null;
         const sources = [];
+        let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
+        let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
         if (!isHidden) for (const d of (declByUser.get(r.user_id) || [])) {
             if (d.server === 'EGD') {
                 const gi = parseInt(d.rank, 10);
-                if (!Number.isFinite(gi)) continue;
-                gor = gi;
-                const s = egfToInternalScalar(gorToRankScalar(gi));
-                if (s !== null) sources.push(s);
+                if (Number.isFinite(gi)) {
+                    gor = gi;
+                    const s = egfToInternalScalar(gorToRankScalar(gi));
+                    if (s !== null) sources.push(s);
+                }
+                if (d.country) egdCountry = d.country;
             } else {
                 const s = serverRankToInternal(d.server, rankLabelToScalar(d.rank));
                 if (s !== null) sources.push(s);
+                if (d.country && !surveyCountry) surveyCountry = d.country;
             }
         }
         const gorRank = gorToRankScalar(gor);
@@ -524,9 +535,12 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         const rangeMax = sources.length ? Math.max(...sources) : null;
         // A hidden user is stripped of name/country and reported as unregistered,
         // so both pages render them anonymously (the /leaderboard page) or drop
-        // them (the /tournament page, via the _hidden filter below).
+        // them (the /tournament page, via the _hidden filter below). Country falls
+        // back GoR (EGD, most reliable) → invitation (EGD, frozen at invite) →
+        // survey (geo-IP), so the flag now shows for ANY user with a country from
+        // any of those, not just registered (invitation) rows.
         const name = isHidden ? null : r.egd_name;
-        const country = isHidden ? null : r.country_code;
+        const country = isHidden ? null : (egdCountry || r.country_code || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
         if (predEgfRank === null) {
             return {
