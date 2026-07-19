@@ -3,8 +3,8 @@
 //
 // Retroactively recompute every leaderboard row's rank fields — buffer,
 // pred_egf_rank, pred_egf_se, week_id, this_week_max, prev_week_max — and apply
-// them to the leaderboard D1 (local miniflare by default; --remote for
-// production). Purpose: after the ratings / rating→rank curve /
+// them to the leaderboard D1 (--local = miniflare, --remote = production,
+// neither = dry run). Purpose: after the ratings / rating→rank curve /
 // population constants change (a re-rate + `map_rating_to_rank` +
 // `package_for_pwa`), the stored current rank AND the frozen week peaks are on
 // the OLD scale; the weekly cron reconcile only refreshes the current rank and
@@ -20,8 +20,8 @@
 //   reads  <- attempts/database.sqlite  (the local mirror; run
 //             `./.venv/bin/python3 -m pipeline.fetch_database` FIRST so the
 //             leaderboard rows + tsumego_reports are fresh)
-//   writes -> a generated SQL file, applied to the LOCAL miniflare D1 by
-//             default (--apply), or to production with --apply --remote
+//   writes -> a generated SQL file, applied to the LOCAL miniflare D1
+//             (--local) or to production (--remote); neither = dry run
 //
 // Per user (novel attempts only, EVENT order — created_at with id tiebreak):
 //   buffer          = last BUFFER_CAP novel attempts, newest first. NOTE this
@@ -49,11 +49,11 @@
 // run it before deploying, the very next /report recomputes the user's current
 // rank on the OLD scale and overwrites it (peaks survive: rollWeek only maxes).
 //
-// Usage (LOCAL by default; --remote is required to touch production):
+// Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
-//   node auxiliary/update_leaderboard_ranks.mjs --apply           # ... and execute against the local miniflare D1
+//   node auxiliary/update_leaderboard_ranks.mjs --local           # ... and execute against the local miniflare D1
 //                                                                 #     (stop `npm run dev` first)
-//   node auxiliary/update_leaderboard_ranks.mjs --apply --remote  # ... against the REMOTE production D1
+//   node auxiliary/update_leaderboard_ranks.mjs --remote          # ... against the REMOTE production D1
 //   node auxiliary/update_leaderboard_ranks.mjs --populate        # ALSO seed anonymous rows for users active in the
 //                                                                 #     past week with no leaderboard row (production
 //                                                                 #     only adds them lazily on their next /report)
@@ -80,19 +80,19 @@ const ACTIVE_WINDOW_DAYS = 7;
 
 // --- CLI ------------------------------------------------------------------------
 const args = process.argv.slice(2);
-let apply = false, remote = false, populate = false;
+let applyLocal = false, applyRemote = false, populate = false;
 const onlyUsers = new Set();
 let sqlOut = path.join(os.tmpdir(), 'leaderboard_rank_update.sql');
 for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--apply') apply = true;
-    else if (a === '--remote') remote = true;
+    if (a === '--local') applyLocal = true;
+    else if (a === '--remote') applyRemote = true;
     else if (a === '--populate') populate = true;
     else if (a === '--user') onlyUsers.add(args[++i]);
     else if (a === '--sql-out') sqlOut = path.resolve(args[++i]);
     else { console.error(`unknown arg: ${a}`); process.exit(1); }
 }
-if (remote && !apply) { console.error('--remote requires --apply (it selects the apply target, not a dry run)'); process.exit(1); }
+if (applyLocal && applyRemote) { console.error('--local and --remote are mutually exclusive'); process.exit(1); }
 
 // --- bundle the production rank code (leaderboard.js inlines the local JSONs) ----
 async function loadLeaderboardModule() {
@@ -364,17 +364,17 @@ async function main() {
     fs.writeFileSync(sqlOut, statements.join('\n') + '\n');
     console.log(`\n${statements.length} statement(s) written to ${sqlOut}`);
 
-    if (apply && remote) {
+    if (applyRemote) {
         console.log('applying to REMOTE production D1...');
         const res = spawnSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--remote', '--yes', `--file=${sqlOut}`],
             { cwd: PWA_DIR, stdio: 'inherit' });
         process.exit(res.status ?? 1);
-    } else if (apply) {
-        const local = findMiniflareD1();
-        console.log(`applying to local miniflare D1: ${local} (stop npm run dev first)`);
-        execFileSync('sqlite3', [local, `.read ${sqlOut}`], { stdio: 'inherit' });
+    } else if (applyLocal) {
+        const dbPath = findMiniflareD1();
+        console.log(`applying to local miniflare D1: ${dbPath} (stop npm run dev first)`);
+        execFileSync('sqlite3', [dbPath, `.read ${sqlOut}`], { stdio: 'inherit' });
     } else {
-        console.log('dry run — re-run with --apply (local miniflare D1) or --apply --remote (production D1) to write.');
+        console.log('dry run — re-run with --local (miniflare D1) or --remote (production D1) to write.');
     }
 }
 
