@@ -62,9 +62,18 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         if (text) return text;
         return side === 'positive' ? getTerm('statsStyleFallback', { k }) : null;
     };
+    // Skill-noun templates (labels are nouns like "reading"/"shape", not move
+    // recipes). When the axis's OPPOSITE tail is also named, the over/under
+    // sentences use the pair form — "you reach for X when Y is called for" —
+    // with the overused/needed slots swapped between the two directions;
+    // one-sided axes fall back to the standalone force/shy-away wording.
     const PHRASES = {
-        tooMuch:   (l) => getTerm('statsIssueTooMuch', { motif: l }),
-        notEnough: (l) => getTerm('statsIssueNotEnough', { motif: l }),
+        tooMuch:   (l, other) => other
+            ? getTerm('statsIssuePair', { overused: l, needed: other })
+            : getTerm('statsIssueTooMuch', { motif: l }),
+        notEnough: (l, other) => other
+            ? getTerm('statsIssuePair', { overused: other, needed: l })
+            : getTerm('statsIssueNotEnough', { motif: l }),
         badAt:     (l) => getTerm('statsIssueBadAt', { motif: l }),
     };
 
@@ -130,8 +139,13 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
             if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
             else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
         }
+        // Counterpart = the OPPOSITE tail's real label (no "Style k" fallback:
+        // an unnamed counterpart must select the one-sided wording, not print
+        // a placeholder inside the pair sentence).
+        const counterpart = localizedMotif(labelMap[String(k)],
+                                           side === 'positive' ? 'negative' : 'positive');
         return { k, side, quadrant, p,
-                 sentence: PHRASES[quadrant](labelFor(k, side)) };
+                 sentence: PHRASES[quadrant](labelFor(k, side), counterpart) };
     });
     issues.sort((a, b) => b.p - a.p);
 

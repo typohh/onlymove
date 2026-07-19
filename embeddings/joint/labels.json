@@ -4,59 +4,59 @@
   "_doc": "Two-tailed axis labels. components[k] names the k-th shipped axis: positive/negative label either tail's motif (null = unnamed; at least ONE tail must be named for package_for_pwa to ship). bank persists labels for motifs absent from the current fit. Anchors (label_anchors.npz) freeze each motif's loading direction; edit TEXT here, never anchors.",
   "bank": {
     "ax_50def44d": {
-      "positive": "narrow margins",
+      "positive": "judgement",
       "positive_i18n": {
-        "zh": "毫厘之差",
-        "ja": "僅差の判断",
-        "ko": "미세한 차이"
+        "zh": "形势判断",
+        "ja": "形勢判断",
+        "ko": "형세판단"
       },
       "negative": null,
       "negative_i18n": null
     },
     "ax_a268d22a": {
-      "positive": "close counting",
+      "positive": "counting",
       "positive_i18n": {
-        "zh": "精细计算",
-        "ja": "細かい計算",
-        "ko": "정밀한 계산"
+        "zh": "数目",
+        "ja": "目算",
+        "ko": "계가"
       },
       "negative": null,
       "negative_i18n": null
     },
     "ax_07955482": {
-      "positive": "early open positions",
+      "positive": "opening",
       "positive_i18n": {
-        "zh": "序盘开放局面",
-        "ja": "序盤の広い局面",
-        "ko": "초반 열린 국면"
+        "zh": "布局",
+        "ja": "序盤",
+        "ko": "포석"
       },
-      "negative": "late settled positions",
+      "negative": "endgame",
       "negative_i18n": {
-        "zh": "终盘定型局面",
-        "ja": "終盤の固まった局面",
-        "ko": "종반 정리된 국면"
+        "zh": "官子",
+        "ja": "ヨセ",
+        "ko": "끝내기"
       }
     },
     "ax_b758482e": {
-      "positive": "shape intuition traps",
+      "positive": "reading",
       "positive_i18n": {
-        "zh": "形状直觉陷阱",
-        "ja": "形の直感の罠",
-        "ko": "모양 직관의 함정"
+        "zh": "计算力",
+        "ja": "読み",
+        "ko": "수읽기"
       },
-      "negative": "counter-intuitive lines",
+      "negative": "shape",
       "negative_i18n": {
-        "zh": "反直觉手段",
-        "ja": "直感に反する手順",
-        "ko": "직관에 반하는 수순"
+        "zh": "棋形",
+        "ja": "形",
+        "ko": "모양"
       }
     },
     "ax_1ad88138": {
-      "positive": "careless reading",
+      "positive": "complexity",
       "positive_i18n": {
-        "zh": "粗心的计算",
-        "ja": "不注意な読み",
-        "ko": "부주의한 수읽기"
+        "zh": "复杂局面",
+        "ja": "複雑な局面",
+        "ko": "복잡한 국면"
       },
       "negative": null,
       "negative_i18n": null
@@ -65,63 +65,63 @@
   "components": [
     {
       "motif_id": "ax_50def44d",
-      "positive": "narrow margins",
+      "positive": "judgement",
       "positive_i18n": {
-        "zh": "毫厘之差",
-        "ja": "僅差の判断",
-        "ko": "미세한 차이"
+        "zh": "形势判断",
+        "ja": "形勢判断",
+        "ko": "형세판단"
       },
       "negative": null,
       "negative_i18n": null
     },
     {
       "motif_id": "ax_a268d22a",
-      "positive": "close counting",
+      "positive": "counting",
       "positive_i18n": {
-        "zh": "精细计算",
-        "ja": "細かい計算",
-        "ko": "정밀한 계산"
+        "zh": "数目",
+        "ja": "目算",
+        "ko": "계가"
       },
       "negative": null,
       "negative_i18n": null
     },
     {
       "motif_id": "ax_07955482",
-      "positive": "early open positions",
+      "positive": "opening",
       "positive_i18n": {
-        "zh": "序盘开放局面",
-        "ja": "序盤の広い局面",
-        "ko": "초반 열린 국면"
+        "zh": "布局",
+        "ja": "序盤",
+        "ko": "포석"
       },
-      "negative": "late settled positions",
+      "negative": "endgame",
       "negative_i18n": {
-        "zh": "终盘定型局面",
-        "ja": "終盤の固まった局面",
-        "ko": "종반 정리된 국면"
+        "zh": "官子",
+        "ja": "ヨセ",
+        "ko": "끝내기"
       }
     },
     {
       "motif_id": "ax_b758482e",
-      "positive": "shape intuition traps",
+      "positive": "reading",
       "positive_i18n": {
-        "zh": "形状直觉陷阱",
-        "ja": "形の直感の罠",
-        "ko": "모양 직관의 함정"
+        "zh": "计算力",
+        "ja": "読み",
+        "ko": "수읽기"
       },
-      "negative": "counter-intuitive lines",
+      "negative": "shape",
       "negative_i18n": {
-        "zh": "反直觉手段",
-        "ja": "直感に反する手順",
-        "ko": "직관에 반하는 수순"
+        "zh": "棋形",
+        "ja": "形",
+        "ko": "모양"
       }
     },
     {
       "motif_id": "ax_1ad88138",
-      "positive": "careless reading",
+      "positive": "complexity",
       "positive_i18n": {
-        "zh": "粗心的计算",
-        "ja": "不注意な読み",
-        "ko": "부주의한 수읽기"
+        "zh": "复杂局面",
+        "ja": "複雑な局面",
+        "ko": "복잡한 국면"
       },
       "negative": null,
       "negative_i18n": null
