@@ -13,7 +13,7 @@
 //   * onlymove — the current rank estimated from their solving here.
 // Any header sorts (labels sort by their underlying continuous scalar).
 
-import { readLeaderboardRows, RANK_START_MIN, egfToInternalScalar } from '../leaderboard.js';
+import { readLeaderboardRows, RANK_START_MIN } from '../leaderboard.js';
 import { rankScalarToLabel } from '../../shared/rank-math.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
@@ -38,13 +38,11 @@ export async function handleLeaderboard(env) {
 function renderPage(rows) {
     // Per row: `decl` = the external-evidence range (v: midpoint scalar for
     // sorting, t: "3k–1d" label), `est` = the current onlymove estimate (v:
-    // internal scalar, t: label) — the stored estimate is an EGF-frame scalar,
-    // inverted through the EGF coupling here so both columns speak the same
-    // internal-rank language.
-    const toEst = (v) => {
-        const s = Number.isFinite(v) ? egfToInternalScalar(v) : null;
-        return Number.isFinite(s) ? { v: s, t: rankScalarToLabel(s) } : null;
-    };
+    // internal scalar, t: label). BOTH are UNTIMED onlymove-frame internal scalars
+    // (readLeaderboardRows already inverted the EGF/server couplings AND removed the
+    // user's time dock), so the two columns speak the same language the client's
+    // front-page rank does — no EGF, no time adjustment.
+    const toEst = (s) => (Number.isFinite(s) ? { v: s, t: rankScalarToLabel(s) } : null);
     const data = rows.map((r) => {
         let decl = null;
         if (Number.isFinite(r.rangeMin) && Number.isFinite(r.rangeMax)) {
@@ -59,7 +57,7 @@ function renderPage(rows) {
             anon: !r.registered,
             flag: flag(r.country),
             decl,
-            est: toEst(r.currentAbs),
+            est: toEst(r.currentInternal),
         };
         // Not yet ranked: the onlymove column shows valid-attempts/threshold progress
         // instead of an estimate, so it's obvious they haven't qualified. est is

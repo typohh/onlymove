@@ -11,7 +11,6 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
-import { handleTournament } from './handlers/tournament-page.js';
 import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
 import { handleProfileHide, handleProfileHidden } from './handlers/profile.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows } from './leaderboard.js';
@@ -37,8 +36,8 @@ const WRITE_ROUTES = [
   // code-guessing on top of the account-code check.
   { path: '/invite/eligible', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteEligible },
   { path: '/invite/create', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteCreate },
-  // "Hide my profile" toggle for the leaderboard/tournament pages (bottom of the
-  // /leaderboard page). GET counterpart (read current state) is in GET_ROUTES.
+  // "Hide my profile" toggle for the leaderboard (bottom of the /leaderboard
+  // page). GET counterpart (read current state) is in GET_ROUTES.
   { path: '/profile/hide', method: 'POST', limiter: 'RL_WRITE', handler: handleProfileHide },
 ];
 
@@ -52,9 +51,6 @@ const GET_ROUTES = [
   { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
-  // Standalone tournament landing page (HTML, Finnish; embeds the tournament
-  // standings read from the leaderboard table).
-  { path: '/tournament', handler: (request, env) => handleTournament(env) },
   // /invite is dual-purpose on the same path: with ?t=<token> it's the invitation
   // preview (JSON) for the /register confirmation dialog; without a token it's the
   // invite generator page (HTML). (GET /register itself is a navigation and falls

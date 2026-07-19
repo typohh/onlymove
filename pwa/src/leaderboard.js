@@ -110,6 +110,48 @@ function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
     return interpExtrap(rating + deltaRating, CURVE.ratings, CURVE.rank_indices);
 }
 
+// Remove a personal time dock from an internal-rank SCALAR (1k=0), returning the
+// UNTIMED onlymove-frame scalar. computeRank ADDS this dock (in rating units) to
+// move a user's untimed onlymove rank into the time-adjusted server frame; this is
+// the exact inverse. The /leaderboard page de-times BOTH its columns with it so
+// they read as onlymove ranks (matching the client's untimed front-page headline),
+// NOT the server-frame ranks the couplings/EGD-GoR natively speak. Monotone in the
+// scalar, so applying it to a range's min/max keeps them the min/max.
+function deTimeInternalScalar(internalScalar, deltaRating) {
+    if (!Number.isFinite(internalScalar)) return null;
+    if (!deltaRating) return internalScalar;
+    const idx = rankIndexAfterRatingDelta(internalScalar + RANK_INDEX_OFFSET, -deltaRating);
+    return Number.isFinite(idx) ? idx - RANK_INDEX_OFFSET : internalScalar;
+}
+
+// The personal time dock in RATING units from a set of valid solve times (ms,
+// NaN where untimed): alpha·(log10(weighted-median minutes) − center). 0 when
+// there's no time signal or no TIME_ADJUST constants. This is the SAME dock
+// computeRank applies to move the untimed onlymove rank into the server frame,
+// factored out so readLeaderboardRows can recover and subtract it back off.
+function timeDockFromTimes(times) {
+    if (!TIME_ADJUST || !Number.isFinite(TIME_ADJUST.alpha_per_log10_min)
+        || !Number.isFinite(TIME_ADJUST.center_log10_min)) return 0;
+    const medMs = weightedMedianOverWindow(times, TIME_MIN_TIMED);
+    if (medMs === null) return 0;
+    return TIME_ADJUST.alpha_per_log10_min * (Math.log10(medMs / 60000) - TIME_ADJUST.center_log10_min);
+}
+
+// The personal dock straight from a buffer of { p, s, t } (newest first): the same
+// valid-in-corpus solve times computeRank's median uses. Used by readLeaderboardRows
+// to de-time a RANKED row, whose rank is read from storage (so computeRank — and the
+// deltaRating it returns — isn't run for it).
+export function timeDeltaRatingFromBuffer(buffer, params) {
+    const times = [];
+    for (let i = buffer.length - 1; i >= 0; i--) {
+        const e = buffer[i];
+        const pp = e && typeof e.p === 'string' ? params.get(e.p) : null;
+        if (!pp) continue;                            // left the corpus / malformed
+        times.push(Number.isFinite(e.t) ? e.t : NaN);
+    }
+    return timeDockFromTimes(times);
+}
+
 // GoR (integer EGD rating) -> onlymove rank scalar (1k = 0, 1d = 1). Standard EGF
 // ~100-GoR/stone linearization anchored at 1k = 2000, 1d = 2100 (kept simple; the
 // full nonlinear EGF relation could replace it later). Returns null on a bad GoR.
@@ -122,9 +164,10 @@ export function gorToRankScalar(gor) {
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
 // flattens through the SHARED transform, runs the SHARED window estimator, then
 // time-adjusts (weighted-median solve time over the same window) and maps to EGF.
-// Returns { predEgfRank, se, usable } — `usable` is the count of buffered attempts still
-// in the corpus (what the fit uses AND what the progress readout shows); predEgfRank is
-// NULL when usable < RANK_START_MIN.
+// Returns { predEgfRank, se, usable, deltaRating } — `usable` is the count of buffered
+// attempts still in the corpus (what the fit uses AND what the progress readout shows);
+// predEgfRank is NULL when usable < RANK_START_MIN; deltaRating is the time dock applied
+// (0 when none), so readLeaderboardRows can subtract it back off to show the untimed rank.
 export function computeRank(buffer, params) {
     const flat = [];
     const times = [];
@@ -137,24 +180,20 @@ export function computeRank(buffer, params) {
         flat.push(f);
         times.push(Number.isFinite(e.t) ? e.t : NaN);
     }
-    if (flat.length < RANK_START_MIN) return { predEgfRank: null, se: null, usable: flat.length };
+    if (flat.length < RANK_START_MIN) return { predEgfRank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // No server-side warm-start: the window MLE is a pure function of the recent
     // history (the prior is weak, WIN_PRIOR_SD = 4, vs hundreds of attempts), so the
     // recent-mean fallback converges to the same R the client's prev-rank seed does.
     const est = estimateWindowRankFromFlat(flat, NaN);
-    if (!est) return { predEgfRank: null, se: null, usable: flat.length };
+    if (!est) return { predEgfRank: null, se: null, usable: flat.length, deltaRating: 0 };
 
-    let rankIndex = est.rankIndex;
-    const medMs = weightedMedianOverWindow(times, TIME_MIN_TIMED);
-    if (medMs !== null && TIME_ADJUST
-        && Number.isFinite(TIME_ADJUST.alpha_per_log10_min)
-        && Number.isFinite(TIME_ADJUST.center_log10_min)) {
-        const deltaRating = TIME_ADJUST.alpha_per_log10_min
-            * (Math.log10(medMs / 60000) - TIME_ADJUST.center_log10_min);
-        rankIndex = rankIndexAfterRatingDelta(rankIndex, deltaRating);
-    }
-    return { predEgfRank: internalIndexToEgf(rankIndex), se: est.se, usable: flat.length };
+    // Time-adjust into the server (EGF) frame, and REPORT the dock: predEgfRank is the
+    // time-adjusted (server-frame) rank the rank_map couplings speak; the /leaderboard
+    // page removes deltaRating again to show untimed onlymove ranks.
+    const deltaRating = timeDockFromTimes(times);
+    const rankIndex = deltaRating ? rankIndexAfterRatingDelta(est.rankIndex, deltaRating) : est.rankIndex;
+    return { predEgfRank: internalIndexToEgf(rankIndex), se: est.se, usable: flat.length, deltaRating };
 }
 
 // --- week bucketing (Monday-00:00-UTC week) -------------------------------------
@@ -392,62 +431,47 @@ export async function reconcileBuffers(env) {
     }
 }
 
-// --- compute-on-read: rows for the /leaderboard and /tournament pages ------------
-// `activeDays` (the /leaderboard page) walks the (pruned, small) leaderboard
-// table limited to rows active in the trailing window; an UNRANKED unregistered
-// row is additionally dropped, since the attempts-toward-a-rank progress readout
-// only makes sense for players who opted in by registering. Without it the walk
-// is REGISTERED-CENTRIC instead — every external_ids row, with or without a
-// (possibly pruned) leaderboard row — which is what the /tournament page wants:
-// idle registrants stay listed with name/GoR and no current estimate.
-// Registration display fields live OFF the leaderboard row: name/country on the
-// claimed invitation (frozen at invite time; bare-column + MAX() subquery picks
-// the newest claim — documented SQLite behavior), and per-user external evidence
-// from ONE latest-per-(user, server) pass over rank_surveys, stitched in JS:
-// the 'EGD' heartbeat gives the current GoR, and EVERY declaration (GoR
-// included) is back-mapped through its server's inverse coupling into an
-// internal-rank range `rangeMin..rangeMax` — "where the consensus mapping would
-// place their external ranks" (null when the user has no mappable source; any
-// row, registered or anonymous, may carry one). A ranked player
+// --- compute-on-read: rows for the /leaderboard page -----------------------------
+// Walks the (pruned, small) leaderboard table limited to rows active in the
+// trailing `activeDays` window; an UNRANKED unregistered row is dropped (the
+// attempts-toward-a-rank progress readout only makes sense for players who opted
+// in by registering), and a hidden row is filtered below. Registration display
+// fields live OFF the leaderboard row: name/country on the claimed invitation
+// (frozen at invite time; bare-column + MAX() subquery picks the newest claim —
+// documented SQLite behavior), and per-user external evidence from ONE
+// latest-per-(user, server) pass over rank_surveys, stitched in JS: EVERY
+// declaration (the 'EGD' GoR heartbeat included) is back-mapped through its
+// server's inverse coupling AND de-timed by the user's own dock into an UNTIMED
+// onlymove-rank range `rangeMin..rangeMax` (null when the user has no mappable
+// source; any row, registered or anonymous, may carry one). A ranked player
 // (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries
-// the derived absolute + relative estimate (relative = rank − gor_rank, live
-// GoR). A not-yet-ranked REGISTERED player carries
-// `ranked: false` + `usableCount` (buffered novel attempts STILL IN THE CORPUS,
-// < RANK_START_MIN) so the page shows their valid-attempts/RANK_START_MIN progress
-// in place of a rank. Every row carries `registered` (has an external_ids row);
-// unregistered rows have name/country/gor null.
-export async function readLeaderboardRows(env, { activeDays = null } = {}) {
+// `currentInternal`, the untimed onlymove estimate. A not-yet-ranked REGISTERED
+// player carries `ranked: false` + `usableCount` (buffered novel attempts STILL
+// IN THE CORPUS, < RANK_START_MIN) so the page shows their
+// valid-attempts/RANK_START_MIN progress in place of a rank. Every row carries
+// `registered` (has an external_ids row); unregistered rows have name/country
+// null. BOTH the estimate and the declared range are UNTIMED onlymove ranks —
+// no EGF, no time adjustment — matching the client's front-page headline.
+export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     if (!env.DB) return [];
     const JOINS = `
         LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
                      FROM invitation WHERE claimed_by_user_id IS NOT NULL
                     GROUP BY claimed_by_user_id) i ON i.uid = u`;
-    // buffer is needed to (re)compute an UNRANKED registered row's rank on read;
-    // the CASE returns NULL otherwise so ranked rows don't ship their (up to
-    // 500-entry) blob — and unranked UNREGISTERED rows are filtered out.
-    let stmt;
-    if (activeDays !== null) {
-        stmt = env.DB.prepare(
-            `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank,
-                    (x.user_id IS NOT NULL) AS registered,
-                    CASE WHEN l.pred_egf_rank IS NULL AND x.user_id IS NOT NULL
-                         THEN l.buffer ELSE NULL END AS buffer
-               FROM (SELECT *, user_id AS u FROM leaderboard
-                      WHERE last_active >= ?1) l
-               LEFT JOIN external_ids x ON x.user_id = u
-               ${JOINS}
-              WHERE x.user_id IS NOT NULL OR l.pred_egf_rank IS NOT NULL`
-        ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
-    } else {
-        stmt = env.DB.prepare(
-            `SELECT u AS user_id, i.egd_name, i.country_code, l.pred_egf_rank,
-                    1 AS registered,
-                    CASE WHEN l.pred_egf_rank IS NULL THEN l.buffer ELSE NULL END AS buffer
-               FROM (SELECT user_id AS u FROM external_ids) x
-               LEFT JOIN leaderboard l ON l.user_id = u
-               ${JOINS}`
-        );
-    }
+    // buffer is shipped for EVERY row: an unranked row (re)computes its rank from it,
+    // and a RANKED row needs it too — the page de-times its rank into the untimed
+    // onlymove frame, which needs the user's median solve time (the personal dock),
+    // recomputed from the buffer on read (cheap median, no window fit; D1 bills rows,
+    // not the blob's bytes). Unranked UNREGISTERED rows are filtered out in SQL.
+    const stmt = env.DB.prepare(
+        `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank, l.buffer,
+                (x.user_id IS NOT NULL) AS registered
+           FROM (SELECT *, user_id AS u FROM leaderboard
+                  WHERE last_active >= ?1) l
+           LEFT JOIN external_ids x ON x.user_id = u
+           ${JOINS}
+          WHERE x.user_id IS NOT NULL OR l.pred_egf_rank IS NOT NULL`
+    ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     // Latest declaration per (user, server) — one pass over the (small)
     // rank_surveys table; stitched onto rows in JS below. `country` is a bare
     // column alongside MAX(id), so SQLite returns it from the latest row (same
@@ -471,17 +495,17 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
     // problems leave the corpus and climbs back only as the player solves more, so it
     // never reads "60/60" without a rank — and (b) surfaces a rank the instant the valid
     // count reaches RANK_START_MIN, without waiting for the weekly reconcile cron.
-    // params is the per-isolate cached asset; load it only if some row needs it.
+    // params is the per-isolate cached asset; load it if any row has a buffer (needed
+    // to recompute an unranked row's rank AND to derive every row's time dock).
     let params = null;
-    if (rows.some((r) => !Number.isFinite(r.pred_egf_rank) && r.buffer)) {
+    if (rows.some((r) => r.buffer)) {
         try { params = await getProblemParams(env); }
         catch (e) { console.error('leaderboard params load failed:', e); }
     }
     // Users who opted to hide their profile (bottom of the /leaderboard page):
     // withhold name, country, and every self-declared / GoR survey rank. Small
     // opt-in table, read whole. A hidden user still gets their onlymove estimate
-    // (they render as an anonymous row on /leaderboard); the row is dropped from
-    // the registered-centric /tournament listing below.
+    // (they render as an anonymous row carrying only that estimate).
     let hidden = new Set();
     try {
         const hres = await env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all();
@@ -492,17 +516,25 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
         // the buffer. usableCount (valid in-corpus attempts, what the fit uses) drives
         // the progress readout while the row is unranked (< RANK_START_MIN valid).
+        // deltaRating is the user's personal time dock (rating units) baked into the
+        // server-frame rank — recomputed here so the page can subtract it back off for
+        // the untimed onlymove display (computeRank returns it for an unranked recompute;
+        // a ranked row reads it straight from the buffer's median solve time).
+        const buf = r.buffer ? parseBuffer(r.buffer) : [];
         let predEgfRank = Number.isFinite(r.pred_egf_rank) ? r.pred_egf_rank : null;
         let usableCount = 0;
-        if (predEgfRank === null && r.buffer) {
-            const buf = parseBuffer(r.buffer);
-            if (params) {
+        let deltaRating = 0;
+        if (predEgfRank === null) {
+            if (params && buf.length) {
                 const c = computeRank(buf, params);
                 usableCount = c.usable;
+                deltaRating = c.deltaRating || 0;
                 if (Number.isFinite(c.predEgfRank)) predEgfRank = c.predEgfRank;
             } else {
                 usableCount = buf.length;   // params unavailable: fall back to raw count
             }
+        } else if (params && buf.length) {
+            deltaRating = timeDeltaRatingFromBuffer(buf, params);
         }
         // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
         // every mappable declaration (GoR included) back-maps through its server's
@@ -511,7 +543,6 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         // most reliable, since it comes from EGD), a human survey's is Cloudflare
         // geo-IP. All skipped entirely for a hidden user — their declared ranks and
         // country are exactly what they've opted to hide.
-        let gor = null;
         const sources = [];
         let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
         let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
@@ -519,7 +550,6 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
             if (d.server === 'EGD') {
                 const gi = parseInt(d.rank, 10);
                 if (Number.isFinite(gi)) {
-                    gor = gi;
                     const s = egfToInternalScalar(gorToRankScalar(gi));
                     if (s !== null) sources.push(s);
                 }
@@ -530,41 +560,34 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
                 if (d.country && !surveyCountry) surveyCountry = d.country;
             }
         }
-        const gorRank = gorToRankScalar(gor);
-        const rangeMin = sources.length ? Math.min(...sources) : null;
-        const rangeMax = sources.length ? Math.max(...sources) : null;
-        // A hidden user is stripped of name/country and reported as unregistered,
-        // so both pages render them anonymously (the /leaderboard page) or drop
-        // them (the /tournament page, via the _hidden filter below). Country falls
-        // back GoR (EGD, most reliable) → invitation (EGD, frozen at invite) →
-        // survey (geo-IP), so the flag now shows for ANY user with a country from
-        // any of those, not just registered (invitation) rows.
+        // The declared sources are server-frame internal scalars (the couplings/EGD-GoR
+        // are time-adjusted). De-time them by the user's own dock so the "Declared" range
+        // reads as untimed onlymove ranks, comparable to the onlymove estimate below.
+        const rangeMin = sources.length ? deTimeInternalScalar(Math.min(...sources), deltaRating) : null;
+        const rangeMax = sources.length ? deTimeInternalScalar(Math.max(...sources), deltaRating) : null;
+        // The onlymove estimate as an UNTIMED internal scalar: invert the stored
+        // server-frame EGF rank to internal, then subtract the dock — recovering the
+        // client's untimed front-page frame (the column the page displays).
+        const currentInternal = predEgfRank === null
+            ? null : deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
+        // A hidden user is stripped of name/country and reported as unregistered, so
+        // the page renders them anonymously (a hidden-and-unranked row is then dropped
+        // by the _hidden filter below). Country falls back GoR (EGD, most reliable) →
+        // invitation (EGD, frozen at invite) → survey (geo-IP), so the flag shows for
+        // ANY user with a country from any of those, not just registered rows.
         const name = isHidden ? null : r.egd_name;
         const country = isHidden ? null : (egdCountry || r.country_code || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
-        if (predEgfRank === null) {
-            return {
-                name, country, gor, gorRank, rangeMin, rangeMax,
-                registered, ranked: false, usableCount,
-                currentAbs: null, currentRel: null, _hidden: isHidden,
-            };
-        }
         return {
-            name, country, gor, gorRank, rangeMin, rangeMax,
-            registered, ranked: true,
-            currentAbs: predEgfRank,
-            currentRel: (Number.isFinite(predEgfRank) && Number.isFinite(gorRank))
-                ? predEgfRank - gorRank : null,
+            name, country, rangeMin, rangeMax,
+            registered, ranked: predEgfRank !== null, usableCount,
+            currentInternal,                   // untimed onlymove internal scalar (null when unranked)
             _hidden: isHidden,
         };
     });
-    // Drop hidden rows the page can't meaningfully show: the /tournament
-    // (registered-centric) listing has no use for an anonymous row, and the
-    // /leaderboard page drops a hidden row that has no onlymove rank (matching
-    // how a never-registered, not-yet-ranked player is already omitted). A hidden
-    // RANKED row survives on /leaderboard as an anonymous rank. Strip the marker.
-    const visible = activeDays !== null
-        ? mapped.filter((r) => !(r._hidden && !r.ranked))
-        : mapped.filter((r) => !r._hidden);
+    // Drop a hidden row that has no onlymove rank (matching how a never-registered,
+    // not-yet-ranked player is already omitted); a hidden RANKED row survives as an
+    // anonymous rank. Strip the internal marker.
+    const visible = mapped.filter((r) => !(r._hidden && !r.ranked));
     return visible.map(({ _hidden, ...rest }) => rest);
 }

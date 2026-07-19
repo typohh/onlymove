@@ -19,14 +19,7 @@ export function baseCss(maxWidthPx) {
 // render their rows client-side from inlined JSON).
 export const ESC_SNIPPET = `function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}`;
 
-// --- leaderboard-row display helpers (shared by /leaderboard and /tournament) -----
-// The estimate is an EGF rank scalar; display it as GoR — the inverse of the
-// Worker's gorToRankScalar (1k=2000, 1d=2100, ~100 GoR/stone). Relative mode
-// shows the GoR gap (estimated GoR − actual GoR) = exactly 100× the scalar diff.
-export const scalarToGor = (v) => Math.round(2000 + 100 * v);
-// Numeric values the client both sorts by AND formats. null where a timeframe has
-// no data (an idle week) → the pages render "—" and sort it last.
-export const numAbs = (v) => (Number.isFinite(v) ? scalarToGor(v) : null);
-export const numRel = (v) => (Number.isFinite(v) ? Math.round(100 * v) : null);
+// --- leaderboard-row display helpers ----------------------------------------------
+// Country code -> flag emoji (regional-indicator pair); '' when not a 2-letter code.
 export const flag = (cc) => (typeof cc === 'string' && cc.length === 2)
     ? cc.toUpperCase().replace(/./g, (c) => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)) : '';

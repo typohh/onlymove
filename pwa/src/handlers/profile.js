@@ -1,11 +1,10 @@
 // pwa/src/handlers/profile.js
 //
-// Per-user "hide my profile" preference for the public /leaderboard +
-// /tournament pages. Presence of a hidden_profiles row = hidden: the user's
-// display name, country, and self-declared / GoR survey ranks are withheld from
-// readLeaderboardRows (see src/leaderboard.js). A hidden player still appears on
-// /leaderboard as an anonymous row carrying only their onlymove estimate, and is
-// dropped from the registered-centric /tournament listing.
+// Per-user "hide my profile" preference for the public /leaderboard page.
+// Presence of a hidden_profiles row = hidden: the user's display name, country,
+// and self-declared / GoR survey ranks are withheld from readLeaderboardRows
+// (see src/leaderboard.js). A hidden player still appears on /leaderboard as an
+// anonymous row carrying only their onlymove estimate.
 //
 // Keyed by user_id and applying to ANY account — a never-registered player can
 // still have declared ranks (rank_surveys) that this hides — so the flag lives
