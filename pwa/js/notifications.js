@@ -79,25 +79,50 @@ function subscriptionToJson(sub) {
     };
 }
 
-// Requests permission (if not yet granted), creates a PushSubscription, and
-// uploads it to the Worker. Must be called from a user gesture.
+// iOS/iPadOS Safari is the ONE platform where pushManager.subscribe() does not
+// surface the notification-permission prompt itself — it requires permission to
+// already be 'granted' (iPadOS 13+ reports a Mac UA, so also probe touch points).
+function isIOS() {
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+// Requests permission (only where subscribe() won't ask itself), creates a
+// PushSubscription, and uploads it to the Worker. Must be called from a user
+// gesture.
 export async function enableNotifications() {
     if (!supportsNotifications()) throw new Error('Notifications not supported');
-
-    let perm = Notification.permission;
-    if (perm === 'default') {
-        perm = await Notification.requestPermission();
-    }
-    if (perm !== 'granted') return { ok: false, permission: perm };
 
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
+        // On iOS, subscribe() below won't prompt — it needs permission granted
+        // first — so request it explicitly here. Everywhere else (desktop,
+        // Android Chrome, AND the TWA) subscribe({userVisibleOnly:true}) requests
+        // permission on its own, so pre-calling requestPermission() is redundant
+        // — and in the TWA actively harmful: the delegated Notification.permission
+        // reads stale 'default' after the Android grant, so subscribe() re-asks
+        // and a SECOND permission dialog pops. Gate the pre-request on iOS to
+        // leave exactly one prompt on every platform. (Same delegated-permission
+        // lag noted in maybeUploadSchedule / updateInstallButton.)
+        if (isIOS() && Notification.permission === 'default') {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') return { ok: false, permission: perm };
+        }
+
         const vapidKey = await fetchVapidPublicKey();
-        sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: base64UrlToUint8Array(vapidKey),
-        });
+        try {
+            sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: base64UrlToUint8Array(vapidKey),
+            });
+        } catch {
+            // User dismissed/denied the prompt (or push is unavailable). No
+            // subscription = not opted in; report the live permission so the
+            // caller paints Blocked vs. Notify correctly.
+            return { ok: false, permission: Notification.permission };
+        }
     }
 
     await postJson('/push/subscribe', { userId: state.userId, subscription: subscriptionToJson(sub) });
