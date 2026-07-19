@@ -11,8 +11,8 @@
 //   POST /invite/create {userId, pin, name, gor, country} -> insert invitation + QR
 //
 // Eligibility is NO LONGER admin-only: an account may invite if it is an admin
-// (env.ADMIN_USER_IDS) OR it is a registered leaderboard member (has a
-// `leaderboard` row — the trust boundary, since membership itself is invite-only).
+// (env.ADMIN_USER_IDS) OR it is a registered member (has an `external_ids`
+// binding — the trust boundary, since registration itself is invite-only).
 // The account code (user_id) is read automatically from the browser's localStorage
 // (same key the PWA uses) and is recorded on the invitation as created_by_user_id
 // — both the abuse-attribution key and the "who invited this person" record. The
@@ -38,13 +38,15 @@ function isAdmin(code, env) {
     return cfg.split(',').map((s) => s.trim()).filter(Boolean).includes(code);
 }
 
-// A registered leaderboard member (has a row) may invite. Membership is itself
-// invite-only, so this is the trust boundary — no need to require a computed rank
-// (pred_egf_rank), which would only delay a freshly-registered player.
-async function isLeaderboardMember(code, env) {
+// A REGISTERED member (has an external_ids binding) may invite. Registration is
+// itself invite-only, so this is the trust boundary — no need to require a
+// computed rank (pred_egf_rank), which would only delay a freshly-registered
+// player. (Deliberately NOT "has a leaderboard row": since the all-users
+// expansion every reporting user has one of those lazily.)
+async function isRegisteredMember(code, env) {
     if (!env.DB || typeof code !== 'string' || !isValidUserId(code)) return false;
     const row = await env.DB.prepare(
-        `SELECT 1 AS ok FROM leaderboard WHERE user_id = ?1`
+        `SELECT 1 AS ok FROM external_ids WHERE user_id = ?1`
     ).bind(code).first();
     return !!row;
 }
@@ -52,7 +54,7 @@ async function isLeaderboardMember(code, env) {
 // Combined gate used by both the page reveal and the create endpoint.
 async function inviteEligibility(code, env) {
     const admin = isAdmin(code, env);
-    const member = admin ? false : await isLeaderboardMember(code, env);
+    const member = admin ? false : await isRegisteredMember(code, env);
     return { eligible: admin || member, admin, member };
 }
 
@@ -136,7 +138,7 @@ export async function handleInviteCreate(request, env) {
         // 1:1 binding: no point inviting a PIN that already has a registered account
         // (the claim would be rejected anyway). Surface it as a clean error.
         const existing = await env.DB.prepare(
-            `SELECT user_id FROM leaderboard WHERE egd_pin = ?1`
+            `SELECT user_id FROM external_ids WHERE egd_pin = ?1`
         ).bind(pinStr).first();
         if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
 

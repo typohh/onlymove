@@ -13,7 +13,7 @@ import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
-import { reconcileBuffers, pruneIdleAnonymousRows } from './leaderboard.js';
+import { reconcileBuffers, pruneIdleLeaderboardRows } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
 // flood is dropped by a cheap Worker invocation instead of spending D1 quota.
@@ -129,14 +129,14 @@ export default {
     ctx.waitUntil(maybeComputeServerStats(env));
     ctx.waitUntil(pruneHistoryRefreshLog(env));
     // EGD leaderboard, weekly (Monday 00:00 UTC — the timing is load-bearing for the
-    // prune, see pruneIdleAnonymousRows): first delete idle anonymous rows (lazily
-    // re-created on their user's next novel /report), then reconcile the remaining
-    // buffers from tsumego_reports (heals drift + freezes last week's GoR at the week
-    // boundary). GoR itself is refreshed by active clients piggybacking on /report
-    // (the Worker can't reach EGD).
+    // prune, see pruneIdleLeaderboardRows): first delete idle rows (lazily re-created
+    // on their user's next novel /report; registration lives in external_ids so
+    // nothing durable is lost), then reconcile the remaining buffers from
+    // tsumego_reports (heals drift). GoR itself is refreshed by active clients
+    // piggybacking on /report (the Worker can't reach EGD).
     const now = new Date();
     if (now.getUTCDay() === 1 && now.getUTCHours() === 0) {
-      ctx.waitUntil(pruneIdleAnonymousRows(env).then(() => reconcileBuffers(env)));
+      ctx.waitUntil(pruneIdleLeaderboardRows(env).then(() => reconcileBuffers(env)));
     }
   },
 };

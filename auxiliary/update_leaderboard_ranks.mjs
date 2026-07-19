@@ -3,7 +3,8 @@
 //
 // Retroactively recompute every leaderboard row's rank fields — buffer,
 // pred_egf_rank, pred_egf_se, week_id, this_week_max, prev_week_max — and apply
-// them to the PRODUCTION D1. Purpose: after the ratings / rating→rank curve /
+// them to the leaderboard D1 (local miniflare by default; --remote for
+// production). Purpose: after the ratings / rating→rank curve /
 // population constants change (a re-rate + `map_rating_to_rank` +
 // `package_for_pwa`), the stored current rank AND the frozen week peaks are on
 // the OLD scale; the weekly cron reconcile only refreshes the current rank and
@@ -19,8 +20,8 @@
 //   reads  <- attempts/database.sqlite  (the local mirror; run
 //             `./.venv/bin/python3 -m pipeline.fetch_database` FIRST so the
 //             leaderboard rows + tsumego_reports are fresh)
-//   writes -> a generated SQL file, applied with
-//             `npx wrangler d1 execute DB --remote --yes --file=...`
+//   writes -> a generated SQL file, applied to the LOCAL miniflare D1 by
+//             default (--apply), or to production with --apply --remote
 //
 // Per user (novel attempts only, EVENT order — created_at with id tiebreak):
 //   buffer          = last BUFFER_CAP novel attempts, newest first. NOTE this
@@ -48,12 +49,15 @@
 // run it before deploying, the very next /report recomputes the user's current
 // rank on the OLD scale and overwrites it (peaks survive: rollWeek only maxes).
 //
-// Usage:
-//   node auxiliary/update_leaderboard_ranks.mjs                 # dry run: print + write SQL file
-//   node auxiliary/update_leaderboard_ranks.mjs --apply         # ... and execute against remote D1
-//   node auxiliary/update_leaderboard_ranks.mjs --apply-local   # ... against the local miniflare D1
-//                                                               #     (stop `npm run dev` first)
-//   node auxiliary/update_leaderboard_ranks.mjs --user <redacted-user-id> # limit to one user (repeatable)
+// Usage (LOCAL by default; --remote is required to touch production):
+//   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
+//   node auxiliary/update_leaderboard_ranks.mjs --apply           # ... and execute against the local miniflare D1
+//                                                                 #     (stop `npm run dev` first)
+//   node auxiliary/update_leaderboard_ranks.mjs --apply --remote  # ... against the REMOTE production D1
+//   node auxiliary/update_leaderboard_ranks.mjs --populate        # ALSO seed anonymous rows for users active in the
+//                                                                 #     past week with no leaderboard row (production
+//                                                                 #     only adds them lazily on their next /report)
+//   node auxiliary/update_leaderboard_ranks.mjs --user <redacted-user-id>   # limit to one user (repeatable; also scopes populate)
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -69,21 +73,26 @@ const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DAY_MS = 86400000;
 const STALE_WARN_MS = 6 * 3600 * 1000;
+// --populate seeds active-but-rowless users; the window matches the /leaderboard
+// page's ACTIVE_DAYS (src/handlers/leaderboard-page.js), so a seeded row's
+// last_active clears that page's active-window filter.
+const ACTIVE_WINDOW_DAYS = 7;
 
 // --- CLI ------------------------------------------------------------------------
 const args = process.argv.slice(2);
-let apply = false, applyLocal = false;
+let apply = false, remote = false, populate = false;
 const onlyUsers = new Set();
 let sqlOut = path.join(os.tmpdir(), 'leaderboard_rank_update.sql');
 for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--apply') apply = true;
-    else if (a === '--apply-local') applyLocal = true;
+    else if (a === '--remote') remote = true;
+    else if (a === '--populate') populate = true;
     else if (a === '--user') onlyUsers.add(args[++i]);
     else if (a === '--sql-out') sqlOut = path.resolve(args[++i]);
     else { console.error(`unknown arg: ${a}`); process.exit(1); }
 }
-if (apply && applyLocal) { console.error('--apply and --apply-local are mutually exclusive'); process.exit(1); }
+if (remote && !apply) { console.error('--remote requires --apply (it selects the apply target, not a dry run)'); process.exit(1); }
 
 // --- bundle the production rank code (leaderboard.js inlines the local JSONs) ----
 async function loadLeaderboardModule() {
@@ -143,6 +152,35 @@ const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`;
 // Monday-00:00-UTC week window for a weekIdAt() id (weekId*7+4 = that Monday's
 // epoch-day index, same arithmetic as leaderboard.js weekStartIso).
 const weekStartMs = (wid) => (wid * 7 + 4) * DAY_MS;
+
+// Windowed, deduped, EVENT-ordered novel attempts for one user (the buffer feed —
+// see the header note on event order vs id order). `uid` is the sql-quoted user id;
+// `wid` bounds the peak scan back to the start of week wid-1, plus the trailing
+// `cap` window feeding the oldest in-window attempt. Returns ascending [{p,s,t,ms}].
+function fetchWindowedAttempts(uid, wid, cap) {
+    const sinceIso = new Date(weekStartMs(wid - 1)).toISOString();
+    // Deduped counts/rows: GROUP BY (problem, created_at) collapses the minted
+    // exact-duplicate rows; SQLite's bare-column rule with the single MIN(id)
+    // aggregate keeps the ORIGINAL row's values. Ordered by created_at (event
+    // time), NOT id — see the header note.
+    const [{ n: inWindow }] = sqliteJson(
+        `SELECT COUNT(*) AS n FROM (
+            SELECT 1 FROM tsumego_reports
+             WHERE user_id = ${uid} AND is_repeat = 0 AND created_at >= '${sinceIso}'
+             GROUP BY problem, created_at)`
+    );
+    return sqliteJson(
+        `SELECT p, s, t, c FROM (
+            SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t, created_at AS c
+              FROM tsumego_reports
+             WHERE user_id = ${uid} AND is_repeat = 0
+             GROUP BY problem, created_at
+             ORDER BY c DESC, id DESC LIMIT ${inWindow + cap})
+          ORDER BY c ASC, id ASC`
+    ).map((r) => ({
+        p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null, ms: Date.parse(r.c),
+    }));
+}
 
 // --- per-user recompute --------------------------------------------------------------
 // attempts: ascending EVENT order (created_at, id tiebreak), exact dups collapsed,
@@ -240,10 +278,10 @@ async function main() {
     console.log(`problem_params: ${params.size} problems\n`);
 
     let rows = sqliteJson(
-        'SELECT user_id, egd_name, week_id, pred_egf_rank, pred_egf_se, this_week_max, prev_week_max FROM leaderboard'
+        'SELECT user_id, week_id, pred_egf_rank, pred_egf_se, this_week_max, prev_week_max FROM leaderboard'
     );
     if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
-    if (!rows.length) { console.log('no leaderboard rows to update'); return; }
+    if (!rows.length && !populate) { console.log('no leaderboard rows to update'); return; }
 
     const statements = [];
     for (const row of rows) {
@@ -254,32 +292,11 @@ async function main() {
         // How far back the peaks can reach: everything since the start of week_id - 1,
         // plus the trailing BUFFER_CAP window feeding the oldest in-window attempt.
         const wid = Number.isFinite(row.week_id) ? row.week_id : lb.weekIdAt(Date.now());
-        const sinceIso = new Date(weekStartMs(wid - 1)).toISOString();
         const uid = sqlStr(row.user_id);
-        // Deduped counts/rows: GROUP BY (problem, created_at) collapses the minted
-        // exact-duplicate rows; SQLite's bare-column rule with the single MIN(id)
-        // aggregate keeps the ORIGINAL row's values. Ordered by created_at (event
-        // time), NOT id — see the header note.
-        const [{ n: inWindow }] = sqliteJson(
-            `SELECT COUNT(*) AS n FROM (
-                SELECT 1 FROM tsumego_reports
-                 WHERE user_id = ${uid} AND is_repeat = 0 AND created_at >= '${sinceIso}'
-                 GROUP BY problem, created_at)`
-        );
-        const attempts = sqliteJson(
-            `SELECT p, s, t, c FROM (
-                SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t, created_at AS c
-                  FROM tsumego_reports
-                 WHERE user_id = ${uid} AND is_repeat = 0
-                 GROUP BY problem, created_at
-                 ORDER BY c DESC, id DESC LIMIT ${inWindow + lb.BUFFER_CAP})
-              ORDER BY c ASC, id ASC`
-        ).map((r) => ({
-            p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null, ms: Date.parse(r.c),
-        }));
+        const attempts = fetchWindowedAttempts(uid, wid, lb.BUFFER_CAP);
 
         const out = recomputeRow(lb, row, attempts, params);
-        console.log(`${row.egd_name || row.user_id} (${row.user_id})  buffer ${attempts.length >= lb.BUFFER_CAP ? lb.BUFFER_CAP : attempts.length} attempts`);
+        console.log(`${row.user_id}  buffer ${attempts.length >= lb.BUFFER_CAP ? lb.BUFFER_CAP : attempts.length} attempts`);
         console.log(`  current   ${fmtDelta(lb, row.pred_egf_rank, out.predEgfRank)}   se ${Number.isFinite(row.pred_egf_se) ? row.pred_egf_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
         console.log(`  this-week ${fmtDelta(lb, row.this_week_max, out.thisWeekMax)}`);
         console.log(`  prev-week ${fmtDelta(lb, row.prev_week_max, out.prevWeekMax)}   week_id ${row.week_id ?? '—'} -> ${out.weekId ?? '—'}`);
@@ -296,21 +313,68 @@ async function main() {
         );
     }
 
+    // --- populate: seed anonymous rows for active-but-rowless users -----------------
+    // Production adds users LAZILY (createLeaderboardRow on their first /report after the
+    // all-users rollout), so a freshly-migrated board omits everyone who hasn't reported
+    // since. This backfills them: any user with an attempt in the past ACTIVE_WINDOW_DAYS
+    // and no leaderboard row gets an anonymous row seeded with the SAME retroactive
+    // recompute the update pass uses.
+    if (populate) {
+        const cutoffIso = new Date(Date.now() - ACTIVE_WINDOW_DAYS * DAY_MS).toISOString();
+        // Local-mirror read (not billed); tag each candidate with its most-recent
+        // activity so last_active clears the /leaderboard active-window filter.
+        let active = sqliteJson(
+            `SELECT user_id, MAX(created_at) AS last_created
+               FROM tsumego_reports
+              WHERE created_at >= '${cutoffIso}'
+                AND user_id NOT IN (SELECT user_id FROM leaderboard)
+              GROUP BY user_id`
+        );
+        if (onlyUsers.size) active = active.filter((r) => onlyUsers.has(r.user_id));
+        console.log(`\npopulate: ${active.length} user(s) active in the past ${ACTIVE_WINDOW_DAYS}d without a leaderboard row`);
+
+        let ranked = 0, unranked = 0;
+        for (const a of active) {
+            if (!USER_ID_RE.test(a.user_id)) {
+                console.warn(`skipping malformed user_id: ${JSON.stringify(a.user_id)}`);
+                continue;
+            }
+            const uid = sqlStr(a.user_id);
+            // No stored week for a new row: recomputeRow derives the week from the
+            // user's last novel attempt and scans this/prev-week peaks.
+            const attempts = fetchWindowedAttempts(uid, lb.weekIdAt(Date.now()), lb.BUFFER_CAP);
+            const out = recomputeRow(lb, { user_id: a.user_id, week_id: null }, attempts, params);
+            if (out.predEgfRank === null) unranked++; else ranked++;
+            console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.predEgfRank === null ? 'unranked' : fmtRank(lb, out.predEgfRank)}`);
+            // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
+            // the row was created concurrently (a live report during a --remote
+            // apply). A NULL rank leaves the week fields NULL — matches the unranked seed.
+            statements.push(
+                `INSERT OR IGNORE INTO leaderboard `
+                + `(user_id, buffer, pred_egf_rank, pred_egf_se, week_id, this_week_max, prev_week_max, last_active) `
+                + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
+                + `${sqlNum(out.predEgfRank)}, ${sqlNum(out.se)}, ${sqlNum(out.weekId)}, `
+                + `${sqlNum(out.thisWeekMax)}, ${sqlNum(out.prevWeekMax)}, ${sqlStr(a.last_created)});`
+            );
+        }
+        console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);
+    }
+
     if (!statements.length) { console.log('\nnothing to write'); return; }
     fs.writeFileSync(sqlOut, statements.join('\n') + '\n');
-    console.log(`\n${statements.length} UPDATE statement(s) written to ${sqlOut}`);
+    console.log(`\n${statements.length} statement(s) written to ${sqlOut}`);
 
-    if (apply) {
+    if (apply && remote) {
         console.log('applying to REMOTE production D1...');
         const res = spawnSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--remote', '--yes', `--file=${sqlOut}`],
             { cwd: PWA_DIR, stdio: 'inherit' });
         process.exit(res.status ?? 1);
-    } else if (applyLocal) {
+    } else if (apply) {
         const local = findMiniflareD1();
         console.log(`applying to local miniflare D1: ${local} (stop npm run dev first)`);
         execFileSync('sqlite3', [local, `.read ${sqlOut}`], { stdio: 'inherit' });
     } else {
-        console.log('dry run — re-run with --apply (remote D1) or --apply-local (miniflare) to write.');
+        console.log('dry run — re-run with --apply (local miniflare D1) or --apply --remote (production D1) to write.');
     }
 }
 

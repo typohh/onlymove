@@ -139,6 +139,12 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_exit
 -- ALTER ... ADD COLUMN on the live D1 appends it last, and the fetch_database
 -- dump is positional VALUES() in column order, so CREATE order must match the
 -- migrated order or the .sql parser (utils/rank_surveys.py) misreads columns.
+-- ALSO holds the MACHINE-written weekly GoR heartbeat for registered players:
+-- server = 'EGD' (not the human-declared 'EGF'), rank = the raw GoR digits
+-- (e.g. '2145' — full precision for the leaderboard display; unparseable by
+-- rank_to_scalar, so the calibration pipeline ignores these until 'EGD' is
+-- deliberately added to SERVERS), country = the EGD federation code (NOT
+-- geo-IP). See the external_ids note.
 CREATE TABLE IF NOT EXISTS rank_surveys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -190,50 +196,59 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
     PRIMARY KEY (user_id, day)
 );
 
+-- External-service player-id bindings: one row per REGISTERED user, identity
+-- only. A general table — future services add columns here (e.g. an aga_pid),
+-- hence not named after EGD. Everything else about a registered player lives
+-- elsewhere: display name/country on their claimed `invitation` row, GoR
+-- history as machine-written 'EGD' rows in `rank_surveys` (weekly heartbeat —
+-- one row per registered player per week from the client GoR piggyback, rank =
+-- the raw GoR digits e.g. '2145', country = the EGD federation code; the
+-- latest row doubles as the "GoR checked this week" marker, and rank_to_scalar
+-- can't parse raw digits so the rank-calibration pipeline ignores 'EGD' rows
+-- until deliberately enabled), and the rank/buffer state on the (prunable)
+-- `leaderboard` row. Having a row here IS the "registered member" trust
+-- boundary the invite tool gates on.
+CREATE TABLE IF NOT EXISTS external_ids (
+    user_id TEXT PRIMARY KEY,
+    egd_pin TEXT NOT NULL
+);
+-- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_egd_pin ON external_ids(egd_pin);
+
 -- Leaderboard: one row per user (created lazily on their first novel /report).
 -- Holds a materialized rank buffer (the user's last 500 novel attempts) + the
 -- derived rank scalars, so /report can recompute the rank in-Worker with
--- +1 read/+1 write. `egd_pin` is the EGD binding and is NULL for the (majority)
--- anonymous rows — only invite-registered players carry a PIN/name/GoR; the
--- /leaderboard page shows anonymous rows as "Anonymous" and limits itself to
--- rows active in the past week. Idle ANONYMOUS rows (last_active > 7 days old)
--- are DELETED by the weekly cron (pruneIdleAnonymousRows) and lazily re-created
--- on the user's next novel /report — they are fully rebuildable from
--- tsumego_reports, so the table stays at roughly weekly-active size. Registered
--- rows (egd_pin NOT NULL) are exempt: the EGD binding is not reconstructible.
+-- +1 read/+1 write. EVERY row is rebuildable from tsumego_reports (registration
+-- lives in external_ids, not here), so idle rows (last_active > 7 days old) are
+-- DELETED by the weekly cron (pruneIdleLeaderboardRows) and lazily re-created on
+-- the user's next novel /report — the table stays at roughly weekly-active
+-- size. The /leaderboard page shows unregistered rows as "Anonymous" and limits
+-- itself to rows active in the past week.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
 -- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
--- >= 60 valid novel attempts (rank-start gate). gor_rank is the current/this-week
--- GoR-rank; prev_week_gor_rank is frozen at the week rollover so past deltas
--- don't move. week_id is the Monday-00:00-UTC week number.
+-- >= 60 valid novel attempts (rank-start gate). prev_week_gor_rank is the GoR
+-- rank frozen at the week rollover so past deltas don't move (week-state:
+-- rollWeek discards it after >1 idle week, exactly when the prune may delete
+-- it). week_id is the Monday-00:00-UTC week number.
 CREATE TABLE IF NOT EXISTS leaderboard (
     user_id            TEXT PRIMARY KEY,
-    egd_pin            TEXT,
-    egd_name           TEXT,
-    country_code       TEXT,
-    gor                INTEGER,
-    gor_updated_at     TEXT,
     buffer             TEXT,
     pred_egf_rank      REAL,
     pred_egf_se        REAL,
-    gor_rank           REAL,
     prev_week_gor_rank REAL,
     week_id            INTEGER,
     this_week_max      REAL,
     prev_week_max      REAL,
     last_active        TEXT
 );
--- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
--- NULL pins (anonymous rows) don't collide: SQLite UNIQUE treats NULLs as distinct.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_egd_pin ON leaderboard(egd_pin);
 -- There is deliberately NO index on last_active. It would be maintained on
 -- EVERY novel /report (the hot-path UPDATE sets last_active each time, and D1
 -- bills index maintenance as rows written — thousands of writes/week), while
 -- the only queries it would serve (the /leaderboard page's active-past-week
 -- filter, behind a 60s edge cache, and the weekly cron) full-scan a table the
--- weekly anonymous-row prune keeps at roughly weekly-active size — a few
--- hundred rows read, and D1 reads are ~1000x cheaper than writes. Revisit only
--- if the table is allowed to grow unbounded again.
+-- weekly prune keeps at roughly weekly-active size — a few hundred rows read,
+-- and D1 reads are ~1000x cheaper than writes. Revisit only if the table is
+-- allowed to grow unbounded again.
 
 -- Registration invitations, issued by an admin (generate_invite.py / the /invite
 -- tool page) OR by any registered leaderboard member (the in-app Invite menu). A
