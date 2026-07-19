@@ -267,3 +267,17 @@ CREATE TABLE IF NOT EXISTS invitation (
 -- MIGRATION for an existing deployment (run once against the live D1; the CREATE
 -- above already carries the column for a fresh DB):
 --   ALTER TABLE invitation ADD COLUMN created_by_user_id TEXT;
+
+-- Per-user "hide my profile" opt-out for the public /leaderboard + /tournament
+-- pages. Presence of a row = hidden: the user's display name, country, and
+-- self-declared / GoR survey ranks are withheld from readLeaderboardRows (a
+-- hidden player still appears on /leaderboard as an anonymous row carrying only
+-- their onlymove estimate, and is dropped from the registered-centric
+-- /tournament listing). Keyed by user_id, applying to ANY account — a
+-- never-registered player can still have declared ranks in rank_surveys that
+-- this hides — so it is its own table rather than a column on external_ids.
+-- Toggled from the bottom of the /leaderboard page (POST /profile/hide).
+CREATE TABLE IF NOT EXISTS hidden_profiles (
+    user_id    TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);

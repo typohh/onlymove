@@ -13,6 +13,7 @@ import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
+import { handleProfileHide, handleProfileHidden } from './handlers/profile.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -36,6 +37,9 @@ const WRITE_ROUTES = [
   // code-guessing on top of the account-code check.
   { path: '/invite/eligible', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteEligible },
   { path: '/invite/create', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteCreate },
+  // "Hide my profile" toggle for the leaderboard/tournament pages (bottom of the
+  // /leaderboard page). GET counterpart (read current state) is in GET_ROUTES.
+  { path: '/profile/hide', method: 'POST', limiter: 'RL_WRITE', handler: handleProfileHide },
 ];
 
 // GET routes, dispatched like WRITE_ROUTES (reads, so no limiter). Every entry
@@ -62,6 +66,9 @@ const GET_ROUTES = [
   // Legacy alias for the invite generator page. Inert without an eligible account
   // code, which the POST endpoints verify.
   { path: '/admin/invite', handler: (request, env) => handleInvitePage(env) },
+  // Current "hide my profile" state for a user (reflects the leaderboard-page
+  // checkbox). Read; no limiter. no-store, set in the handler.
+  { path: '/profile/hide', handler: (request, env) => handleProfileHidden(request, env) },
 ];
 
 // Last-resort error boundary so a handler that throws (malformed JSON body, a

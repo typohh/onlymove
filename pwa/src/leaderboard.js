@@ -474,7 +474,18 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         try { params = await getProblemParams(env); }
         catch (e) { console.error('leaderboard params load failed:', e); }
     }
-    return rows.map((r) => {
+    // Users who opted to hide their profile (bottom of the /leaderboard page):
+    // withhold name, country, and every self-declared / GoR survey rank. Small
+    // opt-in table, read whole. A hidden user still gets their onlymove estimate
+    // (they render as an anonymous row on /leaderboard); the row is dropped from
+    // the registered-centric /tournament listing below.
+    let hidden = new Set();
+    try {
+        const hres = await env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all();
+        for (const h of ((hres && hres.results) || [])) hidden.add(h.user_id);
+    } catch (e) { console.error('hidden_profiles read failed:', e); }
+    const mapped = rows.map((r) => {
+        const isHidden = hidden.has(r.user_id);
         // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
         // the buffer. usableCount (valid in-corpus attempts, what the fit uses) drives
         // the progress readout while the row is unranked (< RANK_START_MIN valid).
@@ -492,10 +503,11 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         }
         // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
         // every mappable declaration (GoR included) back-maps through its server's
-        // inverse coupling into the internal-rank range.
+        // inverse coupling into the internal-rank range. Skipped entirely for a
+        // hidden user — their declared ranks are exactly what they've opted to hide.
         let gor = null;
         const sources = [];
-        for (const d of (declByUser.get(r.user_id) || [])) {
+        if (!isHidden) for (const d of (declByUser.get(r.user_id) || [])) {
             if (d.server === 'EGD') {
                 const gi = parseInt(d.rank, 10);
                 if (!Number.isFinite(gi)) continue;
@@ -510,19 +522,35 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         const gorRank = gorToRankScalar(gor);
         const rangeMin = sources.length ? Math.min(...sources) : null;
         const rangeMax = sources.length ? Math.max(...sources) : null;
+        // A hidden user is stripped of name/country and reported as unregistered,
+        // so both pages render them anonymously (the /leaderboard page) or drop
+        // them (the /tournament page, via the _hidden filter below).
+        const name = isHidden ? null : r.egd_name;
+        const country = isHidden ? null : r.country_code;
+        const registered = isHidden ? false : !!r.registered;
         if (predEgfRank === null) {
             return {
-                name: r.egd_name, country: r.country_code, gor, gorRank, rangeMin, rangeMax,
-                registered: !!r.registered, ranked: false, usableCount,
-                currentAbs: null, currentRel: null,
+                name, country, gor, gorRank, rangeMin, rangeMax,
+                registered, ranked: false, usableCount,
+                currentAbs: null, currentRel: null, _hidden: isHidden,
             };
         }
         return {
-            name: r.egd_name, country: r.country_code, gor, gorRank, rangeMin, rangeMax,
-            registered: !!r.registered, ranked: true,
+            name, country, gor, gorRank, rangeMin, rangeMax,
+            registered, ranked: true,
             currentAbs: predEgfRank,
             currentRel: (Number.isFinite(predEgfRank) && Number.isFinite(gorRank))
                 ? predEgfRank - gorRank : null,
+            _hidden: isHidden,
         };
     });
+    // Drop hidden rows the page can't meaningfully show: the /tournament
+    // (registered-centric) listing has no use for an anonymous row, and the
+    // /leaderboard page drops a hidden row that has no onlymove rank (matching
+    // how a never-registered, not-yet-ranked player is already omitted). A hidden
+    // RANKED row survives on /leaderboard as an anonymous rank. Strip the marker.
+    const visible = activeDays !== null
+        ? mapped.filter((r) => !(r._hidden && !r.ranked))
+        : mapped.filter((r) => !r._hidden);
+    return visible.map(({ _hidden, ...rest }) => rest);
 }

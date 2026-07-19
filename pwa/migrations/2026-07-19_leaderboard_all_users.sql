@@ -59,3 +59,14 @@ INSERT INTO leaderboard_new
       FROM leaderboard;
 DROP TABLE leaderboard;
 ALTER TABLE leaderboard_new RENAME TO leaderboard;
+
+-- Per-user "hide my profile" opt-out for the public /leaderboard + /tournament
+-- pages (2026-07-20). Presence of a row = hidden: readLeaderboardRows withholds
+-- the user's display name, country, and self-declared / GoR survey ranks. Keyed
+-- by user_id and applying to any account (a never-registered player can still
+-- have declared ranks in rank_surveys), so it is its own table. Toggled from the
+-- bottom of the /leaderboard page (POST /profile/hide).
+CREATE TABLE IF NOT EXISTS hidden_profiles (
+    user_id    TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);

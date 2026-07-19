@@ -102,6 +102,12 @@ function renderPage(rows) {
   footer { margin-top: 1.5rem; opacity: .55; font-size: .82rem; }
   footer p { margin: .35rem 0; }
   footer a { color: inherit; }
+  /* "Hide my profile" control — shown only to visitors with a userId. */
+  .hide-profile { margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+  .hide-profile label { display: inline-flex; align-items: flex-start; gap: .5rem; cursor: pointer; }
+  .hide-profile input { margin: .15rem 0 0; flex: none; }
+  .hide-profile input:disabled + span { opacity: .5; }
+  .hide-status { display: block; margin-top: .4rem; min-height: 1.2em; opacity: .85; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
   }
@@ -123,6 +129,13 @@ function renderPage(rows) {
 </table>
 <footer>
   <p>Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
+  <div id="hideProfile" class="hide-profile" hidden>
+    <label>
+      <input type="checkbox" id="hideChk" disabled>
+      <span>Hide my profile — withhold my name, country, and declared ranks from this board. My onlymove rank still shows, but anonymously.</span>
+    </label>
+    <span id="hideStatus" class="hide-status" role="status" aria-live="polite"></span>
+  </div>
 </footer>
 <script>
 (function () {
@@ -189,6 +202,51 @@ function renderPage(rows) {
   }
 
   render();
+})();
+</script>
+<script>
+// "Hide my profile" control. This page doesn't boot the SPA, but it's same-origin
+// with it, so the account's userId is readable from localStorage. Shown only when
+// a userId exists (a visitor who never used the app has no profile to hide).
+(function () {
+  var uid = null;
+  try { uid = localStorage.getItem('userId'); } catch (e) {}
+  if (!uid || !/^[A-Za-z0-9_-]{1,40}$/.test(uid)) return;
+
+  var box = document.getElementById('hideProfile');
+  var chk = document.getElementById('hideChk');
+  var status = document.getElementById('hideStatus');
+  box.hidden = false;
+
+  // Reflect the current server state before enabling the checkbox.
+  fetch('/profile/hide?userId=' + encodeURIComponent(uid))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { if (j) chk.checked = !!j.hidden; })
+    .catch(function () {})
+    .then(function () { chk.disabled = false; });
+
+  chk.addEventListener('change', function () {
+    var want = chk.checked;
+    chk.disabled = true;
+    status.textContent = 'Saving…';
+    fetch('/profile/hide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, hidden: want }),
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (j) {
+        chk.checked = !!j.hidden;
+        status.textContent = (j.hidden
+          ? 'Your profile is hidden.'
+          : 'Your profile is visible.') + ' The board updates within a minute.';
+      })
+      .catch(function () {
+        chk.checked = !want;   // revert on failure
+        status.textContent = 'Could not save — please try again.';
+      })
+      .then(function () { chk.disabled = false; });
+  });
 })();
 </script>
 </body>
