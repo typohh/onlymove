@@ -2,13 +2,12 @@
 // auxiliary/update_leaderboard_ranks.mjs
 //
 // Retroactively recompute every leaderboard row's rank fields — buffer,
-// pred_egf_rank, pred_egf_se, week_id, this_week_max, prev_week_max — and apply
-// them to the leaderboard D1 (--local = miniflare, --remote = production,
-// neither = dry run). Purpose: after the ratings / rating→rank curve /
-// population constants change (a re-rate + `map_rating_to_rank` +
-// `package_for_pwa`), the stored current rank AND the frozen week peaks are on
-// the OLD scale; the weekly cron reconcile only refreshes the current rank and
-// deliberately preserves the peaks, so a scale change needs this script.
+// pred_egf_rank, pred_egf_se — and apply them to the leaderboard D1 (--local =
+// miniflare, --remote = production, neither = dry run). Purpose: after the
+// ratings / rating→rank curve / population constants change (a re-rate +
+// `map_rating_to_rank` + `package_for_pwa`), the stored rank is on the OLD
+// scale; this script refreshes every row at once instead of waiting for each
+// user's next /report (or the weekly cron reconcile) to do it one by one.
 //
 // The math is BIT-IDENTICAL to production: the script esbuild-bundles
 // pwa/src/leaderboard.js (which inlines the CURRENT local rating_to_rank.json /
@@ -33,21 +32,12 @@
 //                     /report-maintained buffer actually holds. Exact duplicate
 //                     rows (same problem + created_at) are collapsed to one.
 //   current rank/se = computeRank over that buffer (window MLE + time adjust)
-//   this_week_max   = max computeRank over the trailing window ending at each
-//                     novel attempt inside the row's week (stored week_id, or the
-//                     week of the last attempt when week_id is NULL) — the
-//                     retroactive equivalent of the per-report rollWeek max
-//   prev_week_max   = same over week_id - 1 (NULL if no rankable attempt then)
-// Peaks REPLACE the stored values (no max() with the old-scale number — that is
-// the point). prev_week_gor_rank (frozen GoR) is rating-independent and is left
-// untouched, except a row whose recomputed rank is NULL gets all week fields
-// nulled (matches rollWeek's fresh start, so a stale old-scale peak can never be
-// promoted later). last_active is untouched.
+// last_active is untouched.
 //
 // Order of operations for a re-rate: package_for_pwa -> `npm run deploy` (so the
 // Worker computes on the new scale too) -> fetch_database -> this script. If you
 // run it before deploying, the very next /report recomputes the user's current
-// rank on the OLD scale and overwrites it (peaks survive: rollWeek only maxes).
+// rank on the OLD scale and overwrites it.
 //
 // Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
@@ -101,7 +91,7 @@ async function loadLeaderboardModule() {
     const res = await esbuild.build({
         stdin: {
             contents: `
-                export { computeRank, weekIdAt, serializeBuffer, RANK_START_MIN, BUFFER_CAP } from './src/leaderboard.js';
+                export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP } from './src/leaderboard.js';
                 export { rankScalarToLabel } from './shared/rank-math.js';
             `,
             resolveDir: PWA_DIR,
@@ -148,90 +138,34 @@ function sqliteJson(sql) {
 const sqlNum = (v) => (Number.isFinite(v) ? String(v) : 'NULL');
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
-// --- week helpers ------------------------------------------------------------------
-// Monday-00:00-UTC week window for a weekIdAt() id (weekId*7+4 = that Monday's
-// epoch-day index, same arithmetic as leaderboard.js weekStartIso).
-const weekStartMs = (wid) => (wid * 7 + 4) * DAY_MS;
-
-// Windowed, deduped, EVENT-ordered novel attempts for one user (the buffer feed —
-// see the header note on event order vs id order). `uid` is the sql-quoted user id;
-// `wid` bounds the peak scan back to the start of week wid-1, plus the trailing
-// `cap` window feeding the oldest in-window attempt. Returns ascending [{p,s,t,ms}].
-function fetchWindowedAttempts(uid, wid, cap) {
-    const sinceIso = new Date(weekStartMs(wid - 1)).toISOString();
-    // Deduped counts/rows: GROUP BY (problem, created_at) collapses the minted
+// Deduped, EVENT-ordered last <= cap novel attempts for one user (the buffer
+// feed — see the header note on event order vs id order). `uid` is the
+// sql-quoted user id. Returns ascending [{p,s,t}].
+function fetchBufferAttempts(uid, cap) {
+    // Deduped rows: GROUP BY (problem, created_at) collapses the minted
     // exact-duplicate rows; SQLite's bare-column rule with the single MIN(id)
     // aggregate keeps the ORIGINAL row's values. Ordered by created_at (event
     // time), NOT id — see the header note.
-    const [{ n: inWindow }] = sqliteJson(
-        `SELECT COUNT(*) AS n FROM (
-            SELECT 1 FROM tsumego_reports
-             WHERE user_id = ${uid} AND is_repeat = 0 AND created_at >= '${sinceIso}'
-             GROUP BY problem, created_at)`
-    );
     return sqliteJson(
-        `SELECT p, s, t, c FROM (
+        `SELECT p, s, t FROM (
             SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t, created_at AS c
               FROM tsumego_reports
              WHERE user_id = ${uid} AND is_repeat = 0
              GROUP BY problem, created_at
-             ORDER BY c DESC, id DESC LIMIT ${inWindow + cap})
+             ORDER BY c DESC, id DESC LIMIT ${cap})
           ORDER BY c ASC, id ASC`
     ).map((r) => ({
-        p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null, ms: Date.parse(r.c),
+        p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null,
     }));
 }
 
 // --- per-user recompute --------------------------------------------------------------
 // attempts: ascending EVENT order (created_at, id tiebreak), exact dups collapsed,
-// [{ p, s, t, ms }]. Buffer at index i = the trailing <= BUFFER_CAP attempts ending
-// at i, newest first (the live-buffer order at that moment in event time).
-function bufferEndingAt(attempts, i, cap) {
-    const lo = Math.max(0, i - cap + 1);
-    const buf = [];
-    for (let j = i; j >= lo; j--) buf.push({ p: attempts[j].p, s: attempts[j].s, t: attempts[j].t });
-    return buf;
-}
-
-// Max rank over the attempts whose created_at falls in [msLo, msHi) — the
-// retroactive equivalent of updateLeaderboardOnReport's per-report rollWeek max.
-function peakOverWindow(lb, attempts, params, msLo, msHi) {
-    let peak = null;
-    for (let i = 0; i < attempts.length; i++) {
-        const ms = attempts[i].ms;
-        if (!Number.isFinite(ms) || ms < msLo || ms >= msHi) continue;
-        if (i + 1 < lb.RANK_START_MIN) continue;   // cheap skip; computeRank would return null
-        const { predEgfRank } = lb.computeRank(bufferEndingAt(attempts, i, lb.BUFFER_CAP), params);
-        if (predEgfRank !== null && (peak === null || predEgfRank > peak)) peak = predEgfRank;
-    }
-    return peak;
-}
-
-function recomputeRow(lb, row, attempts, params) {
-    const buffer = bufferEndingAt(attempts, attempts.length - 1, lb.BUFFER_CAP);
+// [{ p, s, t }]. The buffer is those attempts newest first (the live-buffer order).
+function recomputeRow(lb, attempts, params) {
+    const buffer = attempts.slice().reverse().map(({ p, s, t }) => ({ p, s, t }));
     const { predEgfRank, se } = lb.computeRank(buffer, params);
-
-    if (predEgfRank === null) {
-        return { buffer, predEgfRank: null, se: null, weekId: null, thisWeekMax: null, prevWeekMax: null };
-    }
-    // The row's display week: the stored week_id (what readLeaderboardRows pairs the
-    // peaks + frozen GoR against), falling back to the last attempt's week for a row
-    // that was never ranked before.
-    const lastMs = attempts.length ? attempts[attempts.length - 1].ms : NaN;
-    const weekId = Number.isFinite(row.week_id) ? row.week_id
-        : (Number.isFinite(lastMs) ? lb.weekIdAt(lastMs) : null);
-    if (weekId === null) {
-        return { buffer, predEgfRank, se, weekId: null, thisWeekMax: null, prevWeekMax: null };
-    }
-    const thisPeak = peakOverWindow(lb, attempts, params, weekStartMs(weekId), weekStartMs(weekId + 1));
-    const prevPeak = peakOverWindow(lb, attempts, params, weekStartMs(weekId - 1), weekStartMs(weekId));
-    return {
-        buffer, predEgfRank, se, weekId,
-        // No rankable attempt inside the week (arrival-vs-event-time skew) -> fall
-        // back to the current rank, the value rollWeek would have seeded.
-        thisWeekMax: thisPeak !== null ? thisPeak : predEgfRank,
-        prevWeekMax: prevPeak,
-    };
+    return { buffer, predEgfRank, se: predEgfRank === null ? null : se };
 }
 
 // --- output ---------------------------------------------------------------------------
@@ -278,7 +212,7 @@ async function main() {
     console.log(`problem_params: ${params.size} problems\n`);
 
     let rows = sqliteJson(
-        'SELECT user_id, week_id, pred_egf_rank, pred_egf_se, this_week_max, prev_week_max FROM leaderboard'
+        'SELECT user_id, pred_egf_rank, pred_egf_se FROM leaderboard'
     );
     if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
     if (!rows.length && !populate) { console.log('no leaderboard rows to update'); return; }
@@ -289,26 +223,16 @@ async function main() {
             console.warn(`skipping malformed user_id: ${JSON.stringify(row.user_id)}`);
             continue;
         }
-        // How far back the peaks can reach: everything since the start of week_id - 1,
-        // plus the trailing BUFFER_CAP window feeding the oldest in-window attempt.
-        const wid = Number.isFinite(row.week_id) ? row.week_id : lb.weekIdAt(Date.now());
         const uid = sqlStr(row.user_id);
-        const attempts = fetchWindowedAttempts(uid, wid, lb.BUFFER_CAP);
+        const attempts = fetchBufferAttempts(uid, lb.BUFFER_CAP);
 
-        const out = recomputeRow(lb, row, attempts, params);
-        console.log(`${row.user_id}  buffer ${attempts.length >= lb.BUFFER_CAP ? lb.BUFFER_CAP : attempts.length} attempts`);
+        const out = recomputeRow(lb, attempts, params);
+        console.log(`${row.user_id}  buffer ${attempts.length} attempts`);
         console.log(`  current   ${fmtDelta(lb, row.pred_egf_rank, out.predEgfRank)}   se ${Number.isFinite(row.pred_egf_se) ? row.pred_egf_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
-        console.log(`  this-week ${fmtDelta(lb, row.this_week_max, out.thisWeekMax)}`);
-        console.log(`  prev-week ${fmtDelta(lb, row.prev_week_max, out.prevWeekMax)}   week_id ${row.week_id ?? '—'} -> ${out.weekId ?? '—'}`);
 
-        // A NULL recomputed rank also nulls the week fields (incl. the frozen GoR),
-        // matching rollWeek's fresh start — see the header note.
-        const weekSql = out.predEgfRank === null
-            ? 'week_id = NULL, this_week_max = NULL, prev_week_max = NULL, prev_week_gor_rank = NULL'
-            : `week_id = ${sqlNum(out.weekId)}, this_week_max = ${sqlNum(out.thisWeekMax)}, prev_week_max = ${sqlNum(out.prevWeekMax)}`;
         statements.push(
             `UPDATE leaderboard SET buffer = ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-            + `pred_egf_rank = ${sqlNum(out.predEgfRank)}, pred_egf_se = ${sqlNum(out.se)}, ${weekSql} `
+            + `pred_egf_rank = ${sqlNum(out.predEgfRank)}, pred_egf_se = ${sqlNum(out.se)} `
             + `WHERE user_id = ${uid};`
         );
     }
@@ -340,21 +264,17 @@ async function main() {
                 continue;
             }
             const uid = sqlStr(a.user_id);
-            // No stored week for a new row: recomputeRow derives the week from the
-            // user's last novel attempt and scans this/prev-week peaks.
-            const attempts = fetchWindowedAttempts(uid, lb.weekIdAt(Date.now()), lb.BUFFER_CAP);
-            const out = recomputeRow(lb, { user_id: a.user_id, week_id: null }, attempts, params);
+            const attempts = fetchBufferAttempts(uid, lb.BUFFER_CAP);
+            const out = recomputeRow(lb, attempts, params);
             if (out.predEgfRank === null) unranked++; else ranked++;
             console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.predEgfRank === null ? 'unranked' : fmtRank(lb, out.predEgfRank)}`);
             // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
-            // the row was created concurrently (a live report during a --remote
-            // apply). A NULL rank leaves the week fields NULL — matches the unranked seed.
+            // the row was created concurrently (a live report during a --remote apply).
             statements.push(
                 `INSERT OR IGNORE INTO leaderboard `
-                + `(user_id, buffer, pred_egf_rank, pred_egf_se, week_id, this_week_max, prev_week_max, last_active) `
+                + `(user_id, buffer, pred_egf_rank, pred_egf_se, last_active) `
                 + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-                + `${sqlNum(out.predEgfRank)}, ${sqlNum(out.se)}, ${sqlNum(out.weekId)}, `
-                + `${sqlNum(out.thisWeekMax)}, ${sqlNum(out.prevWeekMax)}, ${sqlStr(a.last_created)});`
+                + `${sqlNum(out.predEgfRank)}, ${sqlNum(out.se)}, ${sqlStr(a.last_created)});`
             );
         }
         console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);

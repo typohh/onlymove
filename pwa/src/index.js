@@ -128,12 +128,11 @@ export default {
     ctx.waitUntil(runRecallNotifications(env));
     ctx.waitUntil(maybeComputeServerStats(env));
     ctx.waitUntil(pruneHistoryRefreshLog(env));
-    // EGD leaderboard, weekly (Monday 00:00 UTC — the timing is load-bearing for the
-    // prune, see pruneIdleLeaderboardRows): first delete idle rows (lazily re-created
-    // on their user's next novel /report; registration lives in external_ids so
-    // nothing durable is lost), then reconcile the remaining buffers from
-    // tsumego_reports (heals drift). GoR itself is refreshed by active clients
-    // piggybacking on /report (the Worker can't reach EGD).
+    // EGD leaderboard, weekly (Monday 00:00 UTC): first delete idle rows (lazily
+    // re-created on their user's next novel /report; registration lives in
+    // external_ids so nothing durable is lost), then reconcile the remaining
+    // buffers from tsumego_reports (heals drift). GoR itself is refreshed by
+    // active clients piggybacking on /report (the Worker can't reach EGD).
     const now = new Date();
     if (now.getUTCDay() === 1 && now.getUTCHours() === 0) {
       ctx.waitUntil(pruneIdleLeaderboardRows(env).then(() => reconcileBuffers(env)));

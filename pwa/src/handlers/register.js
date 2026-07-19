@@ -11,7 +11,7 @@
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import {
-    getProblemParams, buildRowStateFromReports, serializeBuffer, weekIdAt, weekStartIso,
+    getProblemParams, buildRowStateFromReports, serializeBuffer, weekStartIso,
 } from '../leaderboard.js';
 
 const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
@@ -68,9 +68,6 @@ export async function handleRegister(request, env) {
         const params = await getProblemParams(env);
         const st = await buildRowStateFromReports(env, userId, params);
         const nowIso = new Date().toISOString();
-        const ranked = st.predEgfRank !== null;
-        const weekId = ranked ? weekIdAt(Date.now()) : null;
-        const thisMax = ranked ? st.predEgfRank : null;
 
         const stmts = [
             // The binding — identity only (external_ids). IGNORE covers the
@@ -81,23 +78,13 @@ export async function handleRegister(request, env) {
             ).bind(userId, inv.egd_pin),
             env.DB.prepare(
                 `INSERT INTO leaderboard
-                    (user_id, buffer, pred_egf_rank, pred_egf_se, prev_week_gor_rank,
-                     week_id, this_week_max, prev_week_max, last_active)
-                 VALUES (?1,?2,?3,?4,NULL,?5,?6,NULL,?7)
+                    (user_id, buffer, pred_egf_rank, pred_egf_se, last_active)
+                 VALUES (?1,?2,?3,?4,?5)
                  ON CONFLICT(user_id) DO UPDATE SET
                     buffer=excluded.buffer,
                     pred_egf_rank=excluded.pred_egf_rank, pred_egf_se=excluded.pred_egf_se,
-                    week_id=excluded.week_id,
-                    -- Keep an existing row's already-rolled peak when it is in the
-                    -- same week (fresh seed = current rank, which can only be <= the
-                    -- rolled max); MAX(NULL, x) is NULL in SQLite, hence the COALESCEs.
-                    this_week_max=CASE WHEN week_id = excluded.week_id
-                        THEN MAX(COALESCE(this_week_max, excluded.this_week_max),
-                                 COALESCE(excluded.this_week_max, this_week_max))
-                        ELSE excluded.this_week_max END,
                     last_active=excluded.last_active`
-            ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se,
-                   weekId, thisMax, nowIso),
+            ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se, nowIso),
             env.DB.prepare(
                 `UPDATE invitation SET claimed_by_user_id = ?2, claimed_at = ?3 WHERE invite_token = ?1`
             ).bind(token, userId, nowIso),

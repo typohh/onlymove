@@ -4,9 +4,9 @@
 // for the onlymove Go tournament (Finnish audience). Styled to match onlymove's
 // gold-on-dark goban identity. Registered before the SPA fallback in src/index.js.
 // Embeds a compact participants table in the hero (the same readLeaderboardRows the
-// /leaderboard page computes from, one timeframe auto-picked by tournament phase);
-// the full /leaderboard page stays separate and is linked from the page-closing
-// CTA row + footer.
+// /leaderboard page computes from, always the current estimates); the full
+// /leaderboard page stays separate and is linked from the page-closing CTA row +
+// footer.
 
 // Design: dark "goban at dusk", warm gold (#CEB053) accent. The hero is the
 // onlymove app-icon board position, restyled in gold-on-dark, with one black stone
@@ -38,39 +38,31 @@ export async function handleTournament(env) {
     });
 }
 
-// The standings section shows ONE timeframe, picked by where "now" sits relative
-// to the tournament week: a preview of current estimates before, the this-week
-// peak during (the live tournament standing), the frozen last-week peak the week
-// after (the final results). Later than that the week data has rolled off the
-// leaderboard's two-week window, so it falls back to current estimates.
+// The standings section always shows the CURRENT estimates; only the note (and
+// whether the top-2 medal dots render) follows where "now" sits relative to the
+// tournament week.
 function tournamentPhase(nowMs) {
     const nowWeek = weekIdAt(nowMs);
     if (nowWeek < TOURNAMENT_WEEK) {
-        return { tf: 0, medals: false, note: 'Turnaus alkaa 13.7. — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
+        return { medals: false, note: 'Turnaus alkaa 13.7. — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
     }
     if (nowWeek === TOURNAMENT_WEEK) {
-        return { tf: 1, medals: true, note: 'Turnaus käynnissä — sija määräytyy viikon huippuarvion mukaan.' };
+        return { medals: true, note: 'Turnaus käynnissä — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
     }
-    if (nowWeek === TOURNAMENT_WEEK + 1) {
-        return { tf: 2, medals: true, note: 'Turnauksen lopputulokset, 13.–19. heinäkuuta 2026.' };
-    }
-    return { tf: 0, medals: false, note: 'Turnaus on päättynyt — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
+    return { medals: false, note: 'Turnaus on päättynyt — taulukko näyttää ilmoittautuneiden tämänhetkiset arviot.' };
 }
 
 function renderTournamentPage(rows) {
     const phase = tournamentPhase(Date.now());
-    const tf = phase.tf;
-    // One row per registered player, only the phase's timeframe: abs = estimated
-    // GoR, rel = the GoR gap (the two prize series). GoR follows the timeframe —
-    // the frozen last-week GoR when showing last-week peaks (tf 2), else current.
+    // One row per registered player: abs = estimated GoR, rel = the GoR gap (the
+    // two prize series), both from the current estimate.
     const data = rows.map((r) => {
-        const gorRaw = tf === 2 ? r.prevWeekGor : r.gor;
         const row = {
             name: r.name || '—',
             flag: flag(r.country),
-            gor: Number.isFinite(gorRaw) ? gorRaw : null,
-            abs: numAbs([r.currentAbs, r.thisWeekAbs, r.prevWeekAbs][tf]),
-            rel: numRel([r.currentRel, r.thisWeekRel, r.prevWeekRel][tf]),
+            gor: Number.isFinite(r.gor) ? r.gor : null,
+            abs: numAbs(r.currentAbs),
+            rel: numRel(r.currentRel),
         };
         // Not yet ranked: valid-attempts/threshold progress replaces the estimate
         // (abs/rel null → sorts last), same convention as the /leaderboard page.
@@ -433,7 +425,7 @@ function renderTournamentPage(rows) {
         <span class="stone" aria-hidden="true"></span>
         <div>
           <div class="s-title">Ratko viikon ajan</div>
-          <div class="s-body">Ratko tsumegoja 13.–19.7. Viikon aikana paras arvioitu gor lukusi lasketaan turnaustulokseksi. Arvio edellyttää yhteensä vähintään 60 ratkaistua tehtävää, jotka voit kerätä jo ennen turnausta — uutena pelaajana aloita siis ajoissa.</div>
+          <div class="s-body">Ratko tsumegoja 13.–19.7. Arvioitu gor-lukusi lasketaan turnaustulokseksi. Arvio edellyttää yhteensä vähintään 60 ratkaistua tehtävää, jotka voit kerätä jo ennen turnausta — uutena pelaajana aloita siis ajoissa.</div>
         </div>
       </li>
     </ol>
@@ -491,8 +483,8 @@ function renderTournamentPage(rows) {
     if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">Ei pelaajia vielä.</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
-      // Gold/outline dots on the top two — the prize places — only while the shown
-      // timeframe IS the tournament standing (during the week + the results week).
+      // Gold/outline dots on the top two — the prize places — only while the
+      // tournament week is running.
       var medal = MEDALS && !r.progress && r[mode] !== null && i < 2
         ? '<span class="medal ' + (i === 0 ? 'first' : 'second') + '" aria-hidden="true"></span>' : '';
       var val = r.progress

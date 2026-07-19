@@ -10,10 +10,8 @@
 //     through the inverse consensus couplings (rangeMin..rangeMax from
 //     readLeaderboardRows; single label when the sources agree). Shown for any
 //     row with a mappable source, anonymous included.
-//   * onlymove — the rank estimated from their solving here, following the
-//     timeframe toggle (current / this-week peak / last-week peak).
-// All values are inlined so switching is instant, and any header sorts (labels
-// sort by their underlying continuous scalar).
+//   * onlymove — the current rank estimated from their solving here.
+// Any header sorts (labels sort by their underlying continuous scalar).
 
 import { readLeaderboardRows, RANK_START_MIN, egfToInternalScalar } from '../leaderboard.js';
 import { rankScalarToLabel } from '../../shared/rank-math.js';
@@ -39,10 +37,10 @@ export async function handleLeaderboard(env) {
 
 function renderPage(rows) {
     // Per row: `decl` = the external-evidence range (v: midpoint scalar for
-    // sorting, t: "3k–1d" label), `est` = per timeframe [current, thisWeekPeak,
-    // lastWeekPeak] the onlymove estimate (v: internal scalar, t: label) — the
-    // stored estimates are EGF-frame scalars, inverted through the EGF coupling
-    // here so both columns speak the same internal-rank language.
+    // sorting, t: "3k–1d" label), `est` = the current onlymove estimate (v:
+    // internal scalar, t: label) — the stored estimate is an EGF-frame scalar,
+    // inverted through the EGF coupling here so both columns speak the same
+    // internal-rank language.
     const toEst = (v) => {
         const s = Number.isFinite(v) ? egfToInternalScalar(v) : null;
         return Number.isFinite(s) ? { v: s, t: rankScalarToLabel(s) } : null;
@@ -61,11 +59,11 @@ function renderPage(rows) {
             anon: !r.registered,
             flag: flag(r.country),
             decl,
-            est: [toEst(r.currentAbs), toEst(r.thisWeekAbs), toEst(r.prevWeekAbs)],
+            est: toEst(r.currentAbs),
         };
         // Not yet ranked: the onlymove column shows valid-attempts/threshold progress
         // instead of an estimate, so it's obvious they haven't qualified. est is
-        // all null → this row sorts last in the estimate sort (missing values do).
+        // null → this row sorts last in the estimate sort (missing values do).
         // usableCount is the VALID (still-in-corpus) attempt count — the exact set the
         // rank fit needs — so it reaches RANK_START_MIN only when a rank is ready (never
         // a "60/60" without one). The Math.min is a defensive guard against ">60/60".
@@ -82,15 +80,6 @@ function renderPage(rows) {
 <title>onlymove — Leaderboard</title>
 <style>
   ${baseCss(760)}
-  .toggles { display: flex; flex-wrap: wrap; gap: .5rem .75rem; margin-bottom: 1rem; }
-  .toggle { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; overflow: hidden; }
-  .toggle button { font: inherit; padding: .35rem .8rem; border: 0; background: transparent; color: currentColor;
-                   cursor: pointer; opacity: .6; white-space: nowrap; }
-  .toggle button[aria-pressed="true"] { background: currentColor; opacity: 1; }
-  /* Selected label = the page background color (Canvas) so it always contrasts the
-     currentColor fill, in dark AND light mode. No mix-blend-mode: difference — it
-     resolved white-on-white on the white fill in dark mode. */
-  .toggle button[aria-pressed="true"] span { color: Canvas; }
   th, td { padding: .5rem .5rem; text-align: right; white-space: nowrap; }
   td:nth-child(2) { text-align: left; width: 99%; }
   th.player { text-align: left; }
@@ -115,20 +104,12 @@ function renderPage(rows) {
   footer a { color: inherit; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
-    .toggle button { padding: .35rem .6rem; font-size: .92rem; }
   }
 </style>
 </head>
 <body>
 <h1>Leaderboard</h1>
 <p class="sub">Every player active in the past week, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks (EGD GoR and self-declared server ranks) land on the onlymove scale — a range when the sources disagree. Registered players show their name; everyone else is anonymous. Newly registered players show their attempts toward a rank (${RANK_START_MIN} needed) until they qualify.</p>
-<div class="toggles">
-  <div class="toggle" role="group" aria-label="timeframe">
-    <button id="tf0" aria-pressed="true"><span>Current</span></button>
-    <button id="tf1" aria-pressed="false"><span>This week peak</span></button>
-    <button id="tf2" aria-pressed="false"><span>Last week peak</span></button>
-  </div>
-</div>
 <table>
   <thead>
     <tr>
@@ -146,7 +127,6 @@ function renderPage(rows) {
 <script>
 (function () {
   var DATA = ${json};
-  var tf = 0;          // timeframe: 0 current, 1 this-week peak, 2 last-week peak
   var sortKey = 'est'; // 'name' | 'decl' | 'est'
   var sortDir = -1;    // 1 ascending, -1 descending
   var tbody = document.getElementById('rows');
@@ -160,7 +140,7 @@ function renderPage(rows) {
   function sortValue(r) {
     if (sortKey === 'name') return nameOf(r);
     if (sortKey === 'decl') return r.decl ? r.decl.v : null;
-    return r.est[tf] ? r.est[tf].v : null;      // 'est' — the timeframe's estimate
+    return r.est ? r.est.v : null;              // 'est' — the current estimate
   }
   function cmp(a, b) {
     var va = sortValue(a), vb = sortValue(b);
@@ -195,11 +175,11 @@ function renderPage(rows) {
     if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No players yet.</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
-      // Not-yet-ranked rows show attempts/threshold progress (timeframe-independent)
-      // in the estimate column instead of a rank; muted via .progress.
+      // Not-yet-ranked rows show attempts/threshold progress in the estimate
+      // column instead of a rank; muted via .progress.
       var estCell = r.progress
         ? '<td class="val om-start progress">' + esc(r.progress) + '</td>'
-        : '<td class="val om-start">' + fmt(r.est[tf]) + '</td>';
+        : '<td class="val om-start">' + fmt(r.est) + '</td>';
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') +
         '<span class="name' + (r.anon ? ' anon' : '') + '">' + esc(nameOf(r)) + '</span></td>' +
@@ -208,14 +188,6 @@ function renderPage(rows) {
     }).join('');
   }
 
-  function setTf(i) {
-    tf = i;
-    for (var j = 0; j < 3; j++) document.getElementById('tf' + j).setAttribute('aria-pressed', j === i);
-    render();
-  }
-  for (var j = 0; j < 3; j++) (function (k) {
-    document.getElementById('tf' + k).onclick = function () { setTf(k); };
-  })(j);
   render();
 })();
 </script>

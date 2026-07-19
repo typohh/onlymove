@@ -168,38 +168,6 @@ export function weekStartIso(ms) {
     return new Date((weekIdAt(ms) * 7 + 4) * 86400000).toISOString();
 }
 
-// Roll this-week / previous-week maxes for a fresh pred_egf_rank. `row` carries the
-// stored week_id / this_week_max / prev_week_max / prev_week_gor_rank / gor_rank.
-// Previous-week's GoR is FROZEN at rollover so a mid-week GoR change can't rewrite
-// last week's relative delta. Returns the four week fields to persist.
-export function rollWeek(row, nowWeek, predEgfRank) {
-    const wid = row.week_id;
-    if (wid === nowWeek) {
-        const prev = Number.isFinite(row.this_week_max) ? row.this_week_max : -Infinity;
-        return {
-            week_id: nowWeek,
-            this_week_max: Math.max(prev, predEgfRank),
-            prev_week_max: row.prev_week_max ?? null,
-            prev_week_gor_rank: row.prev_week_gor_rank ?? null,
-        };
-    }
-    if (wid === nowWeek - 1) {
-        return {
-            week_id: nowWeek,
-            this_week_max: predEgfRank,
-            prev_week_max: Number.isFinite(row.this_week_max) ? row.this_week_max : null,
-            prev_week_gor_rank: row.gor_rank ?? null,   // freeze the ending week's GoR
-        };
-    }
-    // First report (week_id null), or an idle gap of > 1 week: no previous week.
-    return {
-        week_id: nowWeek,
-        this_week_max: predEgfRank,
-        prev_week_max: null,
-        prev_week_gor_rank: null,
-    };
-}
-
 // --- buffer (de)serialization ---------------------------------------------------
 // Stored as a JSON array of { p, s, t }, newest first, capped at BUFFER_CAP.
 export function parseBuffer(text) {
@@ -305,22 +273,6 @@ export async function applyGorUpdates(env, updates) {
     }
 }
 
-// Latest heartbeat GoR (raw integer) for a user, or null. The external_ids probe
-// comes first so the (majority) unregistered callers cost 1 indexed row instead
-// of a fruitless rank_surveys scan.
-async function latestGorFor(env, userId) {
-    const x = await env.DB.prepare(
-        `SELECT user_id FROM external_ids WHERE user_id = ?1`
-    ).bind(userId).first();
-    if (!x) return null;
-    const r = await env.DB.prepare(
-        `SELECT rank FROM rank_surveys
-          WHERE user_id = ?1 AND server = 'EGD' ORDER BY id DESC LIMIT 1`
-    ).bind(userId).first();
-    const gor = r ? parseInt(r.rank, 10) : NaN;
-    return Number.isFinite(gor) ? gor : null;
-}
-
 // --- seed a row's buffer + rank from tsumego_reports (the source of truth) -------
 // The user's last <= BUFFER_CAP novel attempts, newest first, + the derived rank.
 // Used by /register (seed an established player) and the cron reconcile.
@@ -339,17 +291,15 @@ export async function buildRowStateFromReports(env, userId, params) {
 
 // --- /report hot path -----------------------------------------------------------
 // Best-effort: append this NOVEL attempt to the user's buffer, recompute the rank
-// (only once the buffer holds >= RANK_START_MIN), roll the week maxes, and persist.
-// A user without a row yet gets one created here, seeded from their full
-// tsumego_reports history (a one-time <= 500-row read per user; the just-inserted
-// report is included since the caller's INSERT already succeeded). Never throws —
-// the cron reconcile heals any drift. Callers pass only novel (is_repeat = 0)
-// attempts.
+// (only once the buffer holds >= RANK_START_MIN), and persist. A user without a
+// row yet gets one created here, seeded from their full tsumego_reports history
+// (a one-time <= 500-row read per user; the just-inserted report is included
+// since the caller's INSERT already succeeded). Never throws — the cron
+// reconcile heals any drift. Callers pass only novel (is_repeat = 0) attempts.
 export async function updateLeaderboardOnReport(env, userId, problemId, success, timeUsed) {
     if (!env.DB) return;
     const row = await env.DB.prepare(
-        `SELECT buffer, week_id, this_week_max, prev_week_max, prev_week_gor_rank
-           FROM leaderboard WHERE user_id = ?1`
+        `SELECT buffer FROM leaderboard WHERE user_id = ?1`
     ).bind(userId).first();
     if (!row) { await createLeaderboardRow(env, userId); return; }
 
@@ -364,22 +314,11 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
         ).bind(userId, serializeBuffer(buffer), nowIso).run();
         return;
     }
-    // gor_rank lives off-row now (latest 'EGD' heartbeat); rollWeek only reads it
-    // in the freeze branch (last report was the PREVIOUS week), so fetch it just
-    // for that ~once-per-user-week transition — the steady hot path stays a
-    // single-row read.
-    const nowWeek = weekIdAt(Date.now());
-    if (row.week_id === nowWeek - 1) {
-        row.gor_rank = gorToRankScalar(await latestGorFor(env, userId));
-    }
-    const wk = rollWeek(row, nowWeek, predEgfRank);
     await env.DB.prepare(
         `UPDATE leaderboard SET buffer = ?2, pred_egf_rank = ?3, pred_egf_se = ?4,
-            week_id = ?5, this_week_max = ?6, prev_week_max = ?7, prev_week_gor_rank = ?8,
-            last_active = ?9
+            last_active = ?5
           WHERE user_id = ?1`
-    ).bind(userId, serializeBuffer(buffer), predEgfRank, se,
-           wk.week_id, wk.this_week_max, wk.prev_week_max, wk.prev_week_gor_rank, nowIso).run();
+    ).bind(userId, serializeBuffer(buffer), predEgfRank, se, nowIso).run();
 }
 
 // First novel report from a row-less user (brand new, or pruned while idle): seed
@@ -392,15 +331,11 @@ async function createLeaderboardRow(env, userId) {
     const params = await getProblemParams(env);
     const st = await buildRowStateFromReports(env, userId, params);
     const nowIso = new Date().toISOString();
-    const ranked = st.predEgfRank !== null;
     await env.DB.prepare(
         `INSERT OR IGNORE INTO leaderboard
-            (user_id, buffer, pred_egf_rank, pred_egf_se, week_id,
-             this_week_max, last_active)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
-    ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se,
-           ranked ? weekIdAt(Date.now()) : null, ranked ? st.predEgfRank : null,
-           nowIso).run();
+            (user_id, buffer, pred_egf_rank, pred_egf_se, last_active)
+         VALUES (?1, ?2, ?3, ?4, ?5)`
+    ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se, nowIso).run();
 }
 
 // (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
@@ -413,13 +348,9 @@ async function createLeaderboardRow(env, userId) {
 // deleted rather than kept forever: the table stays at roughly weekly-active
 // size, keeping every full-scan read (/leaderboard page, the reconcile below)
 // cheap without a last_active index — which would cost an index write per novel
-// report (see schema.sql).
-// The >= 7-day cutoff AT THE MONDAY-00:00 RUN is load-bearing: a row idle that
-// long has week_id <= nowWeek-2, exactly the case where rollWeek discards all
-// previous-week state (incl. the frozen prev_week_gor_rank) and restarts —
-// identical to the fresh seed the row gets on re-creation — so deletion loses
-// nothing the system would ever serve. A shorter cutoff or a mid-week run WOULD
-// wipe a this_week_max the page still shows.
+// report (see schema.sql). The >= 7-day cutoff matches the /leaderboard page's
+// active-past-week filter, so a pruned row is one the page had already stopped
+// listing — deletion loses nothing the system would ever serve.
 // A racing /report is harmless: its UPDATE against the deleted row is a no-op and
 // the attempt lives in tsumego_reports, so the next report re-seeds it in full.
 export async function pruneIdleLeaderboardRows(env) {
@@ -436,16 +367,15 @@ export async function pruneIdleLeaderboardRows(env) {
 }
 
 // --- cron: rebuild buffers from tsumego_reports (heal drift + re-rate refresh) ---
-// Preserves week history (week_id / prev_week_max / prev_week_gor_rank); only the
-// buffer + current pred_egf_rank + this_week_max are refreshed. Runs right after
-// the prune, so the whole (small) table is the active set: each rebuild is a
-// <= 500-row tsumego_reports read. A ratings re-ship refreshes every row via the
-// offline auxiliary/update_leaderboard_ranks.mjs instead.
+// Refreshes the buffer + current pred_egf_rank/se. Runs right after the prune,
+// so the whole (small) table is the active set: each rebuild is a <= 500-row
+// tsumego_reports read. A ratings re-ship refreshes every row via the offline
+// auxiliary/update_leaderboard_ranks.mjs instead.
 export async function reconcileBuffers(env) {
     if (!env.DB) return;
     const params = await getProblemParams(env);
     const res = await env.DB.prepare(
-        `SELECT user_id, this_week_max FROM leaderboard`
+        `SELECT user_id FROM leaderboard`
     ).all();
     for (const row of ((res && res.results) || [])) {
         const st = await buildRowStateFromReports(env, row.user_id, params);
@@ -455,11 +385,10 @@ export async function reconcileBuffers(env) {
             ).bind(row.user_id, serializeBuffer(st.buffer)).run();
             continue;
         }
-        const twm = Math.max(Number.isFinite(row.this_week_max) ? row.this_week_max : -Infinity, st.predEgfRank);
         await env.DB.prepare(
-            `UPDATE leaderboard SET buffer = ?2, pred_egf_rank = ?3, pred_egf_se = ?4,
-                this_week_max = ?5 WHERE user_id = ?1`
-        ).bind(row.user_id, serializeBuffer(st.buffer), st.predEgfRank, st.se, twm).run();
+            `UPDATE leaderboard SET buffer = ?2, pred_egf_rank = ?3, pred_egf_se = ?4
+              WHERE user_id = ?1`
+        ).bind(row.user_id, serializeBuffer(st.buffer), st.predEgfRank, st.se).run();
     }
 }
 
@@ -480,11 +409,9 @@ export async function reconcileBuffers(env) {
 // internal-rank range `rangeMin..rangeMax` — "where the consensus mapping would
 // place their external ranks" (null when the user has no mappable source; any
 // row, registered or anonymous, may carry one). A ranked player
-// (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries the
-// week rollover (applied read-only so an idle-this-week user displays correctly) and
-// derived absolute + relative for current / this-week / last-week (relative =
-// rank − gor_rank; current + this-week use the live GoR, previous-week its
-// frozen prev_week_gor_rank). A not-yet-ranked REGISTERED player carries
+// (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries
+// the derived absolute + relative estimate (relative = rank − gor_rank, live
+// GoR). A not-yet-ranked REGISTERED player carries
 // `ranked: false` + `usableCount` (buffered novel attempts STILL IN THE CORPUS,
 // < RANK_START_MIN) so the page shows their valid-attempts/RANK_START_MIN progress
 // in place of a rank. Every row carries `registered` (has an external_ids row);
@@ -501,8 +428,7 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
     let stmt;
     if (activeDays !== null) {
         stmt = env.DB.prepare(
-            `SELECT l.user_id, i.egd_name, i.country_code, l.prev_week_gor_rank,
-                    l.pred_egf_rank, l.week_id, l.this_week_max, l.prev_week_max,
+            `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank,
                     (x.user_id IS NOT NULL) AS registered,
                     CASE WHEN l.pred_egf_rank IS NULL AND x.user_id IS NOT NULL
                          THEN l.buffer ELSE NULL END AS buffer
@@ -514,8 +440,7 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     } else {
         stmt = env.DB.prepare(
-            `SELECT u AS user_id, i.egd_name, i.country_code, l.prev_week_gor_rank,
-                    l.pred_egf_rank, l.week_id, l.this_week_max, l.prev_week_max,
+            `SELECT u AS user_id, i.egd_name, i.country_code, l.pred_egf_rank,
                     1 AS registered,
                     CASE WHEN l.pred_egf_rank IS NULL THEN l.buffer ELSE NULL END AS buffer
                FROM (SELECT user_id AS u FROM external_ids) x
@@ -549,7 +474,6 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         try { params = await getProblemParams(env); }
         catch (e) { console.error('leaderboard params load failed:', e); }
     }
-    const nowWeek = weekIdAt(Date.now());
     return rows.map((r) => {
         // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
         // the buffer. usableCount (valid in-corpus attempts, what the fit uses) drives
@@ -589,31 +513,16 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         if (predEgfRank === null) {
             return {
                 name: r.egd_name, country: r.country_code, gor, gorRank, rangeMin, rangeMax,
-                prevWeekGor: null, registered: !!r.registered, ranked: false, usableCount,
-                currentAbs: null, thisWeekAbs: null, prevWeekAbs: null,
-                currentRel: null, thisWeekRel: null, prevWeekRel: null,
+                registered: !!r.registered, ranked: false, usableCount,
+                currentAbs: null, currentRel: null,
             };
         }
-        let thisMax = r.this_week_max, prevMax = r.prev_week_max, prevGor = r.prev_week_gor_rank;
-        if (r.week_id === nowWeek - 1) {
-            prevMax = r.this_week_max; prevGor = gorRank; thisMax = predEgfRank;
-        } else if (r.week_id !== nowWeek) {
-            prevMax = null; prevGor = null; thisMax = predEgfRank;
-        }
-        // A row ranked only just now on read (was NULL, no stored week peak yet) has no
-        // this_week_max — fall back to the current estimate until a report/cron rolls it.
-        if (!Number.isFinite(thisMax)) thisMax = predEgfRank;
-        const gr = gorRank;
-        const rel = (v, g) => (Number.isFinite(v) && Number.isFinite(g)) ? v - g : null;
-        // Frozen last-week GoR as an integer (inverse of gorToRankScalar) so the page
-        // can show the matching GoR when the last-week-peak view is selected.
-        const prevWeekGor = Number.isFinite(prevGor) ? Math.round(2000 + 100 * prevGor) : null;
         return {
-            name: r.egd_name, country: r.country_code, gor, gorRank: gr, rangeMin, rangeMax,
-            prevWeekGor, registered: !!r.registered, ranked: true,
-            currentAbs: predEgfRank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
-            currentRel: rel(predEgfRank, gr), thisWeekRel: rel(thisMax, gr),
-            prevWeekRel: rel(prevMax, prevGor),
+            name: r.egd_name, country: r.country_code, gor, gorRank, rangeMin, rangeMax,
+            registered: !!r.registered, ranked: true,
+            currentAbs: predEgfRank,
+            currentRel: (Number.isFinite(predEgfRank) && Number.isFinite(gorRank))
+                ? predEgfRank - gorRank : null,
         };
     });
 }

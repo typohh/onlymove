@@ -226,19 +226,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_egd_pin ON external_ids(egd_p
 -- itself to rows active in the past week.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
 -- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
--- >= 60 valid novel attempts (rank-start gate). prev_week_gor_rank is the GoR
--- rank frozen at the week rollover so past deltas don't move (week-state:
--- rollWeek discards it after >1 idle week, exactly when the prune may delete
--- it). week_id is the Monday-00:00-UTC week number.
+-- >= 60 valid novel attempts (rank-start gate).
 CREATE TABLE IF NOT EXISTS leaderboard (
     user_id            TEXT PRIMARY KEY,
     buffer             TEXT,
     pred_egf_rank      REAL,
     pred_egf_se        REAL,
-    prev_week_gor_rank REAL,
-    week_id            INTEGER,
-    this_week_max      REAL,
-    prev_week_max      REAL,
     last_active        TEXT
 );
 -- There is deliberately NO index on last_active. It would be maintained on

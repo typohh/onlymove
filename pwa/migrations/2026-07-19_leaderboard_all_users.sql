@@ -11,9 +11,11 @@
 --     gor_updated_at so this week's freshness carries over, country = the EGD
 --     federation code). Display name/country come from the claimed invitation
 --     row from now on.
---   * leaderboard keeps only state rebuildable from tsumego_reports (+ the
---     frozen prev_week_gor_rank week-state), one row per user, anonymous rows
---     lazily created on /report and idle rows pruned weekly.
+--   * leaderboard keeps only state rebuildable from tsumego_reports, one row
+--     per user, anonymous rows lazily created on /report and idle rows pruned
+--     weekly. The week-peak fields (prev_week_gor_rank, week_id, this_week_max,
+--     prev_week_max) are DROPPED outright — the this-week/last-week peak views
+--     were removed (2026-07-19), so nothing reads them.
 -- There is deliberately NO index on last_active (would cost an index write per
 -- novel /report; the weekly prune keeps full scans cheap — see schema.sql).
 --
@@ -50,15 +52,10 @@ CREATE TABLE leaderboard_new (
     buffer             TEXT,
     pred_egf_rank      REAL,
     pred_egf_se        REAL,
-    prev_week_gor_rank REAL,
-    week_id            INTEGER,
-    this_week_max      REAL,
-    prev_week_max      REAL,
     last_active        TEXT
 );
 INSERT INTO leaderboard_new
-    SELECT user_id, buffer, pred_egf_rank, pred_egf_se, prev_week_gor_rank,
-           week_id, this_week_max, prev_week_max, last_active
+    SELECT user_id, buffer, pred_egf_rank, pred_egf_se, last_active
       FROM leaderboard;
 DROP TABLE leaderboard;
 ALTER TABLE leaderboard_new RENAME TO leaderboard;
