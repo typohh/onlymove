@@ -488,6 +488,23 @@ const localization = {
     whiteCaptures: 'White Captures',
     whiteAdjustment: 'White Adjustment',
 
+    // First-run onboarding bubbles (js/onboarding.js). English only; getTerm
+    // falls back to English for other languages until these are translated.
+    onbIntro: 'Black to play. Tap the point where you think Black\'s best move is.',
+    onbRecall: "You've seen this one before — we resurface problems just as you're about to forget them.",
+    onbRank: 'This is your rank, with a progress bar to the next. Tap it to see how it maps to other servers.',
+    onbKomi: 'This is the effective komi — tap it for the breakdown.',
+    onbInstall: 'Install the app for offline practice and a home-screen icon.',
+    onbNotify: 'Turn on reminders to get a notification when problems are due for recall.',
+    onbReviewIntro: 'Explore freely — tap any point to try a variation. The marked point is the move the engine rates best.',
+    onbReviewRank: 'This is the problem\'s difficulty rank.',
+    onbReviewScore: 'The score estimate for this position — a positive number favours Black.',
+    onbScoreUnreliable: 'Blinking red — this position was evaluated on the spot by KataGo and may contain mistakes.',
+    onbShare: 'Tap Share to send this problem as a link or an image for others to try.',
+    onbStats: 'Open the menu and tap Stats for your weaknesses, solving speed and progress.',
+    onbAccount: 'Open the menu and tap Account — your progress saves to a code you can enter on another device to sync.',
+    onbBoardSize: 'Open the menu to switch between 9×9 and 13×13.',
+
     statsFailed: 'No stats available right now, try completing another problem.',
     statsConstructing: 'Loading your stats…',
 

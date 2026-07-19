@@ -40,6 +40,7 @@ import { recordShareEvent } from './user-stats.js';
 import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
+import { initOnboarding, onResume as onboardingResume } from './onboarding.js';
 
 /**
  * Reads `/9` or `/13` from the pathname. Returns null if the path is anything
@@ -614,6 +615,10 @@ function wireLifecycleRecovery() {
                     location.reload();
                 }
             });
+            // First-run onboarding: re-evaluate ambient bubbles on resume (a new
+            // session may have crossed the install/notify thresholds while
+            // hidden). No-op for existing users.
+            onboardingResume();
         }
     });
 
@@ -700,6 +705,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();
     hideLoading();
+
+    // First-run onboarding bubbles. Runs after the first problem is painted and
+    // history is loaded, so it can decide new-user vs existing-user and evaluate
+    // whatever is already on screen. Self-disables for existing users.
+    initOnboarding();
 
     startBackgroundServices();
     wireLifecycleRecovery();

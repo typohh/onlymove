@@ -62,6 +62,7 @@ import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.j
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
 import { canCreateInvites } from './invite-access.js';
+import { onReviewScoreShown as onboardingReviewScoreShown, onScoreUnreliable as onboardingScoreUnreliable } from './onboarding.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -537,6 +538,14 @@ export function updateAnalysisUI(score, bestMove) {
             } else {
                 document.getElementById('text1').textContent = displayText;
                 document.getElementById('text1-h').textContent = displayText;
+            }
+            // First-run onboarding: explain the review score readout the first
+            // time a real one appears (the blinking-red "unreliable" case gets
+            // its own, higher-priority bubble). No-op for existing users.
+            const isRealScore = displayText !== getTerm('analyzing') && displayText !== getTerm('error');
+            if (isRealScore) {
+                if (isUnreliable) onboardingScoreUnreliable();
+                onboardingReviewScoreShown();
             }
         }
         // Prevent text selection on Android to treat as button

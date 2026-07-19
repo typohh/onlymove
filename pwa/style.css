@@ -1233,3 +1233,78 @@ body {
     -webkit-mask-image: url('../corners/corner_br.png');
             mask-image: url('../corners/corner_br.png');
 }
+
+/* --- First-run onboarding bubbles (js/onboarding.js) -----------------------
+   A small floating callout anchored to a UI element, with an arrow pointing at
+   it. position:fixed and JS-placed. pointer-events:none is load-bearing: the
+   tap that dismisses the bubble passes straight through to the board / menu
+   item underneath, which is exactly the "click anywhere to continue" behaviour.
+
+   Colour: ONE light-blue accent in both light and dark themes, on purpose. The
+   bubble floats over unpredictable backgrounds — the wooden board, BLACK stones,
+   white stones, and the dark (#222) or light chrome — so a dark bubble vanished
+   against black stones and the dark-mode chrome (and its arrow with it). A light
+   fill with dark text pops against black stones AND the dark chrome, while the
+   defined border + drop shadow separate it from white stones / light chrome; the
+   blue reads as an informational "tip". So it is theme-robust rather than
+   theme-swapped. Sits above the menu (z 2000), below the resume overlay/modals. */
+.onb-bubble {
+    --onb-bg: #d8e8fb;      /* light blue fill */
+    --onb-fg: #12243d;      /* dark navy text (>10:1 on the fill) */
+    --onb-border: #2f6fbf;  /* strong blue outline — the separator on pale backgrounds */
+    position: fixed;
+    z-index: 8500;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.onb-bubble.onb-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+/* The visible box lives on the body (not the container) so it can paint OVER the
+   inner half of the arrow square, leaving only the pointed, bordered half. */
+.onb-bubble-body {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    /* Match the app's standard UI text size (title/rank/info) so the bubble
+       scales identically across viewports; width + padding are em-based so they
+       track it. */
+    font-size: calc(0.035 * min(var(--main-col-cap), 100vw));
+    max-width: min(32ch, 80vw);
+    padding: 0.6em 0.8em;
+    border-radius: var(--radius);
+    background: var(--onb-bg);
+    color: var(--onb-fg);
+    border: 2px solid var(--onb-border);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    line-height: 1.35;
+    -webkit-user-select: none;
+    user-select: none;
+}
+/* Arrow = a bordered square rotated 45°, sitting behind the body (z 0) with its
+   inner half covered by the body — a border-triangle can't carry an outline, so
+   it would disappear on same-tone backgrounds. JS sets its `left`; the transform
+   centres it there. */
+.onb-bubble-arrow {
+    position: absolute;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    z-index: 0;
+    background: var(--onb-bg);
+    border: 2px solid var(--onb-border);
+}
+/* Bubble BELOW its anchor → arrow at the body's top edge, pointing up. The 2px
+   inset lets the body's border cover the arrow's base seam cleanly. */
+.onb-bubble.onb-arrow-top .onb-bubble-arrow {
+    top: 2px;
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+/* Bubble ABOVE its anchor → arrow at the body's bottom edge, pointing down. */
+.onb-bubble.onb-arrow-bottom .onb-bubble-arrow {
+    top: calc(100% - 2px);
+    transform: translate(-50%, -50%) rotate(45deg);
+}

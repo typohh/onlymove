@@ -90,7 +90,9 @@ function createOverlayContent(stats, message, textColor) {
 // this one just shows a message and auto-dismisses (or waits for the button).
 export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', buttonText = null) {
     const overlay = document.createElement('div');
-    overlay.className = 'overlay';
+    // `app-blocking-overlay` lets onboarding.js hold a bubble back until this
+    // transition lifts (so a callout never floats over the fade screen).
+    overlay.className = 'overlay app-blocking-overlay';
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
         backgroundColor: color, display: 'flex', justifyContent: 'center',
@@ -156,6 +158,9 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
 // board underneath becomes visible to the user.
 export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'white', text: 'black' }, { buttonText = null } = {}) {
     const overlay = document.createElement('div');
+    // See displayOverlay: marks this as a fullscreen transition so onboarding.js
+    // defers any bubble until it lifts.
+    overlay.className = 'app-blocking-overlay';
     Object.assign(overlay.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
         backgroundColor: colors.background, zIndex: '1000', opacity: '0',

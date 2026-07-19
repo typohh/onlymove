@@ -13,6 +13,7 @@ import { getRecallCandidates, recallServeShare } from './model.js';
 import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { normalizedRankForSize, slopeToQuality, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
+import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
 function weightedRandomSelect(items, weightFn) {
     const totalWeight = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
@@ -339,6 +340,10 @@ function displayProblem(problem, appMode) {
     resetAccumulatedSolvingTime();
     setAcceptClicks(true);
     updateAllUI();
+    // First-run onboarding: a bubble may be offered on the freshly-painted
+    // solving board (intro, recall, rank, komi, install, notify). No-op for
+    // linked/review paints and for anyone but a genuinely new user.
+    if (appMode === APP_MODES.SOLVING) onboardingSolvingProblemShown(problem);
 }
 
 function reportLoadError(error, attempt) {
@@ -800,8 +805,8 @@ export async function loadTsumegoById(tsumegoId, orientation = null, { asRecall 
 // --- In-instance example review (stats Weaknesses pane) ---------------------
 //
 // Weakness-example links review a past problem inside the running instance —
-// a spawned tab would land on the single-active-tab lock overlay (tab-lock.js).
-// The example is staged as a TEMPORARY previousProblem so every analysis-mode
+// a spawned tab would run a second full app instance against the same
+// localStorage. The example is staged as a TEMPORARY previousProblem so every analysis-mode
 // consumer (rank label, motif bubble, share, ignore gating) coherently acts on
 // it, and the swap is undone on exit so "Review" after closing stats still
 // reviews the true previous problem. The context is in-memory only: an example

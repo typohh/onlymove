@@ -11,6 +11,7 @@ import { getTerm } from './i18n.js';
 import { getScoreFromComment, getWinrateFromComment, findBestMoveFromChildren } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 import { populateMotifBubble } from './motif-bubble.js';
+import { onEnterReview as onboardingEnterReview } from './onboarding.js';
 
 
 // Iterative DFS — true if the subtree rooted at `node` contains a pass move.
@@ -70,6 +71,9 @@ export function enterAnalysisMode() {
             // Surface the correct move's motifs for the problem under review
             // (the previous problem, same entry whose SGF was loaded above).
             populateMotifBubble(state.previousProblem);
+            // First-run onboarding: offer a review-context bubble (explore-any-
+            // move, problem rank, share). No-op for existing users.
+            onboardingEnterReview();
             requestAndDisplayAnalysis();
             resolve();
         }, 0);
