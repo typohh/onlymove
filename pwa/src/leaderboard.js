@@ -12,6 +12,7 @@
 // /report hot path, /register (claim seeding), and the cron.
 
 import { interpExtrap, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
+import { rankLabelToScalar } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
 } from '../shared/rank-window.js';
@@ -79,6 +80,26 @@ function internalIndexToEgf(rankIndex) {
     if (!EGF || !Array.isArray(EGF.our) || !Array.isArray(EGF.server) || EGF.our.length < 2) return null;
     if (!Number.isFinite(rankIndex)) return null;
     return interpExtrap(rankIndex - RANK_INDEX_OFFSET, EGF.our, EGF.server);
+}
+
+// Inverse couplings: an EXTERNAL rank scalar -> the internal onlymove rank scalar
+// (1k = 0), interpolating the same monotone rank_map.json knots the forward
+// translations use, the other way. This is "where the consensus mapping would
+// place this declaration" — the /leaderboard page's declared-range + estimate
+// display speaks internal ranks via these. Note the frame: couplings are fitted
+// against TIME-ADJUSTED ratings, so an inverted value is time-adjusted-frame
+// internal rank (may differ from the client's untimed front-page headline by the
+// user's time dock — the same offset today's GoR comparison carries).
+export function egfToInternalScalar(egfScalar) {
+    if (!EGF || !Array.isArray(EGF.our) || !Array.isArray(EGF.server) || EGF.our.length < 2) return null;
+    if (!Number.isFinite(egfScalar)) return null;
+    return interpExtrap(egfScalar, EGF.server, EGF.our);
+}
+export function serverRankToInternal(server, serverScalar) {
+    const m = RANK_MAP && RANK_MAP[server];
+    if (!m || !Array.isArray(m.our) || !Array.isArray(m.server) || m.our.length < 2) return null;
+    if (serverScalar === null || !Number.isFinite(serverScalar)) return null;
+    return interpExtrap(serverScalar, m.server, m.our);
 }
 
 // Apply a rating-space delta to a rank index (mirrors rank-decomposition.js
@@ -451,9 +472,14 @@ export async function reconcileBuffers(env) {
 // (possibly pruned) leaderboard row — which is what the /tournament page wants:
 // idle registrants stay listed with name/GoR and no current estimate.
 // Registration display fields live OFF the leaderboard row: name/country on the
-// claimed invitation (frozen at invite time), current GoR as the latest 'EGD'
-// heartbeat in rank_surveys (raw digits; the bare-column + MAX() subquery picks
-// the newest row per user — documented SQLite behavior). A ranked player
+// claimed invitation (frozen at invite time; bare-column + MAX() subquery picks
+// the newest claim — documented SQLite behavior), and per-user external evidence
+// from ONE latest-per-(user, server) pass over rank_surveys, stitched in JS:
+// the 'EGD' heartbeat gives the current GoR, and EVERY declaration (GoR
+// included) is back-mapped through its server's inverse coupling into an
+// internal-rank range `rangeMin..rangeMax` — "where the consensus mapping would
+// place their external ranks" (null when the user has no mappable source; any
+// row, registered or anonymous, may carry one). A ranked player
 // (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries the
 // week rollover (applied read-only so an idle-this-week user displays correctly) and
 // derived absolute + relative for current / this-week / last-week (relative =
@@ -468,17 +494,14 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
     const JOINS = `
         LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
                      FROM invitation WHERE claimed_by_user_id IS NOT NULL
-                    GROUP BY claimed_by_user_id) i ON i.uid = u
-        LEFT JOIN (SELECT user_id AS uid, rank AS gor_text, MAX(id)
-                     FROM rank_surveys WHERE server = 'EGD'
-                    GROUP BY user_id) g ON g.uid = u`;
+                    GROUP BY claimed_by_user_id) i ON i.uid = u`;
     // buffer is needed to (re)compute an UNRANKED registered row's rank on read;
     // the CASE returns NULL otherwise so ranked rows don't ship their (up to
     // 500-entry) blob — and unranked UNREGISTERED rows are filtered out.
     let stmt;
     if (activeDays !== null) {
         stmt = env.DB.prepare(
-            `SELECT i.egd_name, i.country_code, g.gor_text, l.prev_week_gor_rank,
+            `SELECT l.user_id, i.egd_name, i.country_code, l.prev_week_gor_rank,
                     l.pred_egf_rank, l.week_id, l.this_week_max, l.prev_week_max,
                     (x.user_id IS NOT NULL) AS registered,
                     CASE WHEN l.pred_egf_rank IS NULL AND x.user_id IS NOT NULL
@@ -491,7 +514,7 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     } else {
         stmt = env.DB.prepare(
-            `SELECT i.egd_name, i.country_code, g.gor_text, l.prev_week_gor_rank,
+            `SELECT u AS user_id, i.egd_name, i.country_code, l.prev_week_gor_rank,
                     l.pred_egf_rank, l.week_id, l.this_week_max, l.prev_week_max,
                     1 AS registered,
                     CASE WHEN l.pred_egf_rank IS NULL THEN l.buffer ELSE NULL END AS buffer
@@ -500,7 +523,20 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
                ${JOINS}`
         );
     }
-    const res = await stmt.all();
+    // Latest declaration per (user, server) — one pass over the (small)
+    // rank_surveys table; stitched onto rows in JS below.
+    const [res, declRes] = await Promise.all([
+        stmt.all(),
+        env.DB.prepare(
+            `SELECT user_id, server, rank, MAX(id) FROM rank_surveys
+              GROUP BY user_id, server`
+        ).all(),
+    ]);
+    const declByUser = new Map();
+    for (const d of ((declRes && declRes.results) || [])) {
+        if (!declByUser.has(d.user_id)) declByUser.set(d.user_id, []);
+        declByUser.get(d.user_id).push(d);
+    }
     const rows = (res && res.results) || [];
     // An unranked row is (re)computed on read: this both (a) reports the current VALID
     // (still-in-corpus) attempt count for the progress readout — the count shrinks as
@@ -530,14 +566,29 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
                 usableCount = buf.length;   // params unavailable: fall back to raw count
             }
         }
-        // Current GoR from the latest heartbeat's raw digits (null for unregistered
-        // rows / a registered player with no heartbeat yet).
-        const gorInt = r.gor_text != null ? parseInt(r.gor_text, 10) : NaN;
-        const gor = Number.isFinite(gorInt) ? gorInt : null;
+        // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
+        // every mappable declaration (GoR included) back-maps through its server's
+        // inverse coupling into the internal-rank range.
+        let gor = null;
+        const sources = [];
+        for (const d of (declByUser.get(r.user_id) || [])) {
+            if (d.server === 'EGD') {
+                const gi = parseInt(d.rank, 10);
+                if (!Number.isFinite(gi)) continue;
+                gor = gi;
+                const s = egfToInternalScalar(gorToRankScalar(gi));
+                if (s !== null) sources.push(s);
+            } else {
+                const s = serverRankToInternal(d.server, rankLabelToScalar(d.rank));
+                if (s !== null) sources.push(s);
+            }
+        }
         const gorRank = gorToRankScalar(gor);
+        const rangeMin = sources.length ? Math.min(...sources) : null;
+        const rangeMax = sources.length ? Math.max(...sources) : null;
         if (predEgfRank === null) {
             return {
-                name: r.egd_name, country: r.country_code, gor, gorRank,
+                name: r.egd_name, country: r.country_code, gor, gorRank, rangeMin, rangeMax,
                 prevWeekGor: null, registered: !!r.registered, ranked: false, usableCount,
                 currentAbs: null, thisWeekAbs: null, prevWeekAbs: null,
                 currentRel: null, thisWeekRel: null, prevWeekRel: null,
@@ -558,8 +609,8 @@ export async function readLeaderboardRows(env, { activeDays = null } = {}) {
         // can show the matching GoR when the last-week-peak view is selected.
         const prevWeekGor = Number.isFinite(prevGor) ? Math.round(2000 + 100 * prevGor) : null;
         return {
-            name: r.egd_name, country: r.country_code, gor, gorRank: gr, prevWeekGor,
-            registered: !!r.registered, ranked: true,
+            name: r.egd_name, country: r.country_code, gor, gorRank: gr, rangeMin, rangeMax,
+            prevWeekGor, registered: !!r.registered, ranked: true,
             currentAbs: predEgfRank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
             currentRel: rel(predEgfRank, gr), thisWeekRel: rel(thisMax, gr),
             prevWeekRel: rel(prevMax, prevGor),

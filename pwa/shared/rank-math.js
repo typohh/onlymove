@@ -30,6 +30,20 @@ export function rankScalarToLabel(v) {
     return k <= 0 ? `${1 - k}k` : `${k}d`;
 }
 
+/**
+ * Kyu/dan label → rank scalar ("5k" → -4, "3d" → 3; the inverse of
+ * rankScalarToLabel on whole ranks). Case-insensitive, tolerates surrounding
+ * whitespace; returns null for anything unparseable.
+ */
+export function rankLabelToScalar(label) {
+    if (typeof label !== 'string') return null;
+    const m = /^\s*(\d{1,2})\s*([kd])\s*$/i.exec(label);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return m[2].toLowerCase() === 'k' ? 1 - n : n;
+}
+
 // Internal rank INDEX → rank scalar. The index is the rating·TOTAL_RANKS scale
 // where 1k = 19 (what getDescriptiveRank, the Rank chart, and the server histogram
 // use); the scalar is the 1k = 0 convention rankScalarToLabel speaks, so
