@@ -219,8 +219,8 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
     for (const ex of shown) {
         const link = document.createElement('a');
         link.className = 'stats-issue-example-link';
-        // In-instance review: a spawned tab would land on the tab-lock overlay,
-        // so the example opens over this instance in analysis mode. The stats
+        // In-instance review: the example opens over this instance in analysis
+        // mode rather than spawning a second app instance. The stats
         // modal hides (DOM intact) and reappears when the review exits via the
         // analysis Exit button (main.js → endExampleReview). No href — every
         // activation routes through this handler.

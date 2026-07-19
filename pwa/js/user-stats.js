@@ -20,8 +20,8 @@ import { postJson } from './net.js';
 
 // --- Cross-tab duplicate guard --------------------------------------------
 // Two tabs of the same origin boot the same standing challenge, and each
-// records the solve as a NOVEL attempt. The tab lock (tab-lock.js) prevents
-// concurrent tabs where Web Locks exist; this is the record-time fallback.
+// records the solve as a NOVEL attempt. This record-time guard is the only
+// defense — concurrent tabs are allowed.
 // At answer time, re-read the PERSISTED working set — another tab's write is
 // visible there but not in this tab's stale in-memory copy — and classify a
 // supposedly-novel attempt with the standard novelty window (the same
