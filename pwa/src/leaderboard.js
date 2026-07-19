@@ -348,6 +348,35 @@ async function createAnonymousRow(env, userId) {
 // (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
 // see the GoR-piggyback note above — so GoR is refreshed by active clients now.)
 
+// --- cron: prune idle ANONYMOUS rows (weekly, Monday 00:00 UTC) ------------------
+// An anonymous row is fully rebuildable from tsumego_reports (createAnonymousRow
+// re-seeds a returning user on their next novel report — a <= BUFFER_CAP-row read
+// + one insert), so idle ones are deleted rather than kept forever: the table
+// stays at roughly weekly-active size, keeping every full-scan read (/leaderboard
+// page, the reconcile below) cheap without a last_active index — which would cost
+// an index write per novel report (see schema.sql). Registered rows are EXEMPT:
+// their EGD binding (pin/name/country/GoR + the frozen prev_week_gor_rank) is not
+// reconstructible from reports, and an idle row costs no writes anyway.
+// The >= 7-day cutoff AT THE MONDAY-00:00 RUN is load-bearing: a row idle that
+// long has week_id <= nowWeek-2, exactly the case where rollWeek discards all
+// previous-week state and restarts — identical to the fresh seed the row gets on
+// re-creation — so deletion loses nothing the system would ever serve. A shorter
+// cutoff or a mid-week run WOULD wipe a this_week_max the page still shows.
+// A racing /report is harmless: its UPDATE against the deleted row is a no-op and
+// the attempt lives in tsumego_reports, so the next report re-seeds it in full.
+export async function pruneIdleAnonymousRows(env) {
+    if (!env.DB) return;
+    try {
+        const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+        await env.DB.prepare(
+            `DELETE FROM leaderboard
+              WHERE egd_pin IS NULL AND (last_active IS NULL OR last_active < ?1)`
+        ).bind(cutoff).run();
+    } catch (e) {
+        console.error('pruneIdleAnonymousRows failed:', e);
+    }
+}
+
 // --- cron: rebuild buffers from tsumego_reports (heal drift + re-rate refresh) ---
 // Preserves week history (week_id / prev_week_max / prev_week_gor_rank); only the
 // buffer + current pred_egf_rank + this_week_max are refreshed. Scoped to

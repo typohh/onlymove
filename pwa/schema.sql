@@ -196,7 +196,11 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
 -- +1 read/+1 write. `egd_pin` is the EGD binding and is NULL for the (majority)
 -- anonymous rows — only invite-registered players carry a PIN/name/GoR; the
 -- /leaderboard page shows anonymous rows as "Anonymous" and limits itself to
--- rows active in the past week.
+-- rows active in the past week. Idle ANONYMOUS rows (last_active > 7 days old)
+-- are DELETED by the weekly cron (pruneIdleAnonymousRows) and lazily re-created
+-- on the user's next novel /report — they are fully rebuildable from
+-- tsumego_reports, so the table stays at roughly weekly-active size. Registered
+-- rows (egd_pin NOT NULL) are exempt: the EGD binding is not reconstructible.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
 -- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
 -- >= 60 valid novel attempts (rank-start gate). gor_rank is the current/this-week
@@ -222,9 +226,14 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 -- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
 -- NULL pins (anonymous rows) don't collide: SQLite UNIQUE treats NULLs as distinct.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_egd_pin ON leaderboard(egd_pin);
--- Serves the /leaderboard active-past-week filter + the cron reconcile's active
--- subset without scanning every (mostly idle) row — D1 bills rows read.
-CREATE INDEX IF NOT EXISTS idx_leaderboard_last_active ON leaderboard(last_active);
+-- There is deliberately NO index on last_active. It would be maintained on
+-- EVERY novel /report (the hot-path UPDATE sets last_active each time, and D1
+-- bills index maintenance as rows written — thousands of writes/week), while
+-- the only queries it would serve (the /leaderboard page's active-past-week
+-- filter, behind a 60s edge cache, and the weekly cron) full-scan a table the
+-- weekly anonymous-row prune keeps at roughly weekly-active size — a few
+-- hundred rows read, and D1 reads are ~1000x cheaper than writes. Revisit only
+-- if the table is allowed to grow unbounded again.
 
 -- Registration invitations, issued by an admin (generate_invite.py / the /invite
 -- tool page) OR by any registered leaderboard member (the in-app Invite menu). A
