@@ -80,10 +80,10 @@ export async function handleReport(request, env, ctx) {
     // hash (id known only post-insert), matching the client's full Σ.
     const digest = ins ? (ins.running_sum + rowHash(ins.id)) : null;
 
-    // EGD leaderboard: fan a NOVEL attempt into the registered user's rank buffer
-    // AFTER the response (ctx.waitUntil) so the high-volume /report path isn't slowed.
-    // The point read inside is the registration check — unregistered users are a
-    // cheap no-op. Best-effort; the buffer is a derived cache (the cron reconciles).
+    // Leaderboard: fan a NOVEL attempt into the user's rank buffer AFTER the
+    // response (ctx.waitUntil) so the high-volume /report path isn't slowed. Every
+    // user has a row (created lazily + history-seeded on their first novel report).
+    // Best-effort; the buffer is a derived cache (the cron reconciles).
     if (isRepeat === 0 && ctx && typeof ctx.waitUntil === 'function') {
       ctx.waitUntil(
         updateLeaderboardOnReport(env, data.userId, data.problem, data.success, timeUsed)

@@ -190,18 +190,21 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
     PRIMARY KEY (user_id, day)
 );
 
--- EGD leaderboard: one row per registered user. Holds the EGD binding + a
--- materialized rank buffer (the user's last 500 novel attempts) + the derived
--- rank scalars, so /report can recompute the rank in-Worker with +1 read/+1 write.
+-- Leaderboard: one row per user (created lazily on their first novel /report).
+-- Holds a materialized rank buffer (the user's last 500 novel attempts) + the
+-- derived rank scalars, so /report can recompute the rank in-Worker with
+-- +1 read/+1 write. `egd_pin` is the EGD binding and is NULL for the (majority)
+-- anonymous rows — only invite-registered players carry a PIN/name/GoR; the
+-- /leaderboard page shows anonymous rows as "Anonymous" and limits itself to
+-- rows active in the past week.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
 -- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
--- >= 100 novel attempts (rank-start gate); the leaderboard read filters on
--- `pred_egf_rank IS NOT NULL`. gor_rank is the current/this-week GoR-rank;
--- prev_week_gor_rank is frozen at the week rollover so past deltas don't move.
--- week_id is the Monday-00:00-UTC week number. See docs/leaderboard_plan.md.
+-- >= 60 valid novel attempts (rank-start gate). gor_rank is the current/this-week
+-- GoR-rank; prev_week_gor_rank is frozen at the week rollover so past deltas
+-- don't move. week_id is the Monday-00:00-UTC week number.
 CREATE TABLE IF NOT EXISTS leaderboard (
     user_id            TEXT PRIMARY KEY,
-    egd_pin            TEXT NOT NULL,
+    egd_pin            TEXT,
     egd_name           TEXT,
     country_code       TEXT,
     gor                INTEGER,
@@ -217,7 +220,11 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     last_active        TEXT
 );
 -- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
+-- NULL pins (anonymous rows) don't collide: SQLite UNIQUE treats NULLs as distinct.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_egd_pin ON leaderboard(egd_pin);
+-- Serves the /leaderboard active-past-week filter + the cron reconcile's active
+-- subset without scanning every (mostly idle) row — D1 bills rows read.
+CREATE INDEX IF NOT EXISTS idx_leaderboard_last_active ON leaderboard(last_active);
 
 -- Registration invitations, issued by an admin (generate_invite.py / the /invite
 -- tool page) OR by any registered leaderboard member (the in-app Invite menu). A

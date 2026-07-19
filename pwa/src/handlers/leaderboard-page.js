@@ -2,20 +2,25 @@
 //
 // GET /leaderboard — a standalone, directly-linkable, server-rendered page (loads
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
-// cache bounds D1 reads under traffic. Two toggles drive one estimate column
-// (mobile-friendly): a timeframe toggle (current / this-week peak / last-week peak)
-// and a mode toggle (absolute = estimated GoR / relative = estimated − GoR). The GoR
-// column follows the timeframe — current GoR for current/this-week, the frozen
-// last-week GoR for last-week peak. All values are inlined so switching is instant,
-// and any header sorts. See docs/leaderboard_plan.md.
+// cache bounds D1 reads under traffic. Lists EVERY player active in the past week:
+// invite-registered players with their EGD name/GoR, everyone else as "Anonymous"
+// (rank estimate only, no GoR, so the relative mode shows "—" for them). Two
+// toggles drive one estimate column (mobile-friendly): a timeframe toggle
+// (current / this-week peak / last-week peak) and a mode toggle (absolute =
+// estimated GoR / relative = estimated − GoR). The GoR column follows the
+// timeframe — current GoR for current/this-week, the frozen last-week GoR for
+// last-week peak. All values are inlined so switching is instant, and any header
+// sorts.
 
 import { readLeaderboardRows, RANK_START_MIN } from '../leaderboard.js';
 import { baseCss, ESC_SNIPPET, numAbs, numRel, flag } from './page-shell.js';
 
+const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
+
 export async function handleLeaderboard(env) {
     let rows = [];
     try {
-        rows = await readLeaderboardRows(env);
+        rows = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS });
     } catch (e) {
         console.error('leaderboard read failed:', e);
     }
@@ -42,7 +47,10 @@ function renderPage(rows) {
         const curGor = Number.isFinite(r.gor) ? r.gor : null;
         const pwGor = Number.isFinite(r.prevWeekGor) ? r.prevWeekGor : null;
         const row = {
-            name: r.name || '—',
+            // Anonymous (unregistered) rows carry anon: true and no name — the client
+            // renders a muted "Anonymous" label for them.
+            name: r.registered ? (r.name || '—') : null,
+            anon: !r.registered,
             flag: flag(r.country),
             gors: [curGor, curGor, pwGor],
             abs: [numAbs(r.currentAbs), numAbs(r.thisWeekAbs), numAbs(r.prevWeekAbs)],
@@ -92,6 +100,8 @@ function renderPage(rows) {
   td.val.progress { font-weight: 400; opacity: .5; }
   td.gor { opacity: .7; font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
+  /* Unregistered players — muted so named (registered) rows stand out. */
+  .name.anon { opacity: .5; font-style: italic; }
   .empty { opacity: .5; padding: 2rem 0; text-align: center; }
   footer { margin-top: 1.5rem; opacity: .55; font-size: .82rem; }
   footer p { margin: .35rem 0; }
@@ -104,7 +114,7 @@ function renderPage(rows) {
 </head>
 <body>
 <h1>Leaderboard</h1>
-<p class="sub">onlymove-estimated GoR vs European Go Database GoR. Newly registered players show their attempts toward a rank (${RANK_START_MIN} needed) until they qualify.</p>
+<p class="sub">Every player active in the past week, ranked by onlymove-estimated GoR. Registered players show their name and European Go Database GoR; everyone else is anonymous. Newly registered players show their attempts toward a rank (${RANK_START_MIN} needed) until they qualify.</p>
 <div class="toggles">
   <div class="toggle" role="group" aria-label="timeframe">
     <button id="tf0" aria-pressed="true"><span>Current</span></button>
@@ -128,7 +138,7 @@ function renderPage(rows) {
   <tbody id="rows"></tbody>
 </table>
 <footer>
-  <p>Invite only — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a> if interested.</p>
+  <p>Want your name and GoR shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
 </footer>
 <script>
 (function () {
@@ -149,8 +159,9 @@ function renderPage(rows) {
   function fmtGor(v) { return (v === null || v === undefined) ? '—' : String(v); }
 
   function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'gor' | 'est'
+  function nameOf(r) { return r.anon ? 'Anonymous' : (r.name || ''); }
   function sortValue(r) {
-    if (sortKey === 'name') return r.name || '';
+    if (sortKey === 'name') return nameOf(r);
     if (sortKey === 'gor') return r.gors[tf];
     return r[mode][tf];                       // 'est' — active mode's value for the timeframe
   }
@@ -198,7 +209,8 @@ function renderPage(rows) {
         ? '<td class="val om-start progress">' + esc(r.progress) + '</td>'
         : '<td class="val om-start">' + fmtCell(r[mode][tf]) + '</td>';
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
-        '<td>' + (r.flag ? r.flag + ' ' : '') + '<span class="name">' + esc(r.name) + '</span></td>' +
+        '<td>' + (r.flag ? r.flag + ' ' : '') +
+        '<span class="name' + (r.anon ? ' anon' : '') + '">' + esc(nameOf(r)) + '</span></td>' +
         '<td class="gor">' + fmtGor(r.gors[tf]) + '</td>' +
         estCell + '</tr>';
     }).join('');

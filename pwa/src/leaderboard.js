@@ -1,10 +1,12 @@
 // pwa/src/leaderboard.js
 //
-// EGD leaderboard core (Cloudflare Worker side). Reuses the SHARED window estimator
-// so a registered user's leaderboard rank is computed by the SAME code as the
-// front-page rank, from the user's materialized 500-attempt buffer. Used by the
-// /report hot path, /register (claim seeding), and the cron. See
-// docs/leaderboard_plan.md.
+// Leaderboard core (Cloudflare Worker side). ONE ROW PER USER, created lazily on
+// the first novel /report (seeded from tsumego_reports); invite-registered players
+// additionally carry the EGD binding (egd_pin/name/GoR) while everyone else is an
+// anonymous row (egd_pin NULL). Reuses the SHARED window estimator so a user's
+// leaderboard rank is computed by the SAME code as the front-page rank, from the
+// user's materialized 500-attempt buffer. Used by the /report hot path, /register
+// (claim seeding), and the cron.
 
 import { interpExtrap, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
 import {
@@ -217,6 +219,8 @@ function invalidateStaleGor() { _staleGor.at = 0; }
 
 // PINs still needing a GoR refresh this week, cached in memory (keeps the high-volume
 // /report path off D1 — the scan reads 0 rows once everyone's fresh anyway).
+// egd_pin IS NOT NULL keeps the query on the pin index: anonymous rows (the vast
+// majority, all with gor_updated_at NULL) would otherwise be scanned every refresh.
 export async function getStaleGorPins(env) {
     if (!env.DB) return [];
     const now = Date.now();
@@ -224,7 +228,8 @@ export async function getStaleGorPins(env) {
     if (_staleGor.weekStart === weekStart && (now - _staleGor.at) < GOR_STALE_TTL_MS) return _staleGor.pins;
     try {
         const res = await env.DB.prepare(
-            `SELECT egd_pin FROM leaderboard WHERE gor_updated_at IS NULL OR gor_updated_at < ?1`
+            `SELECT egd_pin FROM leaderboard
+              WHERE egd_pin IS NOT NULL AND (gor_updated_at IS NULL OR gor_updated_at < ?1)`
         ).bind(weekStart).all();
         const pins = ((res && res.results) || []).map((r) => r.egd_pin).filter(Boolean);
         _staleGor = { pins, at: now, weekStart };
@@ -285,18 +290,20 @@ export async function buildRowStateFromReports(env, userId, params) {
 }
 
 // --- /report hot path -----------------------------------------------------------
-// Best-effort: if `userId` is registered, append this NOVEL attempt to their buffer,
-// recompute the rank (only once the buffer holds >= RANK_START_MIN), roll the week
-// maxes, and persist. The point read IS the registration check. Never throws — the
-// caller's tsumego_reports INSERT already succeeded and the cron reconcile heals any
-// drift. Callers pass only novel (is_repeat = 0) attempts.
+// Best-effort: append this NOVEL attempt to the user's buffer, recompute the rank
+// (only once the buffer holds >= RANK_START_MIN), roll the week maxes, and persist.
+// A user without a row yet gets one created here, seeded from their full
+// tsumego_reports history (a one-time <= 500-row read per user; the just-inserted
+// report is included since the caller's INSERT already succeeded). Never throws —
+// the cron reconcile heals any drift. Callers pass only novel (is_repeat = 0)
+// attempts.
 export async function updateLeaderboardOnReport(env, userId, problemId, success, timeUsed) {
     if (!env.DB) return;
     const row = await env.DB.prepare(
         `SELECT buffer, week_id, this_week_max, prev_week_max, prev_week_gor_rank, gor_rank
            FROM leaderboard WHERE user_id = ?1`
     ).bind(userId).first();
-    if (!row) return;   // unregistered
+    if (!row) { await createAnonymousRow(env, userId); return; }
 
     const params = await getProblemParams(env);
     const buffer = pushBuffer(parseBuffer(row.buffer), problemId, success, timeUsed);
@@ -319,16 +326,43 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
            wk.week_id, wk.this_week_max, wk.prev_week_max, wk.prev_week_gor_rank, nowIso).run();
 }
 
+// First novel report from a row-less user: seed an anonymous row from their full
+// report history (buildRowStateFromReports, which already includes the attempt that
+// triggered this call). INSERT OR IGNORE makes the concurrent-first-reports race
+// harmless — both seeds compute from the same reports, the loser is a no-op.
+async function createAnonymousRow(env, userId) {
+    const params = await getProblemParams(env);
+    const st = await buildRowStateFromReports(env, userId, params);
+    const nowIso = new Date().toISOString();
+    const ranked = st.predEgfRank !== null;
+    await env.DB.prepare(
+        `INSERT OR IGNORE INTO leaderboard
+            (user_id, egd_pin, buffer, pred_egf_rank, pred_egf_se, week_id,
+             this_week_max, last_active)
+         VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7)`
+    ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se,
+           ranked ? weekIdAt(Date.now()) : null, ranked ? st.predEgfRank : null,
+           nowIso).run();
+}
+
 // (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
 // see the GoR-piggyback note above — so GoR is refreshed by active clients now.)
 
 // --- cron: rebuild buffers from tsumego_reports (heal drift + re-rate refresh) ---
 // Preserves week history (week_id / prev_week_max / prev_week_gor_rank); only the
-// buffer + current pred_egf_rank + this_week_max are refreshed.
+// buffer + current pred_egf_rank + this_week_max are refreshed. Scoped to
+// registered rows + rows active in the past week: each rebuild is a <= 500-row
+// tsumego_reports read, and an idle anonymous row's buffer can't drift (its user
+// isn't reporting). A ratings re-ship refreshes every row via the offline
+// auxiliary/update_leaderboard_ranks.mjs instead.
 export async function reconcileBuffers(env) {
     if (!env.DB) return;
     const params = await getProblemParams(env);
-    const res = await env.DB.prepare(`SELECT user_id, this_week_max FROM leaderboard`).all();
+    const activeCutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+    const res = await env.DB.prepare(
+        `SELECT user_id, this_week_max FROM leaderboard
+          WHERE egd_pin IS NOT NULL OR last_active >= ?1`
+    ).bind(activeCutoff).all();
     for (const row of ((res && res.results) || [])) {
         const st = await buildRowStateFromReports(env, row.user_id, params);
         if (st.predEgfRank === null) {
@@ -345,25 +379,40 @@ export async function reconcileBuffers(env) {
     }
 }
 
-// --- compute-on-read: all bound-PIN rows for the /leaderboard page ---------------
-// EVERY registered player (bound PIN = has a row) is listed. A ranked player
+// --- compute-on-read: rows for the /leaderboard and /tournament pages ------------
+// `activeDays` (the /leaderboard page) limits to rows — registered or anonymous —
+// active in the trailing window; an UNRANKED anonymous row is additionally
+// dropped, since the attempts-toward-a-rank progress readout only makes sense for
+// players who opted in by registering. Without it every row is returned
+// (the /tournament page, which predates anonymous rows). A ranked player
 // (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries the
 // week rollover (applied read-only so an idle-this-week user displays correctly) and
 // derived absolute + relative for current / this-week / last-week (relative =
 // rank − gor_rank; current + this-week use the live gor_rank, previous-week its
-// frozen prev_week_gor_rank). A not-yet-ranked player carries `ranked: false` +
-// `usableCount` (buffered novel attempts STILL IN THE CORPUS, < RANK_START_MIN) so the
-// page shows their valid-attempts/RANK_START_MIN progress in place of a rank.
-export async function readLeaderboardRows(env) {
+// frozen prev_week_gor_rank). A not-yet-ranked REGISTERED player carries
+// `ranked: false` + `usableCount` (buffered novel attempts STILL IN THE CORPUS,
+// < RANK_START_MIN) so the page shows their valid-attempts/RANK_START_MIN progress
+// in place of a rank. Every row carries `registered` (has an EGD binding);
+// anonymous rows have name/country/gor null.
+export async function readLeaderboardRows(env, { activeDays = null } = {}) {
     if (!env.DB) return [];
+    let where = '';
+    const binds = [];
+    if (activeDays !== null) {
+        where = `WHERE last_active >= ?1 AND (egd_pin IS NOT NULL OR pred_egf_rank IS NOT NULL)`;
+        binds.push(new Date(Date.now() - activeDays * 86400000).toISOString());
+    }
     const res = await env.DB.prepare(
-        // buffer is needed to (re)compute an UNRANKED row's rank on read; the CASE
-        // returns NULL for ranked rows so their (up to 500-entry) blob isn't shipped.
+        // buffer is needed to (re)compute an UNRANKED registered row's rank on read;
+        // the CASE returns NULL otherwise so ranked rows don't ship their (up to
+        // 500-entry) blob — and unranked ANONYMOUS rows are filtered out above.
         `SELECT egd_name, country_code, gor, gor_rank, prev_week_gor_rank,
                 pred_egf_rank, week_id, this_week_max, prev_week_max,
-                CASE WHEN pred_egf_rank IS NULL THEN buffer ELSE NULL END AS buffer
-           FROM leaderboard`
-    ).all();
+                (egd_pin IS NOT NULL) AS registered,
+                CASE WHEN pred_egf_rank IS NULL AND egd_pin IS NOT NULL
+                     THEN buffer ELSE NULL END AS buffer
+           FROM leaderboard ${where}`
+    ).bind(...binds).all();
     const rows = (res && res.results) || [];
     // An unranked row is (re)computed on read: this both (a) reports the current VALID
     // (still-in-corpus) attempt count for the progress readout — the count shrinks as
@@ -396,7 +445,7 @@ export async function readLeaderboardRows(env) {
         if (predEgfRank === null) {
             return {
                 name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: r.gor_rank,
-                prevWeekGor: null, ranked: false, usableCount,
+                prevWeekGor: null, registered: !!r.registered, ranked: false, usableCount,
                 currentAbs: null, thisWeekAbs: null, prevWeekAbs: null,
                 currentRel: null, thisWeekRel: null, prevWeekRel: null,
             };
@@ -417,7 +466,7 @@ export async function readLeaderboardRows(env) {
         const prevWeekGor = Number.isFinite(prevGor) ? Math.round(2000 + 100 * prevGor) : null;
         return {
             name: r.egd_name, country: r.country_code, gor: r.gor, gorRank: gr, prevWeekGor,
-            ranked: true,
+            registered: !!r.registered, ranked: true,
             currentAbs: predEgfRank, thisWeekAbs: thisMax, prevWeekAbs: prevMax,
             currentRel: rel(predEgfRank, gr), thisWeekRel: rel(thisMax, gr),
             prevWeekRel: rel(prevMax, prevGor),

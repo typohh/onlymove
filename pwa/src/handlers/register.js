@@ -54,11 +54,13 @@ export async function handleRegister(request, env) {
         //  - Account side: an account binds to exactly ONE EGD id, for life. If it
         //    already has a row under a DIFFERENT pin, reject — rebinding would orphan
         //    the old pin and let one account hop EGD identities. Re-claiming its OWN
-        //    pin is a harmless refresh (falls through to the idempotent upsert).
+        //    pin is a harmless refresh, and an ANONYMOUS row (pin NULL — every user
+        //    gets a row lazily on report now) is claimable: both fall through to the
+        //    idempotent upsert, which binds the pin onto the existing row.
         const selfRow = await env.DB.prepare(
             `SELECT egd_pin FROM leaderboard WHERE user_id = ?1`
         ).bind(userId).first();
-        if (selfRow && selfRow.egd_pin !== inv.egd_pin) {
+        if (selfRow && selfRow.egd_pin && selfRow.egd_pin !== inv.egd_pin) {
             return jsonResponse({ ok: false, error: 'account_bound' }, 409);
         }
 
@@ -80,15 +82,24 @@ export async function handleRegister(request, env) {
                      this_week_max, prev_week_max, last_active)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,?11,?12,NULL,?6)
                  ON CONFLICT(user_id) DO UPDATE SET
-                    -- egd_pin is deliberately NOT updated: an account's EGD binding is
-                    -- immutable (the account_bound guard above already rejects a
-                    -- different pin, so any conflict here is the same pin anyway).
+                    -- An existing binding is immutable — COALESCE keeps it (the
+                    -- account_bound guard above already rejects a different pin, so a
+                    -- non-NULL conflict is the same pin anyway); an anonymous row
+                    -- (pin NULL) takes the invite's pin here.
+                    egd_pin=COALESCE(egd_pin, excluded.egd_pin),
                     egd_name=excluded.egd_name,
                     country_code=excluded.country_code, gor=excluded.gor,
                     gor_updated_at=excluded.gor_updated_at, buffer=excluded.buffer,
                     pred_egf_rank=excluded.pred_egf_rank, pred_egf_se=excluded.pred_egf_se,
                     gor_rank=excluded.gor_rank, week_id=excluded.week_id,
-                    this_week_max=excluded.this_week_max, last_active=excluded.last_active`
+                    -- Keep an anonymous row's already-rolled peak when it is in the
+                    -- same week (fresh seed = current rank, which can only be <= the
+                    -- rolled max); MAX(NULL, x) is NULL in SQLite, hence the COALESCEs.
+                    this_week_max=CASE WHEN week_id = excluded.week_id
+                        THEN MAX(COALESCE(this_week_max, excluded.this_week_max),
+                                 COALESCE(excluded.this_week_max, this_week_max))
+                        ELSE excluded.this_week_max END,
+                    last_active=excluded.last_active`
             ).bind(userId, inv.egd_pin, inv.egd_name, inv.country_code, inv.gor, nowIso,
                    serializeBuffer(st.buffer), st.predEgfRank, st.se, gorToRankScalar(inv.gor),
                    weekId, thisMax),
