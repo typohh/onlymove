@@ -16,7 +16,7 @@ import { rankLabelToScalar } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
 } from '../shared/rank-window.js';
-import { fetchAgaRating } from './aga.js';
+import { fetchAgaPlayer } from './aga.js';
 // Inlined at build time (wrangler bundles JSON imports, like src/server-stats.js).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
@@ -174,17 +174,11 @@ export function gorToRankScalar(gor) {
     return (gor - 2000) / 100;
 }
 
-// AGA rating (kyu negative, dan positive, ~1 point/stone, with the 1k/1d boundary
-// at rating 0) -> onlymove rank scalar (1k = 0, 1d = 1, boundary at 0.5). Both are
-// 1 unit per stone, so the boundaries differ by a constant 0.5. The +0.5 is a
-// documented calibration constant derived from the boundary definitions — verify
-// against real agagd.usgo.org/player/<id>/ pages (a uniform, monotone shift, so a
-// one-line fix if it reads systematically off). Returns null on a bad rating. This
-// is the AGA analog of gorToRankScalar; the result feeds serverRankToInternal('AGA').
-export function agaRatingToScalar(rating) {
-    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
-    return rating + 0.5;
-}
+// (No AGA rating->scalar helper: the AGA Ratings Explorer gives each player's OWN
+// official rank_label — dan = floor(rating), kyu = floor(|rating|), with a gap
+// around 0 that no linear offset can model — so AGA placement stores that label and
+// maps it via rankLabelToScalar + the AGA coupling, the same path a human 'AGA'
+// survey declaration takes. See src/aga.js and the 'AGAR' branch in readLeaderboardRows.)
 
 // The user's leaderboard rank from a buffer of { p, s, t } (newest FIRST). Resolves
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
@@ -339,14 +333,14 @@ export async function applyGorUpdates(env, updates) {
 }
 
 // --- AGA rating refresh (Worker-side; weekly via cron) --------------------------
-// Unlike EGD, the Worker CAN fetch AGAGD (server-side, no CORS constraint), so AGA
-// ratings are refreshed by the Worker itself on the weekly cron — no client
-// piggyback. If AGAGD is unreachable (a Cloudflare orange-to-orange block, like EGD),
-// no heartbeat is written and the invite-time snapshot persists: AGA linking still
-// works, just without periodic refresh. Mirrors the EGD get-stale / write-heartbeat
-// shape, but self-fetches instead of accepting client-submitted values.
+// Unlike EGD, the Worker CAN fetch the AGA Ratings Explorer (Azure, not Cloudflare),
+// so AGA ranks are refreshed by the Worker itself on the weekly cron — no client
+// piggyback. If it's ever unreachable, no heartbeat is written and the last one
+// persists: AGA linking still works, just without that week's refresh. Mirrors the
+// EGD get-stale / write-heartbeat shape, but self-fetches instead of accepting
+// client-submitted values. Stores the AGA rank_label (short form), not a number.
 
-const AGA_REFRESH_MAX = 200;   // cap AGAGD fetches per cron run (best-effort)
+const AGA_REFRESH_MAX = 200;   // cap Explorer fetches per cron run (best-effort)
 
 // AGA member ids whose rating hasn't been refreshed this week (no 'AGAR' heartbeat
 // since the week start). Small scan (external_ids + one grouped pass of
@@ -382,9 +376,9 @@ export async function refreshAgaRatings(env) {
     if (!ids.length) return;
     const weekStart = weekStartIso(Date.now());
     for (const agaId of ids) {
-        let rating = null;
-        try { rating = await fetchAgaRating(agaId); } catch (e) { rating = null; }
-        if (rating === null) continue;    // unreachable / bad -> keep the snapshot
+        let player = null;
+        try { player = await fetchAgaPlayer(agaId); } catch (e) { player = null; }
+        if (!player || !player.rankLabel) continue;   // unreachable / bad -> keep last
         try {
             await env.DB.prepare(
                 `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
@@ -394,7 +388,7 @@ export async function refreshAgaRatings(env) {
                     AND NOT EXISTS (SELECT 1 FROM rank_surveys s
                                      WHERE s.user_id = x.user_id AND s.server = 'AGAR'
                                        AND s.created_at >= ?4)`
-            ).bind(agaId, String(rating), new Date().toISOString(), weekStart).run();
+            ).bind(agaId, player.rankLabel, new Date().toISOString(), weekStart).run();
         } catch (e) {
             console.error('refreshAgaRatings insert failed:', e);
         }
@@ -657,14 +651,12 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
                 }
                 if (d.country) egdCountry = d.country;
             } else if (d.server === 'AGAR') {
-                // Machine AGA rating heartbeat: raw AGA rating -> onlymove scalar via
-                // the AGA coupling (the analog of the 'EGD' GoR branch). AGAGD gives
-                // no country, so nothing is harvested here.
-                const sc = agaRatingToScalar(parseFloat(d.rank));
-                if (sc !== null) {
-                    const s = serverRankToInternal('AGA', sc);
-                    if (s !== null) sources.push(s);
-                }
+                // Machine AGA heartbeat: the AGA's own rank_label (stored short, e.g.
+                // '10d'/'3k') -> onlymove scalar via the AGA coupling — same path as a
+                // human 'AGA' declaration, but a distinct server code so calibration
+                // ignores it. The Ratings Explorer gives no country, so none is harvested.
+                const s = serverRankToInternal('AGA', rankLabelToScalar(d.rank));
+                if (s !== null) sources.push(s);
             } else {
                 const s = serverRankToInternal(d.server, rankLabelToScalar(d.rank));
                 if (s !== null) sources.push(s);

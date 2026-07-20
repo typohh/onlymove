@@ -17,7 +17,7 @@ import { isValidUserId } from '../guards.js';
 import {
     getProblemParams, buildRowStateFromReports, serializeBuffer, weekStartIso,
 } from '../leaderboard.js';
-import { fetchAgaRating } from '../aga.js';
+import { fetchAgaPlayer } from '../aga.js';
 
 const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
 
@@ -82,14 +82,15 @@ export async function handleRegister(request, env) {
             }
         }
 
-        // For AGA, snapshot the freshest rating server-side (best-effort; this first
-        // claim doubles as the Worker->AGAGD reachability probe). Fall back to the
-        // invitation's snapshot when AGAGD is unreachable so the player still shows a
-        // rank immediately.
-        let agaRating = null;
+        // For AGA, fetch the current official rank_label from the Ratings Explorer
+        // (server-side; Azure is reachable) so the player shows a rank immediately.
+        // Best-effort: if it can't be fetched, no heartbeat is seeded and the weekly
+        // cron fills it in later.
+        let agaRankLabel = null;
         if (isAga) {
-            try { agaRating = await fetchAgaRating(idVal); } catch (e) { agaRating = null; }
-            if (agaRating === null && Number.isFinite(inv.aga_rating)) agaRating = inv.aga_rating;
+            let player = null;
+            try { player = await fetchAgaPlayer(idVal); } catch (e) { player = null; }
+            if (player && player.rankLabel) agaRankLabel = player.rankLabel;
         }
 
         // Seed buffer + rank from the user's existing tsumego_reports so an
@@ -131,14 +132,14 @@ export async function handleRegister(request, env) {
                                      WHERE user_id = ?1 AND server = 'EGD'
                                        AND created_at >= ?5)`
             ).bind(userId, String(inv.gor), nowIso, inv.country_code || null, weekStart));
-        } else if (isAga && Number.isFinite(agaRating)) {
+        } else if (isAga && agaRankLabel) {
             stmts.push(env.DB.prepare(
                 `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
                  SELECT ?1, 'AGAR', ?2, ?3, NULL
                   WHERE NOT EXISTS (SELECT 1 FROM rank_surveys
                                      WHERE user_id = ?1 AND server = 'AGAR'
                                        AND created_at >= ?4)`
-            ).bind(userId, String(agaRating), nowIso, weekStart));
+            ).bind(userId, agaRankLabel, nowIso, weekStart));
         }
         await env.DB.batch(stmts);
         return jsonResponse({ ok: true, egdName: inv.egd_name });
