@@ -22,7 +22,7 @@ const INLINED_DATA_FILES = [
 const DIST_DIR = 'dist';
 const STATIC_ASSETS = [
     'index.html',
-    'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html', 'privacy.html',
+    'sound', 'lib', 'tsumegos', 'manifest.json', 'sw.js', 'lookup.txt', 'about.html', 'privacy.html', 'changelog.html',
     // Digital Asset Links for the Play Store TWA (net.onlymove.twa): must be
     // served at /.well-known/assetlinks.json or the Android app shows the
     // browser URL bar. Carries the upload-key fingerprint + the Play App

@@ -199,8 +199,16 @@ function wireMenu() {
         refreshInviteAccess(updateAllUI);
     };
     const closeMenu = () => menuOverlay.classList.add('menu-overlay-hidden');
-    document.getElementById('menu-toggle').addEventListener('click', openMenu);
-    document.getElementById('menu-toggle-h').addEventListener('click', openMenu);
+    const menuToggle = document.getElementById('menu-toggle');
+    const menuToggleH = document.getElementById('menu-toggle-h');
+    menuToggle.addEventListener('click', openMenu);
+    menuToggleH.addEventListener('click', openMenu);
+    // Localize the two static menu-toggle labels (the vertical toggle is the ☰
+    // glyph with an aria-label; the horizontal one shows the word). index.html
+    // ships English defaults; everything else the app sets goes through getTerm.
+    menuToggle.setAttribute('aria-label', getTerm('menu'));
+    menuToggleH.textContent = getTerm('menu');
+    document.getElementById('resume-text').textContent = getTerm('resumeText');
     menuOverlay.addEventListener('click', (e) => {
         if (e.target === menuOverlay) closeMenu();
     });

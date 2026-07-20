@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>Changelog — onlymove.net</title>
+    <style>
+        /* Palette mirrors the main app (style.css): dark by default with a
+           prefers-color-scheme: light override. Accent is the app's chocolate
+           orange (#d2691e). Kept in sync with about.html / privacy.html. */
+        :root {
+            --bg: #222;
+            --text: #ddd;
+            --heading: #fff;
+            --accent: #d2691e;
+            --muted: #888;
+            --rule: #444;
+            --code-bg: rgba(255, 255, 255, 0.08);
+            --code-text: #eee;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #f0f0f0;
+                --text: #333;
+                --heading: #222;
+                --accent: #c25e16;
+                --muted: #777;
+                --rule: #ccc;
+                --code-bg: rgba(0, 0, 0, 0.06);
+                --code-text: #222;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg);
+        }
+
+        h1 {
+            color: var(--heading);
+            text-align: center;
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 10px;
+        }
+
+        ul {
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        strong {
+            color: var(--heading);
+        }
+
+        code {
+            background-color: var(--code-bg);
+            color: var(--code-text);
+            padding: 0.1em 0.4em;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--rule);
+            color: var(--muted);
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- The changelog is intentionally English-only (about.html and privacy.html
+         are translated; the changelog is not, since it is edited on nearly every
+         release and translating each entry would not keep pace). -->
+    <h1>Changelog</h1>
+    <ul>
+        <li><strong>2026-07-20:</strong> The <a href="/leaderboard">leaderboard</a> page, the About and Privacy pages, and push review reminders are now shown in your language — Chinese, Japanese, and Korean, alongside English — matching the rest of the app. This changelog moved to its own page (the one you're reading); the About page links here.</li>
+        <li><strong>2026-07-20:</strong> The <a href="/leaderboard">leaderboard</a> now lists every player active in the past week who has solved at least 30 problems, applying one threshold to everyone instead of treating invited and uninvited players differently. A short line at the foot of the page counts how many active players haven't reached 30 solves yet, in place of the per-player progress that used to show for not-yet-ranked players.</li>
+        <li><strong>2026-07-20:</strong> You can now hide your profile from the <a href="/leaderboard">leaderboard</a> — a control at the bottom of the page withholds your name, country, and declared ranks (your onlymove rank still appears, but anonymously), and can be switched off again at any time. The leaderboard also now shows a country flag for every active player: their EGD federation or rank-survey country where known (preferring the more reliable EGD one), otherwise the country their play connects from, and a neutral flag when even that isn't available — so every row, anonymous players included, carries a flag. The Community stats tab now also shows a breakdown of active players by country. And both the onlymove estimate and the Declared range now read on the same onlymove rank scale, without the solving-speed adjustment, so they line up with your front-page rank. The Finnish tournament has concluded, and its page now shows the final standings.</li>
+        <li><strong>2026-07-19:</strong> The <a href="/leaderboard">leaderboard</a> now lists every player active in the past week, not just invite-registered players, and speaks ranks instead of rating points. Unregistered players appear as <em>Anonymous</em> with their estimated rank — computed from their last 500 first-time problems, the same way as the front-page rank — while registered players show their name. A new <em>Declared</em> column shows where each player's external ranks (their official EGD rating and any server ranks declared in the rank survey) land on the onlymove scale — shown as a range when the sources disagree — next to the onlymove estimate for comparison. Registration remains invite-based. The this-week/last-week peak views were removed — the board (and the tournament standings) always show current estimates.</li>
+        <li><strong>2026-07-18:</strong> The weakness system now runs on <em>skill axes</em> learned directly from how players of the same rank differ in what they actually solve — replacing the previous motif clusters derived from KataGo's internals alone. Each axis is validated to predict future results before it ships, and axes are two-sided: for example, one axis separates early open positions from late settled ones, and another separates positions that punish shape intuition from lines that reward it. New axes are added automatically as the data grows. Problem difficulty discrimination was also recalibrated (response curves were measurably steeper than modeled), improving how quickly your rank estimate converges.</li>
+        <li><strong>2026-07-17:</strong> In the Play Store (Android) version of the app, the Notify button now correctly turns into the inactive "Reminders" state after you allow notifications, instead of staying clickable — reminders themselves were already being delivered; only the button state was wrong. Recall-schedule updates from the Play Store app are now also uploaded reliably during play.</li>
+        <li><strong>2026-07-17:</strong> Weakness example problems now open for review inside the app itself instead of in a new tab — the new tab collided with the one-tab-at-a-time guard and could show "already open in another tab". The stats panel steps aside while you review the example and returns exactly where you left it when you tap Next, and the Previous button still takes you to your genuinely previous problem afterwards.</li>
+        <li><strong>2026-07-17:</strong> The detailed stats now open much faster on accounts with a long play history — the Rank tab's chart was the slow part, and building its long-term skill curve and bands is now far cheaper, so opening stats no longer stalls for many seconds on large accounts.</li>
+        <li><strong>2026-07-17:</strong> Only Move is now on Google Play. On Android, when your browser can't install the app directly (Firefox, Samsung Internet, and others), the Install button now offers the Play Store version — the same app — instead of only showing manual instructions. If you already have the Play Store app installed, the browser no longer prompts you to install again.</li>
+        <li><strong>2026-07-16:</strong> Reviews of failed problems are now interleaved with new problems at a pace matched to how much you play and how quickly you personally forget, instead of every due review always cutting ahead of new problems — so heavy review days and walls of reviews after a break are gone, and the balance settles to what your own volume and memory sustain. Well-learned problems now also genuinely retire: each success stretches the next review out further without limit, where previously even a fully mastered problem kept coming back every three months or so forever. Review reminders from notifications are unaffected and always open the due problem.</li>
+        <li><strong>2026-07-14:</strong> Displayed ranks are now rounded to the nearest whole rank instead of always rounded down, matching the standard European (EGF) rank convention — so your shown rank may go up by one (a strength just past the three-/four-dan boundary now reads 4 dan rather than 3 dan). This is purely a display correction: your underlying strength, the problems you're served, and your estimated per-server ranks are unchanged. Tapping your front-page rank now lists OnlyMove alongside the other servers as one list, each showing how far you are into that rank, and the 95% confidence interval on your rank moved to the stats Rank tab. On the Rank tab, the solving-speed adjustment for the timed server views now uses the same recent window of problems as your rank, keeping the two in step.</li>
+        <li><strong>2026-07-11:</strong> The Rank tab's chart now also plots your front-page rank over time as a solid line, alongside the smoothed long-term curve — now named "Stable rank" — so recent form and settled strength read off one chart. Rank calibration is now robust against the occasional clearly mistaken survey declaration.</li>
+        <li><strong>2026-07-10:</strong> Removed about 500 problems that had more than one working solution, and the generator now rejects such positions outright; problem ratings were refreshed across both board sizes after the cleanup. When a ratings refresh like this retroactively shifts your rank history, the app now explains it with a brief one-time notice. The analysis hint now always marks the genuinely strongest move. Weakness-aware problem selection now uses the direction of each weakness: motifs you under-play come up more often, while motifs you over-play are no longer served as if you needed more of them.</li>
+        <li><strong>2026-07-09:</strong> Cross-device sync matching is now exact: your device stamps each attempt's time itself, so an attempt can no longer be duplicated or missed when syncing. The stats summary now splits your solved-problem count by board size. The manual install instructions now match your actual browser and platform.</li>
+        <li><strong>2026-07-08:</strong> Reworked the after-answer layout: the Share button is now always visible, and the "why this move" motif bubble aligns consistently with the buttons in every orientation. The rank survey got a proper centered rank picker on desktop. Rank calibration now anchors each survey answer to your strength around the time you gave it rather than your whole career, which reads improving players more accurately. Account sync was rebuilt on exact server-record identity, fixing rare accounts that could re-download the same history over and over.</li>
+        <li><strong>2026-07-07:</strong> The share image can now be copied straight to the clipboard on desktop. Wrong moves are now recorded independently of the orientation the board was shown in, so they sync exactly across devices. Tuned caching so repeat visits load faster.</li>
+        <li><strong>2026-07-06:</strong> The Community "how quickly players return to failed problems" chart now measures the gap from first failing a problem to its first review. Opening the app in two tabs at once can no longer record duplicate attempts. Syncing your history onto a new device now downloads a small fraction of the data it used to. A failed account adoption now falls back cleanly to a fresh account instead of getting stuck halfway.</li>
+        <li><strong>2026-07-05:</strong> Returning to the app now syncs immediately and refreshes the problem on screen — a problem you solved on another device is swapped out behind a brief notice, and a review that came due while you were away can appear right away.</li>
+        <li><strong>2026-07-04:</strong> Problem difficulty targeting now converges correctly at every rank — kyu players were previously served problems slightly above their level on average. Added a landing page for the Finnish problem-solving tournament (July 13–19) at <a href="/tournament">onlymove.net/tournament</a>.</li>
+        <li><strong>2026-07-03:</strong> Tapping your front-page rank now shows a 95% confidence interval on your rank, so you can see how precisely it's currently pinned down alongside your estimated rank on each Go server. Refreshed problem ratings across both board sizes and the weakness-motif labels.</li>
+        <li><strong>2026-06-30:</strong> Reworked how your rank is calibrated, correcting a long-standing under-rating of stronger players — so some dan-level ranks will rise. The solving-speed handling is also clearer: your front-page rank is <em>not</em> adjusted for speed, because here, thinking longer genuinely makes you more likely to solve a problem, so that rank reflects your strength with all the time you want. Your rank on each individual Go server <em>is</em> adjusted, because in a real game a slower time control doesn't make you more likely to win — your opponent gets the same extra time and is just as much stronger for it — so leaning on long thinking reads a little weaker on a timed server.</li>
+        <li><strong>2026-06-29:</strong> Added about 22,000 new 13×13 problems, roughly doubling the 13×13 collection, and refreshed problem ratings across both board sizes. Fixed a bug where the stats and rank graphs — and the problem ratings behind them — could differ between two devices signed in to the same account.</li>
+        <li><strong>2026-06-28:</strong> The "current rank" end of the Rank tab's skill curve no longer lags behind your recent improvement, so the most recent point of the curve reads your present strength more faithfully.</li>
+        <li><strong>2026-06-26:</strong> The front-page rank is now a maximum-likelihood estimate fitted over your recent solving history — the same kind of computation as the Rank tab's long-term curve — replacing the older momentum-based rank. It reads your recent form more cleanly and no longer depends on the order you happened to solve problems in.</li>
+        <li><strong>2026-06-25:</strong> The problem you're solving no longer flips to a different orientation when the app quietly updates itself in the background — the board stays exactly as shown across a reload.</li>
+        <li><strong>2026-06-24:</strong> The Community "Attempts per day" chart now averages each player's attempts over the full week (weekly attempts ÷ 7) for a true daily average, instead of counting only the days they were active, and its ranges were rescaled to match.</li>
+        <li><strong>2026-06-22:</strong> Rebuilt the problem-rating model again. It now learns its overall difficulty scale, easy-guess floor, and reliability ceiling automatically instead of having them set by hand, and it reads the strongest candidate moves in each position as an extra signal. Problem ratings have been refreshed across both board sizes, and the weakness-motif labels were refreshed to match the rebuilt model.</li>
+        <li><strong>2026-06-21:</strong> Finer-grained bins on two Community charts — "how quickly players return to failed problems" and problems solved per day — so the busiest ranges read more clearly.</li>
+        <li><strong>2026-06-20:</strong> Review reminders now reach every device signed in to your account, not just the most recently used one. Fixed a recall-scheduling bug so failed problems reliably come back for review on the right board.</li>
+        <li><strong>2026-06-19:</strong> The detailed stats page now opens at any attempt count, instead of waiting until you had solved several problems. The Community time charts switched to a clearer log-scaled layout with empty buckets dropped. Sharing now starts preparing the image the moment you open the share chooser, so it feels snappier.</li>
+        <li><strong>2026-06-18:</strong> Multiple pop-up messages now stack instead of overlapping. Review mode survives closing and reopening the app — the problem you were reviewing is restored. Made sharing more reliable after the app has been idle or when running in a less-secure context. Long solving histories are now stored more durably for heavy users, so they no longer risk hitting the browser's storage limit. Fixed a bug that could occasionally serve the same new problem twice in a row.</li>
+        <li><strong>2026-06-17:</strong> Fixed a bug where reloading right after solving could re-serve the problem you had just completed.</li>
+        <li><strong>2026-06-16:</strong> Corrected a handful of problems whose stored solution did not match KataGo's best move — the genuinely winning move is now always marked correct.</li>
+        <li><strong>2026-06-14:</strong> Refined the time-adjusted rank so your solving speed is compared fairly against players of a similar rank. Problems opened from shared links are now fully excluded from the server logs as well as your own stats. Made problem downloads more resilient to flaky network connections.</li>
+        <li><strong>2026-06-13:</strong> Your progress is now a portable account. Open Account (menu → More) to see your personal code, then enter it on another device to sync your full solving history and rank across all your devices. The Rank tab's chart also gained a server selector — switch between OnlyMove's own rank and how your strength would read on each Go server, adjusted for your typical solving speed. Tapping your front-page rank shows the same per-server, time-adjusted ranks.</li>
+        <li><strong>2026-06-12:</strong> Added a sound on/off toggle to the menu. Tapping a review reminder now always opens whichever problem is actually due, rather than one you may have already cleared. Corrected several details in the stats and rank math for more accurate recall difficulty, weakness trends, time comparisons, and confidence bands.</li>
+        <li><strong>2026-06-07:</strong> Added a link to the community Discord, both in the menu and at the bottom of this page. A rare misclick on an easy problem no longer dents your rank. Problem difficulty is now centered so you clear about 80% of the problems you are served, and some front-page ranks that had drifted were re-anchored.</li>
+        <li><strong>2026-06-06:</strong> Added five new weakness motifs (with Chinese, Japanese, and Korean translations) to the recommender and stats page. The "comes back in about X hours" estimate shown when you fail a problem is now based on your own recent recall performance rather than idealized assumptions. The Time tab now shows how confident the app is that thinking longer actually helps you. Added a brief loading splash so the app no longer flashes a half-built screen on startup.</li>
+        <li><strong>2026-06-05:</strong> The post-failure "don't rush" and "review more" warnings are now bias-corrected and only appear when there is real evidence that slowing down would help you. Improved the estimate of your chance of solving an unfamiliar problem, including the realistic chance of a lucky guess on hard ones.</li>
+        <li><strong>2026-06-04:</strong> Added decorative ink-wash corner artwork that adapts to light and dark themes. Strong players can now climb past 9 dan, with rank gains smoothly slowing at the top. The skill estimate on the Rank tab now focuses on problems near your own rank for a cleaner read of your progress.</li>
+        <li><strong>2026-06-02:</strong> The screen after each attempt now shows how your solving time compared with your usual pace. Refined the Time chart with whole-second and whole-minute axes, date gridlines, and a middle-50% spread band.</li>
+        <li><strong>2026-06-01:</strong> Polished the Time chart with a smoother trend line and a cleaner spread band, and your own bucket is now highlighted in each Community chart. Stats charts now build behind a "Loading your stats…" overlay so they appear all at once.</li>
+        <li><strong>2026-05-31:</strong> Rebuilt the problem-rating system as a single model shared across both board sizes, tuned to keep its accuracy even across all difficulty levels. Problem ratings have been refreshed accordingly.</li>
+        <li><strong>2026-05-29:</strong> Added a Community graph of how quickly players return to failed problems. Switching board size from the menu now jumps straight to the other board. Reworked the spaced-repetition schedule to an FSRS-style retention curve, and made the app download smaller and faster.</li>
+        <li><strong>2026-05-28:</strong> Added a Community tab with server-wide statistics from the past 7 days — overall activity, rank distribution, time usage, and recall times across all players. Grouped the menu into Practice / Review / More, and added a daily solving- and review-time chart to your stats.</li>
+        <li><strong>2026-05-27:</strong> Moved About, Stats, Share, Ignore, and the board-size toggle into a hamburger menu. Added a Pause recalls / Resume recalls toggle to temporarily stop failed problems from reappearing.</li>
+        <li><strong>2026-05-22:</strong> 9×9 and 13×13 now share a single rank, stats page, and learned models while keeping separate problem histories. Your stats now show how your 13×13 skill compares with your 9×9 skill.</li>
+        <li><strong>2026-05-21:</strong> Added a review-mode bubble naming the motif behind the correct move. The skill chart now shows a continuous skill curve with separate measurement and performance bands.</li>
+        <li><strong>2026-05-20:</strong> Your rank is now anchored to European Go Database ranks and translated into the rank system of whichever server you play on.</li>
+        <li><strong>2026-05-18:</strong> Added an occasional, optional survey asking your rank on other Go servers, which helps calibrate the ranking for everyone.</li>
+        <li><strong>2026-05-15:</strong> Per-attempt details (the move you played, solving time, time spent in review, and whether the problem was a repeat) are now sent to the server alongside the pass/fail result. The weakness section of the stats page is now a single sorted list of plain-English sentences ("You don't ___ often enough.", "You ___ when you shouldn't.", "You inconsistently ___.") instead of three separate panels. The app now auto-reloads between problems whenever the server has a newer build. Refreshed embedding labels with a few typo fixes and better-distinguished motifs.</li>
+        <li><strong>2026-05-14:</strong> New rank chart on the stats page with a smoothed long-term skill estimate, a 95% confidence band, and a session-to-session form variance metric. Added a per-attempt scatter chart showing every result against your rank over time. Push notification reliability fixes: empty schedules no longer accidentally wipe pending reminders, notification taps reliably focus a backgrounded PWA on Android, and the recall reminder shows total backlog rather than just the delta since the last reminder. Tightened the math behind the weakness quadrant probabilities so anti-correlated estimates no longer show false "both directions" mass.</li>
+        <li><strong>2026-05-12:</strong> Added support for 13×13 boards — visit <a href="/13">onlymove.net/13</a> for the larger boards (9×9 stays at <a href="/9">onlymove.net/9</a>). Added a weakness-aware problem recommender: every position is mapped to 64 motif axes derived from KataGo's internal representation, and a per-user logistic regression tilts upcoming problems toward motifs that have been tripping you up. On wrong attempts the move you actually played is mapped into the same space, so the model can tell apart "the position is hard to read" from "you over- or under-play this kind of move".</li>
+        <li><strong>2026-04-25:</strong> Improved sharing: no more lag, immediate feedback while preparing an image, clear error messages on failure, and tapping the share button repeatedly no longer opens multiple dialogs. Fixed the inflated "ignored problems" count in stats — it now only reflects problems you explicitly chose to ignore. The "don't rush" and "insufficient review" messages now compare against your median solving and review times across recent problems, for more responsive feedback. Fixed the ghost stone in review mode disappearing after the app was backgrounded and resumed.</li>
+        <li><strong>2026-02-13:</strong> Removed 6k problems where the mainline didn't stay consistently ahead for black.</li>
+        <li><strong>2026-02-07:</strong> Reranked problems, accounting for exponential mapping from probability-based ratings to actual ranks.</li>
+        <li><strong>2026-02-06:</strong> Removed 30k problems that had no pre-calculated solution. Fixed typos. Back button on linked problems goes back to challenge mode.</li>
+        <li><strong>2025-09-27:</strong> Added a "Click to continue" screen to improve reliability when the app is
+            backgrounded on mobile devices.</li>
+        <li><strong>2025-09-26:</strong> Problem selection quality is now influenced by user solve rates.</li>
+        <li><strong>2025-09-24:</strong> Adjusted ranks to better align with a human-calibrated AI model.</li>
+        <li><strong>2025-09-23:</strong> The statistics page now tracks time spent in review mode.</li>
+        <li><strong>2025-09-22:</strong> Changed how stats are tracked and presented so as to be more informative.</li>
+        <li><strong>2025-09-21:</strong> Made problems easier by 3 ranks.</li>
+        <li><strong>2025-09-20:</strong> Added another 25,000 problems. Made all problems harder by 1.5 ranks (an
+            accidental adjustment in the wrong direction).</li>
+        <li><strong>2025-09-19:</strong> Implemented automatic reload when a new version is available. Fixed a ghost
+            move in review mode. Added 25,000 new problems. Adjusted ratings down by half a stone.</li>
+        <li><strong>2025-09-18:</strong> Improved the score adjustment display and added new problems with ratings aligned to human network benchmarks. Adjusted the transition point for a better landscape mode experience. Fixed an issue where the about button was disabled. Removed unnecessary text from the sharing functionality. Added proper light mode support. Combined captures and komi into a single number. Added a legality check for ghost moves.</li>
+        <li><strong>2025-09-17:</strong> Added progress bar for rank tracking. Implemented double-click confirmation on
+            mobile devices.</li>
+        <li><strong>2025-09-16:</strong> Added native sharing functionality with dynamic URLs. Fixed issues with mode switching between view, challenge, and review modes. Added visual warning for unreliable analysis results from API calls. Improved internationalization with consistent keys across all languages.</li>
+        <li><strong>2025-09-15:</strong> The app install prompt is now shown only after solving a few problems (at 2, 19, and 190 problems solved).</li>
+        <li><strong>2025-09-14:</strong> The main screen now always shows the rank of the current problem. Your personal rank is visible in the detailed stats view (by clicking the rank). Your rank change is now displayed between problems. Rank progression now slows down as you approach higher ranks.</li>
+        <li><strong>2025-09-07:</strong> Problems are now randomly rotated for a fresh perspective.</li>
+        <li><strong>2025-09-06:</strong> The total number of unique problems has increased to 41,000. You will now only be re-tested on failed problems that are easier than your current rank. Correctly answering a problem you have failed before no longer increases your rank.</li>
+        <li><strong>2025-09-05:</strong> Added 10,000 new problems. Fixed a bug that could cause duplicate entries in your problem history.</li>
+        <li><strong>2025-09-04:</strong> Improved the messages and animations when you fail a problem.</li>
+        <li><strong>2025-09-03:</strong> Removed problems where the solution is to pass and problems with very unnatural moves. Improved handling of problems opened via shared links to not interfere with your history. Solving linked problems does not affect your rank.</li>
+        <li><strong>2025-09-02:</strong> You can now see detailed statistics by clicking on your rank.</li>
+        <li><strong>2025-09-01:</strong> Added 15,000 new problems. A warning is now shown if you try to load a problem with an incorrect ID.</li>
+        <li><strong>2025-08-31:</strong> Added 5,200 new problems and removed the failure sound effect.</li>
+        <li><strong>2025-08-23:</strong> Updated the user interface for a cleaner look and feel.</li>
+        <li><strong>2025-08-22:</strong> The URL in your browser now updates to match the current problem.</li>
+        <li><strong>2025-08-21:</strong> Your results are now anonymously stored on the server to help improve the application.</li>
+        <li><strong>2025-08-20:</strong> Zooming on the page is now prevented to improve the mobile experience.</li>
+        <li><strong>2025-08-19:</strong> Analysis mode is now available for reviewing problems.</li>
+        <li><strong>2025-08-18:</strong> Illegal moves due to Ko are now marked with a square.</li>
+        <li><strong>2025-08-17:</strong> Rank momentum increases more when you are on a winning streak.</li>
+        <li><strong>2025-08-13:</strong> Sound effects for placing stones have been added.</li>
+        <li><strong>2025-08-12:</strong> A fade-in/fade-out animation is now used for correct answers. Clicking on the komi value now shows the version number.</li>
+        <li><strong>2025-08-09:</strong> The opponent's response is no longer shown on a correct move to reduce visual noise.</li>
+        <li><strong>2025-07-29:</strong> The ranking algorithm for problems has been improved.</li>
+        <li><strong>2025-07-28:</strong> The ruleset has been changed to Japanese rules with a 6.5 point komi. The application now uses zipped archives for problems, improving loading performance.</li>
+        <li><strong>2025-07-27:</strong> The application is now a Progressive Web App (PWA) and can be installed on your device.</li>
+        <li><strong>2025-07-26:</strong> The application now tracks the frequency of problems you have seen.</li>
+        <li><strong>2025-07-21:</strong> The first version of the PWA went live.</li>
+        <li><strong>2025-07-12:</strong> Initial commit.</li>
+    </ul>
+
+    <div class="footer">
+        <p><a href="about.html">About onlymove.net</a> &middot; <a href="index.html">Back to the App</a></p>
+    </div>
+
+</body>
+
+</html>

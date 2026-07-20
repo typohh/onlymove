@@ -101,75 +101,316 @@
 </head>
 
 <body>
-    <h1>Privacy Policy</h1>
+    <!-- Translated into en/zh/ja/ko via full `.i18n[data-lang]` blocks; the
+         script at the foot reveals the block matching navigator.language (same
+         prefix match as js/i18n.js). English ships un-hidden for no-JS loads.
+         The English text is the authoritative version. -->
 
-    <p>This policy covers onlymove.net and its installable app (including the Android app on Google Play, which is the same web app in a native wrapper). The short version: there are no user accounts in the traditional sense, no names, no email addresses, no advertising, and no third-party analytics. The app stores your solving history under a random account code so your progress can sync between your devices.</p>
+    <!-- ===================== English ===================== -->
+    <div class="i18n" data-lang="en">
+        <h1>Privacy Policy</h1>
 
-    <p><em>Effective date: July 13, 2026.</em></p>
+        <p>This policy covers onlymove.net and its installable app (including the Android app on Google Play, which is the same web app in a native wrapper). The short version: there are no user accounts in the traditional sense, no names, no email addresses, no advertising, and no third-party analytics. The app stores your solving history under a random account code so your progress can sync between your devices.</p>
 
-    <h2>Your account code</h2>
-    <ul>
-        <li>When you first use the app, it generates a <strong>random account code</strong> on your device. This code is the only identifier attached to your data — we never ask for or store your name, email address, or any other personal details.</li>
-        <li>The code is shown under the Account menu. Entering it on another device links that device to the same solving history.</li>
-        <li>Treat the code like a password: anyone who has it can access and continue that solving history.</li>
-    </ul>
+        <p><em>Effective date: July 13, 2026.</em></p>
 
-    <h2>What we collect</h2>
-    <p>Each time you attempt a problem, the app sends the result to our server so your progress is preserved and synced across devices:</p>
-    <ul>
-        <li><strong>Per-attempt records:</strong> your account code, the problem's ID, whether you solved it, the move you played, solving time, time spent in review, board size, whether it was a repeat, and a timestamp.</li>
-        <li><strong>Rank survey answers (optional):</strong> the app occasionally asks what rank you hold on other Go servers. Answering is voluntary; answers are used to calibrate the rating-to-rank curve for everyone.</li>
-        <li><strong>Review reminders (optional):</strong> if you enable push notifications, we store your device's push subscription (a delivery address issued by your browser) and the schedule of problems due for review, so reminders can be delivered.</li>
-        <li><strong>Share-link events:</strong> when you create or open a shared problem link, we record the problem, the account code, the referring page for opened links, and a country-level location derived from the network connection at our hosting provider's edge. IP addresses themselves are not stored.</li>
-        <li>Your <strong>attempts</strong> on problems opened from shared links are not recorded — they reach neither the server's attempt log nor your own solving history, and they never affect your rank.</li>
-    </ul>
+        <h2>Your account code</h2>
+        <ul>
+            <li>When you first use the app, it generates a <strong>random account code</strong> on your device. This code is the only identifier attached to your data — we never ask for or store your name, email address, or any other personal details.</li>
+            <li>The code is shown under the Account menu. Entering it on another device links that device to the same solving history.</li>
+            <li>Treat the code like a password: anyone who has it can access and continue that solving history.</li>
+        </ul>
 
-    <h2>What we don't collect</h2>
-    <ul>
-        <li>No names, email addresses, phone numbers, or payment details.</li>
-        <li>No advertising identifiers, no ad networks, no third-party analytics or tracking scripts.</li>
-        <li>No precise location. Only the country-level value mentioned above, and only for share-link events.</li>
-    </ul>
+        <h2>What we collect</h2>
+        <p>Each time you attempt a problem, the app sends the result to our server so your progress is preserved and synced across devices:</p>
+        <ul>
+            <li><strong>Per-attempt records:</strong> your account code, the problem's ID, whether you solved it, the move you played, solving time, time spent in review, board size, whether it was a repeat, and a timestamp.</li>
+            <li><strong>Rank survey answers (optional):</strong> the app occasionally asks what rank you hold on other Go servers. Answering is voluntary; answers are used to calibrate the rating-to-rank curve for everyone.</li>
+            <li><strong>Review reminders (optional):</strong> if you enable push notifications, we store your device's push subscription (a delivery address issued by your browser) and the schedule of problems due for review, so reminders can be delivered.</li>
+            <li><strong>Share-link events:</strong> when you create or open a shared problem link, we record the problem, the account code, the referring page for opened links, and a country-level location derived from the network connection at our hosting provider's edge. IP addresses themselves are not stored.</li>
+            <li>Your <strong>attempts</strong> on problems opened from shared links are not recorded — they reach neither the server's attempt log nor your own solving history, and they never affect your rank.</li>
+        </ul>
 
-    <h2>How the data is used</h2>
-    <ul>
-        <li>Syncing your solving history, rank, and review schedule across your devices.</li>
-        <li>Estimating your rank and selecting problems suited to you.</li>
-        <li>Calibrating problem difficulty for everyone: each problem's rating is refined by how often players at different strengths actually solve it.</li>
-        <li>Anonymous, aggregated community statistics (the Community tab): activity, rank distribution, and time-usage charts computed over the past week. Nothing shown there can identify an individual player.</li>
-        <li>We do not sell data, and we do not share it with third parties beyond the hosting infrastructure described below.</li>
-    </ul>
+        <h2>What we don't collect</h2>
+        <ul>
+            <li>No names, email addresses, phone numbers, or payment details.</li>
+            <li>No advertising identifiers, no ad networks, no third-party analytics or tracking scripts.</li>
+            <li>No precise location. Only the country-level value mentioned above, and only for share-link events.</li>
+        </ul>
 
-    <h2>Storage on your device</h2>
-    <ul>
-        <li>Your recent solving history, settings, and account code are stored locally in your browser's storage (localStorage and IndexedDB) so the app works offline and loads quickly.</li>
-        <li>Uninstalling the app or clearing site data removes this local copy. Your history remains on the server under your account code, so entering the code again restores it.</li>
-    </ul>
+        <h2>How the data is used</h2>
+        <ul>
+            <li>Syncing your solving history, rank, and review schedule across your devices.</li>
+            <li>Estimating your rank and selecting problems suited to you.</li>
+            <li>Calibrating problem difficulty for everyone: each problem's rating is refined by how often players at different strengths actually solve it.</li>
+            <li>Anonymous, aggregated community statistics (the Community tab): activity, rank distribution, and time-usage charts computed over the past week. Nothing shown there can identify an individual player.</li>
+            <li>We do not sell data, and we do not share it with third parties beyond the hosting infrastructure described below.</li>
+        </ul>
 
-    <h2>Hosting and infrastructure</h2>
-    <ul>
-        <li>The service runs on <strong>Cloudflare</strong> (Workers and the D1 database). Like any web host, Cloudflare processes IP addresses and request metadata to deliver the site and to protect it from abuse; see <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's privacy policy</a>.</li>
-        <li>Board positions you analyze in review mode may be sent to our own analysis server to be evaluated by KataGo. Positions contain no personal data.</li>
-        <li>Push notifications are delivered through your browser vendor's push service (e.g. Google's, for Chrome on Android).</li>
-    </ul>
+        <h2>Storage on your device</h2>
+        <ul>
+            <li>Your recent solving history, settings, and account code are stored locally in your browser's storage (localStorage and IndexedDB) so the app works offline and loads quickly.</li>
+            <li>Uninstalling the app or clearing site data removes this local copy. Your history remains on the server under your account code, so entering the code again restores it.</li>
+        </ul>
 
-    <h2>Data retention and deletion</h2>
-    <ul>
-        <li>Attempt records are kept indefinitely — they are what your rank, review schedule, and the community difficulty calibration are built from.</li>
-        <li>Push subscriptions are deleted when you disable notifications, and expired or unreachable subscriptions are cleaned up automatically.</li>
-        <li>To have all data associated with your account code deleted, email <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> and include the code (Account menu). Since the code is the only identifier we hold, we cannot locate your data without it.</li>
-    </ul>
+        <h2>Hosting and infrastructure</h2>
+        <ul>
+            <li>The service runs on <strong>Cloudflare</strong> (Workers and the D1 database). Like any web host, Cloudflare processes IP addresses and request metadata to deliver the site and to protect it from abuse; see <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's privacy policy</a>.</li>
+            <li>Board positions you analyze in review mode may be sent to our own analysis server to be evaluated by KataGo. Positions contain no personal data.</li>
+            <li>Push notifications are delivered through your browser vendor's push service (e.g. Google's, for Chrome on Android).</li>
+        </ul>
 
-    <h2>Children</h2>
-    <p>The app is a Go puzzle trainer suitable for all ages. It collects no personal information from anyone, children included — only the pseudonymous solving records described above.</p>
+        <h2>Data retention and deletion</h2>
+        <ul>
+            <li>Attempt records are kept indefinitely — they are what your rank, review schedule, and the community difficulty calibration are built from.</li>
+            <li>Push subscriptions are deleted when you disable notifications, and expired or unreachable subscriptions are cleaned up automatically.</li>
+            <li>To have all data associated with your account code deleted, email <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> and include the code (Account menu). Since the code is the only identifier we hold, we cannot locate your data without it.</li>
+        </ul>
 
-    <h2>Changes to this policy</h2>
-    <p>If this policy changes in a meaningful way, the change will be noted in the changelog on the <a href="about.html">about page</a>.</p>
+        <h2>Children</h2>
+        <p>The app is a Go puzzle trainer suitable for all ages. It collects no personal information from anyone, children included — only the pseudonymous solving records described above.</p>
+
+        <h2>Changes to this policy</h2>
+        <p>If this policy changes in a meaningful way, the change will be noted in the <a href="changelog.html">changelog</a>.</p>
+    </div>
+
+    <!-- ===================== 中文 (zh) ===================== -->
+    <div class="i18n" data-lang="zh" hidden>
+        <h1>隐私政策</h1>
+
+        <p>本政策涵盖 onlymove.net 及其可安装的应用（包括 Google Play 上的安卓应用，它是同一款网页应用的原生封装版本）。简而言之：不存在传统意义上的用户账户，没有姓名，没有电子邮件地址，没有广告，也没有第三方分析。应用会在一个随机账号代码下存储你的解题记录，以便你的进度能在你的多台设备之间同步。</p>
+
+        <p><em>生效日期：2026 年 7 月 13 日。</em></p>
+
+        <h2>你的账号代码</h2>
+        <ul>
+            <li>当你首次使用本应用时，它会在你的设备上生成一个<strong>随机账号代码</strong>。此代码是附加在你数据上的唯一标识——我们从不索取或存储你的姓名、电子邮件地址或任何其他个人信息。</li>
+            <li>该代码显示在“账号”菜单下。在另一台设备上输入它，即可将该设备关联到同一份解题记录。</li>
+            <li>请像对待密码一样对待此代码：任何持有它的人都能访问并延续那份解题记录。</li>
+        </ul>
+
+        <h2>我们收集哪些信息</h2>
+        <p>每次你尝试一道题目时，应用都会将结果发送到我们的服务器，以便你的进度得以保存并在多台设备间同步：</p>
+        <ul>
+            <li><strong>逐次尝试记录：</strong>你的账号代码、题目 ID、你是否解出、你所下的着法、解题用时、复习所花时间、棋盘尺寸、是否为重复题目，以及一个时间戳。</li>
+            <li><strong>段级位调查回答（可选）：</strong>应用会偶尔询问你在其他围棋服务器上持有的段级位。回答是自愿的；答案用于为所有人校准评分到段级位的曲线。</li>
+            <li><strong>复习提醒（可选）：</strong>如果你启用推送通知，我们会存储你设备的推送订阅（由你的浏览器签发的一个投递地址）以及待复习题目的日程安排，以便能够送达提醒。</li>
+            <li><strong>分享链接事件：</strong>当你创建或打开一个分享题目链接时，我们会记录题目、账号代码、所打开链接的来源页面，以及一个由我们托管服务商边缘节点处的网络连接推导出的国家级位置。IP 地址本身不会被存储。</li>
+            <li>你在从分享链接打开的题目上的<strong>尝试</strong>不会被记录——它们既不会进入服务器的尝试日志，也不会进入你自己的解题记录，且它们绝不会影响你的段级位。</li>
+        </ul>
+
+        <h2>我们不收集哪些信息</h2>
+        <ul>
+            <li>没有姓名、电子邮件地址、电话号码或支付信息。</li>
+            <li>没有广告标识符，没有广告网络，没有第三方分析或跟踪脚本。</li>
+            <li>没有精确位置。仅有上文提到的国家级数值，且仅用于分享链接事件。</li>
+        </ul>
+
+        <h2>数据的用途</h2>
+        <ul>
+            <li>在你的多台设备之间同步你的解题记录、段级位和复习日程。</li>
+            <li>估计你的段级位并为你挑选合适的题目。</li>
+            <li>为所有人校准题目难度：每道题目的评分会根据不同棋力的玩家实际解出它的频率而不断优化。</li>
+            <li>匿名的、汇总的社区统计（“社区”选项卡）：根据过去一周计算的活跃度、段级位分布和时间使用图表。其中展示的任何内容都无法识别出某个具体玩家。</li>
+            <li>我们不出售数据，也不会将其分享给下述托管基础设施以外的任何第三方。</li>
+        </ul>
+
+        <h2>你设备上的存储</h2>
+        <ul>
+            <li>你近期的解题记录、设置和账号代码会本地存储在你浏览器的存储中（localStorage 和 IndexedDB），以便应用能够离线工作并快速加载。</li>
+            <li>卸载应用或清除站点数据会移除此本地副本。你的记录仍保留在服务器上、位于你的账号代码之下，因此再次输入该代码即可将其恢复。</li>
+        </ul>
+
+        <h2>托管与基础设施</h2>
+        <ul>
+            <li>本服务运行在 <strong>Cloudflare</strong> 上（Workers 和 D1 数据库）。与任何网络托管商一样，Cloudflare 会处理 IP 地址和请求元数据，以便提供本站点并保护其免受滥用；参见 <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare 的隐私政策</a>。</li>
+            <li>你在复习模式中分析的棋盘局面可能会被发送到我们自己的分析服务器，由 KataGo 进行评估。局面中不含任何个人数据。</li>
+            <li>推送通知通过你浏览器供应商的推送服务送达（例如安卓版 Chrome 使用 Google 的推送服务）。</li>
+        </ul>
+
+        <h2>数据保留与删除</h2>
+        <ul>
+            <li>尝试记录会被无限期保留——它们正是你的段级位、复习日程和社区难度校准所依据的基础。</li>
+            <li>当你停用通知时，推送订阅会被删除，过期或无法送达的订阅会被自动清理。</li>
+            <li>若要删除与你账号代码相关联的所有数据，请发送邮件至 <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> 并附上该代码（“账号”菜单）。由于该代码是我们所持有的唯一标识，没有它我们便无法定位你的数据。</li>
+        </ul>
+
+        <h2>儿童</h2>
+        <p>本应用是一款适合所有年龄段的围棋死活题训练器。它不从任何人（包括儿童）处收集个人信息——只收集上文所述的、与随机代码相关联的解题记录。</p>
+
+        <h2>本政策的变更</h2>
+        <p>如果本政策发生实质性变更，该变更将在<a href="changelog.html">更新日志</a>中说明。</p>
+    </div>
+
+    <!-- ===================== 日本語 (ja) ===================== -->
+    <div class="i18n" data-lang="ja" hidden>
+        <h1>プライバシーポリシー</h1>
+
+<p>このポリシーは、onlymove.net およびそのインストール可能なアプリ（Google Play の Android アプリを含みます。これは同じウェブアプリをネイティブアプリで包んだものです）を対象とします。要点は次のとおりです。従来の意味でのユーザーアカウントはなく、氏名も、メールアドレスも、広告も、第三者による分析もありません。アプリはあなたの解答履歴をランダムなアカウントコードのもとに保存し、進捗をデバイス間で同期できるようにします。</p>
+
+<p><em>発効日：2026年7月13日。</em></p>
+
+<h2>あなたのアカウントコード</h2>
+<ul>
+    <li>アプリを初めて使用するとき、アプリはあなたのデバイス上で<strong>ランダムなアカウントコード</strong>を生成します。このコードは、あなたのデータに紐づく唯一の識別子です。私たちはあなたの氏名、メールアドレス、その他いかなる個人情報も尋ねたり保存したりすることはありません。</li>
+    <li>このコードは「アカウント」メニューに表示されます。別のデバイスでこれを入力すると、そのデバイスが同じ解答履歴に紐づけられます。</li>
+    <li>このコードはパスワードのように扱ってください。これを持っている人は誰でも、その解答履歴にアクセスして続けることができます。</li>
+</ul>
+
+<h2>収集する情報</h2>
+<p>問題に挑戦するたびに、アプリはその結果を私たちのサーバーに送信し、あなたの進捗が保存されデバイス間で同期されるようにします。</p>
+<ul>
+    <li><strong>挑戦ごとの記録：</strong> あなたのアカウントコード、問題のID、解けたかどうか、打った手、解答時間、検討に費やした時間、盤のサイズ、再出題かどうか、そしてタイムスタンプ。</li>
+    <li><strong>段級位アンケートの回答（任意）：</strong> アプリは時折、あなたが他の囲碁サーバーで持っている段級位を尋ねます。回答は任意であり、回答はすべての人のためにレーティングと段級位の変換曲線を較正するために使用されます。</li>
+    <li><strong>復習リマインダー（任意）：</strong> プッシュ通知を有効にすると、リマインダーを配信できるように、あなたのデバイスのプッシュサブスクリプション（ブラウザが発行する配信先アドレス）と、復習の時期になった問題のスケジュールを保存します。</li>
+    <li><strong>共有リンクのイベント：</strong> 共有された問題のリンクを作成または開くと、私たちはその問題、アカウントコード、開かれたリンクについては参照元ページ、そしてホスティングプロバイダーのエッジにおけるネットワーク接続から導かれる国レベルの位置情報を記録します。IPアドレスそのものは保存されません。</li>
+    <li>共有リンクから開いた問題への<strong>挑戦</strong>は記録されません。サーバーの挑戦ログにも、あなた自身の解答履歴にも届かず、あなたの段級位に影響することも決してありません。</li>
+</ul>
+
+<h2>収集しない情報</h2>
+<ul>
+    <li>氏名、メールアドレス、電話番号、支払い情報は収集しません。</li>
+    <li>広告識別子、広告ネットワーク、第三者による分析やトラッキングスクリプトはありません。</li>
+    <li>正確な位置情報は収集しません。上記の国レベルの値のみで、それも共有リンクのイベントに限られます。</li>
+</ul>
+
+<h2>データの利用方法</h2>
+<ul>
+    <li>あなたの解答履歴、段級位、復習スケジュールをデバイス間で同期すること。</li>
+    <li>あなたの段級位を推定し、あなたに適した問題を選択すること。</li>
+    <li>すべての人のために問題の難易度を較正すること。各問題のレーティングは、さまざまな棋力のプレイヤーが実際にどれだけの頻度でその問題を解くかによって精緻化されます。</li>
+    <li>匿名で集計されたコミュニティ統計（「コミュニティ」タブ）。過去1週間にわたって計算された活動状況、段級位の分布、時間の使い方のグラフです。そこに表示されるもので個々のプレイヤーを特定できるものは一切ありません。</li>
+    <li>私たちはデータを販売せず、以下に述べるホスティング基盤を超えて第三者と共有することもありません。</li>
+</ul>
+
+<h2>デバイス上での保存</h2>
+<ul>
+    <li>あなたの最近の解答履歴、設定、アカウントコードは、アプリがオフラインで動作し素早く読み込まれるように、ブラウザのストレージ（localStorage と IndexedDB）にローカルで保存されます。</li>
+    <li>アプリをアンインストールしたりサイトのデータを消去したりすると、このローカルのコピーは削除されます。あなたの履歴はアカウントコードのもとでサーバーに残っているため、再びコードを入力すれば復元されます。</li>
+</ul>
+
+<h2>ホスティングとインフラ</h2>
+<ul>
+    <li>このサービスは <strong>Cloudflare</strong>（Workers と D1 データベース）上で稼働しています。あらゆるウェブホストと同様に、Cloudflare はサイトを配信し不正利用から保護するために、IPアドレスとリクエストのメタデータを処理します。<a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare のプライバシーポリシー</a>をご覧ください。</li>
+    <li>検討モードであなたが分析する盤面は、KataGo による評価のために私たち自身の分析サーバーに送信されることがあります。盤面には個人データは一切含まれません。</li>
+    <li>プッシュ通知は、あなたのブラウザの提供元のプッシュサービス（例えば Android の Chrome の場合は Google のもの）を通じて配信されます。</li>
+</ul>
+
+<h2>データの保持と削除</h2>
+<ul>
+    <li>挑戦の記録は無期限に保持されます。これらは、あなたの段級位、復習スケジュール、そしてコミュニティの難易度較正の基礎となるものです。</li>
+    <li>プッシュサブスクリプションは、通知を無効にすると削除され、期限切れまたは到達不能なサブスクリプションは自動的に整理されます。</li>
+    <li>あなたのアカウントコードに関連するすべてのデータを削除するには、<a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> までメールで、コード（「アカウント」メニュー）を添えてご連絡ください。このコードは私たちが保持する唯一の識別子であるため、コードなしにあなたのデータを見つけることはできません。</li>
+</ul>
+
+<h2>お子様について</h2>
+<p>このアプリは、あらゆる年齢の方に適した囲碁パズルのトレーナーです。お子様を含め、誰からも個人情報を収集することはなく、上記の仮名化された解答記録のみを収集します。</p>
+
+<h2>本ポリシーの変更</h2>
+<p>本ポリシーに重要な変更があった場合、その変更は<a href="changelog.html">変更履歴</a>に記載されます。</p>
+    </div>
+
+    <!-- ===================== 한국어 (ko) ===================== -->
+    <div class="i18n" data-lang="ko" hidden>
+        <h1>개인정보처리방침</h1>
+
+        <p>이 방침은 onlymove.net과 설치 가능한 앱(네이티브 래퍼에 담긴 동일한 웹 앱인 Google Play의 Android 앱 포함)에 적용됩니다. 요약하자면: 전통적인 의미의 사용자 계정도, 이름도, 이메일 주소도, 광고도, 제3자 분석도 없습니다. 앱은 여러분의 진행 상황이 기기 간에 동기화될 수 있도록 무작위 계정 코드로 여러분의 풀이 기록을 저장합니다.</p>
+
+        <p><em>시행일: 2026년 7월 13일.</em></p>
+
+        <h2>여러분의 계정 코드</h2>
+        <ul>
+            <li>앱을 처음 사용할 때, 앱은 여러분의 기기에서 <strong>무작위 계정 코드</strong>를 생성합니다. 이 코드는 여러분의 데이터에 연결된 유일한 식별자입니다 — 우리는 여러분의 이름, 이메일 주소, 그 밖의 어떤 개인 정보도 결코 요청하거나 저장하지 않습니다.</li>
+            <li>코드는 계정 메뉴에 표시됩니다. 다른 기기에서 이 코드를 입력하면 그 기기가 같은 풀이 기록에 연결됩니다.</li>
+            <li>코드를 비밀번호처럼 다루세요: 그것을 가진 사람은 누구나 그 풀이 기록에 접근하고 이어갈 수 있습니다.</li>
+        </ul>
+
+        <h2>우리가 수집하는 것</h2>
+        <p>여러분이 문제를 시도할 때마다, 여러분의 진행 상황이 보존되고 기기 간에 동기화되도록 앱이 결과를 우리 서버로 보냅니다:</p>
+        <ul>
+            <li><strong>시도별 기록:</strong> 여러분의 계정 코드, 문제의 ID, 문제를 풀었는지 여부, 여러분이 둔 수, 풀이 시간, 복습에 들인 시간, 바둑판 크기, 반복 문제였는지 여부, 그리고 타임스탬프.</li>
+            <li><strong>급수/단 설문 답변(선택 사항):</strong> 앱은 이따금 여러분이 다른 바둑 서버에서 어떤 급수/단인지 묻습니다. 답변은 자발적이며, 답변은 모두를 위한 레이팅-급수 곡선을 보정하는 데 사용됩니다.</li>
+            <li><strong>복습 알림(선택 사항):</strong> 여러분이 푸시 알림을 켜면, 알림을 전달할 수 있도록 여러분 기기의 푸시 구독(여러분의 브라우저가 발급한 전달 주소)과 복습할 때가 된 문제의 일정을 저장합니다.</li>
+            <li><strong>공유 링크 이벤트:</strong> 여러분이 공유 문제 링크를 만들거나 열 때, 우리는 문제, 계정 코드, 열린 링크의 경우 유입 페이지, 그리고 우리 호스팅 제공업체의 엣지에서 네트워크 연결로부터 유추한 국가 수준의 위치를 기록합니다. IP 주소 자체는 저장하지 않습니다.</li>
+            <li>공유 링크로 열린 문제에 대한 여러분의 <strong>시도</strong>는 기록되지 않습니다 — 서버의 시도 기록에도 여러분 자신의 풀이 기록에도 도달하지 않으며, 여러분의 급수/단에 결코 영향을 주지 않습니다.</li>
+        </ul>
+
+        <h2>우리가 수집하지 않는 것</h2>
+        <ul>
+            <li>이름, 이메일 주소, 전화번호, 결제 정보는 없습니다.</li>
+            <li>광고 식별자도, 광고 네트워크도, 제3자 분석이나 추적 스크립트도 없습니다.</li>
+            <li>정확한 위치는 없습니다. 위에서 언급한 국가 수준의 값만, 그리고 공유 링크 이벤트에 대해서만 있습니다.</li>
+        </ul>
+
+        <h2>데이터가 사용되는 방식</h2>
+        <ul>
+            <li>여러분의 풀이 기록, 급수/단, 복습 일정을 기기 간에 동기화합니다.</li>
+            <li>여러분의 급수/단을 추정하고 여러분에게 맞는 문제를 선택합니다.</li>
+            <li>모두를 위한 문제 난이도 보정: 각 문제의 레이팅은 서로 다른 기력의 플레이어들이 실제로 얼마나 자주 그 문제를 푸는지에 따라 다듬어집니다.</li>
+            <li>익명의 집계된 커뮤니티 통계(커뮤니티 탭): 지난 한 주에 걸쳐 계산한 활동, 급수/단 분포, 시간 사용 차트. 거기에 표시되는 어떤 것도 개별 플레이어를 식별할 수 없습니다.</li>
+            <li>우리는 데이터를 판매하지 않으며, 아래에 설명하는 호스팅 인프라 외에 제3자와 공유하지 않습니다.</li>
+        </ul>
+
+        <h2>여러분 기기에서의 저장</h2>
+        <ul>
+            <li>여러분의 최근 풀이 기록, 설정, 계정 코드는 앱이 오프라인에서 작동하고 빠르게 로드되도록 여러분의 브라우저 저장소(localStorage 및 IndexedDB)에 로컬로 저장됩니다.</li>
+            <li>앱을 삭제하거나 사이트 데이터를 지우면 이 로컬 복사본이 제거됩니다. 여러분의 기록은 여러분의 계정 코드로 서버에 남아 있으므로, 코드를 다시 입력하면 복원됩니다.</li>
+        </ul>
+
+        <h2>호스팅 및 인프라</h2>
+        <ul>
+            <li>이 서비스는 <strong>Cloudflare</strong>(Workers 및 D1 데이터베이스)에서 실행됩니다. 여느 웹 호스트와 마찬가지로, Cloudflare는 사이트를 제공하고 남용으로부터 보호하기 위해 IP 주소와 요청 메타데이터를 처리합니다; <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare의 개인정보처리방침</a>을 참고하세요.</li>
+            <li>여러분이 복습 모드에서 분석하는 판 국면은 KataGo가 평가하도록 우리 자체 분석 서버로 전송될 수 있습니다. 국면에는 개인 정보가 담겨 있지 않습니다.</li>
+            <li>푸시 알림은 여러분의 브라우저 공급업체의 푸시 서비스(예: Android용 Chrome의 경우 Google)를 통해 전달됩니다.</li>
+        </ul>
+
+        <h2>데이터 보관 및 삭제</h2>
+        <ul>
+            <li>시도 기록은 무기한 보관됩니다 — 그것이 여러분의 급수/단, 복습 일정, 그리고 커뮤니티 난이도 보정이 만들어지는 근거이기 때문입니다.</li>
+            <li>푸시 구독은 여러분이 알림을 끄면 삭제되며, 만료되었거나 도달할 수 없는 구독은 자동으로 정리됩니다.</li>
+            <li>여러분의 계정 코드에 연결된 모든 데이터를 삭제하려면, <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a>으로 이메일을 보내면서 코드(계정 메뉴)를 함께 적어 주세요. 코드가 우리가 보유한 유일한 식별자이므로, 그것 없이는 여러분의 데이터를 찾을 수 없습니다.</li>
+        </ul>
+
+        <h2>아동</h2>
+        <p>이 앱은 모든 연령에 적합한 바둑 문제 트레이너입니다. 아동을 포함해 누구로부터도 개인 정보를 수집하지 않으며 — 위에서 설명한 가명 처리된 풀이 기록만 수집합니다.</p>
+
+        <h2>이 방침의 변경</h2>
+        <p>이 방침이 의미 있는 방식으로 변경되면, 그 변경 사항은 <a href="changelog.html">변경 이력</a>에 기재됩니다.</p>
+    </div>
 
     <div class="footer">
-        <p>Questions: <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> &middot; Join the community on <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a></p>
-        <p><a href="about.html">About onlymove.net</a> &middot; <a href="index.html">Back to Tsumego App</a></p>
+        <p class="i18n" data-lang="en">Questions: <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> &middot; Join the community on <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a></p>
+        <p class="i18n" data-lang="zh" hidden>疑问咨询：<a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> &middot; 在 <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a> 加入社区</p><p class="i18n" data-lang="ja" hidden>お問い合わせ：<a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> &middot; <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a> でコミュニティに参加</p><p class="i18n" data-lang="ko" hidden>문의: <a href="mailto:typo.hh@gmail.com">typo.hh@gmail.com</a> &middot; <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>에서 커뮤니티에 참여하세요</p>
+        <p class="i18n" data-lang="en"><a href="about.html">About onlymove.net</a> &middot; <a href="index.html">Back to Tsumego App</a></p>
+        <p class="i18n" data-lang="zh" hidden><a href="about.html">关于 onlymove.net</a> &middot; <a href="index.html">返回死活题应用</a></p><p class="i18n" data-lang="ja" hidden><a href="about.html">onlymove.net について</a> &middot; <a href="index.html">詰碁アプリに戻る</a></p><p class="i18n" data-lang="ko" hidden><a href="about.html">onlymove.net 소개</a> &middot; <a href="index.html">사활 앱으로 돌아가기</a></p>
     </div>
+
+    <script>
+        // Reveal the content block for the viewer's language; hide the rest.
+        // Prefix match mirrors getLang() in js/i18n.js (zh/ja/ko/en).
+        (function () {
+            function pick() {
+                var l = navigator.language || 'en';
+                if (l.indexOf('zh') === 0) return 'zh';
+                if (l.indexOf('ja') === 0) return 'ja';
+                if (l.indexOf('ko') === 0) return 'ko';
+                return 'en';
+            }
+            var lang = pick();
+            document.documentElement.lang = lang;
+            var titles = {
+                en: 'Privacy Policy — onlymove.net',
+                zh: '隐私政策 — onlymove.net',
+                ja: 'プライバシーポリシー — onlymove.net',
+                ko: '개인정보처리방침 — onlymove.net'
+            };
+            document.title = titles[lang] || titles.en;
+            var nodes = document.querySelectorAll('.i18n[data-lang]');
+            for (var i = 0; i < nodes.length; i++) {
+                nodes[i].hidden = (nodes[i].getAttribute('data-lang') !== lang);
+            }
+        })();
+    </script>
 
 </body>
 

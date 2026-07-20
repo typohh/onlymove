@@ -87,16 +87,28 @@ self.addEventListener('activate', event => {
   })());
 });
 
+// Localized fallback title for a push with no/invalid JSON title. The normal
+// path uses the server-rendered payload.title (already localized per the
+// device's stored lang); this only covers a malformed payload. Mirrors the
+// getLang() prefix match in js/i18n.js.
+function fallbackNotifTitle() {
+    const l = (self.navigator && self.navigator.language) || 'en';
+    if (l.indexOf('zh') === 0) return '该复习了';
+    if (l.indexOf('ja') === 0) return '復習の時間です';
+    if (l.indexOf('ko') === 0) return '복습할 시간입니다';
+    return 'Time to review';
+}
+
 self.addEventListener('push', event => {
     let payload = {};
     if (event.data) {
         try {
             payload = event.data.json();
         } catch {
-            payload = { title: 'Time to review', body: event.data.text() };
+            payload = { title: fallbackNotifTitle(), body: event.data.text() };
         }
     }
-    const title = payload.title || 'Time to review';
+    const title = payload.title || fallbackNotifTitle();
     const options = {
         body: payload.body || '',
         icon: '/icon-192.png',

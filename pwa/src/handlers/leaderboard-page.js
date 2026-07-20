@@ -26,6 +26,82 @@ const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
 // regional-indicator glyph like every other flag; swap to '🏴‍☠️' etc. here to taste.
 const UNKNOWN_FLAG = '🇺🇳';
 
+// Localization for this server-rendered page. The page is edge-cached for 60s, so
+// language MUST be resolved on the CLIENT (navigator.language) — an Accept-Language
+// server split would cache one language and serve it to every viewer. The dict is
+// inlined into the page and applied by the prelude script; it mirrors the SPA's
+// getLang() prefix match (zh/ja/ko/en) and {param} interpolation (js/i18n.js).
+// `{discord}` in inviteLine is filled with the anchor at runtime. "onlymove" is a
+// brand name and stays untranslated (the third column header). NOTE: the tournament
+// page (Finnish-only) and the invite page (English-only) are deliberate exceptions
+// and do NOT share this dict.
+const STR = {
+    en: {
+        leaderboard: 'Leaderboard',
+        sub: 'Every player active in the past week with at least {min} solves, ordered by their onlymove rank estimate. "Declared" is where the player\'s external ranks land on the onlymove scale.',
+        player: 'Player',
+        declared: 'Declared',
+        anonymous: 'Anonymous',
+        empty: 'No players yet.',
+        belowNoteOne: '1 more active player has fewer than {min} solves and isn\'t shown yet.',
+        belowNoteMany: '{n} more active players have fewer than {min} solves and aren\'t shown yet.',
+        inviteLine: 'Want your name shown instead of "Anonymous"? Registration is by invite — ask in {discord}.',
+        hideLabel: 'Hide my profile — withhold my name, country, and declared ranks from this board. My onlymove rank still shows, but anonymously.',
+        saving: 'Saving…',
+        hiddenMsg: 'Your profile is hidden. The board updates within a minute.',
+        visibleMsg: 'Your profile is visible. The board updates within a minute.',
+        saveError: 'Could not save — please try again.',
+    },
+    zh: {
+        leaderboard: '排行榜',
+        sub: '过去一周内至少解出 {min} 题的所有活跃玩家，按其 onlymove 段位估计排序。「申报」是玩家的外部段位换算到 onlymove 标度后的位置。',
+        player: '玩家',
+        declared: '申报',
+        anonymous: '匿名',
+        empty: '暂无玩家。',
+        belowNoteOne: '还有 1 名活跃玩家的解题数不足 {min}，暂未显示。',
+        belowNoteMany: '还有 {n} 名活跃玩家的解题数不足 {min}，暂未显示。',
+        inviteLine: '想显示您的名字而不是「匿名」？注册需邀请——请在 {discord} 询问。',
+        hideLabel: '隐藏我的资料——不在此榜单显示我的名字、国家/地区和申报段位。我的 onlymove 段位仍会显示，但为匿名。',
+        saving: '正在保存…',
+        hiddenMsg: '您的资料已隐藏。榜单将在一分钟内更新。',
+        visibleMsg: '您的资料已公开。榜单将在一分钟内更新。',
+        saveError: '保存失败——请重试。',
+    },
+    ja: {
+        leaderboard: 'ランキング',
+        sub: '過去1週間に少なくとも {min} 問解いたアクティブなプレイヤー全員を、onlymove ランク推定値順に並べています。「申告」は、そのプレイヤーの外部ランクを onlymove スケールに換算した位置です。',
+        player: 'プレイヤー',
+        declared: '申告',
+        anonymous: '匿名',
+        empty: 'まだプレイヤーがいません。',
+        belowNoteOne: 'あと1人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
+        belowNoteMany: 'あと{n}人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
+        inviteLine: '「匿名」の代わりに名前を表示しますか？登録は招待制です——{discord} で聞いてください。',
+        hideLabel: 'プロフィールを隠す——このボードで名前・国・申告ランクを表示しません。onlymove ランクは匿名で引き続き表示されます。',
+        saving: '保存中…',
+        hiddenMsg: 'プロフィールは非表示です。ボードは1分以内に更新されます。',
+        visibleMsg: 'プロフィールは表示されています。ボードは1分以内に更新されます。',
+        saveError: '保存できませんでした——もう一度お試しください。',
+    },
+    ko: {
+        leaderboard: '순위표',
+        sub: '지난 한 주 동안 최소 {min}문제를 푼 모든 활동 플레이어를 onlymove 랭크 추정치 순으로 정렬했습니다. "신고"는 플레이어의 외부 랭크를 onlymove 척도로 환산한 위치입니다.',
+        player: '플레이어',
+        declared: '신고',
+        anonymous: '익명',
+        empty: '아직 플레이어가 없습니다.',
+        belowNoteOne: '해결한 문제가 {min}개 미만인 활동 플레이어가 1명 더 있으며 아직 표시되지 않습니다.',
+        belowNoteMany: '해결한 문제가 {min}개 미만인 활동 플레이어가 {n}명 더 있으며 아직 표시되지 않습니다.',
+        inviteLine: '"익명" 대신 이름을 표시하고 싶으신가요? 등록은 초대제입니다 — {discord}에서 문의하세요.',
+        hideLabel: '내 프로필 숨기기 — 이 보드에서 내 이름, 국가, 신고 랭크를 표시하지 않습니다. onlymove 랭크는 익명으로 계속 표시됩니다.',
+        saving: '저장 중…',
+        hiddenMsg: '프로필이 숨겨졌습니다. 보드는 1분 이내에 업데이트됩니다.',
+        visibleMsg: '프로필이 표시됩니다. 보드는 1분 이내에 업데이트됩니다.',
+        saveError: '저장하지 못했습니다 — 다시 시도해 주세요.',
+    },
+};
+
 export async function handleLeaderboard(env) {
     let rows = [], belowMin = 0;
     try {
@@ -69,10 +145,12 @@ function renderPage(rows, belowMin) {
         return row;
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');
+    const strJson = JSON.stringify(STR).replace(/</g, '\\u003c');
     // Footer tally of active players still below the list-entry gate (no per-user
-    // sample count is shown; this aggregate is the only nod to them).
+    // sample count is shown; this aggregate is the only nod to them). The English
+    // text here is the no-JS default; the prelude re-renders it localized.
     const belowNote = belowMin
-        ? `<p>${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
+        ? `<p id="lbBelow">${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
         : '';
 
     return `<!doctype html>
@@ -115,14 +193,14 @@ function renderPage(rows, belowMin) {
 </style>
 </head>
 <body>
-<h1>Leaderboard</h1>
-<p class="sub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks land on the onlymove scale.</p>
+<h1 id="lbH1">Leaderboard</h1>
+<p class="sub" id="lbSub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks land on the onlymove scale.</p>
 <table>
   <thead>
     <tr>
       <th>#</th>
-      <th class="player" data-sort="name">Player</th>
-      <th data-sort="decl">Declared</th>
+      <th class="player" data-sort="name" id="thPlayer">Player</th>
+      <th data-sort="decl" id="thDecl">Declared</th>
       <th class="om-start" data-sort="est">onlymove</th>
     </tr>
   </thead>
@@ -130,15 +208,62 @@ function renderPage(rows, belowMin) {
 </table>
 <footer>
   ${belowNote}
-  <p>Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
+  <p id="lbInvite">Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
   <div id="hideProfile" class="hide-profile" hidden>
     <label>
       <input type="checkbox" id="hideChk" disabled>
-      <span>Hide my profile — withhold my name, country, and declared ranks from this board. My onlymove rank still shows, but anonymously.</span>
+      <span id="hideLabel">Hide my profile — withhold my name, country, and declared ranks from this board. My onlymove rank still shows, but anonymously.</span>
     </label>
     <span id="hideStatus" class="hide-status" role="status" aria-live="polite"></span>
   </div>
 </footer>
+<script>
+// Localization prelude. Resolves the viewer's language on the CLIENT (see STR note
+// in the module) and rewrites the static text; must run BEFORE the render script so
+// the localized column headers become each th's stored data-label. Exposes window.LB
+// for the render + hide-profile scripts.
+(function () {
+  var STR = ${strJson};
+  var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin} };
+  function getLang() {
+    var l = navigator.language || 'en';
+    if (l.indexOf('zh') === 0) return 'zh';
+    if (l.indexOf('ja') === 0) return 'ja';
+    if (l.indexOf('ko') === 0) return 'ko';
+    return 'en';
+  }
+  var LANG = getLang();
+  function t(key, params) {
+    var db = STR[LANG] || STR.en;
+    var s = (key in db) ? db[key] : STR.en[key];
+    if (params && typeof s === 'string') {
+      s = s.replace(/\\{(\\w+)\\}/g, function (m, n) { return (n in params) ? String(params[n]) : m; });
+    }
+    return s;
+  }
+  window.LB = { t: t, lang: LANG, cfg: CFG };
+
+  function setText(id, s) { var el = document.getElementById(id); if (el) el.textContent = s; }
+  document.documentElement.lang = LANG;
+  document.title = 'onlymove — ' + t('leaderboard');
+  setText('lbH1', t('leaderboard'));
+  setText('lbSub', t('sub', { min: CFG.min }));
+  setText('thPlayer', t('player'));
+  setText('thDecl', t('declared'));
+  setText('hideLabel', t('hideLabel'));
+  var invite = document.getElementById('lbInvite');
+  if (invite) {
+    invite.innerHTML = t('inviteLine', {
+      discord: '<a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>',
+    });
+  }
+  var below = document.getElementById('lbBelow');
+  if (below && CFG.belowMin > 0) {
+    below.textContent = t(CFG.belowMin === 1 ? 'belowNoteOne' : 'belowNoteMany',
+                          { n: CFG.belowMin, min: CFG.min });
+  }
+})();
+</script>
 <script>
 (function () {
   var DATA = ${json};
@@ -151,7 +276,7 @@ function renderPage(rows, belowMin) {
   function fmt(cell) { return cell ? esc(cell.t) : '—'; }
 
   function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'decl' | 'est'
-  function nameOf(r) { return r.anon ? 'Anonymous' : (r.name || ''); }
+  function nameOf(r) { return r.anon ? window.LB.t('anonymous') : (r.name || ''); }
   function sortValue(r) {
     if (sortKey === 'name') return nameOf(r);
     if (sortKey === 'decl') return r.decl ? r.decl.v : null;
@@ -187,7 +312,7 @@ function renderPage(rows, belowMin) {
 
   function render() {
     updateHeaders();
-    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No players yet.</td></tr>'; return; }
+    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">' + esc(window.LB.t('empty')) + '</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
       var estCell = '<td class="val om-start">' + fmt(r.est) + '</td>';
@@ -226,7 +351,7 @@ function renderPage(rows, belowMin) {
   chk.addEventListener('change', function () {
     var want = chk.checked;
     chk.disabled = true;
-    status.textContent = 'Saving…';
+    status.textContent = window.LB.t('saving');
     fetch('/profile/hide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -235,13 +360,11 @@ function renderPage(rows, belowMin) {
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
       .then(function (j) {
         chk.checked = !!j.hidden;
-        status.textContent = (j.hidden
-          ? 'Your profile is hidden.'
-          : 'Your profile is visible.') + ' The board updates within a minute.';
+        status.textContent = window.LB.t(j.hidden ? 'hiddenMsg' : 'visibleMsg');
       })
       .catch(function () {
         chk.checked = !want;   // revert on failure
-        status.textContent = 'Could not save — please try again.';
+        status.textContent = window.LB.t('saveError');
       })
       .then(function () { chk.disabled = false; });
   });

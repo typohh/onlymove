@@ -125,7 +125,14 @@ export async function enableNotifications() {
         }
     }
 
-    await postJson('/push/subscribe', { userId: state.userId, subscription: subscriptionToJson(sub) });
+    // Send the device UI language so the recall cron renders each reminder in
+    // the language the user actually reads; the server folds it to a supported
+    // code (resolveLang in handlers/push.js) and stores it per subscription.
+    await postJson('/push/subscribe', {
+        userId: state.userId,
+        subscription: subscriptionToJson(sub),
+        lang: navigator.language || 'en',
+    });
 
     // Push the current recall schedule right away so the cron has something
     // to fire on without waiting for the next attempt. Force past the

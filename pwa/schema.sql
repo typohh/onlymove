@@ -87,7 +87,12 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     -- by every /schedule call (across the account's device rows), even when the
     -- schedule diff is empty. Replaces relying on recall_schedule.updated_at,
     -- which diff-mode uploads no longer refresh across the board.
-    last_seen_at      INTEGER
+    last_seen_at      INTEGER,
+    -- Resolved UI language of the device at subscribe time (one of en/zh/ja/ko;
+    -- the client sends navigator.language and the /push/subscribe handler folds
+    -- it to a supported code). The recall cron renders each device's reminder in
+    -- its own language. NULL / anything unknown -> English at send time.
+    lang              TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 
@@ -109,6 +114,8 @@ CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(use
 --                 created_at, updated_at, last_seen_at FROM push_subscriptions_old;
 --        DROP TABLE push_subscriptions_old;
 --        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+--   3. lang column (per-device notification language):
+--        ALTER TABLE push_subscriptions ADD COLUMN lang TEXT;
 
 -- Per-(user, problem) recall window. enter_at / exit_at are unix ms epochs at
 -- which the client-side logistic model predicts P(recall) crosses 0.80 and

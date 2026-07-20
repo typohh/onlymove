@@ -82,7 +82,7 @@ export async function runRecallNotifications(env) {
     // per opted-in device), so read it whole and bucket in JS rather than
     // building an IN-list over the variable due-user set.
     const subsAll = await env.DB.prepare(
-      `SELECT endpoint, user_id, p256dh, auth, last_notified_at, last_seen_at
+      `SELECT endpoint, user_id, p256dh, auth, last_notified_at, last_seen_at, lang
        FROM push_subscriptions`
     ).all();
     for (const s of (subsAll.results || [])) {
@@ -107,15 +107,18 @@ export async function runRecallNotifications(env) {
       // per-user, not per-device) rather than nagging mid-session.
       if (u.lastActiveAt && (now - u.lastActiveAt) < ACTIVE_SUPPRESS_MS) continue;
 
-      const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlogByUser.get(userId) || 0);
-      const payload = { data: JSON.stringify(message), options: { ttl: 6 * 3600 } };
+      const backlog = backlogByUser.get(userId) || 0;
 
       // Fan out to every device. Throttle is per-device (last_notified_at lives
-      // on the row); dead endpoints are pruned individually.
+      // on the row); dead endpoints are pruned individually. The message is
+      // rendered per device in that device's stored language (sub.lang), so an
+      // account's phone and laptop can read the reminder in different languages.
       let deliveredToAny = false;
       for (const sub of u.subs) {
         if (sub.last_notified_at && (now - sub.last_notified_at) < MIN_NOTIFY_INTERVAL_MS) continue;
 
+        const message = buildNotificationMessage(u.enteredIds, u.exitingIds, backlog, sub.lang);
+        const payload = { data: JSON.stringify(message), options: { ttl: 6 * 3600 } };
         const subscription = {
           endpoint: sub.endpoint,
           expirationTime: null,
@@ -172,7 +175,54 @@ export async function runRecallNotifications(env) {
     .bind(now - SEVEN_DAYS_MS).run();
 }
 
-function buildNotificationMessage(enteredIds, exitingIds, backlog) {
+// Notification string table. Server-side counterpart of js/i18n.js (the client
+// dictionary can't be imported into the Worker). Keep the language set in sync
+// with resolveLang() in handlers/push.js. `{n}` / `{m}` are the entered /
+// expiring counts. Singular vs plural is handled by separate *One / *Many keys
+// (CJK has no plural inflection, so both forms read the same there).
+const NOTIF_STR = {
+  en: {
+    titleOne: '1 problem ready to review',
+    titleMany: '{n} problems ready to review',
+    bodyBoth: '{n} new, {m} expiring soon',
+    bodyExpiringOne: '1 expiring soon',
+    bodyExpiringMany: '{m} expiring soon',
+    bodyTap: 'Tap to open',
+  },
+  zh: {
+    titleOne: '有 1 道题可以复习了',
+    titleMany: '有 {n} 道题可以复习了',
+    bodyBoth: '{n} 道新题，{m} 道即将到期',
+    bodyExpiringOne: '1 道即将到期',
+    bodyExpiringMany: '{m} 道即将到期',
+    bodyTap: '点击打开',
+  },
+  ja: {
+    titleOne: '復習できる問題が1問あります',
+    titleMany: '復習できる問題が{n}問あります',
+    bodyBoth: '新規{n}問、まもなく期限切れ{m}問',
+    bodyExpiringOne: 'まもなく期限切れ1問',
+    bodyExpiringMany: 'まもなく期限切れ{m}問',
+    bodyTap: 'タップして開く',
+  },
+  ko: {
+    titleOne: '복습할 문제가 1개 있습니다',
+    titleMany: '복습할 문제가 {n}개 있습니다',
+    bodyBoth: '새 문제 {n}개, 곧 만료 {m}개',
+    bodyExpiringOne: '곧 만료되는 문제 1개',
+    bodyExpiringMany: '곧 만료되는 문제 {m}개',
+    bodyTap: '탭하여 열기',
+  },
+};
+
+function notifTerm(lang, key, params) {
+  const db = NOTIF_STR[lang] || NOTIF_STR.en;
+  let s = key in db ? db[key] : NOTIF_STR.en[key];
+  if (params) s = s.replace(/\{(\w+)\}/g, (mm, name) => (name in params ? String(params[name]) : mm));
+  return s;
+}
+
+function buildNotificationMessage(enteredIds, exitingIds, backlog, lang) {
   const n = enteredIds.length;
   const m = exitingIds.length;
   // Backlog should already include both newly-entered and not-yet-exited
@@ -180,14 +230,16 @@ function buildNotificationMessage(enteredIds, exitingIds, backlog) {
   // delta read (e.g. a problem entered between the two queries).
   const total = Math.max(backlog || 0, n + m);
 
-  const title = total === 1 ? '1 problem ready to review' : `${total} problems ready to review`;
+  const title = total === 1
+    ? notifTerm(lang, 'titleOne')
+    : notifTerm(lang, 'titleMany', { n: total });
   let body;
   if (n > 0 && m > 0) {
-    body = `${n} new, ${m} expiring soon`;
+    body = notifTerm(lang, 'bodyBoth', { n, m });
   } else if (m > 0) {
-    body = m === 1 ? '1 expiring soon' : `${m} expiring soon`;
+    body = m === 1 ? notifTerm(lang, 'bodyExpiringOne') : notifTerm(lang, 'bodyExpiringMany', { m });
   } else {
-    body = 'Tap to open';
+    body = notifTerm(lang, 'bodyTap');
   }
 
   // Never deep-link a specific problem: this message is a snapshot, and by
