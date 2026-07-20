@@ -11,6 +11,7 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleRegister, handleInvitePreview } from './handlers/register.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
+import { handleTournament } from './handlers/tournament-page.js';
 import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
 import { handleProfileHide, handleProfileHidden } from './handlers/profile.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows } from './leaderboard.js';
@@ -51,6 +52,9 @@ const GET_ROUTES = [
   { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
+  // Static FINAL-RESULTS page for the concluded 2026 tournament (baked-in
+  // standings, no D1 read).
+  { path: '/tournament', handler: () => handleTournament() },
   // /invite is dual-purpose on the same path: with ?t=<token> it's the invitation
   // preview (JSON) for the /register confirmation dialog; without a token it's the
   // invite generator page (HTML). (GET /register itself is a navigation and falls
