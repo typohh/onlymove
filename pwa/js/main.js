@@ -40,7 +40,7 @@ import { recordShareEvent } from './user-stats.js';
 import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
-import { initOnboarding, onResume as onboardingResume } from './onboarding.js';
+import { initOnboarding, onResume as onboardingResume, onPreviousClicked as onboardingPreviousClicked } from './onboarding.js';
 
 /**
  * Reads `/9` or `/13` from the pathname. Returns null if the path is anything
@@ -302,6 +302,9 @@ function wireActionButtons() {
             // is ready; the disabled/no-op path unlocks here.
             setAcceptClicks(false);
             if (!e.target.classList.contains('disabled')) {
+                // First-run onboarding: the user used Previous themselves, so
+                // the bubble teaching it is retired unshown.
+                onboardingPreviousClicked();
                 enterAnalysisMode();
             } else {
                 setAcceptClicks(true);

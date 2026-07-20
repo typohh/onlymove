@@ -116,6 +116,7 @@ const anchors = {
     title: () => firstVisible(['title', 'title-h']),
     unreliableScore: () => document.querySelector('.unreliable'),
     board: () => el('board-container'),
+    previous: () => el('button1'),
     share: () => el('button-share'),
     install: () => el('button4'),
     // The hamburger button itself (portrait ☰ / landscape "Menu"): the
@@ -145,6 +146,17 @@ const BUBBLES = {
     recall: {
         kind: 'trigger', anchor: 'title', placement: 'below', text: 'onbRecall',
         eligible: (ctx) => !!ctx.isRepeat,
+    },
+    // Teaches the Previous button. Ambient and gated past the early drip so it
+    // doesn't compete with the first-problems bubbles. A user who has already
+    // clicked Previous themselves never sees it — onPreviousClicked marks it
+    // shown. Having been in review mode does NOT count (a wrong answer
+    // auto-enters review without the button, teaching nothing about it).
+    previous: {
+        kind: 'ambient', anchor: 'previous', placement: 'below', text: 'onbPrevious',
+        eligible: () => historyLen() >= 8 &&
+            !!(state.previousProblem && state.previousProblem.sgf) &&
+            isVisible(anchors.previous()),
     },
     rank: {
         kind: 'ambient', anchor: 'rank', placement: 'below', text: 'onbRank',
@@ -411,11 +423,18 @@ export function onSolvingProblemShown(problem) {
     if (!_ready || _suppressed) return;
     markActive();
     const isRepeat = !!(problem && problem.isRepeat);
-    tryShow(['intro', 'recall', 'rank', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
+    tryShow(['intro', 'recall', 'rank', 'previous', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
 }
 
 export function onEnterReview() {
     tryShow(['reviewIntro', 'reviewRank', 'share']);
+}
+
+// The user clicked the Previous button themselves — they know it; retire the
+// teaching bubble (a no-op once the flag is set). Deliberately NOT keyed off
+// entering review mode: a wrong answer auto-enters review without the button.
+export function onPreviousClicked() {
+    if (!wasShown('previous')) markShown('previous');
 }
 
 export function onReviewScoreShown() {

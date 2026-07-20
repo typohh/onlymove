@@ -151,7 +151,24 @@ const localization = {
     rankTranslationTitle: '你在各平台的段级位',
     rankTranslationClose: '关闭',
     rankProgressCaption: '（升到下一段级位的进度）',
-    rankConfidenceFormat: '您的段位估计精度为 ± {ci} 子（95% 置信区间）。'
+    rankConfidenceFormat: '您的段位估计精度为 ± {ci} 子（95% 置信区间）。',
+
+    // First-run onboarding bubbles (js/onboarding.js).
+    onbIntro: '黑先。点击你认为黑方最佳一手的位置。',
+    onbRecall: '这道题你之前做过——我们会在你快要忘记时把它重新拿出来复习。',
+    onbRank: '这是你的段位，进度条显示距离下一段的进度。点击可查看它在各平台对应的段级位。',
+    onbKomi: '这是当前的实际贴目——点击可查看明细。',
+    onbInstall: '安装应用，即可离线练习，并在主屏幕添加图标。',
+    onbNotify: '开启提醒，当题目到了复习时间时就会收到通知。',
+    onbPrevious: '刚做过的题目不会消失——随时点击「上一个」即可在复习模式中重新打开它。',
+    onbReviewIntro: '自由探索——点击任意位置即可尝试不同变化。标记的位置是引擎评估的最佳一手。',
+    onbReviewRank: '这是这道题的难度段位。',
+    onbReviewScore: '这是当前局面的得分估算——正数代表黑方占优。',
+    onbScoreUnreliable: '闪烁的红色——这个局面是由 KataGo 即时评估的，可能存在错误。',
+    onbShare: '点击「分享」，即可把这道题以链接或图片的形式发给他人尝试。',
+    onbStats: '打开「菜单」并点击「统计」，即可查看你的弱点、解题速度和进步情况。',
+    onbAccount: '打开「菜单」并点击「账户」——你的进度会保存为一个代码，在其他设备上输入即可同步。',
+    onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。'
   },
   ja: {
     kyu: '級',
@@ -300,7 +317,24 @@ const localization = {
     rankTranslationTitle: '各サーバーでのあなたの段級位',
     rankTranslationClose: '閉じる',
     rankProgressCaption: '（次のランクへの進捗）',
-    rankConfidenceFormat: 'あなたのランクは ± {ci} 子の精度で推定されています（95% 信頼区間）。'
+    rankConfidenceFormat: 'あなたのランクは ± {ci} 子の精度で推定されています（95% 信頼区間）。',
+
+    // First-run onboarding bubbles (js/onboarding.js).
+    onbIntro: '黒番です。黒の最善手だと思う場所をタップしてください。',
+    onbRecall: 'この問題は前にも解きました。忘れかけた頃に、もう一度出題します。',
+    onbRank: 'これはあなたのランクです。バーは次のランクまでの進捗を表します。タップすると各サーバーでの段級位が見られます。',
+    onbKomi: 'これは実効的なコミです。タップすると内訳が見られます。',
+    onbInstall: 'アプリをインストールすると、オフラインで練習でき、ホーム画面にアイコンも追加されます。',
+    onbNotify: '通知をオンにすると、復習の時期になった問題をお知らせします。',
+    onbPrevious: 'さっき解いた問題は消えていません。いつでも「前へ」をタップすれば復習モードで開き直せます。',
+    onbReviewIntro: '自由に探索できます。どこでもタップして変化を試してみましょう。印のある場所が、エンジンが最善と評価する手です。',
+    onbReviewRank: 'これはこの問題の難易度ランクです。',
+    onbReviewScore: 'これはこの局面のスコア予測です。プラスの数字なら黒が優勢です。',
+    onbScoreUnreliable: '赤く点滅しているのは、KataGo がその場で評価した局面で、誤りが含まれることがあります。',
+    onbShare: '「共有」をタップすると、この問題をリンクや画像で誰かに送って挑戦してもらえます。',
+    onbStats: '「メニュー」を開いて「統計」をタップすると、弱点や解答スピード、上達具合を確認できます。',
+    onbAccount: '「メニュー」を開いて「アカウント」をタップ——進捗はコードとして保存され、他の端末で入力すれば同期できます。',
+    onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。'
   },
   ko: {
     kyu: '급',
@@ -449,7 +483,24 @@ const localization = {
     rankTranslationTitle: '각 서버에서의 내 급/단',
     rankTranslationClose: '닫기',
     rankProgressCaption: '(다음 급/단까지의 진행도)',
-    rankConfidenceFormat: '당신의 랭크는 ± {ci} 점 이내로 추정됩니다 (95% 신뢰구간).'
+    rankConfidenceFormat: '당신의 랭크는 ± {ci} 점 이내로 추정됩니다 (95% 신뢰구간).',
+
+    // First-run onboarding bubbles (js/onboarding.js).
+    onbIntro: '흑선입니다. 흑의 최선의 수라고 생각하는 곳을 탭하세요.',
+    onbRecall: '이 문제는 전에 풀어봤어요. 잊어버릴 즈음에 다시 보여드립니다.',
+    onbRank: '이것은 회원님의 랭크입니다. 막대는 다음 랭크까지의 진행도를 보여줍니다. 탭하면 각 서버에서의 급/단을 볼 수 있습니다.',
+    onbKomi: '현재 적용되는 코미입니다. 탭하면 세부 내역을 볼 수 있습니다.',
+    onbInstall: '앱을 설치하면 오프라인으로 연습할 수 있고 홈 화면에 아이콘도 추가됩니다.',
+    onbNotify: '알림을 켜면 복습할 문제가 생겼을 때 알려드립니다.',
+    onbPrevious: '방금 푼 문제는 사라지지 않아요. 언제든 「이전」을 탭하면 복습 모드로 다시 열 수 있습니다.',
+    onbReviewIntro: '자유롭게 살펴보세요. 아무 곳이나 탭해 변화를 시험할 수 있습니다. 표시된 곳이 엔진이 최선으로 평가한 수입니다.',
+    onbReviewRank: '이 문제의 난이도 랭크입니다.',
+    onbReviewScore: '이 국면의 점수 예측입니다. 양수면 흑이 유리합니다.',
+    onbScoreUnreliable: '빨갛게 깜빡이는 것은 KataGo가 즉석에서 평가한 국면으로, 오류가 있을 수 있습니다.',
+    onbShare: '「공유」를 탭하면 이 문제를 링크나 이미지로 보내 다른 사람이 풀어보게 할 수 있습니다.',
+    onbStats: '「메뉴」를 열고 「통계」를 탭하면 약점과 풀이 속도, 진척도를 확인할 수 있습니다.',
+    onbAccount: '「메뉴」를 열고 「계정」을 탭하세요——진행 상황이 코드로 저장되어, 다른 기기에서 입력하면 동기화됩니다.',
+    onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.'
   },
   en: {
     kyu: 'kyu',
@@ -503,14 +554,14 @@ const localization = {
     whiteCaptures: 'White Captures',
     whiteAdjustment: 'White Adjustment',
 
-    // First-run onboarding bubbles (js/onboarding.js). English only; getTerm
-    // falls back to English for other languages until these are translated.
+    // First-run onboarding bubbles (js/onboarding.js).
     onbIntro: 'Black to play. Tap the point where you think Black\'s best move is.',
     onbRecall: "You've seen this one before — we resurface problems just as you're about to forget them.",
     onbRank: 'This is your rank, with a progress bar to the next. Tap it to see how it maps to other servers.',
     onbKomi: 'This is the effective komi — tap it for the breakdown.',
     onbInstall: 'Install the app for offline practice and a home-screen icon.',
     onbNotify: 'Turn on reminders to get a notification when problems are due for recall.',
+    onbPrevious: 'The problem you just answered isn\'t gone — tap Previous anytime to reopen it in review mode.',
     onbReviewIntro: 'Explore freely — tap any point to try a variation. The marked point is the move the engine rates best.',
     onbReviewRank: 'This is the problem\'s difficulty rank.',
     onbReviewScore: 'The score estimate for this position — a positive number favours Black.',
@@ -546,7 +597,7 @@ const localization = {
     statsNoExamples: '(no past examples available)',
     statsMoreExamples: '(+{count} more)',
     statsStyleFallback: 'style #{k}',
-    statsIssueTooMuch: 'You rely on «{motif}» too much.',
+    statsIssueTooMuch: 'You favor «{motif}» too much.',
     statsIssueNotEnough: "You don't trust «{motif}» enough.",
     statsIssueBadAt: 'You are weak at «{motif}».',
     statsCommunityHeader: 'Community · last {days} days (updated {ago})',
