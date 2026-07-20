@@ -232,7 +232,13 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     buffer             TEXT,
     pred_egf_rank      REAL,
     pred_egf_se        REAL,
-    last_active        TEXT
+    last_active        TEXT,
+    -- Edge geo-IP country (ISO 3166-1 alpha-2), stamped from request.cf.country into
+    -- the row's existing /report write (no extra write). The universal flag fallback
+    -- for the /leaderboard page: shows a flag for ANY active player, not just the
+    -- registered/surveyed few. EGD-sourced country (GoR heartbeat, invitation) still
+    -- wins over it — see readLeaderboardRows.
+    country            TEXT
 );
 -- There is deliberately NO index on last_active. It would be maintained on
 -- EVERY novel /report (the hot-path UPDATE sets last_active each time, and D1

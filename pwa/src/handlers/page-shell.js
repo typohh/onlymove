@@ -20,6 +20,6 @@ export function baseCss(maxWidthPx) {
 export const ESC_SNIPPET = `function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}`;
 
 // --- leaderboard-row display helpers ----------------------------------------------
-// Country code -> flag emoji (regional-indicator pair); '' when not a 2-letter code.
-export const flag = (cc) => (typeof cc === 'string' && cc.length === 2)
-    ? cc.toUpperCase().replace(/./g, (c) => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)) : '';
+// Country code -> flag emoji. Re-exported from the shared module so the Worker page
+// and the client's Community-stats country distribution use ONE definition.
+export { flag } from '../../shared/flag.js';

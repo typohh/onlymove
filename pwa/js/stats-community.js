@@ -7,6 +7,7 @@
 
 import { getTerm } from './i18n.js';
 import { computeUserCommunityBuckets, TIME_BINS, binHist } from './stats-compute.js';
+import { flag } from '../shared/flag.js';
 
 // Community pane: server-wide stats over the preceding 7 days (computed by the
 // Worker cron, served from /server-stats). Returns null on any failure or when
@@ -150,6 +151,28 @@ export async function buildServerStatsPane(history = []) {
             ? data.ranks.findIndex(r => r.rank === you.rankLabel)
             : -1;
         pane.append(h, makeBarList(data.ranks.map(r => ({ label: r.rank, value: r.n })), rankIdx, false));
+    }
+
+    // Country distribution of active players (leaderboard geo-IP; hidden profiles
+    // excluded server-side). Flag + code label, commonest-first; the long tail past
+    // COUNTRY_TOP_N is folded into one "Other" row so the list stays compact. No
+    // "you" highlight — the client has no reliable read of its own geo-IP country.
+    if (data.countries && data.countries.length) {
+        const COUNTRY_TOP_N = 15;
+        const sorted = data.countries.slice().sort((a, b) => b.n - a.n);
+        const bars = sorted.slice(0, COUNTRY_TOP_N).map(c => {
+            const f = flag(c.country);
+            return { label: (f ? f + ' ' : '') + c.country, value: c.n };
+        });
+        const tail = sorted.slice(COUNTRY_TOP_N);
+        if (tail.length) {
+            const otherN = tail.reduce((sum, c) => sum + c.n, 0);
+            bars.push({ label: `${getTerm('statsCountriesOther')} (+${tail.length})`, value: otherN });
+        }
+        const h = document.createElement('div');
+        h.className = 'server-stats-heading';
+        h.textContent = getTerm('statsCountries');
+        pane.append(h, makeBarList(bars, -1));
     }
 
     // One legend for the whole pane explaining the highlighted bar, at the very

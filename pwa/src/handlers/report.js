@@ -85,8 +85,11 @@ export async function handleReport(request, env, ctx) {
     // user has a row (created lazily + history-seeded on their first novel report).
     // Best-effort; the buffer is a derived cache (the cron reconciles).
     if (isRepeat === 0 && ctx && typeof ctx.waitUntil === 'function') {
+      // The edge geo-IP country is stamped into the leaderboard row's existing write
+      // (no extra write) as the universal flag fallback — see updateLeaderboardOnReport.
+      const country = (request.cf && request.cf.country) ? request.cf.country : null;
       ctx.waitUntil(
-        updateLeaderboardOnReport(env, data.userId, data.problem, data.success, timeUsed)
+        updateLeaderboardOnReport(env, data.userId, data.problem, data.success, timeUsed, country)
           .catch((e) => console.error('leaderboard update failed:', e))
       );
     }

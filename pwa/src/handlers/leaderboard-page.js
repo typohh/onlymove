@@ -21,6 +21,11 @@ import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
 
+// Shown when we can't resolve a country for a row (no GoR/invitation/geo-IP, or a
+// hidden profile). The UN flag reads as "nation unspecified" and renders as a real
+// regional-indicator glyph like every other flag; swap to '🏴‍☠️' etc. here to taste.
+const UNKNOWN_FLAG = '🇺🇳';
+
 export async function handleLeaderboard(env) {
     let rows = [], belowMin = 0;
     try {
@@ -57,7 +62,7 @@ function renderPage(rows, belowMin) {
             // renders a muted "Anonymous" label for them.
             name: r.registered ? (r.name || '—') : null,
             anon: !r.registered,
-            flag: flag(r.country),
+            flag: flag(r.country) || UNKNOWN_FLAG,
             decl,
             est: toEst(r.currentInternal),
         };

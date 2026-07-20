@@ -151,6 +151,20 @@ export function timeDeltaRatingFromBuffer(buffer, params) {
     return timeDockFromTimes(times);
 }
 
+// A Cloudflare edge geo-IP country (request.cf.country) is an ISO 3166-1 alpha-2
+// code, or one of the non-geographic sentinels 'XX' (unknown) / 'T1' (Tor). Keep
+// only a real 2-letter code (uppercased); the sentinels render as a broken flag
+// glyph, and this column is the UNIVERSAL flag fallback (hits most anonymous rows),
+// so garbage here is far more visible than in the old rare survey fallback. Returns
+// null otherwise, so a COALESCE write never clobbers a known-good country with an
+// unknown one.
+export function normalizeCountry(cc) {
+    if (typeof cc !== 'string') return null;
+    const u = cc.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(u) || u === 'XX' || u === 'T1') return null;
+    return u;
+}
+
 // GoR (integer EGD rating) -> onlymove rank scalar (1k = 0, 1d = 1). Standard EGF
 // ~100-GoR/stone linearization anchored at 1k = 2000, 1d = 2100 (kept simple; the
 // full nonlinear EGF relation could replace it later). Returns null on a bad GoR.
@@ -334,29 +348,37 @@ export async function buildRowStateFromReports(env, userId, params) {
 // (a one-time <= 500-row read per user; the just-inserted report is included
 // since the caller's INSERT already succeeded). Never throws — the cron
 // reconcile heals any drift. Callers pass only novel (is_repeat = 0) attempts.
-export async function updateLeaderboardOnReport(env, userId, problemId, success, timeUsed) {
+export async function updateLeaderboardOnReport(env, userId, problemId, success, timeUsed, country) {
     if (!env.DB) return;
     const row = await env.DB.prepare(
         `SELECT buffer FROM leaderboard WHERE user_id = ?1`
     ).bind(userId).first();
-    if (!row) { await createLeaderboardRow(env, userId); return; }
+    if (!row) { await createLeaderboardRow(env, userId, country); return; }
 
     const params = await getProblemParams(env);
     const buffer = pushBuffer(parseBuffer(row.buffer), problemId, success, timeUsed);
     const { predEgfRank, se } = computeRank(buffer, params);
     const nowIso = new Date().toISOString();
+    // Stamp the request's edge geo-IP country into the SAME row write (no extra
+    // write) — this column is the universal flag fallback for anonymous rows.
+    // COALESCE keeps the last KNOWN country when this report's geo is unknown/Tor
+    // (normalizeCountry -> null), so a sentinel never clobbers a good code; a real
+    // code wins (last-writer-wins among valid codes, so the flag follows travel).
+    const cc = normalizeCountry(country);
 
     if (predEgfRank === null) {
         await env.DB.prepare(
-            `UPDATE leaderboard SET buffer = ?2, last_active = ?3 WHERE user_id = ?1`
-        ).bind(userId, serializeBuffer(buffer), nowIso).run();
+            `UPDATE leaderboard SET buffer = ?2, last_active = ?3,
+                country = COALESCE(?4, country)
+              WHERE user_id = ?1`
+        ).bind(userId, serializeBuffer(buffer), nowIso, cc).run();
         return;
     }
     await env.DB.prepare(
         `UPDATE leaderboard SET buffer = ?2, pred_egf_rank = ?3, pred_egf_se = ?4,
-            last_active = ?5
+            last_active = ?5, country = COALESCE(?6, country)
           WHERE user_id = ?1`
-    ).bind(userId, serializeBuffer(buffer), predEgfRank, se, nowIso).run();
+    ).bind(userId, serializeBuffer(buffer), predEgfRank, se, nowIso, cc).run();
 }
 
 // First novel report from a row-less user (brand new, or pruned while idle): seed
@@ -365,15 +387,16 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
 // concurrent-first-reports race harmless — both seeds compute from the same
 // reports, the loser is a no-op. Registration is not this table's concern
 // (external_ids), so a returning registered player gets the identical seed.
-async function createLeaderboardRow(env, userId) {
+async function createLeaderboardRow(env, userId, country) {
     const params = await getProblemParams(env);
     const st = await buildRowStateFromReports(env, userId, params);
     const nowIso = new Date().toISOString();
     await env.DB.prepare(
         `INSERT OR IGNORE INTO leaderboard
-            (user_id, buffer, pred_egf_rank, pred_egf_se, last_active)
-         VALUES (?1, ?2, ?3, ?4, ?5)`
-    ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se, nowIso).run();
+            (user_id, buffer, pred_egf_rank, pred_egf_se, last_active, country)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se, nowIso,
+        normalizeCountry(country)).run();
 }
 
 // (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
@@ -465,7 +488,7 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // so the sub-gate rows can be tallied for the footer; they're dropped from the
     // visible list in JS below.
     const stmt = env.DB.prepare(
-        `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank, l.buffer,
+        `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank, l.buffer, l.country,
                 (x.user_id IS NOT NULL) AS registered
            FROM (SELECT *, user_id AS u FROM leaderboard
                   WHERE last_active >= ?1) l
@@ -574,10 +597,13 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const currentInternal = deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
         // A hidden user is stripped of name/country and reported as unregistered, so the
         // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
-        // reliable) → invitation (EGD, frozen at invite) → survey (geo-IP), so the flag
-        // shows for ANY user with a country from any of those, not just registered rows.
+        // reliable) → invitation (EGD, frozen at invite) → leaderboard row (edge geo-IP,
+        // stamped on every /report — the universal fallback that gives ANY active player a
+        // flag) → survey (older geo-IP), so the flag shows for anyone with a country from
+        // any source, not just registered rows.
         const name = isHidden ? null : r.egd_name;
-        const country = isHidden ? null : (egdCountry || r.country_code || surveyCountry || null);
+        const country = isHidden ? null
+            : (egdCountry || r.country_code || r.country || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
         visible.push({ name, country, rangeMin, rangeMax, registered, currentInternal });
     }

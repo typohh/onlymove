@@ -261,6 +261,14 @@ async function computeServerStats(env) {
   // not from self-reported server ranks. Users with too little data are dropped.
   const ranks = await computeAnswerRankHist(env, userFirstProblems, neededProblems);
 
+  // Country distribution of active players, off the leaderboard table's stamped
+  // edge geo-IP `country` (see leaderboard.js). Separate query, but the table is
+  // pruned to roughly weekly-active size so it's a small full scan — the same one
+  // the /leaderboard page and cron already run — NOT another pass over the big
+  // tsumego_reports. Hidden profiles are excluded (they opted their country out of
+  // the board; keep them out of the aggregate too). Sorted commonest-first.
+  const countries = await computeCountryDist(env, since);
+
   const data = {
     // Stamp the code version so a deploy that changes this computation
     // invalidates the cache on the next read/cron, even within the 24h window.
@@ -269,7 +277,7 @@ async function computeServerStats(env) {
     windowDays: 7,
     totals,
     bucketSec: SOLVE_BUCKET_SEC,
-    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks,
+    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks, countries,
   };
 
   await env.DB.prepare(
@@ -278,6 +286,32 @@ async function computeServerStats(env) {
   ).bind(JSON.stringify(data), data.computedAt).run();
 
   return data;
+}
+
+// Country distribution over players active in the window, from the leaderboard
+// table's stamped geo-IP `country`. One GROUP BY over the (small, weekly-pruned)
+// leaderboard table — D1 bills the rows it scans, ~weekly-active size, same order
+// as the /leaderboard page's own scan. `country` is already normalizeCountry-clean
+// (real ISO-alpha-2 only), so no sentinel rows here. NOT EXISTS drops hidden
+// profiles. Returns [{ country, n }] commonest-first; [] on any error (the section
+// just doesn't render).
+async function computeCountryDist(env, since) {
+  try {
+    const res = await env.DB.prepare(
+      `SELECT l.country AS country, COUNT(*) AS n
+         FROM leaderboard l
+        WHERE l.last_active >= ?1 AND l.country IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM hidden_profiles h WHERE h.user_id = l.user_id)
+        GROUP BY l.country
+        ORDER BY n DESC, l.country ASC`
+    ).bind(since).all();
+    return ((res && res.results) || [])
+      .filter((r) => typeof r.country === 'string' && r.n > 0)
+      .map((r) => ({ country: r.country, n: r.n }));
+  } catch (e) {
+    console.error('country dist failed:', e);
+    return [];
+  }
 }
 
 // Minimum distinct first-time problems a user needs in the window before we

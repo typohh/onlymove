@@ -1,0 +1,22 @@
+-- One-time migration: add the edge geo-IP `country` column to the `leaderboard`
+-- table (2026-07-20).
+--
+-- Every /report already UPDATEs the reporter's leaderboard row; from now on that
+-- same write also stamps request.cf.country (a real ISO 3166-1 alpha-2 code — the
+-- 'XX'/'T1' sentinels are dropped to null client-of-D1-side in normalizeCountry).
+-- readLeaderboardRows adds this column as the UNIVERSAL flag fallback so the
+-- /leaderboard page shows a flag for ANY active player, not just the
+-- registered/surveyed few. Priority is unchanged at the top: EGD-sourced country
+-- (the GoR heartbeat, then the claimed invitation) still wins; this geo-IP column
+-- slots in below them and above the older survey geo-IP. No new reads or writes —
+-- the SELECT and the UPDATE/INSERT that carry it already existed.
+--
+-- Additive column: no table rebuild. Existing rows backfill their country on their
+-- owner's next /report (COALESCE keeps a known-good code, so nothing is lost).
+--
+-- Apply to the remote D1 (from pwa/):
+--   npx wrangler d1 execute tsumego-reports --remote --file=migrations/2026-07-20_leaderboard_country.sql
+-- And to the local miniflare D1 for dev (stop `npm run dev` first):
+--   npx wrangler d1 execute tsumego-reports --local --file=migrations/2026-07-20_leaderboard_country.sql
+
+ALTER TABLE leaderboard ADD COLUMN country TEXT;
