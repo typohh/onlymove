@@ -146,12 +146,13 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_exit
 -- ALTER ... ADD COLUMN on the live D1 appends it last, and the fetch_database
 -- dump is positional VALUES() in column order, so CREATE order must match the
 -- migrated order or the .sql parser (utils/rank_surveys.py) misreads columns.
--- ALSO holds the MACHINE-written weekly GoR heartbeat for registered players:
--- server = 'EGD' (not the human-declared 'EGF'), rank = the raw GoR digits
--- (e.g. '2145' — full precision for the leaderboard display; unparseable by
--- rank_to_scalar, so the calibration pipeline ignores these until 'EGD' is
--- deliberately added to SERVERS), country = the EGD federation code (NOT
--- geo-IP). See the external_ids note.
+-- ALSO holds the MACHINE-written weekly rating heartbeats for registered
+-- players: server = 'EGD' (raw GoR digits e.g. '2145', from the client GoR
+-- piggyback, country = the EGD federation code) or 'AGAR' (raw AGA rating e.g.
+-- '3.2' / '-4.5', from the Worker-side AGAGD fetch) — both distinct from the
+-- human-declared 'EGF' / 'AGA' rank labels. Full precision for the leaderboard
+-- display; unparseable by rank_to_scalar, so the calibration pipeline ignores
+-- 'EGD'/'AGAR' rows until deliberately added to SERVERS. See the external_ids note.
 CREATE TABLE IF NOT EXISTS rank_surveys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -204,23 +205,33 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
 );
 
 -- External-service player-id bindings: one row per REGISTERED user, identity
--- only. A general table — future services add columns here (e.g. an aga_pid),
--- hence not named after EGD. Everything else about a registered player lives
--- elsewhere: display name/country on their claimed `invitation` row, GoR
--- history as machine-written 'EGD' rows in `rank_surveys` (weekly heartbeat —
--- one row per registered player per week from the client GoR piggyback, rank =
--- the raw GoR digits e.g. '2145', country = the EGD federation code; the
--- latest row doubles as the "GoR checked this week" marker, and rank_to_scalar
--- can't parse raw digits so the rank-calibration pipeline ignores 'EGD' rows
--- until deliberately enabled), and the rank/buffer state on the (prunable)
--- `leaderboard` row. Having a row here IS the "registered member" trust
--- boundary the invite tool gates on.
+-- only. A general table — each supported service is a nullable column here
+-- (egd_pin, aga_id, ...), hence not named after EGD. Everything else about a
+-- registered player lives elsewhere: display name/country on their claimed
+-- `invitation` row, rating history as machine-written heartbeat rows in
+-- `rank_surveys` (weekly, one row per registered player per week; 'EGD' = raw
+-- GoR digits e.g. '2145' from the client GoR piggyback, 'AGAR' = raw AGA rating
+-- e.g. '3.2' from the Worker-side AGAGD fetch; the latest such row doubles as
+-- the "checked this week" marker, and rank_to_scalar can't parse raw digits so
+-- the rank-calibration pipeline ignores 'EGD'/'AGAR' rows until deliberately
+-- enabled), and the rank/buffer state on the (prunable) `leaderboard` row.
+-- Having a row here IS the "registered member" trust boundary the invite tool
+-- gates on.
+--
+-- The schema supports an egd_pin AND an aga_id on one row; the "one identity per
+-- account" rule is enforced only as POLICY in handleRegister (register.js), NOT
+-- as a DB constraint — so allowing both later is a code change with no migration.
+-- Because binding is restricted to one, the frontend assumes a single identity.
 CREATE TABLE IF NOT EXISTS external_ids (
     user_id TEXT PRIMARY KEY,
-    egd_pin TEXT NOT NULL
+    egd_pin TEXT,
+    aga_id  TEXT
 );
--- Enforce the 1:1 EGD-id <-> account binding (PK already gives account -> one PIN).
+-- Enforce a service-id <-> account binding is 1:1 (PK already gives account -> one
+-- of each id). NULLs are distinct in a UNIQUE index, so many egd_pin-NULL (AGA) or
+-- aga_id-NULL (EGD) rows coexist.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_egd_pin ON external_ids(egd_pin);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_aga_id  ON external_ids(aga_id);
 
 -- Leaderboard: one row per user (created lazily on their first novel /report).
 -- Holds a materialized rank buffer (the user's last 500 novel attempts) + the
@@ -258,28 +269,39 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 
 -- Registration invitations, issued by an admin (generate_invite.py / the /invite
 -- tool page) OR by any registered leaderboard member (the in-app Invite menu). A
--- random 8-char opaque token recorded alongside the target EGD PIN (no crypto). The
--- recipient opens /register?t=<token> in their PWA; the Worker looks the token up,
--- binds their user_id to the PIN, and marks it claimed (one-time use).
--- egd_name/country_code/gor are fetched from EGD at creation so the confirmation
--- preview + claim need no live EGD call. Never expires; deleted/revoked manually.
--- created_by_user_id is the account that minted the link — both the abuse-attribution
--- key and the "who invited this person" record (NULL for an admin CLI invite, which
--- has no user context). See docs/leaderboard_plan.md.
+-- random 8-char opaque token recorded alongside the target external id (no crypto).
+-- The recipient opens /register?t=<token> in their PWA; the Worker looks the token
+-- up, binds their user_id to that id, and marks it claimed (one-time use).
+--
+-- `service` selects the target database: 'EGD' (or NULL, the default/legacy) uses
+-- `egd_pin` + `gor`; 'AGA' uses `aga_id` + `aga_rating`. `egd_name`/`country_code`
+-- are the generic display name/country for either. The EGD fields are fetched from
+-- EGD at creation (client-side); the AGA rating is snapshotted server-side at
+-- creation — so the confirmation preview + claim need no live external call.
+-- Never expires; deleted/revoked manually. created_by_user_id is the account that
+-- minted the link — both the abuse-attribution key and the "who invited this person"
+-- record (NULL for an admin CLI invite, which has no user context). See
+-- docs/leaderboard_plan.md.
 CREATE TABLE IF NOT EXISTS invitation (
     invite_token       TEXT PRIMARY KEY,
-    egd_pin            TEXT NOT NULL,
+    egd_pin            TEXT,
     egd_name           TEXT,
     country_code       TEXT,
     gor                INTEGER,
     created_at         TEXT,
     created_by_user_id TEXT,
     claimed_by_user_id TEXT,
-    claimed_at         TEXT
+    claimed_at         TEXT,
+    service            TEXT,      -- 'EGD' (or NULL = EGD) / 'AGA'
+    aga_id             TEXT,      -- AGA member id, when service = 'AGA'
+    aga_rating         REAL       -- AGA rating snapshot, when service = 'AGA'
 );
 -- MIGRATION for an existing deployment (run once against the live D1; the CREATE
--- above already carries the column for a fresh DB):
+-- above already carries the columns for a fresh DB):
 --   ALTER TABLE invitation ADD COLUMN created_by_user_id TEXT;
+-- The service/aga_id/aga_rating columns (and relaxing egd_pin's NOT NULL for AGA
+-- invites) need a table rebuild, not a plain ADD COLUMN — see
+-- migrations/2026-07-21_external_ids_aga.sql.
 
 -- Per-user "hide my profile" opt-out for the public /leaderboard + /tournament
 -- pages. Presence of a row = hidden: the user's display name, country, and

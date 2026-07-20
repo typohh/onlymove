@@ -1,19 +1,21 @@
 // js/registration.js
 //
-// EGD-leaderboard registration confirmation. When the PWA boots on an admin-
-// issued invite link (onlymove.net/register?t=<token>), this previews the
-// invitation's EGD name and, on confirm, binds THIS browser's account (the
-// userId) to that EGD id. The userId travels ONLY in the POST body — it is
-// never shown in the UI, which is the whole point of a link-based claim over an
-// account-code entry. The account's age + size shown in the prompt are the
-// safeguard that replaces the account-code step: a fresh account reads "created
-// today, 0 answers" so the user can tell they're on the wrong account before
-// confirming. See docs/leaderboard_plan.md "Registration flow".
+// Leaderboard registration confirmation. When the PWA boots on an invite link
+// (onlymove.net/register?t=<token>), this previews the invitation's player name
+// and, on confirm, binds THIS browser's account (the userId) to that external
+// identity — an EGD or AGA id, whichever the invitation targets (the client
+// doesn't need to know which; an account links to one identity). The userId
+// travels ONLY in the POST body — it is never shown in the UI, which is the
+// whole point of a link-based claim over an account-code entry. The account's
+// age + size shown in the prompt are the safeguard that replaces the
+// account-code step: a fresh account reads "created today, 0 answers" so the
+// user can tell they're on the wrong account before confirming. See
+// docs/leaderboard_plan.md "Registration flow".
 //
 // Endpoint contracts (pwa/src/handlers/register.js):
 //   GET  /invite?t=<token> -> {ok:true, egdName} | {ok:false, error:'invalid'|'claimed'|'bad_request'}
 //   POST /register {token, userId} -> {ok:true, egdName}
-//                                   | {ok:false, error:'pin_taken'|'claimed'|'invalid'|'bad_request'|'server'}
+//        | {ok:false, error:'pin_taken'|'id_taken'|'account_bound'|'claimed'|'invalid'|'bad_request'|'server'}
 
 import { state, getMergedFullAnswerHistory } from './state.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, showToast } from './overlays.js';
@@ -27,15 +29,17 @@ const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
 // outcome, so the invite token may be dropped from the URL. Anything else
 // ('server' from the /register catch-all, the dispatcher's generic 500 body, an
 // unrecognized code) is treated as transient: the token stays so a reload retries.
-const DEFINITIVE_ERRORS = new Set(['pin_taken', 'account_bound', 'claimed', 'invalid', 'bad_request']);
+const DEFINITIVE_ERRORS = new Set(['pin_taken', 'id_taken', 'account_bound', 'claimed', 'invalid', 'bad_request']);
 
 // Map the locked /invite + /register error codes to a user-facing line. Anything
 // unrecognized (incl. 'server' / a network failure / no error field) falls to
-// the generic retry message.
+// the generic retry message. Wording is service-neutral (EGD or AGA) — pin_taken
+// and id_taken are the same situation from the two services.
 function mapErrorMessage(error) {
     switch (error) {
-        case 'pin_taken':     return 'This EGD id is already registered to another account';
-        case 'account_bound': return 'This account is already registered to a different EGD id';
+        case 'pin_taken':
+        case 'id_taken':      return 'This player is already registered to another account';
+        case 'account_bound': return 'This account is already registered to a different player';
         case 'claimed':       return 'This invite link was already used';
         case 'invalid':       return 'Invalid invite link';
         default:              return 'Registration failed, please try again';

@@ -1,11 +1,15 @@
 // pwa/src/handlers/register.js
 //
-// EGD-leaderboard registration. Two endpoints:
-//   GET  /invite?t=<token>  — preview an invitation's EGD name for the confirmation
+// Leaderboard registration (EGD or AGA, chosen by the invitation's `service`). Two
+// endpoints:
+//   GET  /invite?t=<token>  — preview an invitation's player name for the confirmation
 //                             dialog (no side effect).
 //   POST /register {token, userId} — claim an invitation: bind the browser's user_id
-//                             to the PIN, seed the buffer + rank from the user's
-//                             existing history, mark the invitation claimed (one-time).
+//                             to the external id (egd_pin or aga_id), seed the buffer
+//                             + rank from the user's existing history, mark the
+//                             invitation claimed (one-time). The account binds to a
+//                             single external identity — one-per-account is a POLICY
+//                             enforced here, not a DB constraint.
 // The token is an opaque 8-char DB key (no crypto). See docs/leaderboard_plan.md.
 
 import { jsonResponse } from '../http.js';
@@ -13,6 +17,7 @@ import { isValidUserId } from '../guards.js';
 import {
     getProblemParams, buildRowStateFromReports, serializeBuffer, weekStartIso,
 } from '../leaderboard.js';
+import { fetchAgaRating } from '../aga.js';
 
 const TOKEN_RE = /^[A-Za-z0-9]{8}$/;
 
@@ -36,30 +41,55 @@ export async function handleRegister(request, env) {
             return jsonResponse({ ok: false, error: 'bad_request' }, 400);
         }
         const inv = await env.DB.prepare(
-            `SELECT egd_pin, egd_name, country_code, gor, claimed_by_user_id
+            `SELECT egd_pin, egd_name, country_code, gor, service, aga_id, aga_rating,
+                    claimed_by_user_id
                FROM invitation WHERE invite_token = ?1`
         ).bind(token).first();
         if (!inv) return jsonResponse({ ok: false, error: 'invalid' }, 404);
         if (inv.claimed_by_user_id) return jsonResponse({ ok: false, error: 'claimed' }, 409);
 
+        // Which external service this invite targets. 'AGA' uses aga_id; anything
+        // else (incl. NULL, the legacy default) is EGD using egd_pin.
+        const isAga = inv.service === 'AGA';
+        const idCol = isAga ? 'aga_id' : 'egd_pin';
+        const idVal = isAga ? (inv.aga_id != null ? String(inv.aga_id) : '')
+                            : (inv.egd_pin != null ? String(inv.egd_pin) : '');
+        if (!idVal) return jsonResponse({ ok: false, error: 'invalid' }, 404);
+
         // 1:1 binding, enforced both directions against external_ids:
-        //  - PIN side: reject if this invite's PIN is already registered to a DIFFERENT
-        //    account (UNIQUE(egd_pin) is the hard backstop; this gives a clean message).
+        //  - id side: reject if this invite's external id is already registered to a
+        //    DIFFERENT account (the per-column UNIQUE index is the hard backstop; this
+        //    gives a clean message).
         const existing = await env.DB.prepare(
-            `SELECT user_id FROM external_ids WHERE egd_pin = ?1`
-        ).bind(inv.egd_pin).first();
+            `SELECT user_id FROM external_ids WHERE ${idCol} = ?1`
+        ).bind(idVal).first();
         if (existing && existing.user_id !== userId) {
-            return jsonResponse({ ok: false, error: 'pin_taken' }, 409);
+            return jsonResponse({ ok: false, error: isAga ? 'id_taken' : 'pin_taken' }, 409);
         }
-        //  - Account side: an account binds to exactly ONE EGD id, for life. If it
-        //    already has a binding under a DIFFERENT pin, reject — rebinding would
-        //    orphan the old pin and let one account hop EGD identities. Re-claiming
-        //    its OWN pin is a harmless refresh: the INSERT OR IGNORE below no-ops.
+        //  - Account side: an account binds to exactly ONE external identity, for life
+        //    (POLICY — the schema itself allows both an egd_pin and an aga_id; the
+        //    one-per-account rule is enforced HERE). Reject if the account already
+        //    holds the OTHER service, or a DIFFERENT id of this service. Re-claiming
+        //    its OWN id is a harmless refresh: the INSERT OR IGNORE below no-ops.
         const selfRow = await env.DB.prepare(
-            `SELECT egd_pin FROM external_ids WHERE user_id = ?1`
+            `SELECT egd_pin, aga_id FROM external_ids WHERE user_id = ?1`
         ).bind(userId).first();
-        if (selfRow && selfRow.egd_pin !== inv.egd_pin) {
-            return jsonResponse({ ok: false, error: 'account_bound' }, 409);
+        if (selfRow) {
+            const already = isAga ? selfRow.aga_id : selfRow.egd_pin;
+            const other = isAga ? selfRow.egd_pin : selfRow.aga_id;
+            if (other != null || (already != null && String(already) !== idVal)) {
+                return jsonResponse({ ok: false, error: 'account_bound' }, 409);
+            }
+        }
+
+        // For AGA, snapshot the freshest rating server-side (best-effort; this first
+        // claim doubles as the Worker->AGAGD reachability probe). Fall back to the
+        // invitation's snapshot when AGAGD is unreachable so the player still shows a
+        // rank immediately.
+        let agaRating = null;
+        if (isAga) {
+            try { agaRating = await fetchAgaRating(idVal); } catch (e) { agaRating = null; }
+            if (agaRating === null && Number.isFinite(inv.aga_rating)) agaRating = inv.aga_rating;
         }
 
         // Seed buffer + rank from the user's existing tsumego_reports so an
@@ -68,14 +98,15 @@ export async function handleRegister(request, env) {
         const params = await getProblemParams(env);
         const st = await buildRowStateFromReports(env, userId, params);
         const nowIso = new Date().toISOString();
+        const weekStart = weekStartIso(Date.now());
 
         const stmts = [
             // The binding — identity only (external_ids). IGNORE covers the
-            // re-claim-own-pin refresh; the guards above rejected every conflicting
+            // re-claim-own-id refresh; the guards above rejected every conflicting
             // combination.
             env.DB.prepare(
-                `INSERT OR IGNORE INTO external_ids (user_id, egd_pin) VALUES (?1, ?2)`
-            ).bind(userId, inv.egd_pin),
+                `INSERT OR IGNORE INTO external_ids (user_id, ${idCol}) VALUES (?1, ?2)`
+            ).bind(userId, idVal),
             env.DB.prepare(
                 `INSERT INTO leaderboard
                     (user_id, buffer, pred_egf_rank, pred_egf_se, last_active)
@@ -89,18 +120,25 @@ export async function handleRegister(request, env) {
                 `UPDATE invitation SET claimed_by_user_id = ?2, claimed_at = ?3 WHERE invite_token = ?1`
             ).bind(token, userId, nowIso),
         ];
-        // Seed the first GoR heartbeat from the invitation's EGD snapshot so the
-        // player shows a GoR immediately — same weekly-guarded shape as
-        // applyGorUpdates (a re-claim in the same week no-ops).
-        if (Number.isFinite(inv.gor)) {
+        // Seed the first rating heartbeat from the snapshot so the player shows a rank
+        // immediately — same weekly-guarded shape as applyGorUpdates/refreshAgaRatings
+        // (a re-claim in the same week no-ops). 'EGD' (GoR) or 'AGAR' (AGA rating).
+        if (!isAga && Number.isFinite(inv.gor)) {
             stmts.push(env.DB.prepare(
                 `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
                  SELECT ?1, 'EGD', ?2, ?3, ?4
                   WHERE NOT EXISTS (SELECT 1 FROM rank_surveys
                                      WHERE user_id = ?1 AND server = 'EGD'
                                        AND created_at >= ?5)`
-            ).bind(userId, String(inv.gor), nowIso, inv.country_code || null,
-                   weekStartIso(Date.now())));
+            ).bind(userId, String(inv.gor), nowIso, inv.country_code || null, weekStart));
+        } else if (isAga && Number.isFinite(agaRating)) {
+            stmts.push(env.DB.prepare(
+                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
+                 SELECT ?1, 'AGAR', ?2, ?3, NULL
+                  WHERE NOT EXISTS (SELECT 1 FROM rank_surveys
+                                     WHERE user_id = ?1 AND server = 'AGAR'
+                                       AND created_at >= ?4)`
+            ).bind(userId, String(agaRating), nowIso, weekStart));
         }
         await env.DB.batch(stmts);
         return jsonResponse({ ok: true, egdName: inv.egd_name });

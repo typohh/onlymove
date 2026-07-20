@@ -18,15 +18,21 @@
 // — both the abuse-attribution key and the "who invited this person" record. The
 // POST endpoints are also per-IP rate-limited (RL_WRITE) in the dispatcher.
 //
-// EGD is fetched CLIENT-SIDE (the browser can — EGD sends CORS `*`), because the
-// deployed Worker cannot: EGD sits behind Cloudflare and a Worker→Cloudflare-zone
-// fetch is bot-blocked. So the page does the search itself and hands the chosen
-// player's fields to /invite/create; the Worker only writes the row. The QR is
-// rendered server-side from the minted link and returned in the create response.
+// Two source databases, chosen by a toggle on the page:
+//   * EGD is fetched CLIENT-SIDE (the browser can — EGD sends CORS `*`), because the
+//     deployed Worker cannot: EGD sits behind Cloudflare and a Worker→Cloudflare-zone
+//     fetch is bot-blocked. The page searches EGD by name/PIN itself and hands the
+//     chosen player's fields to /invite/create; the Worker only writes the row.
+//   * AGA has no name-search JSON api and no CORS, so the page can't search it. The
+//     inviter enters the AGA member id + name manually (found on agagd.usgo.org), and
+//     the WORKER snapshots the current rating server-side via /invite/create (the
+//     AGAGD ratings api is fetchable Worker-side; falls back to any entered rating).
+// The QR is rendered server-side from the minted link and returned in the response.
 
 import qrcode from 'qrcode-generator';
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
+import { fetchAgaRating, isValidAgaId } from '../aga.js';
 import { baseCss, ESC_SNIPPET } from './page-shell.js';
 
 // Admins (configured account codes) can always invite. Fails closed if the secret
@@ -81,8 +87,9 @@ function makeQrSvg(link) {
 }
 
 // Insert an invitation with a fresh token; retry on the (astronomically unlikely)
-// primary-key collision. Mirrors generate_invite.py's row shape, plus createdBy.
-async function insertInvitation(env, player, createdBy) {
+// primary-key collision. Handles both services: `service` = 'EGD' (pin + gor) or
+// 'AGA' (agaId + agaRating); egd_name/country are the generic display fields.
+async function insertInvitation(env, inv, createdBy) {
     const nowIso = new Date().toISOString();
     for (let attempt = 0; ; attempt++) {
         const token = generateToken();
@@ -90,9 +97,11 @@ async function insertInvitation(env, player, createdBy) {
             await env.DB.prepare(
                 `INSERT INTO invitation
                     (invite_token, egd_pin, egd_name, country_code, gor, created_at,
-                     created_by_user_id, claimed_by_user_id, claimed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL)`
-            ).bind(token, player.pin, player.name, player.country, player.gor, nowIso, createdBy).run();
+                     created_by_user_id, claimed_by_user_id, claimed_at,
+                     service, aga_id, aga_rating)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, ?8, ?9, ?10)`
+            ).bind(token, inv.pin ?? null, inv.name, inv.country, inv.gor ?? null, nowIso,
+                   createdBy, inv.service, inv.agaId ?? null, inv.agaRating ?? null).run();
             return token;
         } catch (e) {
             if (attempt >= 4) throw e;
@@ -120,62 +129,113 @@ export async function handleInviteEligible(request, env) {
 
 export async function handleInviteCreate(request, env) {
     try {
-        const { userId, pin, name, gor, country } = await request.json();
+        const body = await request.json();
+        const { userId } = body;
         const elig = await inviteEligibility(userId, env);
         if (!elig.eligible) return jsonResponse({ ok: false, error: 'unauthorized' }, 403);
         if (!env.DB) return jsonResponse({ ok: false, error: 'server' }, 500);
 
-        // The player fields come from the eligible client's own EGD fetch (the
-        // Worker can't reach EGD). Validate shape; trust the values.
-        const pinStr = String(pin || '');
-        if (!/^\d+$/.test(pinStr)) return jsonResponse({ ok: false, error: 'bad_pin' }, 400);
-        const egdName = typeof name === 'string' ? name.trim().slice(0, 100) : '';
-        if (!egdName) return jsonResponse({ ok: false, error: 'bad_name' }, 400);
-        const gorInt = Number.isFinite(Number(gor)) ? Math.round(Number(gor)) : null;
-        if (gorInt === null) return jsonResponse({ ok: false, error: 'bad_gor' }, 400);
-        const cc = (typeof country === 'string' ? country : '').slice(0, 2).toUpperCase();
+        // Generic display fields, shared by both services.
+        const name = typeof body.name === 'string' ? body.name.trim().slice(0, 100) : '';
+        if (!name) return jsonResponse({ ok: false, error: 'bad_name' }, 400);
+        const cc = (typeof body.country === 'string' ? body.country : '').slice(0, 2).toUpperCase();
 
-        // 1:1 binding: no point inviting a PIN that already has a registered account
-        // (the claim would be rejected anyway). Surface it as a clean error.
-        const existing = await env.DB.prepare(
-            `SELECT user_id FROM external_ids WHERE egd_pin = ?1`
-        ).bind(pinStr).first();
-        if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
-
-        // Idempotent: if this PIN already has an UNCLAIMED invitation, reuse it (refresh
-        // its stored EGD fields to the current values) instead of piling up duplicate
-        // links for one person. A claimed invitation would have been caught above.
-        // created_by is backfilled only if it was empty (e.g. an admin-CLI invite),
-        // so the first real inviter's attribution is never overwritten.
-        const openInvite = await env.DB.prepare(
-            `SELECT invite_token FROM invitation
-              WHERE egd_pin = ?1 AND claimed_by_user_id IS NULL
-              ORDER BY created_at DESC LIMIT 1`
-        ).bind(pinStr).first();
-        if (openInvite) {
-            await env.DB.prepare(
-                `UPDATE invitation
-                    SET egd_name = ?2, country_code = ?3, gor = ?4,
-                        created_by_user_id = COALESCE(created_by_user_id, ?5)
-                  WHERE invite_token = ?1`
-            ).bind(openInvite.invite_token, egdName, cc, gorInt, userId).run();
-            const link = `https://onlymove.net/register?t=${openInvite.invite_token}`;
-            return jsonResponse({
-                ok: true, inviteToken: openInvite.invite_token, link, qrSvg: makeQrSvg(link),
-                egdName, gor: gorInt, country: cc, reused: true,
-            });
-        }
-
-        const token = await insertInvitation(env, { pin: pinStr, name: egdName, country: cc, gor: gorInt }, userId);
-        const link = `https://onlymove.net/register?t=${token}`;
-        return jsonResponse({
-            ok: true, inviteToken: token, link, qrSvg: makeQrSvg(link),
-            egdName, gor: gorInt, country: cc,
-        });
+        if (body.service === 'AGA') return createAgaInvite(env, { userId, name, cc, body });
+        return createEgdInvite(env, { userId, name, cc, body });
     } catch (e) {
         console.error('invite create failed:', e);
         return jsonResponse({ ok: false, error: 'server' }, 500);
     }
+}
+
+// EGD: the player fields come from the eligible client's own EGD fetch (the Worker
+// can't reach EGD). Validate shape; trust the values.
+async function createEgdInvite(env, { userId, name, cc, body }) {
+    const pinStr = String(body.pin || '');
+    if (!/^\d+$/.test(pinStr)) return jsonResponse({ ok: false, error: 'bad_pin' }, 400);
+    const gorInt = Number.isFinite(Number(body.gor)) ? Math.round(Number(body.gor)) : null;
+    if (gorInt === null) return jsonResponse({ ok: false, error: 'bad_gor' }, 400);
+
+    // 1:1 binding: no point inviting a PIN that already has a registered account
+    // (the claim would be rejected anyway). Surface it as a clean error.
+    const existing = await env.DB.prepare(
+        `SELECT user_id FROM external_ids WHERE egd_pin = ?1`
+    ).bind(pinStr).first();
+    if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
+
+    // Idempotent: if this PIN already has an UNCLAIMED invitation, reuse it (refresh
+    // its stored EGD fields) instead of piling up duplicate links for one person.
+    // created_by is backfilled only if it was empty (e.g. an admin-CLI invite).
+    const openInvite = await env.DB.prepare(
+        `SELECT invite_token FROM invitation
+          WHERE egd_pin = ?1 AND claimed_by_user_id IS NULL
+          ORDER BY created_at DESC LIMIT 1`
+    ).bind(pinStr).first();
+    if (openInvite) {
+        await env.DB.prepare(
+            `UPDATE invitation
+                SET egd_name = ?2, country_code = ?3, gor = ?4, service = 'EGD',
+                    created_by_user_id = COALESCE(created_by_user_id, ?5)
+              WHERE invite_token = ?1`
+        ).bind(openInvite.invite_token, name, cc, gorInt, userId).run();
+        const link = `https://onlymove.net/register?t=${openInvite.invite_token}`;
+        return jsonResponse({
+            ok: true, inviteToken: openInvite.invite_token, link, qrSvg: makeQrSvg(link),
+            egdName: name, service: 'EGD', gor: gorInt, country: cc, reused: true,
+        });
+    }
+
+    const token = await insertInvitation(env,
+        { service: 'EGD', pin: pinStr, name, country: cc, gor: gorInt }, userId);
+    const link = `https://onlymove.net/register?t=${token}`;
+    return jsonResponse({
+        ok: true, inviteToken: token, link, qrSvg: makeQrSvg(link),
+        egdName: name, service: 'EGD', gor: gorInt, country: cc,
+    });
+}
+
+// AGA: the inviter enters the member id + name manually (AGAGD has no name-search
+// api and no CORS). The Worker snapshots the current rating server-side (best-effort;
+// falls back to an optional inviter-entered rating). A null rating is allowed — the
+// weekly refresh / claim-time fetch fills it in later.
+async function createAgaInvite(env, { userId, name, cc, body }) {
+    const agaId = String(body.agaId || body.pin || '');
+    if (!isValidAgaId(agaId)) return jsonResponse({ ok: false, error: 'bad_id' }, 400);
+    let agaRating = null;
+    try { agaRating = await fetchAgaRating(agaId); } catch (e) { agaRating = null; }
+    if (agaRating === null && Number.isFinite(Number(body.rating))) agaRating = Number(body.rating);
+
+    const existing = await env.DB.prepare(
+        `SELECT user_id FROM external_ids WHERE aga_id = ?1`
+    ).bind(agaId).first();
+    if (existing) return jsonResponse({ ok: false, error: 'already_registered' }, 409);
+
+    const openInvite = await env.DB.prepare(
+        `SELECT invite_token FROM invitation
+          WHERE service = 'AGA' AND aga_id = ?1 AND claimed_by_user_id IS NULL
+          ORDER BY created_at DESC LIMIT 1`
+    ).bind(agaId).first();
+    if (openInvite) {
+        await env.DB.prepare(
+            `UPDATE invitation
+                SET egd_name = ?2, country_code = ?3, aga_rating = ?4,
+                    created_by_user_id = COALESCE(created_by_user_id, ?5)
+              WHERE invite_token = ?1`
+        ).bind(openInvite.invite_token, name, cc, agaRating, userId).run();
+        const link = `https://onlymove.net/register?t=${openInvite.invite_token}`;
+        return jsonResponse({
+            ok: true, inviteToken: openInvite.invite_token, link, qrSvg: makeQrSvg(link),
+            egdName: name, service: 'AGA', agaId, rating: agaRating, country: cc, reused: true,
+        });
+    }
+
+    const token = await insertInvitation(env,
+        { service: 'AGA', name, country: cc, agaId, agaRating }, userId);
+    const link = `https://onlymove.net/register?t=${token}`;
+    return jsonResponse({
+        ok: true, inviteToken: token, link, qrSvg: makeQrSvg(link),
+        egdName: name, service: 'AGA', agaId, rating: agaRating, country: cc,
+    });
 }
 
 function renderInvitePage() {
@@ -191,8 +251,13 @@ function renderInvitePage() {
   #gate { margin: 2rem 0; font-size: .95rem; }
   #gate.err { color: #c0392b; }
   #tools { display: none; }
+  #agaMode { display: none; }
+  .toggle { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+  .tab { font: inherit; padding: .4rem 1.1rem; border: 1px solid currentColor; border-radius: 8px;
+         background: transparent; color: inherit; cursor: pointer; opacity: .5; }
+  .tab.on { opacity: 1; font-weight: 600; background: color-mix(in srgb, currentColor 12%, transparent); }
   .searchrow { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
-  #q { flex: 1 1 12rem; font: inherit; padding: .45rem .6rem; border: 1px solid; border-radius: 8px;
+  #q, #agaId, #agaName, #agaCountry, #agaRating { flex: 1 1 12rem; font: inherit; padding: .45rem .6rem; border: 1px solid; border-radius: 8px;
        background: transparent; color: inherit; box-sizing: border-box; }
   button { font: inherit; padding: .45rem .9rem; border: 1px solid currentColor; border-radius: 8px;
            background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
@@ -214,15 +279,37 @@ function renderInvitePage() {
 </head>
 <body>
 <h1>Invite a player</h1>
-<p class="sub">As you are already on the leaderboard, you can invite others to it. Search the European Go Database by name or PIN, pick the player, and share the link or QR code below. When they open it in their onlymove app it binds their account to that EGD identity and adds them to the leaderboard.</p>
+<p class="sub">As you are already on the leaderboard, you can invite others to it. Pick a rating database, choose the player, and share the link or QR code below. When they open it in their onlymove app it binds their account to that identity and adds them to the leaderboard. (An account links to one database — EGD or AGA — not both.)</p>
 <div id="gate">Checking access…</div>
 <div id="tools">
-  <div class="searchrow">
-    <input type="text" id="q" placeholder="EGD name or PIN — e.g. Hemming, Henry Hemming, or 16025130" autocomplete="off">
-    <button id="searchBtn">Search</button>
+  <div class="toggle">
+    <button id="tabEgd" class="tab on">EGD</button>
+    <button id="tabAga" class="tab">AGA</button>
+  </div>
+  <div id="egdMode">
+    <div class="searchrow">
+      <input type="text" id="q" placeholder="EGD name or PIN — e.g. Hemming, Henry Hemming, or 16025130" autocomplete="off">
+      <button id="searchBtn">Search</button>
+    </div>
+    <div id="results"></div>
+  </div>
+  <div id="agaMode">
+    <p class="sub">The AGA database has no name search, so look the player up on <a href="https://agagd.usgo.org/players/" target="_blank" rel="noopener">agagd.usgo.org</a> and enter their member id and name. Their current rating is fetched automatically.</p>
+    <div class="searchrow">
+      <input type="text" id="agaId" placeholder="AGA member id — e.g. 20414" autocomplete="off" inputmode="numeric">
+    </div>
+    <div class="searchrow">
+      <input type="text" id="agaName" placeholder="Name — e.g. Maxim Razin" autocomplete="off">
+    </div>
+    <div class="searchrow">
+      <input type="text" id="agaRating" placeholder="AGA rating, optional — auto-fetched if blank" autocomplete="off" inputmode="decimal">
+      <input type="text" id="agaCountry" placeholder="Country, optional — e.g. US" autocomplete="off" maxlength="2">
+    </div>
+    <div class="searchrow" style="justify-content:flex-end">
+      <button id="agaGenBtn">Generate</button>
+    </div>
   </div>
   <div id="msg"></div>
-  <div id="results"></div>
   <div id="out"></div>
 </div>
 <script>
@@ -241,8 +328,9 @@ function renderInvitePage() {
 
   var errMap = {
     unauthorized: 'This account cannot create invitations.',
-    already_registered: 'That EGD player is already registered.',
-    bad_pin: 'Invalid PIN.', bad_name: 'Missing name.', bad_gor: 'Missing GoR.'
+    already_registered: 'That player is already registered.',
+    bad_pin: 'Invalid PIN.', bad_name: 'Missing name.', bad_gor: 'Missing GoR.',
+    bad_id: 'Invalid AGA member id.'
   };
   ${ESC_SNIPPET}
   function setMsg(t, err) { msg.textContent = t || ''; msg.className = err ? 'err' : ''; }
@@ -337,8 +425,11 @@ function renderInvitePage() {
     setMsg('');
     out.style.display = 'block';
     var reused = d.reused ? ' <em>(existing unclaimed link — reused)</em>' : '';
+    var ratingTxt = d.service === 'AGA'
+      ? 'AGA rating ' + (d.rating == null ? 'pending' : esc(String(d.rating)))
+      : 'GoR ' + esc(String(d.gor));
     // d.qrSvg is Worker-generated SVG built from the minted link (no user content) — safe to inline.
-    out.innerHTML = '<p>Invitation for <strong>' + esc(d.egdName) + '</strong> (GoR ' + esc(String(d.gor)) + ')' + reused + ':</p>' +
+    out.innerHTML = '<p>Invitation for <strong>' + esc(d.egdName) + '</strong> (' + ratingTxt + ')' + reused + ':</p>' +
       (d.qrSvg ? '<div class="qr">' + d.qrSvg + '</div>' : '') +
       '<div class="linkrow"><input id="lnk" readonly value="' + esc(d.link) + '"><button id="copy">Copy</button></div>';
     var lnk = document.getElementById('lnk');
@@ -358,9 +449,47 @@ function renderInvitePage() {
     out = document.getElementById('out');
     document.getElementById('searchBtn').addEventListener('click', search);
     qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') search(); });
+    document.getElementById('tabEgd').addEventListener('click', function () { setMode('EGD'); });
+    document.getElementById('tabAga').addEventListener('click', function () { setMode('AGA'); });
+    document.getElementById('agaGenBtn').addEventListener('click', agaGenerate);
+    document.getElementById('agaName').addEventListener('keydown', function (e) { if (e.key === 'Enter') agaGenerate(); });
     tools.style.display = 'block';
     gate.style.display = 'none';
     qEl.focus();
+  }
+
+  // Switch between the EGD (client-searched) and AGA (manual-entry) panes.
+  function setMode(m) {
+    var aga = m === 'AGA';
+    document.getElementById('egdMode').style.display = aga ? 'none' : 'block';
+    document.getElementById('agaMode').style.display = aga ? 'block' : 'none';
+    document.getElementById('tabEgd').className = 'tab' + (aga ? '' : ' on');
+    document.getElementById('tabAga').className = 'tab' + (aga ? ' on' : '');
+    setMsg(''); results.innerHTML = ''; out.style.display = 'none';
+    (aga ? document.getElementById('agaId') : qEl).focus();
+  }
+
+  // AGA: no live search — the Worker snapshots the rating from the entered member id.
+  async function agaGenerate() {
+    var id = document.getElementById('agaId').value.trim();
+    var nm = document.getElementById('agaName').value.trim();
+    var cc = document.getElementById('agaCountry').value.trim();
+    var rt = document.getElementById('agaRating').value.trim();
+    if (!/^\\d{1,12}$/.test(id)) { setMsg('Enter a numeric AGA member id.', true); return; }
+    if (!nm) { setMsg('Enter the player\\'s name.', true); return; }
+    var body = { userId: userId, service: 'AGA', agaId: id, name: nm, country: cc };
+    // Optional manual rating: only the fallback if the Worker can't fetch AGAGD.
+    if (rt !== '' && isFinite(parseFloat(rt))) body.rating = parseFloat(rt);
+    var btn = document.getElementById('agaGenBtn');
+    btn.disabled = true; btn.textContent = '…'; setMsg('Fetching AGA rating…');
+    var r = await post('/invite/create', body);
+    btn.disabled = false; btn.textContent = 'Generate';
+    if (!r.data || !r.data.ok) {
+      var err = (r.data && r.data.error) || 'error';
+      setMsg(errMap[err] || ('Could not create invitation (' + err + ').'), true);
+      return;
+    }
+    showLink(r.data);
   }
 
   // Auto-verify eligibility from the stored account code, then reveal the tools.

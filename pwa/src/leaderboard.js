@@ -16,6 +16,7 @@ import { rankLabelToScalar } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
 } from '../shared/rank-window.js';
+import { fetchAgaRating } from './aga.js';
 // Inlined at build time (wrangler bundles JSON imports, like src/server-stats.js).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
@@ -173,6 +174,18 @@ export function gorToRankScalar(gor) {
     return (gor - 2000) / 100;
 }
 
+// AGA rating (kyu negative, dan positive, ~1 point/stone, with the 1k/1d boundary
+// at rating 0) -> onlymove rank scalar (1k = 0, 1d = 1, boundary at 0.5). Both are
+// 1 unit per stone, so the boundaries differ by a constant 0.5. The +0.5 is a
+// documented calibration constant derived from the boundary definitions — verify
+// against real agagd.usgo.org/player/<id>/ pages (a uniform, monotone shift, so a
+// one-line fix if it reads systematically off). Returns null on a bad rating. This
+// is the AGA analog of gorToRankScalar; the result feeds serverRankToInternal('AGA').
+export function agaRatingToScalar(rating) {
+    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
+    return rating + 0.5;
+}
+
 // The user's leaderboard rank from a buffer of { p, s, t } (newest FIRST). Resolves
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
 // flattens through the SHARED transform, runs the SHARED window estimator, then
@@ -322,6 +335,69 @@ export async function applyGorUpdates(env, updates) {
         invalidateStaleGor();
     } catch (e) {
         console.error('applyGorUpdates failed:', e);
+    }
+}
+
+// --- AGA rating refresh (Worker-side; weekly via cron) --------------------------
+// Unlike EGD, the Worker CAN fetch AGAGD (server-side, no CORS constraint), so AGA
+// ratings are refreshed by the Worker itself on the weekly cron — no client
+// piggyback. If AGAGD is unreachable (a Cloudflare orange-to-orange block, like EGD),
+// no heartbeat is written and the invite-time snapshot persists: AGA linking still
+// works, just without periodic refresh. Mirrors the EGD get-stale / write-heartbeat
+// shape, but self-fetches instead of accepting client-submitted values.
+
+const AGA_REFRESH_MAX = 200;   // cap AGAGD fetches per cron run (best-effort)
+
+// AGA member ids whose rating hasn't been refreshed this week (no 'AGAR' heartbeat
+// since the week start). Small scan (external_ids + one grouped pass of
+// rank_surveys), the AGA analog of getStaleGorPins. Not cached: called only from the
+// weekly cron, not the hot /report path.
+export async function getStaleAgaIds(env) {
+    if (!env.DB) return [];
+    const weekStart = weekStartIso(Date.now());
+    try {
+        const res = await env.DB.prepare(
+            `SELECT x.aga_id FROM external_ids x
+              LEFT JOIN (SELECT user_id, MAX(created_at) AS checked_at
+                           FROM rank_surveys WHERE server = 'AGAR' GROUP BY user_id) s
+                     ON s.user_id = x.user_id
+              WHERE x.aga_id IS NOT NULL
+                AND (s.checked_at IS NULL OR s.checked_at < ?1)`
+        ).bind(weekStart).all();
+        return ((res && res.results) || []).map((r) => r.aga_id).filter(Boolean);
+    } catch (e) {
+        console.error('getStaleAgaIds failed:', e);
+        return [];
+    }
+}
+
+// Fetch each stale AGA id's current rating from AGAGD (server-side) and write one
+// weekly 'AGAR' heartbeat row per registered player. Best-effort: an unreachable
+// AGAGD / bad fetch leaves that id stale for next week (the snapshot persists).
+// Weekly-guarded + registration-checked inside the INSERT ... WHERE NOT EXISTS, so
+// a re-run in the same week is a no-op — same shape as applyGorUpdates.
+export async function refreshAgaRatings(env) {
+    if (!env.DB) return;
+    const ids = (await getStaleAgaIds(env)).slice(0, AGA_REFRESH_MAX);
+    if (!ids.length) return;
+    const weekStart = weekStartIso(Date.now());
+    for (const agaId of ids) {
+        let rating = null;
+        try { rating = await fetchAgaRating(agaId); } catch (e) { rating = null; }
+        if (rating === null) continue;    // unreachable / bad -> keep the snapshot
+        try {
+            await env.DB.prepare(
+                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
+                 SELECT x.user_id, 'AGAR', ?2, ?3, NULL
+                   FROM external_ids x
+                  WHERE x.aga_id = ?1
+                    AND NOT EXISTS (SELECT 1 FROM rank_surveys s
+                                     WHERE s.user_id = x.user_id AND s.server = 'AGAR'
+                                       AND s.created_at >= ?4)`
+            ).bind(agaId, String(rating), new Date().toISOString(), weekStart).run();
+        } catch (e) {
+            console.error('refreshAgaRatings insert failed:', e);
+        }
     }
 }
 
@@ -580,6 +656,15 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
                     if (s !== null) sources.push(s);
                 }
                 if (d.country) egdCountry = d.country;
+            } else if (d.server === 'AGAR') {
+                // Machine AGA rating heartbeat: raw AGA rating -> onlymove scalar via
+                // the AGA coupling (the analog of the 'EGD' GoR branch). AGAGD gives
+                // no country, so nothing is harvested here.
+                const sc = agaRatingToScalar(parseFloat(d.rank));
+                if (sc !== null) {
+                    const s = serverRankToInternal('AGA', sc);
+                    if (s !== null) sources.push(s);
+                }
             } else {
                 const s = serverRankToInternal(d.server, rankLabelToScalar(d.rank));
                 if (s !== null) sources.push(s);

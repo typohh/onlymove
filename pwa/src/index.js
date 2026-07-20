@@ -14,7 +14,7 @@ import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
 import { handleProfileHide, handleProfileHidden } from './handlers/profile.js';
-import { reconcileBuffers, pruneIdleLeaderboardRows } from './leaderboard.js';
+import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
 // flood is dropped by a cheap Worker invocation instead of spending D1 quota.
@@ -140,9 +140,12 @@ export default {
     // external_ids so nothing durable is lost), then reconcile the remaining
     // buffers from tsumego_reports (heals drift). GoR itself is refreshed by
     // active clients piggybacking on /report (the Worker can't reach EGD).
+    // AGA ratings, in contrast, are refreshed HERE (the Worker can reach AGAGD
+    // server-side); refreshAgaRatings is best-effort and no-ops when up to date.
     const now = new Date();
     if (now.getUTCDay() === 1 && now.getUTCHours() === 0) {
       ctx.waitUntil(pruneIdleLeaderboardRows(env).then(() => reconcileBuffers(env)));
+      ctx.waitUntil(refreshAgaRatings(env));
     }
   },
 };

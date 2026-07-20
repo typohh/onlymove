@@ -4,11 +4,11 @@
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
 // cache bounds D1 reads under traffic. Lists every player active in the past week
 // who has at least RANK_START_MIN solves here (so their onlymove rank is known):
-// invite-registered players with their EGD name, everyone else as "Anonymous".
+// invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // Two value columns, both in ONLYMOVE RANK labels ("3k", "1d"):
-//   * Declared — the range where the player's external evidence (EGD GoR +
-//     self-declared server ranks from rank_surveys) lands when back-mapped
+//   * Declared — the range where the player's external evidence (EGD GoR / AGA
+//     rating + self-declared server ranks from rank_surveys) lands when back-mapped
 //     through the inverse consensus couplings (rangeMin..rangeMax from
 //     readLeaderboardRows; single label when the sources agree). Shown for any
 //     row with a mappable source, anonymous included.
