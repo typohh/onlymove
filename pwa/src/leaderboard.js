@@ -21,15 +21,14 @@ import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
-// Rank is emitted only once the buffer holds this many VALID (still-in-corpus) novel
-// attempts — the exact set computeRank fits — so hitting the threshold always coincides
-// with a rank being ready. A user with pred_egf_rank NULL (fewer than RANK_START_MIN
-// valid attempts) is still LISTED on the board; the page shows their VALID-attempt count
-// / RANK_START_MIN as progress instead of a rank (see readLeaderboardRows). The count is
-// the valid one, NOT the raw buffer length, so it can never read "60/60" without a rank:
-// problems that leave the corpus drop out of the count, and it climbs back to 60 only as
-// the player solves more still-in-corpus problems (each such report recomputes the rank).
-export const RANK_START_MIN = 60;
+// Rank is emitted — and the player LISTED — only once the buffer holds this many VALID
+// (still-in-corpus) novel attempts, the exact set computeRank fits. This is the uniform
+// list-entry gate: a user below it (pred_egf_rank NULL) is NOT shown regardless of
+// registration (no EGD-pin bypass), and the page shows no sample count — only a footer
+// tally of how many active players are still below it. The count is the valid one, NOT
+// the raw buffer length: problems that leave the corpus drop out, so a player can fall
+// back below the gate until they solve more still-in-corpus problems.
+export const RANK_START_MIN = 30;
 const TIME_MIN_TIMED = 20;              // >= this many valid solve times for a time dock
 export const BUFFER_CAP = WIN_CAP;      // 500 — the buffer + the rank window share it
 
@@ -433,44 +432,45 @@ export async function reconcileBuffers(env) {
 
 // --- compute-on-read: rows for the /leaderboard page -----------------------------
 // Walks the (pruned, small) leaderboard table limited to rows active in the
-// trailing `activeDays` window; an UNRANKED unregistered row is dropped (the
-// attempts-toward-a-rank progress readout only makes sense for players who opted
-// in by registering), and a hidden row is filtered below. Registration display
-// fields live OFF the leaderboard row: name/country on the claimed invitation
-// (frozen at invite time; bare-column + MAX() subquery picks the newest claim —
-// documented SQLite behavior), and per-user external evidence from ONE
-// latest-per-(user, server) pass over rank_surveys, stitched in JS: EVERY
-// declaration (the 'EGD' GoR heartbeat included) is back-mapped through its
-// server's inverse coupling AND de-timed by the user's own dock into an UNTIMED
-// onlymove-rank range `rangeMin..rangeMax` (null when the user has no mappable
-// source; any row, registered or anonymous, may carry one). A ranked player
-// (pred_egf_rank not null, i.e. >= RANK_START_MIN usable novel attempts) carries
-// `currentInternal`, the untimed onlymove estimate. A not-yet-ranked REGISTERED
-// player carries `ranked: false` + `usableCount` (buffered novel attempts STILL
-// IN THE CORPUS, < RANK_START_MIN) so the page shows their
-// valid-attempts/RANK_START_MIN progress in place of a rank. Every row carries
-// `registered` (has an external_ids row); unregistered rows have name/country
-// null. BOTH the estimate and the declared range are UNTIMED onlymove ranks —
-// no EGF, no time adjustment — matching the client's front-page headline.
+// trailing `activeDays` window and returns { rows, belowMin }: `rows` are the
+// players AT OR ABOVE the uniform list-entry gate (>= RANK_START_MIN valid
+// in-corpus novel attempts — a real onlymove rank), `belowMin` is the count of
+// active players still under it. The gate is uniform: registration grants NO
+// bypass, so a sub-gate registered player is counted in `belowMin`, not shown,
+// and the page displays no sample count — only the aggregate tally. A hidden row
+// is filtered below. Registration display fields live OFF the leaderboard row:
+// name/country on the claimed invitation (frozen at invite time; bare-column +
+// MAX() subquery picks the newest claim — documented SQLite behavior), and
+// per-user external evidence from ONE latest-per-(user, server) pass over
+// rank_surveys, stitched in JS: EVERY declaration (the 'EGD' GoR heartbeat
+// included) is back-mapped through its server's inverse coupling AND de-timed by
+// the user's own dock into an UNTIMED onlymove-rank range `rangeMin..rangeMax`
+// (null when the user has no mappable source; any row, registered or anonymous,
+// may carry one). Each shown row carries `currentInternal`, the untimed onlymove
+// estimate, and `registered` (has an external_ids row; unregistered rows have
+// name/country null). BOTH the estimate and the declared range are UNTIMED
+// onlymove ranks — no EGF, no time adjustment — matching the client's front-page
+// headline.
 export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
-    if (!env.DB) return [];
+    if (!env.DB) return { rows: [], belowMin: 0 };
     const JOINS = `
         LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
                      FROM invitation WHERE claimed_by_user_id IS NOT NULL
                     GROUP BY claimed_by_user_id) i ON i.uid = u`;
-    // buffer is shipped for EVERY row: an unranked row (re)computes its rank from it,
-    // and a RANKED row needs it too — the page de-times its rank into the untimed
+    // buffer is shipped for EVERY row: a rank-less row (re)computes its rank from it,
+    // and a ranked row needs it too — the page de-times its rank into the untimed
     // onlymove frame, which needs the user's median solve time (the personal dock),
     // recomputed from the buffer on read (cheap median, no window fit; D1 bills rows,
-    // not the blob's bytes). Unranked UNREGISTERED rows are filtered out in SQL.
+    // not the blob's bytes). ALL active rows are pulled — no registration/rank filter —
+    // so the sub-gate rows can be tallied for the footer; they're dropped from the
+    // visible list in JS below.
     const stmt = env.DB.prepare(
         `SELECT l.user_id, i.egd_name, i.country_code, l.pred_egf_rank, l.buffer,
                 (x.user_id IS NOT NULL) AS registered
            FROM (SELECT *, user_id AS u FROM leaderboard
                   WHERE last_active >= ?1) l
            LEFT JOIN external_ids x ON x.user_id = u
-           ${JOINS}
-          WHERE x.user_id IS NOT NULL OR l.pred_egf_rank IS NOT NULL`
+           ${JOINS}`
     ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     // Latest declaration per (user, server) — one pass over the (small)
     // rank_surveys table; stitched onto rows in JS below. `country` is a bare
@@ -490,13 +490,11 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         declByUser.get(d.user_id).push(d);
     }
     const rows = (res && res.results) || [];
-    // An unranked row is (re)computed on read: this both (a) reports the current VALID
-    // (still-in-corpus) attempt count for the progress readout — the count shrinks as
-    // problems leave the corpus and climbs back only as the player solves more, so it
-    // never reads "60/60" without a rank — and (b) surfaces a rank the instant the valid
-    // count reaches RANK_START_MIN, without waiting for the weekly reconcile cron.
-    // params is the per-isolate cached asset; load it if any row has a buffer (needed
-    // to recompute an unranked row's rank AND to derive every row's time dock).
+    // A row with no stored rank is (re)computed on read: (a) so a player who has just
+    // crossed the gate is shown a rank immediately, without waiting for the reconcile
+    // cron, and (b) so sub-gate players can be tallied for the footer. params is the
+    // per-isolate cached asset; load it if any row has a buffer (needed to recompute a
+    // row's rank AND to derive every row's time dock).
     let params = null;
     if (rows.some((r) => r.buffer)) {
         try { params = await getProblemParams(env); }
@@ -511,31 +509,36 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const hres = await env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all();
         for (const h of ((hres && hres.results) || [])) hidden.add(h.user_id);
     } catch (e) { console.error('hidden_profiles read failed:', e); }
-    const mapped = rows.map((r) => {
+    // Below-gate rows (< RANK_START_MIN valid in-corpus attempts) are COUNTED for the
+    // footer tally and dropped; at-or-above-gate rows are stitched into display
+    // identities. The gate is uniform — registration gives no bypass — so an
+    // unregistered ranked player and a registered one are shown alike, and a registered
+    // sub-gate player is not shown at all.
+    let belowMin = 0;
+    const visible = [];
+    for (const r of rows) {
         const isHidden = hidden.has(r.user_id);
         // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
-        // the buffer. usableCount (valid in-corpus attempts, what the fit uses) drives
-        // the progress readout while the row is unranked (< RANK_START_MIN valid).
-        // deltaRating is the user's personal time dock (rating units) baked into the
-        // server-frame rank — recomputed here so the page can subtract it back off for
-        // the untimed onlymove display (computeRank returns it for an unranked recompute;
-        // a ranked row reads it straight from the buffer's median solve time).
+        // the buffer (the stored value can lag a threshold change or a corpus churn; the
+        // recompute surfaces a rank the instant the valid count reaches the gate, without
+        // waiting for the reconcile cron). deltaRating is the user's personal time dock
+        // (rating units) baked into the server-frame rank — recovered here so the page can
+        // subtract it back off for the untimed onlymove display.
         const buf = r.buffer ? parseBuffer(r.buffer) : [];
         let predEgfRank = Number.isFinite(r.pred_egf_rank) ? r.pred_egf_rank : null;
-        let usableCount = 0;
         let deltaRating = 0;
         if (predEgfRank === null) {
             if (params && buf.length) {
                 const c = computeRank(buf, params);
-                usableCount = c.usable;
                 deltaRating = c.deltaRating || 0;
                 if (Number.isFinite(c.predEgfRank)) predEgfRank = c.predEgfRank;
-            } else {
-                usableCount = buf.length;   // params unavailable: fall back to raw count
             }
         } else if (params && buf.length) {
             deltaRating = timeDeltaRatingFromBuffer(buf, params);
         }
+        // Below the list-entry gate: not shown, only tallied. (A hidden sub-gate row is
+        // counted too — the tally is a raw activity aggregate, not identifying.)
+        if (predEgfRank === null) { belowMin++; continue; }
         // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
         // every mappable declaration (GoR included) back-maps through its server's
         // inverse coupling into the internal-rank range. Country is harvested in the
@@ -568,26 +571,15 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         // The onlymove estimate as an UNTIMED internal scalar: invert the stored
         // server-frame EGF rank to internal, then subtract the dock — recovering the
         // client's untimed front-page frame (the column the page displays).
-        const currentInternal = predEgfRank === null
-            ? null : deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
-        // A hidden user is stripped of name/country and reported as unregistered, so
-        // the page renders them anonymously (a hidden-and-unranked row is then dropped
-        // by the _hidden filter below). Country falls back GoR (EGD, most reliable) →
-        // invitation (EGD, frozen at invite) → survey (geo-IP), so the flag shows for
-        // ANY user with a country from any of those, not just registered rows.
+        const currentInternal = deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
+        // A hidden user is stripped of name/country and reported as unregistered, so the
+        // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
+        // reliable) → invitation (EGD, frozen at invite) → survey (geo-IP), so the flag
+        // shows for ANY user with a country from any of those, not just registered rows.
         const name = isHidden ? null : r.egd_name;
         const country = isHidden ? null : (egdCountry || r.country_code || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
-        return {
-            name, country, rangeMin, rangeMax,
-            registered, ranked: predEgfRank !== null, usableCount,
-            currentInternal,                   // untimed onlymove internal scalar (null when unranked)
-            _hidden: isHidden,
-        };
-    });
-    // Drop a hidden row that has no onlymove rank (matching how a never-registered,
-    // not-yet-ranked player is already omitted); a hidden RANKED row survives as an
-    // anonymous rank. Strip the internal marker.
-    const visible = mapped.filter((r) => !(r._hidden && !r.ranked));
-    return visible.map(({ _hidden, ...rest }) => rest);
+        visible.push({ name, country, rangeMin, rangeMax, registered, currentInternal });
+    }
+    return { rows: visible, belowMin };
 }

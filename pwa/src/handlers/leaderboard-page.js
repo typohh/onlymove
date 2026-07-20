@@ -2,8 +2,10 @@
 //
 // GET /leaderboard — a standalone, directly-linkable, server-rendered page (loads
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
-// cache bounds D1 reads under traffic. Lists EVERY player active in the past week:
+// cache bounds D1 reads under traffic. Lists every player active in the past week
+// who has at least RANK_START_MIN solves here (so their onlymove rank is known):
 // invite-registered players with their EGD name, everyone else as "Anonymous".
+// Players still below the gate are only counted, in a footer tally.
 // Two value columns, both in ONLYMOVE RANK labels ("3k", "1d"):
 //   * Declared — the range where the player's external evidence (EGD GoR +
 //     self-declared server ranks from rank_surveys) lands when back-mapped
@@ -20,13 +22,13 @@ import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
 
 export async function handleLeaderboard(env) {
-    let rows = [];
+    let rows = [], belowMin = 0;
     try {
-        rows = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS });
+        ({ rows, belowMin } = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS }));
     } catch (e) {
         console.error('leaderboard read failed:', e);
     }
-    return new Response(renderPage(rows), {
+    return new Response(renderPage(rows, belowMin), {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
@@ -35,7 +37,7 @@ export async function handleLeaderboard(env) {
     });
 }
 
-function renderPage(rows) {
+function renderPage(rows, belowMin) {
     // Per row: `decl` = the external-evidence range (v: midpoint scalar for
     // sorting, t: "3k–1d" label), `est` = the current onlymove estimate (v:
     // internal scalar, t: label). BOTH are UNTIMED onlymove-frame internal scalars
@@ -59,16 +61,14 @@ function renderPage(rows) {
             decl,
             est: toEst(r.currentInternal),
         };
-        // Not yet ranked: the onlymove column shows valid-attempts/threshold progress
-        // instead of an estimate, so it's obvious they haven't qualified. est is
-        // null → this row sorts last in the estimate sort (missing values do).
-        // usableCount is the VALID (still-in-corpus) attempt count — the exact set the
-        // rank fit needs — so it reaches RANK_START_MIN only when a rank is ready (never
-        // a "60/60" without one). The Math.min is a defensive guard against ">60/60".
-        if (!r.ranked) row.progress = Math.min(r.usableCount || 0, RANK_START_MIN) + '/' + RANK_START_MIN;
         return row;
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');
+    // Footer tally of active players still below the list-entry gate (no per-user
+    // sample count is shown; this aggregate is the only nod to them).
+    const belowNote = belowMin
+        ? `<p>${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
+        : '';
 
     return `<!doctype html>
 <html lang="en">
@@ -90,8 +90,6 @@ function renderPage(rows) {
   thead th.sorted { opacity: .95; }
   td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
-  /* Not-yet-ranked progress (attempts/threshold) — muted so it reads as "pending". */
-  td.val.progress { font-weight: 400; opacity: .5; }
   td.decl { opacity: .7; font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
   /* Unregistered players — muted so named (registered) rows stand out. */
@@ -113,7 +111,7 @@ function renderPage(rows) {
 </head>
 <body>
 <h1>Leaderboard</h1>
-<p class="sub">Every player active in the past week, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks (EGD GoR and self-declared server ranks) land on the onlymove scale — a range when the sources disagree. Registered players show their name; everyone else is anonymous. Newly registered players show their attempts toward a rank (${RANK_START_MIN} needed) until they qualify.</p>
+<p class="sub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks land on the onlymove scale.</p>
 <table>
   <thead>
     <tr>
@@ -126,6 +124,7 @@ function renderPage(rows) {
   <tbody id="rows"></tbody>
 </table>
 <footer>
+  ${belowNote}
   <p>Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
   <div id="hideProfile" class="hide-profile" hidden>
     <label>
@@ -186,11 +185,7 @@ function renderPage(rows) {
     if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No players yet.</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
-      // Not-yet-ranked rows show attempts/threshold progress in the estimate
-      // column instead of a rank; muted via .progress.
-      var estCell = r.progress
-        ? '<td class="val om-start progress">' + esc(r.progress) + '</td>'
-        : '<td class="val om-start">' + fmt(r.est) + '</td>';
+      var estCell = '<td class="val om-start">' + fmt(r.est) + '</td>';
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') +
         '<span class="name' + (r.anon ? ' anon' : '') + '">' + esc(nameOf(r)) + '</span></td>' +
