@@ -25,13 +25,14 @@ SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA"]
 
 # INSERT INTO "rank_surveys" VALUES(123,'<redacted-user-id>…','OGS','5k','2025-09-12T…');
-# country is an optional LAST column (quoted, or NULL, or absent on a pre-country
-# dump) — see the schema note; capture it but keep created_at at a fixed group.
+# country is an optional 6th column (quoted, or NULL, or absent on a pre-country
+# dump); any columns after it (rank_label, last_game_at, future adds) are
+# ignored — capture country but keep created_at at a fixed group.
 RANK_SURVEY_RE = re.compile(
     r"INSERT INTO [\"`]?rank_surveys[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
     r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'"
     r"(?:,(?:NULL|'([^']*)'))?"
-    r"\);"
+    r"(?:,.*)?\);"
 )
 
 # Captures: user_id, problem, success, size (optional), is_repeat (optional).
