@@ -9,13 +9,13 @@
 // is two values maintained per user:
 //
 //   - user_seq    — 1-based count of the user's attempts (append-only, so it
-//                   only ever increments by 1 per row). The load-bearing
-//                   divergence signal: client localCount != server user_seq
-//                   means the device is missing (or holds extra) rows.
-//   - running_sum — Σ rowHash(id) over the user's rows. Content-level
-//                   confidence against the rare equal-count-different-set;
-//                   advisory (a sum-only mismatch never escalates to a full
-//                   reconcile — the count does).
+//                   only ever increments by 1 per row). Divergence signal:
+//                   client localCount != server user_seq means the device is
+//                   missing (or holds extra) rows.
+//   - running_sum — Σ rowHash(id) over the user's rows. CO-EQUAL divergence
+//                   signal with the count (sum-first digest): a sum mismatch
+//                   at equal counts is content divergence and triggers the
+//                   same mirror reconcile the count does.
 //
 // The per-row hash is a cheap integer-arithmetic mix of the row's AUTOINCREMENT
 // id (NOT created_at — no date parsing, no SQLite hash function needed). It is

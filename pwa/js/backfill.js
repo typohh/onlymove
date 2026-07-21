@@ -105,12 +105,16 @@ const STALE_FLAG_KEYS = (size) => [
 // The backfill edits entries IN PLACE and updateUserStats shallow-spreads, so the
 // live array shares our edited entry objects AND additionally holds the new
 // attempts. Persisting the live array therefore keeps BOTH the backfilled fields
-// and the session's attempts. The length guard falls back to the snapshot only in
-// the degenerate case where the bucket somehow shrank out from under us (never on
-// the append-only updateUserStats path).
-function persistAnswerHistory(size, snapshot) {
-    const live = getAnswerHistoryForSize(size);
-    setAnswerHistoryForSize(size, live.length >= snapshot.length ? live : snapshot);
+// and the session's attempts. The live array is ALSO authoritative for
+// membership: the working set legitimately SHRINKS during our awaits — the
+// eviction moves rows to the IndexedDB tail mid-pull, and the mirror deletion
+// pass removes rows the server no longer has. (An earlier length guard here
+// restored the pre-await snapshot on any shrink, which re-added just-evicted
+// rows to the working set while their copies sat in the tail — the next evict
+// then re-appended them as tail duplicates, a permanent digest surplus. Found
+// by the sum-first digest during the epoch rehearsal.)
+function persistAnswerHistory(size, _snapshot) {
+    setAnswerHistoryForSize(size, getAnswerHistoryForSize(size));
 }
 
 // Stamp the three data-version gates at their CURRENT values when the device

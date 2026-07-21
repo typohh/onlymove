@@ -69,6 +69,7 @@ function openDB() {
 // failed — the caller must keep those rows in the working set on a false.
 export async function appendTail(rows) {
     if (!rows || rows.length === 0) return true;
+    invalidateTailDigest();
     const db = await openDB();
     if (!db) return false;
     return new Promise((resolve) => {
@@ -135,29 +136,27 @@ export async function getTail() {
     });
 }
 
-// Acked = carries a serverId OR a legacy serverCreatedAt stamp (see
-// state.isUnackedReportable — same OR, correct on every entry shape). The
-// acked row's server-side event time in ms: post-client-time-era entries have
-// date === created_at by construction; legacy un-migrated entries still carry
-// the edge stamp in serverCreatedAt, so prefer it when present.
+// Acked = carries a serverId (the row id /report or /sync stamped; identity
+// and digest key). Mirror-by-id is the only representation — every acked
+// entry has an id.
 function isAcked(v) {
-    return !!v && (!!v.serverCreatedAt || Number.isFinite(v.serverId));
-}
-function ackedEventMs(v) {
-    if (v.serverCreatedAt) {
-        const ts = Date.parse(v.serverCreatedAt);
-        if (Number.isFinite(ts)) return ts;
-    }
-    return v.date;
+    return !!v && Number.isFinite(v.serverId);
 }
 
-// One cold-tail scan for the sync digest: how many tail rows are acked, the
-// Σ rowHash(serverId) over those that carry a serverId, and whether every
-// acked row has one (allHaveId=false disables the content check, leaving the
-// count check). Defensive: empty info on any error.
+// Cached tail digest: the tail changes only through this module's writers
+// (appendTail / updateTail / pruneTail / clearTail / replaceTail), each of
+// which invalidates the cache — so the per-report digest check reads it
+// without an IDB cursor walk.
+let tailDigestCache = null;
+function invalidateTailDigest() { tailDigestCache = null; }
+
+// One cold-tail scan for the sync digest: how many tail rows are acked and the
+// Σ rowHash(serverId) over them. Defensive: empty info on any error (an
+// unavailable tail contributes nothing, same degradation as every reader).
 export async function getTailDigestInfo() {
+    if (tailDigestCache) return tailDigestCache;
     const db = await openDB();
-    const info = { ackedCount: 0, idSum: 0, allHaveId: true };
+    const info = { ackedCount: 0, idSum: 0 };
     if (!db) return info;
     return new Promise((resolve) => {
         let req;
@@ -169,12 +168,11 @@ export async function getTailDigestInfo() {
         }
         req.onsuccess = () => {
             const cursor = req.result;
-            if (!cursor) { resolve(info); return; }
+            if (!cursor) { tailDigestCache = info; resolve(info); return; }
             const v = cursor.value;
             if (isAcked(v)) {
                 info.ackedCount++;
-                if (Number.isFinite(v.serverId)) info.idSum += rowHash(v.serverId);
-                else info.allHaveId = false;
+                info.idSum += rowHash(v.serverId);
             }
             cursor.continue();
         };
@@ -182,18 +180,11 @@ export async function getTailDigestInfo() {
     });
 }
 
-// One cursor pass building everything the sync merge needs to know about the
-// tail: the acked row ids (id-first dedup), the serverCreatedAt stamp set
-// (legacy timestamp dedup, un-migrated devices only), and per-event-ms identity
-// fields (`dates` — the id-first merge's identical-content check, which decides
-// whether a same-timestamp server row is a redundant duplicate copy to absorb
-// or a genuine same-millisecond collision to insert). Event times can collide
-// (that's the point), so `dates` maps a ms value to the LIST of acked rows
-// carrying it. Empty index if IDB is unavailable — the merge then dedups
-// against the working set only, same degradation as before.
+// The acked row ids in the tail — the sync merge's id-first dedup. Empty set
+// if IDB is unavailable (the merge then dedups against the working set only).
 export async function getTailSyncIndex() {
     const db = await openDB();
-    const index = { ids: new Set(), stampSet: new Set(), dates: new Map() };
+    const index = { ids: new Set() };
     if (!db) return index;
     return new Promise((resolve) => {
         let req;
@@ -207,24 +198,45 @@ export async function getTailSyncIndex() {
             const cursor = req.result;
             if (!cursor) { resolve(index); return; }
             const v = cursor.value;
-            if (isAcked(v)) {
-                if (v.serverCreatedAt) index.stampSet.add(v.serverCreatedAt);
-                if (Number.isFinite(v.serverId)) index.ids.add(v.serverId);
-                const ms = ackedEventMs(v);
-                if (Number.isFinite(ms)) {
-                    let list = index.dates.get(ms);
-                    if (!list) { list = []; index.dates.set(ms, list); }
-                    list.push({
-                        problemId: v.problemId,
-                        correct: !!v.correct,
-                        isRepeat: !!v.isRepeat,
-                        size: v.size,
-                    });
-                }
-            }
+            if (isAcked(v)) index.ids.add(v.serverId);
             cursor.continue();
         };
         req.onerror = () => resolve(index);
+    });
+}
+
+// Delete every tail row for which `predicate(row)` is true, in one
+// transaction. The mirror-complete reconcile's deletion pass uses this to drop
+// acked rows the server no longer has, and to collapse evict-seam duplicates
+// (a row present in both the working set and the tail after a crash
+// mid-evict). Resolves the number of rows deleted, or false on
+// unavailability/error.
+export async function pruneTail(predicate) {
+    const db = await openDB();
+    if (!db) return false;
+    invalidateTailDigest();
+    return new Promise((resolve) => {
+        let tx, req, deleted = 0;
+        try {
+            tx = db.transaction(STORE, 'readwrite');
+            req = tx.objectStore(STORE).openCursor();
+        } catch {
+            resolve(false);
+            return;
+        }
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) return; // walk done — tx.oncomplete resolves
+            let hit = false;
+            try { hit = !!predicate(cursor.value); } catch { hit = false; }
+            if (hit) {
+                try { cursor.delete(); deleted++; } catch {}
+            }
+            cursor.continue();
+        };
+        req.onerror = () => resolve(false);
+        tx.oncomplete = () => resolve(deleted);
+        tx.onabort = () => resolve(false);
     });
 }
 
@@ -232,6 +244,7 @@ export async function getTailSyncIndex() {
 // entry to persist the change, or return null/undefined to leave it untouched.
 // Resolves true when the walk completes, false on unavailability/error.
 export async function updateTail(transform) {
+    invalidateTailDigest();
     const db = await openDB();
     if (!db) return false;
     return new Promise((resolve) => {
@@ -261,6 +274,7 @@ export async function updateTail(transform) {
 
 // Drop the whole tail (account switch). Resolves true on success.
 export async function clearTail() {
+    invalidateTailDigest();
     const db = await openDB();
     if (!db) return false;
     return new Promise((resolve) => {
@@ -283,6 +297,7 @@ export async function clearTail() {
 // tail repair (de-dup + rating reconstruction). Resolves true on success, false
 // on unavailability/error (caller should not treat the repair as done).
 export async function replaceTail(rows) {
+    invalidateTailDigest();
     const db = await openDB();
     if (!db) return false;
     return new Promise((resolve) => {

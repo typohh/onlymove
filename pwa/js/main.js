@@ -6,8 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, initHistoryStorage } from './state.js';
-import { runMigrations, runTailMigration, dedupTailExact, maybeInitWindowRankOnce } from './migrations.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, initHistoryStorage, addIgnoredProblem } from './state.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -170,6 +169,10 @@ async function performIgnore() {
 
     if (lastAnswer && lastAnswer.problemId === problemId) {
         lastAnswer.ignored = true;
+        // Also record it in the durable id set — the entry flag round-trips
+        // nowhere, so this is what survives an epoch wipe / re-adoption
+        // (state.applyStoredIgnoredFlags re-marks the restored history).
+        addIgnoredProblem(problemId);
         updateAnswerHistory(answerHistory);
     } else {
         Sentry.captureMessage("Ignore button: last answer does not match problem.", {
@@ -660,17 +663,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireRankDisplayTap();
     wireActionButtons();
 
-    // Legacy answerHistory-shape migrations (js/migrations.js). The board-size
-    // bucket migrations already ran at state.js import time, so these operate
-    // through state.answerHistory (the active size's view).
-    runMigrations();
-
     // Normalize answer-history storage to the unified working set + IndexedDB
-    // tail (history-store.js). Runs AFTER runMigrations so the legacy {9,13}
-    // buckets are migrated in full first, then everything beyond the cap is
-    // evicted to IDB — freeing localStorage before the embedding backfill below
-    // writes through the (now bounded) working set. Awaited so a quota-stressed
-    // device is relieved before any further write; cheap on already-split state.
+    // tail (history-store.js): everything beyond the cap is evicted to IDB —
+    // freeing localStorage before the embedding backfill below writes through
+    // the (now bounded) working set. Awaited so a quota-stressed device is
+    // relieved before any further write; cheap on already-split state. (The
+    // state-epoch gate at state.js import time replaced the migration
+    // ladders; the working set is always the current unified-array shape.)
     await initHistoryStorage();
 
     loadRequiredAssetsOrThrow();
@@ -678,25 +677,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     await maybeFinishPendingAccountSwitch();
 
     // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
-    // (raw) + problemRank on legacy answerHistory entries from already-deployed
+    // (raw) + problemRank on stale answerHistory entries from already-deployed
     // zips and the now-cached curve, so returning users don't need to solve 20+
-    // new problems before the weakness model has data. The one-time cold-tail
-    // migration (de-dup + reconstruct + eviction-baseline fix) settles the tail
-    // FIRST so the backfill's curve-recompute doesn't race its writes. Both are
-    // background — the first problem load doesn't wait.
-    runTailMigration()
-        .catch(() => {})
-        .then(() => dedupTailExact())
-        .catch(() => {})
-        // Seed a genuinely-fresh device (empty history, after the tail settles) to
-        // the CURRENT data versions BEFORE the version gate reads them. This is what
-        // guarantees a brand-new user is never shown the "ratings corrected" notice:
-        // with current stamps its ratingsChanged/curveChanged are false, so the
-        // notice is excluded structurally — not left to the attempt-count gate, which
-        // a new user can cross (play 2, reload) before the backfill stamps them.
-        // No-op once any history exists, so an established/returning user's real
-        // stamps still drive the notice. (The account-switch flow already calls this
-        // for adopted devices; this covers the normal first boot.)
+    // new problems before the weakness model has data. Background — the first
+    // problem load doesn't wait.
+    // Seed a genuinely-fresh device (empty history) to the CURRENT data
+    // versions BEFORE the version gate reads them. This is what guarantees a
+    // brand-new user is never shown the "ratings corrected" notice: with
+    // current stamps its ratingsChanged/curveChanged are false, so the notice
+    // is excluded structurally — not left to the attempt-count gate, which a
+    // new user can cross (play 2, reload) before the backfill stamps them.
+    // No-op once any history exists, so an established/returning user's real
+    // stamps still drive the notice. (The account-switch flow already calls
+    // this for adopted devices; this covers the normal first boot.)
+    Promise.resolve()
         .then(() => stampVersionsForFreshHistory())
         .then(() => backfillMissingEmbeddings())
         // After the re-derive that actually shifted stored ranks, surface the
@@ -704,8 +698,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // the already-corrected board. Guarded to established users only.
         .then(() => maybeShowRatingsCorrectionNotice())
         .catch(() => {});
-
-    maybeInitWindowRankOnce();
 
     // Resolve board size, then load the first problem (shared link / recall
     // notification / standing challenge).

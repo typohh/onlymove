@@ -6,24 +6,23 @@
 // correctness-critical for account sync, so the two paths must stay
 // byte-identical — hence one module.
 //
-// The INSERT lazy-computes the per-profile sync digest in the same statement
+// The INSERT maintains the per-profile sync digest in the same statement
 // (docs/account_sync_redesign.md): user_seq = the user's running attempt
 // count, running_sum = the EXCLUSIVE prefix of Σ rowHash(id) over the user's
-// earlier rows. Both fall back to a one-time COUNT/SUM the first time a user
-// reports after the columns were added (latest row NULL), then ride the O(1)
-// latest-row lookup via idx_tsumego_reports_user_id. RETURNING hands back the
-// new row's id + the two digest fields (/report echoes all three; the
-// backfill only reads id).
+// earlier rows. The chain is a TABLE INVARIANT — every existing row carries
+// its values (the 2026-07 DB surgery materialized all pre-column rows), so
+// the only fallback case is a brand-new user with no rows at all (the
+// constants 0). Rides the O(1) latest-row lookup via
+// idx_tsumego_reports_user_id. RETURNING hands back the new row's id + the
+// two digest fields (/report echoes all three; the backfill only reads id).
 import { ID_HASH_SQL } from '../shared/sync-digest.js';
 
 const ATTEMPT_INSERT_SQL =
   `INSERT INTO tsumego_reports
      (user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat, user_seq, running_sum)
    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-     COALESCE((SELECT user_seq FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
-              (SELECT COUNT(*) FROM tsumego_reports WHERE user_id = ?1)) + 1,
-     COALESCE((SELECT running_sum + ${ID_HASH_SQL} FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1),
-              (SELECT COALESCE(SUM(${ID_HASH_SQL}), 0) FROM tsumego_reports WHERE user_id = ?1))
+     COALESCE((SELECT user_seq FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1), 0) + 1,
+     COALESCE((SELECT running_sum + ${ID_HASH_SQL} FROM tsumego_reports WHERE user_id = ?1 ORDER BY id DESC LIMIT 1), 0)
    RETURNING id, user_seq, running_sum`;
 
 // Optional per-attempt fields; older clients don't send them, so every column

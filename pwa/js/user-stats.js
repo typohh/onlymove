@@ -130,7 +130,7 @@ export async function sendReport({ success, move = null, timeUsed = null, review
             const body = await res.json().catch(() => null);
             if (body) {
                 recordReportAck(problemId, ackAt, body.serverId);
-                checkSyncSignal(body.userSeq);
+                checkSyncSignal(body.userSeq, body.digest);
             }
             // Server advertised registered PINs whose GoR is stale this week — fetch
             // them from EGD now; they ride the next report back (see gor-refresh.js).

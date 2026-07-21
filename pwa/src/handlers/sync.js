@@ -21,7 +21,12 @@ const SYNC_PAGE_LIMIT = 1000;
 // is bypassable by clearing localStorage, so the cap lives here. Incremental
 // syncs (real cursor), existence/frontier probes (limit:1), and full pulls
 // that return NO rows (fresh empty accounts) don't count.
-const HISTORY_REFRESH_DAILY_CAP = 3;
+// TEMPORARILY 10 for the state-epoch rollout (every device re-adopts on its
+// first post-deploy boot; a 3-device user or a flaky connection could exhaust
+// 3 and strand a device rank-less until the next UTC day). Restore to 3 a few
+// weeks after the epoch deploy — the one deferred cleanup item
+// (docs/db_surgery_and_legacy_removal_plan.md section 6).
+const HISTORY_REFRESH_DAILY_CAP = 10;
 
 export async function handleSync(request, env) {
   const syncHeaders = versionedJsonHeaders();
@@ -34,14 +39,11 @@ export async function handleSync(request, env) {
       return new Response('Database not configured', { status: 500, headers: syncHeaders });
     }
 
-    // id cursor only. A request without a valid sinceId gets an empty no-op so it
-    // doesn't trigger a full-table scan, rather than syncing. No data is lost
-    // (its /report writes are unaffected); it resyncs in full on reload.
+    // id cursor only — standard input validation. A stale cached bundle's
+    // failed sync is harmless; it reloads into the new bundle via the version
+    // signal shortly after.
     if (!Number.isInteger(data.sinceId) || data.sinceId < 0) {
-      return new Response(
-        JSON.stringify({ reports: [], cursorId: 0, hasMore: false, serverSeq: null, serverDigest: 0, serverMaxId: 0 }),
-        { status: 200, headers: syncHeaders }
-      );
+      return new Response('Invalid request body', { status: 400, headers: syncHeaders });
     }
     const sinceId = data.sinceId;
 
@@ -118,28 +120,20 @@ export async function handleSync(request, env) {
 
     // Per-profile digest summary (the user's latest row), so an up-to-date
     // device can confirm it is in sync without making a /report: compare
-    // serverSeq to its local row count and serverDigest to its local
+    // serverSeq to its local acked-row count and serverDigest to its local
     // Σ rowHash(serverId). O(1) via idx_tsumego_reports_user_id. serverMaxId is
-    // the current id frontier — the one-time migrateIdCursor() probe adopts it
-    // as cursorId for a device coming off the old created_at cursor.
-    //   - no rows at all      → serverSeq 0,    serverDigest 0,   serverMaxId 0
-    //   - rows exist, unseeded (latest row predates the digest columns and the
-    //     user hasn't reported since) → serverSeq null (client skips the check
-    //     until the user's first post-migration /report seeds it); serverMaxId
-    //     is still the real frontier so the cursor can migrate.
-    //   - seeded              → the real values
+    // the current id frontier (the existence probe reads it).
+    // Every row carries user_seq/running_sum — the DB surgery materialized the
+    // chains for all pre-existing rows and the INSERT maintains them — so the
+    // summary is always defined: no rows → 0/0/0, else the real values.
     let serverSeq = 0, serverDigest = 0, serverMaxId = 0;
     const latest = await env.DB.prepare(
       `SELECT id, user_seq, running_sum FROM tsumego_reports WHERE user_id = ? ORDER BY id DESC LIMIT 1`
     ).bind(data.userId).first();
     if (latest) {
       serverMaxId = latest.id;
-      if (latest.user_seq != null && latest.running_sum != null) {
-        serverSeq = latest.user_seq;
-        serverDigest = latest.running_sum + rowHash(latest.id);
-      } else {
-        serverSeq = null; serverDigest = null;
-      }
+      serverSeq = latest.user_seq;
+      serverDigest = latest.running_sum + rowHash(latest.id);
     }
 
     const payload = { reports, cursorId, hasMore, serverSeq, serverDigest, serverMaxId };

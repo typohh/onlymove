@@ -2,19 +2,17 @@
 import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
-import { runBootMigrations } from './boot-migrations.js';
+import { runStateEpochGate } from './state-epoch.js';
 
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
 
-// --- Import-time localStorage-shape migrations (js/boot-migrations.js) ---
-// Reshape persisted localStorage (per-size buckets, cross-size merge, model
-// resets, challenge-model key cleanup) BEFORE any state property below is read.
-// migrateBoardSizeBuckets establishes the bucket shape the rest of this module
-// depends on, so this MUST stay above the state reads. The bodies live in
-// boot-migrations.js — dependency-light (imports only persist.js) so centralizing
-// them doesn't create a state.js↔migrations.js cycle.
-runBootMigrations();
+// --- Import-time state-epoch gate (js/state-epoch.js) ---
+// The permanent replacement for the migration ladders: a stale/absent epoch
+// wipes the account-derived localStorage and routes init through the standard
+// account-adopt restore. MUST stay above the state reads — a pre-epoch shape
+// would crash the normal read path below. Dependency-light (imports nothing).
+runStateEpochGate();
 
 // --- Board size + per-size backing buckets ---
 
@@ -136,13 +134,46 @@ const PERSIST_REQUESTED_KEY = 'historyPersistRequested';
 // A row the offline outbox still needs to upload: reportable (real problem id)
 // but never acked by the server. account-sync's outbox scan and claim only see
 // the working set, so such a row must never be evicted to the cold tail — once
-// there it would be permanently un-uploadable. Acked = carries a serverId
-// (client-time-era acks stamp the id only) OR a legacy serverCreatedAt (pre-era
-// stamp acks, stripped by migrateClientTime); the OR keeps the predicate
-// correct on every entry shape regardless of which migrations have run.
+// there it would be permanently un-uploadable. Acked = carries a serverId (the
+// row id; mirror-by-id is the only representation).
 export function isUnackedReportable(a) {
-    return !!a && !a.serverCreatedAt && !Number.isFinite(a.serverId)
+    return !!a && !Number.isFinite(a.serverId)
         && typeof a.problemId === 'string' && /^[0-9a-f]{8}$/.test(a.problemId);
+}
+
+// --- Ignored-problems list (durable across the epoch wipe / re-adoption) ---
+// The runtime representation is the `ignored` flag on a problem's LAST
+// answerHistory entry (model.js reads lastAnswer.ignored to exclude recalls).
+// That flag round-trips nowhere server-side, so the curated list is ALSO kept
+// as a standalone id set: performIgnore adds to it, the state-epoch gate
+// carries it through the wipe, and applyStoredIgnoredFlags() re-marks the
+// restored history after an adopt pull.
+const IGNORED_PROBLEMS_KEY = 'ignoredProblems_v1';
+
+export function addIgnoredProblem(problemId) {
+    if (typeof problemId !== 'string') return;
+    const set = new Set(readJSON(IGNORED_PROBLEMS_KEY) || []);
+    if (set.has(problemId)) return;
+    set.add(problemId);
+    writeJSON(IGNORED_PROBLEMS_KEY, [...set]);
+}
+
+export function applyStoredIgnoredFlags() {
+    const ids = readJSON(IGNORED_PROBLEMS_KEY);
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    const ignored = new Set(ids);
+    const lastByProblem = new Map();
+    for (const a of unifiedHistory) {
+        if (a && ignored.has(a.problemId)) lastByProblem.set(a.problemId, a);
+    }
+    let changed = false;
+    for (const a of lastByProblem.values()) {
+        if (!a.ignored) { a.ignored = true; changed = true; }
+    }
+    if (changed) {
+        invalidateActiveView();
+        persistUnifiedHistory();
+    }
 }
 
 // Move attempts beyond the cap into the IndexedDB tail, OLDEST first.
