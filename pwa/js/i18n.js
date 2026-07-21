@@ -156,6 +156,7 @@ const localization = {
     // First-run onboarding bubbles (js/onboarding.js).
     onbIntro: '黑先。点击你认为黑方最佳一手的位置。',
     onbRecall: '这道题你之前做过——我们会在你快要忘记时把它重新拿出来复习。',
+    onbEarlyMistakes: '连错几题？很正常——正确答案往往就是看起来最自然的一手。相信你的直觉。',
     onbRank: '这是你的段位，进度条显示距离下一段的进度。点击可查看它在各平台对应的段级位。',
     onbKomi: '这是当前的实际贴目——点击可查看明细。',
     onbInstall: '安装应用，即可离线练习，并在主屏幕添加图标。',
@@ -322,6 +323,7 @@ const localization = {
     // First-run onboarding bubbles (js/onboarding.js).
     onbIntro: '黒番です。黒の最善手だと思う場所をタップしてください。',
     onbRecall: 'この問題は前にも解きました。忘れかけた頃に、もう一度出題します。',
+    onbEarlyMistakes: '何問か間違えても大丈夫。正解はいちばん自然に見える手であることが多いです。直感を信じてみましょう。',
     onbRank: 'これはあなたのランクです。バーは次のランクまでの進捗を表します。タップすると各サーバーでの段級位が見られます。',
     onbKomi: 'これは実効的なコミです。タップすると内訳が見られます。',
     onbInstall: 'アプリをインストールすると、オフラインで練習でき、ホーム画面にアイコンも追加されます。',
@@ -488,6 +490,7 @@ const localization = {
     // First-run onboarding bubbles (js/onboarding.js).
     onbIntro: '흑선입니다. 흑의 최선의 수라고 생각하는 곳을 탭하세요.',
     onbRecall: '이 문제는 전에 풀어봤어요. 잊어버릴 즈음에 다시 보여드립니다.',
+    onbEarlyMistakes: '몇 문제 틀려도 괜찮아요. 정답은 가장 자연스러워 보이는 수인 경우가 많습니다. 직감을 믿어 보세요.',
     onbRank: '이것은 회원님의 랭크입니다. 막대는 다음 랭크까지의 진행도를 보여줍니다. 탭하면 각 서버에서의 급/단을 볼 수 있습니다.',
     onbKomi: '현재 적용되는 코미입니다. 탭하면 세부 내역을 볼 수 있습니다.',
     onbInstall: '앱을 설치하면 오프라인으로 연습할 수 있고 홈 화면에 아이콘도 추가됩니다.',
@@ -557,6 +560,7 @@ const localization = {
     // First-run onboarding bubbles (js/onboarding.js).
     onbIntro: 'Black to play. Tap the point where you think Black\'s best move is.',
     onbRecall: "You've seen this one before — we resurface problems just as you're about to forget them.",
+    onbEarlyMistakes: 'Missed a few? That\'s normal — the correct answer is often the most natural-looking move. Trust your instinct.',
     onbRank: 'This is your rank, with a progress bar to the next. Tap it to see how it maps to other servers.',
     onbKomi: 'This is the effective komi — tap it for the breakdown.',
     onbInstall: 'Install the app for offline practice and a home-screen icon.',

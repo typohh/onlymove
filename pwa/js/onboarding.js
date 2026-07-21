@@ -147,6 +147,17 @@ const BUBBLES = {
         kind: 'trigger', anchor: 'title', placement: 'below', text: 'onbRecall',
         eligible: (ctx) => !!ctx.isRepeat,
     },
+    // Encouragement after a rough start: the 3rd miss within the first 10
+    // attempts. Fired from the review entry a wrong answer auto-opens (the
+    // failed attempt is already in history by then) and re-attempted on the
+    // next problem if a gate held it back there.
+    earlyMistakes: {
+        kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbEarlyMistakes',
+        eligible: () => {
+            const h = getMergedAnswerHistory();
+            return h.length <= 10 && h.filter(e => !e.correct).length >= 3;
+        },
+    },
     // Teaches the Previous button. Ambient and gated past the early drip so it
     // doesn't compete with the first-problems bubbles. A user who has already
     // clicked Previous themselves never sees it — onPreviousClicked marks it
@@ -423,11 +434,11 @@ export function onSolvingProblemShown(problem) {
     if (!_ready || _suppressed) return;
     markActive();
     const isRepeat = !!(problem && problem.isRepeat);
-    tryShow(['intro', 'recall', 'rank', 'previous', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
+    tryShow(['intro', 'earlyMistakes', 'recall', 'rank', 'previous', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
 }
 
 export function onEnterReview() {
-    tryShow(['reviewIntro', 'reviewRank', 'share']);
+    tryShow(['earlyMistakes', 'reviewIntro', 'reviewRank', 'share']);
 }
 
 // The user clicked the Previous button themselves — they know it; retire the
