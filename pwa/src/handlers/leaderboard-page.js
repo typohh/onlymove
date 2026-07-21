@@ -177,10 +177,11 @@ function agaScalarToRating(s) {
 
 function renderPage(rows, belowMin, staleVerified) {
     // Per row: `est` = the onlymove estimate in the three unit frames — `v` the
-    // UNTIMED internal scalar (the sort key), `om`/`pct` its rank label +
-    // progress, and `egf`/`aga` the TIME-ADJUSTED server-frame conversions as
-    // { pct, t } (the frames the verified ratings natively speak — see
-    // readLeaderboardRows). `ver` = the verified official data per federation:
+    // UNTIMED internal scalar (the om-mode sort key), `om`/`pct` its rank label
+    // + progress, and `egf`/`aga` the TIME-ADJUSTED server-frame conversions as
+    // { v: that frame's sort scalar, pct, t } (the frames the verified ratings
+    // natively speak — see readLeaderboardRows). `ver` = the verified official
+    // data per federation:
     // { v: raw rating (the sort key), pct, t } with the band + percent derived
     // from that rating (the official rank_label only drives the activity gate).
     const data = rows.map((r) => {
@@ -188,11 +189,15 @@ function renderPage(rows, belowMin, staleVerified) {
         if (Number.isFinite(r.currentInternal)) {
             const p = rankProgress(r.currentInternal);
             est = { v: r.currentInternal, om: p.label, pct: p.percent };
+            // Each frame carries its own sort scalar `v`: the om order (untimed)
+            // and the EGF/AGA orders (time-adjusted server frames) genuinely
+            // differ per user by the personal time dock, so switching units must
+            // re-sort by the displayed frame's own value.
             const egf = toPctRank(r.currentEgf);
-            if (egf) est.egf = egf;
-            const aga = Number.isFinite(r.currentAga)
-                ? agaPctRank(agaScalarToRating(r.currentAga)) : null;
-            if (aga) est.aga = aga;
+            if (egf) est.egf = { v: r.currentEgf, ...egf };
+            const agaRating = Number.isFinite(r.currentAga) ? agaScalarToRating(r.currentAga) : null;
+            const aga = agaRating !== null ? agaPctRank(agaRating) : null;
+            if (aga) est.aga = { v: agaRating, ...aga };
         }
         const ver = {};
         if (r.egd) {
@@ -410,7 +415,16 @@ function renderPage(rows, belowMin, staleVerified) {
       var v = r.ver && r.ver[units];
       return v ? v.v : null;
     }
-    return r.est ? r.est.v : null;              // 'est' — the current estimate
+    // 'est' — sort by the DISPLAYED frame's own scalar: the om (untimed) and
+    // EGF/AGA (time-adjusted) orders differ per user by the personal time dock.
+    // A row missing the frame conversion falls back to the untimed scalar (its
+    // cell displays the om form then too).
+    if (!r.est) return null;
+    if (units !== 'om') {
+      var c = r.est[units];
+      if (c && typeof c.v === 'number') return c.v;
+    }
+    return r.est.v;
   }
   function cmp(a, b) {
     var va = sortValue(a), vb = sortValue(b);
