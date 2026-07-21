@@ -21,7 +21,7 @@
 // Any header sorts (cells sort by their underlying continuous scalar).
 
 import { readLeaderboardRows, RANK_START_MIN, gorToRankScalar } from '../leaderboard.js';
-import { rankScalarToLabel } from '../../shared/rank-math.js';
+import { rankScalarToLabel, rankProgress } from '../../shared/rank-math.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
@@ -149,7 +149,11 @@ function renderPage(rows, belowMin) {
     const data = rows.map((r) => {
         let est = null;
         if (Number.isFinite(r.currentInternal)) {
-            est = { v: r.currentInternal, om: rankScalarToLabel(r.currentInternal) };
+            // om units show "(percent) rank" — the same rank + progress-to-next-rank
+            // decomposition the front-page rank list uses (shared rankProgress),
+            // percent-first so the format matches the "rating · rank" of EGF/AGA units.
+            const p = rankProgress(r.currentInternal);
+            est = { v: r.currentInternal, om: p.label, pct: p.percent };
             if (Number.isFinite(r.currentEgf)) {
                 est.egf = {
                     n: String(Math.max(100, Math.round(2000 + 100 * r.currentEgf))),
@@ -339,16 +343,20 @@ function renderPage(rows, belowMin) {
     var v = r.ver && r.ver[units === 'egf' ? 'egf' : 'aga'];
     return v ? esc(v.t) : '—';
   }
-  // Estimate cell: onlymove units show the internal rank label; EGF/AGA units the
-  // converted "rating · rank" (falling back to the onlymove label if a coupling
-  // is unavailable).
+  // Estimate cell: onlymove units show "(percent) rank" — progress to the next
+  // rank, as on the front-page rank list, percent-first to match the rating-first
+  // EGF/AGA format; EGF/AGA units show the converted "rating · rank" (falling
+  // back to the onlymove form if a coupling is unavailable).
+  function omText(e) {
+    return (typeof e.pct === 'number' ? '(' + e.pct + '%) ' : '') + e.om;
+  }
   function estText(r) {
     if (!r.est) return '—';
     if (units !== 'om') {
       var c = r.est[units];
       if (c) return esc(c.n + ' · ' + c.t);
     }
-    return esc(r.est.om);
+    return esc(omText(r.est));
   }
 
   function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'ver' | 'est'
