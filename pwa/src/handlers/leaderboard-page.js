@@ -328,6 +328,21 @@ function renderPage(rows, belowMin) {
 })();
 </script>
 <script>
+// Fit-to-width: the nowrap table can overflow narrow phone screens by a little.
+// After the rows render, if the page's natural width exceeds the screen, rewrite
+// the viewport so the browser starts zoomed OUT just enough to fit it exactly.
+// Zoom-out only — when the screen already fits the content, the meta is left
+// alone (scale 1, intended font size); pinch-zoom stays available either way.
+(function () {
+  var doc = document.documentElement;
+  var w = doc.scrollWidth;
+  if (w <= doc.clientWidth) return;
+  var scale = doc.clientWidth / w;
+  document.querySelector('meta[name=viewport]')
+    .setAttribute('content', 'width=' + w + ', initial-scale=' + scale);
+})();
+</script>
+<script>
 // "Hide my profile" control. This page doesn't boot the SPA, but it's same-origin
 // with it, so the account's userId is readable from localStorage. Shown only when
 // a userId exists (a visitor who never used the app has no profile to hide).
