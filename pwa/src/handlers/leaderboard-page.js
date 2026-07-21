@@ -46,7 +46,6 @@ const UNKNOWN_FLAG = '🇺🇳';
 const STR = {
     en: {
         leaderboard: 'Leaderboard',
-        sub: 'Every player active in the past week with at least {min} solves, ordered by their onlymove rank estimate. "Verified" is the official rating of the player\'s linked EGF or AGA account, shown in the selected units and only while tournament-active.',
         player: 'Player',
         verified: 'Verified',
         units: 'Units',
@@ -54,6 +53,9 @@ const STR = {
         empty: 'No players yet.',
         belowNoteOne: '1 more active player has fewer than {min} solves and isn\'t shown yet.',
         belowNoteMany: '{n} more active players have fewer than {min} solves and aren\'t shown yet.',
+        staleNoteOne: '1 player\'s verified rating is not shown because it is too out of date (no recent enough tournament).',
+        staleNoteMany: '{n} players\' verified ratings are not shown because they are too out of date (no recent enough tournament).',
+        inactiveNote: 'Players not active in the past 7 days are not listed.',
         inviteLine: 'Want your name shown instead of "Anonymous"? Registration is by invite — ask in {discord}.',
         hideLabel: 'Hide my profile — withhold my name, country, and verified rating from this board. My onlymove rank still shows, but anonymously.',
         saving: 'Saving…',
@@ -63,7 +65,6 @@ const STR = {
     },
     zh: {
         leaderboard: '排行榜',
-        sub: '过去一周内至少解出 {min} 题的所有活跃玩家，按其 onlymove 段位估计排序。「已验证」是玩家绑定的 EGF/AGA 账号的官方等级分，以所选单位显示，且仅限近期参加过比赛的棋手。',
         player: '玩家',
         verified: '已验证',
         units: '单位',
@@ -71,6 +72,9 @@ const STR = {
         empty: '暂无玩家。',
         belowNoteOne: '还有 1 名活跃玩家的解题数不足 {min}，暂未显示。',
         belowNoteMany: '还有 {n} 名活跃玩家的解题数不足 {min}，暂未显示。',
+        staleNoteOne: '有 1 名玩家的已验证等级分因过于陈旧（近期无比赛记录）而未显示。',
+        staleNoteMany: '有 {n} 名玩家的已验证等级分因过于陈旧（近期无比赛记录）而未显示。',
+        inactiveNote: '过去 7 天内没有活动的玩家不会列出。',
         inviteLine: '想显示您的名字而不是「匿名」？注册需邀请——请在 {discord} 询问。',
         hideLabel: '隐藏我的资料——不在此榜单显示我的名字、国家/地区和已验证等级分。我的 onlymove 段位仍会显示，但为匿名。',
         saving: '正在保存…',
@@ -80,7 +84,6 @@ const STR = {
     },
     ja: {
         leaderboard: 'ランキング',
-        sub: '過去1週間に少なくとも {min} 問解いたアクティブなプレイヤー全員を、onlymove ランク推定値順に並べています。「認証済み」は、プレイヤーが連携した EGF / AGA アカウントの公式レーティングで、選択した単位で表示され、最近大会に参加しているプレイヤーのみ表示されます。',
         player: 'プレイヤー',
         verified: '認証済み',
         units: '単位',
@@ -88,6 +91,9 @@ const STR = {
         empty: 'まだプレイヤーがいません。',
         belowNoteOne: 'あと1人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
         belowNoteMany: 'あと{n}人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
+        staleNoteOne: '1人のプレイヤーの認証済みレーティングは、古すぎるため（最近の大会出場がないため）表示されていません。',
+        staleNoteMany: '{n}人のプレイヤーの認証済みレーティングは、古すぎるため（最近の大会出場がないため）表示されていません。',
+        inactiveNote: '過去7日間に活動のないプレイヤーは表示されません。',
         inviteLine: '「匿名」の代わりに名前を表示しますか？登録は招待制です——{discord} で聞いてください。',
         hideLabel: 'プロフィールを隠す——このボードで名前・国・認証済みレーティングを表示しません。onlymove ランクは匿名で引き続き表示されます。',
         saving: '保存中…',
@@ -97,7 +103,6 @@ const STR = {
     },
     ko: {
         leaderboard: '순위표',
-        sub: '지난 한 주 동안 최소 {min}문제를 푼 모든 활동 플레이어를 onlymove 랭크 추정치 순으로 정렬했습니다. "인증됨"은 플레이어가 연결한 EGF/AGA 계정의 공식 레이팅으로, 선택한 단위로 표시되며 최근 대회 활동이 있는 경우에만 표시됩니다.',
         player: '플레이어',
         verified: '인증됨',
         units: '단위',
@@ -105,6 +110,9 @@ const STR = {
         empty: '아직 플레이어가 없습니다.',
         belowNoteOne: '해결한 문제가 {min}개 미만인 활동 플레이어가 1명 더 있으며 아직 표시되지 않습니다.',
         belowNoteMany: '해결한 문제가 {min}개 미만인 활동 플레이어가 {n}명 더 있으며 아직 표시되지 않습니다.',
+        staleNoteOne: '플레이어 1명의 인증된 레이팅이 너무 오래되어(최근 대회 기록 없음) 표시되지 않습니다.',
+        staleNoteMany: '플레이어 {n}명의 인증된 레이팅이 너무 오래되어(최근 대회 기록 없음) 표시되지 않습니다.',
+        inactiveNote: '지난 7일간 활동이 없는 플레이어는 표시되지 않습니다.',
         inviteLine: '"익명" 대신 이름을 표시하고 싶으신가요? 등록은 초대제입니다 — {discord}에서 문의하세요.',
         hideLabel: '내 프로필 숨기기 — 이 보드에서 내 이름, 국가, 인증된 레이팅을 표시하지 않습니다. onlymove 랭크는 익명으로 계속 표시됩니다.',
         saving: '저장 중…',
@@ -115,13 +123,13 @@ const STR = {
 };
 
 export async function handleLeaderboard(env) {
-    let rows = [], belowMin = 0;
+    let rows = [], belowMin = 0, staleVerified = 0;
     try {
-        ({ rows, belowMin } = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS }));
+        ({ rows, belowMin, staleVerified } = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS }));
     } catch (e) {
         console.error('leaderboard read failed:', e);
     }
-    return new Response(renderPage(rows, belowMin), {
+    return new Response(renderPage(rows, belowMin, staleVerified), {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
@@ -167,7 +175,7 @@ function agaScalarToRating(s) {
     return s >= 1 ? s : s <= 0 ? s - 1 : 2 * s - 1;
 }
 
-function renderPage(rows, belowMin) {
+function renderPage(rows, belowMin, staleVerified) {
     // Per row: `est` = the onlymove estimate in the three unit frames — `v` the
     // UNTIMED internal scalar (the sort key), `om`/`pct` its rank label +
     // progress, and `egf`/`aga` the TIME-ADJUSTED server-frame conversions as
@@ -208,11 +216,16 @@ function renderPage(rows, belowMin) {
     });
     const json = JSON.stringify(data).replace(/</g, '\\u003c');
     const strJson = JSON.stringify(STR).replace(/</g, '\\u003c');
-    // Footer tally of active players still below the list-entry gate (no per-user
-    // sample count is shown; this aggregate is the only nod to them). The English
-    // text here is the no-JS default; the prelude re-renders it localized.
+    // Footer tallies: active players still below the list-entry gate (no per-user
+    // sample count is shown; this aggregate is the only nod to them), and shown
+    // players whose verified rating was withheld as out of date (the EGF activity
+    // gate). The English text here is the no-JS default; the prelude re-renders
+    // both localized.
     const belowNote = belowMin
         ? `<p id="lbBelow">${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
+        : '';
+    const staleNote = staleVerified
+        ? `<p id="lbStale">${staleVerified} player${staleVerified === 1 ? "'s" : "s'"} verified rating is not shown because it is too out of date (no recent enough tournament).</p>`
         : '';
 
     return `<!doctype html>
@@ -266,9 +279,8 @@ function renderPage(rows, belowMin) {
 </head>
 <body>
 <h1 id="lbH1">Leaderboard</h1>
-<p class="sub" id="lbSub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Verified" is the official rating of the player's linked EGF or AGA account, shown in the selected units and only while tournament-active.</p>
 <div class="units" id="unitsBar" role="group" aria-label="Units">
-  <button type="button" data-units="om" class="on">onlymove</button>
+  <button type="button" data-units="om" class="on">OnlyMove</button>
   <button type="button" data-units="egf">EGF</button>
   <button type="button" data-units="aga">AGA</button>
 </div>
@@ -285,6 +297,8 @@ function renderPage(rows, belowMin) {
 </table>
 <footer>
   ${belowNote}
+  ${staleNote}
+  <p id="lbInactive">Players not active in the past 7 days are not listed.</p>
   <p id="lbInvite">Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
   <div id="hideProfile" class="hide-profile" hidden>
     <label>
@@ -301,7 +315,7 @@ function renderPage(rows, belowMin) {
 // for the render + hide-profile scripts.
 (function () {
   var STR = ${strJson};
-  var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin} };
+  var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin}, stale: ${staleVerified} };
   function getLang() {
     var l = navigator.language || 'en';
     if (l.indexOf('zh') === 0) return 'zh';
@@ -324,7 +338,6 @@ function renderPage(rows, belowMin) {
   document.documentElement.lang = LANG;
   document.title = 'onlymove — ' + t('leaderboard');
   setText('lbH1', t('leaderboard'));
-  setText('lbSub', t('sub', { min: CFG.min }));
   setText('thPlayer', t('player'));
   setText('thVer', t('verified'));
   setText('hideLabel', t('hideLabel'));
@@ -341,6 +354,11 @@ function renderPage(rows, belowMin) {
     below.textContent = t(CFG.belowMin === 1 ? 'belowNoteOne' : 'belowNoteMany',
                           { n: CFG.belowMin, min: CFG.min });
   }
+  var stale = document.getElementById('lbStale');
+  if (stale && CFG.stale > 0) {
+    stale.textContent = t(CFG.stale === 1 ? 'staleNoteOne' : 'staleNoteMany', { n: CFG.stale });
+  }
+  setText('lbInactive', t('inactiveNote'));
 })();
 </script>
 <script>

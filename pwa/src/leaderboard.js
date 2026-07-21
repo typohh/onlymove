@@ -624,7 +624,7 @@ export async function reconcileBuffers(env) {
 // `registered` (has an external_ids row; unregistered rows have name/country
 // null).
 export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
-    if (!env.DB) return { rows: [], belowMin: 0 };
+    if (!env.DB) return { rows: [], belowMin: 0, staleVerified: 0 };
     const JOINS = `
         LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
                      FROM invitation WHERE claimed_by_user_id IS NOT NULL
@@ -689,6 +689,7 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // unregistered ranked player and a registered one are shown alike, and a registered
     // sub-gate player is not shown at all.
     let belowMin = 0;
+    let staleVerified = 0;   // shown players whose verified rating was withheld as out of date
     const visible = [];
     for (const r of rows) {
         const isHidden = hidden.has(r.user_id);
@@ -752,17 +753,21 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
             }
         }
         // EGF activity criterion: an inactive rating (last tournament too long ago
-        // for its tier) is withheld entirely. Tier comes from the official label
-        // when present (pro = dan tier), else from the rating itself; a missing
-        // date fails open (register-seeded heartbeats have none for <= a week).
+        // for its tier) is withheld entirely — and the player counted in the
+        // footer's staleVerified tally, so an empty Verified cell on a linked
+        // player is explained. Tier comes from the official label when present
+        // (pro = dan tier), else from the rating itself; a missing date fails
+        // open (register-seeded heartbeats have none for <= a week).
+        let staleDropped = false;
         if (egd) {
             const tier = tierScalarFromLabel(egd.label) ?? gorToRankScalar(egd.gor);
-            if (!isVerifiedActive(tier, egd.lastGameAt)) egd = null;
+            if (!isVerifiedActive(tier, egd.lastGameAt)) { egd = null; staleDropped = true; }
         }
         if (aga) {
             const tier = tierScalarFromLabel(aga.label) ?? agaRatingToTierScalar(aga.rating);
-            if (!isVerifiedActive(tier, aga.lastGameAt)) aga = null;
+            if (!isVerifiedActive(tier, aga.lastGameAt)) { aga = null; staleDropped = true; }
         }
+        if (staleDropped) staleVerified++;
         // The onlymove estimate in the three frames the units selector displays:
         // untimed internal (onlymove mode + the sort key), and the time-adjusted
         // server frames (EGF directly from the stored rank; AGA via the forward
@@ -783,5 +788,5 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const registered = isHidden ? false : !!r.registered;
         visible.push({ name, country, registered, currentInternal, currentEgf, currentAga, egd, aga });
     }
-    return { rows: visible, belowMin };
+    return { rows: visible, belowMin, staleVerified };
 }
