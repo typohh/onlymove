@@ -225,7 +225,9 @@ function renderPage(rows, belowMin, staleVerified) {
         ? `<p id="lbBelow">${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
         : '';
     const staleNote = staleVerified
-        ? `<p id="lbStale">${staleVerified} player${staleVerified === 1 ? "'s" : "s'"} verified rating is not shown because it is too out of date (no recent enough tournament).</p>`
+        ? `<p id="lbStale">${staleVerified === 1
+            ? "1 player's verified rating is not shown because it is too out of date (no recent enough tournament)."
+            : `${staleVerified} players' verified ratings are not shown because they are too out of date (no recent enough tournament).`}</p>`
         : '';
 
     return `<!doctype html>
