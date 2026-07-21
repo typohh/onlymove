@@ -11,10 +11,11 @@
 //      limiter bounds the volume of valid-looking spoofs.
 
 // Tsumego ids are the symmetry-canonical hash truncated to 8 hex chars
-// (see get_orientation_invariant_hash). user_id is a short client-generated
-// token (observed 8 chars, a few legacy ids up to 23); bound it generously.
+// (see get_orientation_invariant_hash). user_id is exactly 8 chars — the
+// 2026-07 DB surgery normalized the few legacy long ids (S7), so the
+// grandfathered 1-40 bound is retired.
 const PROBLEM_ID_RE = /^[0-9a-f]{8}$/;
-const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const USER_ID_RE = /^[A-Za-z0-9_-]{8}$/;
 export const isValidProblemId = (v) => typeof v === 'string' && PROBLEM_ID_RE.test(v);
 export const isValidUserId = (v) => typeof v === 'string' && USER_ID_RE.test(v);
 
