@@ -7,17 +7,20 @@
 // invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // A UNITS selector (onlymove / EGF / AGA, persisted in localStorage) picks the
-// frame both value columns speak:
-//   * Verified — the official rating of the player's linked federation account,
-//     from the machine heartbeats only (EGD GoR heartbeat / AGA Ratings Explorer
-//     heartbeat), activity-gated per the EGF criteria in readLeaderboardRows.
-//     EGF units show the GoR + official grade ("2830 · 4d"), AGA units the AGA
-//     rating + official rank ("5.1 · 5d"); onlymove units leave the column blank
-//     (there is no raw onlymove-frame source datum). Human survey declarations
-//     are NOT revealed here (they feed only calibration + the flag fallback).
-//   * onlymove — the current estimate from their solving here: onlymove units
-//     show the internal rank label ("3k"), EGF/AGA units the estimate converted
-//     to that server's frame in the same rating+rank format as Verified.
+// frame both value columns speak. EVERY value cell renders as "(pct%) rank" —
+// the rank in the selected frame plus the floored progress toward the next one
+// (raw GoR / AGA rating numbers are not displayed; they remain the sort keys):
+//   * Verified — from the player's linked federation account, machine heartbeats
+//     only (EGD GoR heartbeat / AGA Ratings Explorer heartbeat), activity-gated
+//     per the EGF criteria in readLeaderboardRows. EGF units decompose the GoR
+//     round-band (2389 -> "(39%) 4d" — the GoR's own convention), AGA units the
+//     AGA rating through AGA's floor convention (agaPctRank; 5.7 -> "(70%) 5d");
+//     onlymove units leave the column blank (there is no raw onlymove-frame
+//     source datum). Human survey declarations are NOT revealed here (they feed
+//     only calibration + the flag fallback).
+//   * onlymove — the current estimate from their solving here, decomposed in the
+//     selected frame (onlymove units via the shared rankProgress, matching the
+//     front-page rank list; EGF/AGA units via that federation's convention).
 // Any header sorts (cells sort by their underlying continuous scalar).
 
 import { readLeaderboardRows, RANK_START_MIN, gorToRankScalar } from '../leaderboard.js';
@@ -127,54 +130,70 @@ export async function handleLeaderboard(env) {
     });
 }
 
-// Continuous internal AGA rank scalar (1k = 0, 1d = 1) -> an AGA-style rating
-// number: dan region maps 1:1 (scalar 1.5 -> 1.5), kyu region shifts past the
-// AGA (-1, 1) gap (scalar 0 = 1k -> -1.0), and the sub-1-band (0, 1) interval
-// interpolates linearly across the gap. Display-only (the estimate in AGA units).
+// { pct, t } from a continuous rank scalar via the SHARED rankProgress — the same
+// rank + floored progress-to-next-rank decomposition the front-page rank list
+// uses. Every cell in every unit mode renders as "(pct%) rank"; the percent is
+// derived from the underlying rating scalar, so it always agrees with the shown
+// band (for GoR this IS the EGF convention: 2389 -> "(39%) 4d").
+function toPctRank(scalar) {
+    if (!Number.isFinite(scalar)) return null;
+    const p = rankProgress(scalar);
+    return { pct: p.percent, t: p.label };
+}
+
+// The AGA decomposition — AGA's official convention is FLOOR-based (dan =
+// floor(rating), kyu = floor(|rating|); see src/aga.js), NOT the round-band
+// convention above, so AGA cells decompose the rating in AGA's own frame: label
+// from the floor band, percent = fractional progress through it (5.7 ->
+// "(70%) 5d", -3.8 -> "(20%) 3k"). A kyu band's top edge IS its integer
+// (rating -3.0 = the strongest 3k), hence the 99 clamp there. The (-1, 1) gap
+// holds no real AGA rating; a converted ESTIMATE landing in it snaps to the
+// nearer boundary.
+function agaPctRank(rating) {
+    if (!Number.isFinite(rating)) return null;
+    if (rating >= 1) {
+        const d = Math.floor(rating);
+        return { pct: Math.floor((rating - d) * 100), t: d + 'd' };
+    }
+    if (rating > -1) return rating >= 0 ? { pct: 0, t: '1d' } : { pct: 99, t: '1k' };
+    const k = Math.floor(-rating);
+    return { pct: Math.min(99, Math.floor((rating + k + 1) * 100)), t: k + 'k' };
+}
+
+// Continuous internal AGA rank scalar (1k = 0, 1d = 1) -> an AGA-style rating:
+// dan region maps 1:1, kyu region shifts past the AGA (-1, 1) gap (scalar 0 =
+// 1k -> -1.0), the sub-1-band (0, 1) interval interpolates across the gap.
 function agaScalarToRating(s) {
     return s >= 1 ? s : s <= 0 ? s - 1 : 2 * s - 1;
 }
-const fmtAgaNum = (r) => (Math.round(r * 10) / 10).toFixed(1);
-// AGA official rank from the rating (dan = floor(rating), kyu = floor(|rating|)) —
-// fallback when a heartbeat row predates the stored rank_label.
-const agaLabelFromRating = (r) => (r >= 1 ? Math.floor(r) + 'd' : Math.floor(-r) + 'k');
 
 function renderPage(rows, belowMin) {
     // Per row: `est` = the onlymove estimate in the three unit frames — `v` the
-    // UNTIMED internal scalar (the sort key + the onlymove-mode label source),
-    // `om` its rank label, and `egf`/`aga` the TIME-ADJUSTED server-frame
-    // conversions as { n: rating number, t: rank label } (the frames the verified
-    // ratings natively speak — see readLeaderboardRows). `ver` = the verified
-    // official data per federation, pre-formatted: { v: sort scalar, t: display }.
+    // UNTIMED internal scalar (the sort key), `om`/`pct` its rank label +
+    // progress, and `egf`/`aga` the TIME-ADJUSTED server-frame conversions as
+    // { pct, t } (the frames the verified ratings natively speak — see
+    // readLeaderboardRows). `ver` = the verified official data per federation:
+    // { v: raw rating (the sort key), pct, t } with the band + percent derived
+    // from that rating (the official rank_label only drives the activity gate).
     const data = rows.map((r) => {
         let est = null;
         if (Number.isFinite(r.currentInternal)) {
-            // om units show "(percent) rank" — the same rank + progress-to-next-rank
-            // decomposition the front-page rank list uses (shared rankProgress),
-            // percent-first so the format matches the "rating · rank" of EGF/AGA units.
             const p = rankProgress(r.currentInternal);
             est = { v: r.currentInternal, om: p.label, pct: p.percent };
-            if (Number.isFinite(r.currentEgf)) {
-                est.egf = {
-                    n: String(Math.max(100, Math.round(2000 + 100 * r.currentEgf))),
-                    t: rankScalarToLabel(r.currentEgf),
-                };
-            }
-            if (Number.isFinite(r.currentAga)) {
-                est.aga = {
-                    n: fmtAgaNum(agaScalarToRating(r.currentAga)),
-                    t: rankScalarToLabel(r.currentAga),
-                };
-            }
+            const egf = toPctRank(r.currentEgf);
+            if (egf) est.egf = egf;
+            const aga = Number.isFinite(r.currentAga)
+                ? agaPctRank(agaScalarToRating(r.currentAga)) : null;
+            if (aga) est.aga = aga;
         }
         const ver = {};
         if (r.egd) {
-            const label = r.egd.label || rankScalarToLabel(gorToRankScalar(r.egd.gor));
-            ver.egf = { v: r.egd.gor, t: r.egd.gor + ' · ' + label };
+            const p = toPctRank(gorToRankScalar(r.egd.gor));
+            if (p) ver.egf = { v: r.egd.gor, pct: p.pct, t: p.t };
         }
         if (r.aga) {
-            const label = r.aga.label || agaLabelFromRating(r.aga.rating);
-            ver.aga = { v: r.aga.rating, t: fmtAgaNum(r.aga.rating) + ' · ' + label };
+            const p = agaPctRank(r.aga.rating);
+            if (p) ver.aga = { v: r.aga.rating, pct: p.pct, t: p.t };
         }
         const row = {
             // Anonymous (unregistered) rows carry anon: true and no name — the client
@@ -344,23 +363,23 @@ function renderPage(rows, belowMin) {
   function verText(r) {
     if (units === 'om') return '';
     var v = r.ver && r.ver[units === 'egf' ? 'egf' : 'aga'];
-    return v ? esc(v.t) : '—';
+    return v ? pctRank(v.pct, v.t) : '—';
   }
-  // Estimate cell: onlymove units show "(percent) rank" — progress to the next
-  // rank, as on the front-page rank list, percent-first to match the rating-first
-  // EGF/AGA format; EGF/AGA units show the converted "rating · rank" (falling
-  // back to the onlymove form if a coupling is unavailable).
-  function omText(e) {
-    return (typeof e.pct === 'number'
-      ? '<span class="pct">(' + esc(e.pct) + '%)</span> ' : '') + esc(e.om);
+  // Every value cell, in every unit mode, renders as "(pct%) rank" — the muted
+  // percentage is progress toward the next rank in the selected frame (as on the
+  // front-page rank list; for EGF that's the GoR's own convention, for AGA the
+  // official floor-band one).
+  function pctRank(pct, label) {
+    return (typeof pct === 'number'
+      ? '<span class="pct">(' + esc(pct) + '%)</span> ' : '') + esc(label);
   }
   function estText(r) {
     if (!r.est) return '—';
     if (units !== 'om') {
       var c = r.est[units];
-      if (c) return esc(c.n + ' · ' + c.t);
+      if (c) return pctRank(c.pct, c.t);
     }
-    return omText(r.est);
+    return pctRank(r.est.pct, r.est.om);
   }
 
   function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'ver' | 'est'
