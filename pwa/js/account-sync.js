@@ -378,10 +378,17 @@ async function pullReports({ mode = 'feed', fromStart = false, rowSink = null } 
         const touchedSizes = new Set();
         // Every row id the server returned this pull — the deletion pass input.
         const seenIds = startedFromBeginning ? new Set() : null;
-        // Dedup against the cold tail too, not just the working set. Snapshot it
-        // once up front: rows evicted DURING this pull were merged this pull (so
-        // already known), and /sync pages are disjoint by cursor, so no row
-        // re-arrives within one pull.
+        // Settle any pending debounced eviction BEFORE snapshotting the tail:
+        // the tail index is read once up front, so an eviction from a PREVIOUS
+        // cycle landing mid-pull would be invisible to the merge — the rows
+        // re-insert as working-set copies and the deletion pass then removes
+        // the legitimate tail copies as seam dups, churning digest-triggered
+        // reconciles against each other (observed on the heaviest account
+        // during the epoch rollout). After the flush the snapshot is complete:
+        // rows evicted DURING this pull were merged this pull (so already
+        // known), and /sync pages are disjoint by cursor, so no row re-arrives
+        // within one pull.
+        try { await evictColdTail(); } catch (_) { /* tail unavailable — snapshot covers ws only */ }
         let tailIndex = null;
         try { tailIndex = await getTailSyncIndex(); } catch (_) { tailIndex = null; }
         if (!tailIndex) tailIndex = { ids: new Set() };
