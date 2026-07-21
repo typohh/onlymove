@@ -14,7 +14,7 @@
 const EGD_PIN_URL = 'https://www.europeangodatabase.eu/EGD/GetPlayerDataByPIN.php?pin=';
 const MAX_PER_RESPONSE = 20;   // cap EGD fetches kicked off per report response
 
-let pending = [];              // fetched {pin, gor, name, country} awaiting the next report
+let pending = [];              // fetched {pin, gor, name, country, grade, lastAppearance} awaiting the next report
 const inFlight = new Set();    // PINs currently being fetched (dedupe within a session)
 
 // Take + clear the buffered updates to attach to a /report request body. Returns
@@ -50,7 +50,13 @@ async function fetchOne(pin) {
         const gor = parseInt(d.Gor, 10);
         if (!Number.isFinite(gor)) return;
         const name = `${d.Name || ''} ${d.Last_Name || ''}`.trim();
-        pending.push({ pin, gor, name, country: d.Country_Code || '' });
+        // Grade is EGD's own official rank ("4d"/"7k"/"3p"); Last_Appearance encodes
+        // the last tournament date ("T220122H" -> 2022-01-22). Both are passed raw —
+        // the Worker validates/parses (applyGorUpdates) before storing.
+        pending.push({
+            pin, gor, name, country: d.Country_Code || '',
+            grade: d.Grade || '', lastAppearance: d.Last_Appearance || '',
+        });
     } catch (e) {
         /* leave this PIN stale; the next client re-advertises + retries */
     }

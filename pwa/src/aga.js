@@ -50,8 +50,17 @@ async function fetchJson(url) {
     }
 }
 
+// "YYYY-MM-DD" (possibly with a time suffix) -> the bare ISO date, or null when
+// it isn't one. Used for the player's last tournament date (latest_event_date).
+function isoDate(s) {
+    if (typeof s !== 'string') return null;
+    const m = s.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
+}
+
 // Fetch a member's current AGA rating + official rank by id. Returns
-// { rating, rankLabel } (rankLabel = the SHORT "10d"/"3k" form) or null on any failure.
+// { rating, rankLabel, latestEventDate } (rankLabel = the SHORT "10d"/"3k" form,
+// latestEventDate = ISO date of the last tournament or null) or null on any failure.
 export async function fetchAgaPlayer(agaId) {
     const id = String(agaId || '');
     if (!isValidAgaId(id)) return null;
@@ -61,5 +70,9 @@ export async function fetchAgaPlayer(agaId) {
     const rating = Number(p.rating);
     const rankLabel = agaShortRankLabel(p.rank_label);
     if (!rankLabel) return null;          // no usable rank -> treat as absent
-    return { rating: Number.isFinite(rating) ? rating : null, rankLabel };
+    return {
+        rating: Number.isFinite(rating) ? rating : null,
+        rankLabel,
+        latestEventDate: isoDate(p.latest_event_date),
+    };
 }

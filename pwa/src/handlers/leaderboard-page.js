@@ -6,16 +6,21 @@
 // who has at least RANK_START_MIN solves here (so their onlymove rank is known):
 // invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
-// Two value columns, both in ONLYMOVE RANK labels ("3k", "1d"):
-//   * Declared — the range where the player's external evidence (EGD GoR / AGA
-//     rating + self-declared server ranks from rank_surveys) lands when back-mapped
-//     through the inverse consensus couplings (rangeMin..rangeMax from
-//     readLeaderboardRows; single label when the sources agree). Shown for any
-//     row with a mappable source, anonymous included.
-//   * onlymove — the current rank estimated from their solving here.
-// Any header sorts (labels sort by their underlying continuous scalar).
+// A UNITS selector (onlymove / EGF / AGA, persisted in localStorage) picks the
+// frame both value columns speak:
+//   * Verified — the official rating of the player's linked federation account,
+//     from the machine heartbeats only (EGD GoR heartbeat / AGA Ratings Explorer
+//     heartbeat), activity-gated per the EGF criteria in readLeaderboardRows.
+//     EGF units show the GoR + official grade ("2830 · 4d"), AGA units the AGA
+//     rating + official rank ("5.1 · 5d"); onlymove units leave the column blank
+//     (there is no raw onlymove-frame source datum). Human survey declarations
+//     are NOT revealed here (they feed only calibration + the flag fallback).
+//   * onlymove — the current estimate from their solving here: onlymove units
+//     show the internal rank label ("3k"), EGF/AGA units the estimate converted
+//     to that server's frame in the same rating+rank format as Verified.
+// Any header sorts (cells sort by their underlying continuous scalar).
 
-import { readLeaderboardRows, RANK_START_MIN } from '../leaderboard.js';
+import { readLeaderboardRows, RANK_START_MIN, gorToRankScalar } from '../leaderboard.js';
 import { rankScalarToLabel } from '../../shared/rank-math.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
@@ -38,15 +43,16 @@ const UNKNOWN_FLAG = '🇺🇳';
 const STR = {
     en: {
         leaderboard: 'Leaderboard',
-        sub: 'Every player active in the past week with at least {min} solves, ordered by their onlymove rank estimate. "Declared" is where the player\'s external ranks land on the onlymove scale.',
+        sub: 'Every player active in the past week with at least {min} solves, ordered by their onlymove rank estimate. "Verified" is the official rating of the player\'s linked EGF or AGA account, shown in the selected units and only while tournament-active.',
         player: 'Player',
-        declared: 'Declared',
+        verified: 'Verified',
+        units: 'Units',
         anonymous: 'Anonymous',
         empty: 'No players yet.',
         belowNoteOne: '1 more active player has fewer than {min} solves and isn\'t shown yet.',
         belowNoteMany: '{n} more active players have fewer than {min} solves and aren\'t shown yet.',
         inviteLine: 'Want your name shown instead of "Anonymous"? Registration is by invite — ask in {discord}.',
-        hideLabel: 'Hide my profile — withhold my name, country, and declared ranks from this board. My onlymove rank still shows, but anonymously.',
+        hideLabel: 'Hide my profile — withhold my name, country, and verified rating from this board. My onlymove rank still shows, but anonymously.',
         saving: 'Saving…',
         hiddenMsg: 'Your profile is hidden. The board updates within a minute.',
         visibleMsg: 'Your profile is visible. The board updates within a minute.',
@@ -54,15 +60,16 @@ const STR = {
     },
     zh: {
         leaderboard: '排行榜',
-        sub: '过去一周内至少解出 {min} 题的所有活跃玩家，按其 onlymove 段位估计排序。「申报」是玩家的外部段位换算到 onlymove 标度后的位置。',
+        sub: '过去一周内至少解出 {min} 题的所有活跃玩家，按其 onlymove 段位估计排序。「已验证」是玩家绑定的 EGF/AGA 账号的官方等级分，以所选单位显示，且仅限近期参加过比赛的棋手。',
         player: '玩家',
-        declared: '申报',
+        verified: '已验证',
+        units: '单位',
         anonymous: '匿名',
         empty: '暂无玩家。',
         belowNoteOne: '还有 1 名活跃玩家的解题数不足 {min}，暂未显示。',
         belowNoteMany: '还有 {n} 名活跃玩家的解题数不足 {min}，暂未显示。',
         inviteLine: '想显示您的名字而不是「匿名」？注册需邀请——请在 {discord} 询问。',
-        hideLabel: '隐藏我的资料——不在此榜单显示我的名字、国家/地区和申报段位。我的 onlymove 段位仍会显示，但为匿名。',
+        hideLabel: '隐藏我的资料——不在此榜单显示我的名字、国家/地区和已验证等级分。我的 onlymove 段位仍会显示，但为匿名。',
         saving: '正在保存…',
         hiddenMsg: '您的资料已隐藏。榜单将在一分钟内更新。',
         visibleMsg: '您的资料已公开。榜单将在一分钟内更新。',
@@ -70,15 +77,16 @@ const STR = {
     },
     ja: {
         leaderboard: 'ランキング',
-        sub: '過去1週間に少なくとも {min} 問解いたアクティブなプレイヤー全員を、onlymove ランク推定値順に並べています。「申告」は、そのプレイヤーの外部ランクを onlymove スケールに換算した位置です。',
+        sub: '過去1週間に少なくとも {min} 問解いたアクティブなプレイヤー全員を、onlymove ランク推定値順に並べています。「認証済み」は、プレイヤーが連携した EGF / AGA アカウントの公式レーティングで、選択した単位で表示され、最近大会に参加しているプレイヤーのみ表示されます。',
         player: 'プレイヤー',
-        declared: '申告',
+        verified: '認証済み',
+        units: '単位',
         anonymous: '匿名',
         empty: 'まだプレイヤーがいません。',
         belowNoteOne: 'あと1人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
         belowNoteMany: 'あと{n}人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
         inviteLine: '「匿名」の代わりに名前を表示しますか？登録は招待制です——{discord} で聞いてください。',
-        hideLabel: 'プロフィールを隠す——このボードで名前・国・申告ランクを表示しません。onlymove ランクは匿名で引き続き表示されます。',
+        hideLabel: 'プロフィールを隠す——このボードで名前・国・認証済みレーティングを表示しません。onlymove ランクは匿名で引き続き表示されます。',
         saving: '保存中…',
         hiddenMsg: 'プロフィールは非表示です。ボードは1分以内に更新されます。',
         visibleMsg: 'プロフィールは表示されています。ボードは1分以内に更新されます。',
@@ -86,15 +94,16 @@ const STR = {
     },
     ko: {
         leaderboard: '순위표',
-        sub: '지난 한 주 동안 최소 {min}문제를 푼 모든 활동 플레이어를 onlymove 랭크 추정치 순으로 정렬했습니다. "신고"는 플레이어의 외부 랭크를 onlymove 척도로 환산한 위치입니다.',
+        sub: '지난 한 주 동안 최소 {min}문제를 푼 모든 활동 플레이어를 onlymove 랭크 추정치 순으로 정렬했습니다. "인증됨"은 플레이어가 연결한 EGF/AGA 계정의 공식 레이팅으로, 선택한 단위로 표시되며 최근 대회 활동이 있는 경우에만 표시됩니다.',
         player: '플레이어',
-        declared: '신고',
+        verified: '인증됨',
+        units: '단위',
         anonymous: '익명',
         empty: '아직 플레이어가 없습니다.',
         belowNoteOne: '해결한 문제가 {min}개 미만인 활동 플레이어가 1명 더 있으며 아직 표시되지 않습니다.',
         belowNoteMany: '해결한 문제가 {min}개 미만인 활동 플레이어가 {n}명 더 있으며 아직 표시되지 않습니다.',
         inviteLine: '"익명" 대신 이름을 표시하고 싶으신가요? 등록은 초대제입니다 — {discord}에서 문의하세요.',
-        hideLabel: '내 프로필 숨기기 — 이 보드에서 내 이름, 국가, 신고 랭크를 표시하지 않습니다. onlymove 랭크는 익명으로 계속 표시됩니다.',
+        hideLabel: '내 프로필 숨기기 — 이 보드에서 내 이름, 국가, 인증된 레이팅을 표시하지 않습니다. onlymove 랭크는 익명으로 계속 표시됩니다.',
         saving: '저장 중…',
         hiddenMsg: '프로필이 숨겨졌습니다. 보드는 1분 이내에 업데이트됩니다.',
         visibleMsg: '프로필이 표시됩니다. 보드는 1분 이내에 업데이트됩니다.',
@@ -118,20 +127,50 @@ export async function handleLeaderboard(env) {
     });
 }
 
+// Continuous internal AGA rank scalar (1k = 0, 1d = 1) -> an AGA-style rating
+// number: dan region maps 1:1 (scalar 1.5 -> 1.5), kyu region shifts past the
+// AGA (-1, 1) gap (scalar 0 = 1k -> -1.0), and the sub-1-band (0, 1) interval
+// interpolates linearly across the gap. Display-only (the estimate in AGA units).
+function agaScalarToRating(s) {
+    return s >= 1 ? s : s <= 0 ? s - 1 : 2 * s - 1;
+}
+const fmtAgaNum = (r) => (Math.round(r * 10) / 10).toFixed(1);
+// AGA official rank from the rating (dan = floor(rating), kyu = floor(|rating|)) —
+// fallback when a heartbeat row predates the stored rank_label.
+const agaLabelFromRating = (r) => (r >= 1 ? Math.floor(r) + 'd' : Math.floor(-r) + 'k');
+
 function renderPage(rows, belowMin) {
-    // Per row: `decl` = the external-evidence range (v: midpoint scalar for
-    // sorting, t: "3k–1d" label), `est` = the current onlymove estimate (v:
-    // internal scalar, t: label). BOTH are UNTIMED onlymove-frame internal scalars
-    // (readLeaderboardRows already inverted the EGF/server couplings AND removed the
-    // user's time dock), so the two columns speak the same language the client's
-    // front-page rank does — no EGF, no time adjustment.
-    const toEst = (s) => (Number.isFinite(s) ? { v: s, t: rankScalarToLabel(s) } : null);
+    // Per row: `est` = the onlymove estimate in the three unit frames — `v` the
+    // UNTIMED internal scalar (the sort key + the onlymove-mode label source),
+    // `om` its rank label, and `egf`/`aga` the TIME-ADJUSTED server-frame
+    // conversions as { n: rating number, t: rank label } (the frames the verified
+    // ratings natively speak — see readLeaderboardRows). `ver` = the verified
+    // official data per federation, pre-formatted: { v: sort scalar, t: display }.
     const data = rows.map((r) => {
-        let decl = null;
-        if (Number.isFinite(r.rangeMin) && Number.isFinite(r.rangeMax)) {
-            const lo = rankScalarToLabel(r.rangeMin);
-            const hi = rankScalarToLabel(r.rangeMax);
-            decl = { v: (r.rangeMin + r.rangeMax) / 2, t: lo === hi ? lo : lo + '–' + hi };
+        let est = null;
+        if (Number.isFinite(r.currentInternal)) {
+            est = { v: r.currentInternal, om: rankScalarToLabel(r.currentInternal) };
+            if (Number.isFinite(r.currentEgf)) {
+                est.egf = {
+                    n: String(Math.max(100, Math.round(2000 + 100 * r.currentEgf))),
+                    t: rankScalarToLabel(r.currentEgf),
+                };
+            }
+            if (Number.isFinite(r.currentAga)) {
+                est.aga = {
+                    n: fmtAgaNum(agaScalarToRating(r.currentAga)),
+                    t: rankScalarToLabel(r.currentAga),
+                };
+            }
+        }
+        const ver = {};
+        if (r.egd) {
+            const label = r.egd.label || rankScalarToLabel(gorToRankScalar(r.egd.gor));
+            ver.egf = { v: r.egd.gor, t: r.egd.gor + ' · ' + label };
+        }
+        if (r.aga) {
+            const label = r.aga.label || agaLabelFromRating(r.aga.rating);
+            ver.aga = { v: r.aga.rating, t: fmtAgaNum(r.aga.rating) + ' · ' + label };
         }
         const row = {
             // Anonymous (unregistered) rows carry anon: true and no name — the client
@@ -139,8 +178,8 @@ function renderPage(rows, belowMin) {
             name: r.registered ? (r.name || '—') : null,
             anon: !r.registered,
             flag: flag(r.country) || UNKNOWN_FLAG,
-            decl,
-            est: toEst(r.currentInternal),
+            ver,
+            est,
         };
         return row;
     });
@@ -187,6 +226,13 @@ function renderPage(rows, belowMin) {
   .hide-profile input { margin: .15rem 0 0; flex: none; }
   .hide-profile input:disabled + span { opacity: .5; }
   .hide-status { display: block; margin-top: .4rem; min-height: 1.2em; opacity: .85; }
+  /* Units selector — a small segmented control above the table. */
+  .units { display: inline-flex; margin: 0 0 .9rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+           border-radius: .5rem; overflow: hidden; }
+  .units button { font: inherit; font-size: .8rem; padding: .3rem .7rem; border: 0; background: none;
+                  color: inherit; cursor: pointer; opacity: .6; }
+  .units button + button { border-left: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+  .units button.on { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); font-weight: 600; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
   }
@@ -194,13 +240,18 @@ function renderPage(rows, belowMin) {
 </head>
 <body>
 <h1 id="lbH1">Leaderboard</h1>
-<p class="sub" id="lbSub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Declared" is where the player's external ranks land on the onlymove scale.</p>
+<p class="sub" id="lbSub">Every player active in the past week with at least ${RANK_START_MIN} solves, ordered by their onlymove rank estimate. "Verified" is the official rating of the player's linked EGF or AGA account, shown in the selected units and only while tournament-active.</p>
+<div class="units" id="unitsBar" role="group" aria-label="Units">
+  <button type="button" data-units="om" class="on">onlymove</button>
+  <button type="button" data-units="egf">EGF</button>
+  <button type="button" data-units="aga">AGA</button>
+</div>
 <table>
   <thead>
     <tr>
       <th>#</th>
       <th class="player" data-sort="name" id="thPlayer">Player</th>
-      <th data-sort="decl" id="thDecl">Declared</th>
+      <th data-sort="ver" id="thVer">Verified</th>
       <th class="om-start" data-sort="est">onlymove</th>
     </tr>
   </thead>
@@ -249,8 +300,10 @@ function renderPage(rows, belowMin) {
   setText('lbH1', t('leaderboard'));
   setText('lbSub', t('sub', { min: CFG.min }));
   setText('thPlayer', t('player'));
-  setText('thDecl', t('declared'));
+  setText('thVer', t('verified'));
   setText('hideLabel', t('hideLabel'));
+  var ub = document.getElementById('unitsBar');
+  if (ub) ub.setAttribute('aria-label', t('units'));
   var invite = document.getElementById('lbInvite');
   if (invite) {
     invite.innerHTML = t('inviteLine', {
@@ -267,19 +320,45 @@ function renderPage(rows, belowMin) {
 <script>
 (function () {
   var DATA = ${json};
-  var sortKey = 'est'; // 'name' | 'decl' | 'est'
+  var sortKey = 'est'; // 'name' | 'ver' | 'est'
   var sortDir = -1;    // 1 ascending, -1 descending
   var tbody = document.getElementById('rows');
 
+  // Units selector state: 'om' (onlymove) | 'egf' | 'aga'; persisted per device.
+  var UNITS = ['om', 'egf', 'aga'];
+  var units = 'om';
+  try { var u0 = localStorage.getItem('lbUnits'); if (UNITS.indexOf(u0) >= 0) units = u0; } catch (e) {}
+
   ${ESC_SNIPPET}
 
-  function fmt(cell) { return cell ? esc(cell.t) : '—'; }
-
-  function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'decl' | 'est'
   function nameOf(r) { return r.anon ? window.LB.t('anonymous') : (r.name || ''); }
+  // Verified cell: blank in onlymove units (no raw onlymove-frame source datum);
+  // in EGF/AGA units the pre-formatted "rating · rank" of that federation.
+  function verText(r) {
+    if (units === 'om') return '';
+    var v = r.ver && r.ver[units === 'egf' ? 'egf' : 'aga'];
+    return v ? esc(v.t) : '—';
+  }
+  // Estimate cell: onlymove units show the internal rank label; EGF/AGA units the
+  // converted "rating · rank" (falling back to the onlymove label if a coupling
+  // is unavailable).
+  function estText(r) {
+    if (!r.est) return '—';
+    if (units !== 'om') {
+      var c = r.est[units];
+      if (c) return esc(c.n + ' · ' + c.t);
+    }
+    return esc(r.est.om);
+  }
+
+  function keyOf(th) { return th.getAttribute('data-sort'); }   // 'name' | 'ver' | 'est'
   function sortValue(r) {
     if (sortKey === 'name') return nameOf(r);
-    if (sortKey === 'decl') return r.decl ? r.decl.v : null;
+    if (sortKey === 'ver') {
+      if (units === 'om') return null;
+      var v = r.ver && r.ver[units];
+      return v ? v.v : null;
+    }
     return r.est ? r.est.v : null;              // 'est' — the current estimate
   }
   function cmp(a, b) {
@@ -310,36 +389,52 @@ function renderPage(rows, belowMin) {
     });
   }
 
+  // Fit-to-width: the nowrap table can overflow narrow phone screens. After a
+  // render, if the page's natural width exceeds the screen, rewrite the viewport
+  // so the browser shows the page zoomed OUT just enough to fit it exactly (the
+  // scale is computed against the device width captured before any override).
+  // Zoom-out only — when the screen already fits the content, the meta is left
+  // alone (scale 1, intended font size); pinch-zoom stays available either way.
+  var baseWidth = 0;
+  function fitToWidth() {
+    var doc = document.documentElement;
+    if (!baseWidth) baseWidth = doc.clientWidth;
+    var w = doc.scrollWidth;
+    if (w <= doc.clientWidth) return;
+    var scale = baseWidth / w;
+    document.querySelector('meta[name=viewport]')
+      .setAttribute('content', 'width=' + w + ', initial-scale=' + scale);
+  }
+
   function render() {
     updateHeaders();
     if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">' + esc(window.LB.t('empty')) + '</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
-      var estCell = '<td class="val om-start">' + fmt(r.est) + '</td>';
+      var estCell = '<td class="val om-start">' + estText(r) + '</td>';
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') +
         '<span class="name' + (r.anon ? ' anon' : '') + '">' + esc(nameOf(r)) + '</span></td>' +
-        '<td class="decl">' + fmt(r.decl) + '</td>' +
+        '<td class="decl">' + verText(r) + '</td>' +
         estCell + '</tr>';
     }).join('');
+    fitToWidth();
   }
 
+  var unitButtons = Array.prototype.slice.call(document.querySelectorAll('#unitsBar button'));
+  unitButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var next = btn.getAttribute('data-units');
+      if (UNITS.indexOf(next) < 0 || next === units) return;
+      units = next;
+      try { localStorage.setItem('lbUnits', units); } catch (e) {}
+      unitButtons.forEach(function (b) { b.classList.toggle('on', b === btn); });
+      render();
+    });
+  });
+  unitButtons.forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-units') === units); });
+
   render();
-})();
-</script>
-<script>
-// Fit-to-width: the nowrap table can overflow narrow phone screens by a little.
-// After the rows render, if the page's natural width exceeds the screen, rewrite
-// the viewport so the browser starts zoomed OUT just enough to fit it exactly.
-// Zoom-out only — when the screen already fits the content, the meta is left
-// alone (scale 1, intended font size); pinch-zoom stays available either way.
-(function () {
-  var doc = document.documentElement;
-  var w = doc.scrollWidth;
-  if (w <= doc.clientWidth) return;
-  var scale = doc.clientWidth / w;
-  document.querySelector('meta[name=viewport]')
-    .setAttribute('content', 'width=' + w + ', initial-scale=' + scale);
 })();
 </script>
 <script>

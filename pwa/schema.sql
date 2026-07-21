@@ -149,20 +149,31 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_exit
 -- ALSO holds the MACHINE-written weekly rating heartbeats for registered
 -- players: server = 'EGD' (raw GoR digits e.g. '2145', from the client GoR
 -- piggyback, country = the EGD federation code) or 'AGAR' (raw AGA rating e.g.
--- '3.2' / '-4.5', from the Worker-side AGAGD fetch) — both distinct from the
--- human-declared 'EGF' / 'AGA' rank labels. Full precision for the leaderboard
--- display; unparseable by rank_to_scalar, so the calibration pipeline ignores
--- 'EGD'/'AGAR' rows until deliberately added to SERVERS. See the external_ids note.
+-- '3.2' / '-4.5', from the Worker-side AGA Ratings Explorer fetch) — both
+-- distinct from the human-declared 'EGF' / 'AGA' rank labels. Full precision
+-- for the leaderboard display; unparseable by rank_to_scalar, so the
+-- calibration pipeline ignores 'EGD'/'AGAR' rows until deliberately added to
+-- SERVERS. See the external_ids note. Heartbeat rows also carry `rank_label`
+-- (the source's OWN official short rank — EGD Grade "4d"/"3p", AGA rank_label
+-- "5d") and `last_game_at` (ISO date of the player's last tournament — EGD
+-- Last_Appearance / AGA latest_event_date), which the /leaderboard "Verified"
+-- column shows and activity-gates on (EGF activity criteria). Both NULL on
+-- human survey rows and on heartbeats from sources that omitted them.
 CREATE TABLE IF NOT EXISTS rank_surveys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     server TEXT NOT NULL,
     rank TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    country TEXT
+    country TEXT,
+    rank_label TEXT,
+    last_game_at TEXT
 );
--- For an existing deployment, run once against the live D1:
+-- For an existing deployment, run once against the live D1 (order matters —
+-- the fetch_database dump is positional, so ALTERs must append in this order):
 --   ALTER TABLE rank_surveys ADD COLUMN country TEXT;
+--   ALTER TABLE rank_surveys ADD COLUMN rank_label TEXT;      (migrations/2026-07-21_rank_surveys_verified.sql)
+--   ALTER TABLE rank_surveys ADD COLUMN last_game_at TEXT;    (same file)
 
 -- One row per share-link event. event_type is 'create' (user generated a share
 -- link) or 'open' (someone arrived via a shared link). referrer is the client's

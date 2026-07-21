@@ -82,15 +82,15 @@ export async function handleRegister(request, env) {
             }
         }
 
-        // For AGA, fetch the current official rank_label from the Ratings Explorer
-        // (server-side; Azure is reachable) so the player shows a rank immediately.
-        // Best-effort: if it can't be fetched, no heartbeat is seeded and the weekly
-        // cron fills it in later.
-        let agaRankLabel = null;
+        // For AGA, fetch the current official rating/rank/last-event from the
+        // Ratings Explorer (server-side; Azure is reachable) so the player shows a
+        // verified rating immediately. Best-effort: if it can't be fetched, no
+        // heartbeat is seeded and the weekly cron fills it in later.
+        let agaPlayer = null;
         if (isAga) {
             let player = null;
             try { player = await fetchAgaPlayer(idVal); } catch (e) { player = null; }
-            if (player && player.rankLabel) agaRankLabel = player.rankLabel;
+            if (player && player.rankLabel && Number.isFinite(player.rating)) agaPlayer = player;
         }
 
         // Seed buffer + rank from the user's existing tsumego_reports so an
@@ -123,7 +123,10 @@ export async function handleRegister(request, env) {
         ];
         // Seed the first rating heartbeat from the snapshot so the player shows a rank
         // immediately — same weekly-guarded shape as applyGorUpdates/refreshAgaRatings
-        // (a re-claim in the same week no-ops). 'EGD' (GoR) or 'AGAR' (AGA rating).
+        // (a re-claim in the same week no-ops). 'EGD' (GoR — the invitation snapshot
+        // carries no grade/last-tournament date, so those stay NULL until the first
+        // weekly client refresh; the activity gate fails open meanwhile) or 'AGAR'
+        // (raw AGA rating + official label + latest event date, from the live fetch).
         if (!isAga && Number.isFinite(inv.gor)) {
             stmts.push(env.DB.prepare(
                 `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
@@ -132,14 +135,15 @@ export async function handleRegister(request, env) {
                                      WHERE user_id = ?1 AND server = 'EGD'
                                        AND created_at >= ?5)`
             ).bind(userId, String(inv.gor), nowIso, inv.country_code || null, weekStart));
-        } else if (isAga && agaRankLabel) {
+        } else if (isAga && agaPlayer) {
             stmts.push(env.DB.prepare(
-                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
-                 SELECT ?1, 'AGAR', ?2, ?3, NULL
+                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country, rank_label, last_game_at)
+                 SELECT ?1, 'AGAR', ?2, ?3, NULL, ?4, ?5
                   WHERE NOT EXISTS (SELECT 1 FROM rank_surveys
                                      WHERE user_id = ?1 AND server = 'AGAR'
-                                       AND created_at >= ?4)`
-            ).bind(userId, agaRankLabel, nowIso, weekStart));
+                                       AND created_at >= ?6)`
+            ).bind(userId, String(agaPlayer.rating), nowIso,
+                agaPlayer.rankLabel, agaPlayer.latestEventDate || null, weekStart));
         }
         await env.DB.batch(stmts);
         return jsonResponse({ ok: true, egdName: inv.egd_name });

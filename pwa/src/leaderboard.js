@@ -82,24 +82,26 @@ function internalIndexToEgf(rankIndex) {
     return interpExtrap(rankIndex - RANK_INDEX_OFFSET, EGF.our, EGF.server);
 }
 
-// Inverse couplings: an EXTERNAL rank scalar -> the internal onlymove rank scalar
+// Inverse EGF coupling: an EGF rank scalar -> the internal onlymove rank scalar
 // (1k = 0), interpolating the same monotone rank_map.json knots the forward
-// translations use, the other way. This is "where the consensus mapping would
-// place this declaration" — the /leaderboard page's declared-range + estimate
-// display speaks internal ranks via these. Note the frame: couplings are fitted
-// against TIME-ADJUSTED ratings, so an inverted value is time-adjusted-frame
-// internal rank (may differ from the client's untimed front-page headline by the
-// user's time dock — the same offset today's GoR comparison carries).
+// translation uses, the other way. Used to bring the stored pred_egf_rank back
+// into the internal frame. Note the frame: couplings are fitted against
+// TIME-ADJUSTED ratings, so an inverted value is time-adjusted-frame internal
+// rank (may differ from the client's untimed front-page headline by the user's
+// time dock).
 export function egfToInternalScalar(egfScalar) {
     if (!EGF || !Array.isArray(EGF.our) || !Array.isArray(EGF.server) || EGF.our.length < 2) return null;
     if (!Number.isFinite(egfScalar)) return null;
     return interpExtrap(egfScalar, EGF.server, EGF.our);
 }
-export function serverRankToInternal(server, serverScalar) {
+// Forward coupling: an internal (time-adjusted-frame) rank scalar -> a server's
+// rank scalar. The /leaderboard page's units selector shows the onlymove estimate
+// in EGF/AGA units via this (EGF uses the stored pred_egf_rank directly).
+export function internalToServerScalar(server, internalScalar) {
     const m = RANK_MAP && RANK_MAP[server];
     if (!m || !Array.isArray(m.our) || !Array.isArray(m.server) || m.our.length < 2) return null;
-    if (serverScalar === null || !Number.isFinite(serverScalar)) return null;
-    return interpExtrap(serverScalar, m.server, m.our);
+    if (internalScalar === null || !Number.isFinite(internalScalar)) return null;
+    return interpExtrap(internalScalar, m.our, m.server);
 }
 
 // Apply a rating-space delta to a rank index (mirrors rank-decomposition.js
@@ -174,11 +176,71 @@ export function gorToRankScalar(gor) {
     return (gor - 2000) / 100;
 }
 
-// (No AGA rating->scalar helper: the AGA Ratings Explorer gives each player's OWN
-// official rank_label — dan = floor(rating), kyu = floor(|rating|), with a gap
-// around 0 that no linear offset can model — so AGA placement stores that label and
-// maps it via rankLabelToScalar + the AGA coupling, the same path a human 'AGA'
-// survey declaration takes. See src/aga.js and the 'AGAR' branch in readLeaderboardRows.)
+// --- verified-rating helpers (the /leaderboard "Verified" column) -----------------
+// The column shows ONLY machine-verified data from the player's bound external
+// account — the EGD GoR / AGA rating heartbeats — never human survey declarations.
+
+// AGA rating -> rank-scalar TIER (1k = 0 convention) for the activity window:
+// dan = rating >= 1 (scalar ~ rating), kyu = rating <= -1 (scalar = rating + 1;
+// -1 -> 0 = 1k). The (-1, 1) gap holds no real AGA ratings.
+export function agaRatingToTierScalar(rating) {
+    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
+    if (rating >= 1) return rating;
+    if (rating <= -1) return rating + 1;
+    return null;
+}
+
+// Official short rank label ("4d" / "17k" / "3p") normalized, or null. Accepts the
+// EGD Grade and AGA short-label forms; 'p' (pro) is kept verbatim.
+export function shortRankLabel(label) {
+    if (typeof label !== 'string') return null;
+    const m = label.trim().toLowerCase().match(/^(\d{1,2})\s*([dkp])$/);
+    return m ? m[1] + m[2] : null;
+}
+
+// Tier scalar from an official label; pro grades count as dan tier. Null when the
+// label is absent/unparseable (callers fall back to the rating-derived tier).
+function tierScalarFromLabel(label) {
+    if (typeof label !== 'string') return null;
+    if (/^\d{1,2}p$/.test(label)) return 7;      // pro -> dan tier
+    return rankLabelToScalar(label);
+}
+
+// EGD Last_Appearance tournament code ("T220122H") -> ISO date, or null. Two-digit
+// year pivots at 70 (EGD data starts in 1996).
+export function egdLastAppearanceToIso(code) {
+    if (typeof code !== 'string') return null;
+    const m = code.trim().toUpperCase().match(/^T(\d{2})(\d{2})(\d{2})[A-Z]?$/);
+    if (!m) return null;
+    const yy = parseInt(m[1], 10), mo = parseInt(m[2], 10), dd = parseInt(m[3], 10);
+    if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
+    const year = yy >= 70 ? 1900 + yy : 2000 + yy;
+    return `${year}-${m[2]}-${m[3]}`;
+}
+
+// Bare "YYYY-MM-DD" or null (defensive re-validation when reading stored rows).
+function isoDateOrNull(s) {
+    if (typeof s !== 'string') return null;
+    const m = s.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
+}
+
+// EGF activity criterion: a rating is "active" while the player's last tournament
+// is within 2 years for dan (and pro), 1 year for single-digit kyu, 6 months for
+// double-digit kyu. Tier boundaries use band edges (dan >= 0.5 — the 1k/1d
+// boundary band — DDK < -8.5 = 10k and weaker). FAIL-OPEN when the date is
+// unknown (a register-seeded heartbeat has none until the first weekly refresh).
+export function isVerifiedActive(tierScalar, lastGameAt, nowMs = Date.now()) {
+    if (!lastGameAt) return true;
+    const t = Date.parse(lastGameAt);
+    if (!Number.isFinite(t)) return true;
+    const days = (nowMs - t) / 86400000;
+    const win = !Number.isFinite(tierScalar) ? 730
+        : tierScalar >= 0.5 ? 730
+            : tierScalar > -8.5 ? 365
+                : 183;
+    return days <= win;
+}
 
 // The user's leaderboard rank from a buffer of { p, s, t } (newest FIRST). Resolves
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
@@ -297,11 +359,13 @@ export async function getStaleGorPins(env) {
 
 // Apply client-submitted GoR updates: one weekly heartbeat row per registered
 // player into rank_surveys (server 'EGD', rank = raw GoR digits, country = EGD
-// federation code) — inserted even when the GoR is unchanged, since the row is
-// also the "checked this week" marker. Once-per-week + plausibility + the
-// pin-must-be-registered check are all enforced inside the INSERT ... SELECT, so
-// a stale/duplicate/spoofed re-submit after the first is a silent no-op. A spoof
-// is self-correcting: next week an honest client writes the true value.
+// federation code, rank_label = the EGD Grade, last_game_at = the parsed
+// Last_Appearance tournament date) — inserted even when the GoR is unchanged,
+// since the row is also the "checked this week" marker. Once-per-week +
+// plausibility + the pin-must-be-registered check are all enforced inside the
+// INSERT ... SELECT, so a stale/duplicate/spoofed re-submit after the first is
+// a silent no-op. A spoof is self-correcting: next week an honest client writes
+// the true value.
 export async function applyGorUpdates(env, updates) {
     if (!env.DB || !Array.isArray(updates) || !updates.length) return;
     const weekStart = weekStartIso(Date.now());
@@ -313,15 +377,17 @@ export async function applyGorUpdates(env, updates) {
         const gor = Math.round(Number(u && u.gor));
         if (!Number.isFinite(gor) || gor < GOR_MIN || gor > GOR_MAX) continue;
         const cc = (typeof u.country === 'string' ? u.country : '').slice(0, 2).toUpperCase();
+        const grade = shortRankLabel(u && u.grade);
+        const lastGameAt = egdLastAppearanceToIso(u && u.lastAppearance);
         stmts.push(env.DB.prepare(
-            `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
-             SELECT x.user_id, 'EGD', ?2, ?3, ?4
+            `INSERT INTO rank_surveys (user_id, server, rank, created_at, country, rank_label, last_game_at)
+             SELECT x.user_id, 'EGD', ?2, ?3, ?4, ?6, ?7
                FROM external_ids x
               WHERE x.egd_pin = ?1
                 AND NOT EXISTS (SELECT 1 FROM rank_surveys s
                                  WHERE s.user_id = x.user_id AND s.server = 'EGD'
                                    AND s.created_at >= ?5)`
-        ).bind(pin, String(gor), nowIso, cc || null, weekStart));
+        ).bind(pin, String(gor), nowIso, cc || null, weekStart, grade, lastGameAt));
     }
     if (!stmts.length) return;
     try {
@@ -338,9 +404,14 @@ export async function applyGorUpdates(env, updates) {
 // piggyback. If it's ever unreachable, no heartbeat is written and the last one
 // persists: AGA linking still works, just without that week's refresh. Mirrors the
 // EGD get-stale / write-heartbeat shape, but self-fetches instead of accepting
-// client-submitted values. Stores the AGA rank_label (short form), not a number.
+// client-submitted values. Stores rank = the raw AGA rating (e.g. '5.12'/'-3.2' —
+// what the "Verified" column shows), rank_label = the AGA's own official short
+// label ("5d"), last_game_at = latest_event_date. (Pre-2026-07-21 heartbeat rows
+// stored the label IN `rank`; readers treat those as rating-less and they age out
+// with the next weekly heartbeat.)
 
 const AGA_REFRESH_MAX = 200;   // cap Explorer fetches per cron run (best-effort)
+const AGA_RATING_MIN = -40, AGA_RATING_MAX = 15;   // plausibility bound
 
 // AGA member ids whose rating hasn't been refreshed this week (no 'AGAR' heartbeat
 // since the week start). Small scan (external_ids + one grouped pass of
@@ -378,17 +449,20 @@ export async function refreshAgaRatings(env) {
     for (const agaId of ids) {
         let player = null;
         try { player = await fetchAgaPlayer(agaId); } catch (e) { player = null; }
-        if (!player || !player.rankLabel) continue;   // unreachable / bad -> keep last
+        // Unreachable / bad / no numeric rating -> keep the last heartbeat.
+        if (!player || !player.rankLabel || !Number.isFinite(player.rating)
+            || player.rating < AGA_RATING_MIN || player.rating > AGA_RATING_MAX) continue;
         try {
             await env.DB.prepare(
-                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country)
-                 SELECT x.user_id, 'AGAR', ?2, ?3, NULL
+                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country, rank_label, last_game_at)
+                 SELECT x.user_id, 'AGAR', ?2, ?3, NULL, ?4, ?5
                    FROM external_ids x
                   WHERE x.aga_id = ?1
                     AND NOT EXISTS (SELECT 1 FROM rank_surveys s
                                      WHERE s.user_id = x.user_id AND s.server = 'AGAR'
-                                       AND s.created_at >= ?4)`
-            ).bind(agaId, player.rankLabel, new Date().toISOString(), weekStart).run();
+                                       AND s.created_at >= ?6)`
+            ).bind(agaId, String(player.rating), new Date().toISOString(),
+                player.rankLabel, player.latestEventDate || null, weekStart).run();
         } catch (e) {
             console.error('refreshAgaRatings insert failed:', e);
         }
@@ -534,16 +608,21 @@ export async function reconcileBuffers(env) {
 // is filtered below. Registration display fields live OFF the leaderboard row:
 // name/country on the claimed invitation (frozen at invite time; bare-column +
 // MAX() subquery picks the newest claim — documented SQLite behavior), and
-// per-user external evidence from ONE latest-per-(user, server) pass over
-// rank_surveys, stitched in JS: EVERY declaration (the 'EGD' GoR heartbeat
-// included) is back-mapped through its server's inverse coupling AND de-timed by
-// the user's own dock into an UNTIMED onlymove-rank range `rangeMin..rangeMax`
-// (null when the user has no mappable source; any row, registered or anonymous,
-// may carry one). Each shown row carries `currentInternal`, the untimed onlymove
-// estimate, and `registered` (has an external_ids row; unregistered rows have
-// name/country null). BOTH the estimate and the declared range are UNTIMED
-// onlymove ranks — no EGF, no time adjustment — matching the client's front-page
-// headline.
+// per-user VERIFIED external ratings from ONE latest-per-(user, server) pass
+// over rank_surveys, stitched in JS. Only the MACHINE heartbeats are surfaced —
+// `egd` {gor, label, lastGameAt} from the 'EGD' row and `aga` {rating, label,
+// lastGameAt} from the 'AGAR' row, each dropped (null) when inactive per the
+// EGF activity criterion (isVerifiedActive; fail-open on a missing date).
+// Human survey declarations are DELIBERATELY NOT REVEALED — they feed only the
+// calibration pipeline and the last-resort country/flag fallback here. Each
+// shown row carries the onlymove estimate in three frames for the page's units
+// selector: `currentInternal` (UNTIMED onlymove scalar — the sort key and the
+// onlymove-mode display, matching the client's front-page headline) plus
+// `currentEgf`/`currentAga` (the TIME-ADJUSTED server-frame scalars the
+// couplings speak — the frames the verified GoR/AGA rating natively live in,
+// so estimate and verified columns are comparable in those modes), and
+// `registered` (has an external_ids row; unregistered rows have name/country
+// null).
 export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     if (!env.DB) return { rows: [], belowMin: 0 };
     const JOINS = `
@@ -566,14 +645,16 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
            ${JOINS}`
     ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     // Latest declaration per (user, server) — one pass over the (small)
-    // rank_surveys table; stitched onto rows in JS below. `country` is a bare
-    // column alongside MAX(id), so SQLite returns it from the latest row (same
-    // documented bare-column behavior the invitation JOIN relies on): the 'EGD'
-    // heartbeat carries the EGD federation code, other servers the geo-IP country.
+    // rank_surveys table; stitched onto rows in JS below. `country`/`rank_label`/
+    // `last_game_at` are bare columns alongside MAX(id), so SQLite returns them
+    // from the latest row (same documented bare-column behavior the invitation
+    // JOIN relies on): the 'EGD' heartbeat carries the EGD federation code, other
+    // servers the geo-IP country.
     const [res, declRes] = await Promise.all([
         stmt.all(),
         env.DB.prepare(
-            `SELECT user_id, server, rank, country, MAX(id) FROM rank_surveys
+            `SELECT user_id, server, rank, country, rank_label, last_game_at, MAX(id)
+               FROM rank_surveys
               GROUP BY user_id, server`
         ).all(),
     ]);
@@ -632,46 +713,64 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         // Below the list-entry gate: not shown, only tallied. (A hidden sub-gate row is
         // counted too — the tally is a raw activity aggregate, not identifying.)
         if (predEgfRank === null) { belowMin++; continue; }
-        // External evidence: the 'EGD' heartbeat's raw digits give the current GoR;
-        // every mappable declaration (GoR included) back-maps through its server's
-        // inverse coupling into the internal-rank range. Country is harvested in the
-        // same pass — the 'EGD' heartbeat's country is the EGD federation code (the
-        // most reliable, since it comes from EGD), a human survey's is Cloudflare
-        // geo-IP. All skipped entirely for a hidden user — their declared ranks and
-        // country are exactly what they've opted to hide.
-        const sources = [];
+        // Verified external ratings: ONLY the machine heartbeats ('EGD' GoR, 'AGAR'
+        // AGA rating) are surfaced — human survey declarations are not revealed;
+        // their rows are read solely for the last-resort country/flag fallback.
+        // Country is harvested in the same pass — the 'EGD' heartbeat's country is
+        // the EGD federation code (the most reliable, since it comes from EGD), a
+        // human survey's is Cloudflare geo-IP. All skipped entirely for a hidden
+        // user — their verified ratings and country are exactly what they've opted
+        // to hide.
+        let egd = null;             // { gor, label, lastGameAt } — verified EGD data
+        let aga = null;             // { rating, label, lastGameAt } — verified AGA data
         let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
         let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
         if (!isHidden) for (const d of (declByUser.get(r.user_id) || [])) {
             if (d.server === 'EGD') {
-                const gi = parseInt(d.rank, 10);
-                if (Number.isFinite(gi)) {
-                    const s = egfToInternalScalar(gorToRankScalar(gi));
-                    if (s !== null) sources.push(s);
+                const gor = parseInt(d.rank, 10);
+                if (Number.isFinite(gor) && gor > 0) {
+                    egd = {
+                        gor,
+                        label: shortRankLabel(d.rank_label),
+                        lastGameAt: isoDateOrNull(d.last_game_at),
+                    };
                 }
                 if (d.country) egdCountry = d.country;
             } else if (d.server === 'AGAR') {
-                // Machine AGA heartbeat: the AGA's own rank_label (stored short, e.g.
-                // '10d'/'3k') -> onlymove scalar via the AGA coupling — same path as a
-                // human 'AGA' declaration, but a distinct server code so calibration
-                // ignores it. The Ratings Explorer gives no country, so none is harvested.
-                const s = serverRankToInternal('AGA', rankLabelToScalar(d.rank));
-                if (s !== null) sources.push(s);
-            } else {
-                const s = serverRankToInternal(d.server, rankLabelToScalar(d.rank));
-                if (s !== null) sources.push(s);
-                if (d.country && !surveyCountry) surveyCountry = d.country;
+                // New-format heartbeats store the raw AGA rating in `rank`; legacy
+                // rows stored the label ("5d" -> NaN here) and read as rating-less.
+                const rating = Number(d.rank);
+                if (Number.isFinite(rating) && Math.abs(rating) >= 1) {
+                    aga = {
+                        rating,
+                        label: shortRankLabel(d.rank_label),
+                        lastGameAt: isoDateOrNull(d.last_game_at),
+                    };
+                }
+            } else if (d.country && !surveyCountry) {
+                surveyCountry = d.country;
             }
         }
-        // The declared sources are server-frame internal scalars (the couplings/EGD-GoR
-        // are time-adjusted). De-time them by the user's own dock so the "Declared" range
-        // reads as untimed onlymove ranks, comparable to the onlymove estimate below.
-        const rangeMin = sources.length ? deTimeInternalScalar(Math.min(...sources), deltaRating) : null;
-        const rangeMax = sources.length ? deTimeInternalScalar(Math.max(...sources), deltaRating) : null;
-        // The onlymove estimate as an UNTIMED internal scalar: invert the stored
-        // server-frame EGF rank to internal, then subtract the dock — recovering the
-        // client's untimed front-page frame (the column the page displays).
-        const currentInternal = deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
+        // EGF activity criterion: an inactive rating (last tournament too long ago
+        // for its tier) is withheld entirely. Tier comes from the official label
+        // when present (pro = dan tier), else from the rating itself; a missing
+        // date fails open (register-seeded heartbeats have none for <= a week).
+        if (egd) {
+            const tier = tierScalarFromLabel(egd.label) ?? gorToRankScalar(egd.gor);
+            if (!isVerifiedActive(tier, egd.lastGameAt)) egd = null;
+        }
+        if (aga) {
+            const tier = tierScalarFromLabel(aga.label) ?? agaRatingToTierScalar(aga.rating);
+            if (!isVerifiedActive(tier, aga.lastGameAt)) aga = null;
+        }
+        // The onlymove estimate in the three frames the units selector displays:
+        // untimed internal (onlymove mode + the sort key), and the time-adjusted
+        // server frames (EGF directly from the stored rank; AGA via the forward
+        // coupling) — the frames the verified GoR/AGA rating natively speak.
+        const internalTimed = egfToInternalScalar(predEgfRank);
+        const currentInternal = deTimeInternalScalar(internalTimed, deltaRating);
+        const currentEgf = predEgfRank;
+        const currentAga = internalToServerScalar('AGA', internalTimed);
         // A hidden user is stripped of name/country and reported as unregistered, so the
         // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
         // reliable) → invitation (EGD, frozen at invite) → leaderboard row (edge geo-IP,
@@ -682,7 +781,7 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const country = isHidden ? null
             : (egdCountry || r.country_code || r.country || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
-        visible.push({ name, country, rangeMin, rangeMax, registered, currentInternal });
+        visible.push({ name, country, registered, currentInternal, currentEgf, currentAga, egd, aga });
     }
     return { rows: visible, belowMin };
 }
