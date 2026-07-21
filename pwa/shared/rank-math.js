@@ -81,6 +81,11 @@ export function rankBand(value) {
  * ladder-clamped server labeller). Both spaces share this band math because they
  * differ only by the constant RANK_INDEX_OFFSET and every band has width 1.
  *
+ * The percent is FLOORED, not rounded: a value just under the next band would
+ * otherwise display "100%" (of the current rank, at ≥ .995 progress), which reads
+ * as a contradiction next to the current rank label. Floor caps the display at
+ * 99% — the band itself still switches at the .5 boundary via rankBand's round.
+ *
  * Returns { band, label, percent, nextLabel }. Use this everywhere a rank is shown
  * with its progress — do NOT re-derive round/−0.5/percent inline (that divergence
  * was the floor-vs-round half-rank bug).
@@ -90,7 +95,7 @@ export function rankProgress(value, labelFn = rankScalarToLabel) {
     return {
         band,
         label: labelFn(band),
-        percent: Math.round((value - (band - 0.5)) * 100),
+        percent: Math.floor((value - (band - 0.5)) * 100),
         nextLabel: labelFn(band + 1),
     };
 }
