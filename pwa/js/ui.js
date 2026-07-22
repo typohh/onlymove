@@ -138,15 +138,53 @@ const showManualInstallModal = () => {
     });
 };
 
+/**
+ * Post-opt-in reminder shown only when the Play TWA is installed. On Android
+ * 13+ the app's notification permission is OFF by default, and the delegation
+ * flow that should raise the native grant prompt when the site subscribes is
+ * broken (android-browser-helper #563): subscribe() succeeds, but the app
+ * stays blocked, no reminder can display, and Chrome's next push-subscription
+ * revalidation deletes the subscription (the "Notify forgets itself" loop).
+ * Until the upstream fix / an in-app permission bridge ships, walk the user to
+ * the system toggle; flipping it before the sweep legitimizes the fresh
+ * subscription. Worded as a check so it stays correct for users already
+ * granted.
+ */
+const showTwaNotificationSettingsModal = () => {
+    showModal({
+        build: (modal, close) => {
+            modal.appendChild(modalTitle(getTerm('twaNotifSettingsTitle')));
+
+            const instructions = document.createElement('div');
+            instructions.id = 'twa-notif-instructions';
+            getTerm('twaNotifSettingsInstructions').split('\n').forEach((line, i, arr) => {
+                instructions.appendChild(document.createTextNode(line));
+                if (i < arr.length - 1) instructions.appendChild(document.createElement('br'));
+            });
+            modal.appendChild(instructions);
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'btn';
+            closeBtn.textContent = getTerm('installIosClose');
+            closeBtn.addEventListener('click', close);
+            modal.appendChild(closeBtn);
+        },
+    });
+};
+
 // State-machine cache for button4. refreshNotifState() refills it async;
 // updateInstallButton paints from this snapshot synchronously.
-let notifState = { installed: false, permission: 'default', subscribed: false };
+let notifState = { installed: false, permission: 'default', subscribed: false, storeApp: false };
 
 export async function refreshNotifState() {
     // display-mode covers running inside the TWA / installed PWA; the related-app
     // probe additionally treats "TWA installed, browsing in Chrome" as installed
     // so we don't nag those users (and don't invite a duplicate WebAPK install).
-    notifState.installed = isInstalled() || await hasInstalledStoreApp();
+    // storeApp is kept separately: with the Play TWA installed, Chrome delegates
+    // this origin's notifications to the app, which gates the Android-settings
+    // reminder shown after opt-in (see showTwaNotificationSettingsModal).
+    notifState.storeApp = await hasInstalledStoreApp();
+    notifState.installed = isInstalled() || notifState.storeApp;
     notifState.permission = notificationPermission();
     notifState.subscribed = supportsNotifications() ? !!(await getCurrentSubscription()) : false;
 }
@@ -197,6 +235,13 @@ export const handleInstallClick = async () => {
         notifState.subscribed = true;
     }
     updateInstallButton();
+    // With the Play TWA installed, the subscription alone isn't enough: the
+    // Android app's own notification permission must be on, and the broken
+    // delegation prompt means it usually isn't (see
+    // showTwaNotificationSettingsModal). Point the user at the system toggle.
+    if (result?.ok && notifState.storeApp) {
+        showTwaNotificationSettingsModal();
+    }
 };
 
 /**
