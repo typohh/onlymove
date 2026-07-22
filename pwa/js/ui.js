@@ -139,16 +139,20 @@ const showManualInstallModal = () => {
 };
 
 /**
- * Post-opt-in reminder shown only when the Play TWA is installed. On Android
- * 13+ the app's notification permission is OFF by default, and the delegation
- * flow that should raise the native grant prompt when the site subscribes is
- * broken (android-browser-helper #563): subscribe() succeeds, but the app
- * stays blocked, no reminder can display, and Chrome's next push-subscription
+ * Fallback instructions shown only when the Play TWA is installed but the
+ * in-app permission bridge (below) did not launch — i.e. the installed shell
+ * predates the bridge activity (versionCode < 3), so the intent:// navigation
+ * resolved to nothing. Background: on Android 13+ the app's notification
+ * permission is OFF by default, and the delegation flow that should raise the
+ * native grant prompt when the site subscribes is broken
+ * (android-browser-helper #563): subscribe() succeeds, but the app stays
+ * blocked, no reminder can display, and Chrome's next push-subscription
  * revalidation deletes the subscription (the "Notify forgets itself" loop).
- * Until the upstream fix / an in-app permission bridge ships, walk the user to
- * the system toggle; flipping it before the sweep legitimizes the fresh
- * subscription. Worded as a check so it stays correct for users already
- * granted.
+ * Walking the user to the system toggle before that sweep legitimizes the
+ * fresh subscription. Worded as a check so it stays correct for users already
+ * granted. Once the Play rollout of the bridge saturates, this modal (and its
+ * i18n strings) can be dropped entirely — the shell itself deep-links the
+ * settings screen in the cases that need it.
  */
 const showTwaNotificationSettingsModal = () => {
     showModal({
@@ -171,6 +175,43 @@ const showTwaNotificationSettingsModal = () => {
         },
     });
 };
+
+// The in-app notification permission bridge in the TWA shell (versionCode 3+):
+// a transparent activity that raises the native POST_NOTIFICATIONS prompt —
+// the one Chrome's broken delegation never shows — or deep-links the app's
+// notification settings screen when the prompt would be silently auto-denied.
+// The explicit package= pins resolution to our shell, so on any other device
+// state the navigation is a no-op (the page never unloads either way).
+const TWA_BRIDGE_INTENT =
+    'intent://notifications#Intent;scheme=onlymove-bridge;package=net.onlymove.twa;end';
+
+/**
+ * Fires the permission bridge and reports whether it actually launched.
+ * There is no return channel from the shell, but launching is observable:
+ * the bridge activity (or its permission dialog / settings screen) covers the
+ * TWA, so the page goes hidden. No hidden transition within the timeout means
+ * the intent resolved to nothing — an installed shell that predates the
+ * bridge — and the caller should fall back to the manual instructions modal.
+ * Never rejects.
+ */
+const launchTwaNotificationBridge = () => new Promise((resolve) => {
+    let timer = null;
+    const settle = (launched) => {
+        document.removeEventListener('visibilitychange', onVisibility);
+        clearTimeout(timer);
+        resolve(launched);
+    };
+    const onVisibility = () => {
+        if (document.visibilityState === 'hidden') settle(true);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    timer = setTimeout(() => settle(false), 3000);
+    try {
+        window.location.href = TWA_BRIDGE_INTENT;
+    } catch {
+        settle(false);
+    }
+});
 
 // State-machine cache for button4. refreshNotifState() refills it async;
 // updateInstallButton paints from this snapshot synchronously.
@@ -237,10 +278,14 @@ export const handleInstallClick = async () => {
     updateInstallButton();
     // With the Play TWA installed, the subscription alone isn't enough: the
     // Android app's own notification permission must be on, and the broken
-    // delegation prompt means it usually isn't (see
-    // showTwaNotificationSettingsModal). Point the user at the system toggle.
+    // delegation prompt means it usually isn't. Fire the shell's in-app
+    // permission bridge, which raises the native grant dialog (or the settings
+    // screen when the dialog would silently auto-deny). Only when the bridge
+    // doesn't launch — a pre-bridge shell version — fall back to the manual
+    // walk-to-settings instructions.
     if (result?.ok && notifState.storeApp) {
-        showTwaNotificationSettingsModal();
+        const bridged = await launchTwaNotificationBridge();
+        if (!bridged) showTwaNotificationSettingsModal();
     }
 };
 
