@@ -102,6 +102,8 @@ embeddings/joint/ica_stability.json
 /android/*
 !/android/twa-manifest.json
 !/android/README.md
+!/android/package.json
+!/android/package-lock.json
 !/android/app/
 /android/app/*
 !/android/app/build.gradle

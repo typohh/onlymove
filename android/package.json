@@ -1,0 +1,11 @@
+{
+  "name": "onlymove-twa",
+  "private": true,
+  "description": "Build tooling for the Only Move TWA shell. `npm run build` wraps the version-pinned @bubblewrap/cli (see README.md for the update-prompt clobber trap).",
+  "scripts": {
+    "build": "bubblewrap build"
+  },
+  "devDependencies": {
+    "@bubblewrap/cli": "1.24.1"
+  }
+}

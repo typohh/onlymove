@@ -9,14 +9,15 @@ If you do regenerate with Bubblewrap, re-apply those pieces (git diff against th
 
 ## Building a release
 
-The CLI is not installed globally — run it through npx, from this directory:
+`@bubblewrap/cli` is a version-pinned local devDependency (deliberately not global/npx — the CLI's template-regeneration behavior must not drift under a hand-maintained project):
 
 ```bash
 cd android
-npx @bubblewrap/cli build
+npm install    # first time only
+npm run build
 ```
 
-It uses the JDK/SDK paths in `~/.bubblewrap/config.json`, runs Gradle (`assembleRelease` + `bundleRelease`), and signs with `android.keystore` — it prompts for the keystore and key passwords, or reads them from `BUBBLEWRAP_KEYSTORE_PASSWORD` / `BUBBLEWRAP_KEY_PASSWORD` env vars. Outputs land here: `app-release-signed.apk` (local testing) and `app-release-bundle.aab` (upload this to Play).
+The build uses the JDK/SDK paths in `~/.bubblewrap/config.json`, runs Gradle (`assembleRelease` + `bundleRelease`), and signs with `android.keystore` — it prompts for the keystore and key passwords, or reads them from `BUBBLEWRAP_KEYSTORE_PASSWORD` / `BUBBLEWRAP_KEY_PASSWORD` env vars (`npm run build -- --skipSigning` for an unsigned smoke build). Outputs land here: `app-release-signed.apk` (local testing) and `app-release-bundle.aab` (upload this to Play).
 
 **The update prompt is a clobber trap.** `bubblewrap build` sha1-compares `twa-manifest.json` against `manifest-checksum.txt`, and on mismatch asks "the manifest was updated, apply the changes to the project?" — **defaulting to Yes, which regenerates the project from the template** and wipes the hand-maintained pieces listed above. If the prompt ever appears, answer **No** (the build then proceeds on the current project files). After editing `twa-manifest.json` deliberately, silence the prompt instead by re-syncing the checksum: `sha1sum twa-manifest.json | cut -d' ' -f1 | tr -d '\n' > manifest-checksum.txt` (the build rewrites this file itself after a successful run).
 
