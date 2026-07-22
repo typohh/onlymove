@@ -256,8 +256,10 @@ function renderPage(rows, belowMin, staleVerified) {
   td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
   /* progress-to-next-rank "(64%)" — same relative size/mute as the front-page
-     rank list's percentage span (rank-translation.js: 0.8em, opacity .6). */
-  td.val .pct { font-size: .8em; opacity: .6; font-weight: 400; }
+     rank list's percentage span (rank-translation.js: 0.8em, opacity .6).
+     Both value columns render it (pctRank), so scope on the class, not on
+     td.val — the Verified cell is a td.decl. */
+  .pct { font-size: .8em; opacity: .6; font-weight: 400; }
   td.decl { opacity: .7; font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
   /* Unregistered players — muted so named (registered) rows stand out. */
