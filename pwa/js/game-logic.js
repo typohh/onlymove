@@ -79,15 +79,25 @@ const handleCorrectAnswer = async (x, y) => {
     const stats = await updateUserStats(true, { at });
 
     // Move the solved problem into the previous slot and — if it was the standing
-    // challenge — reselect one NOW. challengeProblem is persisted, so once it's
-    // replaced a reopen can never re-serve the just-answered problem (the bug the
-    // old `answered` flag tried and failed to patch).
-    await completeCurrentProblem();
+    // challenge — start reselecting one NOW, but do NOT await it: the reselection
+    // can need a shard download, which now runs under the white overlay instead
+    // of delaying its start. The synchronous prefix of completeCurrentProblem
+    // still runs before the fade (previous slot set, resume slot cleared — a
+    // reload mid-transition can't re-serve the answered problem), and once the
+    // reselection lands, challengeProblem is persisted so a reopen can never
+    // re-serve the just-answered problem (the bug the old `answered` flag tried
+    // and failed to patch); a kill before it lands is covered by
+    // challengeAlreadyAnswered at the next selection.
+    const completed = completeCurrentProblem();
+    completed.catch(() => {}); // surfaced via the overlay callback's catch below
 
-    // Return the load promise so fadeOverlay holds the white screen up until
-    // the next problem is actually loaded (never lifting onto an empty board).
+    // The overlay holds until the reselection AND the next-problem load finish
+    // (never lifting onto an empty board). advanceToNextProblem must stay inside
+    // the callback — it repaints the board, which has to happen under cover.
     fadeOverlay(1000, () => {
-        return advanceToNextProblem().catch(error => console.error("Error loading next tsumego:", error));
+        return completed
+            .then(() => advanceToNextProblem())
+            .catch(error => console.error("Error loading next tsumego:", error));
     }, stats);
 }
 

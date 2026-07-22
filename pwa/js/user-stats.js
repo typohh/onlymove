@@ -326,26 +326,39 @@ export async function updateUserStats(isCorrect, {
 
     // For a recall (repeat) attempt the rank barely moves (rank is fit on
     // first-time attempts only). Instead the overlay shows how recording this
-    // answer ACTUALLY changed the recall model: we run the real model retrain now
-    // — the same fit the idle path runs — and measure the time until first repeat
-    // of a generic problem before vs after teaching it this attempt. No formula,
-    // no shortcut, no cap: the delta is the genuine before/after the model
-    // produces (a correct recall generally pushes it later, a miss earlier, but
-    // since it's the real retrain over a finite window the magnitude — and rarely
-    // the sign — is whatever the model actually learns). Worth the synchronous
-    // retrain block (≤~2s, usually far less warm-started) because the overlay
-    // cannot report the true value without first training on the answer.
-    let recallImpact = null;
+    // answer ACTUALLY changed the recall model: the real model retrain — the same
+    // fit the idle path runs — measures the time until first repeat of a generic
+    // problem before vs after teaching it this attempt. No formula, no shortcut,
+    // no cap: the delta is the genuine before/after the model produces (a correct
+    // recall generally pushes it later, a miss earlier, but since it's the real
+    // retrain over a finite window the magnitude — and rarely the sign — is
+    // whatever the model actually learns). The retrain (≤~2s, usually far less
+    // warm-started; a synchronous CPU block with no internal yields) is
+    // deliberately NOT awaited here: it's deferred to idle so the result
+    // overlay's fade starts immediately, and the overlay reserves the impact
+    // line and fills it in when this promise resolves (createOverlayContent).
+    // Once the fade's opacity transition is running it animates on the
+    // compositor, so the retrain block can't stall it.
+    let recallImpactPromise = null;
     if (isRepeatAttempt) {
         // The genuine before/after the recall model produces from teaching it this
         // answer (generic average-difficulty problem), THEN — if the displayed delay
         // moved the wrong way for this answer — a few extra Adam steps one at a time
         // until it agrees with the answer's sign (recallImpactWithRefine, shared with
         // the offline contradiction sim so both run the identical path).
-        const { beforeHours, afterHours } = await recallImpactWithRefine(isCorrect);
-        if (beforeHours !== null && afterHours !== null) {
-            recallImpact = { beforeHours, afterHours };
-        }
+        recallImpactPromise = new Promise(resolve => {
+            scheduleIdle(async () => {
+                try {
+                    const { beforeHours, afterHours } = await recallImpactWithRefine(isCorrect);
+                    resolve((beforeHours !== null && afterHours !== null)
+                        ? { beforeHours, afterHours }
+                        : null);
+                } catch (error) {
+                    console.error('recall-impact retrain failed:', error);
+                    resolve(null);
+                }
+            });
+        });
     } else {
         // First-time attempt: nothing to display. Keep the retrain off the
         // critical path — deferred to browser idle (requestIdleCallback fires once
@@ -359,5 +372,5 @@ export async function updateUserStats(isCorrect, {
     // writes would be pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, recallImpact };
+    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, recallImpactPromise };
 }

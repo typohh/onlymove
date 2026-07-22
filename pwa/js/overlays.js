@@ -16,17 +16,6 @@ function formatRecallDelta(deltaHours) {
     return `${sign}${(secs / 3600).toFixed(1)} h`;
 }
 
-// One line, like the rank change: how much this recall answer moved the time until
-// first repeat of a generic problem (e.g. "+7 min repeat delay").
-function appendRecallImpact(container, { beforeHours, afterHours }) {
-    const el = document.createElement('div');
-    Object.assign(el.style, {
-        fontSize: `${boardContainer.offsetWidth / 20}px`,
-        marginBottom: '20px',
-    });
-    el.textContent = getTerm('recallDelayFormat', { change: formatRecallDelta(afterHours - beforeHours) });
-    container.appendChild(el);
-}
 
 function createOverlayContent(stats, message, textColor) {
     const container = document.createElement('div');
@@ -40,10 +29,27 @@ function createOverlayContent(stats, message, textColor) {
         textAlign: 'center',
     });
 
-    if (stats && stats.recallImpact) {
+    if (stats && stats.recallImpactPromise) {
         // Recall (repeat) attempt: the rank barely moves, so show how this answer
-        // shifted the time until first repeat of a generic problem instead.
-        appendRecallImpact(container, stats.recallImpact);
+        // shifted the time until first repeat of a generic problem instead (one
+        // line, e.g. "+7 min repeat delay"). The numbers come from the retrain
+        // updateUserStats defers off the overlay's critical path, so the line is
+        // reserved blank up front (no layout shift under any message below it)
+        // and filled when the promise resolves — usually well within the
+        // overlay's hold. A null impact (model not ready) removes the blank line.
+        const el = document.createElement('div');
+        Object.assign(el.style, {
+            fontSize: `${boardContainer.offsetWidth / 20}px`,
+            marginBottom: '20px',
+        });
+        el.textContent = ' '; // U+00A0 — a plain space collapses to zero height
+        container.appendChild(el);
+        const fill = ({ beforeHours, afterHours }) => {
+            el.textContent = getTerm('recallDelayFormat', { change: formatRecallDelta(afterHours - beforeHours) });
+        };
+        stats.recallImpactPromise
+            .then(impact => { if (impact) fill(impact); else el.remove(); })
+            .catch(() => el.remove());
     } else if (stats && stats.rankChange) {
         const rankChange = stats.rankChange;
         if (rankChange !== 0) {
