@@ -332,13 +332,13 @@ export async function updateUserStats(isCorrect, {
     // no cap: the delta is the genuine before/after the model produces (a correct
     // recall generally pushes it later, a miss earlier, but since it's the real
     // retrain over a finite window the magnitude — and rarely the sign — is
-    // whatever the model actually learns). The retrain (≤~2s, usually far less
-    // warm-started; a synchronous CPU block with no internal yields) is
-    // deliberately NOT awaited here: it's deferred to idle so the result
-    // overlay's fade starts immediately, and the overlay reserves the impact
-    // line and fills it in when this promise resolves (createOverlayContent).
-    // Once the fade's opacity transition is running it animates on the
-    // compositor, so the retrain block can't stall it.
+    // whatever the model actually learns). The retrain (≤~2s of work, usually
+    // far less warm-started) is deliberately NOT awaited here: it's deferred to
+    // idle so the result overlay's fade starts immediately, and the overlay
+    // reserves the impact line and fills it in when this promise resolves
+    // (createOverlayContent). The epoch loop itself yield-slices the main
+    // thread (trainUserModel), so the page stays responsive while it runs
+    // behind the overlay.
     let recallImpactPromise = null;
     if (isRepeatAttempt) {
         // The genuine before/after the recall model produces from teaching it this

@@ -679,12 +679,23 @@ export function getLogitPerRank(statsResults) {
 }
 
 let isCalculatingStats = false;
+let statsRerunQueued = false;
 
 // NOTE: the one-shot wipe of pre-3PL persisted params lives in migrations.js
 // (migrateModelArch3pl), which runMigrations() runs at boot before any training.
 
 export async function calculateAndStoreStatsResults(trainOpts = {}) {
-    if (isCalculatingStats) return null;
+    if (isCalculatingStats) {
+        // Real overlap is possible now that the epoch loop yields (a training
+        // run spans seconds of interleavable time, not microseconds). Don't
+        // drop this caller's data on the floor: queue ONE coalesced follow-up
+        // retrain to run when the in-flight one finishes — a retrain always
+        // trains on the full current history, so a single default-opts rerun
+        // covers any number of skipped callers. (A skipped caller still gets
+        // null back; the recall-refine steps already tolerate that.)
+        statsRerunQueued = true;
+        return null;
+    }
     isCalculatingStats = true;
 
     try {
@@ -739,6 +750,12 @@ export async function calculateAndStoreStatsResults(trainOpts = {}) {
         Sentry.captureException(error);
     } finally {
         isCalculatingStats = false;
+        if (statsRerunQueued) {
+            statsRerunQueued = false;
+            // Fire-and-forget: the rerun logs its own failures, and its
+            // callers-by-proxy (the skipped ones) have already moved on.
+            calculateAndStoreStatsResults();
+        }
     }
 }
 
@@ -855,6 +872,32 @@ export function prepareTrainingData(history, validHistory) {
     };
 }
 
+// How much work trainUserModel does between yields — ~2 frames: long enough
+// that yield overhead is negligible (~60 yields across a full 2s budget),
+// short enough that input and the result overlay's timers stay responsive
+// while a retrain runs.
+const YIELD_SLICE_MS = 30;
+
+// Yield the main thread so the browser can paint and dispatch input between
+// epoch slices. scheduler.yield() where available (prioritized continuation);
+// otherwise a MessageChannel task — a real macrotask boundary WITHOUT
+// setTimeout's nested ~4ms clamp, which would starve the training budget at
+// one yield per slice. (A bare `await Promise.resolve()` would not work:
+// microtasks don't give the browser a rendering or input opportunity.)
+function yieldToBrowser() {
+    if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
+        return scheduler.yield();
+    }
+    if (typeof MessageChannel === 'function') {
+        return new Promise(resolve => {
+            const ch = new MessageChannel();
+            ch.port1.onmessage = () => resolve();
+            ch.port2.postMessage(null);
+        });
+    }
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 async function trainUserModel(trainingData, modelState, trainOpts = {}) {
     const { y, weights, elapsedDays, isRepeatArr, n, floors,
             time_per_percentile_min, time_per_percentile_min_r } = trainingData;
@@ -882,7 +925,13 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
     targets[MODEL_INDICES.REVIEW_TIME] = (REVIEW_BIAS_PER_MIN ?? 0) * (time_per_percentile_min_r || 0);
 
     let prevLoss = Infinity;
-    const startTime = Date.now();
+    // Cooperative scheduling: the epoch loop yields every YIELD_SLICE_MS of
+    // work so the page stays responsive during a retrain (it used to run as
+    // one ≤~2s main-thread block). The time budget counts WORK time only —
+    // yield gaps and whatever foreign tasks run inside them are excluded — so
+    // slicing doesn't shrink how many epochs a training gets.
+    let sliceStart = Date.now();
+    let workMs = 0;
 
     // Features are independent of params, so build the design matrix once.
     const numFeatures = Object.keys(MODEL_INDICES).length;
@@ -926,7 +975,7 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
         epochsRun = epoch + 1;
 
         const converged = Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold;
-        const timedOut = Date.now() - startTime > maxTrainingTimeMs;
+        const timedOut = workMs + (Date.now() - sliceStart) > maxTrainingTimeMs;
         // minEpochs lets a caller force extra Adam steps past convergence (the
         // per-attempt recall-refine experiment forces exactly one at a time).
         if (epoch + 1 >= minEpochs && (converged || timedOut)) {
@@ -934,6 +983,12 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
             break;
         }
         prevLoss = currentLoss;
+
+        if (Date.now() - sliceStart > YIELD_SLICE_MS) {
+            workMs += Date.now() - sliceStart;
+            await yieldToBrowser();
+            sliceStart = Date.now();
+        }
     }
     return { trainedParams: params, finalAdamState: adamState, epochsRun, stopReason };
 }
