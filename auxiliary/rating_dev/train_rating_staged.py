@@ -99,6 +99,9 @@ from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
+# EMA momentum for the --gauge rating difficulty-whitening buffers (BatchNorm-style: train uses
+# batch stats, eval uses the EMA — so the score-time gauge matches the one θ was trained in).
+GAUGE_MOM = 0.01
 # The bot-anchor ladder size --anchor-weight is calibrated at (20k, 9d). With --anchor-fixed-mass
 # the per-rung weight is rescaled by this/len(ladder) so a DENSER ladder sharpens slope
 # identification (more rungs ⇒ more points on each problem's success curve) without growing the
@@ -224,8 +227,24 @@ class RatingNet(nn.Module):
                  mech_floor_botf=None, mech_floor_scale_fixed=None,
                  floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
                  lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0,
-                 move_dropout=0.0, move_dim=0, separate_trunks=False):
+                 move_dropout=0.0, move_dim=0, separate_trunks=False, gauge="theta",
+                 theta_posterior=False):
         super().__init__()
+        # --theta-posterior: per-profile posterior sd + learned population prior sd (see the flag
+        # help). theta itself doubles as the posterior MEAN m_u; sampling happens in forward().
+        self.theta_posterior = bool(theta_posterior)
+        if theta_posterior:
+            self.theta_logsd = nn.Embedding(n_users, 1)
+            nn.init.constant_(self.theta_logsd.weight, float(np.log(0.5)))
+            self.pop_logsd = nn.Parameter(torch.tensor(float(np.log(1.2))))
+        # --gauge: which population pins the 4PL scale (the θ↔b↔a scale freedom needs exactly one
+        # pin). "theta" = the shipped hard unit-Gaussian gauge on ability. "rating" = whiten the
+        # DIFFICULTY head b to mean 0 / std 1 instead and leave θ free — BatchNorm-style (train
+        # batches use their own attempt-weighted stats and update an EMA; eval uses the EMA, so
+        # scored ratings live in the same gauge θ was trained against).
+        self.gauge = gauge
+        self.register_buffer("b_mu", torch.zeros(()))
+        self.register_buffer("b_sd", torch.ones(()))
         self.slope_floor = float(slope_floor)
         self.floor_cap = float(floor_cap)   # hard upper bound on the guessing floor c_p
         # Hierarchical empirical-Bayes priors on the per-problem heads (--hier-slope/--hier-floor):
@@ -464,6 +483,17 @@ class RatingNet(nn.Module):
                 pidx = torch.arange(len(o), device=o.device)
             o = o + self.floor_resid(pidx) * self.resid_mask
         b = o[:, 0]
+        if self.gauge == "rating":
+            # hard-whiten difficulty instead of θ (see __init__). Differentiable through the batch
+            # stats, like the θ gauge; EMA buffers carry the training gauge into eval scoring.
+            if self.training:
+                mu, sd = b.mean(), b.std() + EPS
+                with torch.no_grad():
+                    self.b_mu.mul_(1.0 - GAUGE_MOM).add_(GAUGE_MOM * mu)
+                    self.b_sd.mul_(1.0 - GAUGE_MOM).add_(GAUGE_MOM * sd)
+            else:
+                mu, sd = self.b_mu, self.b_sd
+            b = (b - mu) / sd
         a = torch.nn.functional.softplus(o[:, 1]).clamp(min=self.slope_floor)  # lower bound only
         lam = self.lapse()
         if detach_backbone:
@@ -542,7 +572,10 @@ class RatingNet(nn.Module):
         return out
 
     def ability(self, u):
-        """Per-user ability, hard-whitened to mean 0 / std 1 each call (unit-Gaussian gauge)."""
+        """Per-user ability. Gauge "theta": hard-whitened to mean 0 / std 1 each call (unit-Gaussian
+        gauge). Gauge "rating": raw embedding — the scale pin lives on the difficulty head instead."""
+        if self.gauge == "rating":
+            return self.theta(u).squeeze(-1)
         w = self.theta.weight
         return ((self.theta(u) - w.mean()) / (w.std() + EPS)).squeeze(-1)
 
@@ -550,6 +583,9 @@ class RatingNet(nn.Module):
         b, a, c = self.params(feat, pidx, use_resid=use_resid, detach_backbone=detach_backbone,
                               pin=pin)
         th = self.ability(u)
+        if self.theta_posterior and self.training:
+            # reparameterized draw from q(θ_u) — the ELBO's sampled-θ likelihood term
+            th = th + torch.exp(self.theta_logsd(u)).squeeze(-1) * torch.randn_like(th)
         lam = self.lapse()
         if detach_backbone:
             th, lam = th.detach(), lam.detach()
@@ -573,19 +609,20 @@ class RatingNet(nn.Module):
 # Experiment-control flags (seed, holdout-problem-frac, out-dir, validate, eval-every, log-every)
 # are deliberately NOT included — layer them on top. Keep in sync with pipeline/train_rating.py.
 PRODUCTION_FLAGS = {
-    "staged": True,                      # two-phase coordinate descent over the per-problem heads
-    "global_stage1": True,               # phase 1 learns the global slope/floor jointly with rating
-    "stage_plan": "rating+ceiling,slope+floor+ceiling",  # ceiling both phases ⇒ lapse LEARNED
-    "stage_epochs": 100,
-    "stage_pin_weight": 10.0,
-    "stage_slope_const": 1.0,            # GLOBAL_SLOPE_INIT
-    "stage_floor_const": 0.25,           # GLOBAL_FLOOR_INIT
+    "staged": False,                     # SINGLE joint pass (replaced staged descent 2026-07-24)
+    "gauge": "rating",                   # scale gauge on the difficulty head; θ free
+    "shallow_slope_penalty": 1e-4,       # hard-tail (flat-curve) divergence barrier
+    "high_floor_penalty": 0.01,          # easy-tail (floor→0.8) divergence barrier
+    "free_lapse": True,                  # ceiling LEARNED in the joint pass
+    "epochs": 200,
     "features": "bw_act",
     "move_features": True,               # bw_act ⊕ candidate-move-eval block
+    "phase_features": True,              # ⊕ game-phase raw components (feature-parity policy)
     "pca_dim": 128,
     "diff_hidden": [128, 64],
     "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,  # uniform 0.3
     "anchors": False,                    # no bot-anchor examinees
+    "hier_slope": False, "mech_floor": False, "floor_residual": False,  # no M0b machinery
     "lr": 0.01, "batch": 65536,
     "min": 5, "min_profile": 8,
     "winsor": 1.0, "slope_floor": 0.01,
@@ -598,11 +635,12 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--production-flags", action="store_true",
                     help="Set every model-defining flag to the shipped pipeline.train_rating "
-                         "production config (staged 2-phase plan + --global-stage1, bw_act+move "
-                         "features, uniform 0.3 dropout, no anchors, learned ceiling, floor const "
-                         "0.25, pin-weight 10). Installed as DEFAULTS so explicit flags still "
-                         "override; experiment-control flags (--seed, --holdout-problem-frac, "
-                         "--out-dir, ...) are NOT touched. Typical: `--production-flags "
+                         "production config (single joint pass, --gauge rating, the two divergence "
+                         "barriers --shallow-slope-penalty 1e-4 / --high-floor-penalty 0.01, "
+                         "bw_act+move+phase features, uniform 0.3 dropout, no anchors, learned "
+                         "ceiling). Installed as DEFAULTS so explicit flags still override; "
+                         "experiment-control flags (--seed, --holdout-problem-frac, --out-dir, "
+                         "...) are NOT touched. Typical: `--production-flags "
                          "--holdout-problem-frac 0.1 --seed 1 --out-dir /tmp/rv2_ho/s1`.")
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
@@ -988,6 +1026,69 @@ def main():
                          "problems. May be unnecessary once the floor prior holds (a sound floor "
                          "absorbs the flat hard-tail performance the slope was floored to mimic). "
                          "0 = off.")
+    ap.add_argument("--theta-quadrature", type=int, default=0,
+                    help="TRUE marginal-ML over ability via Gauss-Hermite quadrature: each user's "
+                         "likelihood is integrated over θ ~ N(0, σ_pop²) (σ_pop LEARNED) with this "
+                         "many nodes — log ∫ Π_rows p(row|θ) dθ per USER, the integral INSIDE the "
+                         "log. This is the correct de-attenuation (Neyman-Scott) fix the sampling "
+                         "ELBO is not: expected-log-loss under sampled θ INJECTS position noise "
+                         "and flattens slopes (measured: s 1.47→1.65), while the marginal keeps "
+                         "sharp conditional curves viable because the mixture flattening happens "
+                         "in the probability, not the parameters. Trains in user-grouped batches "
+                         "(a profile's rows must share nodes); no per-profile θ parameters exist — "
+                         "scoring writes each profile's posterior MEAN into the θ table so every "
+                         "artifact keeps its shape. Composes with the divergence barriers; "
+                         "requires --gauge rating, no anchors/DRO/gap/knn/staged/certainty "
+                         "weighting. 21 is a good node count. 0 = off.")
+    ap.add_argument("--certainty-weight-k", type=float, default=0.0,
+                    help="Naive errors-in-variables mitigation: weight each HUMAN row by its "
+                         "profile's ability-certainty proxy n/(n+k) (n = the profile's row count), "
+                         "so poorly-localized profiles vote less on the SHARED parameters — the "
+                         "attenuation channel — while their own ability estimate is untouched (a "
+                         "uniform per-user scaling leaves that user's own argmax invariant). The "
+                         "smooth generalization of the MIN_ATTEMPTS cutoff; k = the half-weight "
+                         "profile size. Watch for heavy-user composition bias (their curves are "
+                         "flatter). 0 = off.")
+    ap.add_argument("--theta-posterior", action=argparse.BooleanOptionalAction, default=False,
+                    help="Variational per-profile ability posterior: q(θ_u) = N(m_u, s_u²) with a "
+                         "LEARNED per-profile sd, trained by sampled-θ ELBO (reparameterized; one "
+                         "draw per row — unbiased since the row expectation is linear) plus the KL "
+                         "to a learned population prior N(0, σ_pop²) at the Bayes per-row scale. "
+                         "Marginal-ML replacement for the point-θ joint MLE — the Neyman-Scott "
+                         "attenuation fix: integrating θ noise during training should de-flatten "
+                         "the fitted slopes (the errors-in-variables channel behind the posthoc "
+                         "slope-scale s ≈ 1.3–1.6). Requires --gauge rating (the θ-whitening gauge "
+                         "would fight the prior; the scale pin lives on b). Eval/scoring uses the "
+                         "posterior mean m_u, so artifacts and validation are unchanged in form.")
+    ap.add_argument("--high-floor-penalty", type=float, default=0.0,
+                    help="Weight w on the easy-side divergence barrier — the floor mirror of "
+                         "--shallow-slope-penalty: the shipped rating diverges to −∞ as the floor "
+                         "approaches CALIBRATION_P (0.8), so penalize w·mean(softplus(o_c − "
+                         "o_div)²) in the floor head's LOGIT space, o_div = the raw output where "
+                         "c = 0.8 (center derived from the serve margin, not hand-set). One-sided "
+                         "(exponentially vanishing below), smooth, and with live gradient even for "
+                         "floors already past 0.8 — a q-space penalty would clamp-die exactly "
+                         "there (the slope-rail lesson). Floor-head only (not gameable via slope "
+                         "or λ; λ is detached in the center). 0 = off.")
+    ap.add_argument("--shallow-slope-penalty", type=float, default=0.0,
+                    help="Weight w on a one-sided anti-flat-curve penalty: w·mean(1/a_raw²) over "
+                         "all problems, a_raw = the PRE-clamp slope (gradient alive at the rail). "
+                         "1/a is the curve's transition width; under --gauge rating the corpus "
+                         "difficulty spread is pinned to 1, so this penalizes transition regions "
+                         "that dwarf the whole corpus scale — the exact term the 80%%-clear rating "
+                         "diverges through. Deliberately floor/ceiling-free (not gameable via c or "
+                         "λ — the --l2-rating lesson) and threshold-free (1/a² is ~10⁴ at the rail "
+                         "vs ~0.7 at the median slope, so it self-targets shallow). 0 = off.")
+    ap.add_argument("--l2-rating", type=float, default=0.0,
+                    help="Weight on a direct penalty on the DERIVED rating magnitude: "
+                         "w·mean(rating_p²) over all problems, rating_p = b + clear_logit(c, λ)/a "
+                         "(the shipped 80%%-clear point). Only coherent WITH a scale gauge (else "
+                         "global shrinkage is a free escape); under --gauge rating the b spread is "
+                         "pinned, so the penalty can only act by pulling in the extreme tail — "
+                         "chiefly lifting collapsed slopes out of the logit/a blowup. The heavy "
+                         "tail makes the quadratic self-targeting (a p99.9≈150 problem outweighs a "
+                         "bulk problem ~10⁴:1), so no explicit 'extreme' threshold is needed. "
+                         "0 = off.")
     # --- continuous kNN inverse-density reweighting (--gap-balance's bin-free analogue) ---
     ap.add_argument("--knn-reweight", action=argparse.BooleanOptionalAction, default=False,
                     help="Continuous kNN inverse-density analogue of --gap-balance over a CHOICE of "
@@ -1054,6 +1155,13 @@ def main():
                     help="Equal-count rating-quantile bins for the final per-bin train-logloss "
                          "diagnostic (printed regardless of --dro-skill, so a DRO run and an ERM run "
                          "can be compared bin-for-bin). 0 disables the report.")
+    ap.add_argument("--gauge", choices=["theta", "rating"], default="theta",
+                    help="Which population pins the 4PL scale gauge. theta (default, shipped): "
+                         "ability hard-whitened to N(0,1) each step. rating: the DIFFICULTY head b "
+                         "is whitened to mean 0 / std 1 instead (BatchNorm-style batch stats + EMA "
+                         "for eval) and θ is left FREE — tests whether a fully joint unconstrained "
+                         "fit (all three per-problem heads + the ceiling at once) settles when the "
+                         "gauge sits on the problem side instead of the population side.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--log-every", type=int, default=50)
     # --production-flags: install the shipped config as defaults BEFORE the real parse, so any
@@ -1091,6 +1199,9 @@ def main():
         "--global-slope and --global-slope-fixed are mutually exclusive"
     if args.mech_floor:
         assert not args.hier_floor, "--mech-floor replaces the floor head; no hier-floor prior"
+    if args.theta_posterior:
+        assert args.gauge == "rating", \
+            "--theta-posterior needs --gauge rating (the θ-whitening gauge conflicts with the prior)"
 
     # --- features (joint-PCA correct-move activations ⊕ common-column bot winrate
     #     [⊕ candidate-move evaluations]) ---
@@ -1278,6 +1389,15 @@ def main():
     n_human = int(train_h.sum())                             # human rows lead; anchors follow
     u_all = np.concatenate(u_all); p_all = np.concatenate(p_all)
     t_all = np.concatenate(t_all); w_all = np.concatenate(w_all)
+    if args.certainty_weight_k > 0:
+        # inverse-uncertainty row weights on the human rows (see --certainty-weight-k); profile
+        # size n from the FULL kept profile (pc), the ability-precision proxy
+        n_u = pc.reindex(profiles.categories).to_numpy(float)
+        cw = (n_u / (n_u + args.certainty_weight_k))[u_all[:n_human]]
+        w_all[:n_human] *= cw.astype(np.float32)
+        print(f"certainty weights: k {args.certainty_weight_k:g} | row weight p[5,50,95] "
+              f"{np.percentile(cw, [5, 50, 95]).round(3)} | effective human mass "
+              f"{cw.mean():.1%}")
 
     tfeat = torch.tensor(feat, device=device)
     tu = torch.tensor(u_all, device=device)
@@ -1344,7 +1464,7 @@ def main():
                       act_dropout=args.act_dropout, act_dim=k if use_act else 0,
                       bw_dropout=args.bw_dropout, bw_dim=nb if use_bw else 0,
                       move_dropout=args.move_dropout, move_dim=nmv if use_mv else 0,
-                      separate_trunks=args.separate_trunks).to(device)
+                      separate_trunks=args.separate_trunks, gauge=args.gauge).to(device)
         m.staged = True
         m.const_a = float(args.stage_slope_const)
         m.const_c = float(args.stage_floor_const)
@@ -1486,12 +1606,101 @@ def main():
                       bw_dropout=args.bw_dropout,
                       bw_dim=nb if use_bw else 0,
                       move_dropout=args.move_dropout,
-                      move_dim=nmv if use_mv else 0).to(device)
+                      move_dim=nmv if use_mv else 0,
+                      separate_trunks=args.separate_trunks,
+                      gauge=args.gauge,
+                      theta_posterior=args.theta_posterior).to(device)
         if args.floor_residual:
             ci = {"diff": 0, "slope": 1, "floor": 2}
             with torch.no_grad():
                 for cn in args.resid_cols.split(","):
                     m.resid_mask[ci[cn.strip()]] = 1.0
+        if args.theta_quadrature > 0:
+            # ---- per-user Gauss-Hermite marginal likelihood (see --theta-quadrature): the
+            # integral sits INSIDE the log, so a user's rows must be evaluated together on a
+            # shared node grid — user-grouped batches replace row batches. No per-profile θ
+            # parameter trains; σ_pop is learned and the posterior means are written into the θ
+            # table afterwards so score_corpus/artifacts are unchanged in shape. ----
+            assert args.gauge == "rating" and n_anchor == 0 and dro is None \
+                and not args.gap_balance and not args.knn_reweight \
+                and not args.certainty_weight_k and not args.floor_residual \
+                and not args.theta_posterior, \
+                "--theta-quadrature: --gauge rating + plain ERM config only " \
+                "(no anchors/DRO/weights/residuals; the θ-whitening gauge would distort the " \
+                "posterior means written to the θ table)"
+            K = args.theta_quadrature
+            gh_x, gh_w = np.polynomial.hermite.hermgauss(K)
+            gh_x_t = torch.tensor(gh_x, dtype=torch.float32, device=device)
+            log_gh_w = torch.tensor(np.log(gh_w / np.sqrt(np.pi)), dtype=torch.float32,
+                                    device=device)
+            log_sigma = torch.nn.Parameter(torch.tensor(float(np.log(1.2)), device=device))
+            qopt = torch.optim.Adam(
+                [p for p in m.parameters() if p.requires_grad] + [log_sigma], lr=args.lr)
+            np.random.seed(args.seed)
+            order = np.argsort(u_all, kind="stable")
+            u_sorted = u_all[order]
+            uniq_u, starts = np.unique(u_sorted, return_index=True)
+            ends = np.append(starts[1:], len(u_sorted))
+            UB = 512                                          # users per batch
+
+            def user_batch(sel):
+                """(row-index tensor, within-batch user position tensor) for user indices sel."""
+                rows = np.concatenate([order[starts[i]:ends[i]] for i in sel])
+                upos = np.repeat(np.arange(len(sel)), (ends[sel] - starts[sel]))
+                return (torch.tensor(rows, device=device), torch.tensor(upos, device=device),
+                        len(sel), len(rows))
+
+            def node_loglik(tr, tup, n_users_b, th_nodes):
+                """Per-user per-node log-likelihood L (n_users_b, K) for the rows tr."""
+                b, a, c = m.params(tfeat[tp[tr]], tp[tr])
+                lam = m.lapse()
+                P = (c.unsqueeze(1) + (1.0 - c - lam).unsqueeze(1)
+                     * torch.sigmoid(a.unsqueeze(1) * (th_nodes.unsqueeze(0) - b.unsqueeze(1)))
+                     ).clamp(EPS, 1 - EPS)
+                yb = tt[tr].unsqueeze(1)
+                lp = yb * torch.log(P) + (1.0 - yb) * torch.log(1.0 - P)
+                return torch.zeros(n_users_b, len(th_nodes), device=device).index_add(0, tup, lp)
+
+            for ep in range(args.epochs):
+                m.train()
+                uperm = np.random.permutation(len(uniq_u))
+                tot_nll, tot_rows = 0.0, 0
+                for i0 in range(0, len(uniq_u), UB):
+                    tr, tup, nub, nrows = user_batch(uperm[i0:i0 + UB])
+                    th_nodes = float(np.sqrt(2.0)) * torch.exp(log_sigma) * gh_x_t
+                    L = node_loglik(tr, tup, nub, th_nodes)
+                    marg = torch.logsumexp(log_gh_w.unsqueeze(0) + L, dim=1)
+                    loss = -marg.sum() / nrows               # per-row units
+                    m.eval()                                 # corpus penalties, dropout off
+                    if args.shallow_slope_penalty > 0:
+                        loss = loss + args.shallow_slope_penalty * \
+                            m.slope_unclamped(tfeat).pow(-2).mean()
+                    if args.high_floor_penalty > 0:
+                        lam_d = m.lapse().detach()
+                        cap_d = (1.0 - 2.0 * lam_d).clamp(min=EPS, max=args.floor_cap)
+                        ratio = (CALIBRATION_P / cap_d).clamp(EPS, 1.0 - EPS)
+                        o_div = torch.log(ratio / (1.0 - ratio))
+                        loss = loss + args.high_floor_penalty * torch.nn.functional.softplus(
+                            m.net(tfeat)[:, 2] - o_div).pow(2).mean()
+                    m.train()
+                    qopt.zero_grad(); loss.backward(); qopt.step()
+                    tot_nll -= float(marg.sum().detach()); tot_rows += nrows
+                if ep % args.log_every == 0 or ep == args.epochs - 1:
+                    print(f"  [quad] epoch {ep:4d}  marginal NLL/row {tot_nll / tot_rows:.4f}  "
+                          f"λ {float(m.lapse()):.5f}  σ_pop {float(torch.exp(log_sigma)):.3f}")
+            m.eval()                                          # posterior means → θ table
+            with torch.no_grad():
+                th_nodes = float(np.sqrt(2.0)) * torch.exp(log_sigma) * gh_x_t
+                for i0 in range(0, len(uniq_u), UB):
+                    sel = np.arange(i0, min(i0 + UB, len(uniq_u)))
+                    tr, tup, nub, _ = user_batch(sel)
+                    L = node_loglik(tr, tup, nub, th_nodes)
+                    w_post = torch.softmax(log_gh_w.unsqueeze(0) + L, dim=1)
+                    means = (w_post * th_nodes.unsqueeze(0)).sum(dim=1)
+                    m.theta.weight[torch.tensor(uniq_u[sel], device=device), 0] = means
+            print(f"  [quad] done | σ_pop {float(torch.exp(log_sigma)):.3f} | posterior-mean θ "
+                  f"std {float(m.theta.weight[:, 0].std()):.3f} (written to the θ table)")
+            return m
         # frozen-mode residuals are fit in their own pass AFTER the backbone; exclude the
         # δ table from the main optimizer so the backbone never sees it. detached-mode
         # residuals DO train here, but in their own param group at the frozen pass's δ lr
@@ -1579,6 +1788,14 @@ def main():
                                    if wa.numel() else torch.zeros((), device=device))
                     fh = w[hm].sum() / w.sum().clamp_min(EPS)  # preserve the human:anchor balance
                     loss = fh * human_loss + (1.0 - fh) * anchor_loss
+                if args.theta_posterior:
+                    # ELBO KL term: Σ_u KL(N(m_u, s_u²) || N(0, σ_pop²)), in per-row loss units
+                    # (÷ total row mass — the same Bayes-scale convention as the hier prior)
+                    mw = m.theta.weight.squeeze(-1)
+                    ls = m.theta_logsd.weight.squeeze(-1)
+                    kl = 0.5 * ((torch.exp(2 * ls) + mw * mw) / torch.exp(2 * m.pop_logsd)
+                                - 1.0 + 2 * m.pop_logsd - 2 * ls).sum()
+                    loss = loss + kl / float(tw.sum())
                 if detached:
                     # one-stage residual term: same rows/weights as the frozen pass would see,
                     # but the backbone (net, θ, λ, global slope) is detached in the graph — only
@@ -1591,7 +1808,9 @@ def main():
                     lres = torch.nn.functional.binary_cross_entropy(pr, tt[bi], reduction="none")
                     loss = loss + ((lres * w).sum() / w.sum().clamp_min(EPS)
                                    + args.floor_resid_l2 * m.floor_resid.weight.pow(2).mean())
-                if (args.l2_floor > 0 or args.l2_slope > 0 or args.slope_dist_prior > 0
+                if (args.l2_floor > 0 or args.l2_slope > 0 or args.l2_rating > 0
+                        or args.shallow_slope_penalty > 0 or args.high_floor_penalty > 0
+                        or args.slope_dist_prior > 0
                         or hier_target is not None or cond_div is not None
                         or args.floor_residual):
                     # global distribution priors over ALL problems' params (dropout off for a clean
@@ -1608,13 +1827,39 @@ def main():
                         # not a tuned knob.
                         hier_scale = args.hier_weight * len(keys) / float(tw.sum())
                         loss = loss + hier_scale * m.hier_nll(tfeat, hier_target)
-                    if args.l2_floor > 0 or args.l2_slope > 0:
-                        _, a_pen, c_pen = m.params(tfeat)
+                    if args.l2_floor > 0 or args.l2_slope > 0 or args.l2_rating > 0:
+                        b_pen, a_pen, c_pen = m.params(tfeat)
                         if args.l2_floor > 0:                   # L2 outlier penalty: floor → its mean
                             loss = loss + args.l2_floor * c_pen.var(unbiased=False)
                         if args.l2_slope > 0:                   # shrink log-slope spread to its mean
                             loss = loss + args.l2_slope * torch.log(
                                 a_pen.clamp_min(1e-4)).var(unbiased=False)
+                        if args.l2_rating > 0:
+                            # penalty on the DERIVED rating (the shipped 80%-clear point), the
+                            # quantity that actually blows up (see --l2-rating). λ is detached so
+                            # the penalty opens no new ceiling-training channel (the const-examinee
+                            # sweeps' λ-collapse lesson).
+                            lam_d = m.lapse().detach()
+                            q_pen = ((CALIBRATION_P - c_pen)
+                                     / (1.0 - c_pen - lam_d)).clamp(EPS, 1 - EPS)
+                            r_pen = b_pen + torch.log(q_pen / (1.0 - q_pen)) / a_pen
+                            loss = loss + args.l2_rating * r_pen.pow(2).mean()
+                    if args.shallow_slope_penalty > 0:
+                        # one-sided width² penalty on the PRE-clamp slope (see --shallow-slope-
+                        # penalty); slope_unclamped keeps the gradient alive at the slope_floor rail
+                        loss = loss + args.shallow_slope_penalty * \
+                            m.slope_unclamped(tfeat).pow(-2).mean()
+                    if args.high_floor_penalty > 0:
+                        # easy-side divergence barrier in the floor head's raw logit space (see
+                        # --high-floor-penalty); center = the raw output where c = CALIBRATION_P,
+                        # λ detached so the barrier can't train the ceiling
+                        lam_d = m.lapse().detach()
+                        cap_d = (1.0 - 2.0 * lam_d).clamp(min=EPS, max=args.floor_cap)
+                        ratio = (CALIBRATION_P / cap_d).clamp(EPS, 1.0 - EPS)
+                        o_div = torch.log(ratio / (1.0 - ratio))
+                        o_c = m.net(tfeat)[:, 2]
+                        loss = loss + args.high_floor_penalty * \
+                            torch.nn.functional.softplus(o_c - o_div).pow(2).mean()
                     if args.slope_dist_prior > 0:
                         # Quantile-match the corpus UNCLAMPED log-slope spectrum to the target
                         # normal: sorted log-slopes vs the target's inverse CDF on the plotting
@@ -1877,6 +2122,14 @@ def main():
     theta = theta_full[:n_profiles]
     bot_theta = theta_full[n_profiles:]
     rating = b_arr + clear_logit_vec(c, lam) / a             # 80%-clear ability under the 4PL
+    # pre-winsor tail readout: the blowup diagnostic (rating = b + logit/a explodes exactly where
+    # the free slope collapses toward the floor) — the winsor below hides it from the CSVs.
+    with np.printoptions(precision=2, suppress=False):
+        print(f"  PRE-winsor rating percentiles [0, .1, 1, 50, 99, 99.9, 100]: "
+              f"{np.percentile(rating, [0, 0.1, 1, 50, 99, 99.9, 100])}")
+        print(f"  slope percentiles [0, .1, 1, 50, 99, 99.9, 100]: "
+              f"{np.percentile(a, [0, 0.1, 1, 50, 99, 99.9, 100])} | "
+              f"at slope_floor rail ({m.slope_floor}): {float((a <= m.slope_floor * 1.01).mean()):.2%}")
     lo, hi = np.percentile(rating, [args.winsor, 100 - args.winsor])
     rating = np.clip(rating, lo, hi)                          # percentile winsor (legacy robustness)
     if m.mech_floor_scale is not None:

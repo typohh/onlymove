@@ -9,33 +9,46 @@ auxiliary/rating_dev/train_rating_staged.py, which can replicate this output. Do
 THERE, so a test tweak can never break the shipped ratings.
 
 ONE model for 9x9 AND 13x13. A SHARED feature→4PL network maps each problem's features to
-(difficulty b_p, slope a_p, floor c_p); per-(user, 2-month) ability θ_u is hard-gauged to a unit
-Gaussian; a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
+(difficulty b_p, slope a_p, floor c_p); per-(user, 2-month) ability θ_u is a free point estimate;
+a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
 
     P(correct) = c_p + (1 − c_p − λ)·σ( a_p·(θ_u − b_p) )
     (b_p, a_p, c_p) = net(feat_p)        # shared net; a_p ≥ SLOPE_FLOOR, c_p ∈ [0, 1 − 2λ]
     feat_p = joint-PCA(correct-move activations) ++ common-column bot winrate ++ candidate-move evals
-             (bw_act + move; the move block needs pipeline.cache_move_features run first)
+             ++ game-phase raw components
+             (bw_act + move + phase; the move block needs pipeline.cache_move_features run first)
 
 There are NO per-problem residuals: the shared net IS the model, so every problem — including the
 never-attempted and the one-sided — gets its 4PL straight from features. The only training target is
 the HUMAN first-time attempts (bot data enters only through the features). The feature trunk uses 0.3
 block dropout on the activation columns, 0.3 column dropout on each of the bot-winrate and
-candidate-move-eval columns, and 0.3 dropout between the trunk's own hidden layers (the
-backbone-overfit fix — 0.3 dropout uniformly, blocks and trunk alike).
+candidate-move-eval columns, and 0.3 dropout between the trunk's own hidden layers.
 
-The fit is a TWO-PHASE coordinate descent on the shared trunk:
-  phase 1 — fit the per-problem difficulty (rating) and simultaneously LEARN a single global slope +
-            global floor + global ceiling (auto-finding the self-consistent globals, no hand
-            fixed-point search, so it stays calibrated as the corpus drifts);
-  phase 2 — individualize the per-problem slope + floor and keep training the ceiling, while the
-            difficulty is held at its phase-1 values by an L2 consistency penalty.
+The fit is a SINGLE JOINT pass (replaced the two-phase staged coordinate descent, 2026-07-24): all
+three per-problem heads and the global ceiling train together, made well-posed by three measured
+ingredients (validated in the gauge/penalty experiment series — see the CLAUDE.md rating section):
 
-Ability is hard-gauged (θ whitened to mean 0 / std 1 each step): the population follows N(0, 1), and
-pinning the scale stops slopes inflating to compensate for compressed ability. The shipped RATING is
-the ability at which the user clears the problem 80% of the time (CALIBRATION_P) — NOT the 50%-point
-— so a flat low-discrimination problem correctly needs more ability to clear at 80% than its midpoint
-implies:
+  1. RATING GAUGE — the scale freedom (rating×s, slope/s, θ×s) is pinned on the PROBLEM side: the
+     difficulty head b is hard-whitened to mean 0 / std 1 (BatchNorm-style: train batches use their
+     own attempt-weighted stats and update an EMA; eval uses the EMA, so scored ratings live in the
+     gauge θ was trained against). θ is left free (its spread settles ≈1.2).
+  2. SHALLOW-SLOPE PENALTY — w_a·mean(1/a_raw²) over all problems, on the PRE-clamp slope so the
+     gradient survives at the SLOPE_FLOOR rail. 1/a is the curve's transition width; with the corpus
+     difficulty spread pinned to 1 this one-sided, threshold-free term is exactly the factor the
+     80%-clear rating diverges through on no-win/unattempted problems (the flat-curve collapse).
+     Deliberately floor/ceiling-free: a penalty on the DERIVED rating is gameable through the floor
+     head (measured: floors inflate to cancel b and held-out calibration collapses).
+  3. HIGH-FLOOR PENALTY — the easy-side mirror: the rating diverges to −∞ as the floor approaches
+     CALIBRATION_P, so w_c·mean(softplus(o_c − o_div)²) in the floor head's LOGIT space, centered at
+     the raw output where c = 0.8 (derived from the serve margin, not hand-set; λ detached). Smooth
+     and one-sided, with live gradient even past 0.8 (a q-space penalty clamp-dies exactly there).
+
+Both weights were selected by held-out logloss sweeps (the tail comes in at ~zero cost; an order of
+magnitude higher starts homogenizing real floor/slope structure — don't raise them casually).
+
+The shipped RATING is the ability at which the user clears the problem 80% of the time
+(CALIBRATION_P) — NOT the 50%-point — so a flat low-discrimination problem correctly needs more
+ability to clear at 80% than its midpoint implies:
 
     rating_p = b_p + logit((0.8 − c_p) / (1 − c_p − λ)) / a_p
 
@@ -44,10 +57,10 @@ pipeline.fit_population_constants reads it through.
 
 Outputs (nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
   ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
-  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
+  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= slope a_p, held-out-calibrated)
   ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
   ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
-  ratings/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
+  ratings/rating_constants.json              {"fat_finger_rate": λ, "slope_scale": s, ...}
   ratings/model.pt                        weights + run metadata
 
 Usage (run pipeline.cache_move_features first — it builds the candidate-move-eval cache the
@@ -83,33 +96,30 @@ from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
 
-# ── PRODUCTION configuration (the shipped staged self-consistent fixed point) ─────────────────────
-# To re-derive or experiment with any of these, use auxiliary/rating_dev/train_rating_staged.py.
+# ── PRODUCTION configuration (the shipped single-pass rating-gauge fit) ───────────────────────────
+# To re-derive or experiment with any of these, use auxiliary/rating_dev/train_rating_staged.py
+# (--production-flags reproduces this config).
 OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
 DIFF_HIDDEN = (128, 64)          # shared feature→4PL trunk hidden layers
-DROPOUT = 0.3                    # trunk dropout (swept 0.0–0.5: 0.3 peaks survey-ρ + held-out flatness and sits at the held-out-LL floor; 0.1 was undertuned, costing ~0.011 held-out LL)
+DROPOUT = 0.3                    # trunk dropout (0.3 uniformly — the backbone-overfit fix)
 ACT_DROPOUT = 0.3                # block dropout on the activation feature block (train only)
 BW_DROPOUT = 0.3                 # column dropout on the bot-winrate columns (train only)
 MOVE_DROPOUT = 0.3               # column dropout on the candidate-move-eval columns (train only)
 LR = 0.01
 BATCH = 65536
-STAGE_EPOCHS = 100               # epochs per coordinate-descent phase
-STAGE_PIN_WEIGHT = 10.0          # L2 penalty holding a frozen head at its stored per-problem values
+EPOCHS = 200                     # single joint pass (matches the old 2×100 staged budget)
 MIN_ATTEMPTS = 5                 # keep users with ≥5 correct AND ≥5 incorrect first-time attempts
 MIN_PROFILE = 8                  # keep 2-month profiles with ≥8 attempts
 WINSOR = 1.0                     # percentile winsor on the shipped rating (robustness)
-SLOPE_FLOOR = 0.01               # lower clamp on the per-problem slope a_p
+SLOPE_FLOOR = 0.01               # lower clamp on the per-problem slope a_p (numerical guard)
 LAPSE_CAP = 0.05                 # upper bound on the global ceiling slip λ
-LAPSE_INIT = 0.02                # λ init (λ is learned every phase)
+LAPSE_INIT = 0.02                # λ init (λ is learned)
 FLOOR_CAP = 1.0                  # hard upper bound on the guessing floor c_p
-GLOBAL_SLOPE_INIT = 1.0          # phase-1 learned-global slope init
-GLOBAL_FLOOR_INIT = 0.25         # phase-1 learned-global floor init
-# Two-phase plan: (free-head set, tag). Heads: 0=rating/b, 1=slope/a, 2=floor/c. The global ceiling
-# λ is trained in BOTH phases.
-STAGE_PLAN = [({0}, "rating+ceiling"), ({1, 2}, "slope+floor+ceiling")]
-HEAD_NAME = {0: "rating", 1: "slope", 2: "floor"}
+GAUGE_MOM = 0.01                 # EMA momentum of the difficulty-whitening (rating gauge) buffers
+SHALLOW_SLOPE_PENALTY = 1e-4     # w_a on mean(1/a_raw²) — the hard-tail (flat-curve) barrier
+HIGH_FLOOR_PENALTY = 0.01        # w_c on mean(softplus(o_c − o_div)²) — the easy-tail barrier
 
 
 def clear_logit_vec(c, lapse=0.0):
@@ -123,40 +133,28 @@ def clear_logit_vec(c, lapse=0.0):
 
 
 class RatingNet(nn.Module):
-    """Shared feature→4PL net + per-user ability (hard unit gauge) + one learned global ceiling λ.
+    """Shared feature→4PL net + free per-user ability + one learned global ceiling λ, with the
+    scale gauge pinned on the DIFFICULTY head (rating gauge).
 
         P = c + (1 − c − λ)·σ( a·(θ_u − b) ),   (b, a, c) = net(feat)
 
-    The shared trunk has NO per-problem parameters, so every problem's 4PL comes from its features.
-    The fit is staged: phase 1 fits b while a and c are held at a single LEARNED global slope /
-    global floor (gslope_raw / gfloor_raw, trained jointly with b and the ceiling), phase 2
-    individualizes a and c (b held at its phase-1 value by a consistency penalty in the loss).
+    b is hard-whitened to mean 0 / std 1 — batch stats while training (differentiable, EMA
+    updated), the EMA at eval — so scored ratings live in the same gauge θ trained against.
+    θ is a free embedding (no whitening; its spread is identified by the b pin).
     a = softplus(·).clamp(min=SLOPE_FLOOR); c is ceiling-coupled to [0, 1 − 2λ]."""
 
-    def __init__(self, fdim, n_users, n_problems, act_dim, bw_dim, move_dim):
+    def __init__(self, fdim, n_users, act_dim, bw_dim, move_dim):
         super().__init__()
-        self.act_dim = int(act_dim)         # activation block = cols [:act_dim]  (block-dropped, train)
-        self.bw_dim = int(bw_dim)           # bot-winrate block = cols [act_dim:act_dim+bw_dim] (col-drop)
-        self.move_dim = int(move_dim)       # move-eval block = cols [act_dim+bw_dim:+move_dim] (col-drop)
-        # head indices 0=rating/b, 1=slope/a, 2=floor/c. A phase frees a SET of heads (live data BCE);
-        # already-trained heads are frozen at their stored per-problem pin buffers by the loss penalty;
-        # not-yet-trained heads sit at the learned global scalar (gslope/gfloor) until their phase.
-        self.trained_heads = set()
-        self.free_heads = set()
-        # phase-1 learned globals (trained jointly with rating + the ceiling)
-        self.gslope_raw = nn.Parameter(torch.tensor(float(np.log(np.expm1(GLOBAL_SLOPE_INIT)))))
-        self.gfloor_raw = nn.Parameter(
-            torch.tensor(float(np.log(GLOBAL_FLOOR_INIT / (1.0 - GLOBAL_FLOOR_INIT)))))
-        # per-problem pin buffers: seeded, then overwritten with the live head values when that head's
-        # phase completes; only pin_b is read as a penalty target (rating, frozen in phase 2).
-        self.register_buffer("pin_b", torch.zeros(n_problems))
-        self.register_buffer("pin_a", torch.ones(n_problems))
-        self.register_buffer("pin_c", torch.full((n_problems,), 1.0 / 3.0))
+        self.act_dim = int(act_dim)         # activation block = cols [:act_dim]  (block-dropped)
+        self.bw_dim = int(bw_dim)           # bot-winrate block = cols [act_dim:+bw_dim] (col-drop)
+        self.move_dim = int(move_dim)       # move-eval block = cols [act_dim+bw_dim:+move_dim]
+        self.register_buffer("b_mu", torch.zeros(()))   # rating-gauge EMA (train stats → eval)
+        self.register_buffer("b_sd", torch.ones(()))
         # (theta is constructed BEFORE the trunk so the RNG draw order is fixed.)
         self.theta = nn.Embedding(n_users, 1)
         nn.init.normal_(self.theta.weight, std=1.0)
         layers, d = [], fdim
-        for h in DIFF_HIDDEN:                                # decreasing layers, ReLU + dropout between
+        for h in DIFF_HIDDEN:                                # decreasing layers, ReLU + dropout
             layers += [nn.Linear(d, h), nn.ReLU(), nn.Dropout(DROPOUT)]
             d = h
         layers += [nn.Linear(d, 3)]                          # → (difficulty b, slope a, floor c)
@@ -168,9 +166,8 @@ class RatingNet(nn.Module):
         """Global 4PL upper-asymptote slip rate λ ∈ (0, LAPSE_CAP)."""
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
-    def params(self, feat):
-        """(b, a, c) for the rows of `feat`. Not-yet-individualized heads return the learned global
-        scalar; trained/free heads come from the shared trunk."""
+    def _dropped(self, feat):
+        """Train-time block/column dropout on the feature blocks (eval passes through)."""
         if self.training and self.act_dim > 0:               # block-drop the whole activation block
             keep = (torch.rand(len(feat), 1, device=feat.device)
                     >= ACT_DROPOUT).float() / (1.0 - ACT_DROPOUT)
@@ -181,31 +178,45 @@ class RatingNet(nn.Module):
                     >= BW_DROPOUT).float() / (1.0 - BW_DROPOUT)
             feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.bw_dim] * keep,
                               feat[:, d0 + self.bw_dim:]], dim=1)
-        if self.training and self.move_dim > 0:              # column-drop the candidate-move-eval block
+        if self.training and self.move_dim > 0:              # column-drop the move-eval block
             d0 = self.act_dim + self.bw_dim
             keep = (torch.rand(len(feat), self.move_dim, device=feat.device)
                     >= MOVE_DROPOUT).float() / (1.0 - MOVE_DROPOUT)
             feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.move_dim] * keep,
                               feat[:, d0 + self.move_dim:]], dim=1)
-        o = self.net(feat)
+        return feat
+
+    def params(self, feat):
+        """(b, a, c) for the rows of `feat`; b in the whitened rating gauge."""
+        o = self.net(self._dropped(feat))
         b = o[:, 0]
+        if self.training:
+            mu, sd = b.mean(), b.std() + EPS
+            with torch.no_grad():
+                self.b_mu.mul_(1.0 - GAUGE_MOM).add_(GAUGE_MOM * mu)
+                self.b_sd.mul_(1.0 - GAUGE_MOM).add_(GAUGE_MOM * sd)
+        else:
+            mu, sd = self.b_mu, self.b_sd
+        b = (b - mu) / sd
         a = torch.nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)  # lower bound only
         lam = self.lapse()
         cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=FLOOR_CAP)
         c = cap * torch.sigmoid(o[:, 2])
-        # NOT-YET-individualized heads → learned global scalar (held out of the prediction until their
-        # phase); frozen (trained) heads stay backbone-produced and are held at pin_* by the LOSS.
-        not_yet = {1, 2} - self.trained_heads - self.free_heads
-        if 1 in not_yet:
-            a = torch.nn.functional.softplus(self.gslope_raw).expand_as(a)
-        if 2 in not_yet:
-            c = torch.sigmoid(self.gfloor_raw).expand_as(c)
         return b, a, c
 
+    def slope_raw(self, feat):
+        """PRE-clamp per-problem slope — the shallow-slope penalty acts on this (the clamp zeroes
+        gradients exactly where collapsed slopes need lifting)."""
+        return torch.nn.functional.softplus(self.net(feat)[:, 1]).clamp_min(1e-4)
+
+    def floor_logit(self, feat):
+        """The floor head's raw logit — the high-floor barrier acts on this (a q-space penalty
+        loses its gradient exactly where floors pass CALIBRATION_P)."""
+        return self.net(feat)[:, 2]
+
     def ability(self, u):
-        """Per-user ability, hard-whitened to mean 0 / std 1 each call (unit-Gaussian gauge)."""
-        w = self.theta.weight
-        return ((self.theta(u) - w.mean()) / (w.std() + EPS)).squeeze(-1)
+        """Per-user ability (free point estimate; the scale pin lives on the difficulty head)."""
+        return self.theta(u).squeeze(-1)
 
     def forward(self, u, feat):
         b, a, c = self.params(feat)
@@ -230,11 +241,9 @@ def main():
     mv, nmv = load_joint_move_features(SIZES, tids_by_size)
     zero_mv = np.zeros(nmv, dtype=np.float32)
     # game-phase raw components [moves_before_position, main_line_len] (shared source with the
-    # secondary-axis work — utils.rating_features.load_joint_game_phase). Metric-neutral on the
-    # held-out suite (paired A/B 2026-07-13: logloss 0.4964->0.4969, survey-rho within jitter) but
-    # included by FEATURE-PARITY POLICY: the rating model and the secondary-axis models train from
-    # the same data sources. Appended after move, before the size indicator (dropout ranges valid);
-    # no dedicated dropout (2 smooth columns cannot fingerprint problems).
+    # secondary-axis work — utils.rating_features.load_joint_game_phase). Included by FEATURE-PARITY
+    # POLICY (see the old staged trainer's notes); no dedicated dropout (2 smooth columns cannot
+    # fingerprint problems).
     ph, nph = load_joint_game_phase(SIZES, tids_by_size)
     zero_ph = np.zeros(nph, dtype=np.float32)
     fdim = k + nb + nmv + nph + 1                             # act ⊕ bw ⊕ move ⊕ phase ⊕ size_is_13
@@ -278,88 +287,64 @@ def main():
     ty = torch.tensor(y, device=device)
     n = len(prof_idx)
 
-    def score_corpus(m):
-        """(b, a, c, per-profile θ, λ) for every problem/user, on cpu — the final outputs."""
-        m.eval()
-        with torch.no_grad():
-            b_all, a_all, c_all = m.params(tfeat)
-            theta_full = m.ability(torch.arange(n_profiles, device=device)).cpu().numpy()
-            lam = float(m.lapse())
-        return (b_all.cpu().numpy(), a_all.cpu().numpy(), c_all.cpu().numpy(), theta_full, lam)
-
-    # ---- staged coordinate descent over the per-problem 4PL heads (rating → slope+floor) ----
+    # ---- single joint pass: BCE + the two divergence barriers (see the module docstring) ----
     torch.manual_seed(SEED)
-    m = RatingNet(fdim, n_profiles, len(keys), act_dim=k, bw_dim=nb, move_dim=nmv).to(device)
-    print(f"\n=== STAGED | shared trunk + pin-weight {STAGE_PIN_WEIGHT} | "
-          f"plan {[sorted(HEAD_NAME[h] for h in s) + ['ceiling'] for s, _ in STAGE_PLAN]} | "
-          f"{STAGE_EPOCHS} ep/stage | dropout {ACT_DROPOUT}/{BW_DROPOUT} | ceiling LEARNED ===")
-
-    def train_stage(free_set, epochs):
-        """Free a SET of heads (data BCE) while already-trained heads are held at their stored
-        per-problem values by a consistency penalty. Frozen heads stay LIVE in the prediction but
-        are DETACHED from the BCE — their only gradient is the penalty (head→pin buffer), forcing the
-        shared trunk to keep emitting them. The global ceiling λ trains every phase."""
-        m.free_heads = set(free_set)
-        frozen = m.trained_heads - m.free_heads
-        m.lapse_raw.requires_grad_(True)
-        opt = torch.optim.Adam([p for p in m.parameters() if p.requires_grad], lr=LR)
-        for ep in range(epochs):
-            m.train()
-            perm = torch.randperm(n, device=device)
-            for i in range(0, n, BATCH):
-                bi = perm[i:i + BATCH]
-                b, a, c = m.params(tfeat[tp[bi]])            # live (not-yet heads already global)
-                th = m.ability(tu[bi]); lam = m.lapse()
-                b_p = b.detach() if 0 in frozen else b       # frozen heads: used live, no BCE grad
-                a_p = a.detach() if 1 in frozen else a
-                c_p = c.detach() if 2 in frozen else c
-                pred = (c_p + (1.0 - c_p - lam) * torch.sigmoid(a_p * (th - b_p))).clamp(EPS, 1 - EPS)
-                # explicit none→sum/N, NOT reduction="mean": the fused mean kernel differs from this
-                # reduction at non-power-of-two batch sizes (the last, smaller minibatch), and over the
-                # epochs that ULP difference compounds in the model's flat slope/floor directions.
-                bce = torch.nn.functional.binary_cross_entropy(
-                    pred, ty[bi], reduction="none").sum() / pred.shape[0]
-                pen = torch.zeros((), device=device)
-                if 0 in frozen:                              # frozen heads → maintain pin buffer
-                    pen = pen + ((b - m.pin_b[tp[bi]]) ** 2).mean()
-                if 1 in frozen:
-                    pen = pen + ((a - m.pin_a[tp[bi]]) ** 2).mean()
-                if 2 in frozen:
-                    pen = pen + ((c - m.pin_c[tp[bi]]) ** 2).mean()
-                loss = bce + STAGE_PIN_WEIGHT * pen
-                opt.zero_grad(); loss.backward(); opt.step()
-        with torch.no_grad():                                # human train BCE for the trace
+    m = RatingNet(fdim, n_profiles, act_dim=k, bw_dim=nb, move_dim=nmv).to(device)
+    print(f"\n=== JOINT rating-gauge fit | {EPOCHS} epochs | dropout {DROPOUT} uniform | "
+          f"shallow-slope w {SHALLOW_SLOPE_PENALTY:g} | high-floor w {HIGH_FLOOR_PENALTY:g} | "
+          f"ceiling LEARNED ===")
+    opt = torch.optim.Adam(m.parameters(), lr=LR)
+    for ep in range(EPOCHS):
+        m.train()
+        perm = torch.randperm(n, device=device)
+        for i in range(0, n, BATCH):
+            bi = perm[i:i + BATCH]
+            pred = m(tu[bi], tfeat[tp[bi]])
+            # explicit none→sum/N, NOT reduction="mean": the fused mean kernel differs from this
+            # reduction at non-power-of-two batch sizes (the last, smaller minibatch), and over the
+            # epochs that ULP difference compounds in the model's flat slope/floor directions.
+            loss = torch.nn.functional.binary_cross_entropy(
+                pred, ty[bi], reduction="none").sum() / pred.shape[0]
+            # divergence barriers, over the FULL corpus with dropout off (clean per-problem read)
             m.eval()
-            return float(torch.nn.functional.binary_cross_entropy(m(tu, tfeat[tp]), ty))
+            loss = loss + SHALLOW_SLOPE_PENALTY * m.slope_raw(tfeat).pow(-2).mean()
+            lam_d = m.lapse().detach()                       # detached: the barrier must not train λ
+            cap_d = (1.0 - 2.0 * lam_d).clamp(min=EPS, max=FLOOR_CAP)
+            ratio = (CALIBRATION_P / cap_d).clamp(EPS, 1.0 - EPS)
+            o_div = torch.log(ratio / (1.0 - ratio))
+            loss = loss + HIGH_FLOOR_PENALTY * \
+                torch.nn.functional.softplus(m.floor_logit(tfeat) - o_div).pow(2).mean()
+            m.train()
+            opt.zero_grad(); loss.backward(); opt.step()
+        if ep % 50 == 0 or ep == EPOCHS - 1:
+            m.eval()
+            with torch.no_grad():
+                hb = float(torch.nn.functional.binary_cross_entropy(m(tu, tfeat[tp]), ty))
+            print(f"  epoch {ep:4d}  human train BCE {hb:.4f}  λ {float(m.lapse()):.5f}")
 
-    for free_set, tag in STAGE_PLAN:
-        hb = train_stage(free_set, STAGE_EPOCHS)
-        freed = sorted(HEAD_NAME[h] for h in free_set) + ["ceiling"]
-        print(f"--- {tag} trained (free {freed}); human train BCE {hb:.4f} ---")
-        with torch.no_grad():                                # store the just-trained heads' LIVE
-            b_all, a_all, c_all = m.params(tfeat)            # per-problem values for the penalty
-            for h, buf, live in [(0, m.pin_b, b_all), (1, m.pin_a, a_all), (2, m.pin_c, c_all)]:
-                if h in free_set:
-                    buf.copy_(live)
-        m.trained_heads |= set(free_set)
-
-    # ---- write the final artifacts to OUT_DIR ----
-    b_all, a_all, c_all, theta_full, lam = score_corpus(m)
+    # ---- score the whole corpus (final model) ----
+    m.eval()
+    with torch.no_grad():
+        b_all, a_all, c_all = m.params(tfeat)
+        theta = m.ability(torch.arange(n_profiles, device=device)).cpu().numpy()
+        lam = float(m.lapse())
+    b_all, a_all, c_all = b_all.cpu().numpy(), a_all.cpu().numpy(), c_all.cpu().numpy()
     rating = b_all + clear_logit_vec(c_all, lam) / a_all     # 80%-clear ability under the 4PL
+    with np.printoptions(precision=2, suppress=False):
+        print(f"  PRE-winsor rating percentiles [.1, 1, 50, 99, 99.9]: "
+              f"{np.percentile(rating, [0.1, 1, 50, 99, 99.9])}")
     lo, hi = np.percentile(rating, [WINSOR, 100 - WINSOR])
     rating = np.clip(rating, lo, hi)                          # percentile winsor (robustness)
-    theta = theta_full[:n_profiles]
 
     # ---- held-out global slope calibration (docs/scalar_weakness_axes.md, 2026-07-18) ----
     # The joint MLE's per-problem slopes come out uniformly too shallow (errors-in-variables:
-    # noisy per-profile theta attenuates discrimination), so a single global multiplier s on
-    # the slopes is fit OUT-OF-SAMPLE here — client-replica walk-forward LL, golden-section;
-    # in-sample refitting would re-absorb the attenuation to s = 1. Mode choice measured
-    # (A/B 2026-07-18): scaling the SLOPE with the shipped rating kept as the 80%-clear
-    # anchor (+1.90 mnat at s~1.3) beats re-deriving the anchor toward the 50%-point
-    # (+1.68) — so ratings stay untouched and only the quality/slope column is scaled.
-    # s is recalculated every run, never hardcoded; ordering matters: rating is derived
-    # from the UNSCALED slope above (it anchors the curve the calibration steepens).
+    # noisy per-profile theta attenuates discrimination; measured invariant across gauge/penalty/
+    # weighting variants — 2026-07-24 series), so a single global multiplier s on the slopes is
+    # fit OUT-OF-SAMPLE here — client-replica walk-forward LL, golden-section; in-sample refitting
+    # would re-absorb the attenuation to s = 1. Mode "slope": ratings stay the 80%-clear anchors
+    # and only the quality/slope column is scaled. s is recalculated every run, never hardcoded;
+    # ordering matters: rating is derived from the UNSCALED slope above (it anchors the curve the
+    # calibration steepens).
     cal = fit_slope_scale(
         load_first_time_attempts(),
         {keys[i][1]: (float(rating[i]), float(a_all[i]), float(c_all[i]))
@@ -396,19 +381,20 @@ def main():
                    "slope_scale": cal["s"], "slope_scale_mode": cal["mode"],
                    "slope_scale_gain_mnat": round(cal["gain_mnat_per_attempt"], 3)},
                   f, indent=2)
-    config = {"features": "bw_act", "move_features": True, "pca_dim": PCA_DIM,
-              "diff_hidden": list(DIFF_HIDDEN), "dropout": DROPOUT, "act_dropout": ACT_DROPOUT,
-              "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,
-              "lr": LR, "batch": BATCH, "stage_epochs": STAGE_EPOCHS,
-              "stage_pin_weight": STAGE_PIN_WEIGHT, "min": MIN_ATTEMPTS, "min_profile": MIN_PROFILE,
+    config = {"features": "bw_act", "move_features": True, "phase_features": True,
+              "pca_dim": PCA_DIM, "diff_hidden": list(DIFF_HIDDEN), "dropout": DROPOUT,
+              "act_dropout": ACT_DROPOUT, "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,
+              "lr": LR, "batch": BATCH, "epochs": EPOCHS,
+              "gauge": "rating", "gauge_mom": GAUGE_MOM,
+              "shallow_slope_penalty": SHALLOW_SLOPE_PENALTY,
+              "high_floor_penalty": HIGH_FLOOR_PENALTY,
+              "min": MIN_ATTEMPTS, "min_profile": MIN_PROFILE,
               "winsor": WINSOR, "slope_floor": SLOPE_FLOOR, "lapse_cap": LAPSE_CAP,
-              "lapse_init": LAPSE_INIT, "floor_cap": FLOOR_CAP,
-              "stage_slope_const": GLOBAL_SLOPE_INIT, "stage_floor_const": GLOBAL_FLOOR_INIT,
-              "seed": SEED}
+              "lapse_init": LAPSE_INIT, "floor_cap": FLOOR_CAP, "seed": SEED}
     torch.save({"state_dict": m.state_dict(), "keys": keys, "fdim": fdim, "k": k,
                 "n_bot_cols": nb, "n_move_cols": nmv, "n_anchor": 0, "anchor_ranks": [],
                 "lapse": lam, "args": config}, os.path.join(OUT_DIR, "model.pt"))
-    print(f"\n=== STAGED complete === wrote ratings + user_theta.csv ({n_profiles} profiles) + "
+    print(f"\n=== JOINT complete === wrote ratings + user_theta.csv ({n_profiles} profiles) + "
           f"rating_constants.json (λ={lam:.5f}) + model.pt to {OUT_DIR}")
 
 
