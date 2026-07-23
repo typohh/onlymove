@@ -83,14 +83,16 @@ export function enterAnalysisMode() {
 /**
  * Handles clicks on the board during analysis mode.
  */
+// Returns whether the click played a move — the typed-coordinate path
+// (board.playTypedMove) uses this for its invalid-input feedback.
 export function handleBoardClick(x, y) {
-    if (!state.acceptClicks) return;
+    if (!state.acceptClicks) return false;
 
-    if (playMoveOnBranch(x, y)) {
-        playStoneSound();
-        updateAllUI();
-        requestAndDisplayAnalysis();
-    }
+    if (!playMoveOnBranch(x, y)) return false;
+    playStoneSound();
+    updateAllUI();
+    requestAndDisplayAnalysis();
+    return true;
 }
 
 /**

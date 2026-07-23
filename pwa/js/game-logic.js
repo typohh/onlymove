@@ -219,12 +219,14 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     setReviewStartTime(Date.now());
 }
 
+// Returns whether the click played a move — the typed-coordinate path
+// (board.playTypedMove) uses this for its invalid-input feedback.
 export function handleBoardClick(x, y) {
-    if (!state.acceptClicks) return;
+    if (!state.acceptClicks) return false;
 
     const moveNode = getLegalMoveNode(x, y);
     if (!moveNode) {
-        return;
+        return false;
     }
 
     setAcceptClicks(false);
@@ -242,4 +244,5 @@ export function handleBoardClick(x, y) {
     } else {
         _handleIncorrectMoveSequence(moveIndex, x, y);
     }
+    return true;
 }

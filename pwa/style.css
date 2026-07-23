@@ -63,6 +63,20 @@ body {
     border-radius: 3px;
 }
 
+/* Keyboard coordinate entry (accessibility) — permanently invisible; typed
+   moves get their feedback from the board itself. Visually hidden rather
+   than display:none so it stays focusable (Tab / type-to-activate). */
+#coord-input {
+    position: fixed;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    border: 0;
+    padding: 0;
+    clip-path: inset(50%);
+    pointer-events: none;
+}
+
 #controls-wrapper {
     display: flex;
     position: relative;

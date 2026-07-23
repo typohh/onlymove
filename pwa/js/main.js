@@ -80,6 +80,7 @@ import { loadRatingRankMap } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
+import { initCoordInput } from './coord-input.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
 import { hasPendingAccountSwitch, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
@@ -660,6 +661,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // re-probes to cover an offline boot). One cheap point-read; hidden otherwise.
     refreshInviteAccess(updateAllUI);
     initMotifBubble();
+    initCoordInput();
     wireRankDisplayTap();
     wireActionButtons();
 

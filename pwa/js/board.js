@@ -9,6 +9,7 @@ import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { APP_MODES } from './constants.js';
+import { COL_LETTERS } from './sgf.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -53,6 +54,39 @@ const handleBoardClick = (x, y) => {
     }
 }
 
+// Tiny always-on coordinate labels at the very edge of the board. Geometry:
+// the canvas margin outside a first-line intersection is 0.75·fieldWidth and a
+// stone's radius is 0.5·fieldWidth, so the outer 0.25·fieldWidth is clear even
+// with a stone on the first line. Labels are kept within 0.2·fieldWidth of the
+// edge because a stone placement's partial redraw clears 1.1·stoneRadius
+// around the point — anything deeper gets clipped when a first-line stone
+// lands. Drawn on the grid layer (under stones) as a WGo custom object, which
+// survives removeAllObjects() and re-renders on resize.
+const coordinateLabels = {
+    grid: {
+        draw: function (args, board) {
+            const fieldSize = Math.min(board.fieldWidth, board.fieldHeight);
+            const fontSize = Math.max(6, 0.19 * fieldSize);
+            this.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            this.font = fontSize + 'px ' + (board.font || 'Calibri');
+            this.textAlign = 'center';
+            this.textBaseline = 'middle';
+            // 0.65 field-units past the outer lines = 0.1·fieldWidth from the
+            // canvas edge (line centers sit 0.75·fieldWidth in).
+            const before = -0.65;
+            const after = board.size - 1 + 0.65;
+            for (let i = 0; i < board.size; i++) {
+                const letter = COL_LETTERS[i];
+                const number = String(board.size - i);
+                this.fillText(letter, board.getX(i), board.getY(before));
+                this.fillText(letter, board.getX(i), board.getY(after));
+                this.fillText(number, board.getX(before), board.getY(i));
+                this.fillText(number, board.getX(after), board.getY(i));
+            }
+        },
+    },
+};
+
 export function initializeBoard(size) {
     if (state.board) {
         state.board.removeEventListener('click', handleBoardClick);
@@ -69,8 +103,27 @@ export function initializeBoard(size) {
     });
 
     board.addEventListener('click', handleBoardClick);
+    board.addCustomObject(coordinateLabels);
     setBoard(board);
     updateBoardSize();
+}
+
+// Typed-coordinate entry (coord-input.js). Mirrors the desktop click path —
+// no mobile ghost-stone confirmation, since a typed coordinate is already
+// deliberate. Returns whether a move was actually played: a click's feedback
+// is the board itself, but typing needs an explicit invalid signal.
+export function playTypedMove(x, y) {
+    if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
+        if (state.ghostMove) {
+            setGhostMove(null);
+            redraw();
+        }
+        return handleTsumegoClick(x, y) === true;
+    }
+    if (state.appMode === APP_MODES.ANALYZING) {
+        return handleAnalysisClick(x, y) === true;
+    }
+    return false;
 }
 
 // Draw a hollow "outline" stone marker in the side-to-move's color at `move` —
@@ -265,7 +318,8 @@ export async function getBoardImageBlob() {
             stoneHandler: WGo.Board.drawHandlers.REALISTIC,
             width: width
         });
-        
+        tempBoard.addCustomObject(coordinateLabels);
+
         // Populate the temporary board
         if (startPosition) {
             for (let x = 0; x < startPosition.size; x++) {

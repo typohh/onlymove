@@ -105,7 +105,8 @@ export function findBestMoveFromChildren(children) {
 // 1-based from the BOTTOM while WGo's y=0 is the TOP row (so row = size - y).
 // toBoardNotation and boardNotationToXy are exact inverses over this alphabet;
 // they live together here so the COL_LETTERS table and the row flip can't drift.
-const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
+// Exported for the board's edge coordinate labels (board.js).
+export const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
 
 // WGo {x, y} → board notation (e.g. {x:2,y:6} on 9x9 → "C3"); null for an
 // off-board coordinate. Used by the live click path to report the picked move.
