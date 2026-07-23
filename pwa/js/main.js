@@ -188,6 +188,22 @@ async function performIgnore() {
     updateAllUI();
 }
 
+// The role="button" elements that aren't native <button>s don't activate from
+// the keyboard on their own: the capture-score <div>s respond to no key at
+// all, and <a role="button">s respond to Enter but not Space. Delegate the
+// missing keys to a click so every role button is keyboard-operable.
+function wireRoleButtonKeys() {
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const el = e.target instanceof Element ? e.target.closest('[role="button"]') : null;
+        if (!el || el.tagName === 'BUTTON') return;
+        // Enter on an <a href> already clicks natively — don't double-fire.
+        if (e.key === 'Enter' && el.tagName === 'A') return;
+        e.preventDefault();
+        el.click();
+    });
+}
+
 // Hamburger menu: open on either (portrait/landscape) trigger, close on
 // backdrop click. Menu items close it before dispatching.
 function wireMenu() {
@@ -215,6 +231,10 @@ function wireMenu() {
     document.getElementById('resume-text').textContent = getTerm('resumeText');
     menuOverlay.addEventListener('click', (e) => {
         if (e.target === menuOverlay) closeMenu();
+    });
+    // Keyboard equivalent of the backdrop click.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menuOverlay.classList.contains('menu-overlay-hidden')) closeMenu();
     });
 
     document.getElementById('menu-board-size').addEventListener('click', (e) => {
@@ -656,6 +676,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Static UI wiring (persistent elements, registered once).
     wireMenu();
+    wireRoleButtonKeys();
     // Probe once at boot whether this account may create leaderboard invitations,
     // so eligible members find the Invite menu item already present (menu-open
     // re-probes to cover an offline boot). One cheap point-read; hidden otherwise.
