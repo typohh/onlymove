@@ -537,6 +537,22 @@ async function selectNextProblem() {
     return recall || state.challengeProblem;
 }
 
+// A freshly painted challenge that is still inside the recent-answer window
+// means challenge reselection failed — selectChallengeCandidate never picks
+// from that window, so the only way an already-answered problem lands here is
+// assignNewChallenge's failure returns keeping the stale slot (offline / a
+// shard fetch failure once the loaded pool is exhausted). The re-serve is
+// deliberate (the board stays usable, and due recalls from cached shards can
+// still interleave), but silently repeating a just-solved problem reads as a
+// bug — explain it. Button-held so it can't be missed under the answer-result
+// fade it appears over; grey per the neutral-overlay convention (white =
+// correct, red = wrong).
+function warnIfServedAnsweredChallenge() {
+    if (!challengeAlreadyAnswered()) return;
+    displayOverlay(getTerm('outOfProblemsMessage'), 0, null,
+        'rgb(128, 128, 128)', getTerm('outOfProblemsButton'));
+}
+
 // Paints a selected problem, falling forward past failures: a bad recall falls
 // back to the challenge; a bad challenge is blacklisted and a fresh one
 // reselected (up to MAX_LOAD_ATTEMPTS).
@@ -550,7 +566,7 @@ async function displayNextProblem(next) {
     for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
         const challenge = state.challengeProblem;
         if (!challenge) { lastError = lastError || new Error('No challenge available.'); break; }
-        try { displayProblem(challenge, APP_MODES.SOLVING); return; }
+        try { displayProblem(challenge, APP_MODES.SOLVING); warnIfServedAnsweredChallenge(); return; }
         catch (error) {
             lastError = error;
             reportLoadError(error, attempt);
@@ -716,7 +732,7 @@ export async function resumeCurrentProblem() {
 export async function returnToChallenge() {
     if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
     if (!state.challengeProblem) return advanceToNextProblem();
-    try { displayProblem(state.challengeProblem, APP_MODES.SOLVING); }
+    try { displayProblem(state.challengeProblem, APP_MODES.SOLVING); warnIfServedAnsweredChallenge(); }
     catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }
 }
 
