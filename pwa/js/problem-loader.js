@@ -5,7 +5,7 @@ import * as Sentry from "@sentry/browser";
 import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem, getMergedAnswerHistory } from './state.js';
 import { loadSgf } from './board.js';
 import { updateAllUI } from './ui.js';
-import { displayOverlay, fadeOverlay } from './overlays.js';
+import { displayOverlay, fadeOverlay, showToast } from './overlays.js';
 import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
@@ -276,13 +276,119 @@ async function doLoadZipProblems(zipFilename) {
     }
 }
 
+// Unloaded shards sorted nearest-first by rank distance to the serve rank —
+// the order both the normal closest-zip load and the exhausted-pool expansion
+// walk. (Shards are loaded near where we SERVE, not where we display.)
+function unloadedZipsByDistance() {
+    const serveRank = state.serveRank;
+    const dist = zip => Math.min(Math.abs(serveRank - zip.minRank), Math.abs(serveRank - zip.maxRank));
+    return state.zipMetadata
+        .filter(zip => !state.loadedZips[zip.filename])
+        .sort((a, b) => dist(a) - dist(b));
+}
+
 function findClosestUnloadedZip() {
-    const serveRank = state.serveRank;   // load shards near where we SERVE, not display
-    const unloadedZips = state.zipMetadata.filter(zip => !state.loadedZips[zip.filename]);
-    return unloadedZips.reduce((closest, zip) => {
-        const diff = Math.min(Math.abs(serveRank - zip.minRank), Math.abs(serveRank - zip.maxRank));
-        return diff < closest.minDiff ? { zip, minDiff: diff } : closest;
-    }, { zip: null, minDiff: Infinity }).zip;
+    return unloadedZipsByDistance()[0] || null;
+}
+
+// --- Off-rank serving mode (offline fallback) --------------------------------
+// Entered when the exhausted-pool expansion could only produce a candidate
+// AFTER skipping a nearer shard that failed to load — we are serving problems
+// farther from the user's rank than the corpus allows because the nearer
+// shards are unreachable (offline / network failure). Exited when the nearest
+// unloaded shard loads again (the expansion's first pick, a background
+// closer-zip load, or the connectivity-restored retry below). Only the
+// TRANSITIONS show a toast; repeated serves inside the mode stay silent so
+// the user isn't nagged before every problem.
+let offRankServing = false;
+
+function serveModeToast(termKey) {
+    try {
+        const el = showToast(getTerm(termKey), { autoDismiss: false });
+        setTimeout(() => el.remove(), 5000);
+    } catch (_) { /* purely informational */ }
+}
+
+function enterOffRankServing() {
+    if (offRankServing) return;
+    offRankServing = true;
+    serveModeToast('offRankServingStart');
+}
+
+function exitOffRankServing() {
+    if (!offRankServing) return;
+    offRankServing = false;
+    serveModeToast('offRankServingEnd');
+}
+
+// Connectivity back: retry the nearest shard right away so the mode exits
+// (and the pool re-centers on the rank) without waiting for the next serve
+// decision to notice.
+window.addEventListener('online', () => {
+    if (offRankServing) backgroundLoadCloserZip();
+});
+
+// True when the shard zip already sits in the service-worker runtime cache
+// (sw.js caches shard zips by their plain URL, cache-first) — i.e. loadable
+// without network. Any failure (Cache API unavailable) reads as "not
+// cached"; the caller then treats the load as a network attempt. The HTTP
+// browser cache can additionally satisfy an "uncached" fetch offline — the
+// probe is an optimization, never a correctness gate.
+async function isZipCached(zipFilename) {
+    try {
+        const url = new URL(`tsumegos/${state.boardSize}/${zipFilename}`, window.location.href);
+        return !!(await caches.match(url.href));
+    } catch (_) {
+        return false;
+    }
+}
+
+// Bounds for the exhausted-pool expansion: cached shards are cheap to try,
+// but genuine network fetches can hang on a flaky connection, and every
+// loaded shard costs parse time + memory — so both are capped per selection
+// call. Progress persists across calls (loadedZips accumulates), so a later
+// serve resumes where this one stopped.
+const EXPAND_NETWORK_ATTEMPTS = 3;
+const EXPAND_ZIP_LOADS = 8;
+
+// Exhausted-pool fallback: the loaded pool has no serveable problem left, so
+// walk the unloaded shards nearest-first until one yields a candidate —
+// service-worker-cached shards work offline, so probing the cache lets an
+// offline user keep playing from whatever is on the device instead of dead-
+// ending into the stale re-serve. Returns null when nothing loadable yields
+// a candidate (the caller then falls through to the stale re-serve terminal
+// path). Also drives the off-rank mode transitions: a candidate that needed
+// skipping a FAILED nearer shard enters it; a candidate found with no
+// failures means the nearest shards are reachable again — exit.
+async function expandPoolForCandidate() {
+    let loads = 0;
+    let networkAttempts = 0;
+    let failures = 0;
+    for (const zip of unloadedZipsByDistance()) {
+        if (loads >= EXPAND_ZIP_LOADS) break;
+        if (!(await isZipCached(zip.filename))) {
+            if (networkAttempts >= EXPAND_NETWORK_ATTEMPTS) continue;
+            networkAttempts++;
+        }
+        try {
+            await loadZipProblems(zip.filename);
+        } catch (error) {
+            console.error(`expandPoolForCandidate: zip load failed for ${zip.filename}:`, error);
+            failures++;
+            continue;
+        }
+        loads++;
+        // A loaded shard can still yield nothing (all its problems recently
+        // answered) — that's legitimate exhaustion, not a failure; keep
+        // walking outward.
+        const raw = selectChallengeCandidate();
+        if (raw) {
+            if (failures > 0) enterOffRankServing();
+            else exitOffRankServing();
+            return raw;
+        }
+    }
+    return null;
 }
 
 async function backgroundLoadCloserZip() {
@@ -290,6 +396,9 @@ async function backgroundLoadCloserZip() {
     if (closestZip) {
         try {
             await loadZipProblems(closestZip.filename);
+            // The nearest shard is reachable again → the pool re-centers on
+            // the user's rank.
+            exitOffRankServing();
         } catch (error) {
             console.error(`Failed to background load ${closestZip.filename}:`, error);
         }
@@ -400,16 +509,13 @@ export async function assignNewChallenge() {
     for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
         let raw = selectChallengeCandidate();
         if (!raw) {
-            const closestZip = findClosestUnloadedZip();
-            if (!closestZip) { lastError = new Error('No zip files found in metadata.'); break; }
-            try {
-                await loadZipProblems(closestZip.filename);
-            } catch (error) {
-                console.error('assignNewChallenge: zip load failed:', error);
-                return state.challengeProblem;
-            }
-            raw = selectChallengeCandidate();
-            if (!raw) { lastError = new Error('Failed to select a challenge after loading zip.'); break; }
+            // Loaded pool exhausted — expand outward through unloaded shards
+            // (cached ones work offline; see expandPoolForCandidate). Null
+            // means nothing loadable yielded a candidate: fall through to the
+            // stale-challenge terminal path, same as the pre-expansion
+            // zip-load-failure return.
+            raw = await expandPoolForCandidate();
+            if (!raw) { lastError = new Error('No candidate from any loadable zip.'); break; }
         }
         try {
             const problem = await buildProblem(raw, { isRepeat: false, linked: false });
