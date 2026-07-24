@@ -478,10 +478,18 @@ class RatingNet(nn.Module):
             o = o.clone()
             for col_, v_ in pin.items():
                 o[:, col_] = v_
+        resid = None
         if use_resid and self.floor_resid is not None:
             if pidx is None:
                 pidx = torch.arange(len(o), device=o.device)
-            o = o + self.floor_resid(pidx) * self.resid_mask
+            resid = self.floor_resid(pidx) * self.resid_mask
+            # slope/floor residual columns act in raw head space (unwhitened heads); the DIFFICULTY
+            # column is deferred to AFTER the rating-gauge whitening — a pre-whitening additive δ is
+            # scale-free under the gauge (the trunk shrinks its raw spread, the whitening divides by
+            # it, and the ridge is evaded by amplification: measured b_sd collapse 0.22→0.07 with
+            # sweep weight, the 2026-07-24 ho_ebdd degeneracy), so the ridge must bind in the
+            # whitened/shipped units the residual actually moves.
+            o = o + torch.cat([torch.zeros_like(resid[:, :1]), resid[:, 1:]], dim=1)
         b = o[:, 0]
         if self.gauge == "rating":
             # hard-whiten difficulty instead of θ (see __init__). Differentiable through the batch
@@ -494,6 +502,10 @@ class RatingNet(nn.Module):
             else:
                 mu, sd = self.b_mu, self.b_sd
             b = (b - mu) / sd
+            if resid is not None:
+                b = b + resid[:, 0]
+        elif resid is not None:
+            b = b + resid[:, 0]
         a = torch.nn.functional.softplus(o[:, 1]).clamp(min=self.slope_floor)  # lower bound only
         lam = self.lapse()
         if detach_backbone:
