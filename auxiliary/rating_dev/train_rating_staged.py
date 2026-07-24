@@ -1048,6 +1048,14 @@ def main():
                          "artifact keeps its shape. Composes with the divergence barriers; "
                          "requires --gauge rating, no anchors/DRO/gap/knn/staged/certainty "
                          "weighting. 21 is a good node count. 0 = off.")
+    ap.add_argument("--mixup-alpha", type=float, default=0.0,
+                    help="Mixup row synthesis: every training point is a convex combination of "
+                         "two attempt rows — problem features, ability values, and the soft "
+                         "target interpolated with one per-row Beta(α,α) weight (1.0 = uniform) "
+                         "— never a raw row. Interpolation-consistency regularizer probed as a "
+                         "less scale-compressing alternative/complement to dropout (the "
+                         "divergence barriers still read real corpus features). Plain joint-fit "
+                         "path only (no staged/DRO/θ-posterior/quadrature/residual/certainty).")
     ap.add_argument("--certainty-weight-k", type=float, default=0.0,
                     help="Naive errors-in-variables mitigation: weight each HUMAN row by its "
                          "profile's ability-certainty proxy n/(n+k) (n = the profile's row count), "
@@ -1760,6 +1768,11 @@ def main():
             assert m.net is not None, "--head-pin-dropout needs the feature net"
             hci = {"diff": 0, "slope": 1, "floor": 2}
             pin_cols = [hci[h.strip()] for h in args.head_pin_heads.split(",") if h.strip()]
+        if args.mixup_alpha > 0:
+            assert (dro is None and not args.theta_posterior and not args.theta_quadrature
+                    and not args.floor_residual and not args.certainty_weight_k
+                    and not args.head_pin_dropout and not args.staged), \
+                "--mixup-alpha needs the plain joint fit"
         for ep in range(args.epochs):
             m.train()
             perm = torch.randperm(n, device=device)
@@ -1782,12 +1795,36 @@ def main():
                 # detached mode: the backbone term is evaluated WITHOUT δ_p (use_resid=False) so
                 # the backbone fits exactly what a residual-free run would; δ gets its own
                 # likelihood term against the detached backbone further down.
-                p = m(tu[bi], tfeat[tp[bi]], tp[bi], use_resid=not detached, pin=pin)
-                l = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
-                w = tw[bi]
-                if dro is None:
+                if args.mixup_alpha > 0:
+                    # Mixup row synthesis (see --mixup-alpha): every training point is a convex
+                    # combination of two attempt rows — problem features, ability VALUES, and the
+                    # soft target share one per-row λ — never a raw row. The distribution
+                    # priors/barriers below still read the real corpus features.
+                    bj = bi[torch.randperm(bi.shape[0], device=bi.device)]
+                    if args.mixup_alpha == 1.0:
+                        lmb = torch.rand(bi.shape[0], device=device)
+                    else:
+                        lmb = torch.distributions.Beta(
+                            args.mixup_alpha, args.mixup_alpha).sample((bi.shape[0],)).to(device)
+                    fmix = (lmb[:, None] * tfeat[tp[bi]]
+                            + (1.0 - lmb[:, None]) * tfeat[tp[bj]])
+                    b_m, a_m, c_m = m.params(fmix)
+                    th_m = lmb * m.ability(tu[bi]) + (1.0 - lmb) * m.ability(tu[bj])
+                    p = (c_m + (1.0 - c_m - m.lapse())
+                         * torch.sigmoid(a_m * (th_m - b_m))).clamp(EPS, 1 - EPS)
+                    ymix = lmb * tt[bi] + (1.0 - lmb) * tt[bj]
+                    w = tw[bi]
+                    loss = torch.nn.functional.binary_cross_entropy(
+                        p, ymix, reduction="none").mean()
+                elif dro is None:
+                    p = m(tu[bi], tfeat[tp[bi]], tp[bi], use_resid=not detached, pin=pin)
+                    l = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
+                    w = tw[bi]
                     loss = (l * w).sum() / w.sum().clamp_min(EPS)
                 else:
+                    p = m(tu[bi], tfeat[tp[bi]], tp[bi], use_resid=not detached, pin=pin)
+                    l = torch.nn.functional.binary_cross_entropy(p, tt[bi], reduction="none")
+                    w = tw[bi]
                     hm = t_is_human[bi]
                     lh = l[hm]                                # human rows in this batch
                     gb = rbt[bi][hm]
