@@ -643,6 +643,14 @@ def main():
                          "...) are NOT touched. Typical: `--production-flags "
                          "--holdout-problem-frac 0.1 --seed 1 --out-dir /tmp/rv2_ho/s1`.")
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
+    ap.add_argument("--synthetic-outcomes", default=None,
+                    help="Parametric-bootstrap hook: CSV with columns user_id,problem,success; "
+                         "replaces every first-time attempt's real outcome by the synthetic one "
+                         "(merged on the unique (user_id, problem) key) before profile explosion. "
+                         "Rows absent from the CSV keep their real outcome. Everything else — row "
+                         "structure, timestamps, serving pattern, features — stays identical, so "
+                         "a refit on data generated from a known static-θ 4PL measures the "
+                         "machinery's own bias (slope attenuation, tail behavior) with truth known.")
     ap.add_argument("--pca-dim", type=int, default=128, help="Joint activation PCs.")
     ap.add_argument("--features", choices=["bw_act", "act", "bw", "move"], default="bw_act",
                     help="Feature ablation: bw_act = activations ⊕ bot-winrate columns (the "
@@ -1276,6 +1284,15 @@ def main():
     # --- HUMAN first-time attempts, pooled, shared profiles (no size in profile id) ---
     df = load_first_time_attempts()
     df = df[df["size"].isin(SIZES)].copy()
+    if args.synthetic_outcomes:
+        syn = pd.read_csv(args.synthetic_outcomes)
+        df = df.merge(syn.rename(columns={"success": "success_syn"}),
+                      on=["user_id", "problem"], how="left")
+        n_rep = int(df["success_syn"].notna().sum())
+        df["success"] = df["success_syn"].fillna(df["success"]).astype(int)
+        df.drop(columns=["success_syn"], inplace=True)
+        print(f"SYNTHETIC outcomes: replaced {n_rep}/{len(df)} attempts from "
+              f"{args.synthetic_outcomes} | synthetic base rate {df['success'].mean():.4f}")
     g = df.groupby("user_id")["success"].agg(c="sum", n="count")
     g["w"] = g["n"] - g["c"]
     df = df[df["user_id"].isin(
