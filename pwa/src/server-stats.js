@@ -5,6 +5,7 @@ import { interpExtrap, rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/ra
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import { APP_VERSION } from './version.js';
 import { CORS_HEADERS, jsonResponse } from './http.js';
+import { normalizeCountry } from './leaderboard.js';
 
 const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 
@@ -25,7 +26,7 @@ function computeServerStatsOnce(env) {
 // cached yet OR the cache was produced by an older code version (so a deploy
 // that changes the computation refreshes on the next read, not 24h later); the
 // cron keeps it fresh by age thereafter.
-export async function handleServerStats(env) {
+export async function handleServerStats(env, request) {
   try {
     if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
     const row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
@@ -34,12 +35,19 @@ export async function handleServerStats(env) {
       try { stale = JSON.parse(row.data).version !== APP_VERSION; } catch { stale = true; }
     }
     const body = stale ? JSON.stringify(await computeServerStatsOnce(env)) : row.data;
+    // Echo the requester's edge geo-IP country so the Community country chart can
+    // mark the "you" bar — the blob is community-wide (per-request identity can't
+    // live in the cached body), and the client has no other read of its own geo.
+    // Same normalizeCountry filter the leaderboard stamp uses (sentinels -> null).
+    const headers = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+    const youCountry = normalizeCountry(request?.cf?.country);
+    if (youCountry) headers['X-Client-Country'] = youCountry;
     return new Response(body, {
       status: 200,
       // The worker already serves from a D1 cache and manages freshness (daily
       // cron + version invalidation); an edge/browser HTTP cache on top would
       // serve stale data and bypass that logic, so opt out of caching here.
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      headers,
     });
   } catch (err) {
     console.error('Error serving server stats:', err);

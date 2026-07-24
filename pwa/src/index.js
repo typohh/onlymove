@@ -49,7 +49,7 @@ const GET_ROUTES = [
   { path: '/push/vapid-public-key', handler: (request, env) => new Response(env.VAPID_PUBLIC_KEY || '', {
       headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' },
     }) },
-  { path: '/server-stats', handler: (request, env) => handleServerStats(env) },
+  { path: '/server-stats', handler: (request, env) => handleServerStats(env, request) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
   // Static FINAL-RESULTS page for the concluded 2026 tournament (baked-in

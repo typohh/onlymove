@@ -15,10 +15,15 @@ import { flag } from '../shared/flag.js';
 // via getTerm (stats* keys in i18n.js).
 export async function buildServerStatsPane(history = []) {
     let data;
+    // The requester's own edge geo-IP country, stamped on the response by the
+    // Worker (the client has no other read of its own geo); marks the "you" bar
+    // in the country chart. null when the edge geo is unknown/sentinel.
+    let youCountry = null;
     try {
         // Version the URL so a deploy bypasses any stale edge-cached response.
         const res = await fetch(`/server-stats?v=${APP_VERSION}`);
         if (!res.ok) return null;
+        youCountry = res.headers.get('X-Client-Country') || null;
         data = await res.json();
     } catch {
         return null;
@@ -155,12 +160,16 @@ export async function buildServerStatsPane(history = []) {
 
     // Country distribution of active players (leaderboard geo-IP; hidden profiles
     // excluded server-side). Flag + code label, commonest-first; the long tail past
-    // COUNTRY_TOP_N is folded into one "Other" row so the list stays compact. No
-    // "you" highlight — the client has no reliable read of its own geo-IP country.
+    // COUNTRY_TOP_N is folded into one "Other" row so the list stays compact. The
+    // "you" bar is the requester's own edge geo-IP country (youCountry, from the
+    // Worker header): its top-N bar is highlighted, or — when it's folded into the
+    // tail — it's surfaced as its own bar so the marker never hides inside "Other".
+    let countryHighlighted = false;
     if (data.countries && data.countries.length) {
         const COUNTRY_TOP_N = 15;
         const sorted = data.countries.slice().sort((a, b) => b.n - a.n);
-        const bars = sorted.slice(0, COUNTRY_TOP_N).map(c => {
+        const top = sorted.slice(0, COUNTRY_TOP_N);
+        const bars = top.map(c => {
             const f = flag(c.country);
             return { label: (f ? f + ' ' : '') + c.country, value: c.n };
         });
@@ -169,16 +178,32 @@ export async function buildServerStatsPane(history = []) {
             const otherN = tail.reduce((sum, c) => sum + c.n, 0);
             bars.push({ label: `${getTerm('statsCountriesOther')} (+${tail.length})`, value: otherN });
         }
+        let countryHi = -1;
+        if (youCountry) {
+            const topIdx = top.findIndex(c => c.country === youCountry);
+            if (topIdx >= 0) {
+                countryHi = topIdx;
+            } else {
+                const mine = tail.find(c => c.country === youCountry);
+                if (mine) {
+                    const f = flag(mine.country);
+                    countryHi = bars.length;
+                    bars.push({ label: (f ? f + ' ' : '') + mine.country, value: mine.n });
+                }
+            }
+        }
+        countryHighlighted = countryHi >= 0;
         const h = document.createElement('div');
         h.className = 'server-stats-heading';
         h.textContent = getTerm('statsCountries');
-        pane.append(h, makeBarList(bars, -1));
+        pane.append(h, makeBarList(bars, countryHi));
     }
 
     // One legend for the whole pane explaining the highlighted bar, at the very
     // bottom, shown only when at least one category has a "you" bucket.
     const hasHighlight = you.attemptsPerDay >= 0 || you.solve >= 0
-        || you.review >= 0 || you.recall >= 0 || you.rankLabel != null;
+        || you.review >= 0 || you.recall >= 0 || you.rankLabel != null
+        || countryHighlighted;
     if (hasHighlight) {
         const legend = document.createElement('div');
         legend.className = 'server-bar-legend';
