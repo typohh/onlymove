@@ -1,18 +1,31 @@
-"""Held-out global slope-scale calibration for the shipped 4PL.
+"""Client-replica walk-forward slope-scale calibration — the VALIDATION harness.
 
 2026-07-18 finding (docs/scalar_weakness_axes.md follow-ups 2-4): the response
 curves are steeper in gap units than the shipped per-problem slope claims —
 a single global multiplier s on the inner logit is worth more held-out than
-any of the residual models. This module estimates that multiplier.
-
-The estimate MUST be out-of-sample: the trainer's own joint MLE already chose
-the attenuated slopes (errors-in-variables — per-profile theta is noisy, which
-biases discrimination downward), so refitting s in-sample just re-absorbs it
-to s = 1. The protocol here is the client-replica walk-forward instead: per
-user, first-time attempts in time order; at each EVAL_BLOCK past WARMUP, fit
-theta by MLE on the trailing WINDOW under the production 4PL
+any of the residual models. This module estimates that multiplier under the
+CLIENT's operating condition: per user, first-time attempts in time order; at
+each EVAL_BLOCK past WARMUP, fit theta by MLE on the trailing WINDOW under the
+production 4PL
 (pwa/js/irt.js: P = c + (1 - c - LAPSE) * sigmoid(a*(theta - rating) + kappa(c)))
-and score the NEXT block. LL(s) is maximized by golden-section.
+and score the NEXT block. LL(s) is maximized by golden-section. Certificate:
+on synthetic outcomes generated from the true parameters the criterion returns
+s = 0.993 (unbiased for its estimand).
+
+NO LONGER the production stage (2026-07-25): pipeline.train_rating's phase 2
+(fit_global_scales) fits the global slope+floor scales in-sample on the frozen
+model with the ability field refit — covering EVERY first-time attempt, where
+this walk-forward's causal protocol can only score heavy users' post-warmup
+rows (~62% of attempt mass). The two criteria agree within the plateau
+(walk-forward 1.667 vs in-sample free-theta 1.71-1.77, <0.1 mnat apart). The
+old rationale here — "in-sample refitting re-absorbs the attenuation to s = 1
+because the trainer's noisy theta biased discrimination down (EIV)" — is
+measured-WRONG on both counts: the multiplier is dropout-induced rating-scale
+compression (parametric bootstrap, 2026-07-24), and an in-sample refit does
+NOT re-absorb it (frozen-theta 1.62, biased low by fixed-point-estimate
+attenuation; free-theta profile likelihood 1.71-1.77, certificate-clean at
+1.01-1.02 on synthetic s=1 truth). This module stays as the client-condition
+cross-check and the harness for phase/attenuation studies.
 
 Two application modes (docs follow-up: the naive "scale ratings around a
 center" is gauge — absorbed exactly by each user's free theta — so the only
