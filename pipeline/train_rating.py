@@ -52,7 +52,7 @@ ability field is refit free (per user × non-overlapping 2-month block, profile 
 not plugged in: fixed-theta plug-in is attenuation-biased, certificate-measured 2026-07-25), and two
 global scalars train that phase 1 held at unity: s (slope scale) and f (floor scale). Pure BCE — no
 dropout (nothing stochastic remains), no barriers (they act on the frozen heads). Scored in the
-CLIENT's response form pivoting at the shipped winsorized rating (mode-'slope' semantics: ratings
+CLIENT's response form pivoting at the shipped rating (mode-'slope' semantics: ratings
 stay the 80%-clear anchors; quality ships as s·slope, floor as f·floor). This replaced the held-out
 walk-forward calibration (2026-07-25): the walk-forward's causal protocol culled ~38% of attempt
 mass (heavy users only), while phase 2 scores every first-time attempt; the two criteria agree
@@ -126,7 +126,6 @@ BATCH = 65536
 EPOCHS = 200                     # single joint pass (matches the old 2×100 staged budget)
 MIN_ATTEMPTS = 5                 # keep users with ≥5 correct AND ≥5 incorrect first-time attempts
 MIN_PROFILE = 8                  # keep 2-month profiles with ≥8 attempts
-WINSOR = 1.0                     # percentile winsor on the shipped rating (robustness)
 SLOPE_FLOOR = 0.01               # lower clamp on the per-problem slope a_p (numerical guard)
 LAPSE_CAP = 0.05                 # upper bound on the global ceiling slip λ
 LAPSE_INIT = 0.02                # λ init (λ is learned)
@@ -165,7 +164,7 @@ def fit_global_scales(df, params_by_tid, lapse, device):
     problem (no user cull; the walk-forward this replaced scored only heavy users' post-warmup
     rows, ~62% of attempt mass).
 
-    Scored in the CLIENT's response form (pwa/js/irt.js), pivoting at the SHIPPED winsorized
+    Scored in the CLIENT's response form (pwa/js/irt.js), pivoting at the SHIPPED
     rating — mode-'slope' semantics: the rating stays the 80%-clear anchor of the unscaled curve,
     and the scales ship as quality = s·slope, floor = f·floor. (Scaling around the trainer's
     internal 50%-point instead would rescale the rating axis itself.) kappa is recomputed from the
@@ -428,10 +427,12 @@ def main():
     b_all, a_all, c_all = b_all.cpu().numpy(), a_all.cpu().numpy(), c_all.cpu().numpy()
     rating = b_all + clear_logit_vec(c_all, lam) / a_all     # 80%-clear ability under the 4PL
     with np.printoptions(precision=2, suppress=False):
-        print(f"  PRE-winsor rating percentiles [.1, 1, 50, 99, 99.9]: "
+        # tail-sanity visibility: the divergence barriers keep these finite (~[-4, +13]); a blowup
+        # here means a barrier regression, not something to clip after the fact (the percentile
+        # winsor that used to sit here was removed 2026-07-25 — redundant under the barriers, and
+        # it erased the ordering of the top/bottom 1% of the corpus)
+        print(f"  rating percentiles [.1, 1, 50, 99, 99.9]: "
               f"{np.percentile(rating, [0.1, 1, 50, 99, 99.9])}")
-    lo, hi = np.percentile(rating, [WINSOR, 100 - WINSOR])
-    rating = np.clip(rating, lo, hi)                          # percentile winsor (robustness)
 
     # ---- PHASE 2: global slope/floor scale fit (replaced the walk-forward stage 2026-07-25) ----
     # The per-problem values come out scale-compressed toward the feature-conditional mean
@@ -487,7 +488,7 @@ def main():
               "high_floor_penalty": HIGH_FLOOR_PENALTY,
               "p2_lr": P2_LR, "p2_steps": P2_STEPS, "p2_bin_months": P2_BIN_MONTHS,
               "min": MIN_ATTEMPTS, "min_profile": MIN_PROFILE,
-              "winsor": WINSOR, "slope_floor": SLOPE_FLOOR, "lapse_cap": LAPSE_CAP,
+              "slope_floor": SLOPE_FLOOR, "lapse_cap": LAPSE_CAP,
               "lapse_init": LAPSE_INIT, "floor_cap": FLOOR_CAP, "seed": SEED}
     torch.save({"state_dict": m.state_dict(), "keys": keys, "fdim": fdim, "k": k,
                 "n_bot_cols": nb, "n_move_cols": nmv, "n_anchor": 0, "anchor_ranks": [],
