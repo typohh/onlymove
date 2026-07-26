@@ -37,14 +37,47 @@ export const FLOOR_MAX = 0.78;
 // the fitter guarantees 0 ≤ LAPSE < 1 − FLOOR_MAX so (1 − floor − LAPSE) > 0.
 export const LAPSE = POPULATION_CONSTANTS.fat_finger_rate;
 
+// σ(κ(c)): the RAW (inner) sigmoid value at a zero rank gap — where the 4PL
+// curve passes through CALIBRATION_P — i.e. (CALIBRATION_P − c)/(1 − c − LAPSE).
+// One expression, shared by κ and by the anchor information below.
+function anchorRawClear(c) {
+    const cc = Math.max(typeof c === 'number' ? c : 0, 0);
+    return Math.min(Math.max((CALIBRATION_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6);
+}
+
 // κ(c): the offset that keeps P(clear) = CALIBRATION_P at a zero rank gap for a
 // 4PL problem with guessing floor c and upper asymptote (1 − LAPSE). The lapse
 // term is folded in so the rating's 80%-clear definition holds exactly; with
 // LAPSE = 0 it reduces to the 3PL anchor.
 export function clearKappa(c) {
-    const cc = Math.max(typeof c === 'number' ? c : 0, 0);
-    const q = Math.min(Math.max((CALIBRATION_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6);
+    const q = anchorRawClear(c);
     return Math.log(q / (1 - q));
+}
+
+// The Fisher information ONE at-rank attempt carries about the user's rank, per
+// unit of squared success-curve slope: I(anchor) = anchorInfo(floor)·slope².
+//
+// A 2PL would give the constant P(1−P) = 0.16 at the 80% point, and that constant
+// is what the selection weight and the UCB SE floor used to assume. It is WRONG
+// under the 4PL actually in use: a guessing floor and a lapse ceiling both flatten
+// dP/dθ at the anchor without flattening the Bernoulli variance, so the same 80%
+// clear rate carries strictly LESS information about where the user sits. With
+// q = σ(κ(c)) and span = 1 − c − LAPSE,
+//
+//     dP/dinner = span·q(1−q)   and   P(1−P) = CALIBRATION_P·(1 − CALIBRATION_P)
+//     I = a²·(span·q(1−q))² / (P(1−P))
+//
+// — the SAME g²/(p(1−p)) windowMLE accumulates, evaluated at a zero rank gap. It
+// equals 0.16 exactly when floor = LAPSE = 0, and is strictly below it otherwise,
+// falling monotonically as the floor rises toward CALIBRATION_P. So the 2PL
+// constant always OVERSTATES a problem's information, by a factor set by the
+// fitted floor distribution — which moves with every re-rate, hence no number
+// here; see CLAUDE.md for the measured range at a given ship.
+export function anchorInfo(floorRaw) {
+    const c = clampFloor(floorRaw);
+    const q = anchorRawClear(c);
+    const g = clearSpan(c) * q * (1 - q);
+    return (g * g) / (CALIBRATION_P * (1 - CALIBRATION_P));
 }
 
 // The success-curve span (upper asymptote − floor) = (1 − floor − LAPSE). The

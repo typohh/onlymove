@@ -11,7 +11,7 @@ import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates, recallServeShare } from './model.js';
 import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
-import { normalizedRankForSize, slopeToQuality, rankConverged } from './rank-decomposition.js';
+import { normalizedRankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
 import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
@@ -95,8 +95,10 @@ function selectChallengeCandidate() {
     // TWO-REGIME weighting (2026-07-18; replaced the quality·exp(T·score)
     // product, which balanced two incommensurable units with one opaque
     // constant). While the rank estimate is still converging, serve for
-    // INFORMATION: weight by quality = slope² (Fisher information — the pool
-    // is difficulty-matched so P(1−P) is ~constant). Once converged
+    // INFORMATION: weight by quality = the 4PL Fisher information at the
+    // 80%-clear anchor, slope²·anchorInfo(floor) — the pool is difficulty-matched
+    // so the anchor is the right common reference, but the floor factor varies
+    // across it and is NOT absorbed by the normalization. Once converged
     // (rankConverged: se < 2× the local floor), serve for PERSONALIZATION:
     // weight by the weakness softmax alone, in its own calibrated units. The
     // regimes partition where the physics does — slope-priority only changes
@@ -249,11 +251,12 @@ async function doLoadZipProblems(zipFilename) {
     // `p.rating` is the raw black-box rating shipped by package_for_pwa; derive
     // the normalized 0..1 rank here with M (the client owns rating→rank). `p.slope`
     // is the raw 2PL discrimination a_p; keep it raw (the rank estimator uses it)
-    // and derive the selection weight (∝ Fisher information a_p²) from it here.
+    // and derive the selection weight (∝ the 4PL Fisher information a_p²·anchorInfo(floor))
+    // from it and the shipped guessing floor here.
     const problems = JSON.parse(metadataContent).map(p => ({
         ...p, zipFilename,
         rank: normalizedRankForSize(p.rating, state.boardSize),
-        quality: slopeToQuality(p.slope),
+        quality: problemInfoWeight(p.slope, p.floor),
     }));
 
     state.loadedZips[zipFilename] = problems;

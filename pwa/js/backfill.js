@@ -38,7 +38,7 @@ import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
-import { normalizedRankForSize, ratingRankCurveVersion, slopeToQuality } from './rank-decomposition.js';
+import { normalizedRankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
 import { detectRatingsCorrection } from './corrections-notice.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -1012,7 +1012,7 @@ function applyRatingFields(e, item, size) {
     if (rank !== null && rank !== undefined) e.problemRank = rank;
     if (typeof item.slope === 'number') {
         e.problemSlope = item.slope;
-        e.problemQuality = slopeToQuality(item.slope);
+        e.problemQuality = problemInfoWeight(item.slope, item.floor);
     }
     if (typeof item.floor === 'number') e.problemFloor = item.floor;
 }

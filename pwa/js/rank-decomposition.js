@@ -53,9 +53,9 @@
 import { state } from './state.js';
 import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanSqSlope, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
-import { clearKappa, clampFloor, clearSpan } from './irt.js';
+import { clearKappa, clampFloor, clearSpan, anchorInfo } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
@@ -143,17 +143,26 @@ export function loadRatingRankMap() {
     return _ratingRankMap;
 }
 
-// Raw 2PL slope a_p → problem-selection weight ∝ the Fisher information the
-// problem provides about a user's ability: I(θ) = a_p²·P(1−P). Selection draws
-// from a difficulty-matched pool (the 50 problems nearest the user's rank, all
-// ≈80%-clear), so P(1−P) is ~constant across candidates and information ∝ a_p².
-// Returned RAW (not on any [0,1] range): weightedRandomSelect normalizes, so only
-// the relative a_p² matters — a sharp problem is quadratically preferred and a
-// flat one strongly down-weighted, by genuine information rather than a min-max
-// remap.
-export function slopeToQuality(slope) {
+// Per-problem (raw 2PL slope a_p, guessing floor c) → problem-selection weight
+// ∝ the Fisher information the problem provides about a user's ability at the
+// 80%-clear anchor: I = a_p²·anchorInfo(c). Selection draws from a difficulty-
+// matched pool (the 50 problems nearest the user's rank, all ≈80%-clear), so
+// evaluating every candidate at its own anchor is the right common reference.
+// The floor factor is NOT constant across that pool — it is the 4PL correction
+// the plain a_p² weight used to omit (down-weighting problems a user can guess
+// into, which tell you less about their rank for the same 80% clear rate). Expect
+// its effect HERE to be second-order: a difficulty-matched pool holds problems of
+// similar floor, so this factor varies far less across candidates than a_p² does.
+// It is the SE floor (localSeFloor below) where the same 2PL constant was
+// load-bearing; this site is the consistency half of that fix. Returned RAW (not
+// on any [0,1] range):
+// weightedRandomSelect normalizes, so only relative information matters — a sharp
+// problem is quadratically preferred and a flat or guessable one down-weighted, by
+// genuine information rather than a min-max remap. A missing floor reads as 0,
+// which recovers the plain 2PL-with-lapse weight.
+export function problemInfoWeight(slope, floor) {
     if (typeof slope !== 'number' || !Number.isFinite(slope) || slope <= 0) return 0;
-    return slope * slope;
+    return slope * slope * anchorInfo(floor);
 }
 
 function curveForSize(size) {
@@ -470,16 +479,16 @@ export function flattenAttempts(answerHistory) {
 //                    serving collapses to the user's OWN rank at convergence on every
 //                    part of the ladder — not just where a constant floor happened to fit.
 // null when no usable (first-time, curve-mapped) attempt exists.
-// Rank-dependent UCB serve-bonus floor (see seFloorForMeanSqSlope in rank-window.js):
+// Rank-dependent UCB serve-bonus floor (see seFloorForMeanInfo in rank-window.js):
 // the irreducible SE the window MLE converges to once the user has a full window of
-// AT-their-rank problems. We estimate the local mean squared success-curve slope (rank
-// space) from the ≤50 corpus problems nearest the estimate that are ALREADY LOADED on
-// the active size — no fetch on the hot path; the selector's normal shard loading keeps
-// this pool warm and it self-refines as the user's rank drifts into new bands. slope²
-// is evaluated only on the 50 nearest (the expensive per-problem transform), not the
-// whole pool. Returns null when nothing is loaded yet (or the curve is missing), so the
-// estimator keeps the constant WIN_SE_FLOOR — a harmless fallback since se dominates the
-// bonus that early anyway.
+// AT-their-rank problems. We estimate the local mean per-attempt 4PL information —
+// anchorInfo(floor)·slope² in rank space — from the ≤50 corpus problems nearest the
+// estimate that are ALREADY LOADED on the active size; no fetch on the hot path, the
+// selector's normal shard loading keeps this pool warm and it self-refines as the
+// user's rank drifts into new bands. The per-problem transform runs only on those 50,
+// not the whole pool. Returns null when nothing is loaded yet (or the curve is
+// missing), so the estimator keeps the constant WIN_SE_FLOOR — a harmless fallback
+// since se dominates the bonus that early anyway.
 function localSeFloor(rankIndex) {
     const pool = state.allProblems;
     if (!pool || pool.length === 0) return null;
@@ -490,14 +499,14 @@ function localSeFloor(rankIndex) {
         .slice()
         .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target))
         .slice(0, 50);
-    let sumSq = 0, n = 0;
+    let sumInfo = 0, n = 0;
     for (const p of nearest) {
         if (typeof p.rating !== 'number') continue;
         const s = slopeInRankSpace(p.rating, p.slope, curve);
-        sumSq += s * s;
+        sumInfo += s * s * anchorInfo(p.floor);
         n++;
     }
-    return n > 0 ? seFloorForMeanSqSlope(sumSq / n) : null;
+    return n > 0 ? seFloorForMeanInfo(sumInfo / n) : null;
 }
 
 export function estimateWindowRank(answerHistory, prevRankIndex) {

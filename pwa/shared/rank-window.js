@@ -88,18 +88,27 @@ const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 // global constant. The floor is the irreducible SE the window MLE would report with a
 // FULL window of problems AT the user's rank, each cleared at the 80% calibration
 // point — i.e. the SE at which serving MORE at-rank problems stops helping. That
-// summed Fisher information is Σw · P(1−P) · <slope²>: Σw the positional-weight mass of
-// a full window, P(1−P) the info factor at the 80% point (clean logistic — at 80% the
-// user sits on the sigmoid shoulder, off the 3PL floor/lapse), and <slope²> the mean
-// squared success-curve slope (rank space) of problems near the user's rank. Flat kyu
-// curves (small slope) genuinely can't pin a rank as tightly as sharp dan ones, so a
-// constant floor mis-scales by ~4× across the ladder and leaves flat-region users
-// perpetually served above their rank, never converging. The caller measures <slope²>
+// summed Fisher information is Σw · <I>: Σw the positional-weight mass of a full
+// window, and <I> the mean per-attempt information of problems near the user's rank.
+// Flat kyu curves (small slope) genuinely can't pin a rank as tightly as sharp dan
+// ones, so a constant floor mis-scales by ~4× across the ladder and leaves flat-region
+// users perpetually served above their rank, never converging. The caller measures <I>
 // from the loaded corpus pool near the estimate and passes it via seFloorFn.
+//
+// <I> is the FULL 4PL information anchorInfo(floor)·slope² (irt.js), matching the
+// g²/(p(1−p)) windowMLE accumulates below. It used to be the 2PL constant
+// 0.8·0.2·<slope²>, which ignored the guessing floor and the lapse and so claimed
+// STRICTLY more information than a real at-rank window can deliver — putting the
+// floor below the se the estimator actually converges to. Two consequences, both
+// structural rather than a matter of degree: the bonus never reached zero, so every
+// converged user carried a permanent over-serve; and rankConverged (se < 2×floor)
+// fired later than its "within 2× of the best achievable" intent. Keeping the two
+// definitions in one formula is what makes the floor REACHABLE at all.
+// The mean is UNWEIGHTED on purpose: it describes the post-convergence steady state,
+// where selection is weakness-driven rather than information-driven.
 export const WIN_STEADY_WEIGHT = (WIN_CAP + 1) / 2;   // Σ of the (M−age)/M ramp over a full window
-const WIN_CALIB_PQ = 0.8 * (1 - 0.8);                 // P(1−P) at the 80%-clear serve point
-export function seFloorForMeanSqSlope(meanSqSlope) {
-    const info = WIN_PRIOR_INFO + WIN_STEADY_WEIGHT * WIN_CALIB_PQ * meanSqSlope;
+export function seFloorForMeanInfo(meanInfo) {
+    const info = WIN_PRIOR_INFO + WIN_STEADY_WEIGHT * meanInfo;
     return info > 0 ? 1 / Math.sqrt(info) : Infinity;
 }
 
