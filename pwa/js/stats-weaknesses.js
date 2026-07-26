@@ -38,12 +38,22 @@ let exampleOpenInFlight = false;
 //   undershoot → notEnough, inconclusive → badAt ("inconsistently") as the
 //   honest residual. Needs no model and no assumption about which moves are
 //   reasonable alternatives.
+// Level 1 screens every axis, so it carries the pane's multiplicity; the shown
+// set is capped by an error budget for it (see WEAK_FALSE_FLAG_BUDGET). Level 2
+// needs no such adjustment — it picks the phrasing of an issue level 1 already
+// admitted, so a wrong call there is a mislabel, not an extra issue.
 export function buildLikelyIssuesElement(history = state.answerHistory) {
     // P(β_correct + β_picked < 0) needed to flag an axis as a weakness. This is
     // a one-sided posterior probability on a single identified quantity (a
     // 50% bar would flag half the axes under a flat posterior), unlike the old
     // 0.50 bar on four-way quadrant mass.
     const WEAK_PROB_THRESHOLD = 0.80;
+    // Multiplicity control: the expected number of spurious issues the pane is
+    // willing to show a user, summed over the whole list (see the admission
+    // loop below). Must stay >= 1 - WEAK_PROB_THRESHOLD, else even the
+    // strongest admissible issue would be unaffordable and the pane could
+    // never fill.
+    const WEAK_FALSE_FLAG_BUDGET = 0.5;
     // Sign-test posterior needed to call a direction, and the minimum number
     // of attributed errors before a direction can be called at all.
     const DIRECTION_PROB_THRESHOLD = 0.85;
@@ -79,10 +89,20 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     heading.textContent = getTerm('statsIssuesHeading');
     root.appendChild(heading);
 
+    // weaknessAxisCov is length-checked like weaknessSe, and its entries are
+    // used with NO null default: the writer (weakness.js) already substitutes 0
+    // for a non-finite covariance, so a missing entry means the array is stale
+    // against the current K — and treating that as cov = 0 would silently
+    // change the flag set rather than fail. Under the picked/correct
+    // collinearity (~80% of rows have picked = correct) the cross-covariance is
+    // strongly negative and dominates the sum variance, so a zero default
+    // inflates it: it does not err on the safe side of a threshold, it moves
+    // the threshold.
     const haveModel = (
         Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
         Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
-        Array.isArray(weaknessAxisCov)
+        Array.isArray(weaknessAxisCov) &&
+        weaknessAxisCov.length === (weaknessParams.length - 2) / 2
     );
     if (!haveModel) {
         const empty = document.createElement('div');
@@ -100,27 +120,61 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. The negative
     // side only surfaces when that tail is named in labels.json; an unnamed
     // tail has nothing actionable to say and is skipped.
-    const flagged = [];
+    const candidates = [];
     for (let k = 0; k < K; k++) {
         const mu_c = weaknessParams[2 + k];
         const mu_p = weaknessParams[2 + K + k];
         const var_c = weaknessSe[2 + k] * weaknessSe[2 + k];
         const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
-        const cov = weaknessAxisCov[k] || 0;
+        const cov = weaknessAxisCov[k];
         if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
         const varSum = var_c + var_p + 2 * cov;
         if (!(varSum > 0)) continue;
         const pWeakPos = normCdf(-(mu_c + mu_p) / Math.sqrt(varSum));
         if (pWeakPos >= WEAK_PROB_THRESHOLD) {
-            flagged.push({ k, p: pWeakPos, side: 'positive' });
+            candidates.push({ k, p: pWeakPos, side: 'positive' });
         } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD
                    && labelFor(k, 'negative')) {
-            flagged.push({ k, p: 1 - pWeakPos, side: 'negative' });
+            candidates.push({ k, p: 1 - pWeakPos, side: 'negative' });
         }
     }
 
+    // MULTIPLICITY. WEAK_PROB_THRESHOLD bounds each issue's OWN error
+    // probability, not the pane's: every axis is screened for every user and K
+    // GROWS with the corpus (build_axes selects it incrementally), so a fixed
+    // per-axis bar lets the expected number of spurious issues grow linearly
+    // with the axis count — the pane would get noisier as the data improves.
+    // So the shown set spends an error BUDGET: strongest first, an issue is
+    // admitted while the running sum of (1 − p) — the posterior probability
+    // that its sign call is wrong — stays within WEAK_FALSE_FLAG_BUDGET.
+    // Expectation is linear, so that running sum IS the expected number of
+    // spurious issues in the list: the bound holds pathwise, for any K, with no
+    // independence assumption — which is what this pane needs, since the axes
+    // co-load on the same problems and their posteriors are correlated (a
+    // Bonferroni-style bar on K would have to assume that away and would also
+    // spend power on axes that never come close). Equivalently: the bar
+    // tightens with each issue already shown, so a lone strong issue is
+    // unaffected while a long borderline list truncates. The accounting is
+    // Bayesian — 1 − p is a posterior error probability, so it rests on the
+    // per-axis empirical-Bayes prior (weakness_axis_lambda) being the
+    // calibrating one, and that prior's shrinkage makes it conservative.
+    candidates.sort((a, b) => b.p - a.p);
+    const flagged = [];
+    let spent = 0;
+    for (const c of candidates) {
+        // Sorted descending by p, so a rejected issue is never followed by a
+        // cheaper one — stop rather than skip.
+        if (spent + (1 - c.p) > WEAK_FALSE_FLAG_BUDGET) break;
+        spent += 1 - c.p;
+        flagged.push(c);
+    }
+
     // Level 2: qualify each flagged axis's direction from the paired
-    // picked-vs-correct contrast; inconclusive stays "inconsistently".
+    // picked-vs-correct contrast; inconclusive stays "inconsistently". Runs on
+    // the budget-truncated set, so each error is attributed among the axes the
+    // pane actually surfaces (the attribution is winner-take-all across the
+    // flagged axes — feeding it dropped axes would divert errors to rows the
+    // user never sees).
     // pOver is P(picked loads HIGHER than correct on axis k) — overshoot
     // toward the POSITIVE tail. For a negative-side weakness the named motif
     // is the negative pole, so over/under invert.
@@ -136,7 +190,8 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         return { k, side, quadrant, p,
                  sentence: PHRASES[quadrant](labelFor(k, side)) };
     });
-    issues.sort((a, b) => b.p - a.p);
+    // Already strongest-first: the budget loop consumed `candidates` in that
+    // order and preserved it.
 
     if (issues.length === 0) {
         const empty = document.createElement('div');
