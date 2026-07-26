@@ -363,6 +363,16 @@ On correct attempts the played vector *is* the correct vector by definition, so 
 - **Level one — is this axis a weakness?** From the posterior of the identified **sum**, requiring credible non-zero mass. Never the correct/played split, which is prior-dominated because the large majority of rows have played equal to correct. An earlier scheme tested the split directly and its gate was structurally always tripped by that collinearity, so only one of its four outcomes could ever render. Since the axes are bipolar, a credibly negative sum flags the positive-tail motif and a credibly positive sum flags the negative-tail motif — the latter only surfacing when that tail is actually named, since an unnamed tail has nothing actionable to say.
 - **Level two — which way do they err?** A paired sign test on the played-minus-correct loading over the user's own wrong attempts, each error attributed to the flagged axis with the largest absolute contrast since axes co-load, with an exact posterior on the direction. Overshoot, undershoot, and an honest "inconsistently" residual when neither is credible. This level needs no model at all and no assumption about which alternative moves are reasonable — the single-solution invariant makes the correct move the canonical reference.
 
+**A per-axis bar alone would not control how many findings are wrong, and this is a case where the natural fix is the wrong one.** Level one screens *every* axis, and the axis count grows with the problem set (section 1.14), so a fixed credibility bar per axis lets the expected number of spurious findings grow linearly with the number of axes — the panel would get noisier precisely as the data got better, which is the opposite of what more data should buy.
+
+The control is therefore an **expected-false-finding budget** rather than a stricter bar. Candidates that clear the per-axis bar are admitted strongest-first while the running sum of their posterior error probabilities — one minus each finding's own confidence — stays within the budget. The reason to spend a budget in exactly this currency is that, by linearity of expectation, that running sum *is* the expected number of spurious findings in the list actually shown. So the bound is pathwise, holds for any number of axes, and — the part that matters here — **assumes nothing about independence**. The axes co-load by construction and their posteriors are correlated, so a family-wise correction dividing the bar by the axis count would have to assume that dependence away, and would additionally spend power on axes that never came close to the bar. Under the budget a single strong finding is admitted exactly as it would have been; it is a long tail of marginal ones that gets truncated.
+
+One constraint ties the two numbers together: the budget must not be smaller than one minus the per-axis bar, or even the single strongest admissible finding is unaffordable and the panel can never show anything.
+
+Level two needs no such correction, because it does not create findings — it phrases one level one already admitted, so an error there is a mislabel rather than an extra finding. It does, however, run on the truncated set, so that its winner-take-all attribution of each mistake to a single axis cannot divert evidence onto rows the user will never see.
+
+One detail of the level-one variance is worth stating because getting it wrong is silent: the posterior variance of the sum needs the **covariance** between the two coefficient blocks, and that term must be read, never defaulted. Under the collinearity that makes the split unidentifiable in the first place, the cross-covariance is strongly negative and dominates the sum's variance, so substituting zero for a missing entry does not err on the safe side — it moves the threshold outright. A missing entry means a stale array rather than a genuine zero, and is treated as such.
+
 Findings expand into links to matching past mistakes, with the per-attempt evidence threshold scaled to the finding's own confidence, and problems currently in the recall window withheld so that browsing examples cannot be used to ace an imminent review.
 
 **In review**, a problem's own strongest motifs are surfaced: components clearing a z-score threshold, a small number of them, each labelled from the tail it actually sits on.
@@ -537,7 +547,8 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | `TAU_S` / `TAU_M` / `TAU_V` / session gap | 30d / 4h / 10d / 6h | `rank-decomposition.js` |
 | `WEAKNESS_TEMPERATURE` | 0.5 | `weakness.js` |
 | `MODEL_INPUT_HISTORY_LENGTH` / `RECALL_CANDIDATE_HISTORY_LENGTH` | 500 / 3000 | `constants.js` |
-| finding thresholds | 0.80 level one, 0.85 level two, ≥3 errors | `stats-weaknesses.js` |
+| finding thresholds | `WEAK_PROB_THRESHOLD` 0.80, `DIRECTION_PROB_THRESHOLD` 0.85, `MIN_DIRECTION_N` 3 | `stats-weaknesses.js` |
+| `WEAK_FALSE_FLAG_BUDGET` | 0.5 expected spurious findings; must stay ≥ 1 − `WEAK_PROB_THRESHOLD` | `stats-weaknesses.js` |
 | review motif threshold | 3σ, at most 3 | `motif-bubble.js` |
 | community stats window / `MIN_RANK_PROBLEMS` | 7 days / 10 distinct first-time problems | `pwa/src/server-stats.js` |
 
