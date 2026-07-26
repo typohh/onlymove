@@ -45,16 +45,18 @@ needs more ability to clear at 80% than its midpoint implies:
 The global ceiling λ is produced HERE (written to ratings/rating_constants.json);
 pipeline.fit_population_constants reads it through and no longer fits it posthoc.
 
-OBJECTIVE — base-rate-centered even-error group-DRO (ON by default, ported from the legacy
-residual model). Plain mean BCE is gradient-dominated by the dense mid-ranks, so it under-fits
+OBJECTIVE — plain mean BCE (ERM). An optional base-rate-centered even-error group-DRO is available
+behind `--dro-skill`; it is OFF by default and is NOT part of the shipped config (production
+pipeline.train_rating runs plain BCE). The paragraph below describes that opt-in objective.
+Ported from the legacy residual model. Plain mean BCE is gradient-dominated by the dense mid-ranks, so it under-fits
 the sparse difficulty TAILS — exactly where strong/grinder users live, who then over-rate. So the
 HUMAN-attempt term is a two-pass online group-DRO (Sagawa et al.) over rating(×gap) bins: pass 1
 trains mean BCE to get the rating that defines the bins, pass 2 reweights bins by their loss
 EXCESS over each bin's base-rate entropy (the aleatoric floor — centering is load-bearing, raw-loss
 DRO chases that floor and loses to ERM). The bot-anchor coverage rows keep their flat weighted BCE.
-`--no-dro-skill` reverts to plain weighted BCE (ERM). A per-bin train-logloss table prints under
-either objective (`--report-bins`) so a DRO and an ERM run compare bin-for-bin. See
-docs/rating_model_comparison_results.md (--even-error) and auxiliary/train_rating_legacy.py.
+`--dro-skill` opts in; the default (and production) is plain weighted BCE (ERM). A per-bin
+train-logloss table prints under either objective (`--report-bins`) so a DRO and an ERM run compare
+bin-for-bin. See auxiliary/train_rating_legacy.py.
 
 Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
   ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
@@ -64,7 +66,7 @@ Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships
   ratings/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
   ratings/model.pt                        weights + run metadata
 
-Defaults are the production config (even-error DRO on); the other knobs are for experiments.
+Pass --production-flags to reproduce the shipped config; the other knobs are for experiments.
 
 Usage:
   ./.venv/bin/python3 -m pipeline.train_rating [--epochs 300] [--anchor-weight 0.2] ...
@@ -228,7 +230,7 @@ class RatingNet(nn.Module):
                  floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
                  lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0,
                  move_dropout=0.0, move_dim=0, separate_trunks=False, gauge="theta",
-                 theta_posterior=False):
+                 theta_posterior=False, act_dropout_mode="block"):
         super().__init__()
         # --theta-posterior: per-profile posterior sd + learned population prior sd (see the flag
         # help). theta itself doubles as the posterior MEAN m_u; sampling happens in forward().
@@ -265,7 +267,15 @@ class RatingNet(nn.Module):
         # Block dropout regularizes that reliance without losing the features at eval time:
         # the net must keep working when the fingerprint is absent, so base-rate information
         # routes through the transferable bot-winrate columns instead.
+        # --act-dropout-mode: the shipped "block" mode removes the fingerprint AS A UNIT, so the net
+        # must stay predictive with no activation signal at all and base rates have to route through
+        # the transferable bot-winrate columns. "column" instead drops each PC independently — at
+        # p=0.3 over 128 PCs essentially every row keeps ~90 of them, so the problem stays
+        # identifiable and the constraint degrades to input jitter (a ridge-like variance penalty)
+        # rather than a routing constraint. Which of the two effects the transfer gain comes from is
+        # the measurement this flag exists for.
         self.act_dropout, self.act_dim = float(act_dropout), int(act_dim)
+        self.act_dropout_mode = str(act_dropout_mode)
         # --bw-dropout: elementwise dropout on the bot-winrate columns (train only, scaled).
         # Per-bot pass rates are ~50% overdispersed vs human difficulty — column dropout keeps
         # the net from leaning on any single rung's idiosyncratic value and pushes it toward
@@ -437,7 +447,11 @@ class RatingNet(nn.Module):
             o = self.pp(pidx)
         else:
             if self.training and self.act_dropout > 0 and self.act_dim > 0:
-                keep = (torch.rand(len(feat), 1, device=feat.device)
+                # --act-dropout-mode: "block" draws ONE keep bit per row and broadcasts it over the
+                # whole activation block (the shipped behavior — the block is present or absent);
+                # "column" draws an independent bit per PC, like the bw/move blocks.
+                ncol = 1 if self.act_dropout_mode == "block" else self.act_dim
+                keep = (torch.rand(len(feat), ncol, device=feat.device)
                         >= self.act_dropout).float() / (1.0 - self.act_dropout)
                 feat = torch.cat([feat[:, :self.act_dim] * keep, feat[:, self.act_dim:]], dim=1)
             if self.training and self.bw_dropout > 0 and self.bw_dim > 0:
@@ -633,8 +647,16 @@ PRODUCTION_FLAGS = {
     "pca_dim": 128,
     "diff_hidden": [128, 64],
     "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,  # uniform 0.3
+    "act_dropout_mode": "column",        # per-PC, not whole-block (2026-07-26; see the flag help)
     "anchors": False,                    # no bot-anchor examinees
     "hier_slope": False, "mech_floor": False, "floor_residual": False,  # no M0b machinery
+    # Pinned even though the argparse default already matches production: these are the knobs an
+    # experiment is most likely to flip, and PRODUCTION_FLAGS must not depend on a default staying
+    # put. (dro_skill in particular: the module docstring above spent a long time claiming DRO was
+    # on by default when the default was False — pin the value, don't trust the prose.)
+    "dro_skill": False,                  # plain BCE/ERM — production runs no DRO objective
+    "weight_decay": 0.0,                 # production uses plain Adam, no decoupled decay
+    "lr_schedule": "constant",           # production has no warmup/anneal
     "lr": 0.01, "batch": 65536,
     "min": 5, "min_profile": 8,
     "winsor": 1.0, "slope_floor": 0.01,
@@ -649,7 +671,8 @@ def main():
                     help="Set every model-defining flag to the shipped pipeline.train_rating "
                          "production config (single joint pass, --gauge rating, the two divergence "
                          "barriers --shallow-slope-penalty 1e-4 / --high-floor-penalty 0.01, "
-                         "bw_act+move+phase features, uniform 0.3 dropout, no anchors, learned "
+                         "bw_act+move+phase features, uniform 0.3 dropout at COLUMN granularity "
+                         "on every feature block, plain-BCE objective, no anchors, learned "
                          "ceiling). Installed as DEFAULTS so explicit flags still override; "
                          "experiment-control flags (--seed, --holdout-problem-frac, --out-dir, "
                          "...) are NOT touched. Typical: `--production-flags "
@@ -707,6 +730,16 @@ def main():
                          "base-rate information through the transferable bot-winrate columns "
                          "(soft version of the bw-backbone/act-local split). No-op for "
                          "--features bw. 0 = off.")
+    ap.add_argument("--act-dropout-mode", choices=["block", "column"], default="block",
+                    help="Granularity of --act-dropout. 'block' (shipped) draws ONE keep bit per "
+                         "row for the WHOLE activation block, so the per-problem fingerprint is "
+                         "present or absent as a unit and the net must stay predictive without it "
+                         "— base-rate information is forced through the transferable bot-winrate "
+                         "columns. 'column' draws an independent bit per PC (the bw/move "
+                         "convention): at p=0.3 over 128 PCs a row keeps ~90 of them, so the "
+                         "problem remains identifiable and the regularizer degrades to input "
+                         "jitter. Measures whether the transfer gain comes from the BLOCK "
+                         "structure (routing) or merely from noise on the activation columns.")
     ap.add_argument("--bw-dropout", type=float, default=0.0,
                     help="Elementwise dropout on the bot-winrate feature columns during "
                          "training (scaled; eval uses all). Per-bot pass rates are ~50%% "
@@ -721,6 +754,23 @@ def main():
                          "worsens unseen-problem transfer; column dropout forces the prior to treat "
                          "it as corroborating, not load-bearing. No-op without --move-features. "
                          "0 = off.")
+    ap.add_argument("--weight-decay", type=float, default=0.0,
+                    help="DECOUPLED (AdamW) weight decay on the feature trunk's Linear WEIGHT "
+                         "matrices only — the alternative-regularizer probe: can weight shrinkage "
+                         "replace the 0.3 dropout stack? Motivation: dropout is the measured cause "
+                         "of the phase-2 slope-scale compression (s≈1.73), so a regularizer that "
+                         "bought the same unseen-problem transfer with less scale compression "
+                         "would shrink the global fudge factor. Deliberately EXCLUDES (a) the "
+                         "theta embedding — decaying ability is the measured theta-compression "
+                         "failure (~0.6x ability squash + rating-dependent miscalibration), and "
+                         "under --gauge rating theta carries the free scale, so decaying it "
+                         "silently redefines the gauge; (b) biases and the scalar lapse/global "
+                         "heads — no memorization capacity, and decaying the lapse logit just "
+                         "drags the ceiling toward its sigmoid midpoint; (c) the per-problem "
+                         "residual/pp tables, which have their own explicit L2 knobs. Decoupled "
+                         "(AdamW), not Adam's coupled L2, so the shrinkage rate is not divided by "
+                         "the per-parameter Adam denominator. Joint-pass only (asserts against "
+                         "--staged). 0 = off (plain Adam, byte-for-byte the previous path).")
     ap.add_argument("--head-pin-dropout", type=float, default=0.0,
                     help="Per-batch head-level dropout (user compensation-learning test): with "
                          "this probability, ONE head from --head-pin-heads is pinned to an EMA "
@@ -1501,7 +1551,8 @@ def main():
                       act_dropout=args.act_dropout, act_dim=k if use_act else 0,
                       bw_dropout=args.bw_dropout, bw_dim=nb if use_bw else 0,
                       move_dropout=args.move_dropout, move_dim=nmv if use_mv else 0,
-                      separate_trunks=args.separate_trunks, gauge=args.gauge).to(device)
+                      separate_trunks=args.separate_trunks, gauge=args.gauge,
+                      act_dropout_mode=args.act_dropout_mode).to(device)
         m.staged = True
         m.const_a = float(args.stage_slope_const)
         m.const_c = float(args.stage_floor_const)
@@ -1646,6 +1697,7 @@ def main():
                       move_dim=nmv if use_mv else 0,
                       separate_trunks=args.separate_trunks,
                       gauge=args.gauge,
+                      act_dropout_mode=args.act_dropout_mode,
                       theta_posterior=args.theta_posterior).to(device)
         if args.floor_residual:
             ci = {"diff": 0, "slope": 1, "floor": 2}
@@ -1746,10 +1798,30 @@ def main():
         main_params = [p for nm, p in m.named_parameters()
                        if not (args.floor_residual and args.floor_resid_mode != "joint"
                                and nm == "floor_resid.weight")]
-        groups = [{"params": main_params}]
+        # --weight-decay: decoupled shrinkage on the TRUNK LINEAR WEIGHTS ONLY. The decay set is
+        # named explicitly (net/net_b/net_a/net_c "<idx>.weight") rather than by "everything except
+        # a deny-list", so a future parameter is unregularized until someone opts it in. theta,
+        # biases, lapse_raw and the per-problem tables stay in the plain group (see the flag help).
+        if args.weight_decay > 0:
+            assert not args.staged, "--weight-decay is joint-pass only (not wired into --staged)"
+            decay_names = {nm for nm, _ in m.named_parameters()
+                           if re.match(r"^net(_[bac])?\.\d+\.weight$", nm)}
+            assert decay_names, "--weight-decay set but the model has no feature trunk"
+            named_main = [(nm, p) for nm, p in m.named_parameters()
+                          if any(p is q for q in main_params)]
+            groups = [{"params": [p for nm, p in named_main if nm in decay_names],
+                       "weight_decay": args.weight_decay},
+                      {"params": [p for nm, p in named_main if nm not in decay_names],
+                       "weight_decay": 0.0}]
+            print(f"  [wd] decoupled weight decay {args.weight_decay:g} on "
+                  f"{len(groups[0]['params'])} trunk weight matrices "
+                  f"({sorted(decay_names)}); {len(groups[1]['params'])} params undecayed")
+        else:
+            groups = [{"params": main_params}]
         if detached:
             groups.append({"params": [m.floor_resid.weight], "lr": 0.05})
-        opt = torch.optim.Adam(groups, lr=args.lr)
+        opt = (torch.optim.AdamW(groups, lr=args.lr) if args.weight_decay > 0
+               else torch.optim.Adam(groups, lr=args.lr))
 
         def _lr_factor(ep):
             """Per-epoch multiplicative LR factor, applied to ALL param groups (so the detached-δ
