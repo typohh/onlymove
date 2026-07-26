@@ -175,10 +175,19 @@ function curveForSize(size) {
 // transform live in shared/rank-window.js (one copy shared with the Worker).
 // applyM is imported above.
 
-// Raw rating → normalized 0..1 rank for `size` (rank_index / TOTAL_RANKS, the
-// scale getDescriptiveRank and the recall/weakness models use). Returns null
-// when M isn't loaded; the whole client converts ratings to ranks through this,
-// so package_for_pwa never has to.
+// Raw rating → NORMALIZED RANK for `size` (rank_index / TOTAL_RANKS, the scale
+// getDescriptiveRank and the recall/weakness models use). Returns null when M
+// isn't loaded; the whole client converts ratings to ranks through this, so
+// package_for_pwa never has to.
+//
+// NOT confined to [0, 1], and deliberately NOT clamped. TOTAL_RANKS is the span
+// of the kyu/dan ladder we LABEL, not a bound on the value: M's own knots do not
+// start at index 0, and applyM extrapolates linearly past both end knots, so a
+// problem easier than the weakest knot goes negative and one harder than the
+// strongest exceeds 1. Both are normal — the corpus hard tail is unattempted
+// KataGo-hard material that extrapolates well past the human knots. Consumers
+// must treat this as an unbounded continuous coordinate: don't clamp it, don't
+// assume a midpoint of 0.5, and don't infer a percentile from it.
 export function normalizedRankForSize(rawRating, size) {
     const c = curveForSize(size);
     if (!c || typeof rawRating !== 'number') return null;
@@ -199,9 +208,9 @@ export function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
     return applyM(rating + deltaRating, c);
 }
 
-// Rating units spanned by ONE normalized-rank unit (the full 0..1 = 29-index
+// Rating units spanned by ONE normalized-rank unit (the full TOTAL_RANKS-index
 // scale), from the shipped curve's endpoints (~5.4). This is the unit constant
-// between a rank gap in normalized 0..1 units and the same gap in raw-rating
+// between a rank gap in normalized-rank units and the same gap in raw-rating
 // units; the recall model needs it to center its PROBLEM_DIFFICULTY prior (its
 // gap feature is normalized-rank while a_p is per RATING unit). An endpoint
 // mean — local knot slopes vary ~2-11 ranks/rating — the model's fitted
@@ -494,7 +503,7 @@ function localSeFloor(rankIndex) {
     if (!pool || pool.length === 0) return null;
     const curve = curveForSize(state.boardSize);
     if (!curve) return null;
-    const target = rankIndex / TOTAL_RANKS;               // pool ranks are normalized 0..1
+    const target = rankIndex / TOTAL_RANKS;               // pool ranks are normalized-rank
     const nearest = pool
         .slice()
         .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target))

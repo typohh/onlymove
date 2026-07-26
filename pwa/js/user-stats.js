@@ -251,7 +251,7 @@ export async function updateUserStats(isCorrect, {
     const answer = {
         problemId,
         // Raw black-box rating (rating-space skill decomposition reads this);
-        // problemRank is its normalized 0..1 rank under M (recall + weakness
+        // problemRank is its normalized rank under M (recall + weakness
         // models read this). Both captured at ingest from the served problem.
         problemRating: currentProblem.rating,
         problemRank: currentProblem.rank,

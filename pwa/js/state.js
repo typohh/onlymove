@@ -278,7 +278,7 @@ export async function syncTailExpectedToActual() {
 const shared = {
     userRank: readJSON('userRank', null),
     // serveRank = userRank + the UCB serve bonus (uncertainty-scaled), in the same
-    // normalized 0..1 units. Problem SELECTION serves near serveRank (slightly harder
+    // normalized-rank units. Problem SELECTION serves near serveRank (slightly harder
     // while the rank estimate is still uncertain); everything DISPLAYED reads userRank.
     serveRank: readJSON('serveRank', null),
     // Posterior SE of the window rank estimate (rank-index units), stored with

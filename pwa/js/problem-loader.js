@@ -131,8 +131,9 @@ async function buildProblem(raw, { isRepeat, linked, orientation }) {
         filename: raw.filename,
         sgf: reoriented.sgf,
         linked,
-        // `rating` is the raw black-box rating; `rank` is its normalized 0..1
-        // rank under the current curve M (derived at ingest).
+        // `rating` is the raw black-box rating; `rank` is its normalized rank
+        // under the current curve M (derived at ingest; unbounded, not a 0..1
+        // fraction — see normalizedRankForSize).
         rating: raw.rating,
         rank: raw.rank,
         quality: raw.quality || 0,
@@ -249,7 +250,7 @@ async function doLoadZipProblems(zipFilename) {
 
     const metadataContent = await metadataFile.async('text');
     // `p.rating` is the raw black-box rating shipped by package_for_pwa; derive
-    // the normalized 0..1 rank here with M (the client owns rating→rank). `p.slope`
+    // the normalized rank here with M (the client owns rating→rank). `p.slope`
     // is the raw 2PL discrimination a_p; keep it raw (the rank estimator uses it)
     // and derive the selection weight (∝ the 4PL Fisher information a_p²·anchorInfo(floor))
     // from it and the shipped guessing floor here.

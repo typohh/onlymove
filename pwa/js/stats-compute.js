@@ -121,7 +121,7 @@ export function computeUserCommunityBuckets(history, timeBins) {
 
     // Answer-derived rank: mean internal-rank index of distinct first-time
     // problems → EGF scalar → label (the server's recipe, minus shard rounding;
-    // problemRank is already the per-problem M index normalized to 0..1).
+    // problemRank is already the per-problem M index divided by TOTAL_RANKS).
     const MIN_RANK_PROBLEMS = 10;
     const firstByProblem = new Map();
     for (const a of recent) {

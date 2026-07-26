@@ -132,7 +132,7 @@ const LN_S_TRAIN_MAX = 8;
 const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
 
 // Neutral value of the PROBLEM_DIFFICULTY multiplier — the coefficient at which
-// coeff·a_p·(rank gap in NORMALIZED 0..1 units) equals the 2PL's a_p·(gap in
+// coeff·a_p·(rank gap in NORMALIZED-RANK units) equals the 2PL's a_p·(gap in
 // raw-rating units): the rating span of the full rank scale (~5.4 from the
 // shipped curve). The L2 prior shrinks toward THIS, not 1.0: a_p is per rating
 // unit, so a target of 1.0 would be unit-inconsistent by that same ~5.4 factor — and
@@ -174,7 +174,7 @@ function retentionLogit(features, params, floor) {
 // `timePct` defaults to the neutral 0.5.
 //
 // PROBLEM_DIFFICULTY is the RELATIVE difficulty (userRank − problemRank, both
-// normalized 0..1) WEIGHTED by the problem's own 3PL discrimination a_p, so a
+// normalized-rank units) WEIGHTED by the problem's own 3PL discrimination a_p, so a
 // sharper problem separates abilities more steeply. Feeding the user-vs-problem
 // delta (not absolute rank) makes "how hard is this *for this user*" explicit
 // and robust at cold start instead of leaning on the INTERCEPT to absorb
@@ -586,7 +586,7 @@ const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
     // Multiplier on the per-problem a_p·(rank gap). Neutral ("the shipped
     // discrimination is right as-is for this user") is DIFFICULTY_NEUTRAL ≈ 5.4,
-    // NOT 1.0: the gap feature is in normalized 0..1 rank units while a_p is per
+    // NOT 1.0: the gap feature is in normalized-rank units while a_p is per
     // raw-rating unit (see DIFFICULTY_NEUTRAL above).
     [MODEL_INDICES.PROBLEM_DIFFICULTY]: DIFFICULTY_NEUTRAL,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
