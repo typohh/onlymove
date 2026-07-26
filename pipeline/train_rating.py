@@ -21,8 +21,9 @@ a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
 There are NO per-problem residuals: the shared net IS the model, so every problem — including the
 never-attempted and the one-sided — gets its 4PL straight from features. The only training target is
 the HUMAN first-time attempts (bot data enters only through the features). The feature trunk uses 0.3
-block dropout on the activation columns, 0.3 column dropout on each of the bot-winrate and
-candidate-move-eval columns, and 0.3 dropout between the trunk's own hidden layers.
+COLUMN dropout on each of the activation, bot-winrate and candidate-move-eval blocks (every feature
+column dropped independently), and 0.3 dropout between the trunk's own hidden layers. The activation
+block used BLOCK dropout (all columns on/off together) until 2026-07-26; see the ACT_DROPOUT note.
 
 The fit is a SINGLE JOINT pass (replaced the two-phase staged coordinate descent, 2026-07-24): all
 three per-problem heads and the global ceiling train together, made well-posed by three measured
@@ -118,7 +119,19 @@ SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
 DIFF_HIDDEN = (128, 64)          # shared feature→4PL trunk hidden layers
 DROPOUT = 0.3                    # trunk dropout (0.3 uniformly — the backbone-overfit fix)
-ACT_DROPOUT = 0.3                # block dropout on the activation feature block (train only)
+# COLUMN dropout on the activation block (train only) — each PC dropped independently, the same
+# convention as the bot-winrate and move blocks. Replaced BLOCK dropout (one keep bit per row for all
+# PCA_DIM columns at once) on 2026-07-26 after a paired 3-seed measurement: column granularity is
+# worth ~0.006-0.012 nats of held-out-PROBLEM logloss (every seed, every cluster-bootstrap CI
+# excluding zero) AND shrinks the phase-2 correction (gain 8.0 -> 5.5 mnat, s 1.63 -> 1.52 mean).
+# Why the finer grain wins, when the block variant was introduced precisely to break per-problem
+# fingerprint memorization: block dropout leaves the fingerprint FULLY INTACT on 1-p of rows, so the
+# net can learn a present/absent regime pair and memorize freely in the majority one. Column dropout
+# never presents the same PCA_DIM-wide code twice, so the exact CONJUNCTION memorization needs is
+# unreliable on every row, while the smooth low-order signal survives everywhere. The dose response
+# is a broad plateau (0.3 and 0.5 tie, 0.7 slightly worse) and only degrades past ~0.9, where so few
+# PCs survive that it reverts to the block regime — which is also the mechanism's own prediction.
+ACT_DROPOUT = 0.3
 BW_DROPOUT = 0.3                 # column dropout on the bot-winrate columns (train only)
 MOVE_DROPOUT = 0.3               # column dropout on the candidate-move-eval columns (train only)
 LR = 0.01
@@ -241,7 +254,7 @@ class RatingNet(nn.Module):
 
     def __init__(self, fdim, n_users, act_dim, bw_dim, move_dim):
         super().__init__()
-        self.act_dim = int(act_dim)         # activation block = cols [:act_dim]  (block-dropped)
+        self.act_dim = int(act_dim)         # activation block = cols [:act_dim]  (column-dropped)
         self.bw_dim = int(bw_dim)           # bot-winrate block = cols [act_dim:+bw_dim] (col-drop)
         self.move_dim = int(move_dim)       # move-eval block = cols [act_dim+bw_dim:+move_dim]
         self.register_buffer("b_mu", torch.zeros(()))   # rating-gauge EMA (train stats → eval)
@@ -263,9 +276,9 @@ class RatingNet(nn.Module):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
     def _dropped(self, feat):
-        """Train-time block/column dropout on the feature blocks (eval passes through)."""
-        if self.training and self.act_dim > 0:               # block-drop the whole activation block
-            keep = (torch.rand(len(feat), 1, device=feat.device)
+        """Train-time column dropout on the feature blocks (eval passes through)."""
+        if self.training and self.act_dim > 0:               # column-drop the activation block
+            keep = (torch.rand(len(feat), self.act_dim, device=feat.device)
                     >= ACT_DROPOUT).float() / (1.0 - ACT_DROPOUT)
             feat = torch.cat([feat[:, :self.act_dim] * keep, feat[:, self.act_dim:]], dim=1)
         if self.training and self.bw_dim > 0:                # column-drop the bot-winrate block
@@ -481,7 +494,8 @@ def main():
                   f, indent=2)
     config = {"features": "bw_act", "move_features": True, "phase_features": True,
               "pca_dim": PCA_DIM, "diff_hidden": list(DIFF_HIDDEN), "dropout": DROPOUT,
-              "act_dropout": ACT_DROPOUT, "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,
+              "act_dropout": ACT_DROPOUT, "act_dropout_mode": "column",
+              "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,
               "lr": LR, "batch": BATCH, "epochs": EPOCHS,
               "gauge": "rating", "gauge_mom": GAUGE_MOM,
               "shallow_slope_penalty": SHALLOW_SLOPE_PENALTY,
