@@ -74,13 +74,23 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     +0.041±0.011 at 2.5%. 0.5% is the accepted compromise — near-neutral NLL
     while still capping any single junk row's pull at −log(eps/N) ≈ 8.7 nats
     (vs ~19 unbounded). Don't raise it without re-running that CV.
-  * THE GAUGE. With no server privileged the consensus scale is only defined up to a
-    monotone reparameterisation. We pin it by a VERY WEAK penalty on the
-    reliability-weighted (by declaration count) mean coupling offset toward identity
-    (GAUGE_WEIGHT). Weak because the likelihood is flat in the gauge direction, so the
-    scale has no motivation to drift — a strong pin is unneeded and would shrink the real
-    per-server offsets. The data-rich servers set the scale, which lands ≈ EGF, so the
-    headline barely moves from the previous EGF-anchored rank.
+  * THE GAUGE — TWO PRIORS, NOT ONE. With no server privileged the LIKELIHOOD leaves the
+    consensus scale free up to a MONOTONE reparameterisation (remap the latent, absorb it
+    into every coupling's free thresholds and the curve's free per-segment gaps). That is
+    infinite-dimensional, so GAUGE_WEIGHT alone cannot pin it and never did:
+      - SERVER_LAMBDA (the uniform-spacing prior pulling each coupling's spacings toward
+        the baseline of 1 consensus unit per server rank) is what removes all but the
+        AFFINE part, scale included — a non-affine remap unbalances the spacings of every
+        coupling at once, a dilation scales them all. The curve pins nothing: its
+        steepness (log β) is free and its shape prior is deliberately gentle.
+      - GAUGE_WEIGHT then pins the one direction spacings are blind to, a rigid
+        TRANSLATION: a VERY WEAK penalty on the reliability-weighted (by declaration
+        count) mean coupling offset toward identity. Weak because the likelihood is flat
+        along it, so the location has no motivation to drift — a strong pin is unneeded
+        and would shrink the real per-server offsets.
+    Both are soft: they select a preferred point on a flat manifold rather than removing
+    the freedom. The data-rich servers set the scale, which lands ≈ EGF, so the headline
+    barely moves from the previous EGF-anchored rank.
 
 Run pipeline.fetch_database first to refresh attempts/database.{sql,sqlite} (the survey +
 attempts source); this step then needs neither GPU nor the heavy pipeline. Then publish
