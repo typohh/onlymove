@@ -70,6 +70,14 @@ def _load_labels_and_anchors():
             legacy = os.path.join(OUT_DIR, "labels_legacy_ica.json")
             os.replace(lpath, legacy)
             print(f"  archived pre-axes labels.json -> {legacy}")
+            # The anchors belong to the space being retired, so they cannot be
+            # matched against — but they are still the only record of those
+            # motifs' directions, and the fresh bank below would otherwise let
+            # the write overwrite them. Move them aside with their labels.
+            if os.path.exists(apath):
+                legacy_a = os.path.join(OUT_DIR, "label_anchors_legacy_ica.npz")
+                os.replace(apath, legacy_a)
+                print(f"  archived pre-axes anchors -> {legacy_a}")
             labels = None
     if labels is None:
         labels = {"version": 4, "space": LABELS_SPACE,
@@ -240,6 +248,13 @@ def main():
     tids = fit["tids"]
 
     labels, anchors = _load_labels_and_anchors()
+    # Motif identity is APPEND-ONLY, and these two snapshots are what proves it
+    # at the write below. A motif absent from this fit keeps its banked label
+    # text and its frozen anchor row so a later fit can recognize it again; the
+    # anchor row is the ONLY record of what that motif's direction was, so
+    # dropping one is unrecoverable by re-running anything.
+    prior_anchor_ids = set(anchors["ids"])
+    prior_bank_ids = set(labels["bank"])
     matches = _match_axes_to_anchors(fit["loadings"], tids, anchors)
     # canonical orientation: flip any axis that matched an anchor negatively,
     # BEFORE anything is written — labels never swap sides
@@ -250,6 +265,23 @@ def main():
             matches[k] = (mid, 1.0)
     labels, anchors = _update_labels(labels, anchors, fit["loadings"], tids,
                                      matches)
+
+    # Checked BEFORE the first write, not beside the write it guards: an abort
+    # partway through leaves the artifacts disagreeing with each other, and a
+    # rewritten axes.npz next to the previous labels and anchors is exactly the
+    # inconsistent state this whole guard exists to prevent.
+    lost_anchors = sorted(prior_anchor_ids - set(anchors["ids"]))
+    lost_bank = sorted(prior_bank_ids - set(labels["bank"]))
+    if lost_anchors or lost_bank:
+        raise RuntimeError(
+            "axis identity would be LOST by this run — refusing before any "
+            "artifact is touched.\n"
+            f"  anchor directions dropped: {lost_anchors}\n"
+            f"  banked labels dropped    : {lost_bank}\n"
+            "Anchors and bank entries are append-only: a motif missing from "
+            "the current fit must keep both so a later fit can recognize and "
+            "re-adopt it. A frozen anchor cannot be regenerated — it is the "
+            "only surviving record of that motif's direction.")
 
     os.makedirs(OUT_DIR, exist_ok=True)
     # per_problem.csv — same contract packaging always read. tid->size comes
