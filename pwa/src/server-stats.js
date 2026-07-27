@@ -1,11 +1,7 @@
-import { interpExtrap, rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
-// M (rating→rank curve) is inlined at build time — same source the client bundles
-// (pwa/tsumegos/rating_to_rank.json) — so the Community rank histogram needs no
-// asset fetch for it. Other tsumego assets (lookup.txt, metadata.json) stay served.
-import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
+import { rankScalarToLabel } from '../shared/rank-math.js';
 import { APP_VERSION } from './version.js';
 import { CORS_HEADERS, jsonResponse } from './http.js';
-import { normalizeCountry } from './leaderboard.js';
+import { normalizeCountry, readActivePlayers } from './leaderboard.js';
 
 const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 
@@ -113,15 +109,6 @@ async function computeServerStats(env) {
   // isn't comparable across users; restricting to post-failure recalls
   // standardizes the measure.
   const userProblemSeq = new Map(); // user → Map<problem, [{ t, success }]>
-  // Answer-derived rank: per user, the set of DISTINCT first-time problems they
-  // attempted (with board size). Problems are served difficulty-matched (~80%
-  // clear) near the user's rank, so the mean internal rank of these problems
-  // approximates the user's own rank — coarse but enough for the histogram.
-  // Repeats (recall) are excluded: they're re-shown by the spaced-repetition
-  // schedule, not freshly difficulty-matched. neededProblems is the union we
-  // must resolve to a rating below.
-  const userFirstProblems = new Map(); // user → Map<problem, size>
-  const neededProblems = new Set();    // every distinct first-time problem id
 
   for (const r of rows) {
     attemptsAll++;
@@ -161,12 +148,6 @@ async function computeServerStats(env) {
       seq.push({ t: ts, success: !!r.success, repeat: !!r.is_repeat });
     }
 
-    if (!r.is_repeat) {
-      let pm = userFirstProblems.get(r.user_id);
-      if (!pm) { pm = new Map(); userFirstProblems.set(r.user_id, pm); }
-      if (!pm.has(r.problem)) pm.set(r.problem, r.size);
-      neededProblems.add(r.problem);
-    }
   }
 
   // Per-user median time → fine bucket; the histogram then counts USERS per
@@ -263,19 +244,13 @@ async function computeServerStats(env) {
     if (i >= 0) attemptsPerUserDist[i].value += 1;
   }
 
-  // Answer-derived rank histogram (EGF scale, weakest→strongest). Each active
-  // user's rank is estimated from the last 7 days of first-time attempts — the
-  // mean internal rank of the difficulty-matched problems they were served —
-  // not from self-reported server ranks. Users with too little data are dropped.
-  const ranks = await computeAnswerRankHist(env, userFirstProblems, neededProblems);
-
-  // Country distribution of active players, off the leaderboard table's stamped
-  // edge geo-IP `country` (see leaderboard.js). Separate query, but the table is
-  // pruned to roughly weekly-active size so it's a small full scan — the same one
-  // the /leaderboard page and cron already run — NOT another pass over the big
-  // tsumego_reports. Hidden profiles are excluded (they opted their country out of
-  // the board; keep them out of the aggregate too). Sorted commonest-first.
-  const countries = await computeCountryDist(env, since);
+  // Rank histogram (weakest→strongest) and country distribution of active players,
+  // both from ONE scan of the leaderboard table — the same small, weekly-pruned
+  // scan the /leaderboard page and cron already run, NOT another pass over the big
+  // tsumego_reports. Each player's rank is the real window MLE over their
+  // materialized attempt buffer, not a self-report and not a proxy off what they
+  // were served. See computeLeaderboardStats.
+  const { ranks, countries } = await computeLeaderboardStats(env);
 
   const data = {
     // Stamp the code version so a deploy that changes this computation
@@ -296,113 +271,71 @@ async function computeServerStats(env) {
   return data;
 }
 
-// Country distribution over players active in the window, from the leaderboard
-// table's stamped geo-IP `country`. One GROUP BY over the (small, weekly-pruned)
-// leaderboard table — D1 bills the rows it scans, ~weekly-active size, same order
-// as the /leaderboard page's own scan. `country` is already normalizeCountry-clean
-// (real ISO-alpha-2 only), so no sentinel rows here. NOT EXISTS drops hidden
-// profiles. Returns [{ country, n }] commonest-first; [] on any error (the section
-// just doesn't render).
-async function computeCountryDist(env, since) {
+// Community rank histogram + country distribution, both from ONE scan of the
+// leaderboard table (readActivePlayers): every player active in the window with
+// their UNTIMED onlymove rank — the same window MLE, over the same materialized
+// buffer, that the front page and the /leaderboard page run — plus the row's
+// stamped edge geo-IP country.
+//
+// The rank half replaced an answer-derived proxy that averaged the difficulty of
+// the problems a user was SERVED in the window. That proxy carried two biases no
+// window length could fix, pulling in opposite directions at the two ends of the
+// ladder, so it compressed the distribution toward the middle. Selection centres on
+// the SERVE rank — the estimate plus the upper-confidence bonus
+// (shared/rank-window.js) — which is non-negative by construction and largest
+// exactly where the posterior is loose, so an unconverged user reads too STRONG.
+// And it replaced each rating by the midpoint of its shard's rating RANGE, while
+// shards are equal-count, so tail bands are wide and their mass is not symmetric
+// about that midpoint — a per-band offset whose VARIANCE averaging reduces, not its
+// bias, and which (with the pool of nearest loaded problems being one-sided out
+// there) reads a strong player too WEAK. A proper fit has neither, and needs no
+// serving assumption at all. D1 cost is unchanged — the leaderboard table is pruned
+// to roughly weekly-active size and was already scanned here for the country
+// distribution, so the histogram now rides that same scan instead of the
+// lookup.txt + metadata.json asset walk it used to do.
+//
+// NOTE the population also changes: this counts players carrying a leaderboard rank
+// (RANK_START_MIN valid attempts, the board's own uniform gate) who were active in
+// the window, where the proxy counted anyone who answered a handful of problems in
+// it. Beginners below the gate drop out and established players having a light week
+// come in — a larger shift on real data than either bias above.
+async function computeLeaderboardStats(env) {
   try {
-    const res = await env.DB.prepare(
-      `SELECT l.country AS country, COUNT(*) AS n
-         FROM leaderboard l
-        WHERE l.last_active >= ?1 AND l.country IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM hidden_profiles h WHERE h.user_id = l.user_id)
-        GROUP BY l.country
-        ORDER BY n DESC, l.country ASC`
-    ).bind(since).all();
-    return ((res && res.results) || [])
-      .filter((r) => typeof r.country === 'string' && r.n > 0)
-      .map((r) => ({ country: r.country, n: r.n }));
+    const { players } = await readActivePlayers(env, { activeDays: 7 });
+
+    // Ranks: one player per bin, weakest -> strongest. Players below the
+    // leaderboard's own RANK_START_MIN gate carry no rank and are left out, exactly
+    // as they are left off the board. Hidden profiles ARE counted: hiding withholds
+    // a name and a country, never the onlymove rank. Clamped to the labelled ladder
+    // so a far-extrapolated estimate lands in an end bin rather than inventing a
+    // label (the underlying scalar is unbounded — see the client's rank notes).
+    const rankHist = new Map();
+    for (const p of players) {
+      if (p.internal === null) continue;
+      const scalar = Math.max(-29, Math.min(9, Math.round(p.internal)));
+      rankHist.set(scalar, (rankHist.get(scalar) || 0) + 1);
+    }
+    const ranks = [...rankHist.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([v, n]) => ({ rank: rankScalarToLabel(v), n }));
+
+    // Countries: hidden profiles excluded — they opted their country out of the
+    // board, so keep them out of the aggregate too. `country` is already
+    // normalizeCountry-clean (real ISO-alpha-2 only), so there are no sentinels to
+    // filter. Commonest-first, ties by code.
+    const byCountry = new Map();
+    for (const p of players) {
+      if (p.hidden || typeof p.country !== 'string' || !p.country) continue;
+      byCountry.set(p.country, (byCountry.get(p.country) || 0) + 1);
+    }
+    const countries = [...byCountry.entries()]
+      .sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1))
+      .map(([country, n]) => ({ country, n }));
+
+    return { ranks, countries };
   } catch (e) {
-    console.error('country dist failed:', e);
-    return [];
+    // Either section just doesn't render; the rest of the blob is unaffected.
+    console.error('leaderboard-derived stats failed:', e);
+    return { ranks: [], countries: [] };
   }
-}
-
-// Minimum distinct first-time problems a user needs in the window before we
-// trust their answer-derived rank. Below this we leave the user out entirely.
-const MIN_RANK_PROBLEMS = 10;
-
-function fetchTsumegoAsset(env, path) {
-  return env.ASSETS
-    .fetch(new Request('https://onlymove.net' + path))
-    .then(res => (res.ok ? res : null))
-    .catch(e => { console.error('asset fetch failed:', path, e); return null; });
-}
-
-// Build the Community "Ranks" histogram from answers. Each problem's coarse
-// rating is the midpoint of the shard it lives in (lookup.txt resolves a
-// problem id → shard hash; the per-size metadata.json gives that shard's
-// min/max rating); that rating maps to an internal rank index via M
-// (rating_to_rank.json). A user's rank is the mean index over their first-time
-// problems — sound because selection serves problems near the user's rank.
-// Returns [{ rank: label, n }] ordered weakest→strongest; [] if assets missing.
-async function computeAnswerRankHist(env, userFirstProblems, neededProblems) {
-  if (!neededProblems.size) return [];
-
-  // 1. problem id → shard hash, parsed straight off lookup.txt ("id hash size"
-  //    per line). Keep only the ids we need to avoid a 143k-entry map.
-  const lookupRes = await fetchTsumegoAsset(env, '/lookup.txt');
-  if (!lookupRes) return [];
-  const text = await lookupRes.text();
-  const idToShard = new Map();
-  for (let start = 0; start < text.length;) {
-    let nl = text.indexOf('\n', start);
-    if (nl < 0) nl = text.length;
-    const sp = text.indexOf(' ', start);
-    if (sp > start && sp < nl) {
-      const id = text.slice(start, sp);
-      if (neededProblems.has(id)) {
-        const rest = text.slice(sp + 1, nl).trim();
-        idToShard.set(id, rest.split(/\s+/)[0]);
-      }
-    }
-    start = nl + 1;
-  }
-
-  // 2. shard hash → midpoint raw rating (board-independent scale, so a single
-  //    map across both sizes is fine).
-  const shardRating = new Map();
-  for (const size of [9, 13]) {
-    const res = await fetchTsumegoAsset(env, `/tsumegos/${size}/metadata.json`);
-    if (!res) continue;
-    const shards = await res.json();
-    for (const s of shards) {
-      const hash = String(s.filename).split('.')[0];
-      shardRating.set(hash, (s.min_rating + s.max_rating) / 2);
-    }
-  }
-
-  // 3. M curve (raw rating → internal rank index), per board size — inlined at
-  //    build time (see the import at the top), so no asset fetch is needed.
-  const curves = RATING_RANK_MAP;
-  const rankIndexOf = (rating, size) => {
-    const c = curves[String(size)] || curves['9'];
-    if (!c || !Array.isArray(c.ratings) || !Array.isArray(c.rank_indices)) return null;
-    return interpExtrap(rating, c.ratings, c.rank_indices);
-  };
-
-  // 4. Per user: mean internal-rank index → EGF scalar (index 19 == 1k == 0).
-  const rankHist = new Map();
-  for (const pm of userFirstProblems.values()) {
-    let sum = 0, n = 0;
-    for (const [pid, size] of pm) {
-      const hash = idToShard.get(pid);
-      if (!hash) continue;
-      const rating = shardRating.get(hash);
-      if (rating == null) continue;
-      const idx = rankIndexOf(rating, size);
-      if (idx == null || !Number.isFinite(idx)) continue;
-      sum += idx; n++;
-    }
-    if (n < MIN_RANK_PROBLEMS) continue;
-    const scalar = Math.max(-29, Math.min(9, Math.round(sum / n) - RANK_INDEX_OFFSET));
-    rankHist.set(scalar, (rankHist.get(scalar) || 0) + 1);
-  }
-  return [...rankHist.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([v, n]) => ({ rank: rankScalarToLabel(v), n }));
 }

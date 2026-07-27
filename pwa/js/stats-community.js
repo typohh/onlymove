@@ -159,39 +159,19 @@ export async function buildServerStatsPane(history = []) {
     }
 
     // Country distribution of active players (leaderboard geo-IP; hidden profiles
-    // excluded server-side). Flag + code label, commonest-first; the long tail past
-    // COUNTRY_TOP_N is folded into one "Other" row so the list stays compact. The
-    // "you" bar is the requester's own edge geo-IP country (youCountry, from the
-    // Worker header): its top-N bar is highlighted, or — when it's folded into the
-    // tail — it's surfaced as its own bar so the marker never hides inside "Other".
+    // excluded server-side). Flag + code label, commonest-first, EVERY country
+    // listed — the tail used to fold into one "Other" row, which hid exactly the
+    // small communities the list is interesting for. The "you" bar is the
+    // requester's own edge geo-IP country (youCountry, from the Worker header) and
+    // is highlighted wherever it lands.
     let countryHighlighted = false;
     if (data.countries && data.countries.length) {
-        const COUNTRY_TOP_N = 15;
         const sorted = data.countries.slice().sort((a, b) => b.n - a.n);
-        const top = sorted.slice(0, COUNTRY_TOP_N);
-        const bars = top.map(c => {
+        const bars = sorted.map(c => {
             const f = flag(c.country);
             return { label: (f ? f + ' ' : '') + c.country, value: c.n };
         });
-        const tail = sorted.slice(COUNTRY_TOP_N);
-        if (tail.length) {
-            const otherN = tail.reduce((sum, c) => sum + c.n, 0);
-            bars.push({ label: `${getTerm('statsCountriesOther')} (+${tail.length})`, value: otherN });
-        }
-        let countryHi = -1;
-        if (youCountry) {
-            const topIdx = top.findIndex(c => c.country === youCountry);
-            if (topIdx >= 0) {
-                countryHi = topIdx;
-            } else {
-                const mine = tail.find(c => c.country === youCountry);
-                if (mine) {
-                    const f = flag(mine.country);
-                    countryHi = bars.length;
-                    bars.push({ label: (f ? f + ' ' : '') + mine.country, value: mine.n });
-                }
-            }
-        }
+        const countryHi = youCountry ? sorted.findIndex(c => c.country === youCountry) : -1;
         countryHighlighted = countryHi >= 0;
         const h = document.createElement('div');
         h.className = 'server-stats-heading';

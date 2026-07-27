@@ -597,6 +597,73 @@ export async function reconcileBuffers(env) {
     }
 }
 
+// Resolve one leaderboard row's rank: the stored pred_egf_rank if present, else a
+// recompute from the row's buffer (the stored value can lag a threshold change or
+// corpus churn; the recompute surfaces a rank the instant the valid count reaches
+// the gate, without waiting for the reconcile cron). `deltaRating` is the user's
+// personal time dock in rating units, baked into the server-frame rank and returned
+// so a caller can subtract it back off for the untimed onlymove frame. Returns
+// predEgfRank = null for a row below RANK_START_MIN valid in-corpus attempts.
+// Shared by the /leaderboard page and the Community rank histogram so the two can
+// never disagree about a player's rank.
+export function resolveRowRank(row, params) {
+    const buf = row.buffer ? parseBuffer(row.buffer) : [];
+    let predEgfRank = Number.isFinite(row.pred_egf_rank) ? row.pred_egf_rank : null;
+    let deltaRating = 0;
+    if (predEgfRank === null) {
+        if (params && buf.length) {
+            const c = computeRank(buf, params);
+            deltaRating = c.deltaRating || 0;
+            if (Number.isFinite(c.predEgfRank)) predEgfRank = c.predEgfRank;
+        }
+    } else if (params && buf.length) {
+        deltaRating = timeDeltaRatingFromBuffer(buf, params);
+    }
+    return { predEgfRank, deltaRating };
+}
+
+// Every player active in the window, with their UNTIMED onlymove rank scalar —
+// the same quantity the front page displays and the /leaderboard page's onlymove
+// units column shows. ONE scan of the (weekly-pruned) leaderboard table plus the
+// small hidden_profiles read; the Community aggregation builds both its rank
+// histogram and its country distribution from this, so it costs one scan, not two.
+// `internal` is null below the RANK_START_MIN gate (tallied in `belowGate`), and
+// `hidden` marks a user who opted out of the board — their rank still counts (the
+// onlymove rank is never hidden), their country does not.
+export async function readActivePlayers(env, { activeDays = 7 } = {}) {
+    if (!env.DB) return { players: [], belowGate: 0 };
+    const since = new Date(Date.now() - activeDays * 86400000).toISOString();
+    const [res, hres] = await Promise.all([
+        env.DB.prepare(
+            `SELECT user_id, pred_egf_rank, buffer, country FROM leaderboard
+              WHERE last_active >= ?1`
+        ).bind(since).all(),
+        env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all(),
+    ]);
+    const rows = (res && res.results) || [];
+    const hidden = new Set(((hres && hres.results) || []).map((h) => h.user_id));
+    let params = null;
+    if (rows.some((r) => r.buffer)) {
+        try { params = await getProblemParams(env); }
+        catch (e) { console.error('active players params load failed:', e); }
+    }
+    const players = [];
+    let belowGate = 0;
+    for (const r of rows) {
+        const { predEgfRank, deltaRating } = resolveRowRank(r, params);
+        if (predEgfRank === null) belowGate++;
+        const internal = predEgfRank === null ? null
+            : deTimeInternalScalar(egfToInternalScalar(predEgfRank), deltaRating);
+        players.push({
+            userId: r.user_id,
+            country: r.country || null,
+            hidden: hidden.has(r.user_id),
+            internal: Number.isFinite(internal) ? internal : null,
+        });
+    }
+    return { players, belowGate };
+}
+
 // --- compute-on-read: rows for the /leaderboard page -----------------------------
 // Walks the (pruned, small) leaderboard table limited to rows active in the
 // trailing `activeDays` window and returns { rows, belowMin }: `rows` are the
@@ -693,24 +760,9 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     const visible = [];
     for (const r of rows) {
         const isHidden = hidden.has(r.user_id);
-        // Resolve the rank: stored pred_egf_rank if present, else recompute on read from
-        // the buffer (the stored value can lag a threshold change or a corpus churn; the
-        // recompute surfaces a rank the instant the valid count reaches the gate, without
-        // waiting for the reconcile cron). deltaRating is the user's personal time dock
-        // (rating units) baked into the server-frame rank — recovered here so the page can
-        // subtract it back off for the untimed onlymove display.
-        const buf = r.buffer ? parseBuffer(r.buffer) : [];
-        let predEgfRank = Number.isFinite(r.pred_egf_rank) ? r.pred_egf_rank : null;
-        let deltaRating = 0;
-        if (predEgfRank === null) {
-            if (params && buf.length) {
-                const c = computeRank(buf, params);
-                deltaRating = c.deltaRating || 0;
-                if (Number.isFinite(c.predEgfRank)) predEgfRank = c.predEgfRank;
-            }
-        } else if (params && buf.length) {
-            deltaRating = timeDeltaRatingFromBuffer(buf, params);
-        }
+        // Rank + personal time dock via the shared resolver (see resolveRowRank): the
+        // page subtracts the dock back off for the untimed onlymove display.
+        const { predEgfRank, deltaRating } = resolveRowRank(r, params);
         // Below the list-entry gate: not shown, only tallied. (A hidden sub-gate row is
         // counted too — the tally is a raw activity aggregate, not identifying.)
         if (predEgfRank === null) { belowMin++; continue; }
