@@ -176,28 +176,23 @@ def _update_labels(labels, anchors, loadings, tids, matches):
 
 
 # ------------------------------------------------------------------ per-cell fanout
-def _init_worker(basis_path, delta_w, prob_vals, act_dir_by_size):
+def _init_worker(delta_full, prob_vals, act_dir_by_size):
     global _W
-    d = np.load(basis_path, allow_pickle=False)
-    basis = {"m1": d["basis_m1"], "s1": d["basis_s1"], "C": d["basis_C"],
-             "pca_mean": d["basis_pca_mean"], "m2": d["basis_m2"],
-             "s2": d["basis_s2"]}
-    _W = (basis, delta_w, prob_vals, act_dir_by_size)
+    _W = (delta_full, prob_vals, act_dir_by_size)
 
 
 def _project_one(task):
     size, tid = task
-    basis, delta_w, prob_vals, act_dir_by_size = _W
+    delta_full, prob_vals, act_dir_by_size = _W
     src = os.path.join(act_dir_by_size[size], tid + ".npz")
     out_dir = os.path.join(OUT_DIR, "per_cell", str(size))
     with np.load(src, allow_pickle=False) as d:
         cand = np.asarray(d["candidates"], dtype=np.float32)
         xys = np.asarray(d["xys"], dtype=np.int32)
         ci = int(d["correct_idx"])
-    z = (cand - basis["m1"]) / basis["s1"]
-    z = (z - basis["pca_mean"]) @ basis["C"].T
-    z = (z - basis["m2"]) / basis["s2"]
-    delta = (z - z[ci][None, :]) @ delta_w                  # (n_cells, K)
+    # raw activations straight to axis space — the basis means cancel in the
+    # difference and its scalings are folded into delta_full (write_per_cell)
+    delta = (cand - cand[ci][None, :]) @ delta_full         # (n_cells, K)
     vals = (prob_vals[tid][None, :] + delta).astype(np.float16)
     tmp = os.path.join(out_dir, f".{tid}.tmp.npz")
     np.savez_compressed(tmp, embeddings=vals, xys=xys)
@@ -221,6 +216,25 @@ def write_per_cell(fit, tid_size):
     scale = fit["v_sd"] / (fit["rms"] * fit["axis_sd"])       # (K,)
     delta_w = (fit["W"][:, :act_dim] / fit["feat_sd"][None, :act_dim]).T \
         * scale[None, :]                                      # (act_dim, K)
+
+    # Fold the ENTIRE per-cell projection into one matrix, applied to the RAW
+    # activations. A cell ships prob_value + (z(cell) - z(correct cell)) @
+    # delta_w, and taking that difference annihilates every additive term in z
+    # — the activation mean, the PCA mean and the post-PCA mean alike — while
+    # what remains (two diagonal scalings and the PCA rotation) is linear and
+    # composes. So the per-problem work becomes ONE matmul, K columns wide
+    # instead of PCA_DIM, with no full-width intermediates: worth doing because
+    # the PCA_DIM-wide matmul is small enough that threaded BLAS spends longer
+    # coordinating than computing, and the fanout runs one process per core.
+    d = np.load(basis_path, allow_pickle=False)
+    C, s1, s2 = d["basis_C"], d["basis_s1"], d["basis_s2"]    # C is (act_dim, raw)
+    if C.shape[0] != act_dim:
+        raise RuntimeError(
+            f"activation block is {act_dim} wide but the joint-PCA basis is "
+            f"{C.shape[0]}; the fold below assumes the activation features ARE "
+            "the PCA output.")
+    delta_full = (((C.T / s1[:, None]) / s2[None, :])
+                  @ delta_w).astype(np.float32)               # (raw, K)
     prob_vals = {t: fit["loadings"][i]
                  for i, t in enumerate(fit["tids"])}
     act_dir_by_size = {s: os.path.join(PROJECT_ROOT, "activations", str(s))
@@ -231,8 +245,7 @@ def write_per_cell(fit, tid_size):
     done = 0
     with ProcessPoolExecutor(
             max_workers=PER_CELL_WORKERS, initializer=_init_worker,
-            initargs=(basis_path, delta_w.astype(np.float32), prob_vals,
-                      act_dir_by_size)) as ex:
+            initargs=(delta_full, prob_vals, act_dir_by_size)) as ex:
         for _ in ex.map(_project_one, tasks, chunksize=200):
             done += 1
             if done % 20000 == 0:
