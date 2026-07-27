@@ -64,6 +64,7 @@ from the near-rank pool, so it carries no information about serving accuracy.
     ./.venv/bin/python3 -m auxiliary.serve_spread_history
     ./.venv/bin/python3 -m auxiliary.serve_spread_history --size 9 --bucket week
     ./.venv/bin/python3 -m auxiliary.serve_spread_history --strict-adjacency
+    ./.venv/bin/python3 -m auxiliary.serve_spread_history --min-tenure 30
     ./.venv/bin/python3 -m auxiliary.serve_spread_history --csv out.csv --plot out.png
 """
 
@@ -169,10 +170,14 @@ def bucket_key(epoch, mode):
     return d.strftime("%Y-%m")
 
 
-def load_attempts(sizes, include_repeats):
+def load_attempts(sizes, include_repeats, min_tenure=0):
     """Ordered per-user attempt stream, with tenure counted over EVERY recorded
     row (repeats and un-rated problems included — tenure is app experience, not
-    sample membership)."""
+    sample membership).
+
+    min_tenure drops each account's first N attempts. It is a PREFIX cut, so it
+    cannot open a hole between two surviving attempts: pairs still come from
+    genuinely consecutive serves, just later in the account's life."""
     if not os.path.exists(DB_PATH):
         sys.exit(f"Missing {DB_PATH}. Run `python -m pipeline.fetch_database` first.")
     con = sqlite3.connect(DB_PATH)
@@ -187,7 +192,7 @@ def load_attempts(sizes, include_repeats):
         if user != prev_user:
             tenure, prev_user = 0, user
         tenure += 1
-        if size in sizes and (include_repeats or not is_repeat):
+        if size in sizes and (include_repeats or not is_repeat) and tenure - 1 >= min_tenure:
             out.append((user, parse_ts(created), size, problem, tenure - 1))
     return out
 
@@ -605,6 +610,9 @@ def main():
                     help="max minutes between the two attempts of a pair")
     ap.add_argument("--include-repeats", action="store_true",
                     help="count recall repeats too (they are not near-rank selections)")
+    ap.add_argument("--min-tenure", type=int, default=0,
+                    help="drop each account's first N attempts, where the rank estimate "
+                         "is still far from converged and the UCB serve bonus is largest")
     ap.add_argument("--strict-adjacency", action="store_true",
                     help="require the pair to be consecutive in the RAW stream, so a "
                          "problem that has since left the corpus disqualifies it")
@@ -628,13 +636,14 @@ def main():
     ratings = load_problem_ratings()
     problem_sizes = load_problem_sizes()
     curves = load_curves()
-    attempts = load_attempts(sizes, args.include_repeats)
+    attempts = load_attempts(sizes, args.include_repeats, args.min_tenure)
     runs, considered, rated_rows = build_sessions(
         attempts, ratings, curves, args.session_gap_min * 60.0, args.strict_adjacency)
     pairs = pairs_at_lag(runs, 1, args.bucket)
 
     print(f"attempts in scope        {len(attempts):>8}  "
-          f"(sizes {sizes}, repeats {'in' if args.include_repeats else 'out'})")
+          f"(sizes {sizes}, repeats {'in' if args.include_repeats else 'out'}"
+          + (f", first {args.min_tenure} per account dropped" if args.min_tenure else "") + ")")
     print(f"with a current rating    {rated_rows:>8}  ({rated_rows / max(1, len(attempts)):.3f})")
     print(f"adjacent pairs in window {considered:>8}  (≤{args.session_gap_min:g} min apart)")
     print(f"pairs both rated         {len(pairs):>8}  ({len(pairs) / max(1, considered):.3f})"
