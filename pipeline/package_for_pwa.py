@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import io
 import json
+import math
 import os
 import shutil
 import sys
@@ -404,6 +405,78 @@ def _embeddings_dir():
     if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
         return joint_dir, True
     return None, False
+
+
+def axis_count_to_ship(output_dir):
+    """The axis count K this run will publish, and where it came from.
+
+    Two sources, in the order the run itself resolves them: a built
+    embeddings/joint/per_problem.csv (a fresh or unchanged axis fit — its
+    embed_* column count IS K), else the K already stamped in the served
+    embedding_meta.json (the embeddings-absent sentinel path, where the shards
+    stay frozen and only the curve + constants are republished). Returns
+    (K, source_description), or (None, reason) when neither exists — a run that
+    process_size will abort on anyway."""
+    embed_dir, _ = _embeddings_dir()
+    if embed_dir is not None:
+        header = pd.read_csv(os.path.join(embed_dir, "per_problem.csv"), nrows=0)
+        return (sum(1 for c in header.columns if c.startswith("embed_")),
+                "embeddings/joint/per_problem.csv")
+    served = os.path.join(output_dir, "tsumegos", "embedding_meta.json")
+    if os.path.exists(served):
+        with open(served, encoding="utf-8") as f:
+            k = json.load(f).get("K")
+        if isinstance(k, int) and k > 0:
+            return k, "the served embedding_meta.json (shards frozen)"
+    return None, "no embeddings/joint/ and no served embedding_meta.json"
+
+
+def check_axis_prior(output_dir):
+    """SHIP GATE: ratings/population_constants.json's per-axis weakness prior must
+    match the axis count about to be published, entry for entry.
+
+    The client's weakness model requires weakness_axis_lambda to be an array of
+    exactly K finite positive precisions and SKIPS TRAINING otherwise — there is
+    no scalar fallback by design (pwa/js/weakness.js). So a build_axes run that
+    changes K without a following fit_population_constants ships perfectly valid
+    files that silently disable weakness detection for every user: an empty
+    findings pane and selection stuck in the information regime, with no error
+    anywhere. That ordering is a real data dependency (build_axes →
+    fit_population_constants → package_for_pwa) and this is what enforces it.
+
+    A PRE-FLIGHT rather than a gate beside the axis-label check in
+    load_embeddings, for two reasons: it must abort before the FIRST shard is
+    written, not between sizes, and it must also cover the embeddings-absent
+    path, which returns before load_embeddings is ever called yet still
+    republishes population_constants.json onto frozen shards."""
+    K, source = axis_count_to_ship(output_dir)
+    if K is None:
+        return                                  # process_size raises on this run
+    path = os.path.join(PROJECT_ROOT, RATINGS_ROOT, "population_constants.json")
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"REFUSING to package: no {RATINGS_ROOT}/population_constants.json "
+            f"— run pipeline.fit_population_constants")
+    with open(path, encoding="utf-8") as f:
+        lam = json.load(f).get("weakness_axis_lambda")
+    if not isinstance(lam, list) or len(lam) != K:
+        raise SystemExit(
+            f"REFUSING to package: weakness_axis_lambda has "
+            f"{len(lam) if isinstance(lam, list) else 'no'} entries but K={K} "
+            f"(from {source}). The axis count changed without a matching "
+            f"population fit — re-run pipeline.fit_population_constants, then "
+            f"package again. Shipping as-is would disable weakness training on "
+            f"every client with no visible error.")
+    bad = [i for i, v in enumerate(lam)
+           if not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0]
+    if bad:
+        raise SystemExit(
+            f"REFUSING to package: weakness_axis_lambda entries {bad} are not "
+            f"finite positive precisions ({[lam[i] for i in bad]}). The client "
+            f"requires every entry positive and finite and skips training "
+            f"otherwise — re-run pipeline.fit_population_constants.")
+    print(f"  axis prior OK: weakness_axis_lambda has K={K} finite positive "
+          f"entries (K from {source})")
 
 
 def _read_embedding_version(embed_dir):
@@ -926,6 +999,12 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[warn] couldn't read {MANIFEST_PATH}: {e}; rebuilding all")
     prev_sizes = prev_manifest.get("sizes", {})
+
+    # SHIP GATE, before the first byte is written: the per-axis weakness prior in
+    # ratings/ must match the axis count this run publishes. See check_axis_prior —
+    # a mismatch ships cleanly and silently disables weakness training everywhere.
+    print("--- preflight ---")
+    check_axis_prior(OUTPUT_DIR)
 
     joint_embedding_meta = None
     ratings_versions = {}
