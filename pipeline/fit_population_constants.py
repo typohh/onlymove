@@ -144,6 +144,15 @@ WEAKNESS_EB_TOL = 1e-3               # max relative tau^2 change to declare conv
 # keeps a zero-signal axis's precision finite (the client still trains on it).
 WEAKNESS_EB_LAMBDA_MIN = 20.0
 WEAKNESS_EB_LAMBDA_MAX = 5000.0
+# Halt if an axis's pooled per-user coefficient is this far from zero, measured as
+# mean^2 / second-moment — the share of what ships as between-user variance that is
+# really population displacement. Scale-free, and the only form that cannot be moved
+# by rescaling an axis (see the zero-mean check). NOT a significance test: with
+# hundreds of users a negligible mean is many standard errors from zero, so a p-value
+# would halt on nothing. This bar corresponds to a pooled mean a third of the
+# between-user spread, which displaces level one's credibility test by about a fifth
+# of its bar — borderline material, and the side to err on.
+WEAKNESS_MEAN_SHARE_MAX = 0.10
 
 
 def sigmoid(x):
@@ -513,7 +522,8 @@ def _weakness_user_datasets(by_user, rank_feat, embeddings):
         yield X, y
 
 
-def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
+def fit_weakness_axis_priors(by_user, params, embeddings, apply_m,
+                             allow_axis_mean=False):
     """Per-axis prior precision vector for the client's weakness betas (group 5 in
     the module docstring): empirical Bayes on the between-user variance component
     tau_k^2 of each axis's weakness coefficient, by EM with a Laplace E-step —
@@ -545,6 +555,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
         lam_vec = np.zeros(d)
         lam_vec[2:] = 1.0 / tau2          # offline prior: one coefficient per axis
         second = np.zeros(K)              # Σ_u (beta_uk^2 + var_uk)
+        first = np.zeros(K)               # Σ_u beta_uk — see the zero-mean check below
         n_ok = 0
         for i, (X, y) in enumerate(data):
             beta, ok = _ridge_logistic(X, y, lam_vec, beta0=betas[i])
@@ -556,6 +567,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
             H = (X * w[:, None]).T @ X + np.diag(np.maximum(lam_vec, 1e-6))
             var = np.diag(np.linalg.inv(H))[2:]
             second += beta[2:] ** 2 + np.maximum(var, 0.0)
+            first += beta[2:]
             n_ok += 1
         if n_ok < WEAKNESS_EB_MIN_USERS:
             return None, f"only {n_ok} converged per-user fits — no per-axis prior"
@@ -565,9 +577,53 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m):
         if rel < WEAKNESS_EB_TOL:
             break
     lam_axis = 2.0 / tau2
+
+    # ZERO-MEAN CHECK. The M-step above is the right one for the prior actually
+    # shipped, N(0, tau^2): it accumulates a second moment about ZERO, not a
+    # variance about the pooled mean. That is only the between-user variance if
+    # the pooled per-user coefficient really is zero on every axis, which
+    # nothing forces -- the client's coefficients are fit per user against the
+    # shipped loadings, and a population-level effect that the rank term cannot
+    # absorb lands in them. Where the mean is not zero the consequences run the
+    # same way on both sides: tau^2 absorbs mean^2 and overstates the spread, so
+    # the prior is looser and shrinks less than intended, AND the client shrinks
+    # toward a point that is not the population centre while level-one tests
+    # credibility against that same wrong point -- turning "everyone finds this
+    # axis hard" into a per-user finding. Reported per axis as a share of the
+    # second moment, which is the decision-relevant form: it says how much of
+    # what ships as variance is really displacement.
+    mu = first / n_ok
+    raw2 = second / n_ok
+    share = mu ** 2 / np.maximum(raw2, 1e-12)
+    print("  weakness prior zero-mean check (shipped prior is centred at 0):")
+    for k in range(K):
+        print(f"    axis {k}: pooled mean {mu[k]:+.4f}  sd {np.sqrt(max(raw2[k] - mu[k] ** 2, 0.0)):.4f}"
+              f"  mean^2/second-moment {share[k]:6.1%}")
+    print(f"    worst axis: {share.max():.1%} of the shipped second moment is "
+          f"pooled mean rather than between-user spread")
+    if share.max() > WEAKNESS_MEAN_SHARE_MAX and not allow_axis_mean:
+        k_bad = int(np.argmax(share))
+        raise RuntimeError(
+            f"axis {k_bad}'s pooled per-user coefficient is {share[k_bad]:.1%} of its "
+            f"second moment (mean {mu[k_bad]:+.4f} against spread "
+            f"{np.sqrt(max(raw2[k_bad] - mu[k_bad] ** 2, 0.0)):.4f}), over the "
+            f"{WEAKNESS_MEAN_SHARE_MAX:.0%} bar.\n"
+            "A coefficient that is non-zero for EVERYONE is not a weakness — it is "
+            "residual difficulty, which build_axes quarantines its population "
+            "residual head to keep OUT of the axes. So read this as that quarantine "
+            "leaking, and look there first: re-centring the prior here would make the "
+            "numbers self-consistent while leaving an axis carrying difficulty that "
+            "belongs to the rating model, and the panel would go on reporting it as a "
+            "property of people.\n"
+            "If the mean is genuinely about users rather than problems, the fix is to "
+            "SHIP it (a per-axis mean beside the precision, the client's prior centred "
+            "at half of it per slot, and a decision on whether level one starts testing "
+            "against the mean) — not to widen this bar. --allow-axis-mean ships the "
+            "zero-centred prior anyway, deliberately.")
+
     info = (f"{len(data)} users, {it + 1} EM iters; per-coefficient lambda "
             f"min/median/max = {lam_axis.min():.0f}/{float(np.median(lam_axis)):.0f}/"
-            f"{lam_axis.max():.0f}")
+            f"{lam_axis.max():.0f}; zero-mean check worst {share.max():.1%}")
     return [round(float(l), 2) for l in lam_axis], info
 
 
@@ -594,6 +650,10 @@ def main():
     ap.add_argument("--allow-defaults", action="store_true",
                     help="ship the hardcoded DEFAULTS for any constant that can't be fit "
                          "(sparse/missing inputs) instead of crashing")
+    ap.add_argument("--allow-axis-mean", action="store_true",
+                    help="ship the zero-centred weakness prior even if an axis's pooled "
+                         "per-user coefficient breaches the zero-mean bar (normally a "
+                         "sign that population difficulty has leaked into that axis)")
     args = ap.parse_args()
 
     print(f"Loading attempts from {args.db} ...")
@@ -685,7 +745,8 @@ def main():
     apply_m = load_rating_to_rank(args.ratings_dir)   # for the weakness prior's problemRank
     print("Fitting per-axis weakness prior (empirical-Bayes between-user variance) ...")
     embeddings = load_problem_embeddings(needed)
-    wa, wa_info = fit_weakness_axis_priors(by_user, params, embeddings, apply_m)
+    wa, wa_info = fit_weakness_axis_priors(by_user, params, embeddings, apply_m,
+                                          args.allow_axis_mean)
     if wa is None:
         raise RuntimeError(
             f"could not fit weakness_axis_lambda ({wa_info}). It is mandatory and has "
