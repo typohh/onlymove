@@ -60,6 +60,12 @@
       },
       "negative": null,
       "negative_i18n": null
+    },
+    "ax_7a80436f": {
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
     }
   },
   "components": [
@@ -116,13 +122,9 @@
       }
     },
     {
-      "motif_id": "ax_1ad88138",
-      "positive": "complexity",
-      "positive_i18n": {
-        "zh": "复杂局面",
-        "ja": "複雑な局面",
-        "ko": "복잡한 국면"
-      },
+      "motif_id": "ax_7a80436f",
+      "positive": null,
+      "positive_i18n": null,
       "negative": null,
       "negative_i18n": null
     }
