@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // auxiliary/update_leaderboard_ranks.mjs
 //
-// Retroactively recompute every leaderboard row's rank fields — buffer,
-// pred_egf_rank, pred_egf_se — and apply them to the leaderboard D1 (--local =
+// Retroactively recompute every leaderboard row's rank fields — buffer, pred_rank,
+// pred_rank_se, time_delta_rating — and apply them to the leaderboard D1 (--local =
 // miniflare, --remote = production, neither = dry run). Purpose: after the
 // ratings / rating→rank curve / population constants change (a re-rate +
 // `map_rating_to_rank` + `package_for_pwa`), the stored rank is on the OLD
@@ -31,8 +31,14 @@
 //                     attempts "on top" — event order matches what the live
 //                     /report-maintained buffer actually holds. Exact duplicate
 //                     rows (same problem + created_at) are collapsed to one.
-//   current rank/se = computeRank over that buffer (window MLE + time adjust)
+//   current rank/se = computeRank over that buffer — the UNTIMED internal rank
+//                     scalar (1k = 0) + its stones SE, plus the personal time dock
+//                     in rating units, each stored in its own column.
 // last_active is untouched.
+//
+// (Before 2026-07-27 the columns held an EGF-frame rank, so this script's dry-run
+// output labelled a GoR scalar with the internal-rank labeller and printed nonsense
+// ranks. The stored value is now genuinely an internal scalar, so fmtRank is right.)
 //
 // Order of operations for a re-rate: package_for_pwa -> `npm run deploy` (so the
 // Worker computes on the new scale too) -> fetch_database -> this script. If you
@@ -182,8 +188,13 @@ function fetchBufferAttempts(uid, cap) {
 // [{ p, s, t }]. The buffer is those attempts newest first (the live-buffer order).
 function recomputeRow(lb, attempts, params) {
     const buffer = attempts.slice().reverse().map(({ p, s, t }) => ({ p, s, t }));
-    const { predEgfRank, se } = lb.computeRank(buffer, params);
-    return { buffer, predEgfRank, se: predEgfRank === null ? null : se };
+    const { rankScalar, se, deltaRating } = lb.computeRank(buffer, params);
+    return {
+        buffer,
+        rankScalar,
+        se: rankScalar === null ? null : se,
+        deltaRating: rankScalar === null ? null : deltaRating,
+    };
 }
 
 // --- output ---------------------------------------------------------------------------
@@ -230,7 +241,7 @@ async function main() {
     console.log(`problem_params: ${params.size} problems\n`);
 
     let rows = sqliteJson(
-        'SELECT user_id, pred_egf_rank, pred_egf_se FROM leaderboard'
+        'SELECT user_id, pred_rank, pred_rank_se FROM leaderboard'
     );
     if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
     if (!rows.length && !populate) { console.log('no leaderboard rows to update'); return; }
@@ -246,11 +257,12 @@ async function main() {
 
         const out = recomputeRow(lb, attempts, params);
         console.log(`${row.user_id}  buffer ${attempts.length} attempts`);
-        console.log(`  current   ${fmtDelta(lb, row.pred_egf_rank, out.predEgfRank)}   se ${Number.isFinite(row.pred_egf_se) ? row.pred_egf_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
+        console.log(`  current   ${fmtDelta(lb, row.pred_rank, out.rankScalar)}   se ${Number.isFinite(row.pred_rank_se) ? row.pred_rank_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
 
         statements.push(
             `UPDATE leaderboard SET buffer = ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-            + `pred_egf_rank = ${sqlNum(out.predEgfRank)}, pred_egf_se = ${sqlNum(out.se)} `
+            + `pred_rank = ${sqlNum(out.rankScalar)}, pred_rank_se = ${sqlNum(out.se)}, `
+            + `time_delta_rating = ${sqlNum(out.deltaRating)} `
             + `WHERE user_id = ${uid};`
         );
     }
@@ -284,15 +296,16 @@ async function main() {
             const uid = sqlStr(a.user_id);
             const attempts = fetchBufferAttempts(uid, lb.BUFFER_CAP);
             const out = recomputeRow(lb, attempts, params);
-            if (out.predEgfRank === null) unranked++; else ranked++;
-            console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.predEgfRank === null ? 'unranked' : fmtRank(lb, out.predEgfRank)}`);
+            if (out.rankScalar === null) unranked++; else ranked++;
+            console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.rankScalar === null ? 'unranked' : fmtRank(lb, out.rankScalar)}`);
             // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
             // the row was created concurrently (a live report during a --remote apply).
             statements.push(
                 `INSERT OR IGNORE INTO leaderboard `
-                + `(user_id, buffer, pred_egf_rank, pred_egf_se, last_active) `
+                + `(user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active) `
                 + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-                + `${sqlNum(out.predEgfRank)}, ${sqlNum(out.se)}, ${sqlStr(a.last_created)});`
+                + `${sqlNum(out.rankScalar)}, ${sqlNum(out.se)}, ${sqlNum(out.deltaRating)}, `
+                + `${sqlStr(a.last_created)});`
             );
         }
         console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);

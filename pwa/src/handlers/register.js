@@ -94,7 +94,7 @@ export async function handleRegister(request, env) {
         }
 
         // Seed buffer + rank from the user's existing tsumego_reports so an
-        // established player is immediately rankable (else pred_egf_rank stays NULL
+        // established player is immediately rankable (else pred_rank stays NULL
         // until they accumulate RANK_START_MIN novel attempts).
         const params = await getProblemParams(env);
         const st = await buildRowStateFromReports(env, userId, params);
@@ -110,13 +110,14 @@ export async function handleRegister(request, env) {
             ).bind(userId, idVal),
             env.DB.prepare(
                 `INSERT INTO leaderboard
-                    (user_id, buffer, pred_egf_rank, pred_egf_se, last_active)
-                 VALUES (?1,?2,?3,?4,?5)
+                    (user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active)
+                 VALUES (?1,?2,?3,?4,?5,?6)
                  ON CONFLICT(user_id) DO UPDATE SET
                     buffer=excluded.buffer,
-                    pred_egf_rank=excluded.pred_egf_rank, pred_egf_se=excluded.pred_egf_se,
+                    pred_rank=excluded.pred_rank, pred_rank_se=excluded.pred_rank_se,
+                    time_delta_rating=excluded.time_delta_rating,
                     last_active=excluded.last_active`
-            ).bind(userId, serializeBuffer(st.buffer), st.predEgfRank, st.se, nowIso),
+            ).bind(userId, serializeBuffer(st.buffer), st.rankScalar, st.se, st.deltaRating, nowIso),
             env.DB.prepare(
                 `UPDATE invitation SET claimed_by_user_id = ?2, claimed_at = ?3 WHERE invite_token = ?1`
             ).bind(token, userId, nowIso),

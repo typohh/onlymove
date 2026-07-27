@@ -254,13 +254,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_aga_id  ON external_ids(aga_i
 -- size. The /leaderboard page shows unregistered rows as "Anonymous" and limits
 -- itself to rows active in the past week.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
--- newest first, capped at 500. `pred_egf_rank` stays NULL until the buffer holds
--- >= 60 valid novel attempts (rank-start gate).
+-- newest first, capped at 500. `pred_rank` stays NULL until the buffer holds
+-- >= RANK_START_MIN valid novel attempts (rank-start gate).
+--
+-- The rank is stored in the window estimator's OWN output frame — `pred_rank` is
+-- the UNTIMED internal onlymove rank scalar (1k = 0) and `pred_rank_se` its standard
+-- error in the same units (stones) — NOT the EGF frame the columns used to hold
+-- (`pred_egf_rank`/`pred_egf_se`, replaced 2026-07-27; see migrations/
+-- 2026-07-27_leaderboard_internal_rank.sql). Reason: both readers wanted the internal
+-- frame and inverted the EGF coupling straight back out of the stored value — the
+-- Community rank histogram exclusively, the /leaderboard page for its default column
+-- and its sort key — while only the page's EGF units mode consumed the stored frame
+-- as-is. `pred_egf_se` was also misnamed: it always held the fit's stones SE, and
+-- nothing read the column at all.
+--
+-- `time_delta_rating` is the user's personal time dock in RATING units, derived by
+-- computeRank alongside the rank and stored so the server-frame columns (EGF/AGA,
+-- whose couplings are fitted against TIME-ADJUSTED ratings) can add it forward. It
+-- used to be baked into the stored rank and re-derived from `buffer` — a full buffer
+-- pass + weighted median per row — on every read.
 CREATE TABLE IF NOT EXISTS leaderboard (
     user_id            TEXT PRIMARY KEY,
     buffer             TEXT,
-    pred_egf_rank      REAL,
-    pred_egf_se        REAL,
+    pred_rank          REAL,
+    pred_rank_se       REAL,
+    time_delta_rating  REAL,
     last_active        TEXT,
     -- Edge geo-IP country (ISO 3166-1 alpha-2), stamped from request.cf.country into
     -- the row's existing /report write (no extra write). The universal flag fallback

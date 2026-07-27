@@ -46,7 +46,7 @@ function isAdmin(code, env) {
 
 // A REGISTERED member (has an external_ids binding) may invite. Registration is
 // itself invite-only, so this is the trust boundary — no need to require a
-// computed rank (pred_egf_rank), which would only delay a freshly-registered
+// computed rank (pred_rank), which would only delay a freshly-registered
 // player. (Deliberately NOT "has a leaderboard row": since the all-users
 // expansion every reporting user has one of those lazily.)
 async function isRegisteredMember(code, env) {
