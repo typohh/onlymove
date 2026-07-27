@@ -567,8 +567,10 @@ function hashToUnit(str) {
 // admits a due recall; otherwise the novel challenge is served even though a
 // recall is due (the skipped recall stays in its window and can win a later
 // roll, or ages out — that pruning is the equilibrium's decay channel). The
-// share is the constant-volume balance point for the user's own trailing-week
-// volume and memory (see model.js recallServeShare); while it is not yet
+// share is the constant-volume balance point for a FRACTION of the user's own
+// trailing-week daily volume — the headroom that lets a below-average day still
+// clear every due recall — and for their memory (see model.js
+// recallServeShare); while it is not yet
 // estimable (null), due recalls always win — the pre-gate behavior. Rolled
 // once per serve decision, BEFORE the recall is built (a gated-out recall
 // costs no shard fetch); P(recall | one is due) = share either way since the

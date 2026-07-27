@@ -269,13 +269,19 @@ export function recentFailureWindowHours(params, history, { userRank, days = 7, 
 }
 
 // --- Recall serving share (constant-volume equilibrium) -----------------------
-// Target: keep the user's total daily volume at its own trailing-week average A
-// while recalls and novels balance. At volume A the working-window guillotine
+// Target: keep recalls and novels in balance at the volume a LIGHT day delivers
+// — SHARE_VOLUME_FRACTION of the user's own trailing-week daily average — rather
+// than at the average itself, so a user practising below their usual pace still
+// gets through every due recall; on an average day the pool is then over-served
+// and drains. At that target volume A the working-window guillotine
 // (RECALL_CANDIDATE_HISTORY_LENGTH attempts) falls at ladder rung
 //   k = ln(WINDOW / (A · τ0_days)) / GROWTH
 // where τ0 is the user's own base window-open delay (their fitted stability at
-// r=0, so between-user memory variance is priced in). A problem entering the
-// ladder is expected to consume
+// r=0, so between-user memory variance is priced in). The window is measured in
+// ATTEMPTS, so a lower target volume spans more days, entries must climb further
+// before graduating out of it, and the share rises — the fraction below 1 buys
+// recall headroom, it does not cut recalls. A problem entering the ladder is
+// expected to consume
 //   E = (x^-k − 1) / (1 − x),   x = 0.80 (retention at window open = per-serve
 //                                success probability, resets included)
 // recall serves before it graduates past the window, and with e = ladder
@@ -289,6 +295,7 @@ export function recentFailureWindowHours(params, history, { userRank, days = 7, 
 // recalls, the pre-gate behavior.
 const X_SERVE = 0.8;                    // retention at the R=0.80 window open
 const SHARE_WEEK_MS = 7 * 24 * 3600e3;  // volume-target window
+const SHARE_VOLUME_FRACTION = 0.5;      // solve the equilibrium at this share of the week's daily average
 const SHARE_NOVEL_SAMPLE = 200;         // entry-rate sample (recent novels)
 const SHARE_MIN_NOVELS = 20;            // below this the rate is noise → null
 export function recallServeShare() {
@@ -305,7 +312,7 @@ export function recallServeShare() {
         weekCount++;
     }
     if (weekCount === 0) return null;
-    const volumePerDay = weekCount / 7;
+    const targetVolumePerDay = (weekCount / 7) * SHARE_VOLUME_FRACTION;
 
     let tau0Hours = recentFailureWindowHours(params, history, { userRank: state.userRank });
     if (tau0Hours == null) tau0Hours = freshFailureReviewHours(params, { userRank: state.userRank });
@@ -323,11 +330,11 @@ export function recallServeShare() {
     if (novels < SHARE_MIN_NOVELS) return null;
     const entryRate = entries / novels;
 
-    const k = Math.log(RECALL_CANDIDATE_HISTORY_LENGTH / (volumePerDay * (tau0Hours / 24))) / GROWTH;
+    const k = Math.log(RECALL_CANDIDATE_HISTORY_LENGTH / (targetVolumePerDay * (tau0Hours / 24))) / GROWTH;
     if (!isFinite(k)) return null;
-    // k ≤ 0: the FIRST due-interval already outlives the working window at this
-    // volume — a served recall could never survive to a second serve, so the
-    // equilibrium share is genuinely 0.
+    // k ≤ 0: the FIRST due-interval already outlives the working window at the
+    // target volume — a served recall could never survive to a second serve, so
+    // the equilibrium share is genuinely 0.
     if (k <= 0) return 0;
     const expectedServes = (Math.pow(X_SERVE, -k) - 1) / (1 - X_SERVE);
     const rho = entryRate * expectedServes;
