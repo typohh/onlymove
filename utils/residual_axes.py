@@ -259,14 +259,23 @@ def _fit_theta(R0, A, C, span, kap, y, grid):
     return float(grid[i])
 
 
-def _irls_off(X, y, off, ridge=1e-6, w0=None):
+def _irls_off(X, y, off, ridge=1e-6, w0=None, penalty=None):
+    """Newton fit of a logistic model with a fixed offset.
+
+    `penalty` is an optional per-parameter Gaussian prior precision (one entry
+    per column). It REPLACES the scalar `ridge`; a zero entry leaves that
+    parameter unpenalized, so the intercept and rank columns can stay free
+    while the axis coefficients are shrunk. With `penalty=None` this is exactly
+    the scalar-ridge fit it has always been."""
+    pen = (np.full(X.shape[1], float(ridge)) if penalty is None
+           else np.asarray(penalty, dtype=float))
     w = np.zeros(X.shape[1]) if w0 is None else w0.copy()
     for _ in range(100):
         z = np.clip(off + X @ w, -35, 35)
         p = 1 / (1 + np.exp(-z))
         Wd = p * (1 - p) + 1e-9
-        H = X.T @ (X * Wd[:, None]) + ridge * np.eye(X.shape[1])
-        step = np.linalg.solve(H, X.T @ (y - p) - ridge * w)
+        H = X.T @ (X * Wd[:, None]) + np.diag(pen)
+        step = np.linalg.solve(H, X.T @ (y - p) - pen * w)
         w = w + step
         if np.max(np.abs(step)) < 1e-9:
             break
@@ -278,13 +287,15 @@ def _logloss(off, y):
     return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).sum())
 
 
-def axes_ll_gain(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
-    """Held-out walk-forward LL gain (nats TOTAL, plus n) of the axes block
-    over the production-form 4PL baseline, with the global calibration fit
-    (intercept + kappa) applied to the pooled axis scores."""
+def _walk_forward(rows_by_user, eval_users, g, rank, params, tid_index, lapse,
+                  penalty=None):
+    """One causal pass per user: fit ability and the per-user logistic on a
+    trailing window, score the next block. Returns the pooled baseline offset,
+    axis score and outcome, plus every per-user axis-coefficient vector the
+    pass produced (the empirical-Bayes input)."""
     all_r0 = np.array([v[0] for v in params.values()])
     grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
-    offs, scores, ys = [], [], []
+    offs, scores, ys, coefs = [], [], [], []
     for u in eval_users:
         a = rows_by_user[u]
         if len(a) < WARMUP + EVAL_BLOCK:
@@ -313,15 +324,57 @@ def axes_ll_gain(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
                 off4 = np.log(P4 / (1 - P4))
                 o_tr, o_ev = off4[:t0 - lo], off4[t0 - lo:]
                 w_b = _irls_off(X_b[lo:t0], y[lo:t0], o_tr, w0=w_b)
-                w_ax = _irls_off(X_ax[lo:t0], y[lo:t0], o_tr, w0=w_ax)
+                w_ax = _irls_off(X_ax[lo:t0], y[lo:t0], o_tr, w0=w_ax,
+                                 penalty=penalty)
             except np.linalg.LinAlgError:
                 continue
             offs.append(np.clip(o_ev + X_b[t0:hi] @ w_b, -35, 35))
             scores.append(X_ax[t0:hi, 2:] @ w_ax[2:])
             ys.append(y[t0:hi])
-    off = np.concatenate(offs)
-    sc = np.concatenate(scores)
-    y = np.concatenate(ys)
+            coefs.append(w_ax[2:].copy())
+    return (np.concatenate(offs), np.concatenate(scores), np.concatenate(ys),
+            np.stack(coefs))
+
+
+def _axis_prior(coefs):
+    """Per-axis Gaussian prior precision from the spread of the per-user axis
+    coefficients -- the same empirical-Bayes form the client ships as
+    weakness_axis_lambda, estimated here because the candidate K under
+    selection has no fitted vector yet. The spread is the MEDIAN ABSOLUTE
+    DEVIATION (scaled to a normal standard deviation), not the standard
+    deviation: an unpenalized pass is what supplies these coefficients, and a
+    single runaway fit would otherwise set the scale for every axis. An axis
+    with no between-user spread is one the prior should pin at zero, so the
+    precision rises without bound and only a division guard bounds it."""
+    mad = np.median(np.abs(coefs - np.median(coefs, axis=0)), axis=0)
+    tau = np.maximum(1.4826 * mad, 1e-9)
+    return np.concatenate([[0.0, 0.0], 1.0 / tau ** 2])   # intercept, rank free
+
+
+def axes_ll_gain(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
+    """Held-out walk-forward LL gain (nats TOTAL, plus n) of the axes block
+    over the production-form 4PL baseline, with the global calibration fit
+    (intercept + kappa) applied to the pooled axis scores.
+
+    Two passes: the first supplies the between-user coefficient spread, the
+    second is the scored fit under that prior. The per-user coefficients are
+    shrunk exactly as the client shrinks them -- unpenalized, a window whose
+    design is near-singular admits an arbitrarily large coefficient, and the
+    resulting scores swamp the pooled calibration."""
+    _o, _s, _y, coefs = _walk_forward(rows_by_user, eval_users, g, rank,
+                                      params, tid_index, lapse)
+    off, sc, y, _c = _walk_forward(rows_by_user, eval_users, g, rank, params,
+                                   tid_index, lapse,
+                                   penalty=_axis_prior(coefs))
+    # Standardize the pooled axis score before calibrating. A converged logistic
+    # fit is invariant to an affine rescale of a regressor -- the coefficient
+    # absorbs it and the intercept absorbs the centering -- so this leaves the
+    # fitted probabilities and the returned gain alone. What it removes is the
+    # dependence on the score's ARBITRARY scale: that scale is set by the
+    # per-user IRLS above, which is unbounded on a separable window, so against
+    # the intercept column the raw Hessian can be ill-conditioned enough that
+    # rounding decides the solve.
+    sc = (sc - sc.mean()) / (sc.std() + 1e-9)
     Xk = np.column_stack([np.ones(len(y)), sc])
     w = _irls_off(Xk, y, off, ridge=1e-9)
     return _logloss(off, y) - _logloss(off + Xk @ w, y), len(y)
@@ -372,11 +425,33 @@ def select_and_fit(device="cuda"):
         gains[k] = total_gain / total_n * 1000.0
         print(f"  K={k}: axes LL gain {gains[k]:.3f} mnat/attempt")
         peak = max(peak, gains[k])
+        # The stop rule below is a FRACTION OF THE PEAK, which orders candidates
+        # only while the peak is positive. Against a non-positive peak the
+        # fraction sits ABOVE it, so the very first candidate breaches against
+        # itself and selection falls through to K_START - 1 -- an axis count
+        # below the floor the search starts at, written out as if it were a
+        # decision. A peak that is not positive means the axes failed to beat
+        # the baseline at all, which is never a shippable state, so refuse here
+        # rather than let a degenerate count reach the artifacts. Only the first
+        # iteration can trip this: peak is a running maximum.
+        if not np.isfinite(peak) or peak <= 0.0:
+            raise RuntimeError(
+                f"axes selection: no positive gain by K={k} (peak {peak:.3f} "
+                "mnat/attempt). The axes block did not beat the production-form "
+                "4PL baseline on held-out users, so there is no axis count "
+                "worth shipping. Refusing rather than selecting a count below "
+                f"the K_START={K_START} floor.")
         if gains[k] < peak * (1.0 - STOP_FRACTION):
             breached = k
             break
         k += 1
     k_sel = (breached - 1) if breached is not None else K_MAX
+    if k_sel < K_START:
+        raise RuntimeError(
+            f"axes selection: selected K={k_sel} below the K_START={K_START} "
+            f"floor (breached at K={breached}, gains {gains}). Unreachable "
+            "with a positive peak -- treat as a bug in the stop rule rather "
+            "than a result.")
     print(f"  selected K = {k_sel} (peak {peak:.3f}"
           + (f", K={breached} breached at {gains[breached]:.3f})"
              if breached is not None else ", K_MAX backstop reached)"))
