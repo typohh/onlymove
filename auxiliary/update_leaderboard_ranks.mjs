@@ -39,6 +39,24 @@
 // run it before deploying, the very next /report recomputes the user's current
 // rank on the OLD scale and overwrites it.
 //
+// CHAIN THE FETCH DIRECTLY INTO THE APPLY — do not run them as two separate
+// steps with a gap in between. The `buffer` column is maintained INCREMENTALLY
+// in production: updateLeaderboardOnReport reads the stored buffer, pushes the
+// one new attempt and writes it back, and NOTHING rebuilds it from
+// tsumego_reports afterwards. So every attempt reported between this script's
+// snapshot and its write is silently truncated out of that user's buffer when
+// the UPDATE lands — permanently. Later reports append on top of the shortened
+// list rather than restoring it, and the only rebuild path is
+// createLeaderboardRow, which runs only for a user who has NO row at all. There
+// is no error and no recovery; the damage is a slightly wrong rank for anyone
+// who happened to be playing. Run it as one command:
+//
+//   ./.venv/bin/python3 -m pipeline.fetch_database && \
+//     node auxiliary/update_leaderboard_ranks.mjs --remote
+//
+// and treat `+0 new tsumego_reports rows` on that fetch as the proof the window
+// was clean. A quiet hour helps; chaining is what actually bounds the exposure.
+//
 // Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
 //   node auxiliary/update_leaderboard_ranks.mjs --local           # ... and execute against the local miniflare D1
