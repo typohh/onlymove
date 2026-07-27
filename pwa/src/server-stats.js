@@ -295,7 +295,7 @@ async function computeServerStats(env) {
 // lookup.txt + metadata.json asset walk it used to do.
 //
 // NOTE the population also changes: this counts players carrying a leaderboard rank
-// (RANK_START_MIN valid attempts, the board's own uniform gate) who were active in
+// (RANK_START_MIN valid attempts, the leaderboard's own uniform gate) who were active in
 // the window, where the proxy counted anyone who answered a handful of problems in
 // it. Beginners below the gate drop out and established players having a light week
 // come in — a larger shift on real data than either bias above.
@@ -305,7 +305,7 @@ async function computeLeaderboardStats(env) {
 
     // Ranks: one player per bin, weakest -> strongest. Players below the
     // leaderboard's own RANK_START_MIN gate carry no rank and are left out, exactly
-    // as they are left off the board. Hidden profiles ARE counted: hiding withholds
+    // as they are left off the leaderboard. Hidden profiles ARE counted: hiding withholds
     // a name and a country, never the onlymove rank. Clamped to the labelled ladder
     // so a far-extrapolated estimate lands in an end bin rather than inventing a
     // label (the underlying scalar is unbounded — see the client's rank notes).
