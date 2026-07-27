@@ -360,7 +360,15 @@ Convergence fires at roughly a quarter of terminal information — deliberately 
 
 ## 2.5 Serving is at-rank; the recorded history is not
 
-Selection is difficulty-matched at the moment of serving: the chosen problem's *then-current* rating sits within about a rank of the *then-current* serve rank, and the calibration means it should be cleared roughly four times in five. It is tempting to carry that property forward and treat the attempt log as a set of near-zero rating gaps. It is not one, and the gap **widens after the fact**.
+Selection is difficulty-matched at the moment of serving: the chosen problem's *then-current* rating sits within about a rank of the *then-current* serve rank, and the calibration means it should be cleared roughly four times in five.
+
+**It is, and this is the cheapest check on the whole system.** The calibration probability is the one constant everything else hangs from — the rating's definition, the serve target, the recall window, the anchor the rank map is fitted against — so the first thing to ask of production logs is whether served problems actually clear at that rate. They do. Across the full first-time attempt log the observed clear rate is **just under 79%**, and it is stable month to month across the log's whole span; repeats, which are served against a deliberately lower retention target, sit around 75%, also where their own window intends. This needs no ratings and no model: it is a raw mean over outcomes, and it is the measurement that would expose a broken serving loop fastest.
+
+The residual few points below the anchor are **selection, not miscalibration**, and the two regimes of section 2.4 separate cleanly. A user's first couple of dozen problems clear at about 82%, above the anchor, because a new account is deliberately started weak and climbs; experienced users settle around 77.5%, below it, because once the rank converges selection switches to weighting by weakness — which by construction prefers problems inside the band that the user is *worse* at than their rank alone implies. Serving at-rank and serving for personalization are not the same target, and the gap between them is small and in the direction the design predicts.
+
+**The model's own anchor is measured separately, and it lands where it is defined to.** Binning every first-time attempt by the gap between the user's fitted rating and the problem's, the observed clear rate at zero gap is **79.5% (±0.3)** against a definition of 80%, and the curve through the gap range is monotone from roughly 36% far below rank to 96.5% far above. Two of those numbers are worth more than the middle one, because nothing fits them: the upper asymptote is set by the learned lapse, and 1 − lapse on the current fit is 0.964 against an observed 0.965 — a parameter estimated from the likelihood, confirmed by a raw cell mean. The zero-gap figure is an in-sample check, since each user's rating comes from the same attempts, so read it as a consistency check rather than a held-out result; the held-out evidence for the fit is elsewhere (section 1.5).
+
+It is tempting to carry the at-rank property forward and treat the attempt log as a set of near-zero rating gaps. It is not one, and the gap **widens after the fact**.
 
 Both sides of the comparison move after the attempt is recorded:
 
