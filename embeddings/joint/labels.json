@@ -123,10 +123,18 @@
     },
     {
       "motif_id": "ax_7a80436f",
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null
+      "positive": "attack",
+      "positive_i18n": {
+        "zh": "攻击",
+        "ja": "攻め",
+        "ko": "공격"
+      },
+      "negative": "defence",
+      "negative_i18n": {
+        "zh": "防守",
+        "ja": "守り",
+        "ko": "수비"
+      }
     }
   ]
 }
