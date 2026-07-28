@@ -102,8 +102,17 @@ VARIANTS = {
 }
 
 
+def merge_thin_units(codes, row_users, min_rows):
+    """Relabel every unit below `min_rows` into a single per-user catch-all, keeping all rows.
+    Fewer nuisance parameters where they are least affordable, without a cull."""
+    sizes = np.bincount(codes)
+    key = np.where(sizes[codes] < min_rows, -1 - row_users, codes)
+    new = pd.factorize(key)[0].astype(np.int64)
+    return new, int(new.max()) + 1
+
+
 def fit_scales(R0, A, C, y, row_idx, codes, n_units, lapse, device, steps, lr,
-               steps_free=None, snapshot_every=None, pin_s=None, pin_f=None):
+               steps_free=None, snapshot_every=None, pin_s=None, pin_f=None, pin_theta=None):
     """The production phase-2 fit (pipeline.train_rating.fit_global_scales) with the ability unit
     injected. Identical in every other respect: client response form pivoting at the shipped
     rating, kappa recomputed from the scaled floor, full-batch Adam, unity baseline first and the
@@ -118,6 +127,11 @@ def fit_scales(R0, A, C, y, row_idx, codes, n_units, lapse, device, steps, lr,
 
     traj = []
 
+    # pin_theta holds a PER-ROW ability (the generating truth in a certificate run), which removes
+    # the nuisance parameters entirely: whatever bias survives is structural, not incidental.
+    tth_fixed = None if pin_theta is None else \
+        torch.tensor(np.asarray(pin_theta, dtype=np.float64)[row_idx], device=device)
+
     def run(free_scales, th_init):
         th = nn.Parameter(torch.tensor(th_init, device=device, dtype=torch.float64))
         # A pinned scale is held at its given value and kept out of the optimizer, so the fit is
@@ -128,8 +142,13 @@ def fit_scales(R0, A, C, y, row_idx, codes, n_units, lapse, device, steps, lr,
         lf = nn.Parameter(torch.zeros((), device=device, dtype=torch.float64)) if pin_f is None \
             else torch.tensor(float(np.log(pin_f)), device=device, dtype=torch.float64)
         free = [p for p in (ls, lf) if isinstance(p, nn.Parameter)]
-        opt = torch.optim.Adam([th] + (free if free_scales else []), lr=lr)
-        n_steps = steps_free if (free_scales and steps_free) else steps
+        params = ([] if tth_fixed is not None else [th]) + (free if free_scales else [])
+        if not params:                                   # nothing to train: score once
+            params = [nn.Parameter(torch.zeros((), device=device, dtype=torch.float64))]
+            n_steps = 1
+        else:
+            n_steps = steps_free if (free_scales and steps_free) else steps
+        opt = torch.optim.Adam(params, lr=lr)
         for _step in range(n_steps):
             s = torch.exp(ls) if free_scales else 1.0
             f = torch.exp(lf) if free_scales else 1.0
@@ -137,7 +156,8 @@ def fit_scales(R0, A, C, y, row_idx, codes, n_units, lapse, device, steps, lr,
             span = (1.0 - c2 - lapse).clamp(min=EPS)
             q = ((CALIBRATION_P - c2) / span).clamp(EPS, 1.0 - EPS)
             kap = torch.log(q / (1.0 - q))
-            z = (s * tA * (th[tcodes] - tR0) + kap).clamp(-35.0, 35.0)
+            th_row = tth_fixed if tth_fixed is not None else th[tcodes]
+            z = (s * tA * (th_row - tR0) + kap).clamp(-35.0, 35.0)
             P = (c2 + span * torch.sigmoid(z)).clamp(EPS, 1.0 - EPS)
             loss = -(ty * torch.log(P) + (1.0 - ty) * torch.log(1.0 - P)).mean()
             opt.zero_grad(); loss.backward(); opt.step()
@@ -162,7 +182,9 @@ def load_frozen_params():
     apply the correction). Rating is already unscaled — it anchors the curve phase 2 scales."""
     with open(os.path.join(RATINGS_DIR, "rating_constants.json")) as fh:
         const = json.load(fh)
-    s0, f0 = float(const["slope_scale"]), float(const["floor_scale"])
+    # floor_scale is absent once production stops scaling the floor; then the shipped floor already
+    # IS the phase-1 value and needs no un-scaling.
+    s0, f0 = float(const["slope_scale"]), float(const.get("floor_scale", 1.0))
     out = {}
     for size in ALL_BOARD_SIZES:
         sdir = os.path.join(RATINGS_DIR, str(size))
@@ -175,7 +197,7 @@ def load_frozen_params():
     return out, const
 
 
-def synth_outcomes(R0, A, C, lapse, user_codes, t_days, drift_sd, rng):
+def synth_outcomes(R0, A, C, lapse, user_codes, t_days, drift_sd, rng, return_theta=False):
     """Outcomes from the frozen curves at TRUE s = f = 1 under a known continuous-time ability
     path: per user, theta starts near their attempt-mean rating (serving is difficulty-matched)
     and follows a Brownian path whose career-long sd is drift_sd. Grid-free by construction, so no
@@ -199,7 +221,8 @@ def synth_outcomes(R0, A, C, lapse, user_codes, t_days, drift_sd, rng):
     q = np.clip((CALIBRATION_P - c) / span_p, EPS, 1.0 - EPS)
     kap = np.log(q / (1.0 - q))
     P = c + span_p / (1.0 + np.exp(-np.clip(A * (theta - R0) + kap, -35, 35)))
-    return (rng.random(n) < P).astype(np.float64)
+    y = (rng.random(n) < P).astype(np.float64)
+    return (y, theta) if return_theta else y
 
 
 def main():
@@ -213,6 +236,8 @@ def main():
                     help="shipped variant only: per-seed floor-scale bias with its spread, plus "
                          "convergence trajectories that separate a genuine bias from an optimizer "
                          "still sliding away from its unity initialisation")
+    ap.add_argument("--mechanism", action="store_true",
+                    help="attribute the floor bias: pin abilities at the generating truth, and vary how many rows each ability is fit on")
     ap.add_argument("--identify", action="store_true",
                     help="separate a floor-scale bias from slope leakage: pin each scale at its "
                          "known truth in turn, and profile the likelihood over the floor scale")
@@ -238,7 +263,33 @@ def main():
     lapse = load_client_lapse(const.get("fat_finger_rate", 0.02))
     print(f"attempts {len(df)} | users {len(np.unique(user_codes))} | months "
           f"{mon.min()}..{mon.max()} | lapse {lapse:.4f} | shipped s {const['slope_scale']} "
-          f"f {const['floor_scale']} | device {device.type}")
+          f"f {const.get('floor_scale', 1.0)} | device {device.type}")
+
+    if args.mechanism:
+        rng = np.random.default_rng(15)
+        y_syn, th_true = synth_outcomes(R0, A, C, lapse, user_codes, t_days, 0.15, rng,
+                                        return_theta=True)
+        ri, co, nu = unit_codes(user_codes, mon, VARIANTS["nonoverlap2_p0"])
+        ru, cu, nu_u = unit_codes(user_codes, mon, VARIANTS["user"])
+        row_users = user_codes[ri]
+        print("\n=== MECHANISM: how much of the floor deficit is the ABILITY NUISANCE? ===\n"
+              "Every ability is fit on the same rows it then helps score, so it absorbs part of\n"
+              "each unit's realised luck. Pinning abilities at the generating truth removes the\n"
+              "nuisance entirely; coarser and thin-merged units keep it but make it cheaper per\n"
+              "row. Truth is f = 1.000 throughout.\n", flush=True)
+        arms = [("production units (user x 2-month)", ri, co, nu, None),
+                ("ABILITIES PINNED AT TRUTH", ri, co, nu, th_true),
+                ("one ability per user (coarser)", ru, cu, nu_u, None)]
+        for min_rows in (8, 30):
+            mc, mn = merge_thin_units(co, row_users, min_rows)
+            arms.append((f"thin units (<{min_rows} rows) merged per user", ri, mc, mn, None))
+        for label, rix, cx, nx, pin in arms:
+            r = fit_scales(R0, A, C, y_syn, rix, cx, nx, lapse, device, args.steps, args.lr,
+                           pin_theta=pin)
+            tag = "  <- pure structural bias" if pin is not None else ""
+            print(f"  {label:<38} units {r['n_units']:>6}  s {r['s']:.4f}  f {r['f']:.4f}  "
+                  f"(f bias {r['f'] - 1:+.4f}){tag}", flush=True)
+        return
 
     if args.identify:
         ri, co, nu = unit_codes(user_codes, mon, VARIANTS["nonoverlap2_p0"])

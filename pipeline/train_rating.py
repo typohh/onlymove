@@ -48,20 +48,24 @@ Both weights were selected by held-out logloss sweeps (the tail comes in at ~zer
 magnitude higher starts homogenizing real floor/slope structure — don't raise them casually).
 
 PHASE 2 — after the joint pass, the SAME response model runs a second time with the trunk frozen
-(fit_global_scales): every per-problem (rating, slope, floor) is an eval-mode constant, the phase-2
-ability field is refit free (per user × non-overlapping 2-month block, profile likelihood — REFIT,
-not plugged in: fixed-theta plug-in is attenuation-biased, certificate-measured 2026-07-25), and two
-global scalars train that phase 1 held at unity: s (slope scale) and f (floor scale). Pure BCE — no
-dropout (nothing stochastic remains), no barriers (they act on the frozen heads). Scored in the
-CLIENT's response form pivoting at the shipped rating (mode-'slope' semantics: ratings
-stay the 80%-clear anchors; quality ships as s·slope, floor as f·floor). This replaced the held-out
-walk-forward calibration (2026-07-25): the walk-forward's causal protocol culled ~38% of attempt
-mass (heavy users only), while phase 2 scores every first-time attempt; the two criteria agree
-within the plateau (<0.1 mnat), the free-ability profile likelihood is certificate-clean (synthetic
-s=1 truth returns 1.01–1.02 at this granularity), and the multiplier is dropout-induced rating-scale
+(fit_global_slope_scale): every per-problem (rating, slope, floor) is an eval-mode constant, the
+phase-2 ability field is refit free (per user × non-overlapping 2-month block, profile likelihood —
+REFIT, not plugged in: fixed-theta plug-in is attenuation-biased, certificate-measured 2026-07-25),
+and ONE global scalar trains that phase 1 held at unity: s, the slope scale. Pure BCE — no dropout
+(nothing stochastic remains), no barriers (they act on the frozen heads). Scored in the CLIENT's
+response form pivoting at the shipped rating (mode-'slope' semantics: ratings stay the 80%-clear
+anchors; quality ships as s·slope). This replaced the held-out walk-forward calibration
+(2026-07-25): the walk-forward's causal protocol culled ~38% of attempt mass (heavy users only),
+while phase 2 scores every first-time attempt; the two criteria agree within the plateau
+(<0.1 mnat), the free-ability profile likelihood is certificate-clean for the SLOPE (synthetic s=1
+truth returns ~1.00 at this granularity), and the multiplier is dropout-induced rating-scale
 compression, NOT errors-in-variables — an in-sample refit does NOT re-absorb it to 1 (measured:
 frozen-theta 1.62, free-theta 1.71–1.77 vs walk-forward 1.667). utils/slope_calibration.py keeps
 the walk-forward as the client-condition validation harness.
+
+The FLOOR is shipped unscaled. A floor scale was fitted here alongside s until it was measured to be
+an artifact of this estimator rather than a property of the data (2026-07-28) — see the docstring of
+fit_global_slope_scale, and auxiliary/rating_dev/eval_phase2_units.py for the measurement.
 
 The shipped RATING is the ability at which the user clears the problem 80% of the time
 (CALIBRATION_P) — NOT the 50%-point — so a flat low-discrimination problem correctly needs more
@@ -75,9 +79,9 @@ pipeline.fit_population_constants reads it through.
 Outputs (nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
   ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
   ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= s·a_p, phase-2-calibrated)
-  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= f·c_p, phase-2-calibrated)
+  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= c_p, NOT scaled — see phase 2)
   ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
-  ratings/rating_constants.json              {"fat_finger_rate": λ, "slope_scale": s, "floor_scale": f, ...}
+  ratings/rating_constants.json              {"fat_finger_rate": λ, "slope_scale": s, ...}
   ratings/model.pt                        weights + run metadata
 
 Usage (run pipeline.cache_move_features first — it builds the candidate-move-eval cache the
@@ -162,31 +166,44 @@ def clear_logit_vec(c, lapse=0.0):
     return np.log(q / (1.0 - q))
 
 
-def fit_global_scales(df, params_by_tid, lapse, device):
-    """PHASE 2 of the two-phase production fit: the global slope scale s and floor scale f (both
-    held at unity during phase 1) by in-sample MLE, everything else frozen except the ability field.
+def fit_global_slope_scale(df, params_by_tid, lapse, device):
+    """PHASE 2 of the two-phase production fit: the global slope scale s (held at unity during
+    phase 1) by in-sample MLE, everything else frozen except the ability field.
 
     The same response model run a second time: per-problem (rating, slope, floor) are phase 1's
     eval-mode outputs, now constants; the phase-2 ability field is REFIT free — one theta per
     user × non-overlapping P2_BIN_MONTHS calendar block, i.e. trainer-granularity profile
     likelihood. Refit is load-bearing, not a luxury: plugging in FIXED abilities attenuates the
     fitted scale (error in the regressor), while the refit-at-every-s profile likelihood is
-    certificate-clean (synthetic data generated at true s = 1 returns 1.01–1.02 at this
-    granularity; 2026-07-25 series). Loss is pure BCE — no dropout (nothing stochastic remains),
-    no barriers (they act on the frozen heads) — over EVERY first-time attempt on a scorable
-    problem (no user cull; the walk-forward this replaced scored only heavy users' post-warmup
-    rows, ~62% of attempt mass).
+    certificate-clean (synthetic data generated at true s = 1 returns ~1.00 at this granularity;
+    2026-07-25 series). Loss is pure BCE — no dropout (nothing stochastic remains), no barriers
+    (they act on the frozen heads) — over EVERY first-time attempt on a scorable problem (no user
+    cull; the walk-forward this replaced scored only heavy users' post-warmup rows, ~62% of
+    attempt mass).
+
+    THE FLOOR IS NOT SCALED HERE, and that is a measured decision rather than an omission. A floor
+    scale was fitted alongside s until a certificate run showed the estimator returns a value well
+    below one on synthetic outcomes generated at a true floor scale of ONE — and the real-data
+    estimate sat inside that artifact, so there was nothing left to correct. The asymmetry has a
+    cause: abilities are profiled from the same rows they then score, so each absorbs part of its
+    unit's realised luck, and the floor is the one parameter that stays fully identified exactly
+    where those abilities are worst. As a unit's ability escapes to the low rail the slope's
+    gradient vanishes with the saturating sigmoid, while the floor's does not — at that rail the
+    response IS the floor — and the ceiling is held fixed, so ability noise pulls the floor one way
+    and nothing the other. Scaling the floor by that number would have shipped the bias as if it
+    were signal. The measurement, and the machinery to re-run it, live in
+    auxiliary/rating_dev/eval_phase2_units.py.
 
     Scored in the CLIENT's response form (pwa/js/irt.js), pivoting at the SHIPPED
     rating — mode-'slope' semantics: the rating stays the 80%-clear anchor of the unscaled curve,
-    and the scales ship as quality = s·slope, floor = f·floor. (Scaling around the trainer's
-    internal 50%-point instead would rescale the rating axis itself.) kappa is recomputed from the
-    scaled floor inside the loss, exactly as the client will compute it from the shipped floor.
+    and the scale ships as quality = s·slope. (Scaling around the trainer's internal 50%-point
+    instead would rescale the rating axis itself.) kappa is computed from the floor exactly as the
+    client will compute it from the shipped floor, under the same clamp.
 
-    Runs twice — scales frozen at unity (theta-only baseline), then scales free, warm-started from
-    the baseline thetas — so the reported gain is like-for-like. Fully deterministic: zero/mean
-    inits, full-batch Adam, no RNG. Returns {'s', 'f', 'gain_mnat_per_attempt', 'n_rows',
-    'n_units', 'bce_unity', 'bce_scaled'}."""
+    Runs twice — scale frozen at unity (theta-only baseline), then free, warm-started from the
+    baseline thetas — so the reported gain is like-for-like. Fully deterministic: zero/mean inits,
+    full-batch Adam, no RNG. Returns {'s', 'gain_mnat_per_attempt', 'n_rows', 'n_units',
+    'bce_unity', 'bce_scaled'}."""
     df = df[df["problem"].isin(params_by_tid)].copy()
     ts = pd.to_datetime(df["created_at"], utc=True, errors="coerce")
     df = df[ts.notna()].copy()
@@ -211,31 +228,31 @@ def fit_global_scales(df, params_by_tid, lapse, device):
     ty = torch.tensor(y, device=device)
     tcodes = torch.tensor(codes, device=device)
 
-    def run(free_scales, th_init):
+    # The floor is unscaled, so the whole floor side of the curve — the clamp, the span and the
+    # 80%-clear pivot kappa — is a loop invariant and is built once, in the client's own form.
+    c2 = tC.clamp(0.0, CLIENT_FLOOR_MAX)
+    span = (1.0 - c2 - lapse).clamp(min=EPS)
+    q = ((CALIBRATION_P - c2) / span).clamp(EPS, 1.0 - EPS)
+    kap = torch.log(q / (1.0 - q))
+
+    def run(free_scale, th_init):
         th = nn.Parameter(torch.tensor(th_init, device=device, dtype=torch.float64))
         ls = nn.Parameter(torch.zeros((), device=device, dtype=torch.float64))
-        lf = nn.Parameter(torch.zeros((), device=device, dtype=torch.float64))
-        opt = torch.optim.Adam([th, ls, lf] if free_scales else [th], lr=P2_LR)
+        opt = torch.optim.Adam([th, ls] if free_scale else [th], lr=P2_LR)
         for step in range(P2_STEPS):
-            s = torch.exp(ls) if free_scales else 1.0
-            f = torch.exp(lf) if free_scales else 1.0
-            c2 = (f * tC).clamp(0.0, CLIENT_FLOOR_MAX)
-            span = (1.0 - c2 - lapse).clamp(min=EPS)
-            q = ((CALIBRATION_P - c2) / span).clamp(EPS, 1.0 - EPS)
-            kap = torch.log(q / (1.0 - q))
+            s = torch.exp(ls) if free_scale else 1.0
             z = (s * tA * (th[tcodes] - tR0) + kap).clamp(-35.0, 35.0)
             P = (c2 + span * torch.sigmoid(z)).clamp(EPS, 1.0 - EPS)
             loss = -(ty * torch.log(P) + (1.0 - ty) * torch.log(1.0 - P)).mean()
             opt.zero_grad(); loss.backward(); opt.step()
-            if free_scales and (step % 500 == 0 or step == P2_STEPS - 1):
+            if free_scale and (step % 500 == 0 or step == P2_STEPS - 1):
                 print(f"    phase-2 step {step:4d}  BCE {float(loss):.5f}  "
-                      f"s {float(torch.exp(ls)):.3f}  f {float(torch.exp(lf)):.3f}", flush=True)
-        return (float(loss), float(torch.exp(ls)), float(torch.exp(lf)),
-                th.detach().cpu().numpy())
+                      f"s {float(torch.exp(ls)):.3f}", flush=True)
+        return float(loss), float(torch.exp(ls)), th.detach().cpu().numpy()
 
-    bce_unity, _, _, th_base = run(False, th0)
-    bce_scaled, s, f, _ = run(True, th_base)
-    return {"s": round(s, 4), "f": round(f, 4),
+    bce_unity, _, th_base = run(False, th0)
+    bce_scaled, s, _ = run(True, th_base)
+    return {"s": round(s, 4),
             "gain_mnat_per_attempt": (bce_unity - bce_scaled) * 1000,
             "n_rows": n, "n_units": n_units,
             "bce_unity": bce_unity, "bce_scaled": bce_scaled}
@@ -447,24 +464,24 @@ def main():
         print(f"  rating percentiles [.1, 1, 50, 99, 99.9]: "
               f"{np.percentile(rating, [0.1, 1, 50, 99, 99.9])}")
 
-    # ---- PHASE 2: global slope/floor scale fit (replaced the walk-forward stage 2026-07-25) ----
+    # ---- PHASE 2: global slope scale fit (replaced the walk-forward stage 2026-07-25) ----
     # The per-problem values come out scale-compressed toward the feature-conditional mean
     # (dropout-induced — NOT errors-in-variables; bootstrap-proven, 2026-07-24 series), so the true
     # response curves are steeper per shipped-rating unit than the phase-1 slope claims. Phase 2
-    # measures the correction as two global scalars on the frozen model, in-sample over EVERY
-    # first-time attempt with the ability field refit (see fit_global_scales — refit is what keeps
-    # the criterion unbiased). s is recalculated every run, never hardcoded; ordering matters:
-    # rating is derived from the UNSCALED slope/floor above (it anchors the curve phase 2 scales).
-    cal = fit_global_scales(
+    # measures the correction as one global scalar on the frozen model, in-sample over EVERY
+    # first-time attempt with the ability field refit (see fit_global_slope_scale — refit is what
+    # keeps the criterion unbiased, and that docstring also carries why the FLOOR is left alone).
+    # s is recalculated every run, never hardcoded; ordering matters: rating is derived from the
+    # UNSCALED slope/floor above (it anchors the curve phase 2 scales).
+    cal = fit_global_slope_scale(
         load_first_time_attempts(),
         {keys[i][1]: (float(rating[i]), float(a_all[i]), float(c_all[i]))
          for i in range(len(keys))},
         load_client_lapse(lam), device)
-    print(f"  phase-2 scales: s = {cal['s']:.3f}, f = {cal['f']:.3f} "
+    print(f"  phase-2 slope scale: s = {cal['s']:.3f} "
           f"(+{cal['gain_mnat_per_attempt']:.2f} mnat/attempt in-sample, "
-          f"{cal['n_units']} ability units / {cal['n_rows']} attempts)")
+          f"{cal['n_units']} ability units / {cal['n_rows']} attempts; floor shipped unscaled)")
     a_all = cal["s"] * a_all
-    c_all = cal["f"] * c_all
     os.makedirs(OUT_DIR, exist_ok=True)
     for s in SIZES:
         sel = [i for i, (sz, _) in enumerate(keys) if sz == s]
@@ -488,7 +505,7 @@ def main():
         os.path.join(OUT_DIR, "user_theta.csv"), index=False)
     with open(os.path.join(OUT_DIR, "rating_constants.json"), "w") as f:
         json.dump({"fat_finger_rate": round(lam, 4),
-                   "slope_scale": cal["s"], "floor_scale": cal["f"],
+                   "slope_scale": cal["s"],
                    "scale_fit": "two_phase_insample",
                    "scale_gain_mnat": round(cal["gain_mnat_per_attempt"], 3)},
                   f, indent=2)
