@@ -74,6 +74,7 @@ import bisect
 import csv
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -106,7 +107,8 @@ DEFAULTS = {
     "review_bias_per_min": 0.0,
     "fat_finger_rate": 0.01,           # 4PL upper-asymptote slip rate (lapse)
     "retention": {"kappa": 4.22, "z0": float(Z0),
-                  "growth": float(np.log(1.54)), "ln_c_prior": 1.55},
+                  "growth": float(np.log(1.54)), "ln_c_prior": 1.55,
+                  "first_success_step": 0.0},
     # Time-adjusted rank: a single log-time slope + center. PRODUCED by the rating→rank
     # mapping (pipeline.map_rating_to_rank fits α jointly with the curve + couplings) and
     # READ THROUGH here into population_constants.json — not fit here. Fallback only.
@@ -116,6 +118,7 @@ DEFAULTS = {
     # fabricated fallback (there is no scalar weakness_ridge_lambda anymore).
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
+MIN_RECALL_HOURS = 6.0                 # pwa/js/model.js stability floor, in hours
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
 
 # --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
@@ -409,7 +412,7 @@ def build_retention_events(rows, params, abilities):
                 t_cur = datetime.fromisoformat(a["created_at"].replace("Z", "+00:00"))
                 gap_days = (t_cur - t_prev).total_seconds() / 86400.0
                 if gap_days > 0:
-                    events.append((1 if a["success"] else 0, gap_days, prev_ssf, z))
+                    events.append((1 if a["success"] else 0, gap_days, prev_ssf, z, user))
             # update successSinceFailure AFTER using the previous value
             if not a["success"]:
                 has_failed = True
@@ -447,6 +450,78 @@ def fit_retention(events):
         return None
     return {"kappa": float(kappa), "z0": float(Z0),
             "growth": float(growth), "ln_c_prior": float(ln_c)}
+
+
+MIN_STEP_EVENTS_PER_CELL = 5           # per user, each of the two streak cells
+MIN_STEP_USERS = 20                    # below this the step keeps its default
+STEP_MAX = 2.0                         # sanity rail on the fitted step
+
+
+def fit_first_success_step(events):
+    """The extra log-stability a problem earns from its FIRST success after a
+    lapse, over and above the per-success growth already in the ladder.
+
+    The streak counter is zero exactly when the previous attempt FAILED, and one
+    when it was the first success after a failure — so rung 0 and rung 1 are the
+    post-lapse and post-success states, not two steps of one ladder. Established
+    schedulers give a lapse its own formula; this model does not, and the
+    shortfall shows up as reviews at rung 1 and above clearing well above the
+    0.80 the window opens at, i.e. served before the intended forgetting.
+
+    Fit by MOMENT MATCHING, deliberately not by retention likelihood. The
+    likelihood is evaluated on intervals the scheduler itself chose, so it is
+    close to uninformative about what a different schedule would do — measured,
+    it sizes this step at about a fifth of what the realized rates require.
+    The moment condition needs no fitting at all: under R = exp(-t/S), scaling
+    an interval by f scales log-retention by f, so the multiplier taking a cell
+    from its realized rate p to a target q is ln(q)/ln(p), and the step is its
+    logarithm. The target is rung 0's own realized rate — making the ladder
+    self-consistent, which is what the client can actually be held to, rather
+    than any particular point inside the window.
+
+    The rung contrast is taken WITHIN USER (Mantel-Haenszel, one stratum per
+    user). How promptly a user returns once a window opens is a habit that sets
+    where in the window their serves land; it is unobservable and stable per
+    user, so comparing each user only against themselves removes it.
+    """
+    by_user = defaultdict(lambda: {0: [0, 0], 1: [0, 0]})
+    for y, gap_days, r, _z, user in events:
+        if gap_days * 24 < MIN_RECALL_HOURS:
+            continue        # under the stability floor: not a schedulable serve
+        cell = by_user[user][0 if r == 0 else 1]
+        cell[0] += y
+        cell[1] += 1
+
+    num = den = 0.0
+    k0 = n0 = 0
+    strata = 0
+    for _user, c in by_user.items():
+        if c[0][1] < MIN_STEP_EVENTS_PER_CELL or c[1][1] < MIN_STEP_EVENTS_PER_CELL:
+            continue
+        A, B = float(c[1][0]), float(c[1][1] - c[1][0])      # rung >= 1
+        C, D = float(c[0][0]), float(c[0][1] - c[0][0])      # rung 0
+        n = A + B + C + D
+        num += A * D / n
+        den += B * C / n
+        k0 += c[0][0]
+        n0 += c[0][1]
+        strata += 1
+    if strata < MIN_STEP_USERS or den <= 0 or num <= 0 or n0 == 0:
+        return None, f"{strata} users with >= {MIN_STEP_EVENTS_PER_CELL} events per cell"
+
+    odds_ratio = num / den
+    p0 = k0 / n0                                   # post-lapse realized rate
+    if not (0 < p0 < 1):
+        return None, "degenerate rung-0 rate"
+    odds1 = (p0 / (1 - p0)) * odds_ratio
+    p1 = odds1 / (1 + odds1)                       # post-success rate, within user
+    if not (0 < p1 < 1) or p1 <= p0:
+        return None, f"post-success rate {p1:.3f} not above post-lapse {p0:.3f}"
+    step = math.log(math.log(p0) / math.log(p1))   # ln of the interval multiplier
+    if not (0 <= step < STEP_MAX):
+        return None, f"step {step:.3f} outside [0, {STEP_MAX})"
+    return step, (f"OR {odds_ratio:.2f} over {strata} users; post-lapse {p0:.3f} "
+                  f"-> post-success {p1:.3f}; interval x{math.exp(step):.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +840,15 @@ def main():
             out["retention"] = {k: round(v, 4) for k, v in fit.items()}
             print(f"  KAPPA={fit['kappa']:.3f}  GROWTH={fit['growth']:.3f}  "
                   f"LN_C_PRIOR={fit['ln_c_prior']:.3f}  (Z0={fit['z0']:.3f} fixed)")
+            step, step_info = fit_first_success_step(events)
+            if step is None:
+                _resort_to_default("retention.first_success_step", step_info,
+                                   args.allow_defaults)
+                out["retention"]["first_success_step"] = \
+                    DEFAULTS["retention"]["first_success_step"]
+            else:
+                out["retention"]["first_success_step"] = round(step, 4)
+                print(f"  FIRST_SUCCESS_STEP={step:.3f}  ({step_info})")
         else:
             _resort_to_default("retention", "retention fit degenerate",
                                args.allow_defaults)

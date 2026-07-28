@@ -60,7 +60,7 @@ export function calculatePercentile(sortedArr, target) {
 //
 //   z    = INTERCEPT + TIME_SOLVING·timePct + REVIEW_TIME·reviewPct
 //          + PROBLEM_DIFFICULTY·problemRank + SIZE_IS_13·size13      (= logit p)
-//   lnS  = LN_C + KAPPA·(z − Z0) + GROWTH·r
+//   lnS  = LN_C + KAPPA·(z − Z0) + GROWTH·r + FIRST_SUCCESS_STEP·[r ≥ 1]
 //   R(t) = exp(-t_days / exp(lnS))
 //
 // i.e. S = exp(LN_C) · odds(p/0.7)^KAPPA · GROWTH_FACTOR^r. R(0)=1 (no instant-
@@ -73,6 +73,21 @@ export function calculatePercentile(sortedArr, target) {
 // and Z0=logit(0.7) is the reference difficulty so LN_C is the base stability at
 // p=0.7. Only LN_C — the per-user base durability — is fit; it is L2-shrunk to
 // the population prior so it stays sane with little data and adapts with more.
+//
+// FIRST_SUCCESS_STEP is a POST-LAPSE term, not another rung of the ladder. r is
+// 0 exactly when the previous attempt FAILED (that is how a problem joins the
+// pool) and 1 when it was the first success after a failure, so r=0 and r≥1 are
+// the post-lapse and post-success states. Established schedulers give a lapse
+// its own formula; this one folds it into LN_C, and without the step every rung
+// above 0 is served before the forgetting the window waits for has happened —
+// measured on the attempt log, they clear AT or ABOVE the 0.80 the window opens
+// at, while rung 0 lands correctly near the window's middle. The carrier is
+// BINARY (did the last attempt succeed), not the count: the second success adds
+// nothing distinguishable from zero, so this is one indicator and not a second
+// growth rate. It is a POPULATION constant — the within-user contrast is close
+// to identical across users (see pipeline.fit_population_constants), and 42% of
+// users have no r≥1 rows at all inside this model's training window, so a
+// per-user version would be its own prior for most of them.
 //
 // The same logit z is the NOVEL cold-solve head P=σ(z); that head is trained on
 // correctness over ALL rows (so REVIEW_TIME, which is 0 on novel rows, is still
@@ -102,6 +117,7 @@ export const MIN_RECALL_INTERVAL_MS = MIN_RECALL_HOURS * 3600 * 1000;
 // `let`, uninitialized until applyRetentionConstants() runs — before any train/schedule.
 let KAPPA;        // stability's sensitivity to the cold-solve logit
 let GROWTH;       // log stability growth per consecutive success
+let FIRST_SUCCESS_STEP;  // extra log stability once the previous attempt was a success
 let Z0;           // reference difficulty: LN_C is the base S at p=0.7 (= logit(0.7))
 let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to this
 // Population-mean time/review benefit confound (logit per MINUTE), from
@@ -208,7 +224,8 @@ function lnStabilityForRepeat(features, params, floor) {
     const M = MODEL_INDICES;
     return params[M.LN_C]
          + KAPPA * (retentionLogit(features, params, floor) - Z0)
-         + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
+         + GROWTH * features[M.SUCCESS_SINCE_FAILURE]
+         + (features[M.SUCCESS_SINCE_FAILURE] >= 1 ? FIRST_SUCCESS_STEP : 0);
 }
 
 // Clamped stability (days) for scheduling/prediction.
@@ -388,7 +405,8 @@ function predictAndGrad(features, params, { isRepeat, elapsedDays, y, floor }) {
     // constant ~34-nat loss on failed rows while contributing zero gradient).
     if (isRepeat && elapsedDays !== null) {
         const z = retentionLogit(features, params, c);
-        const lnSRaw = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE];
+        const lnSRaw = params[M.LN_C] + KAPPA * (z - Z0) + GROWTH * features[M.SUCCESS_SINCE_FAILURE]
+            + (features[M.SUCCESS_SINCE_FAILURE] >= 1 ? FIRST_SUCCESS_STEP : 0);
         const lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnSRaw));
         const S = Math.exp(lnS);
         const u = elapsedDays / S;          // ≥ 0; u=0 ⇒ R=1 (just solved)
@@ -612,14 +630,16 @@ const L2_REGULARIZATION_TARGETS = {
 // re-points the LN_C L2 target at the prior. Throws on a missing/invalid field so a
 // corrupt blob is fatal (the caller aborts boot) rather than silently leaving the
 // constants unset — there is no baked default to fall back to.
-export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior } = {}) {
+export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior, first_success_step } = {}) {
     if (!(Number.isFinite(kappa) && kappa > 0 && kappa < 20)) throw new Error(`population constants: bad kappa ${kappa}`);
     if (!Number.isFinite(z0)) throw new Error(`population constants: bad z0 ${z0}`);
     if (!(Number.isFinite(growth) && growth > -2 && growth < 4)) throw new Error(`population constants: bad growth ${growth}`);
     if (!Number.isFinite(ln_c_prior)) throw new Error(`population constants: bad ln_c_prior ${ln_c_prior}`);
+    if (!(Number.isFinite(first_success_step) && first_success_step >= 0 && first_success_step < 2)) throw new Error(`population constants: bad first_success_step ${first_success_step}`);
     KAPPA = kappa;
     Z0 = z0;
     GROWTH = growth;
+    FIRST_SUCCESS_STEP = first_success_step;
     LN_C_PRIOR = ln_c_prior;
     L2_REGULARIZATION_TARGETS[MODEL_INDICES.LN_C] = ln_c_prior;
 }
