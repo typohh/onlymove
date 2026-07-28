@@ -29,7 +29,7 @@ them after backfill:
                      coordinate — the same (x,y) frame extraction labels cells with.
                      (Validated 300/300 on non-repeat correct attempts; repeats are
                      served-frame and unrecoverable, and are excluded from training.)
-  - problemRank    = normalizedRankForSize(rating): applyM(rating)/TOTAL_RANKS, the
+  - problemRank    = rankForSize(rating): applyM(rating), the
                      board-independent internal rank the model reads as `rating`.
 
 Usage:
@@ -68,8 +68,6 @@ EMBED_META = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "embedding_meta.json"
 POP_CONSTANTS = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "population_constants.json")
 
 # --- Constants (verbatim from the JS sources) ------------------------------
-TOTAL_RANKS = 29                    # constants.js
-RANK_INDEX_OFFSET = 19             # shared/rank-math.js
 MIN_TRAINING_ATTEMPTS = 20         # weakness.js
 MODEL_INPUT_HISTORY_LENGTH = 500   # constants.js
 MAX_EPOCHS = 200                   # weakness.js
@@ -178,7 +176,7 @@ def load_curve():
         data = json.load(f)
     # Top level carries size keys ("9"/"13") plus a "time_adjust" block; keep only
     # the numeric size keys. Both size curves are identical (one shared fit).
-    return {int(k): (v["ratings"], v["rank_indices"])
+    return {int(k): (v["ratings"], v["ranks"])
             for k, v in data.items() if k.isdigit()}
 
 
@@ -253,7 +251,7 @@ def build_history(con, user_id, correct_emb, ratings, curves, picked_loader):
         if emb is None or rating is None:
             continue  # rating-less / embedding-less rows are skipped, as on the client
         curve = curves.get(size) or next(iter(curves.values()))
-        problem_rank = interp_extrap(rating, curve[0], curve[1]) / TOTAL_RANKS
+        problem_rank = interp_extrap(rating, curve[0], curve[1])
         correct = bool(r["success"])
         picked = None
         if not correct:  # picked cell only recorded/needed for wrong attempts
@@ -481,10 +479,9 @@ def served_rank_label(history):
             seen[a["problemId"]] = a["problemRank"]
     if len(seen) < 10:
         return None
-    mean_index = sum(seen.values()) / len(seen) * TOTAL_RANKS
-    scalar = round(mean_index) - RANK_INDEX_OFFSET
-    scalar = max(-29, min(9, scalar))
-    return f"{1 - scalar}k" if scalar <= 0 else f"{scalar}d"
+    band = int(math.floor(sum(seen.values()) / len(seen)))
+    band = max(-30, min(8, band))          # clamp to the labelled ladder (30k..9d)
+    return f"{-band}k" if band < 0 else f"{band + 1}d"
 
 
 # ---------------------------------------------------------------------------

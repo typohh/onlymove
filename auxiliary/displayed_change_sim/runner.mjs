@@ -49,7 +49,6 @@ const REFINE_STEPS = parseInt(arg('refine-steps', '0')) || 0;
 const SINCE = arg('since', '2026-06-22');
 const SINCE_MS = Date.parse(SINCE);
 
-const TOTAL_RANKS = 29;
 const WORKING_SET = 3000;                 // ANSWER_HISTORY_WORKING_SET in constants.js
 // "visible" thresholds = what the overlay rounds to a nonzero number.
 const RANK_VISIBLE_STONES = 0.0005;       // overlays: rankChange*29 toFixed(3) ⇒ ≥0.001
@@ -95,7 +94,7 @@ async function replayUser(uid, attempts) {
 
     const meta = problems[tid];                      // [rating, slope, floor]
     const rating = meta[0], slope = meta[1], floor = meta[2];
-    const problemRank = E.normalizedRankForSize(rating, size);
+    const problemRank = E.rankForSize(rating, size);
 
     const hist = E.state.answerHistory;
     let prev = null;
@@ -143,8 +142,8 @@ async function replayUser(uid, attempts) {
     //      filtered out of flattenAttempts so they leave userRank unchanged) ----
     const merged = E.getMergedAnswerHistory();        // one copy, reused below
     const oldRank = E.state.userRank;
-    const est = E.estimateWindowRank(merged, oldRank * TOTAL_RANKS);
-    if (est) E.state.userRank = est.rankIndex / TOTAL_RANKS;
+    const est = E.estimateWindowRank(merged, oldRank);
+    if (est) E.state.userRank = est.rank;
     const rankChange = E.state.userRank - oldRank;   // normalized; ×29 = stones
 
     // ---- recall delta (repeat only): the REAL shared path, incl. the optional
@@ -200,13 +199,13 @@ function classify(recs, agg, prevUserRankRef, sinceMs = 0) {
     // default-update cost (every attempt runs one default retrain)
     if (count && typeof r.defEpochs === 'number') { agg.def_epochs_sum += r.defEpochs; agg.def_retrains++; }
     if (!r.isRepeat) {
-      const stones = r.rankChange * TOTAL_RANKS;
+      const stones = r.rankChange;
       const expSign = r.correct ? 1 : -1;
       const opp = (expSign > 0 && stones < 0) || (expSign < 0 && stones > 0);
       // integer-rank-label direction (overlays "Rank up/down to X") — compute &
       // advance the running rank for EVERY first-time attempt.
       const before = prevUserRankRef.v, after = before + r.rankChange;
-      const iBefore = Math.floor(before * TOTAL_RANKS), iAfter = Math.floor(after * TOTAL_RANKS);
+      const iBefore = Math.floor(before), iAfter = Math.floor(after);
       prevUserRankRef.v = after;
       if (!count) continue;
       agg.rank_n++;

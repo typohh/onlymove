@@ -361,8 +361,10 @@ const getOrCreateUserId = () => {
     return userId;
 };
 
-// Default applied when a size's bucket is empty.
-const DEFAULT_USER_RANK = 0;
+// Cold-start stand-in when no rank has been estimated yet: the weak end of the
+// labelled ladder (20 kyu). It must stay an explicit named constant — under the
+// AGA-style convention (shared/rank-math.js) a bare 0 reads as 1 DAN.
+export const DEFAULT_USER_RANK = -19.5;
 
 export const state = {
     appMode: APP_MODES.SOLVING,

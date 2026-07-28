@@ -75,9 +75,7 @@ from utils.ratings_io import load_size_value_maps  # noqa: E402
 
 # --- client constants (ports of pwa/js/{irt,rank-decomposition,rank-translation}.js) ---
 SIZES = ("9", "13")
-TOTAL_RANKS = 29
-RANK_INDEX_OFFSET = 19           # internal index 19 == 1k == server scalar 0
-RANK_SCALAR_LO, RANK_SCALAR_HI = -29.0, 9.0
+RANK_BAND_LO, RANK_BAND_HI = -30.0, 8.0   # labelled ladder: 30k .. 9d
 CALIBRATION_P = 0.8
 LOGIT_CALIBRATION = math.log(CALIBRATION_P / (1 - CALIBRATION_P))
 FLOOR_MAX = 0.78
@@ -144,13 +142,13 @@ def clear_kappa(c, lapse):
 
 
 def scalar_to_label(v):
-    """kyu/dan scalar -> label (rankScalarToLabel; 1k=0, 1d=1, no zero gap)."""
-    k = round(v)
-    return f"{1 - k}k" if k <= 0 else f"{k}d"
+    """rank -> label (rankToLabel; 0 is the 1k/1d boundary, integers are edges)."""
+    b = math.floor(v)
+    return f"{-b}k" if b < 0 else f"{b + 1}d"
 
 
 def index_to_label(idx):
-    return scalar_to_label(idx - RANK_INDEX_OFFSET)
+    return scalar_to_label(idx)
 
 
 def parse_ts(s):
@@ -174,7 +172,7 @@ class RankingSystem:
             self.ratings[size], self.slopes[size], self.floors[size] = \
                 load_size_value_maps(v2_dir, size, missing_ok=True)
             if size in rr:
-                self.curve[size] = (rr[size]["ratings"], rr[size]["rank_indices"])
+                self.curve[size] = (rr[size]["ratings"], rr[size]["ranks"])
         # one shared curve (both keys identical); used for the time-adjust remap
         self.curve9 = self.curve.get("9") or next(iter(self.curve.values()))
         try:
@@ -207,19 +205,19 @@ class RankingSystem:
 
     # --- server display (rank-translation.js + stats-ui.js skillToDisplay) ----
     def rank_index_after_rating_delta(self, idx, delta):
-        xs, ys = self.curve9  # (ratings, rank_indices)
+        xs, ys = self.curve9  # (ratings, ranks)
         rating = interp_extrap(idx, ys, xs)        # invert M: index -> rating
         return interp_extrap(rating + delta, xs, ys)
 
     def to_server_scalar(self, idx, server):
-        our = idx - RANK_INDEX_OFFSET
+        our = idx
         if server == "EGF":
-            return min(max(our, RANK_SCALAR_LO), RANK_SCALAR_HI)
+            return min(max(our, RANK_BAND_LO), RANK_BAND_HI)
         c = self.rank_map.get(server)
         if not c or "our" not in c or "server" not in c or len(c["our"]) < 2:
             return float("nan")
         s = interp_extrap(our, c["our"], c["server"])
-        return min(max(s, RANK_SCALAR_LO), RANK_SCALAR_HI)
+        return min(max(s, RANK_BAND_LO), RANK_BAND_HI)
 
     def skill_to_display(self, idx, delta, server):
         """Internal skill index -> display value: index for OnlyMove, else the

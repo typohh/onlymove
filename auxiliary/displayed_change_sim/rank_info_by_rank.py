@@ -59,7 +59,7 @@ def main():
     aP = np.where(aP > 0, aP, A_REF)
     floor = clamp_floor(np.array([floors.get(t, 0.0) for t in tids], float))
 
-    rank = interp_extrap_vec(rating, xs, ys)               # M(rating) -> rank index
+    rank = interp_extrap_vec(rating, xs, ys)               # M(rating) -> internal rank
     h = 1e-3
     mprime = (interp_extrap_vec(rating + h, xs, ys) - interp_extrap_vec(rating - h, xs, ys)) / (2 * h)
     slope_rank = aP / np.maximum(np.abs(mprime), MSLOPE_FLOOR)
@@ -73,15 +73,15 @@ def main():
     g = span * slope_rank * praw * (1 - praw)
     info = g * g / (CAL_P * (1 - CAL_P))
 
-    # bin by rank index (≈ kyu→dan; idx 19 == 1k, idx 20 == 1d)
-    edges = [-5, 5, 10, 14, 17, 19, 21, 23, 25, 28, 45]
+    # bin on the internal rank scale (0 == the 1k/1d boundary, integers are band edges)
+    edges = [-24.5, -14.5, -9.5, -5.5, -2.5, -0.5, 1.5, 3.5, 5.5, 8.5, 25.5]
 
-    def lab(idx):
-        s = idx - 19.0
-        return f"{abs(round(s - 1)):.0f}k" if s < 0.5 else f"{round(s):.0f}d"
+    def lab(v):
+        b = math.floor(v)
+        return f"{-b}k" if b < 0 else f"{b + 1}d"
 
     print(f"\ninfo/attempt vs rank (served at rank, P={CAL_P}). corpus n={len(tids)}; curve "
-          f"rank knots {ys[0]-19:+.0f}..{ys[-1]-19:+.0f} (1k=0).\n")
+          f"rank knots {ys[0]:+.0f}..{ys[-1]:+.0f} (0 = the 1k/1d boundary).\n")
     print(f"{'rank band':<18}{'n':>7}{'med a_p':>9}{'med|Mp|':>10}{'med slope':>11}"
           f"{'med info':>11}{'acc(500)':>10}{'departW@16':>11}{'%clamp':>8}")
     print('-' * 95)
@@ -106,7 +106,7 @@ def main():
         rks = [float(interp_extrap_vec(np.array([ratings[p]]), xs, ys)[0]) for (p,) in rows if p in ratings]
         if rks:
             md = float(np.median(rks))
-            print(f"  {uid:<10} n={len(rks):>5}  median rank idx {md:6.1f} (~{lab(md)})")
+            print(f"  {uid:<10} n={len(rks):>5}  median rank {md:6.1f} (~{lab(md)})")
     con.close()
     print()
 

@@ -2,7 +2,6 @@
 
 import { state } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
-import { TOTAL_RANKS } from './constants.js';
 
 const boardContainer = document.getElementById('board-container');
 
@@ -53,14 +52,13 @@ function createOverlayContent(stats, message, textColor) {
     } else if (stats && stats.rankChange) {
         const rankChange = stats.rankChange;
         if (rankChange !== 0) {
-            const rankChangeInUnits = rankChange * TOTAL_RANKS;
             const rankChangeElement = document.createElement('div');
             Object.assign(rankChangeElement.style, {
                 fontSize: `${boardContainer.offsetWidth / 20}px`,
                 marginBottom: '20px',
             });
-            const sign = rankChangeInUnits > 0 ? '+' : '';
-            const formattedChange = `${sign}${rankChangeInUnits.toFixed(3)}`;
+            const sign = rankChange > 0 ? '+' : '';
+            const formattedChange = `${sign}${rankChange.toFixed(3)}`;
             rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
             container.appendChild(rankChangeElement);
         }

@@ -43,7 +43,7 @@ SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "pwa", "tsumegos")
 
 # Internal rank index ri = floor(applyM(rating)); getDescriptiveRank maps
-# ri<20 -> (20-ri)k, ri>=20 -> (ri-19)d.  Bands keyed by ri (low <= ri < high).
+# band < 0 -> kyu, >= 0 -> dan.  Bands keyed by rank (low <= r < high).
 RANK_BANDS = [
     (float("-inf"), 5,            "16k & weaker"),
     (5,             10,           "15k-11k"),
@@ -105,13 +105,13 @@ def rank_index(rating, size, curves):
     c = curves.get(str(size))
     if not c:
         return None
-    return interp_extrap(rating, c["ratings"], c["rank_indices"])
+    return interp_extrap(rating, c["ratings"], c["ranks"])
 
 
 def rank_label(ri):
     """Kyu/dan label for an internal rank index, matching getDescriptiveRank."""
     i = int(ri // 1)  # floor, including negatives
-    return f"{20 - i}k" if i < 20 else f"{i - 19}d"
+    return f"{-i}k" if i < 0 else f"{i + 1}d"
 
 
 def band_label(value, bands):

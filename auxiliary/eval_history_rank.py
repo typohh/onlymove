@@ -49,7 +49,7 @@ serving from the full ~123k-problem corpus via the production policy (50 nearest
 the serve-rank, highest-slope pick). This induces the narrow served distribution
 the estimator actually gets in production and lets momentum run its own loop.
 
-Everything is in INTERNAL-RANK INDEX space (0..29, EGF-anchored; 1 index = 1
+Everything is in INTERNAL-RANK space (0 = the 1k/1d boundary; 1 unit = 1
 stone), each problem mapped through its size's rating_to_rank curve exactly as
 rank-decomposition.js does. Reuses the corpus loader, momentum port, problem pool
 and 4PL math from auxiliary.eval_rank_estimators.
@@ -77,7 +77,6 @@ if PROJECT_ROOT not in sys.path:
 from auxiliary import eval_rank_estimators as H  # noqa: E402
 
 HOUR_MS = H.HOUR_MS
-TOTAL_RANKS = H.TOTAL_RANKS
 CALIBRATION_P = H.CALIBRATION_P     # 0.8 — ratings are the 80%-clear ability, not 50%
 
 
@@ -139,8 +138,8 @@ def median(vals):
 
 
 def idx_to_label(idx):
-    """Internal-rank index -> kyu/dan label (index 19 == 1k, 20 == 1d)."""
-    scalar = idx - 19.0           # 1k == 0, 1d == 1
+    """Internal rank -> kyu/dan label (-0.5 == 1k, 0.5 == 1d)."""
+    scalar = idx + 0.5            # band-centre convention of the old printout
     if scalar >= 1:
         return f"{scalar:.0f}d" if abs(scalar - round(scalar)) < 0.05 else f"{scalar:.1f}d"
     n = 1 - scalar                # kyu number

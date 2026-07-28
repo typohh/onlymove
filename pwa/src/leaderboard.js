@@ -11,8 +11,8 @@
 // front-page rank, from the user's materialized 500-attempt buffer. Used by the
 // /report hot path, /register (claim seeding), and the cron.
 
-import { interpExtrap, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
-import { rankLabelToScalar } from '../shared/rank-math.js';
+import { interpExtrap } from '../shared/rank-math.js';
+import { rankLabelToRank } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
 } from '../shared/rank-window.js';
@@ -73,38 +73,38 @@ export async function getProblemParams(env) {
     return _paramsPromise;
 }
 
-// Forward coupling: an internal (time-adjusted-frame) rank scalar -> a server's
-// rank scalar. The /leaderboard page's units selector shows the onlymove estimate
-// in EGF and AGA units via this — EGF is NOT special here, it is one coupling
-// among the others (see the consensus-mapping note in CLAUDE.md). Feed it the
-// TIME-ADJUSTED scalar: the couplings were fitted against time-adjusted ratings,
-// so passing the untimed rank silently shifts every estimate by the user's dock.
-export function internalToServerScalar(server, internalScalar) {
+// Forward coupling: an internal (time-adjusted-frame) rank -> a server's rank. The
+// /leaderboard page's units selector shows the onlymove estimate in EGF and AGA
+// units via this — EGF is NOT special here, it is one coupling among the others
+// (see the consensus-mapping note in CLAUDE.md). Feed it the TIME-ADJUSTED rank:
+// the couplings were fitted against time-adjusted ratings, so passing the untimed
+// rank silently shifts every estimate by the user's dock.
+export function internalToServerRank(server, internalRank) {
     const m = RANK_MAP && RANK_MAP[server];
     if (!m || !Array.isArray(m.our) || !Array.isArray(m.server) || m.our.length < 2) return null;
-    if (internalScalar === null || !Number.isFinite(internalScalar)) return null;
-    return interpExtrap(internalScalar, m.our, m.server);
+    if (internalRank === null || !Number.isFinite(internalRank)) return null;
+    return interpExtrap(internalRank, m.our, m.server);
 }
 
-// Apply a rating-space delta to a rank index (mirrors rank-decomposition.js
-// rankIndexAfterRatingDelta; invert M, shift in rating units, re-apply M).
-function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
-    if (!CURVE || !Number.isFinite(rankIndex) || !Number.isFinite(deltaRating)) return rankIndex;
-    const rating = interpExtrap(rankIndex, CURVE.rank_indices, CURVE.ratings);
-    return interpExtrap(rating + deltaRating, CURVE.ratings, CURVE.rank_indices);
+// Apply a rating-space delta to a rank (mirrors rank-decomposition.js
+// rankAfterRatingDelta; invert M, shift in rating units, re-apply M).
+function rankAfterRatingDelta(rank, deltaRating) {
+    if (!CURVE || !Number.isFinite(rank) || !Number.isFinite(deltaRating)) return rank;
+    const rating = interpExtrap(rank, CURVE.ranks, CURVE.ratings);
+    return interpExtrap(rating + deltaRating, CURVE.ratings, CURVE.ranks);
 }
 
-// Add a personal time dock to a stored UNTIMED internal-rank SCALAR (1k=0),
-// returning the TIME-ADJUSTED scalar the server couplings (and a real GoR / AGA
-// rating) natively speak. The stored rank is untimed — the frame the client's
-// front-page headline and the Community histogram use — so this is applied only
-// where a server-frame number is being built. Monotone in the scalar, so applying
-// it to a range's min/max keeps them the min/max.
-export function addTimeDockToInternalScalar(internalScalar, deltaRating) {
-    if (!Number.isFinite(internalScalar)) return null;
-    if (!deltaRating) return internalScalar;
-    const idx = rankIndexAfterRatingDelta(internalScalar + RANK_INDEX_OFFSET, deltaRating);
-    return Number.isFinite(idx) ? idx - RANK_INDEX_OFFSET : internalScalar;
+// Add a personal time dock to a stored UNTIMED internal rank, returning the
+// TIME-ADJUSTED rank the server couplings (and a real GoR / AGA rating) natively
+// speak. The stored rank is untimed — the frame the client's front-page headline
+// and the Community histogram use — so this is applied only where a server-frame
+// number is being built. Monotone, so applying it to a range's min/max keeps them
+// the min/max.
+export function addTimeDockToInternalRank(internalRank, deltaRating) {
+    if (!Number.isFinite(internalRank)) return null;
+    if (!deltaRating) return internalRank;
+    const adj = rankAfterRatingDelta(internalRank, deltaRating);
+    return Number.isFinite(adj) ? adj : internalRank;
 }
 
 // The personal time dock in RATING units from a set of valid solve times (ms,
@@ -150,25 +150,29 @@ export function normalizeCountry(cc) {
     return u;
 }
 
-// GoR (integer EGD rating) -> onlymove rank scalar (1k = 0, 1d = 1). Standard EGF
-// ~100-GoR/stone linearization anchored at 1k = 2000, 1d = 2100 (kept simple; the
-// full nonlinear EGF relation could replace it later). Returns null on a bad GoR.
-export function gorToRankScalar(gor) {
+// GoR (integer EGD rating) -> our rank. Standard EGF ~100-GoR/stone linearization
+// anchored at 1k = 2000, 1d = 2100 (kept simple; the full nonlinear EGF relation
+// could replace it later); the trailing -0.5 lands on the band CENTRE, since GoR
+// 2000 is a mid-1k rather than the 1k/1d boundary our 0 marks. Null on a bad GoR.
+export function gorToRank(gor) {
     if (typeof gor !== 'number' || !Number.isFinite(gor) || gor <= 0) return null;
-    return (gor - 2000) / 100;
+    return (gor - 2000) / 100 - 0.5;
 }
 
 // --- verified-rating helpers (the /leaderboard "Verified" column) -----------------
 // The column shows ONLY machine-verified data from the player's bound external
 // account — the EGD GoR / AGA rating heartbeats — never human survey declarations.
 
-// AGA rating -> rank-scalar TIER (1k = 0 convention) for the activity window:
-// dan = rating >= 1 (scalar ~ rating), kyu = rating <= -1 (scalar = rating + 1;
-// -1 -> 0 = 1k). The (-1, 1) gap holds no real AGA ratings.
-export function agaRatingToTierScalar(rating) {
+// AGA rating -> our-rank TIER for the activity window. Deliberately COARSE — it
+// only has to land in the right dan / SDK / DDK band, so the dan region tracks the
+// rating directly and the kyu region shifts up across AGA's (-1, 1) gap, which
+// holds no real AGA rating. The -0.5 puts both on our band CENTRES, matching
+// rankLabelToRank. Not a rating conversion: agaRankToRating (leaderboard-page.js)
+// is the exact one.
+export function agaRatingToTierRank(rating) {
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
-    if (rating >= 1) return rating;
-    if (rating <= -1) return rating + 1;
+    if (rating >= 1) return rating - 0.5;
+    if (rating <= -1) return rating + 0.5;
     return null;
 }
 
@@ -180,12 +184,12 @@ export function shortRankLabel(label) {
     return m ? m[1] + m[2] : null;
 }
 
-// Tier scalar from an official label; pro grades count as dan tier. Null when the
+// Tier rank from an official label; pro grades count as dan tier. Null when the
 // label is absent/unparseable (callers fall back to the rating-derived tier).
-function tierScalarFromLabel(label) {
+function tierRankFromLabel(label) {
     if (typeof label !== 'string') return null;
-    if (/^\d{1,2}p$/.test(label)) return 7;      // pro -> dan tier
-    return rankLabelToScalar(label);
+    if (/^\d{1,2}p$/.test(label)) return 6.5;    // pro -> dan tier (7d)
+    return rankLabelToRank(label);
 }
 
 // EGD Last_Appearance tournament code ("T220122H") -> ISO date, or null. Two-digit
@@ -209,17 +213,18 @@ function isoDateOrNull(s) {
 
 // EGF activity criterion: a rating is "active" while the player's last tournament
 // is within 2 years for dan (and pro), 1 year for single-digit kyu, 6 months for
-// double-digit kyu. Tier boundaries use band edges (dan >= 0.5 — the 1k/1d
-// boundary band — DDK < -8.5 = 10k and weaker). FAIL-OPEN when the date is
-// unknown (a register-seeded heartbeat has none until the first weekly refresh).
-export function isVerifiedActive(tierScalar, lastGameAt, nowMs = Date.now()) {
+// double-digit kyu. Tier boundaries are band EDGES, which under this convention
+// are the integers: dan >= 0 (the 1k/1d boundary), double-digit kyu < -9 (10k and
+// weaker). FAIL-OPEN when the date is unknown (a register-seeded heartbeat has
+// none until the first weekly refresh).
+export function isVerifiedActive(tierRank, lastGameAt, nowMs = Date.now()) {
     if (!lastGameAt) return true;
     const t = Date.parse(lastGameAt);
     if (!Number.isFinite(t)) return true;
     const days = (nowMs - t) / 86400000;
-    const win = !Number.isFinite(tierScalar) ? 730
-        : tierScalar >= 0.5 ? 730
-            : tierScalar > -8.5 ? 365
+    const win = !Number.isFinite(tierRank) ? 730
+        : tierRank >= 0 ? 730
+            : tierRank >= -9 ? 365
                 : 183;
     return days <= win;
 }
@@ -227,15 +232,15 @@ export function isVerifiedActive(tierScalar, lastGameAt, nowMs = Date.now()) {
 // The user's leaderboard rank from a buffer of { p, s, t } (newest FIRST). Resolves
 // rating/slope/floor from `params` (dropping problems no longer in the corpus),
 // flattens through the SHARED transform and runs the SHARED window estimator.
-// Returns { rankScalar, se, usable, deltaRating } — the estimator's OWN output frame,
-// stored as-is: `rankScalar` is the UNTIMED internal rank scalar (1k = 0) and `se` its
+// Returns { rank, se, usable, deltaRating } — the estimator's OWN output frame,
+// stored as-is: `rank` is the UNTIMED internal rank and `se` its
 // standard error in the same units (stones), both straight from the window MLE with no
 // coupling applied. `deltaRating` is the personal time dock in RATING units, computed
 // here (the weighted-median solve time over the same window) and stored alongside, so a
-// reader building a server-frame number applies it forward via addTimeDockToInternalScalar
+// reader building a server-frame number applies it forward via addTimeDockToInternalRank
 // instead of re-deriving it from the buffer on every read. `usable` is the count of
 // buffered attempts still in the corpus (what the fit uses AND what the progress readout
-// shows); rankScalar is NULL when usable < RANK_START_MIN.
+// shows); rank is NULL when usable < RANK_START_MIN.
 export function computeRank(buffer, params) {
     const flat = [];
     const times = [];
@@ -248,19 +253,19 @@ export function computeRank(buffer, params) {
         flat.push(f);
         times.push(Number.isFinite(e.t) ? e.t : NaN);
     }
-    if (flat.length < RANK_START_MIN) return { rankScalar: null, se: null, usable: flat.length, deltaRating: 0 };
+    if (flat.length < RANK_START_MIN) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // No server-side warm-start: the window MLE is a pure function of the recent
     // history (the prior is weak, WIN_PRIOR_SD = 4, vs hundreds of attempts), so the
     // recent-mean fallback converges to the same R the client's prev-rank seed does.
     const est = estimateWindowRankFromFlat(flat, NaN);
-    if (!est) return { rankScalar: null, se: null, usable: flat.length, deltaRating: 0 };
+    if (!est) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // The dock is DERIVED here but NOT applied: the rank is stored untimed (the frame
     // both the front page and the Community histogram want), and the two consumers that
     // need a server frame add it back forward.
     return {
-        rankScalar: est.rankIndex - RANK_INDEX_OFFSET,
+        rank: est.rank,
         se: est.se,
         usable: flat.length,
         deltaRating: timeDockFromTimes(times),
@@ -470,8 +475,8 @@ export async function buildRowStateFromReports(env, userId, params) {
     ).bind(userId, BUFFER_CAP).all();
     const rows = (res && res.results) || [];
     const buffer = rows.map((r) => ({ p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null }));
-    const { rankScalar, se, deltaRating } = computeRank(buffer, params);
-    return { buffer, rankScalar, se, deltaRating };
+    const { rank, se, deltaRating } = computeRank(buffer, params);
+    return { buffer, rank, se, deltaRating };
 }
 
 // --- /report hot path -----------------------------------------------------------
@@ -490,7 +495,7 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
 
     const params = await getProblemParams(env);
     const buffer = pushBuffer(parseBuffer(row.buffer), problemId, success, timeUsed);
-    const { rankScalar, se, deltaRating } = computeRank(buffer, params);
+    const { rank, se, deltaRating } = computeRank(buffer, params);
     const nowIso = new Date().toISOString();
     // Stamp the request's edge geo-IP country into the SAME row write (no extra
     // write) — this column is the universal flag fallback for anonymous rows.
@@ -499,7 +504,7 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
     // code wins (last-writer-wins among valid codes, so the flag follows travel).
     const cc = normalizeCountry(country);
 
-    if (rankScalar === null) {
+    if (rank === null) {
         await env.DB.prepare(
             `UPDATE leaderboard SET buffer = ?2, last_active = ?3,
                 country = COALESCE(?4, country)
@@ -511,7 +516,7 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
         `UPDATE leaderboard SET buffer = ?2, pred_rank = ?3, pred_rank_se = ?4,
             time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country)
           WHERE user_id = ?1`
-    ).bind(userId, serializeBuffer(buffer), rankScalar, se, deltaRating, nowIso, cc).run();
+    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc).run();
 }
 
 // First novel report from a row-less user (brand new, or pruned while idle): seed
@@ -528,7 +533,7 @@ async function createLeaderboardRow(env, userId, country) {
         `INSERT OR IGNORE INTO leaderboard
             (user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, country)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
-    ).bind(userId, serializeBuffer(st.buffer), st.rankScalar, st.se, st.deltaRating, nowIso,
+    ).bind(userId, serializeBuffer(st.buffer), st.rank, st.se, st.deltaRating, nowIso,
         normalizeCountry(country)).run();
 }
 
@@ -573,7 +578,7 @@ export async function reconcileBuffers(env) {
     ).all();
     for (const row of ((res && res.results) || [])) {
         const st = await buildRowStateFromReports(env, row.user_id, params);
-        if (st.rankScalar === null) {
+        if (st.rank === null) {
             await env.DB.prepare(
                 `UPDATE leaderboard SET buffer = ?2, pred_rank = NULL WHERE user_id = ?1`
             ).bind(row.user_id, serializeBuffer(st.buffer)).run();
@@ -583,32 +588,32 @@ export async function reconcileBuffers(env) {
             `UPDATE leaderboard SET buffer = ?2, pred_rank = ?3, pred_rank_se = ?4,
                 time_delta_rating = ?5
               WHERE user_id = ?1`
-        ).bind(row.user_id, serializeBuffer(st.buffer), st.rankScalar, st.se, st.deltaRating).run();
+        ).bind(row.user_id, serializeBuffer(st.buffer), st.rank, st.se, st.deltaRating).run();
     }
 }
 
-// Resolve one leaderboard row's rank: the stored pred_rank (UNTIMED internal scalar,
-// 1k = 0) if present, else a recompute from the row's buffer (the stored value can lag
+// Resolve one leaderboard row's rank: the stored pred_rank (UNTIMED internal rank,
+// 0 = the 1k/1d boundary) if present, else a recompute from the row's buffer (the stored value can lag
 // a threshold change or corpus churn; the recompute surfaces a rank the instant the
 // valid count reaches the gate, without waiting for the reconcile cron — and it is the
 // path a row takes for one cycle after the pred_egf_rank -> pred_rank column change,
 // which is why no backfill script is needed). `deltaRating` is the user's personal time
 // dock in rating units, stored alongside the rank so the server-frame columns can add it
-// forward without a second pass over the buffer. Returns rankScalar = null for a row
+// forward without a second pass over the buffer. Returns rank = null for a row
 // below RANK_START_MIN valid in-corpus attempts. Shared by the /leaderboard page and the
 // Community rank histogram so the two can never disagree about a player's rank.
 export function resolveRowRank(row, params) {
-    let rankScalar = Number.isFinite(row.pred_rank) ? row.pred_rank : null;
+    let rank = Number.isFinite(row.pred_rank) ? row.pred_rank : null;
     let deltaRating = Number.isFinite(row.time_delta_rating) ? row.time_delta_rating : 0;
-    if (rankScalar === null) {
+    if (rank === null) {
         const buf = row.buffer ? parseBuffer(row.buffer) : [];
         if (params && buf.length) {
             const c = computeRank(buf, params);
             deltaRating = c.deltaRating || 0;
-            if (Number.isFinite(c.rankScalar)) rankScalar = c.rankScalar;
+            if (Number.isFinite(c.rank)) rank = c.rank;
         }
     }
-    return { rankScalar, deltaRating };
+    return { rank, deltaRating };
 }
 
 // Every player active in the window, with their UNTIMED onlymove rank scalar —
@@ -641,13 +646,13 @@ export async function readActivePlayers(env, { activeDays = 7 } = {}) {
     for (const r of rows) {
         // The stored rank IS the untimed onlymove scalar this consumer wants — no
         // coupling and no dock to undo.
-        const { rankScalar } = resolveRowRank(r, params);
-        if (rankScalar === null) belowGate++;
+        const { rank } = resolveRowRank(r, params);
+        if (rank === null) belowGate++;
         players.push({
             userId: r.user_id,
             country: r.country || null,
             hidden: hidden.has(r.user_id),
-            internal: Number.isFinite(rankScalar) ? rankScalar : null,
+            internal: Number.isFinite(rank) ? rank : null,
         });
     }
     return { players, belowGate };
@@ -752,10 +757,10 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const isHidden = hidden.has(r.user_id);
         // Rank + personal time dock via the shared resolver (see resolveRowRank): the
         // rank arrives untimed, and the dock is added forward for the server frames.
-        const { rankScalar, deltaRating } = resolveRowRank(r, params);
+        const { rank, deltaRating } = resolveRowRank(r, params);
         // Below the list-entry gate: not shown, only tallied. (A hidden sub-gate row is
         // counted too — the tally is a raw activity aggregate, not identifying.)
-        if (rankScalar === null) { belowMin++; continue; }
+        if (rank === null) { belowMin++; continue; }
         // Verified external ratings: ONLY the machine heartbeats ('EGD' GoR, 'AGAR'
         // AGA rating) are surfaced — human survey declarations are not revealed;
         // their rows are read solely for the last-resort country/flag fallback.
@@ -802,11 +807,11 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         // open (register-seeded heartbeats have none for <= a week).
         let staleDropped = false;
         if (egd) {
-            const tier = tierScalarFromLabel(egd.label) ?? gorToRankScalar(egd.gor);
+            const tier = tierRankFromLabel(egd.label) ?? gorToRank(egd.gor);
             if (!isVerifiedActive(tier, egd.lastGameAt)) { egd = null; staleDropped = true; }
         }
         if (aga) {
-            const tier = tierScalarFromLabel(aga.label) ?? agaRatingToTierScalar(aga.rating);
+            const tier = tierRankFromLabel(aga.label) ?? agaRatingToTierRank(aga.rating);
             if (!isVerifiedActive(tier, aga.lastGameAt)) { aga = null; staleDropped = true; }
         }
         if (staleDropped) staleVerified++;
@@ -814,10 +819,10 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         // stored untimed internal scalar (onlymove mode + the sort key), and the two
         // time-adjusted server frames — the frames the verified GoR/AGA rating natively
         // speak, so the dock MUST be added before either coupling is applied.
-        const currentInternal = rankScalar;
-        const internalTimed = addTimeDockToInternalScalar(rankScalar, deltaRating);
-        const currentEgf = internalToServerScalar('EGF', internalTimed);
-        const currentAga = internalToServerScalar('AGA', internalTimed);
+        const currentInternal = rank;
+        const internalTimed = addTimeDockToInternalRank(rank, deltaRating);
+        const currentEgf = internalToServerRank('EGF', internalTimed);
+        const currentAga = internalToServerRank('AGA', internalTimed);
         // A hidden user is stripped of name/country and reported as unregistered, so the
         // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
         // reliable) → invitation (EGD, frozen at invite) → leaderboard row (edge geo-IP,

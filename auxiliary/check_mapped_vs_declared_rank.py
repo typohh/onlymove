@@ -62,7 +62,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
-    load_rank_surveys, scalar_to_rank,
+    load_rank_surveys, value_to_rank,
 )
 from pipeline.map_rating_to_rank import (  # noqa: E402
     EPS_CONTAMINATION, SIZES, load_floors, load_ratings, load_slopes,
@@ -76,14 +76,13 @@ V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
 # rank_index axis (rating_to_rank.json) is 20k=0 .. 1k=19 .. 1d=20; the internal
 # (EGF) rank scalar is 1k=0, 1d=1. So internal_scalar = rank_index − 19.
-RANK_INDEX_OFFSET = 19.0
 
 
 def load_M(v2_dir):
     """Shared rating→internal-rank-scalar knots (both board keys are identical).
     Returns (ratings_asc, internal_scalars_asc) for interp_extrap_vec."""
     ratings, internal = load_rating_rank_curve(
-        v2_dir, size=SIZES[0], offset=RANK_INDEX_OFFSET)
+        v2_dir, size=SIZES[0])
     order = np.argsort(ratings)
     return ratings[order], internal[order]
 
@@ -112,7 +111,7 @@ def apply_M(R, m_ratings, m_internal):
 # practice here is untimed but server ranks are timed, so a solver slower than
 # typical FOR THEIR RANK overstates their timed strength. See
 # pwa/js/population-constants.js (timeAdjustDeltaRating) + rank-decomposition.js
-# (rankIndexAfterRatingDelta). Feature must match user_median_log10_minutes in
+# (rankAfterRatingDelta). Feature must match user_median_log10_minutes in
 # fit_population_constants: non-repeat, time_used in (0, AFK cap], ≥MIN_TIMED.
 # The client takes this median over its WORKING SET — the unified most-recent
 # ANSWER_HISTORY_WORKING_SET attempts across both sizes (getMergedAnswerHistory),
@@ -365,7 +364,7 @@ def main():
     rows = []
     for _, r in surveys.iterrows():
         pref = str(r["user_id"])[:8]
-        g = r.get("rank_scalar")
+        g = r.get("rank_value")
         if pref not in user_internal or g is None or pd.isna(g):
             continue
         ours = user_internal[pref]              # raw header rank
@@ -385,14 +384,14 @@ def main():
             "our_R": user_R[pref],
             "median_min": med_min.get(pref),   # working-set median novel solve min, or None
             "our_internal": ours,
-            "our_label": scalar_to_rank(ours),
+            "our_label": value_to_rank(ours),
             "our_internal_adj": ours_adj,
             "declared_internal": declared_internal,
             # internal-rank error (pools across servers): raw ours − theirs
             "err_internal": ours - declared_internal,
             # forward-mapped predicted rank in the server's own rank units
             "pred_server_scalar": pred_server,
-            "pred_server_label": scalar_to_rank(pred_server),
+            "pred_server_label": value_to_rank(pred_server),
             "err_server": pred_server - float(g),
         })
     df = pd.DataFrame(rows)

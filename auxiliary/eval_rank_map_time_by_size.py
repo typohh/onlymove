@@ -361,7 +361,7 @@ def main():
 
     print("Loading surveys + ratings + attempts ...")
     surveys = load_rank_surveys(args.sql)
-    surveys = surveys[surveys["rank_scalar"].notna()].copy()
+    surveys = surveys[surveys["rank_value"].notna()].copy()
     surveys["t"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
                     .astype("int64") / 86400e9)
     surveys = surveys.sort_values("t")
@@ -438,7 +438,7 @@ def main():
             for server, srows in udecl.groupby("server"):
                 srows = srows.sort_values("t")
                 dt = srows["t"].to_numpy()
-                dg = srows["rank_scalar"].to_numpy(float)
+                dg = srows["rank_value"].to_numpy(float)
                 assign = defaultdict(list)
                 for (tc, R, se, _, _), m in zip(blks, masses):
                     j = int(np.argmin(np.abs(dt - tc)))
@@ -482,7 +482,7 @@ def main():
                 if fitres is None:
                     continue
                 eval_rows = [(row["server"], career[row["user_id"]][0],
-                              float(row["rank_scalar"]), T_of[row["user_id"]],
+                              float(row["rank_value"]), T_of[row["user_id"]],
                               size_profile(row["user_id"]))
                              for _, row in test_latest.iterrows()]
                 nll, err, gdecl, tags = evaluate(fitres, eval_rows)
@@ -585,7 +585,7 @@ def main():
         if fitres is None:
             continue
         eval_rows = [(row["server"], career[row["user_id"]][0],
-                      float(row["rank_scalar"]), T_of[row["user_id"]], None)
+                      float(row["rank_value"]), T_of[row["user_id"]], None)
                      for _, row in latest[both_ids].iterrows()]
         nll, err, gdecl, _ = evaluate(fitres, eval_rows)
         print(f"{vname:<14} {np.mean(np.abs(err)):7.4f} {np.mean(err):+8.4f}")

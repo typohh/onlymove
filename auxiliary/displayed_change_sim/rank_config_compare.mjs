@@ -23,7 +23,7 @@ const E = await import(pathToFileURL(path.join(HERE, 'engine.bundle.mjs')).href)
 E.loadPopulationConstants();
 
 const POP = JSON.parse(readFileSync(path.join(REPO, 'pwa', 'tsumegos', 'population_constants.json'), 'utf8'));
-const FLOOR_MAX = 0.78, CAL_P = 0.8, TOTAL_RANKS = 29;
+const FLOOR_MAX = 0.78, CAL_P = 0.8;
 const ff = POP.fat_finger_rate;
 const LAPSE = (typeof ff === 'number' && ff >= 0 && ff < 1 - FLOOR_MAX) ? ff : 0.0026;
 const WIN_PRIOR_SD = 4, WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
@@ -33,7 +33,7 @@ const sigmoid = z => 1 / (1 + Math.exp(-z));
 const clampFloor = c => Math.min(Math.max(typeof c === 'number' ? c : 0, 0), FLOOR_MAX);
 const clearSpan = c => Math.max(0, 1 - Math.max(c, 0) - LAPSE);
 const clearKappa = c => { const cc = Math.max(c, 0); const q = Math.min(Math.max((CAL_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6); return Math.log(q / (1 - q)); };
-const applyM = (rating, size) => E.normalizedRankForSize(rating, size) * TOTAL_RANKS;
+const applyM = (rating, size) => E.rankForSize(rating, size);
 const Mslope = (rating, size) => { const h = 1e-3; return (applyM(rating + h, size) - applyM(rating - h, size)) / (2 * h); };
 const clampSlope = s => (!Number.isFinite(s) || s <= 0) ? SLOPE_FALLBACK : Math.min(SLOPE_HI, Math.max(SLOPE_LO, s));
 function makeAttempt(rating, slopeAp, floor, size, correct) {

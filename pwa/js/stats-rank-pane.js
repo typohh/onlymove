@@ -6,12 +6,11 @@
 // rank decomposition precomputed ONCE by showDetailedStats (no fallback here).
 
 import { state } from './state.js';
-import { TOTAL_RANKS } from './constants.js';
 import { getTerm } from './i18n.js';
-import { evaluateOnGrid, rankIndexAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
+import { evaluateOnGrid, rankAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
 import { getPopulationConstants, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
-import { RANK_TRANSLATION_SERVERS, internalIndexToServerScalar } from './rank-translation.js';
-import { rankScalarToLabel, rankIndexToLabel, rankProgress } from '../shared/rank-math.js';
+import { RANK_TRANSLATION_SERVERS, internalRankToServerRank } from './rank-translation.js';
+import { rankToLabel, rankProgress } from '../shared/rank-math.js';
 import {
     svgEl, makeChartSvg, hGridLine, buildLegend,
     hideOverlappingYTicks, observeResize,
@@ -41,7 +40,7 @@ export function buildRankSummaryText(history, decomp) {
     // in the front-page rank-translation modal). Omitted until there's usable
     // history / a valid current rank.
     const rankValue = (typeof state.userRank === 'number' && Number.isFinite(state.userRank))
-        ? state.userRank * TOTAL_RANKS : null;
+        ? state.userRank : null;
     const rankEst = rankValue !== null ? estimateWindowRank(history, rankValue) : null;
     if (rankEst && Number.isFinite(rankEst.se)) {
         rankText += getTerm('rankConfidenceFormat', { ci: (1.96 * rankEst.se).toFixed(2) }) + '\n';
@@ -96,7 +95,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const entries = history
         .filter(a => typeof a.problemRank === 'number' && typeof a.date === 'number'
                      && !a.isRepeat && !a.linked)
-        .map(a => ({ date: a.date, rankValue: a.problemRank * TOTAL_RANKS, correct: !!a.correct }));
+        .map(a => ({ date: a.date, rankValue: a.problemRank, correct: !!a.correct }));
     if (entries.length < 2) return null;
 
     // Two-kernel rank decomposition: see rank-decomposition.js. We evaluate the
@@ -180,7 +179,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // hub, so "EGF" vs "OnlyMove" differ only by the time adjustment.
     const ONLYMOVE = 'OnlyMove';
     const serverOptions = [ONLYMOVE, ...RANK_TRANSLATION_SERVERS.filter(
-        s => Number.isFinite(internalIndexToServerScalar(19, s)))];
+        s => Number.isFinite(internalRankToServerRank(-0.5, s)))];   // probe at 1k
     let selectedServer = ONLYMOVE;
     const select = document.createElement('select');
     select.className = 'stats-rank-server-select';
@@ -198,25 +197,23 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // Display transforms for the selected server. The skill line + its band edges
     // are SKILL values, so they take the (temporal) time adjustment then translate;
     // the scatter dots are PROBLEM difficulties (independent of how fast the user
-    // solves), so they translate only. onlymove = identity (raw internal index).
-    // internalIndexToServerScalar returns the HONEST (unclamped) server scalar:
+    // solves), so they translate only. onlymove = identity (the raw internal rank).
+    // internalRankToServerRank returns the HONEST (unclamped) server rank:
     // the dots are problem difficulties that extrapolate past 9d, and the
     // band-focused y-window below drops the out-of-range ones. (A rank-ladder cap
     // would instead pile every above-9d dot onto the 8d-9d border — only the
     // translation-table LABELS clamp; see rank-translation.js.)
-    const skillToDisplay = (internalIdx, delta) => {
-        if (selectedServer === ONLYMOVE) return internalIdx;
+    const skillToDisplay = (internalRank, delta) => {
+        if (selectedServer === ONLYMOVE) return internalRank;
         const adj = (Number.isFinite(delta) && delta !== 0)
-            ? rankIndexAfterRatingDelta(internalIdx, delta) : internalIdx;
-        return internalIndexToServerScalar(Number.isFinite(adj) ? adj : internalIdx, selectedServer);
+            ? rankAfterRatingDelta(internalRank, delta) : internalRank;
+        return internalRankToServerRank(Number.isFinite(adj) ? adj : internalRank, selectedServer);
     };
-    const rankToDisplay = (internalIdx) =>
-        selectedServer === ONLYMOVE ? internalIdx
-            : internalIndexToServerScalar(internalIdx, selectedServer);
-    // Integer display value (rank-band floor) → label: an internal index uses the
-    // kyu/dan index labeller; a server scalar uses the shared scalar labeller.
-    const displayLabel = (intVal) =>
-        selectedServer === ONLYMOVE ? rankIndexToLabel(intVal) : rankScalarToLabel(intVal);
+    const rankToDisplay = (internalRank) =>
+        selectedServer === ONLYMOVE ? internalRank
+            : internalRankToServerRank(internalRank, selectedServer);
+    // Band → label. One scale now, so onlymove and the servers share one labeller.
+    const displayLabel = rankToLabel;
 
     // The plot (y-axis + svg + x-date) is rebuilt into this holder on every
     // server change; the title, readout and legend persist around it.
@@ -253,7 +250,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     const legend = buildLegend(legendItems);
 
     // Rebuild the plot for the current selectedServer. Everything below is in
-    // DISPLAY space (internal index for onlymove, that server's rank scalar
+    // DISPLAY space (the internal rank for onlymove, that server's own rank
     // otherwise); the band edges are transformed individually so the monotone
     // adjust+translate keeps them ordered across server-curve knots.
     let labelObserver = null;
@@ -283,7 +280,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         // other servers). Hidden when there's too little data for the line.
         if (winPts.length >= 1) {
             const cur = winPts[winPts.length - 1].y;
-            // Shared decimal-rank → {label, percent, nextLabel} (round band,
+            // Shared decimal-rank → {label, percent, nextLabel} (band floor,
             // progress from the band's lower edge; GoR/EGF-consistent).
             const { label, percent, nextLabel } = rankProgress(cur, displayLabel);
             readout.textContent = getTerm('statsSelectedServerRank', {

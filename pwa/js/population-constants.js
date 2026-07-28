@@ -78,7 +78,7 @@ export function medianNovelSolveMinutes(history) {
 // so a typical-speed solver gets ~0 dock. Returns null when it can't be computed
 // (constants missing or too few timed attempts) — callers then show the raw,
 // unadjusted rank. Apply the returned delta to an internal rank index via
-// rankIndexAfterRatingDelta.
+// rankAfterRatingDelta.
 export function timeAdjustDeltaRating(history) {
     const ta = getPopulationConstants()?.time_adjust;
     if (!ta || !Number.isFinite(ta.alpha_per_log10_min)

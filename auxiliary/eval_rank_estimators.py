@@ -83,7 +83,10 @@ from utils.fit_rank_curves import interp_extrap  # noqa: E402
 from utils.ratings_io import load_size_value_maps  # noqa: E402
 
 # --- client constants (kept in sync with pwa/js/*.js; see module docstring) ---
-TOTAL_RANKS = 29
+# The RETIRED momentum estimator worked in a normalized [0,1] rank; these two
+# convert its internal coordinate to the project rank scale for comparison.
+MOMENTUM_RANK_SPAN = 29
+MOMENTUM_RANK_ZERO = -19.5
 CALIBRATION_P = 0.8
 LOGIT_CALIBRATION = math.log(CALIBRATION_P / (1 - CALIBRATION_P))
 FLOOR_MAX = 0.78
@@ -91,7 +94,7 @@ SLOPE_LO, SLOPE_HI = 0.05, 3.0
 MSLOPE_FLOOR = 1e-3
 LOGIT_PER_RATING = 1.6          # fallback per-attempt slope (legacy entries)
 LOGIT_PER_RANK_FALLBACK = 0.28
-X_CLAMP_LO, X_CLAMP_HI = -15.0, 45.0
+X_CLAMP_LO, X_CLAMP_HI = -34.5, 25.5
 
 HOUR_MS = 3600 * 1000
 DAY_MS = 24 * HOUR_MS
@@ -101,7 +104,7 @@ KERNEL_TRUNC_SIGMA = 4
 # momentum baseline (user-stats.js / state.js)
 DEFAULT_MOMENTUM = 30.0
 MOMENTUM_MIN, MOMENTUM_MAX = 0.5, 300.0
-MIN_RANK_INCREASE_PER_CORRECT = (1.0 / TOTAL_RANKS) / 10.0
+MIN_RANK_INCREASE_PER_CORRECT = (1.0 / MOMENTUM_RANK_SPAN) / 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -156,13 +159,13 @@ class Corpus:
         self.ratings = {}   # size -> {tid: rating}
         self.slopes = {}    # size -> {tid: a_p}
         self.floors = {}    # size -> {tid: floor}
-        self.curve = {}     # size -> (ratings[], rank_indices[])
+        self.curve = {}     # size -> (ratings[], ranks[])
         rdir = os.path.join(root, "ratings")
         rr = json.load(open(os.path.join(rdir, "rating_to_rank.json")))
         for size in ("9", "13"):
             self.ratings[size], self.slopes[size], self.floors[size] = \
                 load_size_value_maps(rdir, size)
-            self.curve[size] = (rr[size]["ratings"], rr[size]["rank_indices"])
+            self.curve[size] = (rr[size]["ratings"], rr[size]["ranks"])
 
     def apply_m(self, rating, size):
         xs, ys = self.curve[size]
@@ -207,7 +210,7 @@ def load_survey_priors(conn, corpus):
     """user_id -> internal-rank-index prior from their LATEST rank survey.
 
     server scalar (rank_map.json 'server') -> our scalar ('our'); index = our+19
-    (index 19 == 1k, matching rankIndexToKey in rank-translation.js). EGF is the
+    (0 == the 1k/1d boundary, matching rank-translation.js). EGF is the
     identity hub. Users with no usable survey are absent (caller falls back to the
     population prior)."""
     rmap = json.load(open(os.path.join(PROJECT_ROOT, "ratings", "rank_map.json")))
@@ -225,7 +228,7 @@ def load_survey_priors(conn, corpus):
             our = interp_extrap(scalar, rmap[server]["server"], rmap[server]["our"])
         else:
             continue
-        out[user_id] = our + 19.0
+        out[user_id] = our
     return out
 
 
@@ -381,7 +384,7 @@ def run_misclick(users, first_n, strong_rank):
             print(f"{thr:>15.0%} {len(sub):>7} {exp:>12.2%} "
                   f"{act:>11.2%} {ratio:>15.1f}x")
 
-    lbl = f"{strong_rank - 19}d" if strong_rank >= 20 else f"{20 - strong_rank}k"
+    lbl = f"{strong_rank + 1}d" if strong_rank >= 0 else f"{-strong_rank}k"
     print("\n" + "=" * 78)
     print(f"MISCLICK / LAPSE analysis — first {first_n} first-time attempts, "
           f"expected failure\nfrom each user's long-term rating (full-history "
@@ -486,7 +489,7 @@ class Estimator:
 
 class MomentumEstimator(Estimator):
     """Port of pwa/js/user-stats.js: cold-start 20k, momentum ratchet. Works in
-    normalized [0,1]; .rank exposes index = norm * TOTAL_RANKS. quality is the
+    normalized [0,1]; .rank converts that to the project rank scale. quality is the
     a_p^2 selection weight clamped to [0,1] (matching the live clamp).
 
     *** CONFOUNDED — do NOT treat its metrics as momentum's real accuracy. ***
@@ -517,7 +520,7 @@ class MomentumEstimator(Estimator):
 
     @property
     def rank(self):
-        return self.rank_norm * TOTAL_RANKS
+        return self.rank_norm * MOMENTUM_RANK_SPAN + MOMENTUM_RANK_ZERO
 
     def update(self, att):
         y, a_p = att[5], att[6]

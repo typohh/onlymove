@@ -97,7 +97,7 @@ MAD_TO_SD = 1.0 / 0.674489750196
 POOL_SIZE = 50
 
 # Rank bands keyed by internal rank index (low <= ri < high), matching the
-# kyu/dan convention of getDescriptiveRank (ri<20 -> (20-ri)k, else (ri-19)d).
+# kyu/dan convention of getDescriptiveRank (band < 0 -> kyu, else dan).
 RANK_BANDS = [
     (float("-inf"), 5, "16k+weaker"),
     (5, 10, "15k-11k"),
@@ -149,7 +149,7 @@ def load_curves():
         sys.exit(f"Missing {CURVE_PATH}. Run `python -m pipeline.map_rating_to_rank` "
                  f"then `python -m pipeline.package_for_pwa` first.")
     curves = json.load(open(CURVE_PATH))
-    return {k: (np.asarray(v["ratings"], float), np.asarray(v["rank_indices"], float))
+    return {k: (np.asarray(v["ratings"], float), np.asarray(v["ranks"], float))
             for k, v in curves.items() if isinstance(v, dict) and "ratings" in v}
 
 

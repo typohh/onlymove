@@ -23,8 +23,8 @@
 //     front-page rank list; EGF/AGA units via that federation's convention).
 // Any header sorts (cells sort by their underlying continuous scalar).
 
-import { readLeaderboardRows, RANK_START_MIN, gorToRankScalar } from '../leaderboard.js';
-import { rankScalarToLabel, rankProgress } from '../../shared/rank-math.js';
+import { readLeaderboardRows, RANK_START_MIN, gorToRank } from '../leaderboard.js';
+import { rankProgress } from '../../shared/rank-math.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
@@ -138,14 +138,14 @@ export async function handleLeaderboard(env) {
     });
 }
 
-// { pct, t } from a continuous rank scalar via the SHARED rankProgress — the same
-// rank + floored progress-to-next-rank decomposition the front-page rank list
-// uses. Every cell in every unit mode renders as "(pct%) rank"; the percent is
-// derived from the underlying rating scalar, so it always agrees with the shown
-// band (for GoR this IS the EGF convention: 2389 -> "(39%) 4d").
-function toPctRank(scalar) {
-    if (!Number.isFinite(scalar)) return null;
-    const p = rankProgress(scalar);
+// { pct, t } from a continuous rank via the SHARED rankProgress — the same rank +
+// floored progress-to-next-rank decomposition the front-page rank list uses. Every
+// cell in every unit mode renders as "(pct%) rank"; the percent is derived from the
+// underlying continuous value, so it always agrees with the shown band (for GoR
+// this IS the EGF convention: 2389 -> "(39%) 4d").
+function toPctRank(rank) {
+    if (!Number.isFinite(rank)) return null;
+    const p = rankProgress(rank);
     return { pct: p.percent, t: p.label };
 }
 
@@ -168,18 +168,20 @@ function agaPctRank(rating) {
     return { pct: Math.min(99, Math.floor((rating + k + 1) * 100)), t: k + 'k' };
 }
 
-// Continuous internal AGA rank scalar (1k = 0, 1d = 1) -> an AGA-style rating:
-// dan region maps 1:1, kyu region shifts past the AGA (-1, 1) gap (scalar 0 =
-// 1k -> -1.0), the sub-1-band (0, 1) interval interpolates across the gap.
-function agaScalarToRating(s) {
-    return s >= 1 ? s : s <= 0 ? s - 1 : 2 * s - 1;
+// Continuous internal AGA-coupled rank -> an AGA-style RATING. Ours and AGA's
+// scales are both one-unit-per-rank but AGA's dan/kyu regions sit either side of a
+// (-1, 1) gap that holds no real rating, so the two halves shift apart by half a
+// band each and the interval between them interpolates across the gap. Continuous
+// at both seams (rank +-0.5 -> rating +-1.0).
+function agaRankToRating(r) {
+    return r >= 0.5 ? r + 0.5 : r <= -0.5 ? r - 0.5 : 2 * r;
 }
 
 function renderPage(rows, belowMin, staleVerified) {
     // Per row: `est` = the onlymove estimate in the three unit frames — `v` the
-    // UNTIMED internal scalar (the om-mode sort key), `om`/`pct` its rank label
+    // UNTIMED internal rank (the om-mode sort key), `om`/`pct` its rank label
     // + progress, and `egf`/`aga` the TIME-ADJUSTED server-frame conversions as
-    // { v: that frame's sort scalar, pct, t } (the frames the verified ratings
+    // { v: that frame's sort value, pct, t } (the frames the verified ratings
     // natively speak — see readLeaderboardRows). `ver` = the verified official
     // data per federation:
     // { v: raw rating (the sort key), pct, t } with the band + percent derived
@@ -189,19 +191,19 @@ function renderPage(rows, belowMin, staleVerified) {
         if (Number.isFinite(r.currentInternal)) {
             const p = rankProgress(r.currentInternal);
             est = { v: r.currentInternal, om: p.label, pct: p.percent };
-            // Each frame carries its own sort scalar `v`: the om order (untimed)
+            // Each frame carries its own sort value `v`: the om order (untimed)
             // and the EGF/AGA orders (time-adjusted server frames) genuinely
             // differ per user by the personal time dock, so switching units must
             // re-sort by the displayed frame's own value.
             const egf = toPctRank(r.currentEgf);
             if (egf) est.egf = { v: r.currentEgf, ...egf };
-            const agaRating = Number.isFinite(r.currentAga) ? agaScalarToRating(r.currentAga) : null;
+            const agaRating = Number.isFinite(r.currentAga) ? agaRankToRating(r.currentAga) : null;
             const aga = agaRating !== null ? agaPctRank(agaRating) : null;
             if (aga) est.aga = { v: agaRating, ...aga };
         }
         const ver = {};
         if (r.egd) {
-            const p = toPctRank(gorToRankScalar(r.egd.gor));
+            const p = toPctRank(gorToRank(r.egd.gor));
             if (p) ver.egf = { v: r.egd.gor, pct: p.pct, t: p.t };
         }
         if (r.aga) {

@@ -17,16 +17,22 @@
 // code.
 //
 // For a future breaking state change: bump CURRENT_STATE_EPOCH and, if some
-// state can survive, add a keep-path here. This epoch (1, the tsumego-id
-// rewrite) wipes universally — already-synced devices hold old problem ids in
-// local copies, and only a full wipe-and-re-adopt propagates the rewrite.
+// state can survive, add a keep-path here. Both epochs so far wipe universally:
+//   1 — the tsumego-id rewrite. Already-synced devices held old problem ids in
+//       local copies, and only a full wipe-and-re-adopt propagates the rewrite.
+//   2 — the single AGA-style rank scale (shared/rank-math.js). Every stored rank
+//       changed units, and a stale value is not detectably wrong: the old
+//       normalized userRank/problemRank are perfectly plausible NEW ranks (a
+//       stored 0 meant 20k and now reads as 1d). The per-user recall and weakness
+//       models are worse still — their fitted coefficients are expressed in the
+//       old units, so they must be refit, which the wipe's re-adopt does.
 //
 // Dependency-light on purpose (no imports): runs before state.js initializes.
 
 const STATE_EPOCH_KEY = 'stateEpoch';
-const CURRENT_STATE_EPOCH = 1;
+const CURRENT_STATE_EPOCH = 2;
 
-// Keys that survive the epoch-1 wipe. The userId is the account credential;
+// Keys that survive the wipe. The userId is the account credential;
 // the rest are device prefs no server pull can restore.
 const KEEP_KEYS = new Set([
     'userId',

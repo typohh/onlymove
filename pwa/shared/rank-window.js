@@ -22,7 +22,7 @@ import { clearSpan, clampFloor, clearKappa } from '../js/irt.js';
 // --- Per-attempt transform to internal-rank space -------------------------------
 // Shared so the client's flattenAttempts (rank-decomposition.js) and the Worker's
 // buffer flatten produce IDENTICAL inputs. The problem's raw rating maps to the
-// internal-rank index x = applyM(rating); the success-curve slope is the problem's
+// internal rank x = applyM(rating); the success-curve slope is the problem's
 // own 2PL discrimination a_p converted to logit-per-internal-rank via M's local
 // steepness. LOGIT_PER_RATING is only the fallback a_p for legacy entries without
 // a stored slope; LOGIT_PER_RANK_FALLBACK is the slope when M' is unusable.
@@ -31,9 +31,9 @@ export const LOGIT_PER_RANK_FALLBACK = 0.28;
 const SLOPE_LO = 0.05, SLOPE_HI = 3.0;
 const MSLOPE_FLOOR = 1e-3;
 
-// Raw rating -> internal-rank index through a size's M curve {ratings, rank_indices}.
+// Raw rating -> internal rank through a size's M curve {ratings, ranks}.
 export function applyM(rating, curve) {
-    return interpExtrap(rating, curve.ratings, curve.rank_indices);
+    return interpExtrap(rating, curve.ratings, curve.ranks);
 }
 
 function mSlope(rating, curve) {
@@ -71,9 +71,9 @@ export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
     };
 }
 
-// Working coordinate is the internal-rank index; clamp for very weak/strong users.
-const X_CLAMP_LO = -15;
-const X_CLAMP_HI = 45;
+// Working coordinate is the internal rank; clamp for very weak/strong users.
+const X_CLAMP_LO = -34.5;
+const X_CLAMP_HI = 25.5;
 
 export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
 const WIN_ITARGET = 16;                       // design steady-state info — the CONSTANT SE-floor fallback
@@ -146,11 +146,11 @@ export function windowMLE(attempts, refR) {
 }
 
 // Public window rank estimate from PRE-FLATTENED attempts (oldest -> newest).
-// prevRankIndex warm-starts the fit; else the recent-mean fallback. Returns
-//   { rankIndex, se, serveRankIndex }   or null when there are no attempts.
-export function estimateWindowRankFromFlat(attempts, prevRankIndex, seFloorFn = null) {
+// prevRank warm-starts the fit; else the recent-mean fallback. Returns
+//   { rank, se, serveRank }   or null when there are no attempts.
+export function estimateWindowRankFromFlat(attempts, prevRank, seFloorFn = null) {
     if (!attempts.length) return null;
-    let ref = prevRankIndex;
+    let ref = prevRank;
     if (!Number.isFinite(ref)) {
         const tail = attempts.slice(-Math.min(attempts.length, 20));
         ref = tail.reduce((s, a) => s + a.x, 0) / tail.length;
@@ -165,7 +165,7 @@ export function estimateWindowRankFromFlat(attempts, prevRankIndex, seFloorFn = 
         if (Number.isFinite(f) && f > 0) seFloor = f;
     }
     const bonus = WIN_UCB_K * Math.max(0, se - seFloor);
-    return { rankIndex: R, se, serveRankIndex: R + bonus };
+    return { rank: R, se, serveRank: R + bonus };
 }
 
 // Positional-weighted median of a per-attempt series over the SAME last-WIN_CAP

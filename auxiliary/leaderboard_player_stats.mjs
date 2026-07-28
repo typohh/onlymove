@@ -23,10 +23,11 @@
 // verified-activity gate — are the shipped ones) and runs the shared window
 // estimator over each row's STORED buffer (the last <=500 novel attempts, the exact
 // input the Worker's computeRank uses). The onlymove rank is the untimed internal
-// rank scalar (est.rankIndex - RANK_INDEX_OFFSET) — what the client's front page and
+// rank (est.rank) — what the client's front page and
 // the /leaderboard page's onlymove units show; est. EGF/AGA re-apply the
 // median-solve-time dock and map through that server's coupling, the frame a real
-// GoR / AGA rating natively speaks. All in the 1k=0 / 1d=1 scalar convention.
+// GoR / AGA rating natively speaks. All on the one internal rank scale, where 0 is
+// the 1k/1d boundary and every band is one unit wide (integers are band EDGES).
 //
 // Display identity comes from the same three tables the /leaderboard page stitches:
 // the rank buffer off `leaderboard`, the name off the claimed `invitation` row, and
@@ -82,11 +83,11 @@ async function loadRankModule() {
     const res = await esbuild.build({
         stdin: {
             contents: `
-                import { interpExtrap, RANK_INDEX_OFFSET, rankScalarToLabel, rankLabelToScalar } from './shared/rank-math.js';
+                import { interpExtrap, rankToLabel, rankLabelToRank } from './shared/rank-math.js';
                 import { estimateWindowRankFromFlat, flattenAttempt } from './shared/rank-window.js';
                 import {
-                    RANK_START_MIN, BUFFER_CAP, gorToRankScalar, agaRatingToTierScalar, shortRankLabel,
-                    isVerifiedActive, internalToServerScalar, timeDeltaRatingFromBuffer, parseBuffer,
+                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToTierRank, shortRankLabel,
+                    isVerifiedActive, internalToServerRank, timeDeltaRatingFromBuffer, parseBuffer,
                 } from './src/leaderboard.js';
                 import RATING_RANK_MAP from './tsumegos/rating_to_rank.json';
 
@@ -94,25 +95,25 @@ async function loadRankModule() {
                 const CURVE = RATING_RANK_MAP['9'] || Object.values(RATING_RANK_MAP)[0] || null;
 
                 export {
-                    RANK_START_MIN, BUFFER_CAP, gorToRankScalar, agaRatingToTierScalar,
-                    isVerifiedActive, rankScalarToLabel, parseBuffer,
+                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToTierRank,
+                    isVerifiedActive, rankToLabel, parseBuffer,
                 };
 
-                // Mirrors leaderboard.js's (private) rankIndexAfterRatingDelta.
-                function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
-                    if (!CURVE || !Number.isFinite(rankIndex) || !Number.isFinite(deltaRating)) return rankIndex;
-                    const rating = interpExtrap(rankIndex, CURVE.rank_indices, CURVE.ratings);
-                    return interpExtrap(rating + deltaRating, CURVE.ratings, CURVE.rank_indices);
+                // Mirrors leaderboard.js's (private) rankAfterRatingDelta.
+                function rankAfterRatingDelta(rank, deltaRating) {
+                    if (!CURVE || !Number.isFinite(rank) || !Number.isFinite(deltaRating)) return rank;
+                    const rating = interpExtrap(rank, CURVE.ranks, CURVE.ratings);
+                    return interpExtrap(rating + deltaRating, CURVE.ratings, CURVE.ranks);
                 }
 
-                // Mirrors leaderboard.js's (private) tierScalarFromLabel, with the
+                // Mirrors leaderboard.js's (private) tierRankFromLabel, with the
                 // caller's rating-derived tier as the fallback — the activity window
                 // the /leaderboard page gates a verified rating on.
-                export function verifiedTierScalar(label, ratingTier) {
+                export function verifiedTierRank(label, ratingTier) {
                     const short = shortRankLabel(label);
                     if (short) {
-                        if (/^\\d{1,2}p$/.test(short)) return 7;         // pro -> dan tier
-                        const v = rankLabelToScalar(short);
+                        if (/^\\d{1,2}p$/.test(short)) return 6.5;       // pro -> dan tier (7d)
+                        const v = rankLabelToRank(short);
                         if (Number.isFinite(v)) return v;
                     }
                     return ratingTier;
@@ -137,17 +138,16 @@ async function loadRankModule() {
                     if (!est) {
                         return { onlymoveRank: null, egfRank: null, agaRank: null, se: null, usable: flat.length };
                     }
-                    const onlymoveRank = est.rankIndex - RANK_INDEX_OFFSET;   // untimed headline
+                    const onlymoveRank = est.rank;                            // untimed headline
                     // The personal time dock moves the untimed rank into the server frame
                     // the couplings (and a real GoR / AGA rating) speak.
                     const deltaRating = timeDeltaRatingFromBuffer(buffer, params);
-                    const timedIndex = deltaRating
-                        ? rankIndexAfterRatingDelta(est.rankIndex, deltaRating) : est.rankIndex;
-                    const timedScalar = timedIndex - RANK_INDEX_OFFSET;
+                    const timedRank = deltaRating
+                        ? rankAfterRatingDelta(est.rank, deltaRating) : est.rank;
                     return {
                         onlymoveRank,
-                        egfRank: internalToServerScalar('EGF', timedScalar),
-                        agaRank: internalToServerScalar('AGA', timedScalar),
+                        egfRank: internalToServerRank('EGF', timedRank),
+                        agaRank: internalToServerRank('AGA', timedRank),
                         se: est.se, usable: flat.length,
                     };
                 }
@@ -196,7 +196,7 @@ function tableColumns(table) {
     return new Set(sqliteJson(`PRAGMA table_info(${table})`).map((r) => r.name));
 }
 
-const rankStr = (mod, v) => (Number.isFinite(v) ? `${v >= 0 ? ' ' : ''}${v.toFixed(2)} (${mod.rankScalarToLabel(v)})` : '—');
+const rankStr = (mod, v) => (Number.isFinite(v) ? `${v >= 0 ? ' ' : ''}${v.toFixed(2)} (${mod.rankToLabel(v)})` : '—');
 function medianStr(ms) {
     if (!Number.isFinite(ms)) return '—';
     const s = ms / 1000;
@@ -431,11 +431,11 @@ async function main() {
         const aga = agaBy.get(r.user_id) || null;
         const gor = egd ? parseInt(egd.rank, 10) : NaN;
         const agaRating = aga ? Number(aga.rank) : NaN;   // legacy label rows -> NaN
-        const realEgfRank = Number.isFinite(gor) && gor > 0 ? mod.gorToRankScalar(gor) : null;
+        const realEgfRank = Number.isFinite(gor) && gor > 0 ? mod.gorToRank(gor) : null;
         const realAgaRank = Number.isFinite(agaRating) && Math.abs(agaRating) >= 1
-            ? mod.agaRatingToTierScalar(agaRating) : null;
+            ? mod.agaRatingToTierRank(agaRating) : null;
         const staleOf = (rec, tierFallback) => (!rec || !hasVerifiedCols ? false
-            : !mod.isVerifiedActive(mod.verifiedTierScalar(rec.rank_label, tierFallback), rec.last_game_at));
+            : !mod.isVerifiedActive(mod.verifiedTierRank(rec.rank_label, tierFallback), rec.last_game_at));
 
         return {
             userId: r.user_id, name: (invBy.get(r.user_id) || {}).egd_name || r.user_id,

@@ -263,13 +263,13 @@ def eb_shrink(users):
 
 
 def build_pairs(users, surveys):
-    """[(pref, server, R, rank_scalar)] for users with BOTH a rating and a
+    """[(pref, server, R, rank_value)] for users with BOTH a rating and a
     median-time feature — the framework's timed comparison set (identical for
     every candidate)."""
     pairs = []
     for _, row in surveys.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
+        g = row.get("rank_value")
         u = users.get(pref)
         if u is None or u["T"] is None or g is None or np.isnan(float(g)):
             continue
@@ -476,7 +476,7 @@ def time_form_eval(users, surveys, args, seeds=CV_SEEDS, folds=CV_FOLDS,
     pairs = []
     for _, row in surveys.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
+        g = row.get("rank_value")
         u = users.get(pref)
         if (u is None or g is None or np.isnan(float(g))
                 or pref not in med_min or med_min[pref] <= 0):
@@ -665,7 +665,7 @@ def global_x_eval(users, surveys, args, seeds=CV_SEEDS, folds=CV_FOLDS, boot=100
     pairs = []   # (pref, server, g)  — R comes from Rb per candidate b
     for _, row in surveys_l.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
+        g = row.get("rank_value")
         if pref not in Rb or g is None or np.isnan(float(g)):
             continue
         pairs.append((pref, row["server"], float(g)))
@@ -783,7 +783,7 @@ def dock_value(users, surveys, args, folds=CV_FOLDS, seeds=5, boot=1000):
     decls = []   # (pref, server, R, g, T_demeaned)
     for _, row in surveys.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
+        g = row.get("rank_value")
         u = users.get(pref)
         if u is None or g is None or np.isnan(float(g)):
             continue

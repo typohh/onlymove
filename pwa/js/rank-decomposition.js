@@ -9,7 +9,7 @@
 // internal rank (EGF-anchored, board-independent) is the one common skill axis
 // shared by 9x9 and 13x13, so a single merged skill curve is well-defined only
 // there. Each attempt is mapped through ITS OWN size's M before pooling:
-//   - x = applyM(rawRating, sizeCurve)            (internal rank index)
+//   - x = applyM(rawRating, sizeCurve)            (internal rank)
 //   - slope = LOGIT_PER_RATING / |M'(rawRating)|  (logit per internal rank)
 // The per-attempt slope preserves calibration: the success curve has constant
 // slope in rating space, so in rank space the slope must vary with the local
@@ -51,7 +51,6 @@
 // computeRankDecomposition returns null if too few survive.
 
 import { state } from './state.js';
-import { TOTAL_RANKS } from './constants.js';
 import { interpExtrap } from '../shared/rank-math.js';
 import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
@@ -87,10 +86,10 @@ const KERNEL_TRUNC_SIGMA = 4;
 // in pwa/shared/rank-window.js so the Worker's buffer flatten matches this one;
 // applyM, flattenAttempt and LOGIT_PER_RANK_FALLBACK are imported above.
 
-// Working coordinate is the internal rank index (~0..29, with extrapolation
-// past either end for very weak/strong users).
-const X_CLAMP_LO = -15;
-const X_CLAMP_HI = 45;
+// Working coordinate is the internal rank (see shared/rank-math.js for the
+// convention), clamped past either end for very weak/strong users.
+const X_CLAMP_LO = -34.5;
+const X_CLAMP_HI = 25.5;
 
 const MIN_ATTEMPTS = 20;        // below this, no decomposition
 const WIDE_GRID_POINTS = 120;   // coarse skill grid for residual interpolation
@@ -167,7 +166,7 @@ export function problemInfoWeight(slope, floor) {
 
 function curveForSize(size) {
     const m = _ratingRankMap && _ratingRankMap[String(size)];
-    return (m && Array.isArray(m.ratings) && Array.isArray(m.rank_indices)
+    return (m && Array.isArray(m.ratings) && Array.isArray(m.ranks)
             && m.ratings.length >= 2) ? m : null;
 }
 
@@ -175,59 +174,54 @@ function curveForSize(size) {
 // transform live in shared/rank-window.js (one copy shared with the Worker).
 // applyM is imported above.
 
-// Raw rating → NORMALIZED RANK for `size` (rank_index / TOTAL_RANKS, the scale
-// getDescriptiveRank and the recall/weakness models use). Returns null when M
-// isn't loaded; the whole client converts ratings to ranks through this, so
-// package_for_pwa never has to.
+// Raw rating → internal RANK for `size` (shared/rank-math.js's one convention).
+// Returns null when M isn't loaded; the whole client converts ratings to ranks
+// through this, so package_for_pwa never has to.
 //
-// NOT confined to [0, 1], and deliberately NOT clamped. TOTAL_RANKS is the span
-// of the kyu/dan ladder we LABEL, not a bound on the value: M's own knots do not
-// start at index 0, and applyM extrapolates linearly past both end knots, so a
-// problem easier than the weakest knot goes negative and one harder than the
-// strongest exceeds 1. Both are normal — the corpus hard tail is unattempted
-// KataGo-hard material that extrapolates well past the human knots. Consumers
-// must treat this as an unbounded continuous coordinate: don't clamp it, don't
-// assume a midpoint of 0.5, and don't infer a percentile from it.
-export function normalizedRankForSize(rawRating, size) {
+// Deliberately NOT clamped to the kyu/dan ladder. The ladder is what we LABEL, not
+// a bound on the value: M's own knots don't span it, and applyM extrapolates
+// linearly past both end knots, so a problem easier than the weakest knot goes
+// below and one harder than the strongest goes above. Both are normal — the corpus
+// hard tail is unattempted KataGo-hard material that extrapolates well past the
+// human knots. Consumers must treat this as an unbounded continuous coordinate.
+export function rankForSize(rawRating, size) {
     const c = curveForSize(size);
     if (!c || typeof rawRating !== 'number') return null;
-    return applyM(rawRating, c) / TOTAL_RANKS;
+    return applyM(rawRating, c);
 }
 
-// Apply a RATING-space delta to a rank index: invert M at the rank index, shift
-// by deltaRating (raw rating units), re-apply M. Exact rather than linearized
-// via M', so it stays correct across knot boundaries. The curve is shared
-// across both board sizes (map_rating_to_rank writes one curve to both keys),
-// so size 9's key stands in for either. Used by the stats Rank tab to turn the
-// population time-adjustment (alpha · Δlog10-minutes, fit in rating units by
-// pipeline.fit_population_constants) into a rank-space shift.
-export function rankIndexAfterRatingDelta(rankIndex, deltaRating) {
+// Apply a RATING-space delta to a rank: invert M at the rank, shift by deltaRating
+// (raw rating units), re-apply M. Exact rather than linearized via M', so it stays
+// correct across knot boundaries. The curve is shared across both board sizes
+// (map_rating_to_rank writes one curve to both keys), so size 9's key stands in for
+// either. Used by the stats Rank tab to turn the population time-adjustment
+// (alpha · Δlog10-minutes, fit in rating units by pipeline.fit_population_constants)
+// into a rank-space shift.
+export function rankAfterRatingDelta(rank, deltaRating) {
     const c = curveForSize(9);
-    if (!c || !Number.isFinite(rankIndex) || !Number.isFinite(deltaRating)) return null;
-    const rating = interpExtrap(rankIndex, c.rank_indices, c.ratings);
+    if (!c || !Number.isFinite(rank) || !Number.isFinite(deltaRating)) return null;
+    const rating = interpExtrap(rank, c.ranks, c.ratings);
     return applyM(rating + deltaRating, c);
 }
 
-// Rating units spanned by ONE normalized-rank unit (the full TOTAL_RANKS-index
-// scale), from the shipped curve's endpoints (~5.4). This is the unit constant
-// between a rank gap in normalized-rank units and the same gap in raw-rating
-// units; the recall model needs it to center its PROBLEM_DIFFICULTY prior (its
-// gap feature is normalized-rank while a_p is per RATING unit). An endpoint
-// mean — local knot slopes vary ~2-11 ranks/rating — the model's fitted
-// multiplier absorbs the local mismatch.
-export function ratingSpanPerNormalizedRank() {
+// Rating units spanned by ONE rank, from the shipped curve's endpoints. This is the
+// unit constant between a gap in rank units and the same gap in raw-rating units;
+// the recall model needs it to center its PROBLEM_DIFFICULTY prior (its gap feature
+// is in rank units while a_p is per RATING unit). An endpoint mean — local knot
+// slopes vary a few fold — the model's fitted multiplier absorbs the local mismatch.
+export function ratingPerRank() {
     const c = curveForSize(9);   // one shared curve, written to both size keys
     if (!c) return null;
     const dRating = c.ratings[c.ratings.length - 1] - c.ratings[0];
-    const dRankNorm = (c.rank_indices[c.rank_indices.length - 1] - c.rank_indices[0]) / TOTAL_RANKS;
-    return dRankNorm > 0 ? dRating / dRankNorm : null;
+    const dRank = c.ranks[c.ranks.length - 1] - c.ranks[0];
+    return dRank > 0 ? dRating / dRank : null;
 }
 
 // Stable per-size signature of the loaded curve. Stored ranks are invalidated
 // when this changes (a fit_rank_curves re-fit that didn't also change ratings).
 export function ratingRankCurveVersion(size) {
     const c = curveForSize(size);
-    return c ? JSON.stringify([c.ratings, c.rank_indices]) : null;
+    return c ? JSON.stringify([c.ratings, c.ranks]) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -440,10 +434,10 @@ export function flattenAttempts(answerHistory) {
             // transform (identical to the Worker's buffer flatten).
             const f = flattenAttempt(raw, a.problemSlope, a.problemFloor, a.correct, c);
             if (f) return { ...f, t: a.date, src: a };
-            // Legacy fallback: no usable curve, but a stored normalized problemRank.
+            // Legacy fallback: no usable curve, but a stored problemRank.
             if (typeof a.problemRank === 'number') {
                 const flr = clampFloor(a.problemFloor);
-                return { t: a.date, x: a.problemRank * TOTAL_RANKS,
+                return { t: a.date, x: a.problemRank,
                          slope: LOGIT_PER_RANK_FALLBACK, correct: a.correct ? 1 : 0,
                          floor: flr, kappa: clearKappa(flr), src: a };
             }
@@ -476,13 +470,13 @@ export function flattenAttempts(answerHistory) {
 // (EGD leaderboard) runs BIT-IDENTICAL rank code. estimateWindowRank here just
 // flattens the client's answerHistory (size/curve-aware, first-time only, pooled
 // across sizes through each attempt's own M — pass getMergedAnswerHistory()) and
-// delegates. prevRankIndex warm-starts the fit (the live displayed rank · TOTAL_RANKS);
-// on a cold device the shared helper falls back to the recent attempts' mean. Returns:
-//   rankIndex      — the estimate to DISPLAY / score (internal-rank index)
-//   se             — its posterior standard error (rank units)
-//   serveRankIndex — rankIndex + the uncertainty-scaled UCB serve bonus (large while
-//                    the posterior is loose, vanishing as it tightens); problem
-//                    SELECTION uses this, display uses rankIndex. The bonus subtracts a
+// delegates. prevRank warm-starts the fit (the live displayed rank); on a cold
+// device the shared helper falls back to the recent attempts' mean. Returns:
+//   rank      — the estimate to DISPLAY / score (internal rank)
+//   se        — its posterior standard error (rank units)
+//   serveRank — rank + the uncertainty-scaled UCB serve bonus (large while the
+//                    posterior is loose, vanishing as it tightens); problem
+//                    SELECTION uses this, display uses rank. The bonus subtracts a
 //                    RANK-DEPENDENT floor (localSeFloor below): the irreducible SE a
 //                    full at-rank window would leave, set by the local corpus slope, so
 //                    serving collapses to the user's OWN rank at convergence on every
@@ -498,15 +492,14 @@ export function flattenAttempts(answerHistory) {
 // not the whole pool. Returns null when nothing is loaded yet (or the curve is
 // missing), so the estimator keeps the constant WIN_SE_FLOOR — a harmless fallback
 // since se dominates the bonus that early anyway.
-function localSeFloor(rankIndex) {
+function localSeFloor(rank) {
     const pool = state.allProblems;
     if (!pool || pool.length === 0) return null;
     const curve = curveForSize(state.boardSize);
     if (!curve) return null;
-    const target = rankIndex / TOTAL_RANKS;               // pool ranks are normalized-rank
     const nearest = pool
         .slice()
-        .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target))
+        .sort((a, b) => Math.abs(a.rank - rank) - Math.abs(b.rank - rank))
         .slice(0, 50);
     let sumInfo = 0, n = 0;
     for (const p of nearest) {
@@ -518,8 +511,8 @@ function localSeFloor(rankIndex) {
     return n > 0 ? seFloorForMeanInfo(sumInfo / n) : null;
 }
 
-export function estimateWindowRank(answerHistory, prevRankIndex) {
-    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRankIndex, localSeFloor);
+export function estimateWindowRank(answerHistory, prevRank) {
+    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRank, localSeFloor);
 }
 
 // Two-regime selection switch (problem-loader.js): the rank estimate counts as
@@ -534,7 +527,7 @@ export function estimateWindowRank(answerHistory, prevRankIndex) {
 export function rankConverged() {
     const se = state.rankSe;
     if (typeof se !== 'number' || !Number.isFinite(se)) return false;
-    const floor = localSeFloor(state.userRank * TOTAL_RANKS);
+    const floor = localSeFloor(state.userRank);
     if (typeof floor !== 'number' || !(floor > 0)) return false;
     return se < 2 * floor;
 }
@@ -544,9 +537,9 @@ export function rankConverged() {
 // first-time attempts), re-evaluated at each of `times`. A pure function of
 // decomp.attempts — already flattened to internal-rank space and time-sorted by
 // flattenAttempts — so its RIGHT endpoint reproduces the live front-page rank
-// (state.userRank·TOTAL_RANKS) exactly, and the Rank chart can draw the headline's
+// (state.userRank) exactly, and the Rank chart can draw the headline's
 // own trajectory alongside the slow skill line. `times` MUST be ascending; the
-// return is aligned 1:1 with `times`, each element the internal-rank index or null
+// return is aligned 1:1 with `times`, each element the internal rank or null
 // (no first-time attempt exists yet at that time). Only the trailing WIN_CAP
 // attempts affect windowMLE, so we pass just that suffix — bit-identical to the
 // whole prefix (both have M = min(prefixLen, WIN_CAP)) but O(WIN_CAP) per point.
@@ -878,7 +871,7 @@ export function evaluateAt(decomp, t) {
     if (!Number.isFinite(sk.R)) return null;
     const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
     return {
-        S: sk.R,                      // skill, internal-rank index
+        S: sk.R,                      // skill, internal rank
         seS: sk.se,                   // measurement SE, rank units
         sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
         sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
@@ -906,7 +899,7 @@ export function evaluateOnGrid(decomp, t) {
     const seS = interpGrid(wideGrid, t, 'se');
     const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
     return {
-        S,                                // skill, internal-rank index (interpolated)
+        S,                                // skill, internal rank (interpolated)
         seS,                              // measurement SE, rank units (interpolated)
         sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
         sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units

@@ -5,8 +5,10 @@ The rating model (pipeline.train_rating) puts problem difficulty and user abilit
 ONE shared logit scale across both boards, so the rating→rank curve is a SINGLE shared
 curve. This step produces, from the survey declarations:
 
-  rating_to_rank.json   per-board (identical) {ratings, rank_indices} + a top-level
+  rating_to_rank.json   per-board (identical) {ratings, ranks} + a top-level
                         `time_adjust` block (the jointly-fit solve-time dock).
+                        `ranks` is on the ONE project rank scale — 0 is the 1k/1d
+                        boundary, every rank one unit wide (pwa/shared/rank-math.js).
   rank_map.json         per-server consensus↔server rank couplings — one per server,
                         EGF INCLUDED (EGF is not special; see below).
 
@@ -113,9 +115,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rank_surveys import (  # noqa: E402
-    SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, scalar_to_rank,
+    SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, rank_band, value_to_rank,
 )
-from utils.statistics_shapes import fit_shape  # noqa: E402
+from utils.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
 from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec, ordinal_nll_vec,
     _unpack_thresholds,
@@ -135,9 +137,12 @@ GAUGE_WEIGHT = 1.0          # VERY WEAK pin on the n-weighted mean coupling offs
 EPS_CONTAMINATION = 0.005   # P(a declaration is junk) — robust mixture; small ON PURPOSE
                             # (held-out NLL degrades monotonically in eps, see docstring)
 LAMBDA_TIME = 0.1           # light ridge keeping the learned time slope bounded
-EGF_LO, EGF_HI = -20, 10    # consensus-rank boundary range the curve spans
+# Rank BANDS (rank_surveys.rank_band): band b spans [b, b+1), so band 0 is 1d and
+# band -1 is 1k, and a band's lower EDGE is the integer b itself. Every threshold
+# below is such an edge.
+EGF_LO, EGF_HI = -21, 9     # consensus-rank band range the curve spans
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
-EXTEND_TO = 9               # force each server range to cover at least up to 9d
+EXTEND_TO = 8               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
 MIN_ATTEMPTS = 20           # drop survey users (and career blocks) with fewer attempts
 BLOCK_DAYS = 60             # career-segment anchor blocks: window length ...
@@ -151,10 +156,6 @@ BLOCK_STEP = 30             # ... and step (overlapping; see the docstring)
 AFK_CAP_MS = 180000
 MIN_TIMED = 20
 WORKING_SET = 3000
-
-# rank_index axis (rating_to_rank.json) is 20k=0 … 1k=19 … 1d=20; the consensus rank
-# scalar is 1k=0, 1d=1. So rank_index = scalar + 19.
-RANK_INDEX_OFFSET = 19.0
 
 
 def load_ratings(ratings_dir, size):
@@ -180,10 +181,11 @@ def load_floors(ratings_dir, size):
 
 
 def _shape_at(ys):
-    """statistics.txt RATING_SHAPE value at each consensus-boundary scalar in `ys`
-    (rank_index = scalar + 19), the curve's prior mean."""
+    """statistics.txt RATING_SHAPE value at each consensus-boundary rank in `ys`, the
+    curve's prior mean. statistics.txt is fitted on its OWN axis (its origin is part
+    of the polynomial family), so convert at the boundary via rank_to_axis."""
     params, theta = fit_shape(RATING_SHAPE)
-    return np.asarray(theta(np.asarray(ys, float) + RANK_INDEX_OFFSET, params), dtype=float)
+    return np.asarray(theta(rank_to_axis(ys), params), dtype=float)
 
 
 def load_user_median_solve_minutes(sqlite_path):
@@ -266,7 +268,7 @@ def block_ratings(times, rows, ratings, slopes, floors, lapse):
 # ---------------------------------------------------------------------------
 def _curve_arrays():
     egf_thr_ranks = list(range(EGF_LO + 1, EGF_HI + 1))
-    ys = np.array([g - 0.5 for g in egf_thr_ranks], dtype=float)   # consensus scalar
+    ys = np.array([float(g) for g in egf_thr_ranks], dtype=float)  # band lower edges
     S = _shape_at(ys)
     dS = np.diff(S)
     return egf_thr_ranks, ys, S, dS
@@ -276,10 +278,10 @@ def _bucket(decls):
     """One coupling block per server (EGF included): rating, declared-category index k,
     the de-meaned time feature T, the identity-line target, and the per-row weight w
     (block anchors normalize each declaration's rows to total weight 1; a plain
-    4-tuple row defaults to w=1)."""
+    4-tuple row defaults to w=1). `g` is a rank BAND index (see rank_surveys.rank_band)."""
     rows_by = defaultdict(list)
     for server, R, g, T, *w in decls:
-        rows_by[server].append((R, int(round(g)), T, float(w[0]) if w else 1.0))
+        rows_by[server].append((R, int(g), T, float(w[0]) if w else 1.0))
     blocks = {}
     for server, rows in rows_by.items():
         if sum(w for *_, w in rows) < MIN_SERVER_SAMPLES:
@@ -295,7 +297,7 @@ def _bucket(decls):
         blocks[server] = {
             "g_min": g_min, "g_max": g_max,
             "baseline": np.ones(K - 1) if K > 1 else np.array([]),
-            "identity": np.array([g - 0.5 for g in gs], float),
+            "identity": np.array([float(g) for g in gs], float),
             "rating": np.array([r for r, _, _, _ in rows], float),
             "T": np.array([t for _, _, t, _ in rows], float),
             "w": np.array([w for _, _, _, w in rows], float),
@@ -389,7 +391,7 @@ def emit_server_curves(server_fits):
             continue
         gs = sorted(thr)
         out[server] = {"our": [float(thr[g]) for g in gs],
-                       "server": [float(g - 0.5) for g in gs]}
+                       "server": [float(g) for g in gs]}
     return out
 
 
@@ -408,7 +410,7 @@ def main():
         sys.exit("No rank_surveys rows found — cannot fit the mapping.")
     # EVERY declaration anchors (weight 1 each; its blocks split that weight) —
     # a re-survey is a new anchor at its own time, not a replacement.
-    surveys = surveys[surveys["rank_scalar"].notna()].copy()
+    surveys = surveys[surveys["rank_value"].notna()].copy()
     surveys["t_days"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
                          .astype("int64") / 86400e9)
     print(f"  {len(surveys)} declarations from {surveys['user_id'].nunique()} users")
@@ -465,14 +467,14 @@ def main():
                                  .groupby(["user_id", "server"])):
         T = (user_logT[uid] - center) if uid in user_logT else 0.0
         dt = srows["t_days"].to_numpy(float)
-        dg = srows["rank_scalar"].to_numpy(float)
+        dg = np.array([rank_band(v) for v in srows["rank_value"].to_numpy(float)])
         assign = defaultdict(list)
         for tc, R, m in user_blocks[uid]:
             assign[int(np.argmin(np.abs(dt - tc)))].append((R, m))
         for j, brs in assign.items():
             mass = sum(m for _, m in brs)
             for R, m in brs:
-                decls.append((server, R, float(dg[j]), T,
+                decls.append((server, R, int(dg[j]), T,
                               m / mass if mass > 0 else 1.0 / len(brs)))
     w_egf = sum(d[4] for d in decls if d[0] == "EGF")
     print(f"\nConsensus fit over {len(decls)} anchor rows, "
@@ -489,9 +491,12 @@ def main():
     if "EGF" in server_fits and len(egf) >= 2 and len(server_fits["EGF"]) >= 2:
         gs = sorted(server_fits["EGF"])
         our = np.array([server_fits["EGF"][k] for k in gs], float)
-        srv = np.array([k - 0.5 for k in gs], float)
+        srv = np.array([float(k) for k in gs], float)
         order = np.argsort(our)
-        R = np.array([r for r, _, _, _ in egf]); gdec = np.array([g for _, g, _, _ in egf])
+        R = np.array([r for r, _, _, _ in egf])
+        # Declared BAND -> its centre, so the residual against a boundary-scale
+        # prediction reads in the same units it always has.
+        gdec = np.array([g + 0.5 for _, g, _, _ in egf], float)
         T = np.array([t for _, _, t, _ in egf]); W = np.array([w for _, _, _, w in egf])
         x_int = interp_extrap_vec(R + alpha * T, a, ys)
         pred = interp_extrap_vec(x_int, our[order], srv[order])
@@ -500,8 +505,10 @@ def main():
               f"bias {np.average(res, weights=W):+.2f} ranks")
 
     # --- write rating_to_rank.json (both board keys identical) + time_adjust ---
+    # Knots sit at consensus-rank band LOWER EDGES, which under this convention are
+    # the band integers themselves.
     curve = {"ratings": [float(r) for r in a],
-             "rank_indices": [float((g - 0.5) + RANK_INDEX_OFFSET) for g in egf_thr_ranks]}
+             "ranks": [float(g) for g in egf_thr_ranks]}
     rr = {str(s): curve for s in SIZES}
     rr["time_adjust"] = {"alpha_per_log10_min": round(alpha, 6),
                          "center_log10_min": round(center, 6)}
@@ -514,8 +521,8 @@ def main():
         json.dump(server_curves, f, indent=2)
 
     fitted = [s for s in SERVERS if s in server_curves]
-    print(f"\nconsensus range mapped: {scalar_to_rank(egf_thr_ranks[0])}→rating "
-          f"{a[0]:.2f} ... {scalar_to_rank(egf_thr_ranks[-1])}→rating {a[-1]:.2f}")
+    print(f"\nconsensus range mapped: {value_to_rank(egf_thr_ranks[0])}→rating "
+          f"{a[0]:.2f} ... {value_to_rank(egf_thr_ranks[-1])}→rating {a[-1]:.2f}")
     print(f"wrote {args.dir}/rating_to_rank.json (shared 9≡13 + time_adjust) + rank_map.json "
           f"({len(fitted)} server couplings incl EGF: {', '.join(fitted)})\n"
           f"  → publish with: python -m pipeline.package_for_pwa")

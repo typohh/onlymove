@@ -84,22 +84,22 @@ def load_lapse(ratings_dir):
     return 0.0
 
 
-def load_rating_rank_curve(ratings_dir, *, size="9", offset=0.0):
-    """(ratings_knots, rank_index_knots − offset) float arrays from the board-`size`
-    key of ratings/rating_to_rank.json. The v2 curve writes both board keys
-    identical, so the default '9' stands in for either (falling back to whatever
-    key is present). rank_index = internal-rank scalar + 19, so pass offset=19 to
-    get the internal-rank scalar directly."""
+def load_rating_rank_curve(ratings_dir, *, size="9"):
+    """(rating_knots, rank_knots) float arrays from the board-`size` key of
+    ratings/rating_to_rank.json. The v2 curve writes both board keys identical, so
+    the default '9' stands in for either (falling back to whatever key is present).
+    Ranks are on the project scale (pwa/shared/rank-math.js) — there is no second
+    coordinate to convert to any more."""
     with open(os.path.join(ratings_dir, "rating_to_rank.json")) as f:
         rr = json.load(f)
     c = rr.get(str(size))
     if c is None:
         # Fall back to any board-size curve — but never the top-level
-        # time_adjust dict, which has no ratings/rank_indices keys.
+        # time_adjust dict, which has no ratings/ranks keys.
         c = next((v for v in rr.values()
                   if isinstance(v, dict) and "ratings" in v), None)
     if c is None:
         raise KeyError(f"rating_to_rank.json has no curve for size {size!r}")
     xs = np.asarray(c["ratings"], dtype=float)
-    ys = np.asarray(c["rank_indices"], dtype=float) - offset
+    ys = np.asarray(c["ranks"], dtype=float)
     return xs, ys

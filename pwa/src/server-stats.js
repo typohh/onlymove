@@ -1,4 +1,4 @@
-import { rankScalarToLabel } from '../shared/rank-math.js';
+import { rankToLabel, rankBand, clampRankBand } from '../shared/rank-math.js';
 import { APP_VERSION } from './version.js';
 import { CORS_HEADERS, jsonResponse } from './http.js';
 import { normalizeCountry, readActivePlayers } from './leaderboard.js';
@@ -308,16 +308,16 @@ async function computeLeaderboardStats(env) {
     // as they are left off the leaderboard. Hidden profiles ARE counted: hiding withholds
     // a name and a country, never the onlymove rank. Clamped to the labelled ladder
     // so a far-extrapolated estimate lands in an end bin rather than inventing a
-    // label (the underlying scalar is unbounded — see the client's rank notes).
+    // label (the underlying rank is unbounded — see the client's rank notes).
     const rankHist = new Map();
     for (const p of players) {
       if (p.internal === null) continue;
-      const scalar = Math.max(-29, Math.min(9, Math.round(p.internal)));
-      rankHist.set(scalar, (rankHist.get(scalar) || 0) + 1);
+      const band = clampRankBand(rankBand(p.internal));
+      rankHist.set(band, (rankHist.get(band) || 0) + 1);
     }
     const ranks = [...rankHist.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([v, n]) => ({ rank: rankScalarToLabel(v), n }));
+      .map(([v, n]) => ({ rank: rankToLabel(v), n }));
 
     // Countries: hidden profiles excluded — they opted their country out of the
     // board, so keep them out of the aggregate too. `country` is already

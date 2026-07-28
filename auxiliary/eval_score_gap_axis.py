@@ -63,7 +63,6 @@ CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 WINDOW = 500
 EVAL_BLOCK = 50
 WARMUP = 120
-RANK_NORM = 29.0
 
 
 # The feature/cache implementations live in utils.rating_features (the production
@@ -85,8 +84,8 @@ def load_ranks():
     harnesses read pwa/tsumegos on purpose; this is model-development code.)"""
     params = load_backend_problem_params()
     curve = load_backend_rank_curve()
-    xs = np.array(curve["ratings"]); ys = np.array(curve["rank_indices"])
-    return {t: float(np.interp(v[0], xs, ys)) / RANK_NORM for t, v in params.items()}
+    xs = np.array(curve["ratings"]); ys = np.array(curve["ranks"])
+    return {t: float(np.interp(v[0], xs, ys)) for t, v in params.items()}
 
 
 def irls(X, y, ridge=1e-6, w0=None):

@@ -1,6 +1,5 @@
 // js/constants.js
 
-export const TOTAL_RANKS = 29;
 
 export const APP_MODES = {
   SOLVING: 'solving',

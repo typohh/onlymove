@@ -122,7 +122,7 @@ def build_axis_features():
         if (key not in bw or t not in f_sc or t not in f_wr or t not in f_ph
                 or t not in rsf):
             continue
-        rk = float(np.interp(rsf[t][0], curve[0], curve[1])) / 29.0
+        rk = float(np.interp(rsf[t][0], curve[0], curve[1]))
         feats[t] = np.concatenate([
             act[key], bw[key], mv.get(key, zero_mv), ph.get(key, zero_ph),
             [1.0 if size == 13 else 0.0],
@@ -139,7 +139,7 @@ def _load_rank_curve():
     path = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
     m = _json.load(open(path))
     c = m["9"] if "9" in m else next(iter(m.values()))
-    return np.array(c["ratings"]), np.array(c["rank_indices"])
+    return np.array(c["ratings"]), np.array(c["ranks"])
 
 
 def load_axis_attempts():

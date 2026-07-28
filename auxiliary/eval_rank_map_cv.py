@@ -363,7 +363,7 @@ def main():
 
     print("Loading surveys + ratings + attempts ...")
     surveys = load_rank_surveys(args.sql)
-    surveys = surveys[surveys["rank_scalar"].notna()].copy()
+    surveys = surveys[surveys["rank_value"].notna()].copy()
     surveys["t"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
                     .astype("int64") / 86400e9)
     surveys = surveys.sort_values("t")
@@ -425,7 +425,7 @@ def main():
         for _, row in latest[latest["user_id"].isin(uids)].iterrows():
             uid = row["user_id"]
             R, se, _ = cov[uid]
-            out.append((row["server"], R, float(row["rank_scalar"]), T_of[uid],
+            out.append((row["server"], R, float(row["rank_value"]), T_of[uid],
                         se if eiv else 0.0, 1.0))
         return out
 
@@ -441,7 +441,7 @@ def main():
             for server, srows in udecl.groupby("server"):
                 srows = srows.sort_values("t")
                 dt = srows["t"].to_numpy()
-                dg = srows["rank_scalar"].to_numpy(float)
+                dg = srows["rank_value"].to_numpy(float)
                 # nearest-in-time declaration anchors each block (no drift otherwise)
                 assign = defaultdict(list)
                 for (tc, R, se, _, _), m in zip(blks, masses):
@@ -509,7 +509,7 @@ def main():
             eval_rows = {}
             for lens_name, cov in LENSES:
                 eval_rows[lens_name] = [
-                    (row["server"], cov[row["user_id"]][0], float(row["rank_scalar"]),
+                    (row["server"], cov[row["user_id"]][0], float(row["rank_value"]),
                      T_of[row["user_id"]])
                     for _, row in latest[latest["user_id"].isin(test_set)].iterrows()
                     if (row["user_id"][:8], row["server"]) not in drop_eval]

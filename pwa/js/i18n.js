@@ -1,6 +1,5 @@
 // js/i18n.js
 
-import { TOTAL_RANKS } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
 
 const localization = {
@@ -753,16 +752,14 @@ export function getTerm(key, params) {
   return term;
 }
 
-export function getDescriptiveRank(numericRank) {
-  // Ratings can extend beyond [0, 1] (problems harder than 9d or weaker
-  // than 20k on the handi-stone scale). The kyu/dan formula keeps working
-  // for any integer index: rankIndex = -1 -> "21 kyu", 29 -> "10 dan", etc.
-  // rankBand ROUNDs (the shared "which rank is this" — the scalar is the band
-  // CENTER, so this matches rankScalarToLabel and the GoR/EGF convention; flooring
-  // under-labeled by up to a full rank). Only the kyu/dan WORDING is localized
-  // here, which is why this stays out of shared/rank-math.js.
-  const rankIndex = rankBand(numericRank * TOTAL_RANKS);
+export function getDescriptiveRank(rank) {
+  // Ranks extend past the labelled ladder in both directions (problems harder
+  // than 9d or weaker than 20k), and the kyu/dan formula keeps working for any
+  // band: -21 -> "21 kyu", 9 -> "10 dan". The band comes from the shared
+  // rankBand so this can't drift from rankToLabel; only the kyu/dan WORDING is
+  // localized here, which is why this stays out of shared/rank-math.js.
+  const band = rankBand(rank);
   const kyuTerm = getTerm('kyu');
   const danTerm = getTerm('dan');
-  return (rankIndex < 20) ? `${20 - rankIndex} ${kyuTerm}` : `${rankIndex - 19} ${danTerm}`;
+  return (band < 0) ? `${-band} ${kyuTerm}` : `${band + 1} ${danTerm}`;
 }

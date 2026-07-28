@@ -227,17 +227,15 @@ Both are soft, so strictly they select a strongly-preferred point on a flat mani
 
 The output is one shared curve for both board sizes — the rating fit is already cross-board, so there is nothing per-board left to map — plus one set of coupling knots per server, plus the time-adjustment coefficients.
 
-**The rank coordinates, and how they relate to rating units.** Everything downstream is quoted either in *rating* units or in *rank* units, and several names exist for each. They are all the same two coordinates, so it is worth fixing them once:
+**The rank coordinate, and how it relates to rating units.** Everything downstream is quoted either in *rating* units or in *rank* units. There is exactly one of each:
 
 - A **rating unit** is set by the gauge of section 1.6 — one standard deviation of fitted difficulty over the attempted problem set. It is internal and arbitrary, and it moves every retrain.
-- The curve maps a rating to a **rank index**: 20 kyu = 0, 1 kyu = 19, 1 dan = 20, 9 dan = 28, so the labelled ladder is 29 whole bands. This is the latent consensus rank of the model above, in the units the curve is stored in.
-- A **rank scalar** is the same coordinate with the origin moved to 1 kyu — scalar = index − 19, so 5 kyu is −4 and 3 dan is 3. The server couplings and every kyu/dan label speak it; nothing else differs.
-- **Internal-rank space** is the rank index again, and is the working coordinate for the window estimate (section 2.3) and the career decomposition (section 2.6): each attempt's rating is mapped through its own board's curve before anything is fitted.
-- A **normalized rank** is the index divided by the 29-band label span. It exists only as a per-problem field on the client (section 2.1), it is not a fraction of anything, and it is never clamped.
-- **Continuous** rank means any of these left unrounded; a whole rank is what you get by rounding, and rounding happens only for display.
+- The curve maps a rating to a **rank**, on one convention used by every part of the system: **0 is the boundary between 1 kyu and 1 dan, every rank is one unit wide, and the integers are band EDGES.** So 1 dan spans [0, 1) and averages 0.5, 2 dan spans [1, 2), 1 kyu spans [−1, 0), and the labelled 30 kyu … 9 dan ladder runs from −30 to 9. Which whole rank a value falls in is its FLOOR. This is the latent consensus rank of the model above, in the units the curve is stored in, the working coordinate for the window estimate (section 2.3) and the career decomposition (section 2.6), the per-problem field on the client (section 2.1), and what the server couplings speak.
+- It is **AGA-style but not AGA**: real AGA ratings leave a gap between −1 and +1 and place 2 dan at [2, 3). Converting into that frame is a genuine conversion, and it lives in the one place that displays AGA ratings.
+- A **whole rank** is the floor of a continuous one, and flooring happens only for display. The value is never clamped for anything else — the ladder is what gets labelled, not a bound on the coordinate, and the corpus extrapolates past both ends.
 - A **declared rank** is the one quantity outside this chain: a surveyed user's self-report on an external server's own ladder. The couplings above are what map into it, and they are why "5 kyu" is not a coordinate at all until you say where.
 
-So one rank means one band in every one of them, and the only arithmetic between them is an offset of 19 and a divisor of 29.
+One rank means one unit everywhere, with no conversion between representations, because there is only one. That is deliberate: the system previously carried three affine images of this coordinate at once, and the failure mode they invited is that a stale value in the wrong one is *not detectably wrong* — it is a plausible number in the new frame, so it corrupts silently rather than raising.
 
 **Between rating units and rank units there is no fixed factor, and there is not supposed to be.** The whole point of the curve is that it is not linear: on the current fit the entire labelled ladder spans a little under five rating units, but the segments are nothing like equal — one rank costs roughly a twentieth of a rating unit through the middle kyus and about a third of one in the dan range, a factor of six, with the extremes wider still. That is a real property of the population, not a fitting artifact: adjacent kyu ranks are close together in latent skill and adjacent dan ranks are far apart. The practical consequence is that a figure quoted in rating units cannot be checked against one quoted in ranks without saying *where on the ladder*, and this document quotes each quantity in whichever unit the code that computes it works in. Where a rating-unit figure needs a rank-scale intuition, the mid-kyu conversion is the one to reach for, because that is where most of the population sits.
 
@@ -330,9 +328,9 @@ Almost everything here runs on the client, which is where the design puts it; th
 
 The client receives **raw** numbers and derives every human-facing quantity itself. Publishing is rank-agnostic: it never computes a rank, never repackages the slope into a bounded quality score, never bakes a rank into a manifest.
 
-On loading a shard, each problem gains exactly two derived fields: a **normalized rank**, from the rating through the published curve, and a **selection weight** equal to the Fisher information one at-rank attempt on it carries, for use in section 2.4. Rating, slope, floor and motif vector stay exactly as published.
+On loading a shard, each problem gains exactly two derived fields: a **rank**, from the rating through the published curve, and a **selection weight** equal to the Fisher information one at-rank attempt on it carries, for use in section 2.4. Rating, slope, floor and motif vector stay exactly as published.
 
-**The normalized rank is not a fraction of anything, and is never clamped.** It is the rank index divided by the ladder's label span (section 1.12 fixes both coordinates), and that divisor is the width of the kyu/dan range we put *names* on, not a bound on the value. The published curve's knots do not begin at index zero, and applying the curve extrapolates linearly past both end knots, so a problem easier than the weakest knot lands below zero and the unattempted hard tail — material far beyond where human declarations reach — lands above one. Both are ordinary. Treat it as an unbounded continuous coordinate: never clamp it, never read one half as a midpoint, never read it as a percentile. Section 2.7 depends on this directly; a clamp hidden inside the translation once pinned every strong player to the top band, which is invisible in a label and wrong in a plot.
+**The rank is never clamped.** The kyu/dan ladder is the range we put *names* on, not a bound on the value (section 1.12 fixes the coordinate). Applying the curve extrapolates linearly past both end knots, so a problem easier than the weakest knot lands below the bottom of the ladder and the unattempted hard tail — material far beyond where human declarations reach — lands above the top. Both are ordinary. Treat it as an unbounded continuous coordinate: never clamp it, never read it as a percentile. Section 2.7 depends on this directly; a clamp hidden inside the translation once pinned every strong player to the top band, which is invisible in a label and wrong in a plot.
 
 The selection weight is a client-local derivation with no counterpart upstream — nothing in the backend computes it, and the published slope is the response curve's actual discrimination. Beware that the same word, *quality*, names the backend column holding the calibrated slope **and** this client-side weight, which are different quantities (section 3.4).
 
@@ -593,7 +591,7 @@ Two roll-up caches are *not* self-maintaining after a problem-set top-up and mus
 | consensus rank mapping | `pipeline/map_rating_to_rank.py` |
 | the user-rating anchor and ordinal likelihood | `utils/fit_rank_curves.py` |
 | the win-rate-table shape prior | `utils/statistics_shapes.py` |
-| survey loading and rank scalars | `utils/rank_surveys.py` |
+| survey loading and rank values | `utils/rank_surveys.py` |
 | the residual-axes model and axis-count selection | `utils/residual_axes.py` |
 | axis fit, labelling, anchors, per-cell fanout | `pipeline/build_axes.py` |
 | population constants | `pipeline/fit_population_constants.py` |
@@ -690,8 +688,7 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | `LAMBDA_SHAPE` / `SERVER_LAMBDA` / `GAUGE_WEIGHT` / `EPS_CONTAMINATION` | 0.3 / 5.0 / 1.0 / 0.005 | `map_rating_to_rank.py` |
 | `K_START` / `K_MAX` / `STOP_FRACTION` / `ORTHO_WEIGHT` | 3 / 12 / 0.03 / 0.5 | `residual_axes.py` |
 | axis count `K` | selected per fit | `axes.npz` → `embedding_meta.json` |
-| `TOTAL_RANKS` | 29 — the LABEL span (20k = 0 … 1d = 20), **not** a bound on the normalized rank | `constants.js` |
-| `RANK_INDEX_OFFSET` | 19 — rank index = rank scalar + 19, the only arithmetic between the two rank coordinates (section 1.12) | `shared/rank-math.js` |
+| the rank convention | 0 = the 1k/1d boundary, one unit per rank, integers are band EDGES, band = FLOOR (section 1.12); `RANK_BAND_LO`/`HI` = −30/8 bound LABELS only | `shared/rank-math.js` |
 | `WIN_CAP` / `WIN_PRIOR_SD` / `WIN_UCB_K` | 500 attempts / a 4-rank prior SD, which makes the window fit MAP rather than ML (section 2.3) / 1, the serve bonus per unit of standard error above the floor | `shared/rank-window.js` |
 | selection weight / SE floor | `problemInfoWeight` = `slope²·anchorInfo(floor)`; `seFloorForMeanInfo` | `rank-decomposition.js`, `irt.js`, `shared/rank-window.js` |
 | `SLOPE_PRIOR_SD` | 2.0 (bandwidth, not a drift prior) | `rank-decomposition.js` |

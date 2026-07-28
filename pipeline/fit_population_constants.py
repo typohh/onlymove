@@ -134,7 +134,6 @@ def _weakness_k_embed():
     with open(WEAKNESS_EMBED_CSV, newline="") as f:
         header = csv.DictReader(f).fieldnames or []
     return sum(1 for c in header if c.startswith("embed_"))
-WEAKNESS_TOTAL_RANKS = 29.0          # problemRank = M(rating) / TOTAL_RANKS (matches the client)
 
 # --- Per-axis weakness prior (weakness_axis_lambda; empirical Bayes, see group 5) ---
 WEAKNESS_EB_MAX_N = 500              # per-user window, mirrors the client's MODEL_INPUT_HISTORY_LENGTH
@@ -372,9 +371,9 @@ def read_time_adjust(ratings_dir):
 
 
 def load_rating_to_rank(ratings_dir):
-    """rating→rank-index interpolator M from ratings/rating_to_rank.json (one
-    shared curve; the size-9 key stands in for either board), for the weakness
-    ridge's problemRank feature. None if absent/bad."""
+    """rating→rank interpolator M from ratings/rating_to_rank.json (one shared
+    curve; the size-9 key stands in for either board), for the weakness ridge's
+    problemRank feature. None if absent/bad."""
     try:
         xs, ys = load_rating_rank_curve(ratings_dir)
     except (ValueError, OSError, KeyError, StopIteration):
@@ -612,7 +611,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, apply_m,
         return None, "no rating_to_rank.json — no per-axis prior"
     if not embeddings:
         return None, "no embeddings — no per-axis prior"
-    rank_feat = {k: apply_m(v[0]) / WEAKNESS_TOTAL_RANKS for k, v in params.items()}
+    rank_feat = {k: apply_m(v[0]) for k, v in params.items()}
     data = list(_weakness_user_datasets(by_user, rank_feat, embeddings))
     if len(data) < WEAKNESS_EB_MIN_USERS:
         return None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "

@@ -33,11 +33,11 @@ const clearSpan = c => Math.max(0, 1 - Math.max(c, 0) - LAPSE);
 const clearKappa = c => { const cc = Math.max(c, 0); const q = Math.min(Math.max((CAL_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6); return Math.log(q / (1 - q)); };
 
 // --- shipped rank-decomposition.js constants ---
-const TOTAL_RANKS = 29, WIN_ITARGET = 16, WIN_CAP = 500;
+const WIN_ITARGET = 16, WIN_CAP = 500;
 const WIN_PRIOR_SD = 4, WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
 const X_LO = -15, X_HI = 45, SLOPE_LO = 0.05, SLOPE_HI = 3.0, MSLOPE_FLOOR = 1e-3, SLOPE_FALLBACK = 0.28, A_REF = 1.6;
 
-const applyM = (rating, size) => E.normalizedRankForSize(rating, size) * TOTAL_RANKS;
+const applyM = (rating, size) => E.rankForSize(rating, size);
 function Mslope(rating, size) { const h = 1e-3; return (applyM(rating + h, size) - applyM(rating - h, size)) / (2 * h); }
 function clampSlope(s) { if (!Number.isFinite(s) || s <= 0) return SLOPE_FALLBACK; return Math.min(SLOPE_HI, Math.max(SLOPE_LO, s)); }
 
@@ -110,7 +110,7 @@ for (const [tid, succ, size, , , isr] of attempts) {
   const m = problems[tid];
   const correct = succ === 1;
   // keep an engine-format history for validation
-  engHist.push({ problemId: tid, problemRating: m[0], problemRank: E.normalizedRankForSize(m[0], size),
+  engHist.push({ problemId: tid, problemRating: m[0], problemRank: E.rankForSize(m[0], size),
     problemSlope: m[1], problemFloor: m[2], correct, date: 1, isRepeat: isr === 1, size });
   if (isr === 1) continue;       // rank uses first-time only
 
@@ -136,7 +136,7 @@ for (const [tid, succ, size, , , isr] of attempts) {
   // validation: engine's estimate on the same prefix
   if (valN < 300) {
     const est = E.estimateWindowRank(engHist.map(h => ({ ...h })), refR);
-    if (est) { valMaxDiff = Math.max(valMaxDiff, Math.abs(est.rankIndex - after.R)); valN++; }
+    if (est) { valMaxDiff = Math.max(valMaxDiff, Math.abs(est.rank - after.R)); valN++; }
   }
   R = after.R;
 }

@@ -7,8 +7,8 @@
 // mirroring, the kernel smoothers, the weakness-example selector) sits with
 // the rest of the model math.
 
-import { TOTAL_RANKS, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
-import { rankScalarToLabel, RANK_INDEX_OFFSET } from '../shared/rank-math.js';
+import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { rankToLabel, rankBand, clampRankBand } from '../shared/rank-math.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
 
 // Display bins in SECONDS over the server's fine-bucket histogram (the
@@ -119,9 +119,8 @@ export function computeUserCommunityBuckets(history, timeBins) {
     const recallMed = median(recallGaps);
     if (recallMed != null) out.recall = RECALL_HI.findIndex(hi => recallMed < hi);
 
-    // Answer-derived rank: mean internal-rank index of distinct first-time
-    // problems → EGF scalar → label (the server's recipe, minus shard rounding;
-    // problemRank is already the per-problem M index divided by TOTAL_RANKS).
+    // Answer-derived rank: mean internal rank of distinct first-time problems →
+    // label (the server's recipe, minus shard rounding).
     const MIN_RANK_PROBLEMS = 10;
     const firstByProblem = new Map();
     for (const a of recent) {
@@ -130,9 +129,8 @@ export function computeUserCommunityBuckets(history, timeBins) {
     }
     if (firstByProblem.size >= MIN_RANK_PROBLEMS) {
         let sum = 0;
-        for (const r of firstByProblem.values()) sum += r * TOTAL_RANKS;
-        const scalar = Math.max(-29, Math.min(9, Math.round(sum / firstByProblem.size) - RANK_INDEX_OFFSET));
-        out.rankLabel = rankScalarToLabel(scalar);
+        for (const r of firstByProblem.values()) sum += r;
+        out.rankLabel = rankToLabel(clampRankBand(rankBand(sum / firstByProblem.size)));
     }
 
     return out;

@@ -7,8 +7,8 @@ via utils.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse
 shape, so the fit lives here (a dependency-free leaf — no auxiliary/ or pipeline/ imports).
 
 `fit_shape(name)` returns (params, theta_func); `name` is matched as a prefix of the families in
-make_models(), so "cubic" picks the cubic family. theta_func(x, params) maps a rank_index x
-(20k=0 … 1k=19 … 6d=25) to θ in win-model logit units.
+make_models(), so "cubic" picks the cubic family. theta_func(x, params) maps this table's own
+axis x (20k=0 … 1k=19 … 6d=25; see rank_to_axis) to θ in win-model logit units.
 """
 
 import os
@@ -19,19 +19,30 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit
 
-from utils.rank_surveys import rank_to_scalar
+from utils.rank_surveys import rank_to_value
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATS_PATH = os.path.join(PROJECT_ROOT, "data", "statistics.txt")
 
-KNEE_6K = 14.0  # 6k  (rank_index for the 6k/5k boundary)
-KNEE_1D = 20.0  # 1d  (rank_index for the 1k/1d boundary)
+# This table has its OWN axis: 20k = 0, 1k = 19, 1d = 20. It is deliberately NOT
+# the project rank scale (pwa/shared/rank-math.js), because every candidate shape
+# below is a polynomial with no constant term — the ORIGIN is part of the model, so
+# translating x would refit a different curve. Callers convert at the boundary with
+# rank_to_axis(); nothing else in the project speaks this coordinate.
+AXIS_ZERO_RANK = -19.5   # the project rank this axis calls 0 (the 20k band centre)
+
+KNEE_6K = 14.0  # 6k  (axis position of the 6k/5k boundary)
+KNEE_1D = 20.0  # 1d  (axis position of the 1k/1d boundary)
+
+
+def rank_to_axis(rank):
+    """Project rank (rank_surveys.rank_to_value convention) -> this table's axis."""
+    return np.asarray(rank, dtype=float) - AXIS_ZERO_RANK
 
 
 def rank_index(label):
-    """20k → 0, 1k → 19, 1d → 20, 6d → 25 (the PWA rank_index axis). The axis is
-    the internal-rank scalar (1k=0, 1d=1; see rank_surveys.rank_to_scalar) + 19."""
-    return rank_to_scalar(label) + 19
+    """Kyu/dan label -> this table's axis: 20k → 0, 1k → 19, 1d → 20, 6d → 25."""
+    return float(rank_to_axis(rank_to_value(label)))
 
 
 def parse_even_table(path):
@@ -125,8 +136,8 @@ def fit_model(theta, init, bounds, X, N, Nw, Ng):
 @lru_cache(maxsize=None)
 def fit_shape(model_name, stats_path=STATS_PATH):
     """Fit one named candidate shape to the statistics.txt even-game table and
-    return (params, theta_func). theta_func(x, params) takes rank_index x
-    (20k=0 … 1k=19 … 6d=25) and returns θ in win-model logit units.
+    return (params, theta_func). theta_func(x, params) takes this table's own axis x
+    (20k=0 … 1k=19 … 6d=25; see rank_to_axis) and returns θ in win-model logit units.
 
     Lets other modules reuse a fitted shape without re-implementing the fit —
     e.g. fit_rank_curves's `--prior cubic`. `model_name` is matched as a prefix

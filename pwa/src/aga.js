@@ -15,7 +15,7 @@
 // The `rank_label` ("10 dan", "3 kyu") is the AGA's OWN official rank — dan = floor(rating),
 // kyu = floor(|rating|), with a gap around 0 that no linear rating->rank offset can model.
 // So placement uses the label (via the AGA coupling), never a computed offset. This module
-// returns the SHORT label ("10d"/"3k") that pwa/shared/rank-math.js rankLabelToScalar parses.
+// returns the SHORT label ("10d"/"3k") that pwa/shared/rank-math.js rankLabelToRank parses.
 //
 // Best-effort: any network error / bad payload returns null, never throws.
 
@@ -27,7 +27,7 @@ export function isValidAgaId(id) {
     return typeof id === 'string' ? /^\d{1,12}$/.test(id) : (Number.isInteger(id) && id > 0 && id < 1e12);
 }
 
-// AGA rank_label ("10 dan" / "3 kyu") -> the short "10d" / "3k" form rankLabelToScalar
+// AGA rank_label ("10 dan" / "3 kyu") -> the short "10d" / "3k" form rankLabelToRank
 // parses. Returns null if it isn't a recognizable dan/kyu label.
 export function agaShortRankLabel(rankLabel) {
     if (typeof rankLabel !== 'string') return null;

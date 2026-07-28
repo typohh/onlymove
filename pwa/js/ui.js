@@ -9,7 +9,7 @@ import {
     enableNotifications,
 } from './notifications.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
-import { rankProgress, rankIndexToLabel } from '../shared/rank-math.js';
+import { rankProgress } from '../shared/rank-math.js';
 
 /**
  * Returns true if the app is already running as an installed PWA.
@@ -58,7 +58,7 @@ const hasInstalledStoreApp = async () => {
         return false;
     }
 };
-import { TOTAL_RANKS, APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
+import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
 import { canCreateInvites } from './invite-access.js';
@@ -361,11 +361,10 @@ const updateSolvingModeUI = () => {
         const rank = getDescriptiveRank(state.userRank);
         text1Elements.forEach(element => element.textContent = `${rank}`);
 
-        // Add progress bar. Round-band progress (matches getDescriptiveRank above and
-        // the modal/Rank tab) via the shared rankProgress — flooring here would desync
-        // the bar from the rounded label by half a band.
-        const rankValue = state.userRank * TOTAL_RANKS;
-        const progress = rankProgress(rankValue, rankIndexToLabel).percent;
+        // Add progress bar. Same band + progress as getDescriptiveRank above and the
+        // modal/Rank tab, via the shared rankProgress — deriving it inline here would
+        // desync the bar from the label.
+        const progress = rankProgress(state.userRank).percent;
 
         text1Elements.forEach(element => {
             element.classList.add('progress-bar-wrapper');

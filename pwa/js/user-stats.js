@@ -4,7 +4,7 @@ import { state, updateUserRank, updateServeRank, updateRankSe, updateAnswerHisto
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
-import { TOTAL_RANKS, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
 import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './model.js';
 import { trainWeakness } from './weakness.js';
@@ -172,10 +172,10 @@ function scheduleIdle(fn, timeout = 2000) {
     }
 }
 
-const getRankInfo = (rating) => {
-    // rankBand (round) so a rank-up/down fires exactly when the DISPLAYED label
-    // changes (getDescriptiveRank rounds); flooring would trip it half a band off.
-    return { rankIndex: rankBand(rating * TOTAL_RANKS) };
+const getRankInfo = (rank) => {
+    // The shared rankBand, so a rank-up/down fires exactly when the DISPLAYED
+    // label changes (getDescriptiveRank uses the same band).
+    return { band: rankBand(rank) };
 }
 
 // Match (by problemId + creation date) the just-recorded answer entry and
@@ -301,15 +301,15 @@ export async function updateUserStats(isCorrect, {
 
     const oldRank = state.userRank;
     // Re-fit the linear-information window MLE over the merged first-time history
-    // (the current attempt was appended above). oldRank·TOTAL_RANKS warm-starts the
+    // (the current attempt was appended above). oldRank warm-starts the
     // fit AND is the R_before for the overlay delta below: because the sync path
     // updates userRank SILENTLY when foreign attempts arrive (see account-sync's
     // retrainAfterMerge), oldRank already reflects them, so the reported rank
     // change is the effect of THIS tsumego alone — never the synced batch.
-    const est = estimateWindowRank(getMergedAnswerHistory(), oldRank * TOTAL_RANKS);
+    const est = estimateWindowRank(getMergedAnswerHistory(), oldRank);
     if (est) {
-        updateUserRank(est.rankIndex / TOTAL_RANKS);
-        updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+        updateUserRank(est.rank);
+        updateServeRank(est.serveRank);
         updateRankSe(est.se);
     }
     // The just-answered problem is moved into the previous slot, and the
@@ -321,8 +321,8 @@ export async function updateUserStats(isCorrect, {
     const oldRankInfo = getRankInfo(oldRank);
     const newRankInfo = getRankInfo(state.userRank);
     let rankChangeDirection = 'same';
-    if (newRankInfo.rankIndex > oldRankInfo.rankIndex) rankChangeDirection = 'up';
-    else if (newRankInfo.rankIndex < oldRankInfo.rankIndex) rankChangeDirection = 'down';
+    if (newRankInfo.band > oldRankInfo.band) rankChangeDirection = 'up';
+    else if (newRankInfo.band < oldRankInfo.band) rankChangeDirection = 'down';
 
     // For a recall (repeat) attempt the rank barely moves (rank is fit on
     // first-time attempts only). Instead the overlay shows how recording this

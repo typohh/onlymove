@@ -98,7 +98,6 @@ WEAKNESS_TEMPERATURE = 0.5
 MODEL_INPUT_HISTORY_LENGTH = 500
 MIN_TRAINING_ATTEMPTS = 20
 POOL_N = 50          # the serve pool: 50 nearest-rank candidates
-RANK_NORM = 29.0     # client problemRank is applyM(rating)/29 (0..1)
 
 
 # --------------------------------------------------------------------------- data
@@ -124,10 +123,10 @@ def load_problem_data():
         slope[pid] = s
 
     curve = json.load(open(CURVE_JSON))["9"]  # both size keys are identical
-    xs = np.array(curve["ratings"]); ys = np.array(curve["rank_indices"])
+    xs = np.array(curve["ratings"]); ys = np.array(curve["ranks"])
 
     def prank_norm(r):
-        return float(np.interp(r, xs, ys)) / RANK_NORM
+        return float(np.interp(r, xs, ys))
 
     ids = [i for i in emb if i in rating]
     return (

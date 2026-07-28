@@ -11,7 +11,7 @@ import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates, recallServeShare } from './model.js';
 import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
-import { normalizedRankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
+import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
 import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
@@ -133,7 +133,7 @@ async function buildProblem(raw, { isRepeat, linked, orientation }) {
         linked,
         // `rating` is the raw black-box rating; `rank` is its normalized rank
         // under the current curve M (derived at ingest; unbounded, not a 0..1
-        // fraction — see normalizedRankForSize).
+        // fraction — see rankForSize).
         rating: raw.rating,
         rank: raw.rank,
         quality: raw.quality || 0,
@@ -167,8 +167,8 @@ async function loadZipMetadata() {
         // so selection (which works in rank space against state.userRank) can use
         // them. M is monotone, so min/max map to min/max.
         for (const z of zips) {
-            z.minRank = normalizedRankForSize(z.min_rating, state.boardSize);
-            z.maxRank = normalizedRankForSize(z.max_rating, state.boardSize);
+            z.minRank = rankForSize(z.min_rating, state.boardSize);
+            z.maxRank = rankForSize(z.max_rating, state.boardSize);
         }
         state.zipMetadata = zips;
     }
@@ -256,7 +256,7 @@ async function doLoadZipProblems(zipFilename) {
     // from it and the shipped guessing floor here.
     const problems = JSON.parse(metadataContent).map(p => ({
         ...p, zipFilename,
-        rank: normalizedRankForSize(p.rating, state.boardSize),
+        rank: rankForSize(p.rating, state.boardSize),
         quality: problemInfoWeight(p.slope, p.floor),
     }));
 

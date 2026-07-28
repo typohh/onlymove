@@ -32,8 +32,8 @@
 //                     /report-maintained buffer actually holds. Exact duplicate
 //                     rows (same problem + created_at) are collapsed to one.
 //   current rank/se = computeRank over that buffer — the UNTIMED internal rank
-//                     scalar (1k = 0) + its stones SE, plus the personal time dock
-//                     in rating units, each stored in its own column.
+//                     (0 = the 1k/1d boundary) + its stones SE, plus the personal
+//                     time dock in rating units, each stored in its own column.
 // last_active is untouched.
 //
 // (Before 2026-07-27 the columns held an EGF-frame rank, so this script's dry-run
@@ -116,7 +116,7 @@ async function loadLeaderboardModule() {
         stdin: {
             contents: `
                 export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP } from './src/leaderboard.js';
-                export { rankScalarToLabel } from './shared/rank-math.js';
+                export { rankToLabel } from './shared/rank-math.js';
             `,
             resolveDir: PWA_DIR,
             sourcefile: 'aux-leaderboard-entry.mjs',
@@ -188,18 +188,18 @@ function fetchBufferAttempts(uid, cap) {
 // [{ p, s, t }]. The buffer is those attempts newest first (the live-buffer order).
 function recomputeRow(lb, attempts, params) {
     const buffer = attempts.slice().reverse().map(({ p, s, t }) => ({ p, s, t }));
-    const { rankScalar, se, deltaRating } = lb.computeRank(buffer, params);
+    const { rank, se, deltaRating } = lb.computeRank(buffer, params);
     return {
         buffer,
-        rankScalar,
-        se: rankScalar === null ? null : se,
-        deltaRating: rankScalar === null ? null : deltaRating,
+        rank,
+        se: rank === null ? null : se,
+        deltaRating: rank === null ? null : deltaRating,
     };
 }
 
 // --- output ---------------------------------------------------------------------------
 function fmtRank(lb, v) {
-    return Number.isFinite(v) ? `${v.toFixed(2)} (${lb.rankScalarToLabel(v)})` : '—';
+    return Number.isFinite(v) ? `${v.toFixed(2)} (${lb.rankToLabel(v)})` : '—';
 }
 function fmtDelta(lb, oldV, newV) {
     return `${fmtRank(lb, oldV)} -> ${fmtRank(lb, newV)}`;
@@ -257,11 +257,11 @@ async function main() {
 
         const out = recomputeRow(lb, attempts, params);
         console.log(`${row.user_id}  buffer ${attempts.length} attempts`);
-        console.log(`  current   ${fmtDelta(lb, row.pred_rank, out.rankScalar)}   se ${Number.isFinite(row.pred_rank_se) ? row.pred_rank_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
+        console.log(`  current   ${fmtDelta(lb, row.pred_rank, out.rank)}   se ${Number.isFinite(row.pred_rank_se) ? row.pred_rank_se.toFixed(3) : '—'} -> ${Number.isFinite(out.se) ? out.se.toFixed(3) : '—'}`);
 
         statements.push(
             `UPDATE leaderboard SET buffer = ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-            + `pred_rank = ${sqlNum(out.rankScalar)}, pred_rank_se = ${sqlNum(out.se)}, `
+            + `pred_rank = ${sqlNum(out.rank)}, pred_rank_se = ${sqlNum(out.se)}, `
             + `time_delta_rating = ${sqlNum(out.deltaRating)} `
             + `WHERE user_id = ${uid};`
         );
@@ -296,15 +296,15 @@ async function main() {
             const uid = sqlStr(a.user_id);
             const attempts = fetchBufferAttempts(uid, lb.BUFFER_CAP);
             const out = recomputeRow(lb, attempts, params);
-            if (out.rankScalar === null) unranked++; else ranked++;
-            console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.rankScalar === null ? 'unranked' : fmtRank(lb, out.rankScalar)}`);
+            if (out.rank === null) unranked++; else ranked++;
+            console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.rank === null ? 'unranked' : fmtRank(lb, out.rank)}`);
             // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
             // the row was created concurrently (a live report during a --remote apply).
             statements.push(
                 `INSERT OR IGNORE INTO leaderboard `
                 + `(user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active) `
                 + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
-                + `${sqlNum(out.rankScalar)}, ${sqlNum(out.se)}, ${sqlNum(out.deltaRating)}, `
+                + `${sqlNum(out.rank)}, ${sqlNum(out.se)}, ${sqlNum(out.deltaRating)}, `
                 + `${sqlStr(a.last_created)});`
             );
         }

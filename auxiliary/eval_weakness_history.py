@@ -62,7 +62,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
 from pipeline.fit_population_constants import (  # noqa: E402
-    WEAKNESS_TOTAL_RANKS, _weakness_k_embed, load_problem_embeddings,
+    _weakness_k_embed, load_problem_embeddings,
     load_problem_params, load_rating_to_rank, load_rows)
 
 WARMUP = 40          # first predicted index (>= client's MIN_TRAINING_ATTEMPTS=20)
@@ -163,7 +163,7 @@ def load_user_designs():
     embeddings = load_problem_embeddings(needed)
     if not embeddings:
         raise SystemExit("no embeddings/joint/per_problem.csv")
-    rank_feat = {k: apply_m(v[0]) / WEAKNESS_TOTAL_RANKS for k, v in params.items()}
+    rank_feat = {k: apply_m(v[0]) for k, v in params.items()}
 
     by_user = defaultdict(list)
     for r in rows:

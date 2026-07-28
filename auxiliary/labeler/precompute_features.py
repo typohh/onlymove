@@ -107,7 +107,7 @@ def build_eligible(per_problem_csv, sizes, max_rank_index):
         sub["rating"] = sub["tsumego_id"].map(load_ratings(s))
         sub = sub.dropna(subset=["rating"])
         c = curve[str(s)]
-        xs, ys = np.asarray(c["ratings"], float), np.asarray(c["rank_indices"], float)
+        xs, ys = np.asarray(c["ratings"], float), np.asarray(c["ranks"], float)
         sub["rank_index"] = sub["rating"].map(lambda r: interp_extrap(r, xs, ys))
         kept = sub[sub["rank_index"] <= max_rank_index]
         print(f"  size {s}: {len(kept)}/{len(sub)} problems at rank_index <= "

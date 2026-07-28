@@ -31,8 +31,8 @@ def rank_label(rating, size, curve):
     c = curve.get(str(size))
     if not c:
         return "?"
-    idx = math.floor(interp_extrap(rating, c["ratings"], c["rank_indices"]))
-    return f"{20 - idx} kyu" if idx < 20 else f"{idx - 19} dan"
+    idx = math.floor(interp_extrap(rating, c["ratings"], c["ranks"]))
+    return f"{-idx} kyu" if idx < 0 else f"{idx + 1} dan"
 
 
 def build(tid, zip_id, size, rating, curve):

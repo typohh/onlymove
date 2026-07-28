@@ -12,7 +12,7 @@ It reproduces the SAME two steps the production client does on the front page:
      front-page rank is a recency-weighted estimate.
   2. Rank        — that rating mapped through the shipped rating→rank curve
      (`ratings/rating_to_rank.json`, the M the client interpolates), reported
-     as a rank index, a kyu/dan scalar (1k=0, 1d=1) and a label.
+     as a rank (0 = the 1k/1d boundary) and a label.
 
 It reads the LOCAL DB copy (`attempts/database.sqlite` by default — the binary is
 far faster than re-parsing the .sql dump; see CLAUDE.md) and the backend
@@ -43,7 +43,7 @@ from utils.ratings_io import (  # noqa: E402
     FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_lapse, load_rating_rank_curve,
     load_value_map,
 )
-from utils.rank_surveys import scalar_to_rank  # noqa: E402
+from utils.rank_surveys import value_to_rank  # noqa: E402
 
 SIZES = [9, 13]
 DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
@@ -72,17 +72,15 @@ def load_problem_maps(v2_dir):
 
 def load_curve(v2_dir):
     """The shared rating→rank curve (both board keys identical). Returns
-    (ratings_knots, rank_index_knots)."""
+    (rating_knots, rank_knots)."""
     return load_rating_rank_curve(v2_dir)
 
 
 def rating_to_rank(R, xs, ys):
-    """Map a rating through M. rank_index = scalar + 19 (1k → scalar 0 →
-    rank_index 19). Returns (rank_index, scalar, label)."""
-    rank_index = float(interp_extrap_vec(np.array([R], float), xs, ys)[0])
-    scalar = rank_index - 19.0
-    label = scalar_to_rank(scalar)
-    return rank_index, scalar, label
+    """Map a rating through M. Returns (rank, rank, label) — the second element is
+    the retired separate scalar coordinate, kept so callers unpack unchanged."""
+    rank = float(interp_extrap_vec(np.array([R], float), xs, ys)[0])
+    return rank, rank, value_to_rank(rank)
 
 
 def load_user_attempts(db_path, user_id, include_repeats):
@@ -177,7 +175,7 @@ def main():
     if surveys:
         decl = "  ".join(f"{srv}:{rk}" for srv, rk, _ in surveys)
         print(f"  declared survey rank(s): {decl}")
-    print(f"  curve knot span: rating {xs[0]:.3f} ({ys[0]-19:+.1f}) .. "
+    print(f"  curve knot span: rating {xs[0]:.3f} ({ys[0]:+.1f}) .. "
           f"{xs[-1]:.3f} ({ys[-1]-19:+.1f}) [scalar]")
     print()
 

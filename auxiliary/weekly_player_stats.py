@@ -1,7 +1,7 @@
 """Per-week activity summary for a single player.
 
 For a given user_id, prints one row per ISO week that has activity, with:
-  - problem-rank mean and stddev (rank-index / stone units, 1k = 19)
+  - problem-rank mean and stddev (rank / stone units; 0 = the 1k/1d boundary)
   - median solve time (seconds)
   - number of attempts
 
@@ -14,6 +14,7 @@ Usage:
     ./.venv/bin/python3 -m auxiliary.weekly_player_stats <user_id>
 """
 
+import math
 import csv
 import json
 import os
@@ -27,7 +28,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
 RATING_TO_RANK = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
 RATINGS_CSV = os.path.join(PROJECT_ROOT, "ratings", "{size}", "tsumego_ratings_final.csv")
-RANK_INDEX_OFFSET = 19  # rank index 19 == 1k (see pwa/shared/rank-math.js)
 
 
 def interp_extrap(x, xs, ys):
@@ -47,16 +47,16 @@ def interp_extrap(x, xs, ys):
     return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
 
 
-def rank_index_to_label(idx):
-    v = round(idx - RANK_INDEX_OFFSET)
-    return f"{1 - v}k" if v <= 0 else f"{v}d"
+def rank_to_label(v):
+    b = math.floor(v)
+    return f"{-b}k" if b < 0 else f"{b + 1}d"
 
 
 def load_rank_curves():
     d = json.load(open(RATING_TO_RANK))
     curves = {}
     for size in ("9", "13"):
-        curves[int(size)] = (d[size]["ratings"], d[size]["rank_indices"])
+        curves[int(size)] = (d[size]["ratings"], d[size]["ranks"])
     return curves
 
 
@@ -117,7 +117,7 @@ def main():
         if ranks:
             mean = statistics.fmean(ranks)
             sd = statistics.pstdev(ranks) if len(ranks) > 1 else 0.0
-            mean_s, label, sd_s = f"{mean:9.2f}", rank_index_to_label(mean), f"{sd:7.2f}"
+            mean_s, label, sd_s = f"{mean:9.2f}", rank_to_label(mean), f"{sd:7.2f}"
         else:
             mean_s, label, sd_s = f"{'--':>9}", f"{'--':>8}", f"{'--':>7}"
         med_time = f"{statistics.median(times):10.1f}" if times else f"{'--':>10}"

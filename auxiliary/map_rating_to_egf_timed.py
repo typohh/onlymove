@@ -75,7 +75,7 @@ from utils.fit_rank_curves import (  # noqa: E402
     _unpack_thresholds,
 )
 from utils.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
-from utils.statistics_shapes import fit_shape  # noqa: E402
+from utils.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
 from pipeline.map_rating_to_rank import (  # noqa: E402
     RATING_SHAPE, SIZES, load_floors, load_ratings, load_slopes,
 )
@@ -86,7 +86,7 @@ def _shape_at(ys, shape=RATING_SHAPE):
     (rank_index = scalar + 19). `shape` is matched as a prefix of the
     statistics_shapes models — 'cubic' (production), 'linear', 'exp', ..."""
     params, theta = fit_shape(shape)
-    return np.asarray(theta(np.asarray(ys, float) + 19.0, params), float)
+    return np.asarray(theta(rank_to_axis(ys), params), float)
 from auxiliary.check_mapped_vs_declared_rank import (  # noqa: E402
     apply_M, declared_to_internal, load_M, load_server_curves,
     load_time_adjust, load_user_median_solve_minutes,
@@ -197,7 +197,7 @@ def build_decls(args):
     decls = []
     for _, row in surveys.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row.get("rank_scalar")
+        g = row.get("rank_value")
         if pref not in user_R or g is None or pd.isna(g):
             continue
         T = (user_T[pref] - mean_logT) if pref in user_T else 0.0
@@ -292,7 +292,7 @@ def time_form_study(args, boot=300):
     rows = []   # (user, resid_rank, R, median_min)
     for _, r in surveys.iterrows():
         pref = str(r["user_id"])[:8]
-        g = r.get("rank_scalar")
+        g = r.get("rank_value")
         if pref not in user_R or pref not in med_min or g is None or pd.isna(g):
             continue
         dec_int = declared_to_internal(r["server"], float(g), server_curves)

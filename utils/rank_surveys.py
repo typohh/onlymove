@@ -48,8 +48,11 @@ FULL_ATTEMPT_RE = re.compile(
 )
 
 
-def rank_to_scalar(s):
-    """1k=0, 2k=-1, ..., 25k=-24; 1d=1, 2d=2, ..., 9d=9. No zero gap."""
+def rank_to_value(s):
+    """Kyu/dan label -> the CENTRE of that band on the project rank scale (0 is the
+    1k/1d boundary, every rank one unit wide, integers are band EDGES; see
+    pwa/shared/rank-math.js, which this mirrors exactly). "1k" -> -0.5, "5k" -> -4.5,
+    "1d" -> 0.5, "9d" -> 8.5. Code wanting the band's LOWER edge subtracts 0.5."""
     if not isinstance(s, str):
         return None
     s = s.strip().lower()
@@ -57,21 +60,26 @@ def rank_to_scalar(s):
     if not m:
         return None
     n = int(m.group(1))
-    return (1 - n) if m.group(2) == "k" else n
+    return (0.5 - n) if m.group(2) == "k" else (n - 0.5)
 
 
-def scalar_to_rank(v):
+def rank_band(v):
+    """Which whole rank a value falls in — FLOOR, since integers are band edges.
+    Mirrors rankBand in pwa/shared/rank-math.js. Band b spans [b, b+1), so its
+    LOWER EDGE is exactly b and its CENTRE is b + 0.5."""
+    return int(np.floor(v))
+
+
+def value_to_rank(v):
+    """Project rank -> its kyu/dan label. FLOOR, because integers are band edges."""
     if v is None or not np.isfinite(v):
         return "?"
-    # Nearest-integer kyu/dan label.
-    k = int(round(v))
-    if k <= 0:
-        return f"{1 - k}k"
-    return f"{k}d"
+    b = int(np.floor(v))
+    return f"{-b}k" if b < 0 else f"{b + 1}d"
 
 
 def load_rank_surveys(sql_path):
-    """Return DataFrame [user_id, server, rank, rank_scalar, created_at, country].
+    """Return DataFrame [user_id, server, rank, rank_value, created_at, country].
     country is Cloudflare's edge geo-IP recorded server-side (None on pre-country
     rows/dumps). Survey duplicates per (user, server) are kept; downstream code
     picks the most recent."""
@@ -90,7 +98,7 @@ def load_rank_surveys(sql_path):
                 "user_id": user_id,
                 "server": server,
                 "rank": rank,
-                "rank_scalar": rank_to_scalar(rank),
+                "rank_value": rank_to_value(rank),
                 "created_at": created_at,
                 "country": country,
             })

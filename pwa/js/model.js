@@ -1,11 +1,11 @@
 // js/model.js
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
+import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize, DEFAULT_USER_RANK } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
-import { ratingSpanPerNormalizedRank } from './rank-decomposition.js';
+import { ratingPerRank } from './rank-decomposition.js';
 import { adamUpdate } from './optimizer.js';
 
 function findFirst(sortedArr, target) {
@@ -148,16 +148,16 @@ const LN_S_TRAIN_MAX = 8;
 const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
 
 // Neutral value of the PROBLEM_DIFFICULTY multiplier — the coefficient at which
-// coeff·a_p·(rank gap in NORMALIZED-RANK units) equals the 2PL's a_p·(gap in
-// raw-rating units): the rating span of the full rank scale (~5.4 from the
-// shipped curve). The L2 prior shrinks toward THIS, not 1.0: a_p is per rating
-// unit, so a target of 1.0 would be unit-inconsistent by that same ~5.4 factor — and
-// since at lambda=10 the prior dominates the <1 nat of Fisher information even
-// a full 500-attempt history carries on this coefficient, it would pin the fitted
-// difficulty slope ~5x too flat (reported logit/rank ~0.06 vs the ~0.28
-// everything else is calibrated to, and a retention z far flatter than the
-// rating-space z KAPPA was fit against in pipeline.fit_population_constants).
-const DIFFICULTY_NEUTRAL = ratingSpanPerNormalizedRank();
+// coeff·a_p·(rank gap) equals the 2PL's a_p·(gap in raw-rating units): the rating
+// units spanned by ONE rank, read off the shipped curve. The L2 prior shrinks
+// toward THIS, not 1.0: a_p is per rating unit while the gap is in rank units, so
+// a target of 1.0 is unit-inconsistent by exactly that factor — and since the
+// prior dominates the under-a-nat of Fisher information even a full 500-attempt
+// history carries on this coefficient, an inconsistent target would pin the fitted
+// difficulty slope far off the logit-per-rank everything else is calibrated to (and
+// a retention z far from the rating-space z KAPPA was fit against in
+// pipeline.fit_population_constants).
+const DIFFICULTY_NEUTRAL = ratingPerRank();
 
 // Inner logit (linear in params): excludes the per-problem κ(floor) offset and
 // the retention-only SUCCESS_SINCE_FAILURE / LN_C. Reads MODEL_INDICES at call
@@ -189,25 +189,25 @@ function retentionLogit(features, params, floor) {
 // (SUCCESS_SINCE_FAILURE carries r; LN_C the per-user base). For prediction
 // `timePct` defaults to the neutral 0.5.
 //
-// PROBLEM_DIFFICULTY is the RELATIVE difficulty (userRank − problemRank, both
-// normalized-rank units) WEIGHTED by the problem's own 3PL discrimination a_p, so a
+// PROBLEM_DIFFICULTY is the RELATIVE difficulty (userRank − problemRank, both in
+// rank units) WEIGHTED by the problem's own 3PL discrimination a_p, so a
 // sharper problem separates abilities more steeply. Feeding the user-vs-problem
 // delta (not absolute rank) makes "how hard is this *for this user*" explicit
 // and robust at cold start instead of leaning on the INTERCEPT to absorb
 // userRank. The fitted coefficient is a multiplier on a_p whose neutral value
 // is DIFFICULTY_NEUTRAL ≈ 5.4 — the rank↔rating unit constant, since the gap is
-// in normalized rank units while a_p is per rating unit. `userRank` defaults to the
+// in rank units while a_p is per rating unit. `userRank` defaults to the
 // active shared rank; training rows approximate it with the current rank. When
 // userRank is unknown (very early), falls back to absolute. `slope` defaults to
 // A_REF for legacy rows that predate per-problem a_p.
-function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = 0, size, r = 0, userRank, slope }) {
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = DEFAULT_USER_RANK, size, r = 0, userRank, slope }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
-    const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : 0);
+    const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : DEFAULT_USER_RANK);
     const aP = (typeof slope === 'number' && slope > 0) ? slope : A_REF;
     f[MODEL_INDICES.INTERCEPT] = 1;
     f[MODEL_INDICES.TIME_SOLVING] = timePct;
     f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
-    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? 0));
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? DEFAULT_USER_RANK));
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
     f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
@@ -241,7 +241,7 @@ function stabilityDaysForRepeat(features, params, floor) {
 // representative difficulty — the stats panel's "a missed problem comes back in
 // ~X h" readout. Returns null when params aren't ready. Uses representative
 // per-problem 3PL inputs (corpus-mean a_p, no floor).
-export function freshFailureReviewHours(params, { problemRank = 0, size, userRank, slope = A_REF, floor = 0 } = {}) {
+export function freshFailureReviewHours(params, { problemRank = DEFAULT_USER_RANK, size, userRank, slope = A_REF, floor = 0 } = {}) {
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
     const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0, userRank, slope }), params, floor);
     return NEG_LN_080 * S * 24;
@@ -610,12 +610,13 @@ const L2_REGULARIZATION_TARGETS = {
     [MODEL_INDICES.TIME_SOLVING]: -0.1,
     [MODEL_INDICES.REVIEW_TIME]: -0.1,
     // Multiplier on the per-problem a_p·(rank gap). Neutral ("the shipped
-    // discrimination is right as-is for this user") is DIFFICULTY_NEUTRAL ≈ 5.4,
-    // NOT 1.0: the gap feature is in normalized-rank units while a_p is per
-    // raw-rating unit (see DIFFICULTY_NEUTRAL above).
+    // discrimination is right as-is for this user") is DIFFICULTY_NEUTRAL, NOT 1.0:
+    // the gap feature is in rank units while a_p is per raw-rating unit (see
+    // DIFFICULTY_NEUTRAL above).
     [MODEL_INDICES.PROBLEM_DIFFICULTY]: DIFFICULTY_NEUTRAL,
     // Shrink toward 0 = "no skill difference between sizes" until data says so.
     [MODEL_INDICES.SIZE_IS_13]: 0,
+
     // SUCCESS_SINCE_FAILURE carries no fitted coefficient (growth is constant) —
     // shrink its unused slot to 0.
     [MODEL_INDICES.SUCCESS_SINCE_FAILURE]: 0,
@@ -624,6 +625,21 @@ const L2_REGULARIZATION_TARGETS = {
     // training reads this before the mandatory population-constants load completes.
     [MODEL_INDICES.LN_C]: LN_C_PRIOR,
 };
+
+// Per-parameter multiplier on the shared L2 lambda (1 = the shared strength).
+//
+// PROBLEM_DIFFICULTY is the one exception. Lambda was tuned when the rank gap was
+// measured in units of the WHOLE kyu/dan ladder rather than single ranks; the gap
+// is now in single ranks, so the coefficient is smaller by the ladder span and an
+// unscaled penalty would be weaker by its SQUARE. Restating the SAME prior on the
+// per-rank coefficient is that square. This is load-bearing, not cosmetic: the data
+// carries under a nat about this coefficient even over a full window, so the prior
+// IS the estimate — at the shared lambda it would float free.
+const LADDER_SPAN_AT_LAMBDA_TUNING = 29;
+const LAMBDA_SCALE_BY_PARAM = {
+    [MODEL_INDICES.PROBLEM_DIFFICULTY]: LADDER_SPAN_AT_LAMBDA_TUNING ** 2,
+};
+const LAMBDA_SCALE = (j) => LAMBDA_SCALE_BY_PARAM[j] ?? 1;
 
 // Apply the retention constants from the (MANDATORY) population_constants.json;
 // population-constants.js calls this at boot before any training/scheduling, and also
@@ -984,7 +1000,7 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
         for (let j = 0; j < params.length; j++) {
             if (isUnregularized(j)) continue;
             const target = targets[j] || 0;
-            l2_penalty += Math.pow(params[j] - target, 2);
+            l2_penalty += LAMBDA_SCALE(j) * Math.pow(params[j] - target, 2);
         }
         currentLoss += (lambda / 2) * l2_penalty;
         currentLoss /= n;
@@ -995,7 +1011,7 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
             gradient[j] /= n;
             if (!isUnregularized(j)) {
                 const target = targets[j] || 0;
-                gradient[j] += (lambda / n) * (params[j] - target);
+                gradient[j] += (LAMBDA_SCALE(j) * lambda / n) * (params[j] - target);
             }
         }
         adamUpdate(params, gradient, adamState, learningRate);
@@ -1059,8 +1075,8 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         // PROBLEM_DIFFICULTY is a multiplier on a_p·gap, so the effective
         // logit-per-rank is coeff·a_p. Fold a representative a_p (A_REF) into the
         // reported coeff so getLogitPerRank / the size-comparison readout keep a
-        // consistent "logit per rank index" scale (the A_REF/29 factor below).
-        else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = A_REF / 29;
+        // consistent "logit per rank" scale.
+        else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = A_REF;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }
     return { results, varCovarMatrix };

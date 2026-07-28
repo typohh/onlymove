@@ -82,7 +82,7 @@ TA_AFK_CAP_S = 180.0       # drop AFK solving times from the median-time feature
 
 
 def _weighted_spearman(pairs, alpha):
-    """pairs: [(user, server, rating, rank_scalar, centered_feature)]. Per-server
+    """pairs: [(user, server, rating, rank_value, centered_feature)]. Per-server
     Spearman(rating + alpha·feature, declared rank), user-count-weighted mean."""
     from collections import defaultdict
     from scipy.stats import spearmanr
@@ -152,7 +152,7 @@ def _time_adjusted_rho(surveys, user_rating, sql_path):
     pairs = []
     for _, row in surveys.iterrows():
         pref = str(row["user_id"])[:8]
-        g = row["rank_scalar"]
+        g = row["rank_value"]
         if pref in resid and g is not None and not (isinstance(g, float) and np.isnan(g)):
             pairs.append((pref, row["server"], user_rating[pref], float(g), resid[pref]))
     if len(pairs) < TA_MIN_PAIRS:
@@ -212,7 +212,7 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
             user_rating[uid[:8]] = R
     serv = defaultdict(list)
     for _, row in surveys.iterrows():
-        g = row["rank_scalar"]; pref = str(row["user_id"])[:8]
+        g = row["rank_value"]; pref = str(row["user_id"])[:8]
         if g is None or (isinstance(g, float) and np.isnan(g)) or pref not in user_rating:
             continue
         serv[row["server"]].append((user_rating[pref], float(g)))

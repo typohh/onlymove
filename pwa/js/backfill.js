@@ -38,7 +38,7 @@ import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
-import { normalizedRankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
+import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
 import { detectRatingsCorrection } from './corrections-notice.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -636,7 +636,7 @@ function remapCurveOnlyWorkingSet(size, history) {
     let curveRankUpdated = 0;
     for (const a of history) {
         if (typeof a.problemRating !== 'number') continue;
-        const newRank = normalizedRankForSize(a.problemRating, size);
+        const newRank = rankForSize(a.problemRating, size);
         if (newRank !== null && a.problemRank !== newRank) {
             a.problemRank = newRank;
             curveRankUpdated++;
@@ -658,7 +658,7 @@ async function remapCurveOnlyTail(size) {
     await updateTail((entry) => {
         if (!entry || entry.size !== size) return null;
         if (typeof entry.problemRating !== 'number') return null;
-        const newRank = normalizedRankForSize(entry.problemRating, size);
+        const newRank = rankForSize(entry.problemRating, size);
         if (newRank !== null && entry.problemRank !== newRank) {
             entry.problemRank = newRank;
             tailUpdated++;
@@ -1008,7 +1008,7 @@ function entrySize(e) {
 // Apply a shard metadata.json item's problem-level fields to a history entry.
 function applyRatingFields(e, item, size) {
     e.problemRating = item.rating;
-    const rank = normalizedRankForSize(item.rating, size);
+    const rank = rankForSize(item.rating, size);
     if (rank !== null && rank !== undefined) e.problemRank = rank;
     if (typeof item.slope === 'number') {
         e.problemSlope = item.slope;

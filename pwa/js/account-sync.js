@@ -56,7 +56,7 @@ import {
     isUnackedReportable, applyStoredIgnoredFlags,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
-import { TOTAL_RANKS, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
+import { HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
@@ -581,11 +581,11 @@ function retrainAfterMerge(insertedEntries, mode) {
     try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
         if (mode === 'adopt' || mode === 'feed') {
-            const seed = mode === 'feed' ? state.userRank * TOTAL_RANKS : undefined;
+            const seed = mode === 'feed' ? state.userRank : undefined;
             const est = estimateWindowRank(getMergedAnswerHistory(), seed);
             if (est) {
-                updateUserRank(est.rankIndex / TOTAL_RANKS);
-                updateServeRank(est.serveRankIndex / TOTAL_RANKS);
+                updateUserRank(est.rank);
+                updateServeRank(est.serveRank);
                 updateRankSe(est.se);
             }
         }
