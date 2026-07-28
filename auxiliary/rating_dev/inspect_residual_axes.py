@@ -21,9 +21,9 @@ the skew-ICA embedding. Three structural differences follow from that model:
     systematically over/under-rates.
 
 Default mode is HTML: one self-contained page, a dropdown over every
-(fold, component), `--rows` intensity bands per tail. Row 0 targets the tail
-extreme; row k targets extreme · (rows-k)/rows. Use --open to launch the
-page, or --no-html to print PWA dev-server URLs instead.
+(fold, component), and each tail's `--rows` × `--cols` most extreme problems,
+strongest signal first. Use --open to launch the page, or --no-html to print
+PWA dev-server URLs instead.
 
 Board rendering (parse / simulate / SVG) lives in utils/board_render.py — the
 single shared copy used by every inspection tool.
@@ -127,50 +127,38 @@ def _build_card(tid, score, lookup):
     )
 
 
-def _pick_intensity_bands(vals, rows, cols):
-    """Return `rows` (target_score, index_array) tuples for one tail.
+def _pick_extremes(vals, rows, cols):
+    """Return the `rows*cols` most extreme problems for one tail, strongest
+    first, chunked into `rows` groups of `cols`.
 
     Operates on the POSITIVE direction of `vals` (negate the input for the
-    negative tail; targets/scores are displayed from the original values by
-    the caller). Row k targets max(vals) · (rows-k)/rows and grabs the `cols`
-    problems closest to that target; already-chosen problems are excluded so
-    rows don't repeat each other on dense bands.
+    negative tail; scores are displayed from the original values by the
+    caller). Each returned tuple is (rank_of_first_item, index_array) with
+    rank 1 = the tail extreme, so the page reads as a straight leaderboard of
+    the strongest signal rather than a walk from extreme toward baseline.
     """
     n = len(vals)
-    extreme = float(vals.max()) if n else 0.0
-    chosen = np.zeros(n, dtype=bool)
-    bands = []
-    for k in range(rows):
-        target = extreme * (rows - k) / rows
-        take = min(cols, n - int(chosen.sum()))
-        if take <= 0:
-            bands.append((target, np.array([], dtype=int)))
-            continue
-        dist = np.abs(vals - target)
-        dist[chosen] = np.inf
-        idx = np.argpartition(dist, take - 1)[:take]
-        # Within a row, sort by score descending so the eye scans
-        # peak→baseline left-to-right.
-        idx = idx[np.argsort(vals[idx])[::-1]]
-        chosen[idx] = True
-        bands.append((target, idx))
-    return bands
+    take = min(rows * cols, n)
+    if take <= 0:
+        return []
+    idx = np.argpartition(-vals, take - 1)[:take]
+    idx = idx[np.argsort(vals[idx])[::-1]]
+    return [(k + 1, idx[k:k + cols]) for k in range(0, take, cols)]
 
 
 def _render_tail_html(tids, vals, sign, rows, cols, lookup):
-    """One tail's bands. sign=+1 renders the positive tail, -1 the negative
-    (band targets and card scores are shown in ORIGINAL units either way)."""
-    bands = _pick_intensity_bands(sign * vals, rows, cols)
+    """One tail's most extreme problems. sign=+1 renders the positive tail, -1
+    the negative (card scores are shown in ORIGINAL units either way)."""
+    groups = _pick_extremes(sign * vals, rows, cols)
+    if not groups:
+        return '<div class="band"><div class="card missing">no problems on this tail</div></div>'
     out = []
-    for target, idx in bands:
-        if len(idx) == 0:
-            cards = '<div class="card missing">no problems left in this band</div>'
-        else:
-            cards = "".join(
-                _build_card(tids[i], float(vals[i]), lookup) for i in idx)
+    for lo, idx in groups:
+        cards = "".join(
+            _build_card(tids[i], float(vals[i]), lookup) for i in idx)
         out.append(
             f'<div class="band">'
-            f'<div class="band-label">target {sign * target:+.3f}</div>'
+            f'<div class="band-label">#{lo}–{lo + len(idx) - 1}</div>'
             f'<div class="grid">{cards}</div>'
             f'</div>'
         )
@@ -225,7 +213,7 @@ def _build_page(source, options_html, sections_html, cols):
 <h1>Residual-MIRT axes — both tails</h1>
 <div class="legend">
   Source: {html.escape(source)} &middot; Red ring <span class="marker"></span> = correct first move
-  &middot; Rows step from the tail extreme (top) toward baseline (bottom).
+  &middot; Each tail shows its strongest-loading problems, most extreme first.
   Both tails shown — residual axes have no skew sign-canonicalization, so the
   negative side is a real direction. Folds are separate fits with arbitrary
   axis rotation; never compare fold 0 axis k to fold 1 axis k by index.
@@ -273,7 +261,7 @@ def main():
     parser.add_argument("--html", action=argparse.BooleanOptionalAction, default=True,
                         help="Render static HTML (default). --no-html prints PWA URLs instead.")
     parser.add_argument("--rows", type=int, default=5,
-                        help="intensity bands per tail; row k targets extreme · (rows-k)/rows (default 5)")
+                        help="rows of extremes per tail; rows × cols problems shown, strongest first (default 5)")
     parser.add_argument("--cols", type=int, default=5, help="HTML grid columns (default 5)")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/residual_axes_extremes.html)")
