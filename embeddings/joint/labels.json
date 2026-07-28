@@ -76,11 +76,11 @@
       }
     },
     "ax_33445e3b": {
-      "positive": "vital point",
+      "positive": "killing",
       "positive_i18n": {
-        "zh": "急所",
-        "ja": "急所",
-        "ko": "급소"
+        "zh": "杀棋",
+        "ja": "殺し",
+        "ko": "잡기"
       },
       "negative": "ko threats",
       "negative_i18n": {
@@ -130,11 +130,11 @@
     },
     {
       "motif_id": "ax_33445e3b",
-      "positive": "vital point",
+      "positive": "killing",
       "positive_i18n": {
-        "zh": "急所",
-        "ja": "急所",
-        "ko": "급소"
+        "zh": "杀棋",
+        "ja": "殺し",
+        "ko": "잡기"
       },
       "negative": "ko threats",
       "negative_i18n": {
