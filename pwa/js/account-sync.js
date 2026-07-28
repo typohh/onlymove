@@ -671,6 +671,17 @@ export function hasPendingAccountSwitch() {
     return !!localStorage.getItem(SWITCH_FLAG_KEY);
 }
 
+// Which flavour of adoption is pending (see SWITCH_FLAG_KEY): 'switch' when the
+// user entered another account's code, 'epoch' when the state-epoch gate is
+// re-adopting this device's OWN account. Only the first is a login, and the two
+// need different wording — an epoch restore that says "logging in" describes an
+// account change that is not happening.
+export function pendingAccountSwitchKind() {
+    const flag = localStorage.getItem(SWITCH_FLAG_KEY);
+    if (!flag) return null;
+    return flag === 'epoch' ? 'epoch' : 'switch';
+}
+
 // A failed adoption leaves a marker for the next boot's user notice ('cap' or
 // 'network'); main.js consumes it and alerts.
 const SWITCH_FAILED_KEY = 'accountSwitchFailed';

@@ -82,7 +82,7 @@ import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { initCoordInput } from './coord-input.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
-import { hasPendingAccountSwitch, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
+import { hasPendingAccountSwitch, pendingAccountSwitchKind, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { maybeHandleRegistration } from './registration.js';
 import { refreshInviteAccess } from './invite-access.js';
@@ -446,8 +446,11 @@ async function maybeFinishPendingAccountSwitch() {
     }
     if (!hasPendingAccountSwitch()) return;
     // The full-history pull + shard field fill + retrain can take on the order
-    // of a minute; say so instead of showing a bare spinner.
-    showLoading(getTerm('accountRestoring'));
+    // of a minute; say so instead of showing a bare spinner. Only a code-entry
+    // adoption is a login — the epoch gate re-adopts this device's own account,
+    // where "logging in" would describe an account change that isn't happening.
+    const isLogin = pendingAccountSwitchKind() === 'switch';
+    showLoading(getTerm(isLogin ? 'accountRestoring' : 'historyRestoring'));
     try {
         await maybeFinishAccountSwitch();
     } catch (e) {
