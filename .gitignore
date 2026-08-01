@@ -54,6 +54,21 @@ Thumbs.db
 
 models/
 
+# Bot executables and their weight blobs: build artifacts of upstream projects,
+# not authored content, and katago_cuda sat within 1 MiB of GitHub's 100 MiB
+# hard per-blob limit. Fetch/build them yourself; KATAGO_PATH (utils/
+# katago_controller.py) points at bots/katago by default. analysis.cfg stays
+# TRACKED — pipeline.tune_engine rewrites it in place per GPU, so it is state,
+# not an artifact.
+/bots/*
+!/bots/analysis.cfg
+
+# Malformed problems quarantined by auxiliary/corpus_surgery.py. Never read
+# back by the pipeline (the surgery scripts only ever WRITE here, recreating
+# the directory on demand), so there is nothing to version.
+/broken/
+/tsumegos/broken/
+
 # Pipeline-extracted activations: per-cell trunk vectors, ~tens of GB at fp16,
 # regenerable via pipeline/extract_activations.py. Not for version control.
 activations/
