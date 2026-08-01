@@ -69,7 +69,7 @@ def clear_logit_vec(c, lapse=0.0):
 
 # ── survey-ρ metrics (the single definition; the trainer no longer carries a copy) ──────────────
 # Time-adjust yardstick knobs + the weighted-Spearman helper, inherited verbatim from the retired
-# fit_population_constants time fit (removed at 62fa3b033e when the production time fit moved into
+# fit_population_constants time fit (removed at 3c1f57521b when the production time fit moved into
 # map_rating_to_rank's joint objective). They live here now as EVAL-side constants: this bench
 # still scores a fresh run's own cross-fitted time-adjusted rho, independent of the shipped dock.
 TA_MIN_TIMED = 20          # timed novel attempts needed for a user's time feature
