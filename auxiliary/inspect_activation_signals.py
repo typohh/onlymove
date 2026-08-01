@@ -48,13 +48,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.board_render import load_lookup, render_problem  # noqa: E402
-from pipeline.build_embedding import _load_correct_vec  # noqa: E402
-# The activation layout (N_LAYERS/CHANNELS_PER_LAYER/N_FEATS) + signal-cache contract
-# (CACHE_DIR + path helpers) live in utils.rating_features; _build_cache below writes
-# the cache those path helpers point at.
+# The activation layout (N_LAYERS/CHANNELS_PER_LAYER/N_FEATS), signal-cache contract
+# (CACHE_DIR + path helpers) and the per-problem correct-vector read live in
+# utils.rating_features; _build_cache below writes the cache those path helpers
+# point at.
 from utils.rating_features import (  # noqa: E402
     CACHE_DIR, CHANNELS_PER_LAYER, N_FEATS, N_LAYERS,
-    _cache_ids_path, _cache_vecs_path,
+    _cache_ids_path, _cache_vecs_path, load_correct_vec,
 )
 
 
@@ -71,7 +71,7 @@ def _load_chunk(task):
     for i, (tid, npz_name) in enumerate(items):
         by_ext = {"npz": {tid: npz_name} if npz_name else {}}
         try:
-            out[i] = _load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
+            out[i] = load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
         except Exception:
             pass  # leave NaN row
     return start, out

@@ -54,6 +54,31 @@ def _contrastive_cache_path(size):
     return os.path.join(CACHE_DIR, f"contrastive_vecs_{size}.npy")
 
 
+def load_correct_vec(act_dir, tid, by_ext):
+    """The correct-move N_FEATS vector for one problem, read from its activation
+    .npz (all legal cells, addressed by correct_idx — NEVER row 0; the npz is in
+    board-scan order).
+
+    This is the per-problem primitive the cache builder
+    (auxiliary.inspect_activation_signals._build_cache) calls once per tid, which
+    is what makes that build incremental: a row depends on nothing but its own
+    .npz. It lives here, beside the cache paths and load_joint_activations that
+    reads them, because its previous home (pipeline.build_embedding) was deleted
+    when build_axes replaced the ICA embedding — leaving the cache builder
+    un-importable, and so the documented post-top-up refresh unrunnable.
+
+    A corrupt/unreadable .npz is a HARD ERROR that aborts the run, so on-disk
+    corruption of the activation corpus surfaces instead of being silently
+    masked.
+    """
+    npz_path = os.path.join(act_dir, by_ext["npz"][tid])
+    try:
+        with np.load(npz_path) as s:
+            return s["candidates"][int(s["correct_idx"])]
+    except Exception as e:
+        raise RuntimeError(f"corrupt/unreadable .npz at {npz_path}") from e
+
+
 def load_first_time_attempts():
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
     columns [user_id, problem, success, size, created_at].

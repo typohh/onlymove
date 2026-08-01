@@ -21,6 +21,31 @@ def parse_eval_comment(comment):
     return float(m.group(1)), float(m.group(2))
 
 
+def _candidate_evals(node):
+    """[(child, mover_winrate, mover_score)] for every candidate first move under
+    `node` that carries a parseable evaluation comment, in variation order.
+
+    Winrate/score comments are black-perspective, so they are flipped when White
+    is the side to move. Moves without a parseable comment (and property-only
+    nodes) are dropped, matching the corpus audit that defined this invariant.
+    """
+    out = []
+    for child in node:
+        colour, _ = child.get_move()
+        if colour is None:  # pass or a property-only node
+            continue
+        comment = child.get("C") if child.has_property("C") else None
+        ev = parse_eval_comment(comment)
+        if ev is None:
+            continue
+        winrate_black, score_black = ev
+        black_to_move = colour == "b"
+        out.append((child,
+                    winrate_black if black_to_move else 100.0 - winrate_black,
+                    score_black if black_to_move else -score_black))
+    return out
+
+
 def first_move_is_well_formed(node):
     """True iff the problem's first-move decision has exactly ONE canonical answer.
 
@@ -32,26 +57,17 @@ def first_move_is_well_formed(node):
       - two or more winners  → the problem has multiple solutions,
       - zero winners         → seki / half-point / dame (no move both-positive),
       - a winrate/score disagreement on any move (e.g. 60.6%/-0.5) → ambiguous.
-    Winrate/score comments are black-perspective, so they are flipped when White
-    is the side to move. Moves without a parseable comment (and passes) are
-    ignored, matching the corpus audit that defined this invariant.
+
+    This says nothing about WHERE the winner sits in the variation list; that is
+    promote_winning_first_move's job. Keeping the two separate is deliberate —
+    a problem whose solution is merely listed late is perfectly well-posed and
+    should be reordered, not discarded.
     """
     if node is None:
         return False
     winners = 0
     ambiguous = 0
-    for child in node:
-        colour, _ = child.get_move()
-        if colour is None:  # pass or a property-only node
-            continue
-        comment = child.get("C") if child.has_property("C") else None
-        ev = parse_eval_comment(comment)
-        if ev is None:
-            continue
-        winrate_black, score_black = ev
-        black_to_move = colour == "b"
-        mover_winrate = winrate_black if black_to_move else 100.0 - winrate_black
-        mover_score = score_black if black_to_move else -score_black
+    for _child, mover_winrate, mover_score in _candidate_evals(node):
         if mover_winrate > 50 and mover_score > 0:
             winners += 1
         elif mover_winrate < 50 and mover_score < 0:
@@ -59,6 +75,38 @@ def first_move_is_well_formed(node):
         else:
             ambiguous += 1
     return winners == 1 and ambiguous == 0
+
+
+def promote_winning_first_move(node):
+    """Reorder `node`'s children so the winning first move is variation index 0.
+
+    The corpus convention is that variation_nodes[0] IS the solution, and every
+    backend consumer relies on it — pipeline.extract_activations takes its
+    correct_idx from it, pipeline.benchmark_bots grades against it. The generator
+    can break that convention: the solution it writes first is the move
+    ProblemFinder's is_valid re-read verified, while the candidates' comments are
+    written afterwards by their own passes at their own playout budgets, so when
+    the two disagree the first variation is a move the SHIPPED evaluations call a
+    loss. The client has never trusted the position (pwa/js/sgf.js
+    findBestMoveFromChildren picks by evaluation), so the file is reordered here
+    to agree with it rather than discarding an otherwise well-posed problem.
+
+    Selection is the client's rule: highest winrate for the side to move, score
+    breaking exact ties, first-listed winning an exact tie on both. Returns True
+    if a node was moved.
+    """
+    if node is None:
+        return False
+    candidates = _candidate_evals(node)
+    if not candidates:
+        return False
+    # max() returns the first maximal element, matching the client's strict-`>`
+    # scan, so an exact tie on both axes leaves the earlier variation in front.
+    best = max(candidates, key=lambda c: (c[1], c[2]))[0]
+    if best is node[0]:
+        return False
+    best.reparent(node, 0)
+    return True
 
 
 PLAYOUTS_SHALLOW = 30

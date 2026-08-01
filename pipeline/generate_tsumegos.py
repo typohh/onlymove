@@ -12,6 +12,7 @@ from utils.add_variations import (
     add_shallow_variations,
     first_move_is_well_formed,
     generate_variations_directly_to_sgf,
+    promote_winning_first_move,
 )
 from utils.configurations import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
 from utils.helper import construct_initial_sgf
@@ -55,6 +56,7 @@ class Stats:
         self.failures_to_create = 0
         self.duplicate_ids_skipped = 0
         self.malformed_discarded = 0
+        self.first_moves_promoted = 0
         self.worker_errors = 0
         self.number_of_moves = RunningStats()
         self.start_time = time.time()
@@ -90,6 +92,9 @@ class Stats:
     def add_malformed_discarded(self):
         self.malformed_discarded += 1
 
+    def add_first_move_promoted(self):
+        self.first_moves_promoted += 1
+
     def add_worker_error(self):
         self.worker_errors += 1
 
@@ -124,6 +129,8 @@ class Stats:
             stats["Duplicate ids skipped"] = self.duplicate_ids_skipped
         if self.malformed_discarded:
             stats["Malformed discarded"] = self.malformed_discarded
+        if self.first_moves_promoted:
+            stats["First move reordered"] = self.first_moves_promoted
         if self.worker_errors:
             stats["Worker errors (skipped)"] = self.worker_errors
 
@@ -182,12 +189,11 @@ def tsumego_id_taken(filename):
     Never overwrite an existing id: attempts/, activations/, ratings/ and the
     PWA all key rows by the 8-hex id, so replacing the SGF would silently
     re-point every one of those artifacts at different content. Hits happen two
-    ways — the truncated hash is only 32 bits, so distinct positions collide
-    (birthday math: ~2 expected at the current 9x9 corpus size), and the
+    ways — the truncated hash is only 32 bits, so distinct positions do collide
+    (expected collisions grow with the SQUARE of the corpus size), and the
     generator can legitimately rediscover an already-generated position. The id
     namespace is checked across ALL sizes because downstream id-keyed consumers
-    share it (the corpus already carries 4 cross-size collisions from before
-    this guard; those are grandfathered, not license to add more)."""
+    share it, so an id must be unique across the whole namespace, not per size."""
     return any(
         os.path.exists(os.path.join(PROJECT_ROOT, "tsumegos", str(s), filename))
         for s in ALL_BOARD_SIZES)
@@ -250,6 +256,17 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                         with print_lock:
                             print(f"[skip] {filename}: not a single-solution problem; discarding")
                         continue
+
+                    # The solution written first is the one ProblemFinder's is_valid
+                    # verified; the variation comments above are written by their own
+                    # passes and can name a different move. Every backend consumer
+                    # reads the solution off variation_nodes[0], so make the file
+                    # agree with its own evaluations before it is written.
+                    if promote_winning_first_move(node):
+                        STATS.add_first_move_promoted()
+                        with print_lock:
+                            print(f"[fix] {filename}: winning first move was listed late; "
+                                  f"moved to variation 0")
 
                     STATS.add_problem_found(len(moves))
                     os.makedirs(OUTPUT_DIR, exist_ok=True)
