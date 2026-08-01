@@ -8,7 +8,7 @@ train_rating_staged,validate_ratings}.py` import, plus `load_problem_features`
 
 History: this was `auxiliary/compare_rating_models.py`, the held-out human-outcome
 model-comparison CLI behind the `--even-error` DRO study in
-`docs/rating_model_comparison_results.md`. The comparison/fitting machinery
+`docs/onlymove.md`. The comparison/fitting machinery
 (`RatingModel`, `fit_eval`, `run_*`, `even_error`, …) was used only by that CLI
 and has been removed — recover it from git history if it's ever needed again.
 """

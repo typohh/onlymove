@@ -5,7 +5,7 @@
 // (js/account-sync.js etc., bundled by esbuild). One source of truth so the
 // server-maintained digest and the client's local mirror can never drift.
 //
-// See docs/account_sync_redesign.md. The account-sync change-detection digest
+// The account-sync change-detection digest
 // is two values maintained per user:
 //
 //   - user_seq    — 1-based count of the user's attempts (append-only, so it

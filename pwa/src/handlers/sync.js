@@ -13,7 +13,6 @@ import { rowHash } from '../../shared/sync-digest.js';
 // still gets a fresh high id and is pulled. Requires idx_tsumego_reports_user_id.
 // Every response also carries a per-profile digest summary
 // (serverSeq/serverDigest/serverMaxId) for the client's cheap in-sync check.
-// See docs/account_sync_redesign.md.
 const SYNC_PAGE_LIMIT = 1000;
 // Server-enforced cap on full-history pulls (sinceId=0) per user per UTC day:
 // the stats eviction-recovery refresh, account adoption, and the outbox
@@ -24,8 +23,7 @@ const SYNC_PAGE_LIMIT = 1000;
 // TEMPORARILY 10 for the state-epoch rollout (every device re-adopts on its
 // first post-deploy boot; a 3-device user or a flaky connection could exhaust
 // 3 and strand a device rank-less until the next UTC day). Restore to 3 a few
-// weeks after the epoch deploy — the one deferred cleanup item
-// (docs/db_surgery_and_legacy_removal_plan.md section 6).
+// weeks after the epoch deploy — the one deferred cleanup item.
 const HISTORY_REFRESH_DAILY_CAP = 10;
 
 export async function handleSync(request, env) {

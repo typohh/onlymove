@@ -49,7 +49,7 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     rating_to_rank.json's `time_adjust` and fit_population_constants reads them through
     into population_constants.json (no separate fit). A SIMPLE log-time slope is all the
     survey data supports — no rating-interaction, no power-law (see
-    docs/egf_anchor_bias_and_time.md), and no rank-residualization line (the joint
+    docs/onlymove.md), and no rank-residualization line (the joint
     couplings absorb the rank-correlated part of solve time on their own).
   * M: a MONOTONE per-segment fit with the EGF statistics.txt cubic SHAPE as a PRIOR.
     The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)` (>0 ⇒ monotone);

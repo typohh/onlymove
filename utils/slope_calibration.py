@@ -1,6 +1,6 @@
 """Client-replica walk-forward slope-scale calibration — the VALIDATION harness.
 
-2026-07-18 finding (docs/scalar_weakness_axes.md follow-ups 2-4): the response
+2026-07-18 finding (docs/onlymove.md): the response
 curves are steeper in gap units than the shipped per-problem slope claims —
 a single global multiplier s on the inner logit is worth more held-out than
 any of the residual models. This module estimates that multiplier under the

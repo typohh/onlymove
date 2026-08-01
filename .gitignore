@@ -63,6 +63,11 @@ models/
 /bots/*
 !/bots/analysis.cfg
 
+# One-time 2026-07-21 id-surgery working directory (id map, staging SQL, the
+# pre-change DB backup). The surgery is done and its scripts take every path as
+# an explicit argument, so nothing here is an input to the pipeline.
+/surgery/
+
 # Malformed problems quarantined by auxiliary/corpus_surgery.py. Never read
 # back by the pipeline (the surgery scripts only ever WRITE here, recreating
 # the directory on demand), so there is nothing to version.

@@ -19,7 +19,7 @@
 // deleted (the deletion pass — see pullReports). Un-acked entries (the
 // outbox) are never touched by either direction.
 //
-// EVENT TIME IS CLIENT-OWNED (docs/client_owned_event_time_plan.md): the client
+// EVENT TIME IS CLIENT-OWNED: the client
 // mints one timestamp per attempt, stores it as the entry's `date`, and sends it
 // as /report's createdAt; the server inserts it VERBATIM or refuses (never
 // rewrites), so row.created_at === entry.date exactly and own-row matching is

@@ -737,8 +737,6 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 
 **`MIN_ATTEMPTS` names two unrelated thresholds**, the same trap as `quality` above and with no shared meaning to fall back on. In `train_rating.py` it is **5**, and it is an identifiability requirement: a user needs at least that many correct *and* that many incorrect first-time attempts before an ability can be estimated at all (section 1.4). In `map_rating_to_rank.py` it is **20**, and it is a precision requirement: a survey user's two-month career block needs that many joined attempts before its 80%-clear rating is worth anchoring a declaration to (section 1.12). Neither number constrains the other, and moving one for the other's reasons is the mistake the shared name invites.
 
-## 3.6 Related notes
+## 3.6 Provenance
 
-Deeper evidence for claims made above, none of it required to read this document — where a result is load-bearing here, it is stated here.
-
-`docs/scalar_weakness_axes.md` (axis validation and the per-axis tail structure), `docs/rating_model_comparison_results.md` (model comparisons and the even-error study), `docs/rating_backbone_overfit_and_feature_dropout.md` (the memorization and dropout story), `docs/rating_4pl_structure_log.md` (four-parameter representation findings), `docs/consensus_mapping_rollout_plan.md` and `docs/egf_anchor_bias_and_time.md` (the consensus mapping and the time form).
+The supporting notes this section used to index — axis validation, the model comparisons and the even-error study, the memorization and dropout story, the four-parameter representation findings, the consensus mapping and the time form — were removed from the repository on 2026-08-01. Nothing was lost that this document depends on: each was deeper evidence for a claim, and where a result is load-bearing it is stated here in full. The experiments themselves remain reproducible from `auxiliary/rating_dev/train_rating_staged.py`, which still carries every flag they were run under.

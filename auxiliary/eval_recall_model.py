@@ -58,7 +58,7 @@ RECONSTRUCTION CAVEATS (read before quoting a number)
     predicted-R checks measure the population model, not the exact number the
     device used at serve time. The observed clear rates (checks 1-2) are free of
     this: they are just outcomes.
-  * Ratings are retrospective (docs/rating_rank_motifs.md section 2.5): the
+  * Ratings are retrospective (docs/onlymove.md section 2.5): the
     problem parameters used here are today's, not the ones shipped on the day of
     the attempt.
   * Check 4 re-scores the same events the constants were fit on, so it is

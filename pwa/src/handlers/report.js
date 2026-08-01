@@ -4,7 +4,7 @@ import { rowHash } from '../../shared/sync-digest.js';
 import { coerceAttemptFields, prepareAttemptInsert } from '../attempt-insert.js';
 import { updateLeaderboardOnReport, applyGorUpdates, getStaleGorPins } from '../leaderboard.js';
 
-// The client OWNS the attempt's event time (docs/client_owned_event_time_plan.md):
+// The client OWNS the attempt's event time:
 // createdAt is REQUIRED in the payload and inserted VERBATIM, so the stored row
 // equals the client's local entry exactly and sync matching is exact (no fuzzy
 // window). The server only sanity-bounds it — and REFUSES, never rewrites: a

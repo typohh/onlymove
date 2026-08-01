@@ -387,7 +387,7 @@ class RatingNet(nn.Module):
         # overdispersion of bot-derived difficulty), so anchoring many rungs as plain
         # examinees forces bot-flat slopes/floors into the SHIPPED human-scale params
         # (verified: dense-20 ladder → 97% hard-tail slope clamp, floors → 0; see
-        # docs/rating_4pl_structure_log.md). The discount absorbs that mismatch per bot:
+        # docs/onlymove.md). The discount absorbs that mismatch per bot:
         # bots keep teaching difficulty location and RELATIVE shape across problems;
         # humans alone pin the absolute steepness scale. Slope-side analogue of legacy's
         # human-recalibrated (0.70·) bot floor, but learned.
@@ -1670,7 +1670,7 @@ def main():
         nudged up on bins whose loss EXCEEDS their base-rate entropy base_g, and the human loss is
         the q-weighted bin mean. Centering on base_g targets REDUCIBLE skill-over-base, not the
         aleatoric base-rate floor — raw-loss DRO chases that floor and underperforms ERM (see
-        docs/rating_model_comparison_results.md, --even-error). The bot-anchor rows keep their plain
+        docs/onlymove.md, --even-error). The bot-anchor rows keep their plain
         weighted-BCE coverage term; only the human term is reweighted, and the batch human:anchor
         balance is preserved. q persists across minibatches/epochs. dro=None ⇒ plain weighted BCE."""
         torch.manual_seed(args.seed)

@@ -2,7 +2,7 @@
 """Residual MIRT: learn per-problem SECONDARY AXES from human between-user residuals.
 
 Supervised alternative to skew-ICA axes and hand-crafted scalars (see
-docs/scalar_weakness_axes.md): on top of a per-user difficulty baseline, a small
+docs/onlymove.md): on top of a per-user difficulty baseline, a small
 network learns K per-problem axis loadings whose per-user positions explain the
 between-user response residuals — the axes are DEFINED by validated human
 variation instead of hoped-for from activation statistics.
@@ -34,12 +34,12 @@ Model (attempt-level):
        unit-RMS columns, lenient mutual+r orthogonality penalty (0.5), and the
        first 3 axes warm-started at the hand-crafted scalar directions. The
        original trunk-shared free-scale g provably failed to learn directions
-       known to be forward-valid (docs/scalar_weakness_axes.md follow-up 4):
+       known to be forward-valid (docs/onlymove.md):
        free loading scale subsidized r-cloning, the r-dominated trunk bottleneck
        hid non-r features, and the v=0 init deadlocked weak directions.
     v_u ~ N(0, I) prior, centered per axis (r carries any mean).
 
-Training/eval protocol (per docs/scalar_weakness_axes.md metrics):
+Training/eval protocol (per docs/onlymove.md):
   - 2-fold split BY USER. g/r are trained on fold-train users only; held-out
     users never influence the axis directions they are scored on.
   - Evaluation on held-out users reuses the walk-forward harness of

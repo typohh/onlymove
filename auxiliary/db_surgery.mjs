@@ -1,4 +1,4 @@
-// One-off DB surgery (docs/db_surgery_and_legacy_removal_plan.md section 4).
+// One-off DB surgery.
 //
 // Runs against a LOCAL SQLite copy of the D1 export (never remote D1 —
 // perform locally, verify, upload the result as a staging table). Imports the

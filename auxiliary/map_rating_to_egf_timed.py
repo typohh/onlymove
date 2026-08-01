@@ -32,7 +32,7 @@ Two questions this harness answers, both raised 2026-06-29:
       Both DO drive EGF's bias to ~0, but only by starving the kyu range (EGF is
       kyu-sparse; the servers are its only kyu anchor), so the kyu band blows up to
       +8..+12 and overall RMSE degrades. The trade is fundamental (relaxing --lambda-shape
-      does NOT decouple it; see docs/egf_anchor_bias_and_time.md).
+      does NOT decouple it; see docs/onlymove.md).
 
   (C) METHODOLOGY (user, 2026-06-29): assigned-vs-declared is compared on the SHIPPED
       production TIME-ADJUSTED rating R_prod (the default), not the raw rating, because

@@ -9,8 +9,7 @@
 // whole point of a link-based claim over an account-code entry. The account's
 // age + size shown in the prompt are the safeguard that replaces the
 // account-code step: a fresh account reads "created today, 0 answers" so the
-// user can tell they're on the wrong account before confirming. See
-// docs/leaderboard_plan.md "Registration flow".
+// user can tell they're on the wrong account before confirming.
 //
 // Endpoint contracts (pwa/src/handlers/register.js):
 //   GET  /invite?t=<token> -> {ok:true, egdName} | {ok:false, error:'invalid'|'claimed'|'bad_request'}

@@ -3,7 +3,7 @@
 // The positional-linear WINDOW rank estimator — the live front-page rank — plus
 // the matching positional-weighted solve-time median, factored out of
 // rank-decomposition.js so the Cloudflare Worker (EGD leaderboard) and the browser
-// client run BIT-IDENTICAL rank code. See docs/leaderboard_plan.md.
+// client run BIT-IDENTICAL rank code.
 //
 // Both consumers feed already-"flattened" attempts in INTERNAL-RANK space, sorted
 // oldest -> newest: { x, slope, correct(0/1), floor, kappa }. The client flattens

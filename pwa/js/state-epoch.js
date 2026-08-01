@@ -1,7 +1,7 @@
 // js/state-epoch.js
 //
 // The state-epoch wipe gate — the PERMANENT mechanism that replaced the
-// migration ladders (docs/db_surgery_and_legacy_removal_plan.md section 6).
+// migration ladders.
 // A single `stateEpoch` localStorage key is checked at state.js IMPORT time,
 // before any persisted property is read. Epoch current → cheap no-op (the
 // steady-state path). Epoch absent/stale → wipe the account-derived state and

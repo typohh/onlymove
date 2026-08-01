@@ -10,7 +10,7 @@
 //                             invitation claimed (one-time). The account binds to a
 //                             single external identity — one-per-account is a POLICY
 //                             enforced here, not a DB constraint.
-// The token is an opaque 8-char DB key (no crypto). See docs/leaderboard_plan.md.
+// The token is an opaque 8-char DB key (no crypto).
 
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';

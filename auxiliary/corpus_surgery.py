@@ -1,7 +1,6 @@
 """One-off corpus surgery: apply the id map to every id-keyed pipeline artifact.
 
-Consumes the map emitted by `auxiliary.check_corpus_ids --emit-map` (docs plan
-docs/db_surgery_and_legacy_removal_plan.md, section 3) and performs, per entry:
+Consumes the map emitted by `auxiliary.check_corpus_ids --emit-map` and performs, per entry:
 
   rename — mv the SGF and its same-named per-id artifacts to the canonical id
   merge  — back up, then DELETE the loser's SGF + per-id artifacts; drop its

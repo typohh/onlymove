@@ -20,7 +20,7 @@ Usage:
     ./.venv/bin/python3 -m auxiliary.check_corpus_ids --emit-map surgery/id_map.json
 
 Read-only; scans tsumegos/<size>/*.sgf. With --emit-map it additionally writes
-the corpus-surgery id map (docs/db_surgery_and_legacy_removal_plan.md section 3)
+the corpus-surgery id map
 consumed by auxiliary.corpus_surgery and the DB surgery script: one entry per
 file whose id changes or that is deleted, `{size, old_id, new_id, action}` with
 action `rename` (misnamed file, or an elected duplicate-group survivor not yet

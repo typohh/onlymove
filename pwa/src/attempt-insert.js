@@ -7,7 +7,7 @@
 // byte-identical — hence one module.
 //
 // The INSERT maintains the per-profile sync digest in the same statement
-// (docs/account_sync_redesign.md): user_seq = the user's running attempt
+// user_seq = the user's running attempt
 // count, running_sum = the EXCLUSIVE prefix of Σ rowHash(id) over the user's
 // earlier rows. The chain is a TABLE INVARIANT — every existing row carries
 // its values (the 2026-07 DB surgery materialized all pre-column rows), so

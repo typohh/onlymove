@@ -1,4 +1,4 @@
-"""Structural diagnostics for a ratings-style 4PL artifact (docs/rating_4pl_structure_log.md).
+"""Structural diagnostics for a ratings-style 4PL artifact (docs/onlymove.md).
 
 Reads <dir>/<size>/tsumego_{ratings,quality,floor}_final.csv (rating / slope a_p / floor c_p)
 and compares against bot-ladder ground truth from attempts/<size>/b18c384nbt-humanv0_<rank>.txt:

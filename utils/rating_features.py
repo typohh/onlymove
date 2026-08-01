@@ -317,7 +317,7 @@ def load_joint_move_features(sizes, tids_by_size):
 # --------------------------------------------------------------------------------
 # Scalar problem axes: tightness gaps (from the move-eval cache) and game phase
 # (from the SGFs, cached). These are the forward-validated per-user axes of
-# docs/scalar_weakness_axes.md AND candidate rating-model features (the residual-
+# docs/onlymove.md AND candidate rating-model features (the residual-
 # MIRT prototype's r head found predictable residual difficulty on exactly this
 # surface — see auxiliary.rating_dev.train_residual_axes). Living here keeps the
 # production trainer (pipeline.train_rating), the experiment surface
@@ -440,7 +440,7 @@ def zscore_neglog(gap):
 def phase_ratio_z(phase=None):
     """tid -> z (per board size) of main/(prefix+main) — the share of the game
     still ahead as continuation; the game-phase form that carries the per-user
-    signal (the raw total self-cancels; see docs/scalar_weakness_axes.md)."""
+    signal (the raw total self-cancels; see docs/onlymove.md)."""
     if phase is None:
         phase = load_game_phase()
     ratio = {t: v[2] / max(v[0] + v[1] + v[2], 1) for t, v in phase.items()}
