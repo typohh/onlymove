@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // auxiliary/leaderboard_player_stats.mjs
 //
-// Read-only report: for every leaderboard player with a LINKED external account, print
+// Read-only report: for every leaderboard player with a LINKED external account (and,
+// with --with-unlinked, every other leaderboard row appended BELOW them), print
 //   - novel (is_repeat = 0) 9x9 attempt count
 //   - novel 13x13 attempt count
-//   - median solve time over their novel attempts
-//   - attempts per local day of the ongoing week
+//   - median solve time over their novel attempts, and its standard deviation (raw:
+//     solve time is right-skewed and a left-open tab lands in the tail, so the sd is
+//     an outlier-sensitive spread, unlike the median beside it)
+//   - attempts per local day over the past 7 days
 //   - their onlymove rank    (the untimed front-page window MLE, decimal)
 //   - their est. EGF rank    (the time-adjusted EGF-coupled rank, decimal)
 //   - their real EGF rank    (from the verified 'EGD' GoR heartbeat)
@@ -41,11 +44,10 @@
 // population_constants.json}. Run `./.venv/bin/python3 -m pipeline.fetch_database`
 // first so the leaderboard rows + tsumego_reports are fresh.
 //
-// Usage:
-//   node auxiliary/leaderboard_player_stats.mjs            # linked players, strongest first
-//   node auxiliary/leaderboard_player_stats.mjs --all      # every leaderboard row (all users)
-//   node auxiliary/leaderboard_player_stats.mjs --json     # machine-readable JSON ({ correlations, players })
-//   node auxiliary/leaderboard_player_stats.mjs --user <redacted-user-id>   # limit (repeatable)
+// Run with --help for the flags. On --with-unlinked the two groups are sorted
+// strongest-first INDEPENDENTLY rather than merged into one order, so the linked block
+// reads exactly as it does without the flag — it is the block with verified ratings to
+// compare against, and the correlations below are computed from it alone either way.
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -60,16 +62,34 @@ const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const STALE_WARN_MS = 6 * 3600 * 1000;
 
 // --- CLI ------------------------------------------------------------------------
+const USAGE = `Per-player leaderboard report: attempt counts, solve time, the last 7 days'
+activity, and onlymove's rank estimate against each player's verified EGF/AGA rating.
+
+Usage: node auxiliary/leaderboard_player_stats.mjs [options]
+
+  --with-unlinked   also list every leaderboard row WITHOUT a linked external
+                    account, appended below the linked players (--all is an alias)
+  --user <id>       limit to this user id; repeatable
+  --json            machine-readable JSON: { correlations, players }
+  --help, -h        show this message
+
+Reads attempts/database.sqlite and the local pwa/tsumegos/ data files; run
+\`./.venv/bin/python3 -m pipeline.fetch_database\` first for fresh numbers.`;
+
 const args = process.argv.slice(2);
 let asJson = false;
-let showAll = false;
+let withUnlinked = false;
 const onlyUsers = new Set();
 for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--json') asJson = true;
-    else if (a === '--all') showAll = true;
-    else if (a === '--user') onlyUsers.add(args[++i]);
-    else { console.error(`unknown arg: ${a}`); process.exit(1); }
+    if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
+    else if (a === '--json') asJson = true;
+    else if (a === '--with-unlinked' || a === '--all') withUnlinked = true;
+    else if (a === '--user') {
+        const uid = args[++i];
+        if (uid === undefined) { console.error('--user needs a user id\n\n' + USAGE); process.exit(1); }
+        onlyUsers.add(uid);
+    } else { console.error(`unknown arg: ${a}\n\n${USAGE}`); process.exit(1); }
 }
 
 // --- bundle the production rank code ---------------------------------------------
@@ -197,7 +217,7 @@ function tableColumns(table) {
 }
 
 const rankStr = (mod, v) => (Number.isFinite(v) ? `${v >= 0 ? ' ' : ''}${v.toFixed(2)} (${mod.rankToLabel(v)})` : '—');
-function medianStr(ms) {
+function durationStr(ms) {
     if (!Number.isFinite(ms)) return '—';
     const s = ms / 1000;
     if (s < 120) return `${s.toFixed(1)}s`;
@@ -206,12 +226,14 @@ function medianStr(ms) {
 function pad(s, n) { s = String(s); return s.length >= n ? s : s + ' '.repeat(n - s.length); }
 function padl(s, n) { s = String(s); return s.length >= n ? s : ' '.repeat(n - s.length) + s; }
 
-// --- current-week day columns ---------------------------------------------------
-// Days of the ONGOING week (Monday .. today) in LOCAL time, so each column matches
-// "today" for whoever runs it (the machine here is EEST = the Finnish tournament TZ).
-// created_at is stored as ISO-8601 UTC, so the per-day SQL groups on
-// date(created_at,'localtime') to bucket by the same local calendar day.
+// --- rolling 7-day columns -------------------------------------------------------
+// The 7 days ending TODAY inclusive, in LOCAL time, so each column matches "today"
+// for whoever runs it (the machine here is EEST = the Finnish tournament TZ) and the
+// window is the same width every day of the week. created_at is stored as ISO-8601
+// UTC, so the per-day SQL groups on date(created_at,'localtime') to bucket by the
+// same local calendar day.
 const DAYW = 7;
+const WINDOW_DAYS = 7;
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 function localDateStr(d) {
     const y = d.getFullYear();
@@ -219,13 +241,14 @@ function localDateStr(d) {
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;   // 'YYYY-MM-DD', lexically comparable + matches SQLite date()
 }
-function currentWeekDays() {
+function pastSevenDays() {
     const now = new Date();
-    const isoDow = (now.getDay() + 6) % 7;   // 0=Mon .. 6=Sun
     const days = [];
-    for (let i = 0; i <= isoDow; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - isoDow + i);
-        days.push({ date: localDateStr(d), label: `${WEEKDAY[i]} ${d.getDate()}` });
+    for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
+        // Day-of-month arithmetic on the local calendar day; the Date constructor
+        // normalizes across month/year boundaries.
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        days.push({ date: localDateStr(d), label: `${WEEKDAY[(d.getDay() + 6) % 7]} ${d.getDate()}` });
     }
     return days;
 }
@@ -328,7 +351,7 @@ async function main() {
 
     // Default scope: players with a linked external account (the successor to the old
     // "everyone on the EGD leaderboard" — the table now holds one row per ACTIVE USER,
-    // anonymous rows included). --all lists every leaderboard row too.
+    // anonymous rows included). --with-unlinked appends every other leaderboard row.
     const isLinked = (uid) => linkedIds.has(uid) || invBy.has(uid) || egdBy.has(uid) || agaBy.has(uid);
     // The weekly cron PRUNES idle leaderboard rows, so a linked player who stopped
     // playing has no row (and no stored buffer) — they'd silently vanish from the
@@ -338,7 +361,10 @@ async function main() {
     for (const uid of new Set([...linkedIds, ...invBy.keys(), ...egdBy.keys(), ...agaBy.keys()])) {
         if (!byId.has(uid)) byId.set(uid, { user_id: uid, buffer: null, rebuilt: true });
     }
-    let rows = [...byId.values()].filter((r) => showAll || isLinked(r.user_id));
+    // Naming a user with --user IS the request to see them, so it carries its own
+    // scope — otherwise an unlinked id would report "no matching players".
+    let rows = [...byId.values()].filter((r) => withUnlinked || isLinked(r.user_id)
+        || onlyUsers.has(r.user_id));
     if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
     if (!rows.length) { console.log('no matching players'); return; }
 
@@ -378,28 +404,49 @@ async function main() {
     }
 
     // Median solve time over novel attempts (time_used > 0 ms; <=0 = untimed, dropped
-    // — same convention the rank's weightedMedianOverWindow uses).
+    // — same convention the rank's weightedMedianOverWindow uses), plus the standard
+    // deviation over that SAME population. SQLite ships no stddev(), so the spread CTE
+    // returns the first two moments and JS finishes the sample sd; the seconds unit
+    // keeps the sum of squares far from double's exact-integer range, and solve time is
+    // spread widely enough that the E[t²]−E[t]² form loses no significant digits.
     const meds = sqliteJson(
         `WITH novel AS (
-            SELECT user_id, time_used
+            SELECT user_id, time_used / 1000.0 AS t
               FROM tsumego_reports
              WHERE is_repeat = 0 AND time_used > 0
                AND user_id IN (${idList})
          ), ranked AS (
-            SELECT user_id, time_used,
-                   ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY time_used) AS rn,
-                   COUNT(*)     OVER (PARTITION BY user_id)                     AS cnt
+            SELECT user_id, t,
+                   ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY t) AS rn,
+                   COUNT(*)     OVER (PARTITION BY user_id)            AS cnt
               FROM novel
+         ), med AS (
+            SELECT user_id, AVG(t) AS median_s, MAX(cnt) AS n_timed
+              FROM ranked
+             WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
+             GROUP BY user_id
+         ), spread AS (
+            SELECT user_id, AVG(t) AS mean_s, AVG(t * t) AS mean_sq_s
+              FROM novel
+             GROUP BY user_id
          )
-         SELECT user_id, AVG(time_used) AS median_ms, MAX(cnt) AS n_timed
-           FROM ranked
-          WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
-          GROUP BY user_id`
+         SELECT med.user_id, med.median_s, med.n_timed, spread.mean_s, spread.mean_sq_s
+           FROM med JOIN spread USING (user_id)`
     );
-    const medBy = new Map(meds.map((m) => [m.user_id, m]));
+    const medBy = new Map(meds.map((m) => {
+        const n = m.n_timed;
+        const varS = n > 1
+            ? Math.max(0, m.mean_sq_s - m.mean_s * m.mean_s) * (n / (n - 1))   // sample sd
+            : NaN;
+        return [m.user_id, {
+            medianMs: m.median_s * 1000,
+            sdMs: Number.isFinite(varS) ? Math.sqrt(varS) * 1000 : NaN,
+            nTimed: n,
+        }];
+    }));
 
-    // Attempts (all reports, incl. repeats) per LOCAL calendar day of the ongoing week.
-    const weekDays = currentWeekDays();
+    // Attempts (all reports, incl. repeats) per LOCAL calendar day, last 7 days.
+    const weekDays = pastSevenDays();
     const weekStart = weekDays[0].date;
     const perDayRows = sqliteJson(
         `SELECT user_id, date(created_at, 'localtime') AS d, COUNT(*) AS n
@@ -439,11 +486,14 @@ async function main() {
 
         return {
             userId: r.user_id, name: (invBy.get(r.user_id) || {}).egd_name || r.user_id,
+            linked: isLinked(r.user_id),
             registered: linkedIds.has(r.user_id), rebuilt: !!r.rebuilt,
             gor: Number.isFinite(gor) ? gor : null,
             agaRating: Number.isFinite(agaRating) ? agaRating : null,
             novel9: c[9] || 0, novel13: c[13] || 0,
-            medianMs: Number.isFinite(md.median_ms) ? md.median_ms : null,
+            medianMs: Number.isFinite(md.medianMs) ? md.medianMs : null,
+            sdMs: Number.isFinite(md.sdMs) ? md.sdMs : null,
+            nTimed: md.nTimed || 0,
             perDay, weekTotal,
             onlymoveRank, estEgfRank: egfRank, realEgfRank,
             estAgaRank: agaRank, realAgaRank,
@@ -452,8 +502,10 @@ async function main() {
             se, usableNovel: usable,
         };
     });
-    // Strongest first by onlymove rank; unranked (null) sink to the bottom.
-    out.sort((a, b) => (b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity));
+    // Linked block first, then the unlinked one; strongest first by onlymove rank
+    // WITHIN each block, unranked (null) sinking to that block's bottom.
+    out.sort((a, b) => (Number(b.linked) - Number(a.linked))
+        || ((b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity)));
 
     // --- correlations: onlymove's predicted strength vs the player's real rating ----
     // Pearson r is invariant under the affine GoR<->scalar map (gor = 2000 + 100·scalar),
@@ -483,23 +535,31 @@ async function main() {
 
     // AGA columns only earn their width once someone has a verified AGA rating.
     const anyAga = out.some((p) => Number.isFinite(p.realAgaRank));
-    const W = { name: 20, s9: 8, s13: 8, med: 9, n: 6, wk: 7, om: 15, est: 15, real: 16 };
+    const W = { name: 20, s9: 8, s13: 8, med: 9, sd: 9, n: 6, wk: 7, om: 15, est: 15, real: 16 };
     const dayHeader = weekDays.map((d) => padl(d.label, DAYW)).join('');
     const dayCells = (p) => weekDays.map((d) => padl((p.perDay[d.date] || 0).toLocaleString('en-US'), DAYW)).join('');
     const realStr = (v, stale) => (Number.isFinite(v) ? rankStr(mod, v) + (stale ? ' *' : '') : '—');
+    const ruleW = W.name + W.s9 + W.s13 + W.med + W.sd + W.n + 2 + weekDays.length * DAYW + W.wk + 2
+        + W.om + W.est + W.real + (anyAga ? W.est + W.real : 0);
     console.log(
         pad('Player', W.name) + padl('9×9', W.s9) + padl('13×13', W.s13)
-        + padl('median', W.med) + padl('buf', W.n) + '  ' + dayHeader + padl('wk', W.wk) + '  '
+        + padl('median', W.med) + padl('sd', W.sd) + padl('buf', W.n) + '  ' + dayHeader + padl('wk', W.wk) + '  '
         + pad('onlymove', W.om) + pad('est. EGF', W.est) + pad('real EGF', W.real)
         + (anyAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : ''));
-    console.log('─'.repeat(W.name + W.s9 + W.s13 + W.med + W.n + 2 + weekDays.length * DAYW + W.wk + 2
-        + W.om + W.est + W.real + (anyAga ? W.est + W.real : 0)));
+    console.log('─'.repeat(ruleW));
+    let inUnlinked = false;
     for (const p of out) {
+        if (!p.linked && !inUnlinked) {
+            inUnlinked = true;
+            const caption = ' no linked external account ';
+            console.log('──' + caption + '─'.repeat(Math.max(0, ruleW - caption.length - 2)));
+        }
         console.log(
             pad(p.name + (p.rebuilt ? ' †' : ''), W.name)
             + padl(p.novel9.toLocaleString('en-US'), W.s9)
             + padl(p.novel13.toLocaleString('en-US'), W.s13)
-            + padl(medianStr(p.medianMs), W.med)
+            + padl(durationStr(p.medianMs), W.med)
+            + padl(durationStr(p.sdMs), W.sd)
             + padl(p.usableNovel, W.n) + '  '
             + dayCells(p) + padl(p.weekTotal.toLocaleString('en-US'), W.wk) + '  '
             + pad(rankStr(mod, p.onlymoveRank), W.om)
@@ -508,11 +568,15 @@ async function main() {
             + (anyAga ? pad(rankStr(mod, p.estAgaRank), W.est)
                 + pad(realStr(p.realAgaRank, p.agaStale), W.real) : ''));
     }
+    const nLinked = out.filter((p) => p.linked).length;
     console.log(
-        `\n${out.length} ${showAll ? 'leaderboard' : 'externally-linked'} player(s). `
+        `\n${nLinked} externally-linked player(s)`
+        + (withUnlinked ? ` + ${out.length - nLinked} unlinked leaderboard row(s)` : '') + '. '
         + `"novel" = distinct-attempt (is_repeat=0) count over all history; `
-        + `median = median solve time over novel timed attempts; buf = still-in-corpus attempts in the rank buffer.\n`
-        + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (${weekStart}→today); wk = week total so far.\n`
+        + `median / sd = median and standard deviation of solve time over novel timed attempts `
+        + `(the sd is raw, so a left-open tab inflates it — solve time is right-skewed); `
+        + `buf = still-in-corpus attempts in the rank buffer.\n`
+        + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (the 7 days ${weekStart}→today); wk = that window's total.\n`
         + `onlymove  = untimed front-page window rank.\n`
         + `est. EGF/AGA = the time-adjusted estimate mapped through that server's coupling (the frame a real rating speaks).\n`
         + `real EGF/AGA = the verified machine heartbeat — the EGD GoR ((GoR−2000)/100) / the AGA rating.\n`
@@ -520,7 +584,9 @@ async function main() {
         + `players below that threshold are low-confidence — see se in --json.`
         + (out.some((p) => p.rebuilt) ? `\n† = no leaderboard row (pruned as idle); buffer rebuilt from tsumego_reports, as the Worker would on their next report.` : '')
         + (hasVerifiedCols ? `\n* = production would withhold this verified rating as out of date (EGF activity criterion); kept here.` : '')
-        + (showAll ? '' : `\nRun with --all to list every leaderboard row (one per active user, anonymous included).`));
+        + (withUnlinked
+            ? `\nRows below the divider have no linked external account (one per active user, anonymous included), so they carry no verified rating and enter none of the correlations.`
+            : `\nRun with --with-unlinked to append every other leaderboard row below.`));
 
     // --- correlation summary --------------------------------------------------------
     const fc = (v) => (Number.isFinite(v) ? v.toFixed(3) : '  —  ');
