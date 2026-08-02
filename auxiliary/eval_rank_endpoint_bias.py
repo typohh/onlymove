@@ -41,9 +41,12 @@ chart endpoint TOWARD the window MLE.
 
 Reads the local DB (attempts/database.sqlite). No network.
 
+--users is mandatory: pass a comma list of user ids to evaluate, picked from the
+local DB (data-rich accounts make the endpoint comparison meaningful).
+
 Usage:
-  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias
-  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias --users <redacted-user-id>,<redacted-user-id> --sds 0,1,1.5,2,2.5,3,5
+  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias --users <id>,<id>
+  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias --users <id>,<id> --sds 0,1,1.5,2,2.5,3,5
 """
 
 import argparse
@@ -142,8 +145,9 @@ def main():
     ap.add_argument("--db", default=DB_DEFAULT)
     ap.add_argument("--dir", default=V2_DIR_DEFAULT)
     ap.add_argument("--pop-constants", default=POP_DEFAULT)
-    ap.add_argument("--users", default=None,
-                    help="comma list of user-id prefixes (default: a built-in panel)")
+    ap.add_argument("--users", required=True,
+                    help="comma list of user ids to evaluate (pick data-rich ones "
+                         "from the local DB)")
     ap.add_argument("--sds", default="0.0,1.0,1.5,2.0,2.5,3.0,5.0",
                     help="SLOPE_PRIOR_SD values to sweep (0 == local-constant)")
     ap.add_argument("--trend-thresh", type=float, default=0.5,
@@ -158,9 +162,9 @@ def main():
     rs = RankingSystem(args.dir, lapse)
     sds = [float(s) for s in args.sds.split(",")]
 
-    panel = (args.users.split(",") if args.users else
-             ["<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>",
-              "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>"])
+    panel = [u for u in (s.strip() for s in args.users.split(",")) if u]
+    if not panel:
+        sys.exit("--users is empty.")
 
     # per-(SD or const) accumulators, split all / trending
     keys = ["const"] + [f"lin{sd:g}" for sd in sds]

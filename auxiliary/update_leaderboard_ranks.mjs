@@ -79,7 +79,7 @@
 //   node auxiliary/update_leaderboard_ranks.mjs --populate        # ALSO seed anonymous rows for users active in the
 //                                                                 #     past week with no leaderboard row (production
 //                                                                 #     only adds them lazily on their next /report)
-//   node auxiliary/update_leaderboard_ranks.mjs --user <redacted-user-id>   # limit to one user (repeatable; also scopes populate)
+//   node auxiliary/update_leaderboard_ranks.mjs --user <id>       # limit to one user (repeatable; also scopes populate)
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';

@@ -17,9 +17,9 @@ dropped (the client likewise can't rank/score an unrated problem) — count repo
 
 Usage:
   ./.venv/bin/python3 -m auxiliary.displayed_change_sim.export_sim_data \
-      --users <redacted-user-id>,<redacted-user-id>,<redacted-user-id>,...
-  ./.venv/bin/python3 -m auxiliary.displayed_change_sim.export_sim_data \
       --top 40 --min-total 300 --min-repeats 100
+  ./.venv/bin/python3 -m auxiliary.displayed_change_sim.export_sim_data \
+      --users <id>,<id>,...
 """
 
 import argparse

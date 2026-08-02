@@ -52,9 +52,15 @@ import { fileURLToPath } from 'node:url';
 
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 const BASE = process.env.STORE_SHOTS_BASE || 'http://localhost:8787';
-// The account whose history/rank the screenshots show. Pick a data-rich one
-// from the local DB; its production data is never modified (see interception).
-const ACCOUNT = process.env.STORE_SHOTS_ACCOUNT || '<redacted-user-id>';
+// The account whose history/rank the screenshots show. Mandatory, no default:
+// pick a data-rich one from the local DB. Its production data is never
+// modified (see interception).
+const ACCOUNT = process.env.STORE_SHOTS_ACCOUNT;
+if (!ACCOUNT) {
+    console.error('STORE_SHOTS_ACCOUNT is required: set it to the account code whose '
+        + 'history the screenshots should show (pick a data-rich one from the local DB).');
+    process.exit(1);
+}
 const LANGS = ['en', 'ko', 'ja', 'zh'];
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

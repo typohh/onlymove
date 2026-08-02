@@ -49,8 +49,8 @@ visible moves** as the honest denominator.
 ```bash
 # 1. export real attempts + per-problem rating/slope/floor (reads attempts/database.sqlite + ratings/)
 ./.venv/bin/python3 -m auxiliary.displayed_change_sim.export_sim_data \
-    --users <redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>,<redacted-user-id>
-#    or auto-select:  --top 40 --min-total 300 --min-repeats 100
+    --top 40 --min-total 300 --min-repeats 100
+#    or name the panel explicitly:  --users <id>,<id>,...
 
 cd auxiliary/displayed_change_sim
 node build.mjs                       # bundle the real client modules → engine.bundle.mjs

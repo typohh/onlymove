@@ -25,7 +25,7 @@ SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 # other server, not the identity/calibration hub it was in the retired model.
 SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA"]
 
-# INSERT INTO "rank_surveys" VALUES(123,'<redacted-user-id>…','OGS','5k','2025-09-12T…');
+# INSERT INTO "rank_surveys" VALUES(123,'<user-id>','OGS','5k','2025-09-12T…');
 # country, rank_label and last_game_at are optional trailing columns (quoted, or
 # NULL, or absent on an older dump); anything after them (future adds) is ignored.
 RANK_SURVEY_RE = re.compile(

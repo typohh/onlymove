@@ -7,7 +7,7 @@
 //           gradual re-weight
 // and separately measures the 500-cap boundary drop and the effective window size.
 //
-// Run: node rank_mechanism_diag.mjs [user] [sinceISO]
+// Run: node rank_mechanism_diag.mjs <user> [sinceISO]   (user is mandatory)
 import { readFileSync } from 'fs';
 import vm from 'vm';
 import path from 'path';
@@ -19,7 +19,12 @@ vm.runInThisContext(readFileSync(path.join(REPO, 'pwa', 'lib', 'math.min.js'), '
 const E = await import(pathToFileURL(path.join(HERE, 'engine.bundle.mjs')).href);
 E.loadPopulationConstants();
 
-const USER = process.argv[2] || '<redacted-user-id>';
+const USER = process.argv[2];
+if (!USER) {
+    console.error('usage: node rank_mechanism_diag.mjs <user> [sinceISO]  '
+        + '(pick a user id from the local DB)');
+    process.exit(1);
+}
 const SINCE_MS = process.argv[3] ? Date.parse(process.argv[3]) : Date.parse('2026-06-22');
 
 // --- shipped irt.js constants/helpers (population fat_finger_rate) ---

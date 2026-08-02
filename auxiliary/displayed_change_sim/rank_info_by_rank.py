@@ -97,10 +97,14 @@ def main():
               f"{np.median(slope_rank[m]):>11.3f}{med_info:>11.4f}{acc500:>10.2f}"
               f"{departW:>11.2f}{100*clamped[m].mean():>7.0f}%")
 
-    # place the 5 post-update users by their median first-time served rank
-    print("\nwhere the post-update users sit (median first-time served rank):")
+    # place any user ids given on the command line by their median first-time
+    # served rank (none given = skip this section)
+    uids = [u for u in (a.strip() for a in sys.argv[1:]) if u]
+    if not uids:
+        return
+    print("\nwhere the given users sit (median first-time served rank):")
     con = sqlite3.connect(DB)
-    for uid in ["<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>", "<redacted-user-id>"]:
+    for uid in uids:
         rows = con.execute("SELECT problem FROM tsumego_reports WHERE user_id LIKE ? AND is_repeat=0",
                            (uid + "%",)).fetchall()
         rks = [float(interp_extrap_vec(np.array([ratings[p]]), xs, ys)[0]) for (p,) in rows if p in ratings]

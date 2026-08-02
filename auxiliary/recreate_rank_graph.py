@@ -49,9 +49,9 @@ and interpolated to attempt times — precisely how the chart polyline is drawn.
 
 Reads the LOCAL DB copy (`attempts/database.sqlite`; see CLAUDE.md). No network.
 
-Usage:
-  ./.venv/bin/python3 -m auxiliary.recreate_rank_graph <redacted-user-id>
-  ./.venv/bin/python3 -m auxiliary.recreate_rank_graph <redacted-user-id> --server EGF --both-filters --plot g.png
+Usage (the user id is positional and mandatory; pick one from the local DB):
+  ./.venv/bin/python3 -m auxiliary.recreate_rank_graph <id>
+  ./.venv/bin/python3 -m auxiliary.recreate_rank_graph <id> --server EGF --both-filters --plot g.png
 """
 
 import argparse
