@@ -163,5 +163,8 @@ auxiliary/time_benefit_users.csv
 
 # Raw user data pulled for analysis: localStorage dumps contain the user's
 # account credential (userId) and full history — never version-control these.
-# They live under data/test/; the rest of data/ (survey CSVs, statistics) is tracked.
+# Called data/test/ until 2026-08-03, which read as disposable fixtures rather
+# than real user data. The rest of data/ (the tracked reference inputs under
+# data/reference/, and the audit outputs) is version-controlled.
+/data/user_dumps/
 /data/test/

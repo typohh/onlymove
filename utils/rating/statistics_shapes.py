@@ -22,7 +22,7 @@ from scipy.special import expit
 from utils.rating.rank_surveys import rank_to_value
 
 from utils.paths import PROJECT_ROOT
-STATS_PATH = os.path.join(PROJECT_ROOT, "data", "statistics.txt")
+STATS_PATH = os.path.join(PROJECT_ROOT, "data", "reference", "statistics.txt")
 
 # This table has its OWN axis: 20k = 0, 1k = 19, 1d = 20. It is deliberately NOT
 # the project rank scale (pwa/shared/rank-math.js), because every candidate shape

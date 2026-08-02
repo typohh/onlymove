@@ -13,6 +13,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
 - **`android/`** — the Bubblewrap TWA shell that wraps the PWA for the Play Store.
 - **`docs/`** — methodology and operational runbooks.
+- **`data/`** — external rank reference inputs (`reference/`), corpus audit findings (`tsumego_audit/`), and gitignored real-user localStorage dumps (`user_dumps/`, which carry account credentials — see `data/README.md`).
 - **`db/`** — the local snapshot of the production Cloudflare D1 (`d1.sqlite`, plus the `d1.sql` text dump beside it), pulled by `pipeline.fetch_database`. Gitignored and regenerable; query `d1.sqlite` for any local analysis. Distinct from `attempts/<size>/`, which holds the *tracked* bot benchmark results that feed the rating model.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
