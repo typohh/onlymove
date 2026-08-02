@@ -1,4 +1,10 @@
-// js/user-stats.js
+// js/attempt-recorder.js
+//
+// What happens when an attempt is finished: update the local history and rank
+// (updateUserStats), then report it to the Worker (sendReport, plus the share-event
+// sibling). Named `user-stats.js` until 2026-08-03, which read as a member of the
+// stats-* family — the detailed-stats modal — when it is the write path for an
+// answer, not a display of one.
 
 import { state, updateUserRank, updateServeRank, updateRankSe, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
@@ -6,7 +12,7 @@ import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
-import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './model.js';
+import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
 import { trainWeakness } from './weakness.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
 // EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale

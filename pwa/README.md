@@ -49,12 +49,12 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   ├── irt.js               # The shared 4PL response curve
 │   ├── rank-decomposition.js # Curve application, career decomposition, convergence test
 │   ├── rank-translation.js  # Translation to other rating systems
-│   ├── model.js             # Retention model, recall schedule, recall serve gate
+│   ├── recall-model.js      # Retention model, recall schedule, recall serve gate
 │   ├── weakness.js          # Per-user weakness logistic over the motif axes
 │   ├── optimizer.js         # Adam, shared by the client-side fits
 │   ├── math-utils.js        # Numeric helpers
 │   │
-│   ├── user-stats.js        # Per-attempt record and reporting
+│   ├── attempt-recorder.js  # Per-attempt record and reporting
 │   ├── account-sync.js      # Pull-based account sync + offline outbox
 │   ├── backfill.js          # Version-gated re-derivation of stored history fields
 │   ├── picked-embedding.js  # Played-move motif vector fetch (Range into the sidecar)
@@ -139,7 +139,7 @@ There are **no migration ladders**. `js/state-epoch.js` runs at import time: a s
 
 Each branch comment in a problem SGF is `"<winrate>%/<score>"` (e.g. `"86.4%/3.1"`). `js/sgf.js` reads this to identify the correct move without needing a "Correct" marker. The starting position is tagged with a `"Q"` comment. The module also reorients recalls randomly so a repeat can't be recognised by its visual pattern; novel and linked problems are served at the identity orientation, which the share-link and picked-move contracts depend on.
 
-### 4.4. Problem selection (`js/problem-loader.js` + `js/model.js`)
+### 4.4. Problem selection (`js/problem-loader.js` + `js/recall-model.js`)
 
 The displayed problem lives in three slots on `state`: `challengeProblem` (the always-assigned standing challenge, persisted per-size), `currentProblem` (what's on screen), and `previousProblem` (the last completed problem, kept reviewable). `advanceToNextProblem()` picks what to show next:
 
@@ -159,7 +159,7 @@ Everything rank-shaped is derived on the device from the published raw numbers; 
 
 - **Rank** (`shared/rank-window.js`, `js/rank-decomposition.js`, `js/irt.js`) — the displayed rank is a positionally-weighted 4PL maximum-likelihood fit over the recent first-time history, a **pure function** of that history, so two devices that have seen the same attempts agree regardless of how they were batched. Each attempt enters with its own problem's slope and floor, so a sharp problem pins the estimate harder. `serveRank` adds an uncertainty bonus that only problem selection reads.
 - **Rank labels** (`shared/rank-math.js`) — one internal scale, AGA-style: 0 is the 1k/1d boundary, every rank is one unit wide, integers are band edges. Shared verbatim with the Worker so the server-rendered rank histogram cannot drift from the client's display.
-- **Retention** (`js/model.js`) — the spaced-repetition model, with population constants fitted offline and per-user terms fitted on device.
+- **Retention** (`js/recall-model.js`) — the spaced-repetition model, with population constants fitted offline and per-user terms fitted on device.
 - **Weakness** (`js/weakness.js`, `js/stats-weaknesses.js`) — a logistic over the motif axes with a coefficient pair per axis (the position's correct move, and the move the user actually played), under a per-axis prior shipped in the population constants. Selection consumes the contrast between the two; the Weaknesses pane runs two-level detection over the posterior under an expected-false-flag budget.
 
 ### 4.7. Account sync (`js/account-sync.js`)

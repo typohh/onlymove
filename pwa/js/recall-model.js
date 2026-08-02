@@ -1,4 +1,13 @@
-// js/model.js
+// js/recall-model.js
+//
+// The spaced-repetition (recall) model: the retention formula, its per-user fit,
+// the due-candidate search and the serve-share gate. Named `model.js` until
+// 2026-08-03, which said nothing — every sibling model here is named for what it
+// models (weakness.js, rank-decomposition.js).
+//
+// calculateAndStoreStatsResults is this module's TRAINER, not a stats helper: it
+// drives prepareTrainingData / MODEL_INDICES / the Adam loop and stores the fit.
+// It reads "stats" because the fitted output lands in state.statsResults.
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize, DEFAULT_USER_RANK } from './state.js';
@@ -107,7 +116,7 @@ export const MIN_RECALL_HOURS = 6;
 // !isFinite fallback below covers degenerate params.)
 const MIN_STABILITY_DAYS = (MIN_RECALL_HOURS / 24) / NEG_LN_080;
 // The floor expressed as the earliest a repeat can come due (ms) — the minimum
-// recall interval. Exported for the cross-tab duplicate guard (user-stats.js):
+// recall interval. Exported for the cross-tab duplicate guard (attempt-recorder.js):
 // a second attempt closer than this can never be a legitimate recall.
 export const MIN_RECALL_INTERVAL_MS = MIN_RECALL_HOURS * 3600 * 1000;
 // Retention constants — loaded at boot from the fitted population_constants.json (a

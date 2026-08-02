@@ -2,7 +2,7 @@
 //
 // Loads the fitted population model constants (pwa/tsumegos/population_constants.json,
 // produced by pipeline.fit_population_constants and shipped by package_for_pwa) and
-// applies them: the retention constants in model.js (KAPPA/Z0/GROWTH/LN_C_PRIOR) and
+// applies them: the retention constants in recall-model.js (KAPPA/Z0/GROWTH/LN_C_PRIOR) and
 // the rushing/review time-benefit biases in game-logic.js. Board-independent — one
 // blob for both sizes.
 //
@@ -12,7 +12,7 @@
 // instant the app boots — no runtime fetch, no precache, no eviction/offline path
 // that could fail. main.js still null-guards against a malformed packaged file.
 
-import { applyRetentionConstants, setTimeBias } from './model.js';
+import { applyRetentionConstants, setTimeBias } from './recall-model.js';
 import { weightedMedianOverWindow } from '../shared/rank-window.js';
 import { flattenAttempts } from './rank-decomposition.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/population_constants.json).

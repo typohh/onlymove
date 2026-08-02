@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/browser";
 import { state } from './state.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
-import { recordShareEvent } from './user-stats.js';
+import { recordShareEvent } from './attempt-recorder.js';
 import { getBoardImageBlob } from './board.js';
 import { showModal, showToast } from './overlays.js';
 

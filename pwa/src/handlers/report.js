@@ -41,7 +41,7 @@ export async function handleReport(request, env, ctx) {
     }
 
     // Timestamp bounds: refused loudly with serverNow so the client can
-    // self-correct its entry and resend (js/user-stats.js sendReport). A
+    // self-correct its entry and resend (js/attempt-recorder.js sendReport). A
     // stamp-less payload can only be a not-yet-reloaded old bundle's first
     // report(s) around the deploy — its attempt stays un-acked and reaches the
     // server via the outbox (/report-backfill) after the forced reload.

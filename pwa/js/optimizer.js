@@ -1,6 +1,6 @@
 // js/optimizer.js
 //
-// Shared Adam parameter update. The recall model (model.js) and the weakness
+// Shared Adam parameter update. The recall model (recall-model.js) and the weakness
 // model (weakness.js) each ran their own hand-rolled, identical Adam inner
 // loop; this extracts the bias-corrected update step so the two fitters share
 // one optimizer. Each fitter still owns its own loss/gradient computation and

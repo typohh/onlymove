@@ -57,7 +57,7 @@ import {
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
 import { HISTORY_BACKFILL_DONE_KEY } from './constants.js';
-import { calculateAndStoreStatsResults } from './model.js';
+import { calculateAndStoreStatsResults } from './recall-model.js';
 import { trainWeakness } from './weakness.js';
 import { estimateWindowRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';

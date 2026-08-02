@@ -32,10 +32,10 @@ try {
 }
 
 import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
-import { getRecallCandidates } from './model.js';
+import { getRecallCandidates } from './recall-model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule } from './notifications.js';
-import { recordShareEvent } from './user-stats.js';
+import { recordShareEvent } from './attempt-recorder.js';
 import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';

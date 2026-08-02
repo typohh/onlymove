@@ -16,7 +16,7 @@ import {
     hideOverlappingYTicks, observeResize,
     makeChartFrame, buildYAxis, buildPlotRow, chartViewBoxHeight,
 } from './chart-svg.js';
-import { getLogitPerRank, MODEL_INDICES } from './model.js';
+import { getLogitPerRank, MODEL_INDICES } from './recall-model.js';
 
 // medianNovelSolveMinutes + the TIME_ADJUST_* feature constants + the scalar
 // timeAdjustDeltaRating live in population-constants.js (one definition, shared with

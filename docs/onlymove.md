@@ -642,14 +642,14 @@ Experiments live in `auxiliary/rating_dev/` (notably `train_rating_staged.py`, w
 | curve application, career decomposition, convergence test | `pwa/js/rank-decomposition.js` |
 | candidate pool and two-regime weighting | `pwa/js/problem-loader.js` |
 | server translation | `pwa/js/rank-translation.js` |
-| retention model and recall gate | `pwa/js/model.js` |
-| time-benefit recentring, its readout and its nudge gate | `pwa/js/model.js` (`benefitConfidenceForVar`), `pwa/js/stats-ui.js`, `pwa/js/game-logic.js` |
+| retention model and recall gate | `pwa/js/recall-model.js` |
+| time-benefit recentring, its readout and its nudge gate | `pwa/js/recall-model.js` (`benefitConfidenceForVar`), `pwa/js/stats-ui.js`, `pwa/js/game-logic.js` |
 | the weakness logistic and contrast score | `pwa/js/weakness.js` |
 | two-level findings | `pwa/js/stats-weaknesses.js`, `pwa/js/stats-compute.js` |
 | review-time motif surfacing | `pwa/js/motif-bubble.js` |
 | played-move vector fetch | `pwa/js/picked-embedding.js` |
 | re-derivation gates | `pwa/js/backfill.js` |
-| per-attempt record | `pwa/js/user-stats.js` |
+| per-attempt record | `pwa/js/attempt-recorder.js` |
 
 **The pass-unreachability chain** (section 2.9) is two coordinate-keyed lookups. Live: `board.js` turns a click into an intersection and `getLegalMoveNode(x, y)` matches a child on `child.move.x === x && child.move.y === y`, returning null for anything unmatched — a pass child has no such coordinates, and `handleBoardClick` bails on null before any state changes; the index is then `children.indexOf(moveNode)` on the already-matched node. Reconstructed: `cellIndexForMove` in `backfill.js` parses the reported board notation and runs the same `findIndex` coordinate match. Neither can yield the pass child's index, which is what makes the all-zero placeholder row written by `project_cells_for_problem` unreadable in practice. Analysis mode does handle passes (`move.pass` in `analysis.js`, and `subtreeReachesPass` uses a terminating pass to tell a solved line from an abandoned engine branch), but it records no attempt.
 
@@ -727,11 +727,11 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | `TAU_S` / `TAU_M` / `TAU_V` / session gap | 30d skill kernel / 4h form kernel / 10d variance smoothing / 6h session split | `rank-decomposition.js` |
 | `WEAKNESS_TEMPERATURE` | 0.5 — the tilt of the weakness-regime sampling weight `exp(T · score)`; a product setting, not fitted (section 2.4) | `weakness.js` |
 | `MODEL_INPUT_HISTORY_LENGTH` / `RECALL_CANDIDATE_HISTORY_LENGTH` / `ANSWER_HISTORY_WORKING_SET` | 500 / 3000 / 3000 — the last two are equal on purpose: the working set is sized to the largest hot window any synchronous consumer reads, and recall graduation is then defined by that bound (sections 2.8, 2.10) | `constants.js` |
-| recall window / `MIN_RECALL_HOURS` | retention 0.80 (open) to 0.60 (close) / 6h stability floor | `model.js` |
+| recall window / `MIN_RECALL_HOURS` | retention 0.80 (open) to 0.60 (close) / 6h stability floor | `recall-model.js` |
 | retention `KAPPA` / `GROWTH` / `Z0` / `LN_C_PRIOR` / `first_success_step` | fit each run; `Z0` fixed at logit(0.7) as the origin; the step is moment-matched, not likelihood-fitted (section 2.8) | `fit_population_constants.py` → `population_constants.json` |
 | `time_bias_per_min` / `review_bias_per_min` | fit each run, clamped at or below zero; the shrinkage target and the recentring origin for the per-user time coefficients (sections 1.13, 2.8) | `fit_population_constants.py` → `population_constants.json` |
 | `BENEFIT_CONFIDENCE` | 0.80 — the recentred one-sided confidence required before the rushing / short-review nudge shows | `game-logic.js` |
-| `X_SERVE` / `SHARE_VOLUME_FRACTION` | 0.80 assumed per-serve success (measured ≈0.71, section 2.8) / 0.5 of trailing-week daily volume | `model.js` |
+| `X_SERVE` / `SHARE_VOLUME_FRACTION` | 0.80 assumed per-serve success (measured ≈0.71, section 2.8) / 0.5 of trailing-week daily volume | `recall-model.js` |
 | finding thresholds | `WEAK_PROB_THRESHOLD` 0.80, `DIRECTION_PROB_THRESHOLD` 0.85, `MIN_DIRECTION_N` 3 | `stats-weaknesses.js` |
 | `WEAK_FALSE_FLAG_BUDGET` | 0.5 expected spurious findings; must stay ≥ 1 − `WEAK_PROB_THRESHOLD` | `stats-weaknesses.js` |
 | review motif threshold | 3σ, at most 3 | `motif-bubble.js` |

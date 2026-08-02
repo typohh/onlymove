@@ -7,9 +7,9 @@
 // modules — stats-weaknesses.js, stats-rank-pane.js, stats-time-chart.js,
 // stats-activity-chart.js, stats-community.js — built on the shared SVG/chart
 // primitives in chart-svg.js and the pure-numeric helpers in stats-compute.js.
-// model.js holds the numeric recall model + stats computation; the dependency
+// recall-model.js holds the numeric recall model + stats computation; the dependency
 // is one-directional: this module consumes the model's exported helpers;
-// model.js never reaches back into the UI.
+// recall-model.js never reaches back into the UI.
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
@@ -36,7 +36,7 @@ import {
     averageRepeatRank,
     benefitConfidenceForVar,
     MODEL_INDICES,
-} from './model.js';
+} from './recall-model.js';
 
 // If the browser silently evicted history-tail rows, tell the user how many are
 // missing and offer a server refresh (subject to the daily cap). No-op when the

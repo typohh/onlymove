@@ -10,7 +10,7 @@ import { state, setAcceptClicks } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
-import { getRecallCandidates } from './model.js';
+import { getRecallCandidates } from './recall-model.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';

@@ -1,7 +1,7 @@
 // js/irt.js
 //
 // Shared 4PL item-response math for the client's two rank-aware consumers:
-// the recall model (model.js) and the per-attempt rank estimator
+// the recall model (recall-model.js) and the per-attempt rank estimator
 // (rank-decomposition.js). Both place a user on a problem's success curve
 //
 //     P(clear) = floor + (1 − floor − LAPSE)·σ(slope·(rank gap) + κ(floor))

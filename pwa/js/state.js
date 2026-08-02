@@ -143,7 +143,7 @@ export function isUnackedReportable(a) {
 
 // --- Ignored-problems list (durable across the epoch wipe / re-adoption) ---
 // The runtime representation is the `ignored` flag on a problem's LAST
-// answerHistory entry (model.js reads lastAnswer.ignored to exclude recalls).
+// answerHistory entry (recall-model.js reads lastAnswer.ignored to exclude recalls).
 // That flag round-trips nowhere server-side, so the curated list is ALSO kept
 // as a standalone id set: performIgnore adds to it, the state-epoch gate
 // carries it through the wipe, and applyStoredIgnoredFlags() re-marks the

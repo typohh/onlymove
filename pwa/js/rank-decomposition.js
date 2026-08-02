@@ -66,7 +66,7 @@ const TAU_M_MS = 4 * HOUR_MS;               // form (fast): ~session kernel
 const TAU_V_MS = 10 * DAY_MS;               // σ_M(t) variance-smoothing window
 const KERNEL_TRUNC_SIGMA = 4;
 
-// rank = the level you clear at this rate (CALIBRATION_P; matches model.js /
+// rank = the level you clear at this rate (CALIBRATION_P; matches recall-model.js /
 // fit_rank_curves). The per-problem 3PL guessing floor c (problemFloor, shipped
 // by train_rating from the bot ladder) gives P(clear) = c + (1−c)·σ(slope·
 // (R−x)+κ(c)); κ(c) keeps P(clear)=80% at R==x for any c. Far below a problem

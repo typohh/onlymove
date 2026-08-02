@@ -8,9 +8,9 @@ import { fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
-import { MODEL_INDICES, benefitConfidenceForVar } from './model.js';
+import { MODEL_INDICES, benefitConfidenceForVar } from './recall-model.js';
 import { getTerm } from './i18n.js';
-import { sendReport, updateUserStats } from './user-stats.js';
+import { sendReport, updateUserStats } from './attempt-recorder.js';
 import { completeCurrentProblem, advanceToNextProblem } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { fetchPickedEmbedding } from './picked-embedding.js';
@@ -38,7 +38,7 @@ const median = (values) => {
 // ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
 const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
 // benefitConfidenceForVar (recenters the per-user time/review coeff by the
-// population confound) and setTimeBias now live in model.js, alongside the L2
+// population confound) and setTimeBias now live in recall-model.js, alongside the L2
 // prior the same coefficient is shrunk toward — they must stay in lockstep.
 
 

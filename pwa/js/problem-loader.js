@@ -9,7 +9,7 @@ import { displayOverlay, fadeOverlay, showToast } from './overlays.js';
 import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
-import { getRecallCandidates, recallServeShare } from './model.js';
+import { getRecallCandidates, recallServeShare } from './recall-model.js';
 import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
 import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
@@ -569,7 +569,7 @@ function hashToUnit(str) {
 // roll, or ages out — that pruning is the equilibrium's decay channel). The
 // share is the constant-volume balance point for a FRACTION of the user's own
 // trailing-week daily volume — the headroom that lets a below-average day still
-// clear every due recall — and for their memory (see model.js
+// clear every due recall — and for their memory (see recall-model.js
 // recallServeShare); while it is not yet
 // estimable (null), due recalls always win — the pre-gate behavior. Rolled
 // once per serve decision, BEFORE the recall is built (a gated-out recall

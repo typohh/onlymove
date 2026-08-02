@@ -1,7 +1,7 @@
 // js/math-utils.js
 //
 // Tiny shared numeric helpers used across the client models
-// (model.js, weakness.js, rank-decomposition.js, game-logic.js,
+// (recall-model.js, weakness.js, rank-decomposition.js, game-logic.js,
 // stats-compute.js, the stats chart modules), kept in one
 // place so the definitions can't drift.
 
