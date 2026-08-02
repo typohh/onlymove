@@ -78,21 +78,18 @@ models/
 # regenerable via pipeline/extract_activations.py. Not for version control.
 activations/
 
-# Pre-projected per-cell K-dim embeddings (~1.3 GB at K=64). Written by
-# pipeline/build_embedding.py after the PCA fit; consumed by
-# pipeline/package_for_pwa.py. Reproducible from activations/ + pca.npz.
-embeddings/joint/per_cell/
+# Pre-projected per-cell K-dim axis vectors, one npz per problem. Written by
+# pipeline/build_axes.py, consumed by pipeline/package_for_pwa.py. Reproducible
+# from activations/.
+axes/per_cell/
 
-# Joint embedding fit outputs (pipeline/build_embedding.py): regenerable from
-# activations/, multi-MB, and churn on every refit. Two files stay TRACKED on
-# purpose: labels.json (handcrafted motif labels) and label_anchors.npz (the
+# Skill-axis fit outputs (pipeline/build_axes.py): regenerable from activations/,
+# multi-MB, and churn on every refit. THREE files in here stay TRACKED on purpose
+# — axes.npz (the fitted model plus the content-hash embedding_version packaging
+# ships), labels.json (handcrafted motif labels) and label_anchors.npz (the
 # frozen anchor directions that let those labels survive refits — frozen at
 # each motif's first appearance, so a refit cannot reproduce them).
-embeddings/joint/pca.npz
-embeddings/joint/per_problem.csv
-embeddings/joint/explained_variance.csv
-embeddings/joint/extreme_problems.json
-embeddings/joint/ica_stability.json
+axes/per_problem.csv
 
 # D1 attempts dump: a large (~50 MB) snapshot pulled from production by
 # pipeline.fetch_database. Regenerable on demand and changes constantly, so it's

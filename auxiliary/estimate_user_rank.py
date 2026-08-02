@@ -40,7 +40,7 @@ from utils.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 from utils.ratings_io import (  # noqa: E402
-    FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_lapse, load_rating_rank_curve,
+    FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_lapse, load_rating_rank_curve,
     load_value_map,
 )
 from utils.rank_surveys import value_to_rank  # noqa: E402
@@ -64,7 +64,7 @@ def load_problem_maps(v2_dir):
         ratings.update(load_value_map(
             os.path.join(v2_dir, str(size), RATINGS_CSV), "rating", missing_ok=True))
         slopes.update(load_value_map(
-            os.path.join(v2_dir, str(size), QUALITY_CSV), "quality", missing_ok=True))
+            os.path.join(v2_dir, str(size), SLOPE_CSV), "slope", missing_ok=True))
         floors.update(load_value_map(
             os.path.join(v2_dir, str(size), FLOOR_CSV), "floor", missing_ok=True))
     return ratings, slopes, floors

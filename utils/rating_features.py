@@ -23,6 +23,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
@@ -300,7 +302,7 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
     """ONE PCA basis shared across boards (so a pooled model's activation weights mean
     the same thing on 9×9 and 13×13). Loads each board's raw correct-move activation
     cache for its attempted problems, stacks, fits a single StandardScaler+randomized
-    PCA, z-scores. Returns {(size, tid): vec}, k. (Distinct from embeddings/joint, which
+    PCA, z-scores. Returns {(size, tid): vec}, k. (Distinct from axes/, which
     residualises rating OUT — useless as a difficulty feature.)
 
     The randomized-PCA fit over the stacked ~N×6912 activation matrix is the dominant
@@ -639,21 +641,22 @@ RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 
 def load_backend_problem_params(sizes=(9, 13)):
     """tid -> (rating, slope, floor) from ratings/<size>/tsumego_{ratings,quality,
-    floor}_final.csv. Fails loud on a missing file (run pipeline.train_rating)."""
+    tsumego_{ratings,slopes,floors}.csv. Fails loud on a missing file (run
+    pipeline.train_rating)."""
     out = {}
     for size in sizes:
         d = os.path.join(RATINGS_DIR, str(size))
         frames = {}
-        for name, col in (("tsumego_ratings_final.csv", "rating"),
-                          ("tsumego_quality_final.csv", "quality"),
-                          ("tsumego_floor_final.csv", None)):
+        for name, col in ((RATINGS_CSV, "rating"),
+                          (SLOPE_CSV, "slope"),
+                          (FLOOR_CSV, None)):
             path = os.path.join(d, name)
             if not os.path.exists(path):
                 raise FileNotFoundError(f"{path} missing — run pipeline.train_rating first")
             frames[name] = pd.read_csv(path)
-        r = frames["tsumego_ratings_final.csv"].set_index("tsumego_id")["rating"]
-        q = frames["tsumego_quality_final.csv"].set_index("tsumego_id")["quality"]
-        fdf = frames["tsumego_floor_final.csv"].set_index("tsumego_id")
+        r = frames[RATINGS_CSV].set_index("tsumego_id")["rating"]
+        q = frames[SLOPE_CSV].set_index("tsumego_id")["slope"]
+        fdf = frames[FLOOR_CSV].set_index("tsumego_id")
         f = fdf[fdf.columns[0]]
         for tid in r.index:
             if tid in q.index and tid in f.index:

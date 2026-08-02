@@ -26,7 +26,7 @@ Always execute Python pipeline scripts using the virtual environment:
 ./.venv/bin/python -m pipeline.extract_activations     # GPU trunk activations extraction
 ./.venv/bin/python -m pipeline.cache_move_features    # Build move features cache
 ./.venv/bin/python -m pipeline.train_rating            # Train rating model (produces ratings/)
-./.venv/bin/python -m pipeline.build_embedding         # Fit PCA/ICA embedding models
+./.venv/bin/python -m pipeline.build_axes              # Fit the supervised skill axes
 ./.venv/bin/python -m pipeline.package_for_pwa         # Package data into pwa/tsumegos/
 ./.venv/bin/python -m pipeline.map_rating_to_rank      # Map raw rating to consensus ranks
 ./.venv/bin/python -m pipeline.fit_population_constants# Fit retention/time-bias population parameters

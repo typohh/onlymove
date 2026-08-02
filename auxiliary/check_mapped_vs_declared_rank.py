@@ -50,8 +50,8 @@ entirely.
 
 Inputs (run `pipeline.fetch_database` first to refresh the dump):
   attempts/database.sql                         rank_surveys + tsumego_reports
-  ratings/<size>/tsumego_ratings_final.csv   b_p (shipped rating)
-  ratings/<size>/tsumego_quality_final.csv   a_p (shipped slope)
+  ratings/<size>/tsumego_ratings.csv   b_p (shipped rating)
+  ratings/<size>/tsumego_slopes.csv    a_p (shipped slope)
   ratings/rating_to_rank.json                M  (shared rating→rank curve)
   ratings/rank_map.json                      per-server internal↔server knots
 

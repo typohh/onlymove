@@ -5,7 +5,7 @@ survey-ρ (base + time-adjusted). The rating tests (auxiliary.rating_dev.train_r
 NO inbuilt validation; they either chain this bench afterward or pass --validate to call
 run_validation on the just-written CSVs (same code, no duplication).
 
-Pointed at a ratings dir (the per-size tsumego_{ratings,quality,floor}_final.csv + rating_constants.json
+Pointed at a ratings dir (the per-size tsumego_{ratings,slopes,floors}.csv + rating_constants.json
 + user_theta.csv a training run writes) plus a (seed, held-out fraction), it:
 
   1. Derives the SAME held-out problem set the test run excluded, via auxiliary.rating_dev.holdout_set, and prints

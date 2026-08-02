@@ -322,7 +322,7 @@ What genuinely remains is a **labelling** risk rather than a modelling one, and 
 
 **Labels are two-tailed.** The axes are bipolar: both extremes are real, opposite directions, not "motif present" versus "motif absent". Measurement supports this — there are no U-shaped even components at the extremes, and users' coefficients on the two tails are near-antipodal on the trade-off axes. So each axis may name its positive tail, its negative tail, or both, and some axes genuinely have a nameable motif on only one side. Packaging **refuses to publish** while any axis has neither tail named, which forces the intended loop: new data grows an axis, a human inspects both extremes and names it, publishing proceeds. Per-axis tail structure varies — some axes are trade-offs, one is common competence across both tails, one is dominated by its positive tail — so no symmetry should be read into the linear model.
 
-**The motifs the fit currently carries**, in shipped order — a snapshot rather than a fixed vocabulary, since the count is selected and the names are assigned by hand (`embeddings/joint/labels.json` is authoritative, and every name also carries Chinese, Japanese and Korean forms):
+**The motifs the fit currently carries**, in shipped order — a snapshot rather than a fixed vocabulary, since the count is selected and the names are assigned by hand (`axes/labels.json` is authoritative, and every name also carries Chinese, Japanese and Korean forms):
 
 | Positive tail | Negative tail |
 | --- | --- |
@@ -594,7 +594,7 @@ pipeline.cache_move_features           → activations/_signal_cache/move_evals_
 pipeline.fetch_database                → attempts/database.{sqlite,sql}   (attempt log + surveys)
 pipeline.train_rating                  → ratings/
 pipeline.map_rating_to_rank            → ratings/rating_to_rank.json, ratings/rank_map.json
-pipeline.build_axes                    → embeddings/joint/
+pipeline.build_axes                    → axes/
 pipeline.fit_population_constants      → ratings/population_constants.json
 pipeline.package_for_pwa               → pwa/tsumegos/          (single writer)
 ```
@@ -602,7 +602,7 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 **The last five are ordered by hard data dependencies, not by convention.** Two of them — `map_rating_to_rank` and `fit_population_constants` — are board-independent and need no GPU, which makes it tempting to treat them as side steps. "Board-independent" is not "detachable": both sit *inside* the sequence.
 
 - `map_rating_to_rank` consumes `ratings/` and must precede `build_axes`, whose features include the rating outputs and the rank derived through the curve (`utils/residual_axes.py` reads `ratings/rating_to_rank.json` directly).
-- `fit_population_constants` consumes `embeddings/joint/per_problem.csv` and must therefore follow `build_axes` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
+- `fit_population_constants` consumes `axes/per_problem.csv` and must therefore follow `build_axes` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
 
 `pipeline.fetch_database` supplies the human attempt log and the survey rows, so it precedes everything that fits against them — the rating trainer, the rank map and the axes alike. It takes no board size, pulls incrementally by row id, and is the one step in the block that reads the production database rather than the artifact tree.
 
@@ -655,12 +655,12 @@ Experiments live in `auxiliary/rating_dev/` (notably `train_rating_staged.py`, w
 
 ## 3.4 Artifacts
 
-Backend outputs, all under `ratings/` and `embeddings/joint/`:
+Backend outputs, all under `ratings/` and `axes/`:
 
 ```
-ratings/<size>/tsumego_ratings_final.csv    tsumego_id, rating   (80%-clear, raw)
-ratings/<size>/tsumego_quality_final.csv    tsumego_id, quality  (calibrated slope)
-ratings/<size>/tsumego_floor_final.csv      tsumego_id, floor    (unscaled; see section 1.10)
+ratings/<size>/tsumego_ratings.csv          tsumego_id, rating   (80%-clear, raw)
+ratings/<size>/tsumego_slopes.csv           tsumego_id, slope    (calibrated slope)
+ratings/<size>/tsumego_floors.csv           tsumego_id, floor    (unscaled; see section 1.10)
 ratings/user_theta.csv                      per-profile abilities
 ratings/rating_constants.json               fat_finger_rate, slope_scale
                                             (the trainer writes the lapse HERE; the population
@@ -669,11 +669,11 @@ ratings/rating_constants.json               fat_finger_rate, slope_scale
 ratings/rating_to_rank.json                 per-board (identical) curve + time_adjust
 ratings/rank_map.json                       per-server coupling knots
 ratings/population_constants.json           retention, time bias, weakness_axis_lambda
-embeddings/joint/per_problem.csv            per-problem axis loadings
-embeddings/joint/per_cell/<size>/<tid>.npz  per-cell loadings
-embeddings/joint/axes.npz                   model + content-hash embedding_version
-embeddings/joint/labels.json                v4 two-tailed labels + motif bank
-embeddings/joint/label_anchors.npz          frozen per-motif directions
+axes/per_problem.csv            per-problem axis loadings
+axes/per_cell/<size>/<tid>.npz  per-cell loadings
+axes/axes.npz                   model + content-hash embedding_version
+axes/labels.json                v4 two-tailed labels + motif bank
+axes/label_anchors.npz          frozen per-motif directions
 ```
 
 Published under `pwa/tsumegos/`:
@@ -690,11 +690,11 @@ embedding_meta.json                K, dtype, bytes_per_cell, embedding_version,
 rating_to_rank.json, rank_map.json, population_constants.json   (copied across)
 ```
 
-**`quality` is an overloaded name — three distinct meanings, and the code comments are not consistent about it.** Track the value, not the label:
+**`quality` survives as a client-side name only, and it does NOT mean the slope.** The backend column was called `quality` until 2026-08-03; it is now named for what it holds, leaving one meaning per label:
 
 | Where | Name | Value |
 | --- | --- | --- |
-| `ratings/<size>/tsumego_quality_final.csv` | column `quality` | the **calibrated slope**, `slope_scale · slope` |
+| `ratings/<size>/tsumego_slopes.csv` | column `slope` | the **calibrated slope**, `slope_scale · slope` |
 | shard `metadata.json` | field `slope` | the same calibrated slope, copied verbatim |
 | client problem object | field `quality` | **the squared** slope **times the floor-dependent information factor**, i.e. the selection weight |
 

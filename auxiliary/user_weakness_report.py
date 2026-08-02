@@ -18,14 +18,14 @@ re-run ahead of the last package_for_pwa" caveat). The ported surfaces are:
 
 Per-attempt features are assembled exactly as the client's answerHistory carries
 them after backfill:
-  - embedding      = the problem's correct-move axis vector (embeddings/joint/
+  - embedding      = the problem's correct-move axis vector (axes/
                      per_problem.csv, the same source the shipped lookup sidecar +
                      shard metadata are emitted from).
   - pickedEmbedding = the axis vector at the cell the user actually clicked, for
                      WRONG non-repeat attempts. The DB `move` is GTP notation in
                      the canonical orientation-0 frame (game-logic.buildReportPayload
                      inverse-transforms the click), so gtp_to_xy(move) indexes the
-                     per-cell npz (embeddings/joint/per_cell/<size>/<tid>.npz) by
+                     per-cell npz (axes/per_cell/<size>/<tid>.npz) by
                      coordinate — the same (x,y) frame extraction labels cells with.
                      (Validated 300/300 on non-repeat correct attempts; repeats are
                      served-frame and unrecoverable, and are excluded from training.)
@@ -58,8 +58,8 @@ from utils.coords import gtp_to_xy  # noqa: E402
 
 # --- Artifact locations (backend + shipped) --------------------------------
 DEFAULT_DB = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
-PER_PROBLEM_CSV = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
-PER_CELL_DIR = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_cell")
+PER_PROBLEM_CSV = os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
+PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
 RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 # Shipped copies (what the client actually reads) preferred; backend fallbacks.
 CURVE_JSON = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "rating_to_rank.json")
@@ -158,10 +158,10 @@ def load_correct_embeddings():
 
 
 def load_ratings():
-    """(tsumego_id, size) -> raw rating, from ratings/<size>/tsumego_ratings_final.csv."""
+    """(tsumego_id, size) -> raw rating, from ratings/<size>/tsumego_ratings.csv."""
     out = {}
     for size in (9, 13):
-        path = os.path.join(RATINGS_DIR, str(size), "tsumego_ratings_final.csv")
+        path = os.path.join(RATINGS_DIR, str(size), "tsumego_ratings.csv")
         if not os.path.exists(path):
             continue
         with open(path) as f:

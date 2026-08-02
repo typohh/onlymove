@@ -27,7 +27,7 @@ Model (attempt-level):
            size_is_13, rating, slope, floor, rank]  (z-scored)
     LITERAL feature parity with the rating trainer by design: every input
     block the rating NN consumes, plus its OUTPUTS (rating/slope/floor/rank).
-    The skew-ICA embedding (embeddings/joint/) is deliberately NOT an input —
+    The skew-ICA embedding (axes/) is deliberately NOT an input —
     the production form of this model must never depend on the motif pipeline.
     r: MLP trunk with dropout (the rating backbone's overfit lesson).
     g: 2026-07-18 FIXED REGIMEN — a direct LINEAR head on the features with

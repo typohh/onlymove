@@ -20,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.configurations import ALL_BOARD_SIZES
 from utils.coords import gtp_to_xy, sgf_to_gtp
-from utils.ratings_io import FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_size_value_maps, load_value_map
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
 from pipeline.benchmark_bots import parse_tsumego_sgf
 
 
@@ -52,7 +52,7 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     for every problem (build_axes fills the whole corpus), so a gap is a hard
     error, never silently skipped.
 
-    Reads embeddings/joint/per_cell/<size>/<tid>.npz, written upstream by
+    Reads axes/per_cell/<size>/<tid>.npz, written upstream by
     pipeline.build_axes (per-cell fanout). Those rows are in *extraction
     order*, which is board-scan order (sorted by (y, x)) — NOT the order the PWA
     uses. The PWA recovers a picked move's cell index via
@@ -395,15 +395,16 @@ def print_rating_distribution(metadata):
               f"avg slope: {avg_slope:.3f}, avg rating: {avg_rating:.3f})")
 
 
-def _embeddings_dir():
-    """The embeddings source dir: the joint model, or None if it hasn't been
-    built (the embeddings-absent sentinel — the size's shards are then left
-    frozen at their older rating era). Returns (dir, is_joint) or (None, False).
-    No legacy per-size fallback: a stale embeddings/<size>/ must not silently
-    stand in for the joint fit."""
-    joint_dir = os.path.join(PROJECT_ROOT, "embeddings", "joint")
-    if os.path.exists(os.path.join(joint_dir, "per_problem.csv")):
-        return joint_dir, True
+def _axes_dir():
+    """The skill-axis source dir (axes/, written by pipeline.build_axes), or None
+    if it hasn't been built (the axes-absent sentinel — the size's shards are then
+    left frozen at their older rating era). Returns (dir, is_joint) or (None, False);
+    is_joint is always True for a built fit — the axes are fit jointly across board
+    sizes, and there is deliberately no per-size fallback, so a stale per-size
+    directory cannot silently stand in for the joint fit."""
+    axes_dir = os.path.join(PROJECT_ROOT, "axes")
+    if os.path.exists(os.path.join(axes_dir, "per_problem.csv")):
+        return axes_dir, True
     return None, False
 
 
@@ -411,24 +412,24 @@ def axis_count_to_ship(output_dir):
     """The axis count K this run will publish, and where it came from.
 
     Two sources, in the order the run itself resolves them: a built
-    embeddings/joint/per_problem.csv (a fresh or unchanged axis fit — its
+    axes/per_problem.csv (a fresh or unchanged axis fit — its
     embed_* column count IS K), else the K already stamped in the served
     embedding_meta.json (the embeddings-absent sentinel path, where the shards
     stay frozen and only the curve + constants are republished). Returns
     (K, source_description), or (None, reason) when neither exists — a run that
     process_size will abort on anyway."""
-    embed_dir, _ = _embeddings_dir()
+    embed_dir, _ = _axes_dir()
     if embed_dir is not None:
         header = pd.read_csv(os.path.join(embed_dir, "per_problem.csv"), nrows=0)
         return (sum(1 for c in header.columns if c.startswith("embed_")),
-                "embeddings/joint/per_problem.csv")
+                "axes/per_problem.csv")
     served = os.path.join(output_dir, "tsumegos", "embedding_meta.json")
     if os.path.exists(served):
         with open(served, encoding="utf-8") as f:
             k = json.load(f).get("K")
         if isinstance(k, int) and k > 0:
             return k, "the served embedding_meta.json (shards frozen)"
-    return None, "no embeddings/joint/ and no served embedding_meta.json"
+    return None, "no axes/ and no served embedding_meta.json"
 
 
 def check_axis_prior(output_dir):
@@ -529,16 +530,16 @@ def load_embeddings(board_size, meta_only=False):
                      only when shards are actually being (re)built).
       embedding_meta: dict with K, embedding_version, labels.
                      The PWA only reads version (for cache invalidation) and
-                     labels (for stats display); fields like explained-variance
-                     and extreme_problems are kept locally in embeddings/joint/
-                     as inspection aids and not shipped.
+                     labels (for stats display); the rest of the fit (the
+                     loadings in axes.npz, the per-problem values) stays in
+                     axes/ and is not shipped.
     """
-    embed_dir, is_joint = _embeddings_dir()
+    embed_dir, is_joint = _axes_dir()
     if embed_dir is None:
         # The whole embeddings artifact is missing (build_axes never ran) — a
         # misconfigured run, not a per-problem coverage gap. Abort.
         raise FileNotFoundError(
-            "no embeddings at embeddings/joint/per_problem.csv — run pipeline.build_axes")
+            "no embeddings at axes/per_problem.csv — run pipeline.build_axes")
 
     per_problem = os.path.join(embed_dir, "per_problem.csv")
     # meta_only: read just the header to count K columns, skip the row map.
@@ -565,7 +566,7 @@ def load_embeddings(board_size, meta_only=False):
 
     # SHIP GATE: every axis must have at least one tail named. An unlabeled
     # component means build_axes grew a new axis from fresh data — name it in
-    # embeddings/joint/labels.json (positive and/or negative) before shipping.
+    # axes/labels.json (positive and/or negative) before shipping.
     comps = (labels or {}).get("components", [])
     unlabeled = [i for i, c in enumerate(comps)
                  if not ((c or {}).get("positive") or (c or {}).get("negative"))]
@@ -573,7 +574,7 @@ def load_embeddings(board_size, meta_only=False):
         raise SystemExit(
             f"REFUSING to package: axis labels incomplete "
             f"({len(comps)} components for K={K}; unlabeled axes {unlabeled}). "
-            f"Name at least one tail of each axis in embeddings/joint/labels.json "
+            f"Name at least one tail of each axis in axes/labels.json "
             f"and re-run.")
 
     embedding_meta = {
@@ -599,10 +600,10 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     """Content hash of everything that determines a size's shards (zips + .bin +
     metadata.json). When this is unchanged the shard build can be skipped — the
     expensive SGF reparse + zip/bin emission. Inputs:
-      - tsumego_ratings_final.csv (rating drives grouping + metadata + min/max)
-      - tsumego_quality_final.csv (metadata `quality`)
-      - tsumego_floor_final.csv (metadata `floor`; absent on older backends)
-      - embeddings/joint/per_problem.csv (correct-cell `embedding` in metadata)
+      - tsumego_ratings.csv (rating drives grouping + metadata + min/max)
+      - tsumego_slopes.csv (metadata `slope`)
+      - tsumego_floors.csv (metadata `floor`; absent on older backends)
+      - axes/per_problem.csv (correct-cell `embedding` in metadata)
       - shipped embedding_version (covers per_cell/*.npz content, which is
         regenerated with the embedding refit — those files are tid-named but
         their CONTENTS change on refit, so the version, not the filename set,
@@ -614,10 +615,10 @@ def size_inputs_hash(board_size, reorder_by_sgf):
       - reorder flag + ratings_root (output semantics)."""
     h = hashlib.sha256()
     rdir = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
-    _hash_file_into(h, os.path.join(rdir, "tsumego_ratings_final.csv"))
-    _hash_file_into(h, os.path.join(rdir, "tsumego_quality_final.csv"))
-    _hash_file_into(h, os.path.join(rdir, "tsumego_floor_final.csv"))
-    embed_dir, _ = _embeddings_dir()
+    _hash_file_into(h, os.path.join(rdir, RATINGS_CSV))
+    _hash_file_into(h, os.path.join(rdir, SLOPE_CSV))
+    _hash_file_into(h, os.path.join(rdir, FLOOR_CSV))
+    embed_dir, _ = _axes_dir()
     if embed_dir:
         _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
         h.update((shipped_embedding_version(embed_dir) or "noemb").encode())
@@ -662,13 +663,13 @@ def copy_curve(output_dir):
 def load_rating_artifacts(ratings_dir, ratings_csv):
     """The three raw per-problem rating artifacts package_for_pwa ships into each
     shard's metadata.json — returns (ratings_map, slope_map, floor_map):
-      - ratings_map ← tsumego_ratings_final.csv `rating`: the raw black-box rating
+      - ratings_map ← tsumego_ratings.csv `rating`: the raw black-box rating
         (the client converts it to a rank via the survey-calibrated curve; no rank
         baked in here).
-      - slope_map   ← tsumego_quality_final.csv `quality`: the raw 2PL slope a_p,
+      - slope_map   ← tsumego_slopes.csv `slope`: the raw 2PL slope a_p,
         shipped RAW (the client uses it as the success-curve slope and as the
         selection weight ∝ a_p²).
-      - floor_map   ← tsumego_floor_final.csv `floor`: the raw 3PL guessing floor
+      - floor_map   ← tsumego_floors.csv `floor`: the raw 3PL guessing floor
         c_p (lower asymptote of the per-attempt success curve).
     Uses the shared utils.ratings_io reader, so the shipped floats are
     correctly-rounded and consistent with the rest of the pipeline's loaders.
@@ -677,10 +678,10 @@ def load_rating_artifacts(ratings_dir, ratings_csv):
     anyway, i.e. when a new ratings/SGF set has changed size_inputs_hash.)"""
     ratings_map = load_value_map(ratings_csv, "rating")
 
-    quality_csv = os.path.join(ratings_dir, QUALITY_CSV)
-    if not os.path.exists(quality_csv):
-        raise FileNotFoundError(f"no slopes at {quality_csv} — run train_rating")
-    slope_map = load_value_map(quality_csv, "quality")
+    slope_csv = os.path.join(ratings_dir, SLOPE_CSV)
+    if not os.path.exists(slope_csv):
+        raise FileNotFoundError(f"no slopes at {slope_csv} — run train_rating")
+    slope_map = load_value_map(slope_csv, "slope")
 
     floor_csv = os.path.join(ratings_dir, FLOOR_CSV)
     if not os.path.exists(floor_csv):
@@ -760,7 +761,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # lands in the served pwa/tsumegos/ structure.
     RATINGS_DIR = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     PER_CELL_DIR = os.path.join(
-        PROJECT_ROOT, "embeddings", "joint", "per_cell", str(board_size))
+        PROJECT_ROOT, "axes", "per_cell", str(board_size))
 
     # Every size in ALL_BOARD_SIZES is expected to have a full set of artifacts; a
     # missing one is a misconfigured run, not something to skip past.
@@ -793,13 +794,13 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     # fatal. This also sidesteps size_inputs_hash dropping its embedding terms when
     # embeddings/ is gone, which would otherwise change the hash and force a doomed
     # rebuild instead of the skip the unchanged shards deserve.
-    if _embeddings_dir()[0] is None:
+    if _axes_dir()[0] is None:
         if have_zips:
             print("  embeddings/ absent but shards present — keeping shards, "
                   "embedding_meta and manifest untouched (curve/constants-only run)")
             return None, None, None
         raise FileNotFoundError(
-            f"no embeddings at embeddings/joint/ AND no existing "
+            f"no embeddings at axes/ AND no existing "
             f"shards in {zip_dir} — run pipeline.build_axes first")
 
     if (not force and prev and have_zips
@@ -936,7 +937,7 @@ def emit_correct_embeddings(output_dir):
     with open(lookup_path, "r", encoding="utf-8") as f:
         lookup_ids = [line.split()[0] for line in f if line.strip()]
 
-    per_problem = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
+    per_problem = os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
     df = pd.read_csv(per_problem)
     embed_cols = sorted(
         [c for c in df.columns if c.startswith("embed_")],
@@ -1058,7 +1059,7 @@ if __name__ == "__main__":
     # aligns — keep it rather than emitting a mismatched one.
     print("\n--- correct-move embeddings ---")
     ce_path = os.path.join(OUTPUT_DIR, "tsumegos", "lookup.embeddings.bin")
-    if _embeddings_dir()[0] is None or any_sentinel:
+    if _axes_dir()[0] is None or any_sentinel:
         print("  keeping existing lookup.embeddings.bin (embeddings/ absent or "
               "a size took the sentinel path)"
               if os.path.exists(ce_path) else

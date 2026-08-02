@@ -57,6 +57,7 @@ from pipeline.train_rating import (  # noqa: E402
 )
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 from utils.rating_features import load_first_time_attempts  # noqa: E402
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 from utils.slope_calibration import load_client_lapse  # noqa: E402
 
 RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
@@ -188,9 +189,9 @@ def load_frozen_params():
     out = {}
     for size in ALL_BOARD_SIZES:
         sdir = os.path.join(RATINGS_DIR, str(size))
-        rat = pd.read_csv(os.path.join(sdir, "tsumego_ratings_final.csv"))
-        qual = pd.read_csv(os.path.join(sdir, "tsumego_quality_final.csv"))
-        flo = pd.read_csv(os.path.join(sdir, "tsumego_floor_final.csv"))
+        rat = pd.read_csv(os.path.join(sdir, RATINGS_CSV))
+        qual = pd.read_csv(os.path.join(sdir, SLOPE_CSV))
+        flo = pd.read_csv(os.path.join(sdir, FLOOR_CSV))
         m = rat.merge(qual, on="tsumego_id").merge(flo, on="tsumego_id")
         for tid, r, q, c in zip(m.tsumego_id, m.rating, m.quality, m.floor):
             out[tid] = (float(r), float(q) / s0, float(c) / f0)

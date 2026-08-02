@@ -47,11 +47,13 @@ if PROJECT_ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
+
 # Per-id file artifacts: (relative dir template, extension).
 FILE_ARTIFACTS = [
     ("tsumegos/{size}", ".sgf"),
     ("activations/{size}", ".npz"),
-    ("embeddings/joint/per_cell/{size}", ".npz"),
+    ("axes/per_cell/{size}", ".npz"),
 ]
 
 TMP_SUFFIX = ".surgery-tmp"
@@ -332,7 +334,7 @@ def rewrite_move_evals(size, old_to_final, survivor_old, quarantined, log, apply
 
 
 def rewrite_label_anchors(old_to_final, survivor_old, quarantined, log, apply, root):
-    path = os.path.join(root, "embeddings/joint", "label_anchors.npz")
+    path = os.path.join(root, "axes", "label_anchors.npz")
     if not os.path.exists(path):
         log.hit("label_anchors MISSING")
         return
@@ -440,7 +442,7 @@ def main():
           f"{'APPLY' if args.apply else 'DRY RUN'} on {args.root}")
 
     # Back up the small table artifacts once, before any rewrite.
-    table_files = ([os.path.join(args.root, "embeddings/joint", n)
+    table_files = ([os.path.join(args.root, "axes", n)
                     for n in ("per_problem.csv", "label_anchors.npz")]
                    + [os.path.join(args.root, "activations/_signal_cache", n)
                       for size in sizes
@@ -449,9 +451,7 @@ def main():
                                 f"move_evals_{size}.npz")]
                    + [os.path.join(args.root, "ratings", str(size), n)
                       for size in sizes
-                      for n in ("tsumego_ratings_final.csv",
-                                "tsumego_quality_final.csv",
-                                "tsumego_floor_final.csv")]
+                      for n in (RATINGS_CSV, SLOPE_CSV, FLOOR_CSV)]
                    + [os.path.join(args.root, "attempts", str(size), n)
                       for size in sizes
                       if os.path.isdir(os.path.join(args.root, "attempts", str(size)))
@@ -465,8 +465,7 @@ def main():
     rename_files(entries, args.root, log, args.apply)
 
     for size in sizes:
-        for n in ("tsumego_ratings_final.csv", "tsumego_quality_final.csv",
-                  "tsumego_floor_final.csv"):
+        for n in (RATINGS_CSV, SLOPE_CSV, FLOOR_CSV):
             rewrite_csv(os.path.join(args.root, "ratings", str(size), n),
                         old_to_final, survivor_old, quarantined, log, args.apply)
         rewrite_json_dict(
@@ -479,7 +478,7 @@ def main():
                            args.apply, args.root)
         rewrite_bot_attempts(size, old_to_final, survivor_old, quarantined, log,
                              args.apply, args.root)
-    rewrite_csv(os.path.join(args.root, "embeddings/joint", "per_problem.csv"),
+    rewrite_csv(os.path.join(args.root, "axes", "per_problem.csv"),
                 old_to_final, survivor_old, quarantined, log, args.apply)
     rewrite_label_anchors(old_to_final, survivor_old, quarantined, log, args.apply, args.root)
     delete_joint_pca_caches(log, args.apply, args.root)

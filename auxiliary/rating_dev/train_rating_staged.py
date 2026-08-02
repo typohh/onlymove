@@ -60,9 +60,9 @@ train-logloss table prints under either objective (`--report-bins`) so a DRO and
 bin-for-bin. See auxiliary/train_rating_legacy.py.
 
 Outputs (parallel; nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
-  ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
-  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= raw slope a_p)
-  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= learned c_p)
+  ratings/<size>/tsumego_ratings.csv         tsumego_id, rating   (= 80%-clear rating)
+  ratings/<size>/tsumego_slopes.csv          tsumego_id, slope    (= raw slope a_p)
+  ratings/<size>/tsumego_floors.csv          tsumego_id, floor    (= learned c_p)
   ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
   ratings/rating_constants.json              {"fat_finger_rate": λ}  (the learned ceiling)
   ratings/model.pt                        weights + run metadata
@@ -99,6 +99,7 @@ from auxiliary.rating_dev.model_comparison import (  # noqa: E402
 )
 from utils.rating_features import _cache_ids_path, load_first_time_attempts  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
@@ -1627,11 +1628,11 @@ def main():
                 tids = [keys[i][1] for i in sel]
                 d = os.path.join(sdir0, str(s)); os.makedirs(d, exist_ok=True)
                 pd.DataFrame({"tsumego_id": tids, "rating": rating[sel]}).to_csv(
-                    os.path.join(d, "tsumego_ratings_final.csv"), index=False)
-                pd.DataFrame({"tsumego_id": tids, "quality": a_all[sel]}).to_csv(
-                    os.path.join(d, "tsumego_quality_final.csv"), index=False)
+                    os.path.join(d, RATINGS_CSV), index=False)
+                pd.DataFrame({"tsumego_id": tids, "slope": a_all[sel]}).to_csv(
+                    os.path.join(d, SLOPE_CSV), index=False)
                 pd.DataFrame({"tsumego_id": tids, "floor": c_all[sel]}).to_csv(
-                    os.path.join(d, "tsumego_floor_final.csv"), index=False)
+                    os.path.join(d, FLOOR_CSV), index=False)
             pd.DataFrame({"profile": list(profiles.categories), "theta": theta}).to_csv(
                 os.path.join(sdir0, "user_theta.csv"), index=False)
             with open(os.path.join(sdir0, "rating_constants.json"), "w") as f:
@@ -2425,13 +2426,13 @@ def main():
         os.makedirs(sdir, exist_ok=True)
         pd.DataFrame({"tsumego_id": tids, "rating": rating[sel]}).sort_values(
             "rating", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_ratings_final.csv"), index=False)
-        pd.DataFrame({"tsumego_id": tids, "quality": a[sel]}).sort_values(
-            "quality", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_quality_final.csv"), index=False)
+            os.path.join(sdir, RATINGS_CSV), index=False)
+        pd.DataFrame({"tsumego_id": tids, "slope": a[sel]}).sort_values(
+            "slope", ascending=False).to_csv(
+            os.path.join(sdir, SLOPE_CSV), index=False)
         pd.DataFrame({"tsumego_id": tids, "floor": c[sel]}).sort_values(
             "floor", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_floor_final.csv"), index=False)
+            os.path.join(sdir, FLOOR_CSV), index=False)
         print(f"  size {s}: wrote {len(tids)} ratings | rating "
               f"[{rating[sel].min():.2f},{rating[sel].max():.2f}] slope [{a[sel].min():.2f},"
               f"{a[sel].max():.2f}] | floor mean {c[sel].mean():.3f}")

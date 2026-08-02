@@ -16,9 +16,9 @@ import os
 import numpy as np
 
 # Backend per-size CSVs (written by pipeline.train_rating, keyed by tsumego_id).
-RATINGS_CSV = "tsumego_ratings_final.csv"   # value col 'rating'  — 80%-clear b_p
-QUALITY_CSV = "tsumego_quality_final.csv"   # value col 'quality' — raw 2PL slope a_p
-FLOOR_CSV = "tsumego_floor_final.csv"       # value col 'floor'   — 3PL guessing floor c_p
+RATINGS_CSV = "tsumego_ratings.csv"   # value col 'rating' — 80%-clear b_p
+SLOPE_CSV = "tsumego_slopes.csv"      # value col 'slope'  — 2PL discrimination a_p
+FLOOR_CSV = "tsumego_floors.csv"      # value col 'floor'  — 3PL guessing floor c_p
 
 
 def load_value_map(csv_path, value_col, *, keep=None, missing_ok=False):
@@ -51,12 +51,12 @@ def load_value_map(csv_path, value_col, *, keep=None, missing_ok=False):
 
 def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
     """(ratings, slopes, floors) {tsumego_id: float} maps for one board size from
-    ratings/<size>/ (rating ← tsumego_ratings_final, slope ← tsumego_quality_final's
-    'quality', floor ← tsumego_floor_final's 'floor')."""
+    ratings/<size>/ — each CSV's value column is named for what it holds
+    (tsumego_ratings' 'rating', tsumego_slopes' 'slope', tsumego_floors' 'floor')."""
     sd = os.path.join(ratings_dir, str(size))
     return (
         load_value_map(os.path.join(sd, RATINGS_CSV), "rating", keep=keep, missing_ok=missing_ok),
-        load_value_map(os.path.join(sd, QUALITY_CSV), "quality", keep=keep, missing_ok=missing_ok),
+        load_value_map(os.path.join(sd, SLOPE_CSV), "slope", keep=keep, missing_ok=missing_ok),
         load_value_map(os.path.join(sd, FLOOR_CSV), "floor", keep=keep, missing_ok=missing_ok),
     )
 

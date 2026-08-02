@@ -124,7 +124,7 @@ from utils.fit_rank_curves import (  # noqa: E402
 )
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
 from utils.ratings_io import (  # noqa: E402
-    FLOOR_CSV, QUALITY_CSV, RATINGS_CSV, load_lapse, load_value_map,
+    FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_lapse, load_value_map,
 )
 
 SIZES = list(ALL_BOARD_SIZES)
@@ -159,22 +159,22 @@ WORKING_SET = 3000
 
 
 def load_ratings(ratings_dir, size):
-    """{tsumego_id: rating} from ratings/<size>/tsumego_ratings_final.csv — the 80%-clear
+    """{tsumego_id: rating} from ratings/<size>/tsumego_ratings.csv — the 80%-clear
     black-box scalar package_for_pwa ships."""
     return load_value_map(
         os.path.join(ratings_dir, str(size), RATINGS_CSV), "rating", missing_ok=True)
 
 
 def load_slopes(ratings_dir, size):
-    """{tsumego_id: a_p} from tsumego_quality_final.csv — the raw 2PL discrimination
+    """{tsumego_id: a_p} from tsumego_slopes.csv — the raw 2PL discrimination
     (`quality`). fit_user_rating uses these so the survey 80%-clear ratings anchor M with
     the SAME per-problem slope the client estimator uses."""
     return load_value_map(
-        os.path.join(ratings_dir, str(size), QUALITY_CSV), "quality", missing_ok=True)
+        os.path.join(ratings_dir, str(size), SLOPE_CSV), "slope", missing_ok=True)
 
 
 def load_floors(ratings_dir, size):
-    """{tsumego_id: c_p} from tsumego_floor_final.csv — the per-problem 4PL guessing floor,
+    """{tsumego_id: c_p} from tsumego_floors.csv — the per-problem 4PL guessing floor,
     fed (with the global ceiling λ) through fit_user_rating to match the client's irt.js."""
     return load_value_map(
         os.path.join(ratings_dir, str(size), FLOOR_CSV), "floor", missing_ok=True)

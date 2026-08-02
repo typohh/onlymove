@@ -1,6 +1,6 @@
 # `auxiliary/`
 
-Diagnostics, surgery tools and the rating research package — recurring helpers for debugging the live rank/rating system, inspecting the skill axes, auditing the corpus and repairing the database. They read the artifacts the pipeline produces (`attempts/database.sqlite` / `database.sql`, `ratings/<size>/`, `activations/<size>/`, `embeddings/joint/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML or SQL. Nothing here is part of the in-order pipeline.
+Diagnostics, surgery tools and the rating research package — recurring helpers for debugging the live rank/rating system, inspecting the skill axes, auditing the corpus and repairing the database. They read the artifacts the pipeline produces (`attempts/database.sqlite` / `database.sql`, `ratings/<size>/`, `activations/<size>/`, `axes/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML or SQL. Nothing here is part of the in-order pipeline.
 
 **Import direction.** `pipeline/` and `utils/` never import from here. The genuinely shared helpers — the activation-cache builder and contract, the attempt/survey loaders, the profile/feature builders — live in `utils/rating_features.py` and `utils/rank_surveys.py`, so everything in this directory is a leaf: deletable without touching production code. `rating_dev/` imports `utils/` and its own modules; two top-level scripts import a sibling (`map_rating_to_egf_timed` ← `check_mapped_vs_declared_rank`, `eval_rank_endpoint_bias` ← `recreate_rank_graph`) and `rating_dev/train_residual_axes` imports `eval_score_gap_axis`.
 
@@ -53,9 +53,13 @@ Faithful offline ports of client code, for debugging one account against the loc
 - **`rank_activity_buckets.py`** — recently-active users (24h / 7d) bucketed by rank band × tsumegos-per-day. Writes `rank_activity_buckets.png` (gitignored; `--no-plot` to skip).
 - **`db_stats.py`** — top-line stats from `attempts/database.sql`: totals, recent weekly activity, tenure × activity-rate cohort grid.
 
+## Admin
+
+- **`generate_invite.py`** — mint an EGD-leaderboard invitation: validates an EGD PIN against the European Go Database, inserts the `invitation` row via wrangler, and prints the `/register?t=` link. A non-numeric argument is a name search instead (no DB write). The in-app equivalent is the `GET /invite` page (`pwa/src/handlers/invite-tool.js`). `<EGD_PIN>|<name...> [--local]`. Stdlib only.
+
 ## Skill-axis inspection
 
-- **`rating_dev/inspect_residual_axes.py`** — renders the extreme-loading problems on each production axis, both tails, straight from `embeddings/joint/per_problem.csv`. This is the motif-labeling tool: `build_axes` grows an axis, you eyeball its tails here, name them in `embeddings/joint/labels.json`, re-run `package_for_pwa` (which REFUSES to ship an axis with neither tail labeled). `--per-problem --size --rows --cols --open`.
+- **`rating_dev/inspect_residual_axes.py`** — renders the extreme-loading problems on each production axis, both tails, straight from `axes/per_problem.csv`. This is the motif-labeling tool: `build_axes` grows an axis, you eyeball its tails here, name them in `axes/labels.json`, re-run `package_for_pwa` (which REFUSES to ship an axis with neither tail labeled). `--per-problem --size --rows --cols --open`.
 - **`inspect_axis_inputs.py`** — the other half: which INPUT columns drive an axis and how concentrated that reliance is (participation ratio), each tail decomposed additively, plus correlation against every frozen anchor so a new axis can be placed as a known motif, a near-miss, or genuinely new. `--quick` reads `axes.npz` alone.
 - **`eval_score_gap_axis.py`** — between-user predictive power of the best-vs-second-best score-gap axis (`--feature wr_gap` for the winrate comparator). Also the loader battery `rating_dev/train_residual_axes.py` imports.
 

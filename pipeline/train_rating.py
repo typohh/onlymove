@@ -77,9 +77,9 @@ The global ceiling λ is produced HERE (written to ratings/rating_constants.json
 pipeline.fit_population_constants reads it through.
 
 Outputs (nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
-  ratings/<size>/tsumego_ratings_final.csv   tsumego_id, rating   (= 80%-clear rating)
-  ratings/<size>/tsumego_quality_final.csv   tsumego_id, quality  (= s·a_p, phase-2-calibrated)
-  ratings/<size>/tsumego_floor_final.csv     tsumego_id, floor    (= c_p, NOT scaled — see phase 2)
+  ratings/<size>/tsumego_ratings.csv         tsumego_id, rating   (= 80%-clear rating)
+  ratings/<size>/tsumego_slopes.csv          tsumego_id, slope    (= s·a_p, phase-2-calibrated)
+  ratings/<size>/tsumego_floors.csv          tsumego_id, floor    (= c_p, NOT scaled — see phase 2)
   ratings/user_theta.csv                     profile, theta, n_attempts (for EGF mapping)
   ratings/rating_constants.json              {"fat_finger_rate": λ, "slope_scale": s, ...}
   ratings/model.pt                        weights + run metadata
@@ -108,6 +108,7 @@ from utils.rating_features import (  # noqa: E402
     load_joint_activations, load_joint_bot_winrate, load_joint_game_phase,
     load_joint_move_features,
 )
+from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 from utils.slope_calibration import load_client_lapse  # noqa: E402
 from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
 from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
@@ -489,13 +490,13 @@ def main():
         sdir = os.path.join(OUT_DIR, str(s)); os.makedirs(sdir, exist_ok=True)
         pd.DataFrame({"tsumego_id": tids, "rating": rating[sel]}).sort_values(
             "rating", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_ratings_final.csv"), index=False)
-        pd.DataFrame({"tsumego_id": tids, "quality": a_all[sel]}).sort_values(
-            "quality", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_quality_final.csv"), index=False)
+            os.path.join(sdir, RATINGS_CSV), index=False)
+        pd.DataFrame({"tsumego_id": tids, "slope": a_all[sel]}).sort_values(
+            "slope", ascending=False).to_csv(
+            os.path.join(sdir, SLOPE_CSV), index=False)
         pd.DataFrame({"tsumego_id": tids, "floor": c_all[sel]}).sort_values(
             "floor", ascending=False).to_csv(
-            os.path.join(sdir, "tsumego_floor_final.csv"), index=False)
+            os.path.join(sdir, FLOOR_CSV), index=False)
         print(f"  size {s}: wrote {len(tids)} ratings | rating "
               f"[{rating[sel].min():.2f},{rating[sel].max():.2f}] slope "
               f"[{a_all[sel].min():.2f},{a_all[sel].max():.2f}] | floor mean {c_all[sel].mean():.3f}")

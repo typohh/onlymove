@@ -8,11 +8,11 @@ walk-forward LL gain), then writes the same artifact contract the packaging
 step consumes — so pipeline.package_for_pwa and the PWA client are unchanged
 in format, only K shrinks from 64 to the selected axis count:
 
-  embeddings/joint/per_problem.csv        tsumego_id, size, embed_0..embed_{K-1}
-  embeddings/joint/per_cell/<size>/<tid>.npz   embeddings (n_cells, K) fp16 + xys
-  embeddings/joint/axes.npz               model + content-hash embedding_version
-  embeddings/joint/labels.json            v4 — TWO-TAILED labels (see below)
-  embeddings/joint/label_anchors.npz      frozen per-motif loading anchors
+  axes/per_problem.csv        tsumego_id, size, embed_0..embed_{K-1}
+  axes/per_cell/<size>/<tid>.npz   embeddings (n_cells, K) fp16 + xys
+  axes/axes.npz               model + content-hash embedding_version
+  axes/labels.json            v4 — TWO-TAILED labels (see below)
+  axes/label_anchors.npz      frozen per-motif loading anchors
 
 Per-cell values: the axes are linear in the trainer features and only the
 joint-PCA activation block varies per cell, so a cell's axis value is the
@@ -48,7 +48,7 @@ from utils.rating_features import (  # noqa: E402
     _cache_ids_path, load_joint_activation_basis,
 )
 
-OUT_DIR = os.path.join(PROJECT_ROOT, "embeddings", "joint")
+OUT_DIR = os.path.join(PROJECT_ROOT, "axes")
 ANCHOR_MATCH_MIN = 0.8
 LABELS_SPACE = "residual_axes_v1"
 PER_CELL_WORKERS = os.cpu_count() or 4

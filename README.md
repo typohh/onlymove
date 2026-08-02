@@ -74,7 +74,7 @@ Fits the rating→rank curve and the per-server couplings against the rank surve
 ```
 
 ### 9. Build axes
-Fits the supervised residual skill axes (the motifs) into `embeddings/joint/`, selecting the axis count from held-out gain. Consumes the rating outputs and the rank curve, so it follows both preceding steps.
+Fits the supervised residual skill axes (the motifs) into `axes/`, selecting the axis count from held-out gain. Consumes the rating outputs and the rank curve, so it follows both preceding steps.
 ```bash
 ./.venv/bin/python3 -m pipeline.build_axes
 ```

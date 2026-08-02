@@ -55,7 +55,7 @@ from utils.rating_features import CACHE_DIR  # noqa: E402
 
 def load_per_problem_csv(path):
     """Production-axes mode: components straight from pipeline.build_axes'
-    embeddings/joint/per_problem.csv (one fit, canonical orientation — the
+    axes/per_problem.csv (one fit, canonical orientation — the
     shipped loadings, exactly what labels.json names)."""
     import csv as _csv
     tids, rows = [], []
@@ -246,7 +246,7 @@ def main():
     parser.add_argument("--npz", default=None,
                         help="explicit path to a residual_axes_*.npz (overrides --k/--seed)")
     parser.add_argument("--per-problem", nargs="?", default=None,
-                        const=os.path.join(PROJECT_ROOT, "embeddings", "joint",
+                        const=os.path.join(PROJECT_ROOT, "axes",
                                            "per_problem.csv"),
                         help="PRODUCTION mode: render the shipped axes from "
                              "pipeline.build_axes' per_problem.csv (default "

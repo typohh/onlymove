@@ -54,10 +54,10 @@ Four groups of constants:
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
 
-Needs the backend ratings/<size>/ 3PL params (tsumego_ratings_final.csv,
-tsumego_quality_final.csv, tsumego_floor_final.csv — written by train_rating)
+Needs the backend ratings/<size>/ 3PL params (tsumego_ratings.csv,
+tsumego_slopes.csv, tsumego_floors.csv — written by train_rating)
 ratings/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
-embeddings/joint/per_problem.csv (the weakness ridge's correct-move embeddings),
+axes/per_problem.csv (the weakness ridge's correct-move embeddings),
 and attempts/database.sqlite. It reads the backend directly, NOT the served
 pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
 upstream of it depends on the dist artifacts. No GPU, not part of the in-order
@@ -125,7 +125,7 @@ MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
 # The per-axis L2 precision on the client's weakness betas is fit by empirical
 # Bayes (group 4 / fit_weakness_axis_priors). These are the shared inputs.
 # Board-independent (9x9+13x13 pooled), the embedding axes being joint.
-WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "embeddings", "joint", "per_problem.csv")
+WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
 
 
 def _weakness_k_embed():
@@ -194,8 +194,8 @@ def load_rows(db_path):
 def load_problem_params(ratings_dir, needed):
     """{(size, tid): (rating, slope, floor)} from the backend ratings/<size>/
     CSVs — the SAME source package_for_pwa ships into the shard metadata
-    (rating ← tsumego_ratings_final, slope ← tsumego_quality_final's `quality`,
-    floor ← tsumego_floor_final). Reading the backend directly keeps the pipeline
+    (rating ← tsumego_ratings.csv, slope ← tsumego_slopes.csv, floor ←
+    tsumego_floors.csv). Reading the backend directly keeps the pipeline
     from depending on the served pwa/tsumegos/ artifacts (package_for_pwa is the
     sole bridge into pwa/)."""
     params = {}
@@ -528,7 +528,7 @@ def fit_first_success_step(events):
 # ---------------------------------------------------------------------------
 def load_problem_embeddings(needed):
     """{(size, tid): np.ndarray(K)} correct-move joint-ICA embedding from
-    embeddings/joint/per_problem.csv, restricted to the attempted problems.
+    axes/per_problem.csv, restricted to the attempted problems.
     Empty if the CSV is absent — the per-axis fit then raises (no fallback)."""
     if not os.path.exists(WEAKNESS_EMBED_CSV):
         return {}

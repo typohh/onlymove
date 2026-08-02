@@ -54,7 +54,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-EMBED_DIR = os.path.join(PROJECT_ROOT, "embeddings", "joint")
+EMBED_DIR = os.path.join(PROJECT_ROOT, "axes")
 N_ALT_SLOTS = 10                      # winning move + 9 alternatives
 MOVE_COLS_PER_SLOT = 2                # (logit win-prob, score)
 
