@@ -2,6 +2,8 @@
 
 This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, rates each by difficulty using a model trained on human attempts (with bot benchmarks and KataGo neural-network features as inputs), and serves the result through a PWA at [onlymove.net](https://onlymove.net). Both 9×9 and 13×13 are supported.
 
+Each problem has exactly one correct first move. From the attempt log the pipeline fits three things per problem — a **rating** (with a discrimination slope and a guessing floor), the **rank** that rating maps to on the kyu/dan ladder, and a **motif** vector describing what kind of skill the problem exercises — and publishes them as raw numbers. Everything the player sees (their live rank, which problem comes next, the spaced-repetition schedule, the weakness readouts) is computed on their own device from those numbers.
+
 ## Project structure
 
 - **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
@@ -9,9 +11,11 @@ This project generates Go (Baduk / Weiqi) life-and-death problems with KataGo, r
 - **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
+- **`android/`** — the Bubblewrap TWA shell that wraps the PWA for the Play Store.
+- **`docs/`** — methodology and operational runbooks.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
-For deeper architecture, `CLAUDE.md` documents the subsystems and cross-file invariants, and `pwa/README.md` covers the front-end.
+Three documents go deeper: **`docs/onlymove.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
 
 ## Board size
 
@@ -22,7 +26,7 @@ Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/c
 Run each step through the venv's Python so imports resolve.
 
 ### 1. Fetch database
-Pulls the latest tsumego attempts and rank surveys from Cloudflare D1 into `attempts/`.
+Pulls the human attempt log and the rank surveys from Cloudflare D1 into `attempts/database.{sqlite,sql}`, and resets the local wrangler D1 to match. Incremental by default (new `tsumego_reports` rows only, by row id); `--full` forces a complete re-download. Stop `npm run dev` before running it.
 ```bash
 ./.venv/bin/python3 -m pipeline.fetch_database
 ```
@@ -46,7 +50,7 @@ Runs a stable of bots against the generated tsumegos to collect performance data
 ```
 
 ### 5. Extract activations
-Captures KataGo trunk activations per problem into `activations/<size>/` (GPU; resumable). Feeds both the rating model and the embedding recommender.
+Captures KataGo trunk activations at every legal cell into `activations/<size>/<id>.npz` (GPU; resumable). Feeds both the rating features and the motif axes.
 ```bash
 ./.venv/bin/python3 -m pipeline.extract_activations
 ```
@@ -58,44 +62,49 @@ Builds the candidate-move-eval cache the rating trainer reads.
 ```
 
 ### 7. Train rating
-Fits the cross-board rating model on human attempts (using activation, bot-winrate, and move-eval features) into `ratings/<size>/`.
+Fits the cross-board rating model on human first-time attempts (activation, bot-winrate, move-eval and game-phase features) into `ratings/<size>/`. Takes no arguments — the shipped configuration is baked in; the experiment surface lives in `auxiliary/rating_dev/`.
 ```bash
 ./.venv/bin/python3 -m pipeline.train_rating
 ```
 
-### 8. Build embedding
-Fits the joint embedding over activations for the per-component weakness recommender into `embeddings/`.
+### 8. Map rating to rank
+Fits the rating→rank curve and the per-server couplings against the rank surveys, into `ratings/rating_to_rank.json` and `ratings/rank_map.json`. Board-independent and needs no GPU, but it sits *inside* the sequence: the axes step reads the curve.
 ```bash
-./.venv/bin/python3 -m pipeline.build_embedding
+./.venv/bin/python3 -m pipeline.map_rating_to_rank
 ```
 
-### 9. Package for PWA
-The single writer of `pwa/tsumegos/`: bundles tsumegos, ratings, and embeddings into the ZIP archives the web app serves.
+### 9. Build axes
+Fits the supervised residual skill axes (the motifs) into `embeddings/joint/`, selecting the axis count from held-out gain. Consumes the rating outputs and the rank curve, so it follows both preceding steps.
+```bash
+./.venv/bin/python3 -m pipeline.build_axes
+```
+
+### 10. Fit population constants
+Fits the retention and time-bias constants and the per-axis weakness prior into `ratings/population_constants.json`. It fits one prior entry per axis, so it must follow `build_axes` — packaging refuses to run on a stale prior vector.
+```bash
+./.venv/bin/python3 -m pipeline.fit_population_constants
+```
+
+### 11. Package for PWA
+The single writer of `pwa/tsumegos/`: bundles tsumegos, ratings, motifs and the curve into the archives and sidecars the web app serves. Change-detects per size, so a curve-only or labels-only change publishes without rebuilding shards.
 ```bash
 ./.venv/bin/python3 -m pipeline.package_for_pwa
 ```
 
-### Rank calibration (board-independent)
-
-These two steps are board-independent and run outside the in-order pipeline. They need `ratings/` and the `attempts/` database (no GPU), and write only to the backend `ratings/`; `package_for_pwa` then publishes their outputs into `pwa/tsumegos/`.
-
-```bash
-./.venv/bin/python3 -m pipeline.map_rating_to_egf          # survey-anchored rating→rank curve
-./.venv/bin/python3 -m pipeline.fit_population_constants   # retention / time-bias / weakness-ridge constants
-```
+Steps 7–11 are ordered by hard data dependencies rather than convention; `docs/onlymove.md` §3.1 spells out each edge and what breaks if it is skipped.
 
 ### Remote execution
 
 The heavy generation steps can run on a rented Vast.ai GPU:
 
 ```bash
-python vast_orchestration.py                  # no args prints subcommands
+python vast_orchestration.py                    # no args prints subcommands
 python vast_orchestration.py run <step> <size>  # tune / generate / benchmark are remoted (size forwarded); the rest stay local
 ```
 
 ## PWA
 
-The web app lives in `pwa/` and is deployed as a Cloudflare Worker (with a D1 database for attempt logging). See `pwa/README.md` for the front-end architecture.
+The web app lives in `pwa/` and is deployed as a Cloudflare Worker (with a D1 database for attempt logging, account sync, and the leaderboard). See `pwa/README.md` for the front-end and Worker architecture.
 
 ### Build
 
@@ -108,10 +117,10 @@ npm run build       # esbuild → pwa/dist/
 ### Local dev
 
 ```bash
-npm run dev         # build + wrangler dev → http://localhost:8787
+npm run dev         # watch build + wrangler dev → http://localhost:8787
 ```
 
-Local testing must go through `npm run dev`: the Worker runs the `/report` endpoint and the SPA fallback (URL-based size hints), so opening the static bundle alone will misbehave.
+Local testing must go through `npm run dev`: the Worker runs the write endpoints and the SPA fallback (URL-based size hints), so opening the static bundle alone will misbehave.
 
 ### Deploy
 
