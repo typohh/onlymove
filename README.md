@@ -13,6 +13,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
 - **`android/`** — the Bubblewrap TWA shell that wraps the PWA for the Play Store.
 - **`docs/`** — methodology and operational runbooks.
+- **`db/`** — the local snapshot of the production Cloudflare D1 (`d1.sqlite`, plus the `d1.sql` text dump beside it), pulled by `pipeline.fetch_database`. Gitignored and regenerable; query `d1.sqlite` for any local analysis. Distinct from `attempts/<size>/`, which holds the *tracked* bot benchmark results that feed the rating model.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
 Three documents go deeper: **`docs/onlymove.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
@@ -26,7 +27,7 @@ Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/c
 Run each step through the venv's Python so imports resolve.
 
 ### 1. Fetch database
-Pulls the human attempt log and the rank surveys from Cloudflare D1 into `attempts/database.{sqlite,sql}`, and resets the local wrangler D1 to match. Incremental by default (new `tsumego_reports` rows only, by row id); `--full` forces a complete re-download. Stop `npm run dev` before running it.
+Pulls the human attempt log and the rank surveys from Cloudflare D1 into `db/d1.{sqlite,sql}`, and resets the local wrangler D1 to match. Incremental by default (new `tsumego_reports` rows only, by row id); `--full` forces a complete re-download. Stop `npm run dev` before running it.
 ```bash
 ./.venv/bin/python3 -m pipeline.fetch_database
 ```

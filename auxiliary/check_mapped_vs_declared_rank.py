@@ -49,7 +49,7 @@ head-to-head — that measures self-report bias with our estimate out of the loo
 entirely.
 
 Inputs (run `pipeline.fetch_database` first to refresh the dump):
-  attempts/database.sql                         rank_surveys + tsumego_reports
+  db/d1.sql                         rank_surveys + tsumego_reports
   ratings/<size>/tsumego_ratings.csv   b_p (shipped rating)
   ratings/<size>/tsumego_slopes.csv    a_p (shipped slope)
   ratings/rating_to_rank.json                M  (shared rating→rank curve)
@@ -81,6 +81,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, VERIFIED_SERVERS, is_verified_active,
     latest_per_user_server, load_attempts_for_users, load_rank_surveys,
@@ -458,7 +459,7 @@ def main():
                          "leaking a uniform bias). Keeps the within-cohort precision "
                          "gain, drops the mean shift.")
     ap.add_argument("--sqlite",
-                    default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"),
+                    default=DB_SQLITE,
                     help="SQLite DB for per-user median solve time (--time-adjust).")
     args = ap.parse_args()
 

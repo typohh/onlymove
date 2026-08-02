@@ -1,6 +1,6 @@
 # `auxiliary/`
 
-Diagnostics, surgery tools and the rating research package — recurring helpers for debugging the live rank/rating system, inspecting the skill axes, auditing the corpus and repairing the database. They read the artifacts the pipeline produces (`attempts/database.sqlite` / `database.sql`, `ratings/<size>/`, `activations/<size>/`, `axes/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML or SQL. Nothing here is part of the in-order pipeline.
+Diagnostics, surgery tools and the rating research package — recurring helpers for debugging the live rank/rating system, inspecting the skill axes, auditing the corpus and repairing the database. They read the artifacts the pipeline produces (`db/d1.sqlite` / `d1.sql`, `ratings/<size>/`, `activations/<size>/`, `axes/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML or SQL. Nothing here is part of the in-order pipeline.
 
 **Import direction.** `pipeline/` and `utils/` never import from here. The genuinely shared helpers — the activation-cache builder and contract, the attempt/survey loaders, the profile/feature builders — live in `utils/rating/features.py` and `utils/rating/rank_surveys.py`, so everything in this directory is a leaf: deletable without touching production code. `rating_dev/` imports `utils/` and its own modules; two top-level scripts import a sibling (`map_rating_to_egf_timed` ← `check_mapped_vs_declared_rank`, `eval_rank_endpoint_bias` ← `recreate_rank_graph`) and `rating_dev/train_residual_axes` imports `eval_score_gap_axis`.
 
@@ -51,7 +51,7 @@ Faithful offline ports of client code, for debugging one account against the loc
 
 - **`leaderboard_player_stats.mjs`** — per-player report over the leaderboard: novel attempt counts per board, median solve time, attempts/day, and the onlymove estimate against the verified EGF/AGA rating, with a summary correlation. `--with-unlinked`.
 - **`rank_activity_buckets.py`** — recently-active users (24h / 7d) bucketed by rank band × tsumegos-per-day. Writes `rank_activity_buckets.png` (gitignored; `--no-plot` to skip).
-- **`db_stats.py`** — top-line stats from `attempts/database.sql`: totals, recent weekly activity, tenure × activity-rate cohort grid.
+- **`db_stats.py`** — top-line stats from `db/d1.sql`: totals, recent weekly activity, tenure × activity-rate cohort grid.
 
 ## Admin
 

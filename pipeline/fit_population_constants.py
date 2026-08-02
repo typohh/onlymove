@@ -58,13 +58,13 @@ Needs the backend ratings/<size>/ 3PL params (tsumego_ratings.csv,
 tsumego_slopes.csv, tsumego_floors.csv — written by train_rating)
 ratings/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
 axes/per_problem.csv (the weakness ridge's correct-move embeddings),
-and attempts/database.sqlite. It reads the backend directly, NOT the served
+and db/d1.sqlite. It reads the backend directly, NOT the served
 pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
 upstream of it depends on the dist artifacts. No GPU, not part of the in-order
 pipeline.
 
 Run:
-  ./.venv/bin/python3 -m pipeline.fetch_database          # refresh attempts/database.sqlite
+  ./.venv/bin/python3 -m pipeline.fetch_database          # refresh db/d1.sqlite
   ./.venv/bin/python3 -m pipeline.fit_population_constants # reads ratings/
   ./.venv/bin/python3 -m pipeline.package_for_pwa          # publishes the JSON
 """
@@ -88,6 +88,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import CALIBRATION_P, interp_extrap_vec  # noqa: E402
 from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 
@@ -718,7 +719,7 @@ def _resort_to_default(field, reason, allow):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+    ap.add_argument("--db", default=DB_SQLITE)
     ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "ratings", "population_constants.json"))
     ap.add_argument("--allow-defaults", action="store_true",

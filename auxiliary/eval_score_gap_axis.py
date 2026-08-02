@@ -57,7 +57,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-DB_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 WINDOW = 500
@@ -68,10 +67,13 @@ WARMUP = 120
 # The feature/cache implementations live in utils.rating.features (the production
 # data-source home shared with pipeline.train_rating and auxiliary.rating_dev.*)
 # — this script keeps thin aliases so its CLI and importers are unchanged.
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.features import (  # noqa: E402
     load_backend_problem_params, load_backend_rank_curve,
     load_game_phase, load_tightness_gaps, zscore_neglog,
 )
+
+DB_PATH = DB_SQLITE
 
 load_feature = load_tightness_gaps
 

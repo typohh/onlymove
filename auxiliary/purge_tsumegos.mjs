@@ -5,7 +5,7 @@
 // Worker's exact rowHash from pwa/shared/sync-digest.js so the repaired digest
 // chains are byte-identical to what the live INSERT computes.
 //
-//   node auxiliary/purge_tsumegos.mjs --db attempts/database.sqlite \
+//   node auxiliary/purge_tsumegos.mjs --db db/d1.sqlite \
 //        --ids data/tsumego_audit/bad_terminal_results.txt \
 //        [--apply] [--emit-sql surgery/purge.sql] [--emit-corpus-map surgery/purge_map.json]
 //

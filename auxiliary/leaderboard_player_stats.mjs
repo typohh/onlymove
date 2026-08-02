@@ -39,7 +39,7 @@
 // survey declarations are NOT read — they are calibration input, not ground truth
 // about a player's federation rating.
 //
-// Data source: attempts/database.sqlite (the local D1 mirror) + the current local
+// Data source: db/d1.sqlite (the local D1 mirror) + the current local
 // pwa/tsumegos/{problem_params.bin, rating_to_rank.json, rank_map.json,
 // population_constants.json}. Run `./.venv/bin/python3 -m pipeline.fetch_database`
 // first so the leaderboard rows + tsumego_reports are fresh.
@@ -57,7 +57,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PWA_DIR = path.join(REPO, 'pwa');
-const DB_PATH = path.join(REPO, 'attempts', 'database.sqlite');
+const DB_PATH = path.join(REPO, 'db', 'd1.sqlite');
 const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const STALE_WARN_MS = 6 * 3600 * 1000;
 
@@ -73,7 +73,7 @@ Usage: node auxiliary/leaderboard_player_stats.mjs [options]
   --json            machine-readable JSON: { correlations, players }
   --help, -h        show this message
 
-Reads attempts/database.sqlite and the local pwa/tsumegos/ data files; run
+Reads db/d1.sqlite and the local pwa/tsumegos/ data files; run
 \`./.venv/bin/python3 -m pipeline.fetch_database\` first for fresh numbers.`;
 
 const args = process.argv.slice(2);

@@ -25,7 +25,9 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
+
+from utils.paths import DB_SQLITE
+DB_PATH = DB_SQLITE
 RATING_TO_RANK = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
 RATINGS_CSV = os.path.join(PROJECT_ROOT, "ratings", "{size}", "tsumego_ratings.csv")
 

@@ -57,7 +57,7 @@ models/
 # Bot executables and their weight blobs: build artifacts of upstream projects,
 # not authored content, and katago_cuda sat within 1 MiB of GitHub's 100 MiB
 # hard per-blob limit. Fetch/build them yourself; KATAGO_PATH (utils/
-# katago_controller.py) points at bots/katago by default. analysis.cfg stays
+# katago/controller.py) points at bots/katago by default. analysis.cfg stays
 # TRACKED — pipeline.tune_engine rewrites it in place per GPU, so it is state,
 # not an artifact.
 /bots/*
@@ -91,16 +91,17 @@ axes/per_cell/
 # each motif's first appearance, so a refit cannot reproduce them).
 axes/per_problem.csv
 
-# D1 attempts dump: a large (~50 MB) snapshot pulled from production by
-# pipeline.fetch_database. Regenerable on demand and changes constantly, so it's
-# not version-controlled (the benchmark attempts under attempts/<size>/ are).
-# database.sqlite is the same data imported into a binary SQLite file (for fast
-# local analysis without re-importing the .sql each session); also regenerable.
-/attempts/database.sql
-/attempts/database.sqlite
+# Local snapshot of the REMOTE production D1: a large (~50 MB) dump pulled by
+# pipeline.fetch_database. Regenerable on demand and changes constantly, so it is
+# not version-controlled. d1.sqlite is the canonical binary (query this one);
+# d1.sql is the text dump regenerated from it. It sat under attempts/ until
+# 2026-08-03, next to the TRACKED per-size bot benchmark results — those are a
+# pipeline input and stay in attempts/<size>/.
+/db/d1.sql
+/db/d1.sqlite
 # Timestamped pre-change backups of the production DB (manual `cp` snapshots);
 # local insurance only, never committed.
-/attempts/database.backup-*.sqlite
+/db/d1.backup-*.sqlite
 
 # Rating pipeline output (pipeline.train_rating / map_rating_to_egf): regenerable,
 # and model.pt is a multi-MB binary. The training code is tracked; its outputs

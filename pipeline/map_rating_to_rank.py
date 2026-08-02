@@ -94,7 +94,7 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     the freedom. The data-rich servers set the scale, which lands ≈ EGF, so the headline
     barely moves from the previous EGF-anchored rank.
 
-Run pipeline.fetch_database first to refresh attempts/database.{sql,sqlite} (the survey +
+Run pipeline.fetch_database first to refresh db/d1.{sql,sqlite} (the survey +
 attempts source); this step then needs neither GPU nor the heavy pipeline. Then publish
 with pipeline.package_for_pwa.
 """
@@ -114,6 +114,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, rank_band, value_to_rank,
 )
@@ -401,7 +402,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
-    ap.add_argument("--sqlite", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+    ap.add_argument("--sqlite", default=DB_SQLITE)
     args = ap.parse_args()
 
     print(f"Reading {args.sql} ...")

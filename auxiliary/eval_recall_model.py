@@ -90,6 +90,8 @@ import numpy as np
 from scipy.optimize import minimize
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from utils.paths import DB_SQLITE
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -1202,7 +1204,7 @@ def report_serves_per_entry(rows, events, params, abilities, x0, min_n,
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--db", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+    ap.add_argument("--db", default=DB_SQLITE)
     ap.add_argument("--ratings-dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--constants", default=os.path.join(PROJECT_ROOT, "ratings",
                                                         "population_constants.json"))

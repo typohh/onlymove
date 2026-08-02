@@ -39,7 +39,7 @@ local-linear endpoint, and the live front-page window MLE (estimateWindowRank).
 The chart endpoint and the headline rank disagree today; the fix should pull the
 chart endpoint TOWARD the window MLE.
 
-Reads the local DB (attempts/database.sqlite). No network.
+Reads the local DB (db/d1.sqlite). No network.
 
 --users is mandatory: pass a comma list of user ids to evaluate, picked from the
 local DB (data-rich accounts make the endpoint comparison meaningful).

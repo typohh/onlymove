@@ -14,7 +14,7 @@ It reproduces the SAME two steps the production client does on the front page:
      (`ratings/rating_to_rank.json`, the M the client interpolates), reported
      as a rank (0 = the 1k/1d boundary) and a label.
 
-It reads the LOCAL DB copy (`attempts/database.sqlite` by default — the binary is
+It reads the LOCAL DB copy (`db/d1.sqlite` by default — the binary is
 far faster than re-parsing the .sql dump; see CLAUDE.md) and the backend
 `ratings/` artifacts. No network, no GPU.
 
@@ -36,6 +36,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
@@ -46,7 +47,7 @@ from utils.rating.ratings_io import (  # noqa: E402
 from utils.rating.rank_surveys import value_to_rank  # noqa: E402
 
 SIZES = [9, 13]
-DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
+DB_DEFAULT = DB_SQLITE
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 
 

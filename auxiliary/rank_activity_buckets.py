@@ -1,6 +1,6 @@
 """Bucket recently-active users by estimated rank and tsumegos-per-day.
 
-Reads the local D1 dump at attempts/database.sql (from pipeline.fetch_database)
+Reads the local D1 dump at db/d1.sql (from pipeline.fetch_database)
 and, for the last 24h and last 7d, reports who is playing and how much, split by
 rank. The DB stores no rank, so we proxy each user's rank by the median internal
 rank of the problems they were served (the PWA serves problems near the user's
@@ -37,9 +37,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQL  # noqa: E402
 from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
 
-SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
+SQL_PATH = DB_SQL
 TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "pwa", "tsumegos")
 
 # Internal rank index ri = floor(applyM(rating)); getDescriptiveRank maps

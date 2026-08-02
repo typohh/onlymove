@@ -591,7 +591,7 @@ pipeline.generate_tsumegos <size>      → tsumegos/<size>/*.sgf
 pipeline.benchmark_bots <size>         → attempts/<size>/*.txt
 pipeline.extract_activations           → activations/<size>/<id>.npz
 pipeline.cache_move_features           → activations/_signal_cache/move_evals_<size>.npz
-pipeline.fetch_database                → attempts/database.{sqlite,sql}   (attempt log + surveys)
+pipeline.fetch_database                → db/d1.{sqlite,sql}   (attempt log + surveys)
 pipeline.train_rating                  → ratings/
 pipeline.map_rating_to_rank            → ratings/rating_to_rank.json, ratings/rank_map.json
 pipeline.build_axes                    → axes/

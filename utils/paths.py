@@ -15,3 +15,16 @@ so any dependency in the other direction would close a cycle).
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# The local snapshot of the REMOTE production D1, written by
+# pipeline.fetch_database: db/d1.sqlite is the canonical binary (query this), and
+# db/d1.sql the regenerated text dump beside it. Not to be confused with the
+# wrangler DEV database under .wrangler/, which fetch_database resets from this one.
+#
+# It lived at attempts/database.{sqlite,sql} until 2026-08-03, where it shared a
+# directory with the tracked per-size bot benchmark results — a pipeline input,
+# whereas this is a ~50 MB gitignored snapshot of real user data. Fifteen modules
+# each rebuilt the literal; they read it from here now.
+DB_DIR = os.path.join(PROJECT_ROOT, "db")
+DB_SQLITE = os.path.join(DB_DIR, "d1.sqlite")
+DB_SQL = os.path.join(DB_DIR, "d1.sql")

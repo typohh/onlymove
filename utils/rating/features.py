@@ -25,10 +25,10 @@ import pandas as pd
 
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
-from utils.paths import PROJECT_ROOT
+from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT
 
-SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
-SQLITE_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
+SQL_PATH = DB_SQL
+SQLITE_PATH = DB_SQLITE
 
 # Raw KataGo trunk activation layout (18 residual blocks × 384 channels), captured at
 # the correct move by pipeline.extract_activations. Feature index = layer*384 + channel.
@@ -234,7 +234,7 @@ def load_first_time_attempts():
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
     columns [user_id, problem, success, size, created_at].
 
-    Reads the canonical binary attempts/database.sqlite directly (opened
+    Reads the canonical binary db/d1.sqlite directly (opened
     read-only) instead of replaying the ~290k-INSERT text dump into an in-memory
     DB on every call: fetch_database keeps the two artifacts in sync and treats
     the binary as the merge target, so this is the cheaper, equivalent source."""

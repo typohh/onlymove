@@ -18,19 +18,16 @@ RETRY_BACKOFFS = [3, 15]  # seconds between attempts; len == number of retries
 # the other tables are tolerated automatically.
 INCREMENTAL_TABLE = "tsumego_reports"
 
+from utils.paths import DB_DIR, DB_SQL, DB_SQLITE, PROJECT_ROOT
+
 # Page size for the remote SELECTs (keeps any single wrangler response bounded).
 FETCH_PAGE = 50000
 
 
 def _paths():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    pwa_dir = os.path.join(project_root, "pwa")
-    attempts_dir = os.path.join(project_root, "attempts")
-    sql_file = os.path.join(attempts_dir, "database.sql")
-    sqlite_file = os.path.splitext(sql_file)[0] + ".sqlite"
-    os.makedirs(attempts_dir, exist_ok=True)
-    return project_root, pwa_dir, attempts_dir, sql_file, sqlite_file
+    pwa_dir = os.path.join(PROJECT_ROOT, "pwa")
+    os.makedirs(DB_DIR, exist_ok=True)
+    return PROJECT_ROOT, pwa_dir, DB_DIR, DB_SQL, DB_SQLITE
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +231,7 @@ def _row_insert_lines(con, table, where=""):
 
 
 def emit_dump(con, sql_file):
-    """Regenerate attempts/database.sql from the canonical local SQLite so the
+    """Regenerate db/d1.sql from the canonical local SQLite so the
     many text-parsing consumers stay in sync with database.sqlite."""
     objs = con.execute(
         "SELECT type, name, tbl_name, sql FROM sqlite_master "
@@ -259,7 +256,7 @@ def emit_dump(con, sql_file):
 def incremental_fetch(do_local_d1=True):
     """Default path: append only new `tsumego_reports` rows (by AUTOINCREMENT
     id) and re-fetch every other table whole, merging into the canonical
-    attempts/database.sqlite, then regenerate attempts/database.sql and sync the
+    db/d1.sqlite, then regenerate db/d1.sql and sync the
     wrangler dev (local) D1.
 
     Falls back to a full fetch if there is no local SQLite baseline yet.
@@ -343,8 +340,8 @@ def _full_fetch(do_local_d1):
 
 def rebuild_sqlite(sql_file):
     """
-    Reconstruct the local binary SQLite DB (attempts/database.sqlite) from the
-    raw D1 dump (attempts/database.sql).
+    Reconstruct the local binary SQLite DB (db/d1.sqlite) from the
+    raw D1 dump (db/d1.sql).
 
     The dump is removed-and-rebuilt rather than re-imported: D1 emits plain
     `INSERT`s with no conflict handling, so importing into an existing DB would
@@ -486,7 +483,7 @@ def _miniflare_d1_file(pwa_dir):
 
 
 def sync_local_d1(sqlite_file, sql_file, pwa_dir):
-    """Mirror the canonical attempts/database.sqlite into wrangler's dev (local)
+    """Mirror the canonical db/d1.sqlite into wrangler's dev (local)
     D1 by copying the file directly onto the miniflare D1 SQLite — far faster
     than a wrangler reimport (verified: D1 reads/writes work fine afterwards;
     its internal `_cf_*` tables aren't required). The stale -wal/-shm sidecars
@@ -517,7 +514,7 @@ def sync_local_d1(sqlite_file, sql_file, pwa_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch the D1 database into attempts/database.{sql,sqlite} and "
+        description="Fetch the D1 database into db/d1.{sql,sqlite} and "
                     "mirror it into wrangler's local dev D1. By default only NEW "
                     "tsumego_reports rows are pulled (by AUTOINCREMENT id) and the "
                     "other (small) tables are re-fetched whole — far fewer D1 rows "

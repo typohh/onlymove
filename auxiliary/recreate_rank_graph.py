@@ -47,7 +47,7 @@ near filter |slope·(S0−x)| ≤ logit(0.95)−logit(0.8) ≈ 1.56. The wide ke
 smooth at daily scale, so S0/S are evaluated on a daily grid (vectorised numpy)
 and interpolated to attempt times — precisely how the chart polyline is drawn.
 
-Reads the LOCAL DB copy (`attempts/database.sqlite`; see CLAUDE.md). No network.
+Reads the LOCAL DB copy (`db/d1.sqlite`; see CLAUDE.md). No network.
 
 Usage (the user id is positional and mandatory; pick one from the local DB):
   ./.venv/bin/python3 -m auxiliary.recreate_rank_graph <id>
@@ -70,6 +70,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
 from utils.rating.ratings_io import load_size_value_maps  # noqa: E402
 
@@ -107,7 +108,7 @@ TIME_ADJUST_TAU_MS = 30 * DAY_MS
 TIME_ADJUST_SHRINK_ESS = 8
 
 ONLYMOVE = "OnlyMove"
-DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")
+DB_DEFAULT = DB_SQLITE
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 POP_DEFAULT = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "population_constants.json")
 

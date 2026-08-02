@@ -16,9 +16,9 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-from utils.paths import PROJECT_ROOT
+from utils.paths import DB_SQL, PROJECT_ROOT
 
-SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
+SQL_PATH_DEFAULT = DB_SQL
 
 # The servers a user can declare a rank on. Under the consensus mapping
 # (map_rating_to_rank) EGF is NOT special — it's a free coupling like every

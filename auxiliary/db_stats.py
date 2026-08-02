@@ -1,4 +1,4 @@
-"""Print summary statistics from the local D1 dump at attempts/database.sql.
+"""Print summary statistics from the local D1 dump at db/d1.sql.
 
 Loads the wrangler-exported SQL into an in-memory SQLite, then renders:
   - Totals.
@@ -18,7 +18,9 @@ from datetime import datetime
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
+
+from utils.paths import DB_SQL
+SQL_PATH = DB_SQL
 
 # Right-exclusive ranges: low <= value < high.
 TENURE_BUCKETS = [

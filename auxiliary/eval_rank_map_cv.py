@@ -73,6 +73,7 @@ from pipeline.map_rating_to_rank import (  # noqa: E402
     _curve_arrays, fit_consensus,
     load_floors, load_ratings, load_slopes, load_user_median_solve_minutes,
 )
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, FLOOR_MAX, LOGIT_PER_RATING, fit_user_rating,
     interp_extrap_vec, _unpack_thresholds,
@@ -340,7 +341,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
-    ap.add_argument("--sqlite", default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+    ap.add_argument("--sqlite", default=DB_SQLITE)
     ap.add_argument("--reps", type=int, default=6)
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--variants", default=None,

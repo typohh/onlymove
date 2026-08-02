@@ -31,7 +31,7 @@ Steps 2–7 are the window. Do them back to back.
 1. **Prepare and rehearse.** With `MAINTENANCE_MODE = "0"` still live, take a snapshot and rehearse on a throwaway copy until the run is clean:
    ```bash
    ./.venv/bin/python3 -m pipeline.fetch_database
-   cp attempts/database.sqlite /tmp/rehearsal.sqlite      # rm -f /tmp/rehearsal.sqlite* first
+   cp db/d1.sqlite /tmp/rehearsal.sqlite      # rm -f /tmp/rehearsal.sqlite* first
    node auxiliary/purge_tsumegos.mjs --db /tmp/rehearsal.sqlite --ids <ids.txt> --apply
    ```
    The rehearsal must end in `post-verification PASSED`.
@@ -46,18 +46,18 @@ Steps 2–7 are the window. Do them back to back.
 
 4. **Take the authoritative snapshot — after the freeze, not before.**
    ```bash
-   cp attempts/database.sqlite attempts/database.backup-pre-surgery.sqlite   # rm -f the -wal/-shm first
+   cp db/d1.sqlite db/d1.backup-pre-surgery.sqlite   # rm -f the -wal/-shm first
    ./.venv/bin/python3 -m pipeline.fetch_database
    ```
    This is the snapshot the emitted SQL is valid against. A fetch taken *before* the freeze is not, because the gap is exactly the hazard. Keep the backup: it is the exact pre-state.
 
 5. **Plan, verify, emit — against the canonical local DB, not a copy.**
    ```bash
-   node auxiliary/purge_tsumegos.mjs --db attempts/database.sqlite --ids <ids.txt> \
+   node auxiliary/purge_tsumegos.mjs --db db/d1.sqlite --ids <ids.txt> \
         [--purge-broken-digest] --apply --emit-sql surgery/purge.sql \
         --emit-corpus-map surgery/purge_map.json
    ```
-   Stop unless it prints `post-verification PASSED`; the script fails closed and emits no SQL otherwise. Operating on `attempts/database.sqlite` itself is deliberate — see *the local mirror cannot re-sync itself* below — and step 4's backup is the undo.
+   Stop unless it prints `post-verification PASSED`; the script fails closed and emits no SQL otherwise. Operating on `db/d1.sqlite` itself is deliberate — see *the local mirror cannot re-sync itself* below — and step 4's backup is the undo.
 
 6. **Apply remotely.**
    ```bash
@@ -69,7 +69,7 @@ Steps 2–7 are the window. Do them back to back.
    ```bash
    npx wrangler d1 execute tsumego-reports --remote --command \
      "SELECT COUNT(*) AS rows, SUM(user_seq) AS seq_sum, SUM(running_sum) AS sum_sum FROM tsumego_reports;"
-   sqlite3 attempts/database.sqlite \
+   sqlite3 db/d1.sqlite \
      "SELECT COUNT(*), SUM(user_seq), SUM(running_sum) FROM tsumego_reports;"
    ```
    All three numbers must match. Do **not** verify with `pipeline.fetch_database` — it cannot see this change (below).
@@ -78,7 +78,7 @@ Steps 2–7 are the window. Do them back to back.
    ```bash
    node auxiliary/update_leaderboard_ranks.mjs --remote
    ```
-   Its other ordering rule — run it only after the deploy carrying the new ratings, or the next `/report` recomputes on the old scale and overwrites the work — is satisfied twice over: the freeze deploy already shipped them, and no `/report` can run anyway. It reads the local `attempts/database.sqlite` and the local `pwa/tsumegos/`, both of which are now the intended post-state, and it supersedes the purge's own leaderboard edits (which exist so the purge is correct when run standalone).
+   Its other ordering rule — run it only after the deploy carrying the new ratings, or the next `/report` recomputes on the old scale and overwrites the work — is satisfied twice over: the freeze deploy already shipped them, and no `/report` can run anyway. It reads the local `db/d1.sqlite` and the local `pwa/tsumegos/`, both of which are now the intended post-state, and it supersedes the purge's own leaderboard edits (which exist so the purge is correct when run standalone).
 
 9. **Unfreeze and release.** Set `MAINTENANCE_MODE = "0"`, bump `CURRENT_STATE_EPOCH` if this release includes one, `npm run deploy`.
 
@@ -116,11 +116,11 @@ Order:
 
 1. *(unfrozen, hours)* `corpus_surgery` → `extract_activations` → `cache_move_features` → `train_rating` → `map_rating_to_rank` → `build_axes` → `fit_population_constants` → `package_for_pwa`. Do **not** deploy yet.
 
-   Take the `attempts/database.sqlite` this chain reads from a **pre-freeze** fetch; it is only training input, and it does not need to be the surgical snapshot.
+   Take the `db/d1.sqlite` this chain reads from a **pre-freeze** fetch; it is only training input, and it does not need to be the surgical snapshot.
 
    `package_for_pwa` is the long pole and there is no cheap path here: removing ids changes `lookup.txt`, which changes every shard's `metadata.json`, and a re-rate moves `ratings_version` and re-emits `problem_params.bin` + `lookup.embeddings.bin` — so the per-size change detection rebuilds everything rather than skipping. That cost is deliberately on this side of the freeze. It is also why the ordering matters: you want to pay it **once**, and nothing downstream invalidates it — the DB surgery reads `ratings/` rather than feeding it, and `update_leaderboard_ranks.mjs` consumes `problem_params.bin` rather than regenerating it.
 
-   The retrain steps read `attempts/database.sqlite` while it still holds the doomed rows, and that is fine: `corpus_surgery` ran first, so those ids are already absent from `ratings/` and `per_problem.csv` and every join drops them. The rows are inert until the purge.
+   The retrain steps read `db/d1.sqlite` while it still holds the doomed rows, and that is fine: `corpus_surgery` ran first, so those ids are already absent from `ratings/` and `per_problem.csv` and every join drops them. The rows are inert until the purge.
 2. Freeze (step 2 above). This deploy ships whatever is in `pwa/dist` — including the newly packaged data, which is fine — but **not** the epoch bump.
 3. Snapshot, surgery, apply, verify, leaderboard refresh (steps 4–8 above) — all inside the freeze.
 4. Unfreeze **and** release in one deploy: `MAINTENANCE_MODE = "0"` together with the epoch bump.
@@ -131,7 +131,7 @@ One consequence worth planning for: **a trickle of attempts can still land on pu
 
 ## If it goes wrong
 
-The emitted SQL has no undo. D1 Time Travel is the recovery path — restore to a timestamp just before step 6 — so note the UTC time before applying. Keep the pre-surgery `attempts/database.sqlite` as well; it is the exact pre-state and can be diffed against whatever production ends up holding.
+The emitted SQL has no undo. D1 Time Travel is the recovery path — restore to a timestamp just before step 6 — so note the UTC time before applying. Keep the pre-surgery `db/d1.sqlite` as well; it is the exact pre-state and can be diffed against whatever production ends up holding.
 
 Leaving the freeze on is the safe failure: the app still serves problems, and attempts queue client-side in the outbox. Do not leave it on for days — the outbox has a 30-minute throttle but the backlog is bounded by localStorage.
 

@@ -46,7 +46,7 @@ groups) which NO mapper change can fix.  So judge the levers by the EGF-anchor b
 PER BAND and the per-system table, under grouped-by-user CV (in-sample EGF bias is
 optimistic), NOT by a single cohort-mean number.
 
-Run pipeline.fetch_database first (refreshes attempts/database.{sql,sqlite}).  Then e.g.:
+Run pipeline.fetch_database first (refreshes db/d1.{sql,sqlite}).  Then e.g.:
 
   ./.venv/bin/python3 -m auxiliary.map_rating_to_egf_timed --sweep
   ./.venv/bin/python3 -m auxiliary.map_rating_to_egf_timed --sweep --cv
@@ -66,6 +66,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys,
@@ -934,7 +935,7 @@ def main():
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
     ap.add_argument("--dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--sqlite",
-                    default=os.path.join(PROJECT_ROOT, "attempts", "database.sqlite"))
+                    default=DB_SQLITE)
     ap.add_argument("--min-attempts", type=int, default=20)
     ap.add_argument("--min-server-samples", type=int, default=3)
     ap.add_argument("--rank-padding", type=int, default=2)

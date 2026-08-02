@@ -16,7 +16,7 @@
 // whatever curve/params sit in pwa/tsumegos/ right now.
 //
 // Data flow (read-cost discipline — D1 bills rows read):
-//   reads  <- attempts/database.sqlite  (the local mirror; run
+//   reads  <- db/d1.sqlite  (the local mirror; run
 //             `./.venv/bin/python3 -m pipeline.fetch_database` FIRST so the
 //             leaderboard rows + tsumego_reports are fresh)
 //   writes -> a generated SQL file, applied to the LOCAL miniflare D1
@@ -90,7 +90,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PWA_DIR = path.join(REPO, 'pwa');
-const DB_PATH = path.join(REPO, 'attempts', 'database.sqlite');
+const DB_PATH = path.join(REPO, 'db', 'd1.sqlite');
 const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DAY_MS = 86400000;

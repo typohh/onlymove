@@ -57,10 +57,10 @@ npm run deploy     # publish to Cloudflare Workers
 - Use the helpers `katago_to_sgf_coords` in [utils/katago/queries.py](file:///home/ootakamoku/Repositories/onlymove/utils/katago/queries.py) and `sgf_to_gtp` in [pipeline/benchmark_bots.py](file:///home/ootakamoku/Repositories/onlymove/pipeline/benchmark_bots.py) instead of rewriting coordinate math.
 
 ### Database Operations
-- `attempts/database.sqlite` is the canonical merge target (gitignored).
+- `db/d1.sqlite` is the canonical merge target (gitignored).
 - If you need to rebuild the sqlite DB from the sql dump manually:
   ```bash
-  { echo "BEGIN;"; cat attempts/database.sql; echo "COMMIT;"; } | sqlite3 attempts/database.sqlite
+  { echo "BEGIN;"; cat db/d1.sql; echo "COMMIT;"; } | sqlite3 db/d1.sqlite
   ```
 - **Avoid piping sql files through `head`/`tail`** as this can trigger `SIGPIPE` and silently corrupt the import.
 
