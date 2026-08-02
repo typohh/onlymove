@@ -80,18 +80,16 @@ def load_correct_vec(act_dir, tid, by_ext):
 def _load_correct_vec_chunk(task):
     """Worker: the correct-move vectors for a chunk of problems.
 
-    Returns (start_index, (chunk, N_FEATS) float16). A problem that fails to load
-    gets a NaN row so the chunk stays index-aligned; the caller counts them and the
-    downstream finite-mask in _fit_joint_pca drops them from the fit.
+    Returns (start_index, (chunk, N_FEATS) float16). An unreadable .npz raises out
+    of load_correct_vec and aborts the whole build — deliberately. The alternative
+    (a NaN row) is invisible: the tid stays in correct_ids while _fit_joint_pca's
+    finite mask drops the row, so the problem silently leaves the rated set.
     """
     start, act_dir, items = task
-    out = np.full((len(items), N_FEATS), np.nan, dtype=np.float16)
+    out = np.empty((len(items), N_FEATS), dtype=np.float16)
     for i, (tid, npz_name) in enumerate(items):
         by_ext = {"npz": {tid: npz_name} if npz_name else {}}
-        try:
-            out[i] = load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
-        except Exception:
-            pass  # leave NaN row
+        out[i] = load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
     return start, out
 
 
@@ -156,23 +154,39 @@ def build_correct_vec_cache(size, workers=None, force=False):
                 rate = done / (time.time() - t0) if time.time() > t0 else 0.0
                 print(f"\r  {done}/{len(missing)} ({rate:.0f}/s)", end="", flush=True)
         print(flush=True)
-        # Report unreadable rows rather than letting them vanish into the finite mask:
-        # a NaN row keeps its tid in correct_ids but is dropped from the PCA fit, so the
-        # problem leaves the rated set with no other trace.
-        failed = [t for t, r in missing_rows.items() if not np.isfinite(r).all()]
-        if failed:
-            print(f"[size {size}] WARNING: {len(failed)} unreadable activation rows "
-                  f"(e.g. {failed[:5]}); they will be dropped from the rating fit", flush=True)
 
     # Assemble the full cache in `ids` order: reused rows from the old memmap, the rest
     # from this run's loads. Written to a tmp memmap, then atomically swapped in.
+    #
+    # Every row is checked finite as it lands. Freshly loaded rows cannot be otherwise —
+    # an unreadable .npz already aborted the worker — but a REUSED row was written by an
+    # older build that tolerated failures, so this is what retires those. A non-finite row
+    # is a hard abort, not a drop: its tid would stay in correct_ids while _fit_joint_pca's
+    # finite mask removed it from the fit, i.e. the problem leaves the rated set with
+    # nothing anywhere saying so.
     tmp_path = vecs_path + ".tmp"
-    mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16, shape=(n, N_FEATS))
-    for i, t in enumerate(ids):
-        mm[i] = old_vecs[old_row[t]] if t in old_row else missing_rows[t]
-    mm.flush()
-    del mm
-    del old_vecs  # release the mmap before replacing the file underneath it
+    try:
+        mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16, shape=(n, N_FEATS))
+        try:
+            bad = []
+            for i, t in enumerate(ids):
+                row = old_vecs[old_row[t]] if t in old_row else missing_rows[t]
+                if not np.isfinite(row).all():
+                    bad.append(t)
+                mm[i] = row
+            if bad:
+                raise RuntimeError(
+                    f"size {size}: {len(bad)} non-finite correct-vector rows (e.g. {bad[:5]}); "
+                    f"refusing to write a corrupt cache. Re-extract those problems' "
+                    f"activations, then rebuild with force=True.")
+            mm.flush()
+        finally:
+            del mm
+            del old_vecs  # release the mmaps before replacing the file underneath them
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)  # never leave a rejected build to be mistaken for a cache
+        raise
     os.replace(tmp_path, vecs_path)
     with open(ids_path, "w") as f:
         json.dump(ids, f)

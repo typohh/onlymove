@@ -178,26 +178,39 @@ def build_size(size, workers, force, rebuild_activations=False):
         with np.load(out_path) as d:
             cached = {t: r for t, r in zip(d["tids"].tolist(), d["feats"])}
     to_extract = tids if force else [t for t in tids if t not in cached]
-    if not to_extract:
+    # Surplus = cached rows whose tid has since LEFT correct_ids (a corpus purge). The write
+    # path below emits in correct_ids order and so prunes them, but only if we get there:
+    # short-circuiting on `not to_extract` alone would strand them, since nothing new needs
+    # extracting. The cache is up to date only when its tid set EQUALS the target set.
+    target = set(tids)
+    surplus = [t for t in cached if t not in target]
+    if not to_extract and not surplus:
         print(f"size {size}: cache up to date ({len(cached)} problems)")
         return
+    if surplus:
+        print(f"size {size}: pruning {len(surplus)} rows no longer in correct_ids "
+              f"(e.g. {surplus[:3]})")
 
     idx = {t: i for i, t in enumerate(to_extract)}
     new_feats = np.full((len(to_extract), N_FEATS), np.nan, dtype=np.float32)
     chunks = [(size, to_extract[i:i + CHUNK]) for i in range(0, len(to_extract), CHUNK)]
-    print(f"size {size}: {len(to_extract)} to extract ({len(cached)} cached), "
-          f"{len(chunks)} chunks, {workers} workers")
     t0 = time.time()
     done = 0
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(_process_chunk, c) for c in chunks]
-        for k, fu in enumerate(as_completed(futs)):
-            ctids, cout = fu.result()
-            for t, row in zip(ctids, cout):
-                new_feats[idx[t]] = row
-            done += len(ctids)
-            if (k + 1) % 50 == 0 or done == len(to_extract):
-                print(f"  {done}/{len(to_extract)} ({done / max(time.time() - t0, 1e-9):.0f}/s)")
+    # A prune-only run has nothing to extract, so `chunks` is empty; skip the worker pool
+    # and fall straight through to the write, which is what does the pruning.
+    if chunks:
+        print(f"size {size}: {len(to_extract)} to extract ({len(cached)} cached), "
+              f"{len(chunks)} chunks, {workers} workers")
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_process_chunk, c) for c in chunks]
+            for k, fu in enumerate(as_completed(futs)):
+                ctids, cout = fu.result()
+                for t, row in zip(ctids, cout):
+                    new_feats[idx[t]] = row
+                done += len(ctids)
+                if (k + 1) % 50 == 0 or done == len(to_extract):
+                    print(f"  {done}/{len(to_extract)} "
+                          f"({done / max(time.time() - t0, 1e-9):.0f}/s)")
     for t, row in zip(to_extract, new_feats):
         cached[t] = row
 
