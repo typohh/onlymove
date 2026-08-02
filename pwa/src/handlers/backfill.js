@@ -1,6 +1,7 @@
 import { versionedJsonHeaders } from '../http.js';
 import { isValidUserId, isValidProblemId } from '../guards.js';
 import { coerceAttemptFields, prepareAttemptInsert } from '../attempt-insert.js';
+import { updateLeaderboardOnBackfill } from '../leaderboard.js';
 
 // --- Historical report upload (the durable outbox's upload path) -------------
 // PERMANENT endpoint for the client's offline outbox (account-sync.flushOutbox):
@@ -18,7 +19,7 @@ const BACKFILL_MAX_BATCH = 500;
 // have data, and old enough not to collide with live reporting.
 const BACKFILL_MIN_CREATED = '2024-01-01T00:00:00.000Z';
 
-export async function handleReportBackfill(request, env) {
+export async function handleReportBackfill(request, env, ctx) {
   const headers = versionedJsonHeaders();
   try {
     const data = await request.json();
@@ -42,6 +43,7 @@ export async function handleReportBackfill(request, env) {
     const serverNow = new Date(nowMs).toISOString();
     const stmts = [];
     const stmtIndex = [];   // request index of each statement, for id alignment
+    const novel = [];       // buffer pushes, in batch-insert (= ascending id) order
     const rejected = [];
     data.reports.forEach((r, i) => {
       if (!isValidProblemId(r.problem) || typeof r.success !== 'boolean' ||
@@ -72,6 +74,13 @@ export async function handleReportBackfill(request, env) {
         createdAt: r.createdAt, size, move: null, timeUsed, reviewTime, isRepeat: r.isRepeat,
       }));
       stmtIndex.push(i);
+      // Novel attempts also enter the rank buffer, in the order the batch
+      // inserts them (= ascending id) — see updateLeaderboardOnBackfill. Without
+      // this a flushed attempt stayed invisible to the leaderboard until the
+      // weekly cron reconcile.
+      if (!r.isRepeat) {
+        novel.push({ problemId: r.problem, success: r.success, timeUsed });
+      }
     });
     const results = stmts.length ? await env.DB.batch(stmts) : [];
     // Inserted ids aligned to REQUEST order (rejected slots stay null), so the
@@ -80,6 +89,14 @@ export async function handleReportBackfill(request, env) {
     results.forEach((res, j) => {
       ids[stmtIndex[j]] = (res && res.results && res.results[0]) ? res.results[0].id : null;
     });
+    // Leaderboard AFTER the response, like /report: the buffer is a derived
+    // cache and the cron reconciles it, so a failure here must not fail the
+    // upload the client is waiting on.
+    if (novel.length && ctx && typeof ctx.waitUntil === 'function') {
+      const country = (request.cf && request.cf.country) ? request.cf.country : null;
+      ctx.waitUntil(
+        updateLeaderboardOnBackfill(env, data.userId, novel, country).catch(() => {}));
+    }
     return new Response(JSON.stringify({ inserted: stmts.length, ids, rejected }), { status: 201, headers });
   } catch (error) {
     console.error('Error handling report backfill:', error);

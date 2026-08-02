@@ -22,15 +22,23 @@
 //   writes -> a generated SQL file, applied to the LOCAL miniflare D1
 //             (--local) or to production (--remote); neither = dry run
 //
-// Per user (novel attempts only, EVENT order — created_at with id tiebreak):
-//   buffer          = last BUFFER_CAP novel attempts, newest first. NOTE this
-//                     deliberately differs from buildRowStateFromReports'
-//                     ORDER BY id: /report-backfill inserts historical rows at
-//                     the id frontier (and the 2026-07-07 outbox incident minted
-//                     exact-duplicate rows), so id order can put months-old
-//                     attempts "on top" — event order matches what the live
-//                     /report-maintained buffer actually holds. Exact duplicate
-//                     rows (same problem + created_at) are collapsed to one.
+// Per user (novel attempts only, INSERT order — the AUTOINCREMENT id):
+//   buffer          = last BUFFER_CAP novel attempts, newest first, MATCHING
+//                     buildRowStateFromReports' ORDER BY id. Id order is the
+//                     single convention every writer and rebuild shares: the
+//                     live /report push, /report-backfill's batched push
+//                     (updateLeaderboardOnBackfill), createLeaderboardRow and
+//                     the weekly cron reconcile. This script used to order by
+//                     created_at instead, on the grounds that /report-backfill
+//                     inserts historical rows at the id frontier so id order
+//                     could seat a months-old attempt "on top" — true, but the
+//                     fix was to make backfill maintain the buffer like every
+//                     other writer, not to give one rebuilder its own ordering.
+//                     Event order would also need a (user_id, created_at) index
+//                     that was deliberately dropped, turning a bounded
+//                     BUFFER_CAP read into a full per-user history scan.
+//                     Exact duplicate rows (same problem + created_at) are still
+//                     collapsed to one (the 2026-07-07 outbox incident).
 //   current rank/se = computeRank over that buffer — the UNTIMED internal rank
 //                     (0 = the 1k/1d boundary) + its stones SE, plus the personal
 //                     time dock in rating units, each stored in its own column.
@@ -162,30 +170,28 @@ function sqliteJson(sql) {
 const sqlNum = (v) => (Number.isFinite(v) ? String(v) : 'NULL');
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
-// Deduped, EVENT-ordered last <= cap novel attempts for one user (the buffer
-// feed — see the header note on event order vs id order). `uid` is the
-// sql-quoted user id. Returns ascending [{p,s,t}].
+// Deduped, ID-ordered last <= cap novel attempts for one user (the buffer feed).
+// `uid` is the sql-quoted user id. Returns ascending [{p,s,t}].
 function fetchBufferAttempts(uid, cap) {
     // Deduped rows: GROUP BY (problem, created_at) collapses the minted
     // exact-duplicate rows; SQLite's bare-column rule with the single MIN(id)
-    // aggregate keeps the ORIGINAL row's values. Ordered by created_at (event
-    // time), NOT id — see the header note.
+    // aggregate keeps the ORIGINAL row's values.
     return sqliteJson(
         `SELECT p, s, t FROM (
-            SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t, created_at AS c
+            SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t
               FROM tsumego_reports
              WHERE user_id = ${uid} AND is_repeat = 0
              GROUP BY problem, created_at
-             ORDER BY c DESC, id DESC LIMIT ${cap})
-          ORDER BY c ASC, id ASC`
+             ORDER BY id DESC LIMIT ${cap})
+          ORDER BY id ASC`
     ).map((r) => ({
         p: r.p, s: r.s ? 1 : 0, t: Number.isFinite(r.t) ? r.t : null,
     }));
 }
 
 // --- per-user recompute --------------------------------------------------------------
-// attempts: ascending EVENT order (created_at, id tiebreak), exact dups collapsed,
-// [{ p, s, t }]. The buffer is those attempts newest first (the live-buffer order).
+// attempts: ascending id order, exact dups collapsed, [{ p, s, t }]. The buffer is
+// those attempts newest first (the live-buffer order).
 function recomputeRow(lb, attempts, params) {
     const buffer = attempts.slice().reverse().map(({ p, s, t }) => ({ p, s, t }));
     const { rank, se, deltaRating } = lb.computeRank(buffer, params);

@@ -519,6 +519,55 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
     ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc).run();
 }
 
+// Same, for a BATCH of novel attempts landing at once — the outbox flush behind
+// /report-backfill. One read + one write regardless of batch size, instead of a
+// per-row round trip.
+//
+// The buffer is ordered by INSERT ORDER (id), which is the one ordering every
+// writer and every rebuild agrees on (buildRowStateFromReports, the cron
+// reconcile, auxiliary/update_leaderboard_ranks.mjs). A backfilled row carries a
+// historical created_at but a fresh id, so under that convention it IS the
+// newest and prepending is correct — `attempts` must therefore arrive in
+// ascending id order, i.e. the order the batch INSERT ran. Ordering the buffer
+// by event time instead would need a (user_id, created_at) index that was
+// deliberately dropped, and would make the heaviest user's rebuild read their
+// whole history rather than the last BUFFER_CAP rows.
+//
+// Skipping the buffer entirely (the behaviour before this) left flushed attempts
+// invisible to the leaderboard until the weekly cron reconcile.
+export async function updateLeaderboardOnBackfill(env, userId, attempts, country) {
+    if (!env.DB || !attempts.length) return;
+    const row = await env.DB.prepare(
+        `SELECT buffer FROM leaderboard WHERE user_id = ?1`
+    ).bind(userId).first();
+    // No row yet: seed from the full history, which already contains the rows
+    // this batch just inserted — so the seed subsumes the push.
+    if (!row) { await createLeaderboardRow(env, userId, country); return; }
+
+    const params = await getProblemParams(env);
+    let buffer = parseBuffer(row.buffer);
+    for (const a of attempts) buffer = pushBuffer(buffer, a.problemId, a.success, a.timeUsed);
+    const { rank, se, deltaRating } = computeRank(buffer, params);
+    // last_active tracks PRESENCE, not the attempts' event time: the user is
+    // online right now to be flushing, so an old created_at must not leave them
+    // looking idle to pruneIdleLeaderboardRows.
+    const nowIso = new Date().toISOString();
+    const cc = normalizeCountry(country);
+    if (rank === null) {
+        await env.DB.prepare(
+            `UPDATE leaderboard SET buffer = ?2, last_active = ?3,
+                country = COALESCE(?4, country)
+              WHERE user_id = ?1`
+        ).bind(userId, serializeBuffer(buffer), nowIso, cc).run();
+        return;
+    }
+    await env.DB.prepare(
+        `UPDATE leaderboard SET buffer = ?2, pred_rank = ?3, pred_rank_se = ?4,
+            time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country)
+          WHERE user_id = ?1`
+    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc).run();
+}
+
 // First novel report from a row-less user (brand new, or pruned while idle): seed
 // the row from their full report history (buildRowStateFromReports, which already
 // includes the attempt that triggered this call). INSERT OR IGNORE makes the
