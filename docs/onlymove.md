@@ -590,7 +590,7 @@ Generation and evaluation take a mandatory board size and run once per size; eve
 pipeline.generate_tsumegos <size>      → tsumegos/<size>/*.sgf
 pipeline.benchmark_bots <size>         → attempts/<size>/*.txt
 pipeline.extract_activations           → activations/<size>/<id>.npz
-pipeline.cache_move_features           → activations/_signal_cache/move_evals_<size>.npz
+pipeline.cache_rating_features           → activations/_signal_cache/move_evals_<size>.npz
 pipeline.fetch_database                → db/d1.{sqlite,sql}   (attempt log + surveys)
 pipeline.train_rating                  → ratings/
 pipeline.map_rating_to_rank            → ratings/rating_to_rank.json, ratings/rank_map.json
@@ -621,7 +621,7 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 | walk-forward calibration harness (validation only) | `utils/rating/slope_calibration.py` |
 | consensus rank mapping | `pipeline/map_rating_to_rank.py` |
 | the user-rating anchor and ordinal likelihood | `utils/rating/fit_rank_curves.py` |
-| the win-rate-table shape prior | `utils/rating/statistics_shapes.py` |
+| the win-rate-table shape prior | `utils/rating/rank_curve_shape.py` |
 | survey loading and rank values | `utils/rating/rank_surveys.py` |
 | the residual-axes model and axis-count selection | `utils/rating/residual_axes.py` |
 | axis fit, labelling, anchors, per-cell fanout | `pipeline/build_axes.py` |

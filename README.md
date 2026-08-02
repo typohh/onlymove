@@ -60,7 +60,7 @@ Captures KataGo trunk activations at every legal cell into `activations/<size>/<
 ### 6. Cache move features
 Builds the candidate-move-eval cache the rating trainer reads.
 ```bash
-./.venv/bin/python3 -m pipeline.cache_move_features
+./.venv/bin/python3 -m pipeline.cache_rating_features
 ```
 
 ### 7. Train rating

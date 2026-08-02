@@ -18,7 +18,7 @@
 
 import { state, getMergedFullAnswerHistory } from './state.js';
 import { showModal, modalTitle, modalButton, modalButtonRow, showToast } from './overlays.js';
-import { postJson } from './net.js';
+import { postJson } from './worker-post.js';
 
 // Same 8-alphanumeric shape the Worker's TOKEN_RE enforces; a mismatch means the
 // URL didn't come from a real invite link, so we don't even hit /invite.

@@ -65,7 +65,7 @@ import { refreshShownProblemAfterSync } from './problem-loader.js';
 import { getTailSyncIndex, getTailDigestInfo, pruneTail } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
-import { postJson } from './net.js';
+import { postJson } from './worker-post.js';
 import { updateAllUI } from './ui.js';
 
 const SYNC_STATE_KEY = 'accountSyncState';

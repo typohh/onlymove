@@ -707,7 +707,7 @@ def main():
                          "score per move, 20 cols). A sharp gap to the alternatives = an obvious "
                          "best move (easy); many near-solution rivals = ambiguous (hard) — a "
                          "difficulty signal orthogonal to the activations and bot ladder. Cache "
-                         "it first with `python -m pipeline.cache_move_features`. The block sits "
+                         "it first with `python -m pipeline.cache_rating_features`. The block sits "
                          "between the bot-winrate columns and the size indicator, so --act-dropout "
                          "/ --bw-dropout are unaffected. The scorable problem set is unchanged "
                          "(problems missing a move-feature row are mean-imputed).")

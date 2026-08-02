@@ -1,6 +1,6 @@
 """Fit a named candidate rating→rank SHAPE to KataGo's even-game win-rate table.
 
-`statistics.txt` is KataGo's tabulated weak-side win rate for even games at each rank gap; the
+`even_game_winrates.txt` is KataGo's tabulated weak-side win rate for even games at each rank gap; the
 ΔAIC-best fit to it gives the rating→rank curve's SHAPE (the EGF cubic), with only the affine
 (α, β) left for the survey fit downstream. The rank-calibration stage (pipeline.map_rating_to_rank
 via utils.rating.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse the same fitted
@@ -22,7 +22,7 @@ from scipy.special import expit
 from utils.rating.rank_surveys import rank_to_value
 
 from utils.paths import PROJECT_ROOT
-STATS_PATH = os.path.join(PROJECT_ROOT, "data", "reference", "statistics.txt")
+WINRATE_TABLE_PATH = os.path.join(PROJECT_ROOT, "data", "reference", "even_game_winrates.txt")
 
 # This table has its OWN axis: 20k = 0, 1k = 19, 1d = 20. It is deliberately NOT
 # the project rank scale (pwa/shared/rank-math.js), because every candidate shape
@@ -134,8 +134,8 @@ def fit_model(theta, init, bounds, X, N, Nw, Ng):
 
 
 @lru_cache(maxsize=None)
-def fit_shape(model_name, stats_path=STATS_PATH):
-    """Fit one named candidate shape to the statistics.txt even-game table and
+def fit_shape(model_name, table_path=WINRATE_TABLE_PATH):
+    """Fit one named candidate shape to the even_game_winrates.txt even-game table and
     return (params, theta_func). theta_func(x, params) takes this table's own axis x
     (20k=0 … 1k=19 … 6d=25; see rank_to_axis) and returns θ in win-model logit units.
 
@@ -143,9 +143,9 @@ def fit_shape(model_name, stats_path=STATS_PATH):
     e.g. fit_rank_curves's `--prior cubic`. `model_name` is matched as a prefix
     of the names in make_models() (so "cubic" picks the cubic family). Cached:
     callers in hot loops (per-rank table cells) hit the same fit, not a refit."""
-    cells = parse_even_table(stats_path)
+    cells = parse_even_table(table_path)
     if not cells:
-        raise RuntimeError(f"no even-game cells parsed from {stats_path}")
+        raise RuntimeError(f"no even-game cells parsed from {table_path}")
     X = np.array([c["x"] for c in cells], float)
     N = np.array([c["n"] for c in cells], float)
     Nw = np.array([c["Nw"] for c in cells], float)

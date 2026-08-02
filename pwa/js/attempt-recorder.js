@@ -22,7 +22,7 @@ import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 // history; the estimator lives in rank-decomposition.js alongside the per-attempt
 // slope/floor conversion it shares with the skill chart.
 import { estimateWindowRank } from './rank-decomposition.js';
-import { postJson } from './net.js';
+import { postJson } from './worker-post.js';
 
 // --- Cross-tab duplicate guard --------------------------------------------
 // Two tabs of the same origin boot the same standing challenge, and each

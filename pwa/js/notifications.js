@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { buildRecallSchedule } from './recall-model.js';
-import { postJson } from './net.js';
+import { postJson } from './worker-post.js';
 
 const SUPPORTED_SIZES = [9, 13];
 

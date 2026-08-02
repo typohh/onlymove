@@ -51,11 +51,11 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     survey data supports — no rating-interaction, no power-law (see
     docs/onlymove.md), and no rank-residualization line (the joint
     couplings absorb the rank-correlated part of solve time on their own).
-  * M: a MONOTONE per-segment fit with the EGF statistics.txt cubic SHAPE as a PRIOR.
+  * M: a MONOTONE per-segment fit with the EGF even_game_winrates.txt cubic SHAPE as a PRIOR.
     The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)` (>0 ⇒ monotone);
     δ_g=0 reproduces the rigid affine `α_c + β·S`, and `LAMBDA_SHAPE·Σδ_g²` penalises
     deviation. The shape is the ΔAIC-best fit to the even-game win-rate table
-    (utils.rating.statistics_shapes) — the right convex backbone for the sparse tails. The
+    (utils.rating.rank_curve_shape) — the right convex backbone for the sparse tails. The
     prior is GENTLE (LAMBDA_SHAPE small): once the curve is anchored by ALL servers it
     is no longer kyu-starved, so a strong prior over-constrains.
   * EGF IS JUST ANOTHER SERVER. Every server, EGF included, gets free ordinal thresholds
@@ -118,7 +118,7 @@ from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, rank_band, value_to_rank,
 )
-from utils.rating.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
+from utils.rating.rank_curve_shape import fit_shape, rank_to_axis  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec, ordinal_nll_vec,
     _unpack_thresholds,
@@ -131,7 +131,7 @@ from utils.rating.ratings_io import (  # noqa: E402
 SIZES = list(ALL_BOARD_SIZES)
 
 # --- Model config (baked; this module is production-only, no experimentation) ---
-RATING_SHAPE = "cubic"      # statistics.txt shape used as the curve's prior MEAN
+RATING_SHAPE = "cubic"      # even_game_winrates.txt shape used as the curve's prior MEAN
 LAMBDA_SHAPE = 0.3          # GENTLE shape prior (the all-server latent isn't kyu-starved)
 SERVER_LAMBDA = 5.0         # uniform-spacing prior on each server coupling
 GAUGE_WEIGHT = 1.0          # VERY WEAK pin on the n-weighted mean coupling offset → 0
@@ -182,8 +182,8 @@ def load_floors(ratings_dir, size):
 
 
 def _shape_at(ys):
-    """statistics.txt RATING_SHAPE value at each consensus-boundary rank in `ys`, the
-    curve's prior mean. statistics.txt is fitted on its OWN axis (its origin is part
+    """even_game_winrates.txt RATING_SHAPE value at each consensus-boundary rank in `ys`, the
+    curve's prior mean. even_game_winrates.txt is fitted on its OWN axis (its origin is part
     of the polynomial family), so convert at the boundary via rank_to_axis."""
     params, theta = fit_shape(RATING_SHAPE)
     return np.asarray(theta(rank_to_axis(ys), params), dtype=float)

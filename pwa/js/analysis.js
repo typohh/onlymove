@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/browser";
 
 import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove, setCandidateMoves } from './state.js';
-import { fetchAnalysis } from './api.js';
+import { fetchAnalysis } from './analysis-api.js';
 import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './board.js';
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';

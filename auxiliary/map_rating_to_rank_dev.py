@@ -48,9 +48,9 @@ optimistic), NOT by a single cohort-mean number.
 
 Run pipeline.fetch_database first (refreshes db/d1.{sql,sqlite}).  Then e.g.:
 
-  ./.venv/bin/python3 -m auxiliary.map_rating_to_egf_timed --sweep
-  ./.venv/bin/python3 -m auxiliary.map_rating_to_egf_timed --sweep --cv
-  ./.venv/bin/python3 -m auxiliary.map_rating_to_egf_timed --egf-weight 10 --time all
+  ./.venv/bin/python3 -m auxiliary.map_rating_to_rank_dev --sweep
+  ./.venv/bin/python3 -m auxiliary.map_rating_to_rank_dev --sweep --cv
+  ./.venv/bin/python3 -m auxiliary.map_rating_to_rank_dev --egf-weight 10 --time all
 """
 
 import argparse
@@ -76,16 +76,16 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
     _unpack_thresholds,
 )
 from utils.rating.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
-from utils.rating.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
+from utils.rating.rank_curve_shape import fit_shape, rank_to_axis  # noqa: E402
 from pipeline.map_rating_to_rank import (  # noqa: E402
     RATING_SHAPE, SIZES, load_floors, load_ratings, load_slopes,
 )
 
 
 def _shape_at(ys, shape=RATING_SHAPE):
-    """statistics.txt SHAPE value at each EGF-boundary scalar in `ys`
+    """even_game_winrates.txt SHAPE value at each EGF-boundary scalar in `ys`
     (rank_index = scalar + 19). `shape` is matched as a prefix of the
-    statistics_shapes models — 'cubic' (production), 'linear', 'exp', ..."""
+    rank_curve_shape models — 'cubic' (production), 'linear', 'exp', ..."""
     params, theta = fit_shape(shape)
     return np.asarray(theta(rank_to_axis(ys), params), float)
 from auxiliary.check_mapped_vs_declared_rank import (  # noqa: E402
@@ -981,7 +981,7 @@ def main():
                     help="Ridge pulling EGF's coupling toward identity in --consensus "
                          "(high = EGF stays the anchor; low = EGF absorbs its offset).")
     ap.add_argument("--curve-shape", default=RATING_SHAPE,
-                    help="statistics.txt shape used as the curve's prior MEAN "
+                    help="even_game_winrates.txt shape used as the curve's prior MEAN "
                          "(cubic/linear/exp/quadratic; prefix-matched).")
     ap.add_argument("--shape-study", action="store_true",
                     help="In the CONSENSUS model (now anchored by ALL servers), compare "

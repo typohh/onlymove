@@ -1,4 +1,4 @@
-// js/api.js
+// js/analysis-api.js
 import { ANALYSIS_STATUS } from './constants.js';
 
 // Analysis server endpoint

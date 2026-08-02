@@ -8,7 +8,7 @@
 // re-verifies server-side, so this is display-gating only — never the auth check.
 
 import { state } from './state.js';
-import { postJson } from './net.js';
+import { postJson } from './worker-post.js';
 
 let inviteAccess = false; // may this account create invites?
 let confirmed = false;    // got a definitive server answer this session

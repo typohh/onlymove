@@ -136,7 +136,7 @@ There are **no migration ladders**. `js/state-epoch.js` runs at import time: a s
 `state.appMode` (defined in `js/constants.js` as `APP_MODES`):
 
 1. **`'solving'`** — default. Clicks evaluated by `js/game-logic.js`; failure transitions automatically into analysis.
-2. **`'analyzing'`** — entered after a failure or via the Review button. Logic in `js/analysis.js`. Best-move and score come from comments embedded in the SGF (`js/sgf.js`); if missing, `js/api.js` calls the server fallback.
+2. **`'analyzing'`** — entered after a failure or via the Review button. Logic in `js/analysis.js`. Best-move and score come from comments embedded in the SGF (`js/sgf.js`); if missing, `js/analysis-api.js` calls the server fallback.
 3. **`'linked'`** — entered when the user opens a URL with a specific problem id. Rank and history are not affected, and the `?id` stays in the address bar so a reload re-enters the same shared problem.
 
 ### 4.3. SGF format

@@ -28,7 +28,7 @@ because it is the other roll-up of extract_activations' per-problem .npz output 
 own tid set comes from it. So one command brings both aggregate caches forward after a tsumego
 top-up; neither can be left stale behind the other. Run once per size (both cached by default):
 
-  ./.venv/bin/python3 -m pipeline.cache_move_features [--sizes 9,13] [--workers N] [--force]
+  ./.venv/bin/python3 -m pipeline.cache_rating_features [--sizes 9,13] [--workers N] [--force]
 """
 
 import argparse

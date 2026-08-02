@@ -133,7 +133,7 @@ def build_correct_vec_cache(size, workers=None, force=False):
 
     pipeline.extract_activations writes one .npz per problem; this rolls those up into
     the single memmap the feature loaders address by row, and correct_ids becomes the
-    definitive "problems the rating model can score" set (pipeline.cache_move_features
+    definitive "problems the rating model can score" set (pipeline.cache_rating_features
     takes its tid set straight from it). So a stale cache after a tsumego top-up drops
     the new problems from the rated set silently, which is why every consumer refreshes
     it rather than assuming it is current.
@@ -441,7 +441,7 @@ def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
 def load_joint_move_features(sizes, tids_by_size):
     """Candidate-move evaluation features (the winning move + its 9 best alternatives), pooled
     and z-scored across boards (a feature means the same on 9×9 and 13×13). Reads the per-size
-    RAW caches written by pipeline.cache_move_features and applies the pooled column z-score
+    RAW caches written by pipeline.cache_rating_features and applies the pooled column z-score
     here — so the cache is reusable across tid subsets, like load_joint_bot_winrate. Returns
     {(size, tid): vec}, n_cols. Raises with a build hint if a cache is missing."""
     keys, rows, ncol = [], [], None
@@ -450,7 +450,7 @@ def load_joint_move_features(sizes, tids_by_size):
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"move-feature cache {path} missing — run "
-                f"`./.venv/bin/python3 -m pipeline.cache_move_features` first")
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features` first")
         d = np.load(path, allow_pickle=False)
         feats = d["feats"]                                # decompress ONCE (NpzFile re-reads per access)
         ncol = int(feats.shape[1])
@@ -487,7 +487,7 @@ def _game_phase_one(path):
     led to the contested position); main_len = non-pass moves on the principal
     line (first-child chain) of the CORRECT first move — the child with the best
     winrate comment, score breaking ties (the same choice as the PWA's
-    findBestMoveFromChildren / cache_move_features slot 0). The principal line
+    findBestMoveFromChildren / cache_rating_features slot 0). The principal line
     terminates in passes by construction."""
     import re as _re
     import sgfmill.sgf
@@ -571,7 +571,7 @@ def load_tightness_gaps(kind, sizes=(9, 13)):
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"move-feature cache {path} missing — run "
-                f"`./.venv/bin/python3 -m pipeline.cache_move_features` first")
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features` first")
         d = np.load(path, allow_pickle=False)
         feats = d["feats"]
         g = feats[:, 1] - feats[:, 3] if kind == "score_gap" else feats[:, 0] - feats[:, 2]

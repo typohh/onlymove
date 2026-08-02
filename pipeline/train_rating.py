@@ -16,7 +16,7 @@ a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
     (b_p, a_p, c_p) = net(feat_p)        # shared net; a_p ≥ SLOPE_FLOOR, c_p ∈ [0, 1 − 2λ]
     feat_p = joint-PCA(correct-move activations) ++ common-column bot winrate ++ candidate-move evals
              ++ game-phase raw components
-             (bw_act + move + phase; the move block needs pipeline.cache_move_features run first)
+             (bw_act + move + phase; the move block needs pipeline.cache_rating_features run first)
 
 There are NO per-problem residuals: the shared net IS the model, so every problem — including the
 never-attempted and the one-sided — gets its 4PL straight from features. The only training target is
@@ -84,9 +84,9 @@ Outputs (nothing in pwa/tsumegos/ is touched — package_for_pwa ships these):
   ratings/rating_constants.json              {"fat_finger_rate": λ, "slope_scale": s, ...}
   ratings/model.pt                        weights + run metadata
 
-Usage (run pipeline.cache_move_features first — it builds the candidate-move-eval cache the
+Usage (run pipeline.cache_rating_features first — it builds the candidate-move-eval cache the
 feature trunk reads):
-  ./.venv/bin/python3 -m pipeline.cache_move_features
+  ./.venv/bin/python3 -m pipeline.cache_rating_features
   ./.venv/bin/python3 -m pipeline.train_rating
 """
 
@@ -361,7 +361,7 @@ def main():
     bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
     keys = [key for key in act if key in bw]                  # (size, tid); scorable iff act∩bw
     key_idx = {key: i for i, key in enumerate(keys)}
-    # candidate-move-eval block (pipeline.cache_move_features); appended AFTER bot, BEFORE the size
+    # candidate-move-eval block (pipeline.cache_rating_features); appended AFTER bot, BEFORE the size
     # indicator so the [act | bw | move | size] layout keeps the per-block dropouts' column ranges
     # valid. Doesn't gate the scorable set (act∩bw); a problem missing a move row is mean-imputed
     # (zero after the pooled z-score).

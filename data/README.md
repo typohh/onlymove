@@ -6,7 +6,7 @@ Three kinds of thing that used to sit side by side at this level. They differ in
 
 Rank data the project did not generate and cannot regenerate.
 
-- **`statistics.txt`** — KataGo's tabulated weak-side win rate for even games at each rank gap. Read by `utils/rating/statistics_shapes.py` (`STATS_PATH`), which fits the shape `pipeline.map_rating_to_rank` uses as the prior mean for the rating→rank curve. The one file here with a live code consumer.
+- **`even_game_winrates.txt`** — KataGo's tabulated weak-side win rate for even games at each rank gap. Read by `utils/rating/rank_curve_shape.py` (`WINRATE_TABLE_PATH`), which fits the shape `pipeline.map_rating_to_rank` uses as the prior mean for the rating→rank curve. The one file here with a live code consumer.
 - **`rank_survey_2018.csv`**, **`rank_survey_2024.csv`** — community surveys of how players' ranks correspond across servers (OGS, KGS, Fox, Tygem, IGS, EGF, AGA, …). Archival: no code reads them, and the live equivalent is now the in-app `rank_surveys` D1 table that `map_rating_to_rank` fits its per-server couplings from. Kept because they are the historical record of where the cross-server correspondence came from.
 
 ## `tsumego_audit/` — audit outputs, tracked

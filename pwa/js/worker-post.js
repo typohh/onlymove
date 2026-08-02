@@ -1,4 +1,4 @@
-// js/net.js
+// js/worker-post.js
 //
 // The one JSON-POST helper for the Worker's endpoints. Every write endpoint
 // takes a JSON body; keeping the fetch boilerplate here stops the
