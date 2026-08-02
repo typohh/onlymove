@@ -2,7 +2,7 @@ import { CORS_HEADERS, jsonResponse, tooManyRequests } from './http.js';
 import { maintenanceFrozen, rateLimited, serviceUnavailable } from './guards.js';
 import { handleReport } from './handlers/report.js';
 import { handleSync } from './handlers/sync.js';
-import { handleReportBackfill } from './handlers/backfill.js';
+import { handleReportBackfill } from './handlers/report-backfill.js';
 import { handleSubscribe, handleUnsubscribe } from './handlers/push.js';
 import { handleSchedule } from './handlers/schedule.js';
 import { handleRankSurvey } from './handlers/rank-survey.js';

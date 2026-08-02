@@ -70,7 +70,7 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   ├── motif-bubble.js      # Review-time motif surfacing
 │   ├── onboarding.js, audio.js, i18n.js, share.js
 │   ├── notifications.js     # Push opt-in + subscription management
-│   ├── account-ui.js, rank-survey.js, registration.js, invite-access.js
+│   ├── account-ui.js, rank-survey-prompt.js, registration.js, invite-access.js
 │   ├── gor-refresh.js       # Weekly EGD rating heartbeat (client-side; see CLAUDE.md)
 │   └── corrections-notice.js, debug-log.js
 │
@@ -84,9 +84,10 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   ├── index.js             # Thin router over the write endpoints + scheduled() cron
 │   ├── http.js              # CORS + JSON response helpers
 │   ├── guards.js            # id/user validation, per-IP rate limiting, maintenance freeze
-│   ├── handlers/            # One module per route (report, backfill, sync, push,
-│   │                        #   schedule, rank-survey, share-event, profile, register,
-│   │                        #   leaderboard-page, tournament-page, invite-tool)
+│   ├── handlers/            # One module per route, NAMED FOR THE ROUTE (report,
+│   │                        #   report-backfill, sync, push, schedule, rank-survey,
+│   │                        #   share-event, profile, register, leaderboard-page,
+│   │                        #   tournament-page, invite-tool)
 │   ├── leaderboard.js       # Leaderboard buffer maintenance + row resolution
 │   ├── attempt-insert.js    # The shared INSERT (maintains the per-profile digest)
 │   ├── server-stats.js      # /server-stats compute + cache

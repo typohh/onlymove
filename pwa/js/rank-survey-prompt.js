@@ -1,4 +1,4 @@
-// js/rank-survey.js
+// js/rank-survey-prompt.js
 //
 // Periodic rank-declaration prompt: once a user has a non-trivial answer
 // history, ask which server-rated rank they currently hold so we can later

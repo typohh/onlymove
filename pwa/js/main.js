@@ -8,7 +8,7 @@ initDebugLog();
 
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, initHistoryStorage, addIgnoredProblem } from './state.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
-import { maybeShowRankSurvey } from './rank-survey.js';
+import { maybeShowRankSurvey } from './rank-survey-prompt.js';
 import { showRankTranslation } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
 
