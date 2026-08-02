@@ -690,7 +690,7 @@ embedding_meta.json                K, dtype, bytes_per_cell, embedding_version,
 rating_to_rank.json, rank_map.json, population_constants.json   (copied across)
 ```
 
-**`quality` survives as a client-side name only, and it does NOT mean the slope.** The backend column was called `quality` until 2026-08-03; it is now named for what it holds, leaving one meaning per label:
+**`quality` is a client-side name only, and it does NOT mean the slope.** Every label below carries exactly one meaning, but the client's `quality` is the one that invites a wrong reading — it is a derived selection weight, not the discrimination it is derived from:
 
 | Where | Name | Value |
 | --- | --- | --- |

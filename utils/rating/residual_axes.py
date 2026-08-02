@@ -2,7 +2,7 @@
 
 The model behind pipeline.build_axes (which replaced the skew-ICA embedding
 pipeline on 2026-07-18; the validation story lives in
-docs/onlymove.md). On top of a per-user difficulty baseline, K
+docs/methodology.md). On top of a per-user difficulty baseline, K
 per-problem axis loadings are learned so that per-user positions explain the
 between-user response residuals — axes are DEFINED by validated human
 variation, not activation statistics.

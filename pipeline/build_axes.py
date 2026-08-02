@@ -1,6 +1,6 @@
 """Build the per-problem SKILL AXES shipped to the PWA (replaces the retired
 skew-ICA build_embedding pipeline, 2026-07-18 — validation in
-docs/onlymove.md).
+docs/methodology.md).
 
 Trains the supervised residual-axes model (utils.rating.residual_axes: fixed regimen,
 literal rating-trainer feature parity, incremental K selected by held-out

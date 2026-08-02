@@ -8,7 +8,7 @@ activation-PCA features for a problem set).
 
 History: this was `auxiliary/compare_rating_models.py`, the held-out human-outcome
 model-comparison CLI behind the `--even-error` DRO study in
-`docs/onlymove.md`. The comparison/fitting machinery
+`docs/methodology.md`. The comparison/fitting machinery
 (`RatingModel`, `fit_eval`, `run_*`, `even_error`, …) was used only by that CLI
 and has been removed — recover it from git history if it's ever needed again.
 """

@@ -17,7 +17,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 - **`db/`** — the local snapshot of the production Cloudflare D1 (`d1.sqlite`, plus the `d1.sql` text dump beside it), pulled by `pipeline.fetch_database`. Gitignored and regenerable; query `d1.sqlite` for any local analysis. Distinct from `attempts/<size>/`, which holds the *tracked* bot benchmark results that feed the rating model.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
-Three documents go deeper: **`docs/onlymove.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
+Three documents go deeper: **`docs/methodology.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
 
 ## Board size
 
@@ -93,7 +93,7 @@ The single writer of `pwa/tsumegos/`: bundles tsumegos, ratings, motifs and the 
 ./.venv/bin/python3 -m pipeline.package_for_pwa
 ```
 
-Steps 7–11 are ordered by hard data dependencies rather than convention; `docs/onlymove.md` §3.1 spells out each edge and what breaks if it is skipped.
+Steps 7–11 are ordered by hard data dependencies rather than convention; `docs/methodology.md` §3.1 spells out each edge and what breaks if it is skipped.
 
 ### Remote execution
 

@@ -6,7 +6,7 @@ The mobile-first Single Page Application served at [onlymove.net](https://onlymo
 
 The pipeline publishes raw per-problem numbers (a rating, a discrimination slope, a guessing floor, and a motif vector) and the client does the rest: it estimates the user's rank from their own recent history, picks problems against that estimate, runs a spaced-repetition model over previously-failed problems, and fits a per-user weakness model over the motif axes. When a user fails a problem they enter Analysis mode, where variations and best-move/score data are read from the SGF itself; if the SGF lacks that data, the front-end calls a server-side KataGo fallback.
 
-The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shipped as a Cloudflare Worker. `docs/onlymove.md` (chapter 2) is the methodology behind the client-side models; `CLAUDE.md` is the invariant reference for the subsystems below.
+The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shipped as a Cloudflare Worker. `docs/methodology.md` (chapter 2) is the methodology behind the client-side models; `CLAUDE.md` is the invariant reference for the subsystems below.
 
 ## 2. Technology stack
 

@@ -24,7 +24,7 @@ Four groups of constants:
    so the client contract (a `time_adjust` field) is unchanged. A SIMPLE log-time slope
    is all the survey data supports — no rating-interaction, no power-law, and no
    rank-residualization line (the old g0/g1 — the joint couplings absorb the
-   rank-correlated part of solve time on their own; see docs/onlymove.md).
+   rank-correlated part of solve time on their own; see docs/methodology.md).
    The client docks every SERVER translation by alpha·(log10(median_minutes) − center)
    and leaves the onlymove headline untimed.
 
