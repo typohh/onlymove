@@ -2,9 +2,9 @@
 
 Re-exports the cross-board profile/feature builders from `utils.rating_features`
 (`build_profiles`, `load_joint_activations`, `load_joint_bot_winrate`,
-`load_joint_move_features`) that `rating_dev/{train_rating_research,
-train_rating_staged,validate_ratings}.py` import, plus `load_problem_features`
-(unsupervised activation-PCA features for a problem set).
+`load_joint_move_features`) that `rating_dev/{train_rating_staged,
+validate_ratings}.py` import, plus `load_problem_features` (unsupervised
+activation-PCA features for a problem set).
 
 History: this was `auxiliary/compare_rating_models.py`, the held-out human-outcome
 model-comparison CLI behind the `--even-error` DRO study in
@@ -50,7 +50,8 @@ def load_problem_features(size, tids, pca_dim, contrastive, seed):
     if contrastive:
         cpath = _contrastive_cache_path(size)
         if not os.path.exists(cpath):
-            sys.exit(f"missing {cpath}; run predict_rating_from_activations --contrastive first")
+            sys.exit(f"missing {cpath}; the contrastive-cache builder was retired with the "
+                     f"ICA embedding — recover it from git history to rebuild this arm")
         cvecs = np.load(cpath, mmap_mode="r")
 
     usable = [t for t in tids if t in row]

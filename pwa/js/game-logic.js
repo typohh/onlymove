@@ -28,9 +28,9 @@ const median = (values) => {
 // NEGATIVE by residual-difficulty confounding: a problem harder-than-its-rating
 // for this user takes longer AND fails more, so the within-user time effect soaks
 // up difficulty the model didn't capture (it controls only for MEASURED rank).
-// Quantified offline in auxiliary/analyze_time_benefit.py: the population-mean
-// solving-time coefficient is ~ -1.25 logit/min (the bias); review time shows no
-// such bias (~0). We recenter by that bias, then require the corrected estimate to
+// Quantified offline against the attempt log: the population-mean solving-time
+// coefficient is ~ -1.25 logit/min (the bias); review time shows no such bias
+// (~0). We recenter by that bias, then require the corrected estimate to
 // be positive with BENEFIT_CONFIDENCE certainty. That second step also handles
 // cold start for free: a user with little data has a wide SE, so the recentered
 // estimate sits near 50% and never clears the bar — no nagging until there's real

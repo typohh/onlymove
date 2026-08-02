@@ -1,8 +1,8 @@
 """Single source of truth for Go board parsing, simulation and SVG rendering.
 
-Both auxiliary/labeler/render.py and the auxiliary/inspect_*.py inspection
-tools import from here, so there is exactly one copy of the board-position
-logic in Python.
+The auxiliary inspection tools (auxiliary/rating_dev/inspect_residual_axes.py)
+import from here, so there is exactly one copy of the board-position logic in
+Python.
 
 The board is shown the way the solver sees it (mirrors the PWA board.js
 markers):

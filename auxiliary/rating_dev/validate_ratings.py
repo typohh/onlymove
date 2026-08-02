@@ -1,14 +1,14 @@
 """Validation bench — score a directory of rating outputs on a hash-confirmed held-out set.
 
 THE single home of rating validation: held-out-problem logloss, held-out Δskill flatness, and
-survey-ρ (base + time-adjusted). The rating tests (auxiliary.train_rating_research) carry NO
-inbuilt validation; they either chain this bench afterward or pass --validate to call run_validation
-on the just-written CSVs (same code, no duplication).
+survey-ρ (base + time-adjusted). The rating tests (auxiliary.rating_dev.train_rating_staged) carry
+NO inbuilt validation; they either chain this bench afterward or pass --validate to call
+run_validation on the just-written CSVs (same code, no duplication).
 
 Pointed at a ratings dir (the per-size tsumego_{ratings,quality,floor}_final.csv + rating_constants.json
 + user_theta.csv a training run writes) plus a (seed, held-out fraction), it:
 
-  1. Derives the SAME held-out problem set the test run excluded, via auxiliary.holdout_set, and prints
+  1. Derives the SAME held-out problem set the test run excluded, via auxiliary.rating_dev.holdout_set, and prints
      its hash. With --expect-hash it ASSERTS the hash matches (bench and test provably agree on the
      set; mismatch => different set or a drifted attempts DB => nonzero exit).
   2. Reports, on the held-out (UNSEEN) problems — which the rated model never trained on, so their
@@ -32,8 +32,8 @@ bench's is the one that reflects what ships, and it correctly charges any predic
 the winsorization step itself.
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.validate_ratings --ratings-dir /tmp/rv2_ho --seed 0 --holdout-problem-frac 0.1
-  ./.venv/bin/python3 -m auxiliary.validate_ratings --ratings-dir /tmp/rv2_ho --seed 0 --holdout-problem-frac 0.1 --expect-hash e83ecdbf5c2e3dae
+  ./.venv/bin/python3 -m auxiliary.rating_dev.validate_ratings --ratings-dir /tmp/rv2_ho --seed 0 --holdout-problem-frac 0.1
+  ./.venv/bin/python3 -m auxiliary.rating_dev.validate_ratings --ratings-dir /tmp/rv2_ho --seed 0 --holdout-problem-frac 0.1 --expect-hash e83ecdbf5c2e3dae
 """
 
 import argparse
@@ -304,7 +304,7 @@ def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
 def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
     """Derive the held-out set (seed, frac), confirm/print its hash, and report held-out logloss +
     Δskill flatness (frac>0) and survey-ρ. Prints results and returns a dict. Shared by the CLI and
-    by auxiliary.train_rating_research --validate (one definition, no duplicated validation)."""
+    by auxiliary.rating_dev.train_rating_staged --validate (one definition, no duplication)."""
     ho_keys, ho_hash = held_out_keys(seed, frac)
     print(f"held-out set: {len(ho_keys)} problems | seed {seed} | frac {frac:g} | hash {ho_hash}")
     if expect_hash and expect_hash != ho_hash:

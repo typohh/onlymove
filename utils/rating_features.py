@@ -13,8 +13,11 @@ them from here. The auxiliary modules that historically defined them now re-expo
 their other callers are unaffected.
 """
 
+import json
 import os
 import sqlite3
+import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 
 import numpy as np
@@ -35,10 +38,10 @@ N_FEATS = N_LAYERS * CHANNELS_PER_LAYER  # 6912
 # OTHER legal moves (N_CONTRAST_BLOCKS × N_FEATS), id-aligned with the correct-vec cache.
 N_CONTRAST_BLOCKS = 4
 
-# The activation "signal cache": correct-move trunk vectors written once per board by
-# auxiliary.inspect_activation_signals._build_cache and read directly by load_joint_activations.
-# The optional contrastive cache (the other-move aggregates) is written by
-# auxiliary.predict_rating_from_activations --contrastive into the same directory.
+# The activation "signal cache": correct-move trunk vectors written per board by
+# build_correct_vec_cache below and read directly by load_joint_activations. The optional
+# contrastive cache (the other-move aggregates) is a legacy sibling in the same directory,
+# read if present and no longer written by anything in the repo.
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
@@ -59,17 +62,12 @@ def load_correct_vec(act_dir, tid, by_ext):
     .npz (all legal cells, addressed by correct_idx — NEVER row 0; the npz is in
     board-scan order).
 
-    This is the per-problem primitive the cache builder
-    (auxiliary.inspect_activation_signals._build_cache) calls once per tid, which
-    is what makes that build incremental: a row depends on nothing but its own
-    .npz. It lives here, beside the cache paths and load_joint_activations that
-    reads them, because its previous home (pipeline.build_embedding) was deleted
-    when build_axes replaced the ICA embedding — leaving the cache builder
-    un-importable, and so the documented post-top-up refresh unrunnable.
+    This is the per-problem primitive build_correct_vec_cache calls once per tid,
+    which is what makes that build incremental: a row depends on nothing but its
+    own .npz.
 
-    A corrupt/unreadable .npz is a HARD ERROR that aborts the run, so on-disk
-    corruption of the activation corpus surfaces instead of being silently
-    masked.
+    A corrupt/unreadable .npz is a HARD ERROR here, so on-disk corruption of the
+    activation corpus surfaces instead of being silently masked.
     """
     npz_path = os.path.join(act_dir, by_ext["npz"][tid])
     try:
@@ -77,6 +75,107 @@ def load_correct_vec(act_dir, tid, by_ext):
             return s["candidates"][int(s["correct_idx"])]
     except Exception as e:
         raise RuntimeError(f"corrupt/unreadable .npz at {npz_path}") from e
+
+
+def _load_correct_vec_chunk(task):
+    """Worker: the correct-move vectors for a chunk of problems.
+
+    Returns (start_index, (chunk, N_FEATS) float16). A problem that fails to load
+    gets a NaN row so the chunk stays index-aligned; the caller counts them and the
+    downstream finite-mask in _fit_joint_pca drops them from the fit.
+    """
+    start, act_dir, items = task
+    out = np.full((len(items), N_FEATS), np.nan, dtype=np.float16)
+    for i, (tid, npz_name) in enumerate(items):
+        by_ext = {"npz": {tid: npz_name} if npz_name else {}}
+        try:
+            out[i] = load_correct_vec(act_dir, tid, by_ext).astype(np.float16)
+        except Exception:
+            pass  # leave NaN row
+    return start, out
+
+
+def build_correct_vec_cache(size, workers=None, force=False):
+    """Build/refresh one board's correct-cell activation cache — correct_vecs_<size>.npy
+    plus correct_ids_<size>.json — the aggregate that load_joint_activations reads.
+
+    pipeline.extract_activations writes one .npz per problem; this rolls those up into
+    the single memmap the feature loaders address by row, and correct_ids becomes the
+    definitive "problems the rating model can score" set (pipeline.cache_move_features
+    takes its tid set straight from it). So a stale cache after a tsumego top-up drops
+    the new problems from the rated set silently, which is why every consumer refreshes
+    it rather than assuming it is current.
+
+    INCREMENTAL: each row is a pure per-problem read of that problem's .npz, so reusing
+    the rows already cached and loading only the tids missing from them is identical to a
+    full rebuild while skipping the per-problem disk reads that dominate. force=True
+    re-reads every .npz.
+    """
+    workers = workers or os.cpu_count() or 1
+    act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+    if not os.path.isdir(act_dir):
+        raise SystemExit(f"no activations dir for size {size}: {act_dir}")
+    files = os.listdir(act_dir)
+    npz = {f[:-4]: f for f in files if f.endswith(".npz")}
+    ids = sorted(npz)
+    if not ids:
+        raise SystemExit(f"no .npz activation files in {act_dir}")
+    n = len(ids)
+
+    # Reuse the existing cache where it covers the same tid (in any order).
+    vecs_path, ids_path = _cache_vecs_path(size), _cache_ids_path(size)
+    old_row, old_vecs = {}, None
+    if not force and os.path.exists(vecs_path) and os.path.exists(ids_path):
+        old_ids = json.load(open(ids_path))
+        cand = np.load(vecs_path, mmap_mode="r")
+        if cand.shape == (len(old_ids), N_FEATS):
+            old_vecs, old_row = cand, {t: i for i, t in enumerate(old_ids)}
+        if old_ids == ids and old_vecs is not None:
+            print(f"[size {size}] correct-vector cache up to date ({n} problems)", flush=True)
+            return
+
+    missing = [t for t in ids if t not in old_row]
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    print(f"[size {size}] correct-vector cache: {n} problems "
+          f"({len(missing)} to load, {n - len(missing)} reused) "
+          f"-> {vecs_path} ({n * N_FEATS * 2 / 1e9:.2f} GB)", flush=True)
+
+    # Load only the missing tids' correct vectors (parallel); keep by tid for assembly.
+    missing_rows = {}
+    chunk = 1024
+    tasks = [(s, act_dir,
+              [(t, npz[t]) for t in missing[s:s + chunk]])
+             for s in range(0, len(missing), chunk)]
+    t0, done = time.time(), 0
+    if tasks:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for (_, arr), (_, _, items) in zip(ex.map(_load_correct_vec_chunk, tasks), tasks):
+                for j, (tid, _) in enumerate(items):
+                    missing_rows[tid] = arr[j]
+                done += len(items)
+                rate = done / (time.time() - t0) if time.time() > t0 else 0.0
+                print(f"\r  {done}/{len(missing)} ({rate:.0f}/s)", end="", flush=True)
+        print(flush=True)
+        # Report unreadable rows rather than letting them vanish into the finite mask:
+        # a NaN row keeps its tid in correct_ids but is dropped from the PCA fit, so the
+        # problem leaves the rated set with no other trace.
+        failed = [t for t, r in missing_rows.items() if not np.isfinite(r).all()]
+        if failed:
+            print(f"[size {size}] WARNING: {len(failed)} unreadable activation rows "
+                  f"(e.g. {failed[:5]}); they will be dropped from the rating fit", flush=True)
+
+    # Assemble the full cache in `ids` order: reused rows from the old memmap, the rest
+    # from this run's loads. Written to a tmp memmap, then atomically swapped in.
+    tmp_path = vecs_path + ".tmp"
+    mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16, shape=(n, N_FEATS))
+    for i, t in enumerate(ids):
+        mm[i] = old_vecs[old_row[t]] if t in old_row else missing_rows[t]
+    mm.flush()
+    del mm
+    del old_vecs  # release the mmap before replacing the file underneath it
+    os.replace(tmp_path, vecs_path)
+    with open(ids_path, "w") as f:
+        json.dump(ids, f)
 
 
 def load_first_time_attempts():
@@ -481,7 +580,7 @@ def load_joint_game_phase(sizes, tids_by_size):
 # Model-development consumers (auxiliary.rating_dev.*, the axis batteries) read
 # THESE, not pwa/tsumegos/problem_params.bin: same values (packaging just copies),
 # but available the moment training finishes and immune to a stale/half-packaged
-# dist. Client-replica harnesses (leaderboard replay, eval_weakness_forward) keep
+# dist. Client-replica harnesses (leaderboard replay, user_weakness_report) keep
 # reading the shipped files on purpose — bit-fidelity to what clients see IS
 # their job.
 

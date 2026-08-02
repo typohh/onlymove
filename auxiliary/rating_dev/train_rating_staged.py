@@ -1,15 +1,16 @@
 """STAGED (coordinate-descent) fork of the rating trainer — an experiment harness.
 
-Copy of auxiliary/rating_dev/train_rating_research.py with ONE addition: a `--staged` mode that
-fits the per-problem 4PL heads ONE AT A TIME (rating → slope → floor) instead of jointly. Each stage
+The production superset: every flag the shipped configuration was selected under, plus a `--staged`
+mode that fits the per-problem 4PL heads ONE AT A TIME (rating → slope → floor) instead of jointly
+(`--production-flags` reproduces what pipeline.train_rating bakes in). Each staged run
 frees a single head (still backbone/feature-predicted, with 0.3 act/bw dropout), trains it, then
 FREEZES it at its learned PER-PROBLEM values (stored in pin_b/pin_a/pin_c buffers, not reverted to a
 global mean) before the next head is freed. Slope/floor start pinned to constants (1.0 / 0.333). The
 backbone trunk is shared, so a frozen head is held by substituting its stored per-problem value in
 (b,a,c) space — the trunk's gradient reaches only the free head each stage. After every stage it
-writes per-size CSVs + runs auxiliary.validate_ratings, so each head's MARGINAL contribution (1PL →
-2PL → 3PL ladder) is visible. Everything else (data prep, anchors, eval) is identical to the research
-trainer; the non-staged path is byte-for-byte the original. Run: `--staged --stage-epochs 100
+writes per-size CSVs + runs auxiliary.rating_dev.validate_ratings, so each head's MARGINAL
+contribution (1PL → 2PL → 3PL ladder) is visible. The non-staged path is the plain joint fit — same
+data prep, anchors and eval, no staging. Run: `--staged --stage-epochs 100
 --no-mech-floor --act-dropout 0.3 --bw-dropout 0.3 --holdout-problem-frac 0.1 --out-dir /tmp/...`.
 
 Original docstring follows.
@@ -208,7 +209,7 @@ def load_anchor_winrates(keys, ranks):
     return out
 
 
-# The survey-ρ / time-adjusted-ρ metrics moved to auxiliary.validate_ratings (the single home of
+# The survey-ρ / time-adjusted-ρ metrics moved to auxiliary.rating_dev.validate_ratings (the single home of
 # rating validation). This file trains + writes; run_validation (the bench) judges the output.
 
 
@@ -305,7 +306,7 @@ class RatingNet(nn.Module):
             self.global_slope = nn.Parameter(torch.tensor(float(np.log(np.expm1(2.0)))))
         # --mech-floor: the guessing floor is MEASURED, not learned. c_p = s·bot_floor_p where
         # bot_floor_p = min pass-rate over the standard-temperature humanv0 ladder (the empirical
-        # guess rate; same convention as auxiliary/diag_4pl_structure.py) and s is ONE global
+        # guess rate) and s is ONE global
         # human-vs-bot scalar (independently measured ≈0.70; legacy shipped exactly 0.70·bot).
         # Rationale: the floor is the one 4PL parameter with a physical meaning a measurement can
         # pin (chance of guessing the move among plausible candidates). Removing the learned head
@@ -877,13 +878,13 @@ def main():
                          "rating tail through it (Finding UU).")
     ap.add_argument("--holdout-problem-frac", type=float, default=0.0,
                     help="If >0, hold out this fraction of ATTEMPTED problems (and their anchor "
-                         "rows) from training (via auxiliary.holdout_set, seed-keyed, hash-printed) "
+                         "rows) from training (via auxiliary.rating_dev.holdout_set, seed-keyed, hash-printed) "
                          "so the feature prior's generalization to those UNSEEN problems can be "
                          "measured. Writes the (subset-trained) CSVs to --out-dir (refuses the "
-                         "production ratings/); validate with auxiliary.validate_ratings or "
+                         "production ratings/); validate with auxiliary.rating_dev.validate_ratings or "
                          "--validate.")
     ap.add_argument("--validate", action="store_true",
-                    help="After writing, run auxiliary.validate_ratings.run_validation on --out-dir "
+                    help="After writing, run auxiliary.rating_dev.validate_ratings.run_validation on --out-dir "
                          "for the same (seed, held-out frac) — held-out logloss + Δskill flatness + "
                          "survey-ρ, hash-confirmed — so you needn't chain the bench by hand.")
     ap.add_argument("--mixed-only", action=argparse.BooleanOptionalAction, default=False,
@@ -1386,8 +1387,8 @@ def main():
     # --- optional held-out PROBLEM set: the feature prior's generalization to UNSEEN problems
     #     (held-out problems are excluded from BOTH human and anchor training rows, so the model
     #     has zero signal on them — its b/a/c there come purely from features). The set + its hash
-    #     come from the SHARED generator (auxiliary.holdout_set) so a held-out training run and the
-    #     validation bench (auxiliary.validate_ratings) provably assume the identical set; the hash
+    #     come from the SHARED generator (auxiliary.rating_dev.holdout_set) so a held-out training run and the
+    #     validation bench (auxiliary.rating_dev.validate_ratings) provably assume the identical set; the hash
     #     is printed for cross-confirmation. Held-out runs WRITE CSVs (see the eval block) so the
     #     bench can score them. ---
     ho_mask_h = np.zeros(len(y), bool)
@@ -1400,7 +1401,7 @@ def main():
         ho_mask_h = np.isin(prob_idx, list(ho_problems))
         print(f"HELD-OUT eval: held-out-set hash {ho_hash} | {len(ho_keys)} attempted problems held "
               f"out ({len(ho_problems)} scorable, {int(ho_mask_h.sum())} human rows) — feature-prior "
-              f"generalization test (confirm via auxiliary.validate_ratings --expect-hash {ho_hash})")
+              f"generalization test (confirm via auxiliary.rating_dev.validate_ratings --expect-hash {ho_hash})")
 
     # --- bot 'anchor users': extra examinees (learned ability) with soft-target responses on every
     #     problem. Coverage is the prior; each rung is a point on every problem's success curve, so
@@ -1438,7 +1439,7 @@ def main():
 
     # --- assemble training rows: human (w=1) ⊕ anchor (w=anchor_weight), MINUS held-out problems
     #     (held-out PROBLEMS get NO training rows, so the bench measures pure feature-prior transfer;
-    #     held-out VALIDATION itself now lives in auxiliary.validate_ratings, not here). ---
+    #     held-out VALIDATION itself now lives in auxiliary.rating_dev.validate_ratings, not here). ---
     train_h = ~ho_mask_h
     if args.mixed_only:
         # Conditional-MLE-style filter (user direction): train only on rows whose PROBLEM has both
@@ -2409,7 +2410,7 @@ def main():
                            "train rows, heavy users — outcome-contaminated, read A/B diffs only")
 
     # Held-out runs train on a SUBSET, so refuse to overwrite the production ratings/ — pass an
-    # explicit --out-dir (e.g. a temp dir). The standalone bench (auxiliary.validate_ratings) scores
+    # explicit --out-dir (e.g. a temp dir). The standalone bench (auxiliary.rating_dev.validate_ratings) scores
     # the written CSVs; --validate runs it automatically after the write below.
     if args.holdout_problem_frac > 0 and os.path.abspath(args.out_dir) == os.path.join(PROJECT_ROOT, "ratings"):
         sys.exit("--holdout-problem-frac writes a SUBSET-trained model; refusing to overwrite the "
@@ -2456,7 +2457,7 @@ def main():
         # re-derives the held-out set from (seed, frac) and confirms it matches the hash we trained
         # on (ho_hash), so a mismatch — e.g. an attempts-DB drift mid-run — fails loud.
         from auxiliary.rating_dev.validate_ratings import run_validation
-        print("\n--validate: scoring the written ratings via auxiliary.validate_ratings ...")
+        print("\n--validate: scoring the written ratings via auxiliary.rating_dev.validate_ratings ...")
         run_validation(args.out_dir, args.seed, args.holdout_problem_frac, expect_hash=ho_hash)
 
 

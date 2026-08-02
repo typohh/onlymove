@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Inspect the extreme-loading problems on the residual-MIRT secondary axes.
 
-Companion to auxiliary/inspect_extreme_problems.py, but for the supervised
-axes trained by auxiliary.rating_dev.train_residual_axes (loaded from the
-activations/_signal_cache/residual_axes_k<K>_seed<S>.npz it saves) instead of
-the skew-ICA embedding. Three structural differences follow from that model:
+Renders the supervised axes trained by auxiliary.rating_dev.train_residual_axes
+(loaded from the activations/_signal_cache/residual_axes_k<K>_seed<S>.npz it
+saves). Three structural differences from the skew-ICA embedding it replaced,
+all following from the model:
 
   - BOTH tails are rendered. The residual axes carry no skew
     sign-canonicalization: a negative loading is a real direction (problems
@@ -256,8 +256,8 @@ def main():
     parser.add_argument("--host", default="http://localhost:8787",
                         help="PWA dev server origin (only used with --no-html)")
     parser.add_argument("--size", default="all",
-                        help="9, 13, or 'all' (default; HTML mode defaults to 9 like "
-                             "inspect_extreme_problems so grids stay board-comparable)")
+                        help="9, 13, or 'all' (default; HTML mode defaults to 9 so grids "
+                             "stay board-comparable)")
     parser.add_argument("--html", action=argparse.BooleanOptionalAction, default=True,
                         help="Render static HTML (default). --no-html prints PWA URLs instead.")
     parser.add_argument("--rows", type=int, default=5,

@@ -21,7 +21,12 @@ utils.rating_features.load_joint_move_features:
 The npz stores RAW features; the loader pools + z-scores them across boards at train time, so
 the cache is reusable across tid subsets. The tid set is the activation id cache for the size
 (activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_rating can
-score. Run once per size (both cached by default):
+score.
+
+This step ALSO refreshes that activation cache (utils.rating_features.build_correct_vec_cache),
+because it is the other roll-up of extract_activations' per-problem .npz output and this step's
+own tid set comes from it. So one command brings both aggregate caches forward after a tsumego
+top-up; neither can be left stale behind the other. Run once per size (both cached by default):
 
   ./.venv/bin/python3 -m pipeline.cache_move_features [--sizes 9,13] [--workers N] [--force]
 """
@@ -41,7 +46,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rating_features import CACHE_DIR, _cache_ids_path  # noqa: E402
+from utils.rating_features import (  # noqa: E402
+    CACHE_DIR, _cache_ids_path, build_correct_vec_cache,
+)
 from pipeline.benchmark_bots import parse_tsumego_sgf  # noqa: E402
 
 # Feature layout: the winning move + N_ALT best alternatives, each as (logit win-prob, score).
@@ -134,9 +141,26 @@ def _process_chunk(task):
     return tids, out
 
 
-def build_size(size, workers, force):
+def build_size(size, workers, force, rebuild_activations=False):
     out_path = _cache_path(size)
     ids_path = _cache_ids_path(size)
+
+    # Refresh the correct-vector cache FIRST: correct_ids is this step's tid set and the
+    # rating model's scorable set, and both roll up the per-problem activation .npz files
+    # that extract_activations writes. Refreshing here means one command brings both
+    # aggregate caches forward after a tsumego top-up, instead of a stale correct_ids
+    # silently truncating this cache and the rated set alike. It is a cheap no-op when
+    # already current. A size with no activations at all is skipped, not an error.
+    #
+    # --force does NOT reach it: forcing a move-feature re-extraction is a minutes-long
+    # SGF reparse, while forcing the activation cache is a full re-read of every .npz in
+    # the corpus. --rebuild-activation-cache asks for that separately.
+    act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+    if not os.path.isdir(act_dir):
+        print(f"size {size}: no activations dir ({act_dir}); skipping")
+        return
+    build_correct_vec_cache(size, workers=workers, force=rebuild_activations)
+
     if not os.path.exists(ids_path):
         print(f"size {size}: no activation id cache ({ids_path}); skipping")
         return
@@ -202,10 +226,15 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sizes", default="9,13", help="comma-separated board sizes to cache")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1)
-    ap.add_argument("--force", action="store_true", help="rebuild even if the cache exists")
+    ap.add_argument("--force", action="store_true",
+                    help="re-extract every move-feature row (leaves the activation cache "
+                         "on its incremental path)")
+    ap.add_argument("--rebuild-activation-cache", action="store_true",
+                    help="also re-read every activation .npz into correct_vecs (hours; "
+                         "only needed if that cache is corrupt)")
     args = ap.parse_args()
     for s in [int(x) for x in args.sizes.split(",") if x.strip()]:
-        build_size(s, max(1, args.workers), args.force)
+        build_size(s, max(1, args.workers), args.force, args.rebuild_activation_cache)
 
 
 if __name__ == "__main__":

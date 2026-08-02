@@ -1,5 +1,0 @@
-# generated artifacts (not source) — sim_input* carries real user-attempt data, never commit
-engine.bundle.mjs
-sim_input*.json
-results*.json
-__pycache__/
