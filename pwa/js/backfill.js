@@ -584,9 +584,17 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             stripOldEmbeddingFields(size, history, startIdx);
             // Correct-move embeddings straight from the lookup-aligned sidecar —
             // zero shard zips. Only pickedEmbedding still lives in the per-shard
-            // bins (addressed by the STORED pickedCellIndex, which the wipe
-            // keeps — it's an SGF-structure index, independent of the fit), so
-            // the zip walk shrinks to shards carrying such a need.
+            // bins, addressed by the STORED pickedCellIndex, which the wipe
+            // keeps: it indexes the SGF's root variations, so a REFIT (new
+            // axes, new embedding_version) cannot move it. It is NOT immune to
+            // the SGF itself changing — reordering a problem's root variations
+            // silently re-points every stored index for it, and the refetch
+            // below would then return a different cell's vector. Only
+            // fillSyncedHistoryFields re-derives the index (from the reported
+            // move, on adopt/sync); a locally-recorded entry keeps whatever it
+            // was given. So a corpus surgery that reorders variations either
+            // rides a state-epoch bump or knowingly leaves those entries stale.
+            // The zip walk shrinks to shards carrying such a need.
             totalFilled = await fillCorrectEmbeddingsViaSidecar(history.slice(startIdx));
             const pickedNeedIds = collectPickedNeedIds(history, startIdx);
             if (pickedNeedIds.size > 0) {
