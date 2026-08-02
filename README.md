@@ -7,7 +7,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 ## Project structure
 
 - **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
-- **`utils/`** — core logic, shared helpers, and the KataGo controller.
+- **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the rating artifacts reader, rank-curve fitting, surveys, the residual-axes model). The two families share no imports; `utils/constants.py` holds the handful of values both need.
 - **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
@@ -19,7 +19,7 @@ Three documents go deeper: **`docs/onlymove.md`** is the self-contained methodol
 
 ## Board size
 
-Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/configurations.py`); there is no single global `BOARD_SIZE` switch. The three single-size generation steps — `tune_engine`, `generate_tsumegos`, `benchmark_bots` — take a **mandatory positional `size` arg** (`9` or `13`). The downstream steps (`extract_activations` onward) iterate both sizes in one run and take no size arg. All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run each generation step once per size (e.g. `generate_tsumegos 9` then `generate_tsumegos 13`), then run the downstream steps once.
+Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/constants.py`); there is no single global `BOARD_SIZE` switch. The three single-size generation steps — `tune_engine`, `generate_tsumegos`, `benchmark_bots` — take a **mandatory positional `size` arg** (`9` or `13`). The downstream steps (`extract_activations` onward) iterate both sizes in one run and take no size arg. All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run each generation step once per size (e.g. `generate_tsumegos 9` then `generate_tsumegos 13`), then run the downstream steps once.
 
 ## Pipeline execution
 

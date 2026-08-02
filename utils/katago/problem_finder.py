@@ -1,8 +1,8 @@
 import math
 import random
 
-from utils.configurations import debug, DEBUG
-from utils.katago_queries import KatagoQueries, GTP_COLS
+from utils.constants import debug, DEBUG
+from utils.katago.queries import KatagoQueries, GTP_COLS
 
 MIN_WINRATE_CORRECT = 0.6
 MAX_WINRATE_ALTERNATIVE = 0.4

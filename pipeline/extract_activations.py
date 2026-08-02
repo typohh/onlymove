@@ -42,7 +42,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-import utils.katago_torch  # noqa: F401  -- adds vendored katago/ to sys.path
+import utils.katago.torch_model  # noqa: F401  -- adds vendored katago/ to sys.path
 
 from katago.game.board import Board
 from katago.game.features import Features
@@ -51,8 +51,8 @@ from katago.train.load_model import load_model
 from katago.train.model_pytorch import ExtraOutputs
 
 from pipeline.benchmark_bots import parse_tsumego_sgf
-from utils.configurations import ALL_BOARD_SIZES
-from utils.coords import gtp_to_xy, sgf_to_gtp
+from utils.constants import ALL_BOARD_SIZES
+from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 
 DEFAULT_CKPT = os.path.join(
     PROJECT_ROOT, "models",

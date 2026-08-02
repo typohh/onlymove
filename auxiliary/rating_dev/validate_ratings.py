@@ -49,10 +49,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from auxiliary.rating_dev.holdout_set import held_out_keys  # noqa: E402
-from utils.rating_features import load_first_time_attempts  # noqa: E402
+from utils.rating.features import load_first_time_attempts  # noqa: E402
 from auxiliary.rating_dev.model_comparison import build_profiles  # noqa: E402
-from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
-from utils.ratings_io import load_size_value_maps  # noqa: E402
+from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.rating.ratings_io import load_size_value_maps  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
@@ -192,9 +192,9 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
     coefficients fit on the current run (the shipped population_constants.json alpha is stale for a
     fresh train). Returns (weighted_rho, {server: (n, rho)}, time_adjust_dict | None)."""
     from collections import defaultdict
-    from utils.rank_surveys import (
+    from utils.rating.rank_surveys import (
         load_rank_surveys, latest_per_user_server, load_attempts_for_users, SQL_PATH_DEFAULT)
-    from utils.fit_rank_curves import fit_user_rating
+    from utils.rating.fit_rank_curves import fit_user_rating
     surveys = latest_per_user_server(load_rank_surveys(SQL_PATH_DEFAULT))
     # first_time_only: mirror the client / production anchor (first-time attempts);
     # repeats' spaced-repetition success would inflate the 80%-clear rating this rho uses.

@@ -16,11 +16,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.configurations import ALL_BOARD_SIZES
-from utils.coords import sgf_to_gtp, sgfmill_point_to_sgf
-from utils.katago_controller import KatagoController
-from utils.katago_queries import KatagoQueries, get_all_ranks, get_rank_str
-from utils.models import MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODEL_HUMAN
+from utils.constants import ALL_BOARD_SIZES
+from utils.katago.coords import sgf_to_gtp, sgfmill_point_to_sgf
+from utils.katago.controller import KatagoController
+from utils.katago.queries import KatagoQueries, get_all_ranks, get_rank_str
+from utils.katago.models import MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODEL_HUMAN
 
 # Set in main() from the mandatory size arg: tsumegos/<size>/ and attempts/<size>/.
 TSUMEGO_DIR = None

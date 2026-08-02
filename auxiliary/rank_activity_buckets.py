@@ -37,7 +37,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.fit_rank_curves import interp_extrap  # noqa: E402
+from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
 
 SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "pwa", "tsumegos")

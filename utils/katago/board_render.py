@@ -20,7 +20,7 @@ import os
 import re
 import zipfile
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 _STAR_POINTS = {
     9: [(2, 2), (2, 6), (6, 2), (6, 6), (4, 4)],

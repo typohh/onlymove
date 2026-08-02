@@ -13,7 +13,7 @@ file; if the survivor had no row, the first loser's row is kept under the new
 id (same position, equivalent content) and counted as a fallback.
 
 The `joint_pca_*.npz` memo caches are deleted outright: they are fingerprinted
-on the raw caches' mtime + exact tid subset (utils.rating_features), so the
+on the raw caches' mtime + exact tid subset (utils.rating.features), so the
 rewrite orphans them and the next training run refits automatically. The stale
 `contrastive_vecs_*.npy` aux caches (already row-count-desynced from
 correct_ids, unused by production) are left untouched.
@@ -47,7 +47,7 @@ if PROJECT_ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 
 # Per-id file artifacts: (relative dir template, extension).
 FILE_ARTIFACTS = [

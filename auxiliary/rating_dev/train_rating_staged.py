@@ -97,9 +97,9 @@ from auxiliary.rating_dev.model_comparison import (  # noqa: E402
     build_profiles, load_joint_activations, load_joint_bot_winrate,
     load_joint_game_phase, load_joint_move_features,
 )
-from utils.rating_features import _cache_ids_path, load_first_time_attempts  # noqa: E402
-from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
+from utils.rating.features import _cache_ids_path, load_first_time_attempts  # noqa: E402
+from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
@@ -714,7 +714,7 @@ def main():
     ap.add_argument("--phase-features", action=argparse.BooleanOptionalAction, default=False,
                     help="Append the game-phase RAW-component block "
                          "[moves_before_position, main_line_len] "
-                         "(utils.rating_features.load_joint_game_phase; z-scored, 2 cols) after "
+                         "(utils.rating.features.load_joint_game_phase; z-scored, 2 cols) after "
                          "the move block. Motivated by the residual-MIRT r-head finding "
                          "(kappa +0.109 of predictable residual difficulty on a surface "
                          "including these; auxiliary.rating_dev.train_residual_axes). Not in the "

@@ -22,7 +22,7 @@ among the first moves, score as the tie-break).  How often that disagrees with
 variation_nodes[0] — the convention benchmark_bots / extract_activations /
 package_for_pwa still use — is reported, as is a census of the stricter
 "exactly one first move with winrate > 50% AND score > 0" rule that
-utils.add_variations.first_move_is_well_formed gates new problems on.
+utils.katago.add_variations.first_move_is_well_formed gates new problems on.
 
 PERSPECTIVE.  Every "{winrate}%/{score}" comment is BLACK-perspective
 (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK; pwa/js/sgf.js reads
@@ -56,8 +56,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.add_variations import parse_eval_comment  # noqa: E402
-from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
+from utils.katago.add_variations import parse_eval_comment  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
 # A conflicting node only counts as MATERIAL when both axes are clear of the
 # rounding grain and of the coin-flip band around 50%.

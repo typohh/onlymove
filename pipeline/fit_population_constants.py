@@ -88,11 +88,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.fit_rank_curves import CALIBRATION_P, interp_extrap_vec  # noqa: E402
-from utils.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
+from utils.rating.fit_rank_curves import CALIBRATION_P, interp_extrap_vec  # noqa: E402
+from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
-# CALIBRATION_P (the 80%-clear margin) is the single source in utils.fit_rank_curves.
+# CALIBRATION_P (the 80%-clear margin) is the single source in utils.rating.fit_rank_curves.
 LOGIT_CALIBRATION = np.log(CALIBRATION_P / (1 - CALIBRATION_P))
 FLOOR_MAX = 0.78
 Z0 = np.log(0.7 / 0.3)                 # fixed retention reference (= logit(0.7))

@@ -23,9 +23,9 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 SQL_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 SQLITE_PATH = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")

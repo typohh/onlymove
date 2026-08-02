@@ -2,7 +2,7 @@
 skew-ICA build_embedding pipeline, 2026-07-18 — validation in
 docs/onlymove.md).
 
-Trains the supervised residual-axes model (utils.residual_axes: fixed regimen,
+Trains the supervised residual-axes model (utils.rating.residual_axes: fixed regimen,
 literal rating-trainer feature parity, incremental K selected by held-out
 walk-forward LL gain), then writes the same artifact contract the packaging
 step consumes — so pipeline.package_for_pwa and the PWA client are unchanged
@@ -43,8 +43,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.residual_axes import select_and_fit  # noqa: E402
-from utils.rating_features import (  # noqa: E402
+from utils.rating.residual_axes import select_and_fit  # noqa: E402
+from utils.rating.features import (  # noqa: E402
     _cache_ids_path, load_joint_activation_basis,
 )
 
@@ -206,7 +206,7 @@ def write_per_cell(fit, tid_size):
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
     load_joint_activation_basis(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
     # basis is cached in the joint-PCA npz; workers re-open it directly
-    from utils.rating_features import _joint_pca_cache_path
+    from utils.rating.features import _joint_pca_cache_path
     basis_path = _joint_pca_cache_path(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
 
     act_dim = fit["act_dim"]
@@ -300,7 +300,7 @@ def main():
     # per_problem.csv — same contract packaging always read. tid->size comes
     # from the SGF corpus (corpus_tid_size), NEVER the cache id lists — a stale
     # cache id in the other size's list would mis-size the row (000d0d75).
-    from utils.residual_axes import corpus_tid_size
+    from utils.rating.residual_axes import corpus_tid_size
     tid_size = corpus_tid_size()
     import csv
     k_sel = fit["k_sel"]

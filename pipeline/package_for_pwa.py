@@ -18,9 +18,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.configurations import ALL_BOARD_SIZES
-from utils.coords import gtp_to_xy, sgf_to_gtp
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
+from utils.constants import ALL_BOARD_SIZES
+from utils.katago.coords import gtp_to_xy, sgf_to_gtp
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
 from pipeline.benchmark_bots import parse_tsumego_sgf
 
 
@@ -671,7 +671,7 @@ def load_rating_artifacts(ratings_dir, ratings_csv):
         selection weight ∝ a_p²).
       - floor_map   ← tsumego_floors.csv `floor`: the raw 3PL guessing floor
         c_p (lower asymptote of the per-attempt success curve).
-    Uses the shared utils.ratings_io reader, so the shipped floats are
+    Uses the shared utils.rating.ratings_io reader, so the shipped floats are
     correctly-rounded and consistent with the rest of the pipeline's loaders.
     (These values can differ from an older pandas-parsed bundle by ≤1 ULP, which
     re-hashes the shards — fine: this only runs when the shard set is rebuilt

@@ -83,10 +83,10 @@ if PROJECT_ROOT not in sys.path:
 from auxiliary.eval_score_gap_axis import (  # noqa: E402
     DB_PATH, WINDOW, EVAL_BLOCK, WARMUP, load_ranks, irls,
 )
-# Data sources come from the shared production home (utils.rating_features) —
+# Data sources come from the shared production home (utils.rating.features) —
 # the same module pipeline.train_rating loads its feature blocks from, so the
 # rating trainer and this prototype stay in sync by construction.
-from utils.rating_features import (  # noqa: E402
+from utils.rating.features import (  # noqa: E402
     CACHE_DIR, _cache_ids_path, load_backend_problem_params,
     load_joint_activations, load_joint_bot_winrate, load_joint_game_phase,
     load_joint_move_features, load_tightness_gaps, phase_ratio_z, zscore_neglog,

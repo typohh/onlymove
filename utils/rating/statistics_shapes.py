@@ -3,7 +3,7 @@
 `statistics.txt` is KataGo's tabulated weak-side win rate for even games at each rank gap; the
 ΔAIC-best fit to it gives the rating→rank curve's SHAPE (the EGF cubic), with only the affine
 (α, β) left for the survey fit downstream. The rank-calibration stage (pipeline.map_rating_to_rank
-via utils.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse the same fitted
+via utils.rating.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse the same fitted
 shape, so the fit lives here (a dependency-free leaf — no auxiliary/ or pipeline/ imports).
 
 `fit_shape(name)` returns (params, theta_func); `name` is matched as a prefix of the families in
@@ -19,9 +19,9 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit
 
-from utils.rank_surveys import rank_to_value
+from utils.rating.rank_surveys import rank_to_value
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 STATS_PATH = os.path.join(PROJECT_ROOT, "data", "statistics.txt")
 
 # This table has its OWN axis: 20k = 0, 1k = 19, 1d = 20. It is deliberately NOT

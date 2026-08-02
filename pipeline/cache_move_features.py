@@ -13,7 +13,7 @@ rivals — a difficulty signal orthogonal to the trunk activations and the bot-l
 that train_rating already feeds.
 
 Output (one per board size), consumed by train_rating --move-features through
-utils.rating_features.load_joint_move_features:
+utils.rating.features.load_joint_move_features:
   activations/_signal_cache/move_evals_<size>.npz
       tids   (n,)      <U8   canonical problem id (orientation-invariant hash)
       feats  (n, 20)   f32   RAW [logit win-prob, score] × 10 moves (solution, then 9 alts)
@@ -23,7 +23,7 @@ the cache is reusable across tid subsets. The tid set is the activation id cache
 (activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_rating can
 score.
 
-This step ALSO refreshes that activation cache (utils.rating_features.build_correct_vec_cache),
+This step ALSO refreshes that activation cache (utils.rating.features.build_correct_vec_cache),
 because it is the other roll-up of extract_activations' per-problem .npz output and this step's
 own tid set comes from it. So one command brings both aggregate caches forward after a tsumego
 top-up; neither can be left stale behind the other. Run once per size (both cached by default):
@@ -46,7 +46,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rating_features import (  # noqa: E402
+from utils.rating.features import (  # noqa: E402
     CACHE_DIR, _cache_ids_path, build_correct_vec_cache,
 )
 from pipeline.benchmark_bots import parse_tsumego_sgf  # noqa: E402

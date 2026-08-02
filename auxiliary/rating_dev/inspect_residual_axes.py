@@ -47,8 +47,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.board_render import load_lookup, render_problem  # noqa: E402
-from utils.rating_features import CACHE_DIR  # noqa: E402
+from utils.katago.board_render import load_lookup, render_problem  # noqa: E402
+from utils.rating.features import CACHE_DIR  # noqa: E402
 
 
 # ---- artifact loading ---------------------------------------------------

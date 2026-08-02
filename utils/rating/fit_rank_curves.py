@@ -38,7 +38,7 @@ CALIBRATION_P = 0.8  # matches the client / momentum: rank = where you clear 80%
 # finite (κ→∞ as c→P). Mirrors pwa/js/irt.js clampFloor / FLOOR_MAX exactly.
 FLOOR_MAX = 0.78
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 

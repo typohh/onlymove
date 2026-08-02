@@ -47,14 +47,14 @@ npm run deploy     # publish to Cloudflare Workers
 ## Development Conventions
 
 ### Python Code Style & Imports
-- Use **absolute imports** rooted at the repository root (e.g., `from utils.configurations import ...`).
+- Use **absolute imports** rooted at the repository root (e.g., `from utils.constants import ...`).
 - Appending `PROJECT_ROOT` to `sys.path` is standard at the start of pipeline entry points.
 - **Tests**: The `tests/` folder is empty and there is no test runner. Do not claim to run automated tests unless you explicitly write and run them.
 
 ### Coordinates
 - **KataGo coordinates** skip the letter `I` (columns: `ABCDEFGHJKLMNOPQRST`).
 - **SGF coordinates** do not skip `I`.
-- Use the helpers `katago_to_sgf_coords` in [utils/katago_queries.py](file:///home/ootakamoku/Repositories/onlymove/utils/katago_queries.py) and `sgf_to_gtp` in [pipeline/benchmark_bots.py](file:///home/ootakamoku/Repositories/onlymove/pipeline/benchmark_bots.py) instead of rewriting coordinate math.
+- Use the helpers `katago_to_sgf_coords` in [utils/katago/queries.py](file:///home/ootakamoku/Repositories/onlymove/utils/katago/queries.py) and `sgf_to_gtp` in [pipeline/benchmark_bots.py](file:///home/ootakamoku/Repositories/onlymove/pipeline/benchmark_bots.py) instead of rewriting coordinate math.
 
 ### Database Operations
 - `attempts/database.sqlite` is the canonical merge target (gitignored).

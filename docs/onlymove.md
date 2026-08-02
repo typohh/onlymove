@@ -601,7 +601,7 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 
 **The last five are ordered by hard data dependencies, not by convention.** Two of them — `map_rating_to_rank` and `fit_population_constants` — are board-independent and need no GPU, which makes it tempting to treat them as side steps. "Board-independent" is not "detachable": both sit *inside* the sequence.
 
-- `map_rating_to_rank` consumes `ratings/` and must precede `build_axes`, whose features include the rating outputs and the rank derived through the curve (`utils/residual_axes.py` reads `ratings/rating_to_rank.json` directly).
+- `map_rating_to_rank` consumes `ratings/` and must precede `build_axes`, whose features include the rating outputs and the rank derived through the curve (`utils/rating/residual_axes.py` reads `ratings/rating_to_rank.json` directly).
 - `fit_population_constants` consumes `axes/per_problem.csv` and must therefore follow `build_axes` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
 
 `pipeline.fetch_database` supplies the human attempt log and the survey rows, so it precedes everything that fits against them — the rating trainer, the rank map and the axes alike. It takes no board size, pulls incrementally by row id, and is the one step in the block that reads the production database rather than the artifact tree.
@@ -610,25 +610,25 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 
 **The collision guard** of section 1.1 is `tsumego_id_taken` in `pipeline/generate_tsumegos.py`: it checks the id across *all* board sizes and discards the candidate rather than overwriting, counted as `duplicate_ids_skipped` in the run stats.
 
-**Section 1.1's two first-move guarantees are separate functions in `utils/add_variations.py`, applied in that order.** `first_move_is_well_formed` decides admission — exactly one candidate winning on both axes, every other a clean loss, nothing straddling — and rejects on anything else. `promote_winning_first_move` then reorders an admitted problem so the evaluations' winner is variation zero, counted as `first_moves_promoted`. Keeping them apart is what makes the reorder possible: a problem whose solution is merely listed late passes the admission test on its own terms, so a single combined check would have to throw it away. `auxiliary/check_tsumego_sequences.py` audits both properties over the whole corpus.
+**Section 1.1's two first-move guarantees are separate functions in `utils/katago/add_variations.py`, applied in that order.** `first_move_is_well_formed` decides admission — exactly one candidate winning on both axes, every other a clean loss, nothing straddling — and rejects on anything else. `promote_winning_first_move` then reorders an admitted problem so the evaluations' winner is variation zero, counted as `first_moves_promoted`. Keeping them apart is what makes the reorder possible: a problem whose solution is merely listed late passes the admission test on its own terms, so a single combined check would have to throw it away. `auxiliary/check_tsumego_sequences.py` audits both properties over the whole corpus.
 
 ## 3.2 Backend modules
 
 | Method | Module |
 | --- | --- |
-| feature loaders, attempt loading, profile construction | `utils/rating_features.py` |
+| feature loaders, attempt loading, profile construction | `utils/rating/features.py` |
 | the rating fit, gauge, barriers, phase-two calibration | `pipeline/train_rating.py` |
-| walk-forward calibration harness (validation only) | `utils/slope_calibration.py` |
+| walk-forward calibration harness (validation only) | `utils/rating/slope_calibration.py` |
 | consensus rank mapping | `pipeline/map_rating_to_rank.py` |
-| the user-rating anchor and ordinal likelihood | `utils/fit_rank_curves.py` |
-| the win-rate-table shape prior | `utils/statistics_shapes.py` |
-| survey loading and rank values | `utils/rank_surveys.py` |
-| the residual-axes model and axis-count selection | `utils/residual_axes.py` |
+| the user-rating anchor and ordinal likelihood | `utils/rating/fit_rank_curves.py` |
+| the win-rate-table shape prior | `utils/rating/statistics_shapes.py` |
+| survey loading and rank values | `utils/rating/rank_surveys.py` |
+| the residual-axes model and axis-count selection | `utils/rating/residual_axes.py` |
 | axis fit, labelling, anchors, per-cell fanout | `pipeline/build_axes.py` |
 | population constants | `pipeline/fit_population_constants.py` |
 | publishing | `pipeline/package_for_pwa.py` |
 
-**The rank-collinearity invariant** (section 1.14) is enforced by two specifics in `utils/residual_axes.py`, both easy to break by accident. In `train_axes`, `alpha` and `beta` sit in an optimizer group with **no** `weight_decay` and appear in no penalty term, while `v` carries `0.5·(v²/counts)` plus `10·mean(v)²`, and `gh` is unit-RMS normalized before meeting `v` — so the free/penalized asymmetry that routes rank-shaped variation into `beta` is real. In `axes_ll_gain`, the baseline design matrix is `X_b = [1, rk]` against the augmented `X_ax = [1, rk, G]`; dropping `rk` from `X_b` would let a rank-collinear axis score a large spurious gain. Adding a penalty to `beta`, or scoring against a rank-free baseline, requires revisiting section 1.14's argument before either is merged.
+**The rank-collinearity invariant** (section 1.14) is enforced by two specifics in `utils/rating/residual_axes.py`, both easy to break by accident. In `train_axes`, `alpha` and `beta` sit in an optimizer group with **no** `weight_decay` and appear in no penalty term, while `v` carries `0.5·(v²/counts)` plus `10·mean(v)²`, and `gh` is unit-RMS normalized before meeting `v` — so the free/penalized asymmetry that routes rank-shaped variation into `beta` is real. In `axes_ll_gain`, the baseline design matrix is `X_b = [1, rk]` against the augmented `X_ax = [1, rk, G]`; dropping `rk` from `X_b` would let a rank-collinear axis score a large spurious gain. Adding a penalty to `beta`, or scoring against a rank-free baseline, requires revisiting section 1.14's argument before either is merged.
 
 Experiments live in `auxiliary/rating_dev/` (notably `train_rating_staged.py`, whose `--production-flags` reproduces the shipped rating configuration) and in `auxiliary/eval_*.py` — `eval_rank_map_cv.py` validated the career-block anchors and rejected confidence weighting; `eval_recall_model.py` produces every measurement in section 2.8's closing subsection, and re-running it is how those figures get refreshed. `auxiliary/check_mapped_vs_declared_rank.py` is the end-to-end calibration diagnostic of section 1.12: it maps each surveyed user's shipped rating forward through the curve and their server's coupling, reports the error against what they declared, and — where linked federation accounts supply machine-written ratings — runs both honesty routes of section 1.12, the rank-matched contrast against self-reporters holding no verified rating and the same-user exact-match limit. The production modules carry no experiment flags, so a test tweak cannot reach shipped output.
 

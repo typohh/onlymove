@@ -1,7 +1,7 @@
-from utils.configurations import RULES, KOMI
-# GTP_COLS re-exported here for back-compat (utils.problem_finder and others
-# import it from this module); the coordinate primitives live in utils.coords.
-from utils.coords import GTP_COLS, col_index_to_gtp_letter, gtp_letter_to_col_index
+from utils.constants import RULES, KOMI
+# GTP_COLS re-exported here for back-compat (utils.katago.problem_finder and others
+# import it from this module); the coordinate primitives live in utils.katago.coords.
+from utils.katago.coords import GTP_COLS, col_index_to_gtp_letter, gtp_letter_to_col_index
 
 _SUPPORTED_RANKS = [
     "rank_20k", "rank_19k", "rank_18k", "rank_17k", "rank_16k",

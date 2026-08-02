@@ -66,16 +66,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rank_surveys import (  # noqa: E402
+from utils.rating.rank_surveys import (  # noqa: E402
     SQL_PATH_DEFAULT, latest_per_user_server, load_attempts_for_users,
     load_rank_surveys,
 )
-from utils.fit_rank_curves import (  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec, ordinal_nll_vec,
     _unpack_thresholds,
 )
-from utils.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
-from utils.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
+from utils.rating.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
+from utils.rating.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
 from pipeline.map_rating_to_rank import (  # noqa: E402
     RATING_SHAPE, SIZES, load_floors, load_ratings, load_slopes,
 )

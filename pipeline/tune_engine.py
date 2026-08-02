@@ -9,9 +9,9 @@ import re
 import argparse
 import traceback
 
-from utils.configurations import ALL_BOARD_SIZES, DEFAULT_MODEL
-from utils.katago_controller import KATAGO_PATH, CONFIG_FILE
-from utils.models import get_model
+from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL
+from utils.katago.controller import KATAGO_PATH, CONFIG_FILE
+from utils.katago.models import get_model
 
 
 verbose = False

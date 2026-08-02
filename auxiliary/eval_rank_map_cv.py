@@ -73,12 +73,12 @@ from pipeline.map_rating_to_rank import (  # noqa: E402
     _curve_arrays, fit_consensus,
     load_floors, load_ratings, load_slopes, load_user_median_solve_minutes,
 )
-from utils.fit_rank_curves import (  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, FLOOR_MAX, LOGIT_PER_RATING, fit_user_rating,
     interp_extrap_vec, _unpack_thresholds,
 )
-from utils.rank_surveys import SQL_PATH_DEFAULT, load_rank_surveys  # noqa: E402
-from utils.ratings_io import load_lapse  # noqa: E402
+from utils.rating.rank_surveys import SQL_PATH_DEFAULT, load_rank_surveys  # noqa: E402
+from utils.rating.ratings_io import load_lapse  # noqa: E402
 
 BLOCK_DAYS = 60
 BLOCK_STEP = 30

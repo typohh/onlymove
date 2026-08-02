@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from utils.models import MODEL_FULL
+from utils.katago.models import MODEL_FULL
 
 DEBUG = False
 ALL_BOARD_SIZES = (9, 13)

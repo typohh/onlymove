@@ -55,7 +55,7 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)` (>0 ⇒ monotone);
     δ_g=0 reproduces the rigid affine `α_c + β·S`, and `LAMBDA_SHAPE·Σδ_g²` penalises
     deviation. The shape is the ΔAIC-best fit to the even-game win-rate table
-    (utils.statistics_shapes) — the right convex backbone for the sparse tails. The
+    (utils.rating.statistics_shapes) — the right convex backbone for the sparse tails. The
     prior is GENTLE (LAMBDA_SHAPE small): once the curve is anchored by ALL servers it
     is no longer kyu-starved, so a strong prior over-constrains.
   * EGF IS JUST ANOTHER SERVER. Every server, EGF included, gets free ordinal thresholds
@@ -114,16 +114,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rank_surveys import (  # noqa: E402
+from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, rank_band, value_to_rank,
 )
-from utils.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
-from utils.fit_rank_curves import (  # noqa: E402
+from utils.rating.statistics_shapes import fit_shape, rank_to_axis  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec, ordinal_nll_vec,
     _unpack_thresholds,
 )
-from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
-from utils.ratings_io import (  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
+from utils.rating.ratings_io import (  # noqa: E402
     FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_lapse, load_value_map,
 )
 

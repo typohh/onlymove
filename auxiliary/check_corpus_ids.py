@@ -48,7 +48,7 @@ if PROJECT_ROOT not in sys.path:
 from sgfmill import sgf, boards  # noqa: E402
 
 from pipeline.generate_tsumegos import get_orientation_invariant_hash  # noqa: E402
-from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
 
 def problem_hash(path):

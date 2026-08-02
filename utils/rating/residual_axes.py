@@ -39,14 +39,14 @@ from collections import defaultdict
 
 import numpy as np
 
-from utils.rating_features import (
+from utils.rating.features import (
     _cache_ids_path, load_backend_problem_params, load_joint_activations,
     load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features,
     load_tightness_gaps, phase_ratio_z, zscore_neglog, SQLITE_PATH,
 )
-from utils.slope_calibration import load_client_lapse
+from utils.rating.slope_calibration import load_client_lapse
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 # training regimen
 EPOCHS = 40
@@ -61,7 +61,7 @@ K_START = 3                 # the three scalar seeds
 K_MAX = 12                  # runaway backstop, far above expected selection
 STOP_FRACTION = 0.03        # stop when gain < (1 - this) * peak; select K-1
 
-# walk-forward eval protocol (client replica — same as utils.slope_calibration)
+# walk-forward eval protocol (client replica — same as utils.rating.slope_calibration)
 WINDOW = 500
 EVAL_BLOCK = 50
 WARMUP = 120

@@ -1,6 +1,6 @@
 """Shared rating-model data/feature loaders for the rating-dev harness.
 
-Re-exports the cross-board profile/feature builders from `utils.rating_features`
+Re-exports the cross-board profile/feature builders from `utils.rating.features`
 (`build_profiles`, `load_joint_activations`, `load_joint_bot_winrate`,
 `load_joint_move_features`) that `rating_dev/{train_rating_staged,
 validate_ratings}.py` import, plus `load_problem_features` (unsupervised
@@ -24,7 +24,7 @@ PROJECT_ROOT = os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rating_features import (  # noqa: F401,E402  (build_profiles/load_joint_* re-exported for the trainers/validator)
+from utils.rating.features import (  # noqa: F401,E402  (build_profiles/load_joint_* re-exported for the trainers/validator)
     N_CONTRAST_BLOCKS,
     N_FEATS,
     _cache_ids_path,

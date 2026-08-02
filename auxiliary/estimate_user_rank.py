@@ -36,14 +36,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.fit_rank_curves import (  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
-from utils.ratings_io import (  # noqa: E402
+from utils.rating.ratings_io import (  # noqa: E402
     FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_lapse, load_rating_rank_curve,
     load_value_map,
 )
-from utils.rank_surveys import value_to_rank  # noqa: E402
+from utils.rating.rank_surveys import value_to_rank  # noqa: E402
 
 SIZES = [9, 13]
 DB_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")

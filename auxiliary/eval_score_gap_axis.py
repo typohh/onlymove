@@ -65,10 +65,10 @@ EVAL_BLOCK = 50
 WARMUP = 120
 
 
-# The feature/cache implementations live in utils.rating_features (the production
+# The feature/cache implementations live in utils.rating.features (the production
 # data-source home shared with pipeline.train_rating and auxiliary.rating_dev.*)
 # — this script keeps thin aliases so its CLI and importers are unchanged.
-from utils.rating_features import (  # noqa: E402
+from utils.rating.features import (  # noqa: E402
     load_backend_problem_params, load_backend_rank_curve,
     load_game_phase, load_tightness_gaps, zscore_neglog,
 )

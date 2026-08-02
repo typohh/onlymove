@@ -8,7 +8,7 @@ Pipeline mirrored from the PWA / map_rating_to_rank (so the numbers are what a
 user actually sees):
 
   1. R = the user's 80%-clear v2-rating, pooled across boards
-     (`utils.fit_rank_curves.fit_user_rating` @ CALIBRATION_P, with each
+     (`utils.rating.fit_rank_curves.fit_user_rating` @ CALIBRATION_P, with each
      problem's own a_p slope) — the same estimator the client uses.
   2. our_internal = applyM(R): interpolate R through ratings/rating_to_rank.json,
      which is already on the one internal rank scale (0 = the 1k/1d boundary,
@@ -81,7 +81,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rank_surveys import (  # noqa: E402
+from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, VERIFIED_SERVERS, is_verified_active,
     latest_per_user_server, load_attempts_for_users, load_rank_surveys,
     value_to_rank, verified_rank_value, verified_tier_rank,
@@ -89,10 +89,10 @@ from utils.rank_surveys import (  # noqa: E402
 from pipeline.map_rating_to_rank import (  # noqa: E402
     EPS_CONTAMINATION, SIZES, load_floors, load_ratings, load_slopes,
 )
-from utils.fit_rank_curves import (  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
-from utils.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
+from utils.rating.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
 
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
 

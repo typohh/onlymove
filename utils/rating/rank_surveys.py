@@ -1,7 +1,7 @@
 """Shared rank-survey + attempts plumbing for the rank-calibration stage.
 
 The rank→EGF calibration (pipeline.map_rating_to_rank), the population-constant fit
-(pipeline.fit_population_constants), the joint rank-curve helpers (utils.fit_rank_curves), and
+(pipeline.fit_population_constants), the joint rank-curve helpers (utils.rating.fit_rank_curves), and
 the auxiliary survey diagnostics all read the same things: the `rank_surveys` declarations and
 the per-user `tsumego_reports` attempts out of the local D1 dump, plus the rank-label↔scalar
 convention they share. Those loaders + conversions live here (a dependency-free leaf — no
@@ -16,7 +16,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 SQL_PATH_DEFAULT = os.path.join(PROJECT_ROOT, "attempts", "database.sql")
 

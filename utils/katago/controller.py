@@ -4,9 +4,9 @@ import re
 import subprocess
 import threading
 
-from utils.models import MODEL_HUMAN, get_model
+from utils.katago.models import MODEL_HUMAN, get_model
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 CONFIG_FILE = os.path.join(PROJECT_ROOT, "bots", "analysis.cfg")
 # KATAGO_PATH defaults to the OpenCL build at bots/katago. Override via the
 # KATAGO_PATH environment variable on hosts that need a different binary

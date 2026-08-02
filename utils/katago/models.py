@@ -1,7 +1,7 @@
 import os
 import urllib.request
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 MODEL_BEST_SMALL = 'kata1-b6c96-s175395328-d26788732.txt.gz' # 9959.8 ± 16.9
 MODEL_FULL = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz" # 13617.9 ± 14.9

@@ -103,15 +103,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rating_features import (  # noqa: E402
+from utils.rating.features import (  # noqa: E402
     _cache_ids_path, build_profiles, load_first_time_attempts,
     load_joint_activations, load_joint_bot_winrate, load_joint_game_phase,
     load_joint_move_features,
 )
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
-from utils.slope_calibration import load_client_lapse  # noqa: E402
-from utils.fit_rank_curves import CALIBRATION_P  # noqa: E402
-from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
+from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
+from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
 EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
@@ -368,7 +368,7 @@ def main():
     mv, nmv = load_joint_move_features(SIZES, tids_by_size)
     zero_mv = np.zeros(nmv, dtype=np.float32)
     # game-phase raw components [moves_before_position, main_line_len] (shared source with the
-    # secondary-axis work — utils.rating_features.load_joint_game_phase). Included by FEATURE-PARITY
+    # secondary-axis work — utils.rating.features.load_joint_game_phase). Included by FEATURE-PARITY
     # POLICY (see the old staged trainer's notes); no dedicated dropout (2 smooth columns cannot
     # fingerprint problems).
     ph, nph = load_joint_game_phase(SIZES, tids_by_size)

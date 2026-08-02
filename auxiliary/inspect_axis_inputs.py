@@ -291,7 +291,7 @@ def main():
 
     F = pp = None
     if not args.quick:
-        import utils.residual_axes as ra
+        import utils.rating.residual_axes as ra
         print("loading features (use --quick to skip) ...")
         feats, _sc, _rk, _pa, _ad = ra.build_axis_features()
         tids = sorted(feats)

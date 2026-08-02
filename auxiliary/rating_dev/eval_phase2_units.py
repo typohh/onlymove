@@ -2,7 +2,7 @@
 global slope/floor scales better than the non-overlapping calendar blocks phase 2 ships?
 
 pipeline.train_rating uses two different ability-unit conventions:
-  phase 1  utils.rating_features.build_profiles — 2-month windows STEPPED ONE MONTH, so every
+  phase 1  utils.rating.features.build_profiles — 2-month windows STEPPED ONE MONTH, so every
            attempt is exploded into two profile rows and consecutive units share half their data.
   phase 2  fit_global_scales — user x (month // P2_BIN_MONTHS), disjoint blocks on a fixed calendar
            grid, every attempt counted once.
@@ -55,10 +55,10 @@ if PROJECT_ROOT not in sys.path:
 from pipeline.train_rating import (  # noqa: E402
     CALIBRATION_P, CLIENT_FLOOR_MAX, EPS, P2_BIN_MONTHS, P2_LR, P2_STEPS,
 )
-from utils.configurations import ALL_BOARD_SIZES  # noqa: E402
-from utils.rating_features import load_first_time_attempts  # noqa: E402
-from utils.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
-from utils.slope_calibration import load_client_lapse  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
+from utils.rating.features import load_first_time_attempts  # noqa: E402
+from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
+from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
 
 RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 

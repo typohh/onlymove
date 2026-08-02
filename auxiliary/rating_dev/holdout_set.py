@@ -24,7 +24,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.rating_features import load_first_time_attempts  # noqa: E402
+from utils.rating.features import load_first_time_attempts  # noqa: E402
 
 SIZES = [9, 13]
 

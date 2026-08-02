@@ -6,7 +6,7 @@ import threading
 import time
 import traceback
 
-from utils.add_variations import (
+from utils.katago.add_variations import (
     CALM_UTILITY_OVERRIDE,
     VariationDepthExceeded,
     add_shallow_variations,
@@ -14,13 +14,13 @@ from utils.add_variations import (
     generate_variations_directly_to_sgf,
     promote_winning_first_move,
 )
-from utils.configurations import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
-from utils.helper import construct_initial_sgf
-from utils.katago_controller import KatagoController
-from utils.katago_queries import KatagoQueries
-from utils.coords import gtp_to_sgfmill_point
-from utils.models import get_model
-from utils.problem_finder import ProblemFinder
+from utils.constants import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
+from utils.katago.add_variations import construct_initial_sgf
+from utils.katago.controller import KatagoController
+from utils.katago.queries import KatagoQueries
+from utils.katago.coords import gtp_to_sgfmill_point
+from utils.katago.models import get_model
+from utils.katago.problem_finder import ProblemFinder
 from sgfmill import boards
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

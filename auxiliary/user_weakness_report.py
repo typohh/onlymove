@@ -54,7 +54,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from utils.coords import gtp_to_xy  # noqa: E402
+from utils.katago.coords import gtp_to_xy  # noqa: E402
 
 # --- Artifact locations (backend + shipped) --------------------------------
 DEFAULT_DB = os.path.join(PROJECT_ROOT, "attempts", "database.sqlite")

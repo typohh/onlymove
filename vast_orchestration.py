@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from utils.configurations import ALL_BOARD_SIZES
+from utils.constants import ALL_BOARD_SIZES
 
 VASTAI_BIN = ".venv/bin/vastai"
 REMOTE_DIR = "/workspace/onlymove"

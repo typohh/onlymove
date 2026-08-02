@@ -43,7 +43,7 @@ from multiprocessing import Pool
 
 import numpy as np
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.paths import PROJECT_ROOT
 
 # Client-replica walk-forward protocol (same constants as the aux axis
 # batteries — auxiliary/eval_score_gap_axis.py).

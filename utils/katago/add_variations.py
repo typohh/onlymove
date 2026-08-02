@@ -1,8 +1,36 @@
+"""SGF tree construction: build a problem's initial SGF from its move sequence,
+then hang the analysed variations off it.
+
+construct_initial_sgf lived in utils/helper.py — a one-function module whose name
+said nothing about its contents — and is the step that produces the tree the rest
+of this module annotates, so it belongs beside it.
+"""
 import re
 
-from utils.katago_queries import KatagoQueries
-from utils.coords import gtp_to_sgfmill_point
 from sgfmill import sgf
+
+from utils.constants import KOMI, RULES
+from utils.katago.coords import gtp_to_sgfmill_point
+from utils.katago.queries import KatagoQueries
+
+
+def construct_initial_sgf(moves, solution, board_size):
+    game = sgf.Sgf_game(size=board_size)
+    game.root.set("KM", KOMI)
+    game.root.set("RU", RULES)
+    player = "b"
+    node = None
+    for move in moves:
+        node = game.extend_main_sequence()
+        node.set_move(player, gtp_to_sgfmill_point(move, board_size))
+        player = "w" if player == "b" else "b"
+    if solution:
+        answer = game.extend_main_sequence()
+        answer.set_move(player, gtp_to_sgfmill_point(solution, board_size))
+    else:
+        answer = None
+    return game, node, answer
+
 
 # Parses a variation comment written as "{winrate}%/{score}" (e.g. "60.6%/-0.5")
 # back into its two numbers. Both are stored from BLACK's perspective
