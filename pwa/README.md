@@ -96,7 +96,10 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   └── version.js           # Build-stamped APP_VERSION (written by build.mjs)
 │
 ├── migrations/              # Dated D1 migrations, applied manually
-├── lib/                     # Bundled third-party libs (WGo.js, JSZip, math.js)
+├── lib/                     # Bundled third-party libs (WGo.js, JSZip, math.js).
+│                            #   Copied wholesale into dist/ and SHIPPED, so keep
+│                            #   non-runtime files out; WGo.js's own API reference
+│                            #   is docs/vendor/WGo.js.html.
 ├── sound/                   # UI sound effects
 ├── corners/                 # Ink-wash corner art
 ├── tsumegos/                # Published data (gitignored — written by package_for_pwa)
