@@ -93,6 +93,38 @@ def _load_correct_vec_chunk(task):
     return start, out
 
 
+def _assert_activations_subset_of_corpus(size, ids):
+    """Every activation .npz must belong to a problem still in tsumegos/<size>/.
+
+    ONE-DIRECTIONAL on purpose. Corpus ⊅ activations is an error; corpus ⊋ activations is
+    normal — extraction is resumable, so a fresh tsumego top-up legitimately has SGFs with
+    no .npz yet, and asserting that direction would break the ordinary workflow.
+
+    The subset direction has no legitimate cause: pipeline.extract_activations writes one
+    .npz per SGF it reads, so an orphan can only mean the SGF was removed without its
+    artifacts. That is worth a hard failure because correct_ids is derived from THIS
+    listing, so an orphan silently promotes a problem that no longer exists into the rated
+    set — it gets features, a rating, a slope and a floor, and nothing downstream can tell
+    it apart from a real one. It ships nowhere (packaging works off tsumegos/), so the only
+    place the contradiction is visible is right here. Found in production 2026-08-02 as a
+    single 13x13 .npz left behind by a pre-canonical-id removal; it had been feeding a
+    phantom problem through the whole rating chain since May.
+    """
+    corpus_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    if not os.path.isdir(corpus_dir):
+        raise SystemExit(
+            f"size {size}: activations exist but the corpus dir is missing ({corpus_dir}); "
+            f"refusing to build a cache whose ids cannot be checked against real problems")
+    corpus = {f[:-4] for f in os.listdir(corpus_dir) if f.endswith(".sgf")}
+    orphans = sorted(t for t in ids if t not in corpus)
+    if orphans:
+        raise SystemExit(
+            f"size {size}: {len(orphans)} activation .npz with no SGF in {corpus_dir} "
+            f"(e.g. {orphans[:5]}). Each would enter correct_ids as a problem that does "
+            f"not exist. Delete them (keeping a backup — with the SGF gone the .npz is the "
+            f"last trace of that position), or restore the SGFs, then re-run.")
+
+
 def build_correct_vec_cache(size, workers=None, force=False):
     """Build/refresh one board's correct-cell activation cache — correct_vecs_<size>.npy
     plus correct_ids_<size>.json — the aggregate that load_joint_activations reads.
@@ -108,6 +140,9 @@ def build_correct_vec_cache(size, workers=None, force=False):
     the rows already cached and loading only the tids missing from them is identical to a
     full rebuild while skipping the per-problem disk reads that dominate. force=True
     re-reads every .npz.
+
+    The .npz set must be a SUBSET of the corpus — see _assert_activations_subset_of_corpus,
+    checked before any work.
     """
     workers = workers or os.cpu_count() or 1
     act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
@@ -118,6 +153,7 @@ def build_correct_vec_cache(size, workers=None, force=False):
     ids = sorted(npz)
     if not ids:
         raise SystemExit(f"no .npz activation files in {act_dir}")
+    _assert_activations_subset_of_corpus(size, ids)
     n = len(ids)
 
     # Reuse the existing cache where it covers the same tid (in any order).
