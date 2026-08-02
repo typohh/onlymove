@@ -8,8 +8,8 @@ into the leaderboard D1 (via wrangler, the same tool `pipeline.fetch_database`
 uses). Prints the registration link to hand to the recipient.
 
 Usage:
-    python generate_invite.py <EGD_PIN> [--local]     # numeric -> create invitation
-    python generate_invite.py <name...>               # non-numeric -> search EGD
+    ./.venv/bin/python3 -m auxiliary.generate_invite <EGD_PIN> [--local]  # numeric -> create invitation
+    ./.venv/bin/python3 -m auxiliary.generate_invite <name...>            # non-numeric -> search EGD
 
     <EGD_PIN>   a numeric European Go Database PIN -> validates it and inserts an
                 invitation row, printing the registration link.
@@ -33,6 +33,8 @@ import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Token alphabet: 8 random alphanumeric characters.
 TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -172,7 +174,8 @@ def print_search_results(query, players):
         )
     print()
     print("To create an invitation, re-run with a PIN from above, e.g.:")
-    print(f"    python generate_invite.py {players[0].get('Pin_Player', '')}")
+    print(f"    ./.venv/bin/python3 -m auxiliary.generate_invite "
+          f"{players[0].get('Pin_Player', '')}")
 
 
 def _sql_str(value):
@@ -187,8 +190,7 @@ def insert_invitation(token, egd_pin, egd_name, country_code, gor, created_at, u
     cwd=pwa_dir (where wrangler.toml lives), and the same FileNotFoundError /
     CalledProcessError handling.
     """
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    pwa_dir = os.path.join(project_root, "pwa")
+    pwa_dir = os.path.join(PROJECT_ROOT, "pwa")
 
     sql = (
         "INSERT INTO invitation "

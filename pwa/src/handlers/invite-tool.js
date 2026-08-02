@@ -1,6 +1,6 @@
 // pwa/src/handlers/invite-tool.js
 //
-// Invite generator — the web equivalent of generate_invite.py. A standalone page
+// Invite generator — the web equivalent of auxiliary/generate_invite.py. A standalone page
 // at GET /invite lets an eligible user search BOTH rating databases at once and mint
 // an invitation link (an `invitation` row + the /register?t= URL, plus a QR code).
 //
