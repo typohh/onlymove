@@ -129,18 +129,18 @@
       }
     },
     {
-      "motif_id": "ax_33445e3b",
-      "positive": "killing",
+      "motif_id": "ax_b758482e",
+      "positive": "reading",
       "positive_i18n": {
-        "zh": "杀棋",
-        "ja": "殺し",
-        "ko": "잡기"
+        "zh": "计算力",
+        "ja": "読み",
+        "ko": "수읽기"
       },
-      "negative": "ko threats",
+      "negative": "shape",
       "negative_i18n": {
-        "zh": "劫材",
-        "ja": "コウ材",
-        "ko": "팻감"
+        "zh": "棋形",
+        "ja": "形",
+        "ko": "모양"
       }
     }
   ]

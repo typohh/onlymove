@@ -430,7 +430,16 @@ if (EMIT_MAP) {
     if (size === null) { missing++; continue; }
     entries.push({ size, old_id: t, new_id: null, action: 'quarantine' });
   }
-  const map = { renames: 0, merges: 0, quarantines: entries.length, entries };
+  // Same schema auxiliary/check_corpus_ids.py --emit-map writes, since
+  // auxiliary/corpus_surgery.py consumes both.
+  const map = {
+    generated_at: new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00'),
+    scanned_files: ids.length,
+    renames: 0,
+    merges: 0,
+    quarantines: entries.length,
+    entries,
+  };
   mkdirSync(dirname(EMIT_MAP), { recursive: true });
   writeFileSync(EMIT_MAP, JSON.stringify(map, null, 2));
   console.log(`corpus id map -> ${EMIT_MAP} (${entries.length} quarantine entries`
