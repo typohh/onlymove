@@ -35,6 +35,13 @@ crons = ["0 * * * *"]
 #   wrangler secret put VAPID_PRIVATE_KEY
 # Public key is non-secret (clients fetch it via GET /push/vapid-public-key).
 [vars]
+# Maintenance freeze. "1" makes every POST route return 503 and skips the cron,
+# so DB surgery (auxiliary/purge_tsumegos.mjs) can run against a table that is
+# standing still. Clients treat the 503 exactly like being offline: the attempt
+# stays un-acked and the durable outbox re-uploads it afterwards, so no attempt
+# is lost and there is nothing to coordinate on the client side.
+# Flip with a deploy: set "1", deploy, do the surgery, set "0", deploy.
+MAINTENANCE_MODE = "0"
 VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
 VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"
 

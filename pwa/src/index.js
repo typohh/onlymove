@@ -1,5 +1,5 @@
 import { CORS_HEADERS, jsonResponse, tooManyRequests } from './http.js';
-import { rateLimited } from './guards.js';
+import { maintenanceFrozen, rateLimited, serviceUnavailable } from './guards.js';
 import { handleReport } from './handlers/report.js';
 import { handleSync } from './handlers/sync.js';
 import { handleReportBackfill } from './handlers/backfill.js';
@@ -94,6 +94,10 @@ export default {
 
     for (const route of WRITE_ROUTES) {
       if (url.pathname === route.path && request.method === route.method) {
+        // Maintenance freeze, checked before the limiter and before any handler
+        // touches D1 — see maintenanceFrozen(). Covers every POST route,
+        // including /sync, so no client observes a half-applied surgery.
+        if (maintenanceFrozen(env)) return serviceUnavailable();
         if (await rateLimited(request, env, route.limiter)) return tooManyRequests();
         return dispatch(route.handler, request, env, ctx);
       }
@@ -132,6 +136,11 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    // The cron writes recall_schedule notification stamps and the leaderboard
+    // buffers, both of which DB surgery edits — so the freeze covers it too.
+    // Skipping a tick is harmless: reminders are re-evaluated next hour and the
+    // weekly jobs are idempotent.
+    if (maintenanceFrozen(env)) return;
     ctx.waitUntil(runRecallNotifications(env));
     ctx.waitUntil(maybeComputeServerStats(env));
     ctx.waitUntil(pruneHistoryRefreshLog(env));
