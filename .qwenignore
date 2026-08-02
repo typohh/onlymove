@@ -1,3 +1,34 @@
+# Paths other AI CLIs should not walk.
+#
+# KEEP THIS FILE AND .qwenignore IDENTICAL — same content under two names, because
+# each tool looks only for its own filename. There is no include mechanism to share
+# them, so a change here is a change there.
+#
+# Entries are here for one of two reasons:
+#   SIZE        — these trees run to 100k+ files and, for activations/, ~126 GB.
+#                 Walking them is slow and yields nothing readable.
+#   SENSITIVITY — data/user_dumps/ holds real users' localStorage exports, each
+#                 carrying an account credential (the userId IS the password) and a
+#                 full answer history. Never send it to a third-party service.
+#                 See data/README.md.
+
+# Generated corpus and model artifacts (all regenerable — .gitignore says how)
+activations/
 tsumegos/
+axes/
 attempts/
 ratings/
+models/
+pwa/tsumegos/
+pwa/dist/
+
+# Local snapshot of the production database
+db/
+
+# Real user data — read data/README.md before touching
+data/user_dumps/
+
+# Dependencies and local runtime state
+.venv/
+node_modules/
+.wrangler/
