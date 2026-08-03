@@ -19,6 +19,39 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 
 Three documents go deeper: **`docs/methodology.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
 
+## Prerequisites
+
+The repository is complete as source and deliberately incomplete as a deployment: the packaged shards, the network weights, the KataGo binary and the human attempt log are all gitignored because they are generated, large, or private. Read [What a fork can run](#what-a-fork-can-run) below before installing anything — roughly half the pipeline reproduces outside this project and half does not, and it is better to know which half in advance. To understand the system rather than run it, `docs/methodology.md` is self-contained and needs no setup at all.
+
+### Runtimes
+
+- **Python 3.11 or newer** (developed on 3.12). NumPy and SciPy set that floor. Create a virtualenv, install `requirements.txt` into it, and invoke every pipeline step through it — `./.venv/bin/python3 -m pipeline.<step>` — so the repo-rooted absolute imports resolve.
+- **Node.js 22** (the version the PWA is developed and deployed against) with npm, for the front end. Wrangler installs with the other dev dependencies and runs through `npx`; no global install.
+
+### KataGo
+
+- **The binary is not in the repository** — `bots/` is gitignored apart from `analysis.cfg`, which is tuned state rather than an artifact. Build or download a KataGo yourself and put it at `bots/katago`, or point the `KATAGO_PATH` environment variable at it. The default assumption is an OpenCL build; `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda` when running remotely.
+- **Network weights fetch themselves.** `utils.katago.models.get_model` downloads the `.bin.gz` that the analysis engine reads on first use, so the generation steps need no manual model setup.
+- **Activation extraction is the exception.** Step 5 runs the vendored PyTorch copy of KataGo, which loads a `model.ckpt` — a different artifact from the `.bin.gz`, and not derivable from it, since KataGo's own tooling converts PyTorch → binary and not back. Extract it from the matching checkpoint `.zip` to `models/kata1-b18c384nbt-s9996604416-d4316597426/model.ckpt`, or pass `--ckpt`.
+
+### Hardware
+
+A GPU is a practical requirement for generation, bot benchmarking and activation extraction (steps 3–5). Extraction runs about 8 GPU-minutes per 1000 problems on a Quadro M2200, so a full-corpus pass is a day of compute; `vast_orchestration.py` rents a Vast.ai instance for the three remotable steps. Everything downstream of extraction, and everything in `auxiliary/`, is CPU-only.
+
+### Cloudflare (deployment only)
+
+Deploying the PWA needs a Wrangler login, a D1 database created from `pwa/schema.sql`, and two secrets — `VAPID_PRIVATE_KEY` for Web Push and `ADMIN_USER_IDS` for the invite tool — set with `wrangler secret put`. A gitignored `pwa/.dev.vars` supplies the same values to `wrangler dev`. None of this is needed to read the code or to run the generation half of the pipeline.
+
+## What a fork can run
+
+**Steps 2–6 reproduce anywhere.** Tuning, generation, bot benchmarking, activation extraction and the feature cache need only KataGo, the weights and a GPU, and they manufacture their own inputs. That is where a fork starts.
+
+**Step 1 belongs to this project's Cloudflare account.** `fetch_database` runs `wrangler d1 export` against the live D1 holding the human attempt log. A fork cannot authenticate to it, and the log is not published — it is real users' per-attempt answer history.
+
+**Steps 7–10 read that log**, so the rating, rank and motif fits do not reproduce outside the project. The seam for substituting an attempt log of your own is at least a clean one — `db/d1.sqlite` is an ordinary SQLite file whose shape is fixed by `pwa/schema.sql`, and the loaders open it directly — but nobody has done it, so treat it as an opening rather than a documented path.
+
+**`npm run build` fails on a fresh clone**, and the error is worth recognising rather than debugging. `pwa/js/data-version.js` statically imports `../tsumegos/embedding_meta.json` so the data manifest can never be served stale; `pwa/tsumegos/` is written by step 11. Until packaging has run, esbuild stops on the unresolved import.
+
 ## Board size
 
 Both 9×9 and 13×13 ship in production (`ALL_BOARD_SIZES = (9, 13)` in `utils/constants.py`); there is no single global `BOARD_SIZE` switch. The three single-size generation steps — `tune_engine`, `generate_tsumegos`, `benchmark_bots` — take a **mandatory positional `size` arg** (`9` or `13`). The downstream steps (`extract_activations` onward) iterate both sizes in one run and take no size arg. All pipeline outputs go under size-keyed subdirectories (`tsumegos/<size>/`, `attempts/<size>/`, `ratings/<size>/`, `pwa/tsumegos/<size>/`). To refresh both modes, run each generation step once per size (e.g. `generate_tsumegos 9` then `generate_tsumegos 13`), then run the downstream steps once.
