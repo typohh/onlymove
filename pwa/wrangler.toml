@@ -82,11 +82,16 @@ type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 50, period = 60 }
 
-# OUTER edge layer: a Cloudflare dashboard WAF *rate-limiting rule* (Security →
-# WAF → Rate limiting rules). It is account config, not in this repo, so apply
-# it manually. Blocked requests never invoke the Worker (zero Worker + D1 cost),
-# so this is the cheapest layer and absorbs the worst bursts. This rule is
-# CURRENTLY IN EFFECT (deployed; last updated 2026-05-30) — not aspirational:
+# OUTER edge layer: a Cloudflare WAF *rate-limiting rule* (Security → WAF → Rate
+# limiting rules). It is ZONE config, so `wrangler deploy` neither creates nor
+# touches it — it is applied out of band like pwa/migrations/*.sql. Its desired
+# state and the zone/ruleset/rule ids live in pwa/waf/rate-limit-rule.sh:
+#   ./pwa/waf/rate-limit-rule.sh show    # print the live rule + flag drift
+#   ./pwa/waf/rate-limit-rule.sh apply   # push the values below
+# Keep the numbers here and in that script in sync — the script is the one that
+# is actually executed. Blocked requests never invoke the Worker (zero Worker +
+# D1 cost), so this is the cheapest layer and absorbs the worst bursts. This rule
+# is CURRENTLY IN EFFECT (deployed; last updated 2026-05-30) — not aspirational:
 #   Description: "Flood guard on write endpoints (POST)"   Action: Block
 #   When incoming requests match:  (http.request.method eq "POST")
 #   Counting characteristic: ip.src   Period: 10s   Requests: 100

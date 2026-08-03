@@ -53,23 +53,33 @@
 // run it before deploying, the very next /report recomputes the user's current
 // rank on the OLD scale and overwrites it.
 //
-// CHAIN THE FETCH DIRECTLY INTO THE APPLY — do not run them as two separate
-// steps with a gap in between. The `buffer` column is maintained INCREMENTALLY
-// in production: updateLeaderboardOnReport reads the stored buffer, pushes the
-// one new attempt and writes it back, and NOTHING rebuilds it from
-// tsumego_reports afterwards. So every attempt reported between this script's
-// snapshot and its write is silently truncated out of that user's buffer when
-// the UPDATE lands — permanently. Later reports append on top of the shortened
-// list rather than restoring it, and the only rebuild path is
+// RUN IT UNDER THE MAINTENANCE FREEZE. The `buffer` column is maintained
+// INCREMENTALLY in production: updateLeaderboardOnReport reads the stored
+// buffer, pushes the one new attempt and writes it back, and NOTHING rebuilds
+// it from tsumego_reports afterwards. So every attempt reported between this
+// script's snapshot and its write is silently truncated out of that user's
+// buffer when the UPDATE lands — permanently. Later reports append on top of
+// the shortened list rather than restoring it, and the only rebuild path is
 // createLeaderboardRow, which runs only for a user who has NO row at all. There
 // is no error and no recovery; the damage is a slightly wrong rank for anyone
-// who happened to be playing. Run it as one command:
+// who happened to be playing.
 //
-//   ./.venv/bin/python3 -m pipeline.fetch_database && \
-//     node auxiliary/update_leaderboard_ranks.mjs --remote
+// With MAINTENANCE_MODE = "1" every POST 503s, so nothing can land in that gap
+// and the race is not merely unlikely but IMPOSSIBLE. That is why the refresh
+// belongs inside the surgery window (docs/db_surgery_runbook.md step 8), and it
+// applies to a standalone post-re-rate refresh too:
 //
-// and treat `+0 new tsumego_reports rows` on that fetch as the proof the window
-// was clean. A quiet hour helps; chaining is what actually bounds the exposure.
+//   1. set MAINTENANCE_MODE = "1" in pwa/wrangler.toml, `cd pwa && npm run deploy`
+//   2. ./.venv/bin/python3 -m pipeline.fetch_database
+//   3. node auxiliary/update_leaderboard_ranks.mjs --remote
+//   4. set MAINTENANCE_MODE = "0", `npm run deploy`
+//
+// --remote ENFORCES this rather than trusting the operator (see preflightRemote):
+// it refuses unless production is actually frozen AND the local mirror's newest
+// tsumego_reports id equals production's, then re-checks both after the apply so
+// a freeze that lapsed mid-run is reported instead of silently corrupting rows.
+// `--allow-unfrozen` overrides deliberately; chaining the fetch into the apply
+// only NARROWS the window and is a fallback, never the guarantee.
 //
 // Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
@@ -80,6 +90,11 @@
 //                                                                 #     past week with no leaderboard row (production
 //                                                                 #     only adds them lazily on their next /report)
 //   node auxiliary/update_leaderboard_ranks.mjs --user <id>       # limit to one user (repeatable; also scopes populate)
+//   node auxiliary/update_leaderboard_ranks.mjs --remote --allow-unfrozen
+//                                                                 #     skip the freeze/snapshot preflight (see above)
+//   node auxiliary/update_leaderboard_ranks.mjs --remote --origin https://…
+//                                                                 #     probe a different origin (default: the custom
+//                                                                 #     domain in pwa/wrangler.toml)
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -102,7 +117,8 @@ const ACTIVE_WINDOW_DAYS = 7;
 
 // --- CLI ------------------------------------------------------------------------
 const args = process.argv.slice(2);
-let applyLocal = false, applyRemote = false, populate = false;
+let applyLocal = false, applyRemote = false, populate = false, allowUnfrozen = false;
+let originOverride = null;
 const onlyUsers = new Set();
 let sqlOut = path.join(os.tmpdir(), 'leaderboard_rank_update.sql');
 for (let i = 0; i < args.length; i++) {
@@ -110,6 +126,8 @@ for (let i = 0; i < args.length; i++) {
     if (a === '--local') applyLocal = true;
     else if (a === '--remote') applyRemote = true;
     else if (a === '--populate') populate = true;
+    else if (a === '--allow-unfrozen') allowUnfrozen = true;
+    else if (a === '--origin') originOverride = args[++i];
     else if (a === '--user') onlyUsers.add(args[++i]);
     else if (a === '--sql-out') sqlOut = path.resolve(args[++i]);
     else { console.error(`unknown arg: ${a}`); process.exit(1); }
@@ -164,6 +182,116 @@ function sqliteJson(sql) {
         { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
     const text = out.trim();
     return text ? JSON.parse(text) : [];
+}
+
+// --- production write-freeze preflight (--remote only) ------------------------------
+// The buffer rebuild is a read-modify-write against a snapshot, so it is only safe
+// while production cannot write. Both checks below are cheap: the freeze probe costs
+// one Worker invocation and zero D1, and MAX(id) is served by the AUTOINCREMENT PK.
+
+// wrangler normally keeps its banners on stderr, but defensively locate where the
+// --json array starts (a line that is exactly "[") rather than trusting stdout to be
+// pure JSON — and by LINE, not by the first "[" character, since a "▲ [WARNING]"
+// banner contains one. A clean stdout just matches at line 0.
+const stripAnsi = (s) => s.replace(/\u001B\[[0-9;]*m/g, '');
+
+function remoteQueryRows(sql) {
+    const res = spawnSync('npx',
+        ['wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql],
+        { cwd: PWA_DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (res.status !== 0) {
+        throw new Error(`wrangler d1 execute failed (${res.status}): ${stripAnsi(res.stderr || res.stdout || '')}`);
+    }
+    const lines = stripAnsi(res.stdout || '').split('\n');
+    const start = lines.findIndex((l) => l.trim() === '[');
+    const text = start >= 0 ? lines.slice(start).join('\n') : (res.stdout || '');
+    return JSON.parse(text)[0]?.results ?? [];
+}
+
+// Default to the custom domain declared in wrangler.toml rather than hardcoding it.
+function productionOrigin() {
+    if (originOverride) return originOverride.replace(/\/+$/, '');
+    const toml = fs.readFileSync(path.join(PWA_DIR, 'wrangler.toml'), 'utf8');
+    const m = toml.match(/pattern\s*=\s*"([^"]+)"\s*,\s*custom_domain\s*=\s*true/);
+    if (!m) throw new Error('no custom_domain route found in pwa/wrangler.toml — pass --origin');
+    return `https://${m[1]}`;
+}
+
+// POST /sync is the probe: it is in WRITE_ROUTES (so the freeze covers it) but is a
+// READ, and an empty body fails isValidUserId before any D1 access — so an unfrozen
+// probe costs nothing and writes nothing. Frozen returns 503 {error:'maintenance'},
+// which distinguishes the freeze from a generic edge 503.
+async function probeProductionFrozen(origin) {
+    let res;
+    try {
+        res = await fetch(`${origin}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+        });
+    } catch (err) {
+        return { frozen: false, detail: `request failed: ${err.message}` };
+    }
+    if (res.status !== 503) return { frozen: false, detail: `POST /sync -> ${res.status} (expected 503)` };
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON 503 = not our freeze */ }
+    if (body?.error !== 'maintenance') {
+        return { frozen: false, detail: 'got a 503 that is not the maintenance freeze (edge error?)' };
+    }
+    return { frozen: true, detail: 'POST /sync -> 503 {error:"maintenance"}' };
+}
+
+const localMaxReportId = () => sqliteJson('SELECT MAX(id) AS m FROM tsumego_reports')[0]?.m ?? null;
+const remoteMaxReportId = () => remoteQueryRows('SELECT MAX(id) AS m FROM tsumego_reports')[0]?.m ?? null;
+
+// Fails CLOSED: any error reaching production is a refusal, because "we could not
+// confirm the freeze" and "the freeze is on" must not be the same outcome here.
+async function preflightRemote() {
+    const origin = productionOrigin();
+    console.log(`preflight: ${origin}`);
+
+    const { frozen, detail } = await probeProductionFrozen(origin);
+    console.log(`  freeze    ${frozen ? 'ON' : 'OFF'} — ${detail}`);
+    if (!frozen) {
+        console.error(
+            '\nREFUSING: production is not frozen.\n'
+            + '  This script rebuilds each row\'s buffer from a snapshot and writes it back;\n'
+            + '  an attempt landing in between is truncated out of that buffer permanently.\n'
+            + '  Freeze first: set MAINTENANCE_MODE = "1" in pwa/wrangler.toml, then\n'
+            + '  `cd pwa && npm run deploy`. Unfreeze the same way when done.\n'
+            + '  (--allow-unfrozen overrides this deliberately.)');
+        process.exit(1);
+    }
+
+    const local = localMaxReportId();
+    const remote = remoteMaxReportId();
+    console.log(`  snapshot  local MAX(id) ${local} vs remote ${remote}`);
+    if (local !== remote) {
+        console.error(
+            `\nREFUSING: the local mirror is ${remote > local ? `${remote - local} row(s) behind` : 'ahead of'} production.\n`
+            + '  The buffers would be rebuilt from a stale snapshot. Re-fetch INSIDE the\n'
+            + '  freeze: ./.venv/bin/python3 -m pipeline.fetch_database\n'
+            + '  (A purge changes rows without changing MAX(id) — after surgery, verify with\n'
+            + '  the runbook\'s COUNT/SUM check rather than relying on this one.)');
+        process.exit(1);
+    }
+    return { origin, maxId: remote };
+}
+
+// Turns "the window was closed before we started" into "it stayed closed throughout".
+async function postflightRemote(before) {
+    const { frozen, detail } = await probeProductionFrozen(before.origin);
+    const remote = remoteMaxReportId();
+    const ok = frozen && remote === before.maxId;
+    console.log(`\npostflight: freeze ${frozen ? 'ON' : 'OFF'} (${detail}); MAX(id) ${before.maxId} -> ${remote}`);
+    if (ok) { console.log('window held — no attempt landed during the apply.'); return true; }
+    console.error(
+        '\nWARNING: the write freeze did not hold for the whole run.\n'
+        + `  ${frozen ? '' : 'Production accepted writes again before the apply finished.\n  '}`
+        + `${remote === before.maxId ? '' : `${remote - before.maxId} attempt(s) landed, so those users' buffers may have been truncated.\n  `}`
+        + '  Re-freeze, re-run pipeline.fetch_database, and re-run this script to rebuild\n'
+        + '  every buffer from a clean snapshot — the rebuild is idempotent and repairs it.');
+    return false;
 }
 
 // --- SQL literal helpers -----------------------------------------------------------
@@ -232,6 +360,16 @@ async function main() {
     if (!fs.existsSync(PARAMS_BIN)) {
         console.error(`missing ${PARAMS_BIN} — run: ./.venv/bin/python3 -m pipeline.package_for_pwa`);
         process.exit(1);
+    }
+
+    // Preflight BEFORE the per-user recompute, so a missing freeze costs seconds
+    // rather than minutes of work thrown away.
+    let frozenWindow = null;
+    if (applyRemote && !allowUnfrozen) {
+        frozenWindow = await preflightRemote();
+    } else if (applyRemote) {
+        console.warn('WARNING: --allow-unfrozen — skipping the freeze/snapshot preflight.\n'
+            + '  Any attempt reported during this run is truncated out of that user\'s buffer.');
     }
 
     const [{ m: latest }] = sqliteJson('SELECT MAX(created_at) AS m FROM tsumego_reports');
@@ -325,7 +463,10 @@ async function main() {
         console.log('applying to REMOTE production D1...');
         const res = spawnSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--remote', '--yes', `--file=${sqlOut}`],
             { cwd: PWA_DIR, stdio: 'inherit' });
-        process.exit(res.status ?? 1);
+        if (res.status !== 0) process.exit(res.status ?? 1);
+        // Re-check the window only if we established one; --allow-unfrozen opted out.
+        if (frozenWindow && !await postflightRemote(frozenWindow)) process.exit(1);
+        process.exit(0);
     } else if (applyLocal) {
         const dbPath = findMiniflareD1();
         console.log(`applying to local miniflare D1: ${dbPath} (stop npm run dev first)`);
