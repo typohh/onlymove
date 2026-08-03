@@ -20,11 +20,7 @@ const SYNC_PAGE_LIMIT = 1000;
 // is bypassable by clearing localStorage, so the cap lives here. Incremental
 // syncs (real cursor), existence/frontier probes (limit:1), and full pulls
 // that return NO rows (fresh empty accounts) don't count.
-// TEMPORARILY 10 for the state-epoch rollout (every device re-adopts on its
-// first post-deploy boot; a 3-device user or a flaky connection could exhaust
-// 3 and strand a device rank-less until the next UTC day). Restore to 3 a few
-// weeks after the epoch deploy — the one deferred cleanup item.
-const HISTORY_REFRESH_DAILY_CAP = 10;
+const HISTORY_REFRESH_DAILY_CAP = 5;
 
 export async function handleSync(request, env) {
   const syncHeaders = versionedJsonHeaders();

@@ -767,9 +767,7 @@ export async function maybeFinishAccountSwitch() {
 // (the read-cost the rest of the app fights), so it is hard-capped per UTC day
 // by the Worker (client counting is bypassable by clearing localStorage). The
 // value below is for DISPLAY only — it mirrors the cap the server enforces.
-// TEMPORARILY 10 for the state-epoch rollout; restore to 3 with the Worker's
-// (the one deferred cleanup item).
-export const HISTORY_REFRESH_DAILY_CAP = 10;
+export const HISTORY_REFRESH_DAILY_CAP = 5;
 // Cached "refreshes left" from the server's last response, for the prompt's
 // hint only — never the authority. { day: 'YYYY-MM-DD', left }.
 const HISTORY_REFRESH_LEFT_KEY = 'historyRefreshLeft';
