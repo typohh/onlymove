@@ -5,23 +5,28 @@ env/
 venv/
 .wrangler/
 
-# Python
+# Python. The setuptools build-output names are ROOT-ANCHORED on purpose: they
+# mean "a build directory at the top of the repo", and unanchored they match at
+# every depth. `lib/` in particular silently swallowed pwa/lib/ — the vendored
+# WGo.js / JSZip / math.js bundles — which only stayed in the repo because they
+# were already tracked when the rule arrived. New files there were dropped with
+# no error, the way a .gitignore miss always fails.
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 *.egg-info/
 .installed.cfg
 *.egg
