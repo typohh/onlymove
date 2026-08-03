@@ -45,7 +45,7 @@ RATING_MODEL_TAG = "v2"
 # rating→rank conversion itself.
 
 
-def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
+def project_cells_for_problem(per_cell_path, sgf_path):
     """Load pre-projected per-cell embeddings for one tsumego in the order the
     PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells). A missing,
     corrupt, or SGF-inconsistent .npz RAISES — packaging requires a per-cell projection
@@ -70,12 +70,8 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     2 fixed this). The zeros row is never fetched: a board click can't select
     the pass node, and backfill's coordinate match never resolves to it.
 
-    reorder_by_sgf=True (default) re-parses the SGF and reorders rows by the
-    (x, y) → variation_index map. The sgfmill parse dominates packaging time
-    (~60× the npz read), so it's the hot path — parallelize the caller, don't
-    skip this. reorder_by_sgf=False ships the npz rows as-is and is ONLY correct
-    if the .npz has been pre-reordered into SGF-variation order upstream; on the
-    current build_axes output (board-scan order) it produces a corrupt bin.
+    The sgfmill parse dominates packaging time (~60× the npz read), so this is
+    the hot path; create_packages parallelizes it across processes.
     """
     if not os.path.exists(per_cell_path):
         raise FileNotFoundError(
@@ -87,11 +83,6 @@ def project_cells_for_problem(per_cell_path, sgf_path, reorder_by_sgf=True):
     with np.load(per_cell_path) as data:
         embeddings = np.asarray(data["embeddings"])  # (n_cells, K) fp16
         xys = np.asarray(data["xys"])                # (n_cells, 2)
-
-    if not reorder_by_sgf:
-        if embeddings.shape[0] == 0:
-            raise RuntimeError(f"per_cell {per_cell_path} has zero embedded cells")
-        return embeddings.astype(EMBEDDING_DTYPE), int(embeddings.shape[0])
 
     with open(sgf_path, "rb") as f:
         game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
@@ -158,7 +149,7 @@ def _build_group_shard(task):
     module scope so ProcessPoolExecutor can pickle it.
     """
     (group_index, group_items, tsumegos_dir, per_cell_dir,
-     embed_cells_enabled, reorder_by_sgf) = task
+     embed_cells_enabled) = task
 
     min_rating = min(item["rating"] for item in group_items)
     max_rating = max(item["rating"] for item in group_items)
@@ -176,8 +167,7 @@ def _build_group_shard(task):
             # project_cells_for_problem RAISES on any missing/corrupt/
             # SGF-inconsistent npz (a gap is a hard error, never silently
             # skipped), so there is no "no cells" case to count here.
-            cells, n_cells = project_cells_for_problem(
-                per_cell_path, sgf_path, reorder_by_sgf=reorder_by_sgf)
+            cells, n_cells = project_cells_for_problem(per_cell_path, sgf_path)
             offset = len(bin_buffer)
             bin_buffer.extend(cells.tobytes())  # fp16 little-endian
             embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
@@ -217,7 +207,7 @@ def _build_group_shard(task):
 
 
 def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="pwa",
-                    per_cell_dir=None, reorder_by_sgf=True, n_workers=None):
+                    per_cell_dir=None, n_workers=None):
     """Sorts, groups, and packages tsumegos into zip files based on rating.
 
     Output layout:
@@ -235,8 +225,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     SGFs" runs.
 
     Shards are built in parallel across n_workers processes (default
-    os.cpu_count()); the parent serializes only the disk writes. reorder_by_sgf
-    is forwarded to project_cells_for_problem (see there).
+    os.cpu_count()); the parent serializes only the disk writes.
     """
 
     # Tie-break equal ratings by filename so grouping (and thus the shard
@@ -262,7 +251,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     for item in metadata:
         grouped.setdefault(item["group"], []).append(item)
     tasks = [
-        (gi, items, tsumegos_dir, per_cell_dir, embed_cells_enabled, reorder_by_sgf)
+        (gi, items, tsumegos_dir, per_cell_dir, embed_cells_enabled)
         for gi, items in sorted(grouped.items())
     ]
 
@@ -596,7 +585,7 @@ def _hash_file_into(h, path):
         h.update(b"\x00MISSING")
 
 
-def size_inputs_hash(board_size, reorder_by_sgf):
+def size_inputs_hash(board_size):
     """Content hash of everything that determines a size's shards (zips + .bin +
     metadata.json). When this is unchanged the shard build can be skipped — the
     expensive SGF reparse + zip/bin emission. Inputs:
@@ -612,7 +601,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
       - the SGF filename set (filenames ARE orientation-invariant content hashes,
         so a content change cannot occur without a filename change → the set hash
         detects add/remove/content)
-      - reorder flag + ratings_root (output semantics)."""
+      - ratings_root (output semantics)."""
     h = hashlib.sha256()
     rdir = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
     _hash_file_into(h, os.path.join(rdir, RATINGS_CSV))
@@ -626,7 +615,7 @@ def size_inputs_hash(board_size, reorder_by_sgf):
     names = sorted(f for f in os.listdir(tdir)
                    if f.endswith(".sgf")) if os.path.isdir(tdir) else []
     h.update(("\n".join(names)).encode())
-    h.update(f"|reorder={reorder_by_sgf}|root={RATINGS_ROOT}".encode())
+    h.update(f"|root={RATINGS_ROOT}".encode())
     return h.hexdigest()[:16]
 
 
@@ -738,7 +727,7 @@ def assemble_metadata(sgf_files, board_size, ratings_map, slope_map, floor_map,
     return all_metadata
 
 
-def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
+def process_size(board_size, output_dir, n_workers=None,
                  prev=None, force=False):
     """Run the full per-size packaging — ratings load, metadata assembly, zip +
     per-cell sidecar emission. Returns (embedding_meta, ratings_hash, inputs_hash);
@@ -753,7 +742,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     artifacts were cleaned up) the shards can't be rebuilt: existing shards are kept
     as-is (returns (None, None, None), leaving meta + manifest untouched) so a
     curve/constants-only publish still works; only missing shards are then fatal.
-    reorder_by_sgf/n_workers → create_packages."""
+    n_workers → create_packages."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
     TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
@@ -771,7 +760,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     if not os.path.exists(ratings_csv):
         raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating")
 
-    inputs_hash = size_inputs_hash(board_size, reorder_by_sgf)
+    inputs_hash = size_inputs_hash(board_size)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
     # A shard set counts as present only with BOTH zips AND its metadata.json.
     # create_packages removes metadata.json first and rewrites it last, so
@@ -836,8 +825,7 @@ def process_size(board_size, output_dir, reorder_by_sgf=True, n_workers=None,
     print(f"  building shards ...")
     create_packages(
         all_metadata, board_size, TSUMEGOS_DIR, output_dir,
-        per_cell_dir=per_cell_arg, reorder_by_sgf=reorder_by_sgf,
-        n_workers=n_workers,
+        per_cell_dir=per_cell_arg, n_workers=n_workers,
     )
     size_dir = os.path.join(output_dir, 'tsumegos', str(board_size))
     print(f"  packages -> {size_dir}")
@@ -970,12 +958,6 @@ def emit_correct_embeddings(output_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Package rated tsumegos for the PWA.")
     parser.add_argument(
-        "--no-sgf-reorder", dest="reorder_by_sgf", action="store_false",
-        help="ship per-cell embeddings in raw npz (board-scan) order instead of "
-             "reordering to SGF-variation order. ONLY correct if the .npz files "
-             "have been pre-reordered upstream; on current build_axes "
-             "output this produces a corrupt picked-move sidecar. Default off.")
-    parser.add_argument(
         "--workers", type=int, default=None,
         help="parallel shard-builder processes (default: os.cpu_count())")
     parser.add_argument(
@@ -1018,8 +1000,7 @@ if __name__ == "__main__":
     size_manifest = dict(prev_sizes)
     for size in ALL_BOARD_SIZES:
         meta, ratings_hash, inputs_hash = process_size(
-            size, OUTPUT_DIR,
-            reorder_by_sgf=args.reorder_by_sgf, n_workers=args.workers,
+            size, OUTPUT_DIR, n_workers=args.workers,
             prev=prev_sizes.get(str(size)), force=args.force)
         if meta is not None:
             joint_embedding_meta = meta  # joint across sizes; last write wins
