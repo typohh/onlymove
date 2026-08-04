@@ -89,7 +89,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.paths import DB_SQLITE  # noqa: E402
-from utils.rating.fit_rank_curves import CALIBRATION_P, interp_extrap_vec  # noqa: E402
+from utils.rating.fit_rank_curves import (  # noqa: E402
+    CALIBRATION_P, fit_user_rating, interp_extrap_vec,
+)
 from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
@@ -121,6 +123,19 @@ DEFAULTS = {
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_RECALL_HOURS = 6.0                 # pwa/js/model.js stability floor, in hours
 MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
+
+# --- Population rank prior (pwa/shared/rank-window.js) ---
+# The client's window estimator is a Bayesian posterior over the user's rank, and
+# this is its prior: the distribution of rank across the real user population.
+# Shipped as a log-density on a fixed rank grid rather than a Gaussian because the
+# population is genuinely BIMODAL (a beginner mass and a stronger mass), and a
+# unimodal stand-in would pull every early estimate toward a trough where few users
+# actually sit.
+MIN_PRIOR_ATTEMPTS = 50                # novel rated attempts to place a user in the prior
+MIN_PRIOR_USERS = 200                  # below this the prior is too sparse to ship
+PRIOR_GRID_LO, PRIOR_GRID_HI = -40.0, 20.0   # rank grid bounds (UNBOUNDED scale: wide)
+PRIOR_GRID_STEP = 0.5                  # inlined into the JS bundle — keep it coarse
+PRIOR_BANDWIDTH = 1.0                  # KDE width, in stones
 
 # --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
 # The per-axis L2 precision on the client's weakness betas is fit by empirical
@@ -266,6 +281,86 @@ def read_rating_lapse(ratings_dir):
             return float(json.load(f).get("fat_finger_rate"))
     except (ValueError, TypeError, KeyError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Population rank prior (the client window estimator's prior over user rank)
+# ---------------------------------------------------------------------------
+def fit_rank_prior(by_user, params, apply_m, lapse):
+    """Distribution of user RANK across the population, as a KDE log-density on a
+    fixed grid.
+
+    Each user's rank is `fit_user_rating` (the 80%-clear MLE the client mirrors,
+    with each problem's own slope and floor plus the global lapse) mapped through
+    M — the same two steps the client performs, so the prior lives in exactly the
+    coordinate the posterior is taken over.
+
+    Two properties of this estimate the reader has to keep in mind, neither of
+    which is corrected for here because any correction would be invented rather
+    than measured:
+
+      - It is SURVIVORSHIP-SELECTED. Only users who reached MIN_PRIOR_ATTEMPTS are
+        placed, so the population that churns early is absent, and that population
+        is likely weaker than the one that stays. The prior is therefore an
+        over-estimate of a brand-new user's expected strength, which biases the
+        cold-start display UP — the unsafe direction. Raising MIN_PRIOR_ATTEMPTS
+        sharpens each user's placement and worsens this; lowering it does the
+        reverse.
+      - The spread is the OBSERVED one, so it carries per-user estimation noise on
+        top of the true population variance. The threshold is set where that noise
+        is small against the population sd, not zero.
+
+    Returns (prior_dict, info_str) or (None, reason)."""
+    ranks = []
+    for user, urows in by_user.items():
+        att = [(r["problem"], 1 if r["success"] else 0) for r in urows
+               if not r["is_repeat"] and (r["size"], r["problem"]) in params]
+        if len(att) < MIN_PRIOR_ATTEMPTS:
+            continue
+        # params is keyed by (size, tid); tsumego ids are symmetry-canonical and
+        # globally unique, so a flat per-user view is lossless.
+        flat = {}
+        for r in urows:
+            key = (r["size"], r["problem"])
+            if key in params:
+                flat[r["problem"]] = params[key]
+        R, n = fit_user_rating(
+            att, {t: v[0] for t, v in flat.items()}, target=CALIBRATION_P,
+            slopes={t: v[1] for t, v in flat.items()},
+            floors={t: v[2] for t, v in flat.items()},
+            lapse=lapse, min_n=MIN_PRIOR_ATTEMPTS)
+        if R is None or not np.isfinite(R):
+            continue
+        rk = apply_m(R)
+        if np.isfinite(rk):
+            ranks.append(rk)
+    if len(ranks) < MIN_PRIOR_USERS:
+        return None, f"only {len(ranks)} users with >={MIN_PRIOR_ATTEMPTS} rated novel attempts"
+
+    r = np.asarray(ranks, float)
+    grid = np.arange(PRIOR_GRID_LO, PRIOR_GRID_HI + 1e-9, PRIOR_GRID_STEP)
+    # Gaussian KDE, then normalised to a pmf over the grid. Mass falling outside
+    # the grid is folded in by the normalisation rather than dropped, so the tails
+    # stay proper — the rank scale is unbounded and the grid is only a resolution
+    # choice, never a claim about where users can be.
+    dens = np.exp(-0.5 * ((grid[:, None] - r[None, :]) / PRIOR_BANDWIDTH) ** 2).sum(axis=1)
+    dens = np.maximum(dens, dens.max() * 1e-9)          # keep log finite everywhere
+    dens /= dens.sum()
+    prior = {
+        "rank_lo": float(PRIOR_GRID_LO),
+        "rank_step": float(PRIOR_GRID_STEP),
+        "log_density": [round(float(v), 4) for v in np.log(dens)],
+        "mean": round(float(r.mean()), 4),
+        "sd": round(float(r.std(ddof=1)), 4),
+        "n_users": int(r.size),
+        "min_attempts": int(MIN_PRIOR_ATTEMPTS),
+        "bandwidth": float(PRIOR_BANDWIDTH),
+    }
+    qs = np.percentile(r, [10, 50, 90])
+    info = (f"{r.size} users, mean {r.mean():+.2f} sd {r.std(ddof=1):.2f}, "
+            f"p10/p50/p90 {qs[0]:+.1f}/{qs[1]:+.1f}/{qs[2]:+.1f}, "
+            f"{grid.size} grid points")
+    return prior, info
 
 
 # ---------------------------------------------------------------------------
@@ -829,6 +924,20 @@ def main():
             f"or wait for more attempts) and re-run. Not shipping without it.")
     out["weakness_axis_lambda"] = wa
     print(f"  {wa_info}")
+
+    # --- Population rank prior (the window estimator's prior over user rank) ---
+    # Mandatory for the same reason as the weakness vector: without it the client's
+    # posterior has no anchor, and the failure is invisible — an unanchored estimator
+    # still returns a number, it just tracks wherever it last drifted.
+    print("Fitting population rank prior ...")
+    rp, rp_info = fit_rank_prior(by_user, params, apply_m, out["fat_finger_rate"])
+    if rp is None:
+        raise RuntimeError(
+            f"could not fit rank_prior ({rp_info}). It is mandatory and has no "
+            f"fallback — the client's window estimator is a posterior and needs its "
+            f"prior. Not shipping without it.")
+    out["rank_prior"] = rp
+    print(f"  {rp_info}")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")

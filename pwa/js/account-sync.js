@@ -51,7 +51,7 @@
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
-    getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank,
+    getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank, updateDisplayRank,
     updateRankSe, evictColdTail, clearHistoryTail, syncTailExpectedToActual,
     isUnackedReportable, applyStoredIgnoredFlags,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
@@ -581,11 +581,11 @@ function retrainAfterMerge(insertedEntries, mode) {
     try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
         if (mode === 'adopt' || mode === 'feed') {
-            const seed = mode === 'feed' ? state.userRank : undefined;
-            const est = estimateWindowRank(getMergedAnswerHistory(), seed);
+            const est = estimateWindowRank(getMergedAnswerHistory());
             if (est) {
                 updateUserRank(est.rank);
                 updateServeRank(est.serveRank);
+                updateDisplayRank(est.displayRank);
                 updateRankSe(est.se);
             }
         }
@@ -616,7 +616,7 @@ function retrainAfterMerge(insertedEntries, mode) {
 // account (maybeFinishAccountSwitch drops the partially merged rows).
 const ACCOUNT_WIPE_KEYS = [
     'answerHistory', 'challengeProblem', 'previousProblem',
-    'userRank', 'serveRank', 'rankSe',
+    'userRank', 'serveRank', 'displayRank', 'rankSe',
     'modelParams', 'adamState',
     'weaknessParams', 'weaknessAdam', 'weaknessSe', 'weaknessAxisCov',
     'recallPausedUntil',

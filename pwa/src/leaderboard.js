@@ -255,10 +255,11 @@ export function computeRank(buffer, params) {
     }
     if (flat.length < RANK_START_MIN) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
-    // No server-side warm-start: the window MLE is a pure function of the recent
-    // history (the prior is weak, WIN_PRIOR_SD = 4, vs hundreds of attempts), so the
-    // recent-mean fallback converges to the same R the client's prev-rank seed does.
-    const est = estimateWindowRankFromFlat(flat, NaN);
+    // No seed of any kind: the estimator is a posterior over the population rank
+    // prior, so it is a pure function of the recent history and reproduces the
+    // client's number exactly. We store the posterior MEAN (est.rank), never the
+    // client's conservative displayRank — pred_rank has to stay calibrated.
+    const est = estimateWindowRankFromFlat(flat);
     if (!est) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // The dock is DERIVED here but NOT applied: the rank is stored untimed (the frame

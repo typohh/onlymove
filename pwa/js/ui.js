@@ -357,14 +357,16 @@ const updateSolvingModeUI = () => {
             element.removeAttribute('title');
         });
     } else {
-        // Normal display with user rank information
-        const rank = getDescriptiveRank(state.userRank);
+        // Normal display with user rank information. displayRank, NOT userRank:
+        // the badge is the display layer, and it is deliberately conservative while
+        // the posterior is wide (see state.js's three-rank note).
+        const rank = getDescriptiveRank(state.displayRank);
         text1Elements.forEach(element => element.textContent = `${rank}`);
 
         // Add progress bar. Same band + progress as getDescriptiveRank above and the
         // modal/Rank tab, via the shared rankProgress — deriving it inline here would
         // desync the bar from the label.
-        const progress = rankProgress(state.userRank).percent;
+        const progress = rankProgress(state.displayRank).percent;
 
         text1Elements.forEach(element => {
             element.classList.add('progress-bar-wrapper');

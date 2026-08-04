@@ -43,14 +43,17 @@ from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
 SQL_PATH = DB_SQL
 TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "pwa", "tsumegos")
 
-# Internal rank index ri = floor(applyM(rating)); getDescriptiveRank maps
-# band < 0 -> kyu, >= 0 -> dan.  Bands keyed by rank (low <= r < high).
+# Internal rank ri = applyM(rating) on the one AGA-style scale (0 is the 1k/1d
+# boundary, every rank one unit wide, integers are band EDGES; pwa/shared/rank-math.js),
+# so the bounds below are the same numbers rank_label() floors — keep the two in step.
+# Bands keyed by rank (low <= r < high); open-ended at both ends, since the rank
+# coordinate is unbounded and only LABELS clamp to the 30k..9d ladder.
 RANK_BANDS = [
-    (float("-inf"), 5,            "16k & weaker"),
-    (5,             10,           "15k-11k"),
-    (10,            15,           "10k-6k"),
-    (15,            20,           "5k-1k"),
-    (20,            float("inf"), "1d+"),
+    (float("-inf"), -15,          "16k & weaker"),
+    (-15,           -10,          "15k-11k"),
+    (-10,           -5,           "10k-6k"),
+    (-5,            0,            "5k-1k"),
+    (0,             float("inf"), "1d+"),
 ]
 # tsumegos/day bands (low <= rate < high).
 ACTIVITY_BANDS = [

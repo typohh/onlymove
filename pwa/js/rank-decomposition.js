@@ -52,7 +52,7 @@
 
 import { state } from './state.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, windowMLE, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan, anchorInfo } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -470,17 +470,17 @@ export function flattenAttempts(answerHistory) {
 // (EGD leaderboard) runs BIT-IDENTICAL rank code. estimateWindowRank here just
 // flattens the client's answerHistory (size/curve-aware, first-time only, pooled
 // across sizes through each attempt's own M — pass getMergedAnswerHistory()) and
-// delegates. prevRank warm-starts the fit (the live displayed rank); on a cold
-// device the shared helper falls back to the recent attempts' mean. Returns:
-//   rank      — the estimate to DISPLAY / score (internal rank)
-//   se        — its posterior standard error (rank units)
-//   serveRank — rank + the uncertainty-scaled UCB serve bonus (large while the
-//                    posterior is loose, vanishing as it tightens); problem
-//                    SELECTION uses this, display uses rank. The bonus subtracts a
-//                    RANK-DEPENDENT floor (localSeFloor below): the irreducible SE a
-//                    full at-rank window would leave, set by the local corpus slope, so
-//                    serving collapses to the user's OWN rank at convergence on every
-//                    part of the ladder — not just where a constant floor happened to fit.
+// delegates. There is no seed: the fit starts from the population prior every time.
+// Returns:
+//   rank        — the posterior MEAN, the honest estimate everything CALIBRATED
+//                 scores against (server translations, recall, weakness, pred_rank)
+//   se          — the posterior standard deviation (rank units)
+//   displayRank — what the front page shows: conservative while se is wide
+//   serveRank   — what problem SELECTION targets; ramps from displayRank onto rank
+// Both offsets scale with the EXCESS se over a RANK-DEPENDENT floor (localSeFloor
+// below): the irreducible SE a full at-rank window would leave, set by the local
+// corpus slope, so both collapse onto the user's OWN rank at convergence on every
+// part of the ladder — not just where a constant floor happened to fit.
 // null when no usable (first-time, curve-mapped) attempt exists.
 // Rank-dependent UCB serve-bonus floor (see seFloorForMeanInfo in rank-window.js):
 // the irreducible SE the window MLE converges to once the user has a full window of
@@ -511,8 +511,8 @@ function localSeFloor(rank) {
     return n > 0 ? seFloorForMeanInfo(sumInfo / n) : null;
 }
 
-export function estimateWindowRank(answerHistory, prevRank) {
-    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), prevRank, localSeFloor);
+export function estimateWindowRank(answerHistory) {
+    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), localSeFloor);
 }
 
 // Two-regime selection switch (problem-loader.js): the rank estimate counts as
@@ -536,32 +536,32 @@ export function rankConverged() {
 // window 4PL MLE the live headline uses (windowMLE over the trailing WIN_CAP
 // first-time attempts), re-evaluated at each of `times`. A pure function of
 // decomp.attempts — already flattened to internal-rank space and time-sorted by
-// flattenAttempts — so its RIGHT endpoint reproduces the live front-page rank
-// (state.userRank) exactly, and the Rank chart can draw the headline's
-// own trajectory alongside the slow skill line. `times` MUST be ascending; the
+// flattenAttempts — and it returns the SHOWN rank (displayRankFor), not the raw
+// posterior mean, so its right endpoint reproduces the front-page badge
+// (state.displayRank) exactly and the chart never contradicts the home screen. The
+// slow skill line S(t) beside it is deliberately NOT display-adjusted: that one is
+// the stable skill estimate, and the conservatism offset belongs only to the number
+// we present as "your rank". `times` MUST be ascending; the
 // return is aligned 1:1 with `times`, each element the internal rank or null
 // (no first-time attempt exists yet at that time). Only the trailing WIN_CAP
 // attempts affect windowMLE, so we pass just that suffix — bit-identical to the
 // whole prefix (both have M = min(prefixLen, WIN_CAP)) but O(WIN_CAP) per point.
-// Each point warm-starts from the previous (the fit converges regardless; this
-// only saves Newton steps).
+// There is no warm start: the posterior is built from the population prior every
+// time, which is what makes each point independent of the ones before it.
 export function windowRankSeries(decomp, times) {
     const out = new Array(times.length).fill(null);
     const attempts = decomp && decomp.attempts;
     if (!attempts || !attempts.length) return out;
     let idx = 0;            // count of attempts with t <= the current grid time
-    let ref = NaN;          // warm-start from the previous evaluated point
     for (let i = 0; i < times.length; i++) {
         while (idx < attempts.length && attempts[idx].t <= times[i]) idx++;
         if (idx === 0) continue;   // no first-time attempt yet
         const prefix = attempts.slice(Math.max(0, idx - WIN_CAP), idx);
-        let r = ref;
-        if (!Number.isFinite(r)) {
-            const tail = prefix.slice(-Math.min(prefix.length, 20));
-            r = tail.reduce((s, a) => s + a.x, 0) / tail.length;
-        }
-        const { R } = windowMLE(prefix, r);
-        if (Number.isFinite(R)) { out[i] = R; ref = R; }
+        const { R, se } = windowMLE(prefix);
+        // Same rank-dependent floor the live badge uses, measured at this point's
+        // own estimate — so the line is the badge's own trajectory, not an
+        // approximation of it.
+        if (Number.isFinite(R)) out[i] = displayRankFor(R, se, localSeFloor(R));
     }
     return out;
 }

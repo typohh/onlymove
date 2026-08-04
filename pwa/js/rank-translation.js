@@ -59,7 +59,13 @@ export async function showRankTranslation() {
     // Only meaningful for the user's own rank in solving mode (analysis/linked
     // modes show a problem's rank or nothing).
     if (state.appMode !== APP_MODES.SOLVING) return;
-    const rating = state.userRank;
+    // displayRank, NOT userRank: this modal answers "what is the rank on the
+    // badge, on each server", so it must translate the number the badge shows or
+    // the two disagree by the whole conservatism offset. Translating the
+    // conservative value is self-consistent — the couplings are fitted on the
+    // backend from surveys, never from anything the client displays, so no
+    // calibration loop closes here.
+    const rating = state.displayRank;
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
 
     const history = getMergedAnswerHistory();

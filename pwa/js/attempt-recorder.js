@@ -6,7 +6,7 @@
 // stats-* family — the detailed-stats modal — when it is the write path for an
 // answer, not a display of one.
 
-import { state, updateUserRank, updateServeRank, updateRankSe, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -305,17 +305,19 @@ export async function updateUserStats(isCorrect, {
     }
     setCurrentSolvingStartTime(null);
 
-    const oldRank = state.userRank;
-    // Re-fit the linear-information window MLE over the merged first-time history
-    // (the current attempt was appended above). oldRank warm-starts the
-    // fit AND is the R_before for the overlay delta below: because the sync path
-    // updates userRank SILENTLY when foreign attempts arrive (see account-sync's
-    // retrainAfterMerge), oldRank already reflects them, so the reported rank
-    // change is the effect of THIS tsumego alone — never the synced batch.
-    const est = estimateWindowRank(getMergedAnswerHistory(), oldRank);
+    const oldRank = state.displayRank;
+    // Re-fit the window posterior over the merged first-time history (the current
+    // attempt was appended above). oldRank is the R_before for the overlay delta
+    // below, and it is the DISPLAYED rank because that is the number whose change
+    // the overlay reports. Because the sync path updates the ranks SILENTLY when
+    // foreign attempts arrive (see account-sync's retrainAfterMerge), oldRank
+    // already reflects them, so the reported change is the effect of THIS tsumego
+    // alone — never the synced batch.
+    const est = estimateWindowRank(getMergedAnswerHistory());
     if (est) {
         updateUserRank(est.rank);
         updateServeRank(est.serveRank);
+        updateDisplayRank(est.displayRank);
         updateRankSe(est.se);
     }
     // The just-answered problem is moved into the previous slot, and the
@@ -325,7 +327,7 @@ export async function updateUserStats(isCorrect, {
     updateAllUI();
 
     const oldRankInfo = getRankInfo(oldRank);
-    const newRankInfo = getRankInfo(state.userRank);
+    const newRankInfo = getRankInfo(state.displayRank);
     let rankChangeDirection = 'same';
     if (newRankInfo.band > oldRankInfo.band) rankChangeDirection = 'up';
     else if (newRankInfo.band < oldRankInfo.band) rankChangeDirection = 'down';
@@ -378,5 +380,5 @@ export async function updateUserStats(isCorrect, {
     // writes would be pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.userRank - oldRank, rankChangeDirection, isCorrect, recallImpactPromise };
+    return { rankChange: state.displayRank - oldRank, rankChangeDirection, isCorrect, recallImpactPromise };
 }

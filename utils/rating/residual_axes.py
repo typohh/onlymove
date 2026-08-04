@@ -44,6 +44,7 @@ from utils.rating.features import (
     load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features,
     load_tightness_gaps, phase_ratio_z, zscore_neglog, SQLITE_PATH,
 )
+from utils.rating.fit_rank_curves import interp_extrap
 from utils.rating.slope_calibration import load_client_lapse
 
 from utils.paths import PROJECT_ROOT
@@ -122,7 +123,15 @@ def build_axis_features():
         if (key not in bw or t not in f_sc or t not in f_wr or t not in f_ph
                 or t not in rsf):
             continue
-        rk = float(np.interp(rsf[t][0], curve[0], curve[1]))
+        # M is applied with END-SLOPE EXTRAPOLATION, never bare np.interp: the
+        # curve's knots span only where human declarations reach, so a bare
+        # np.interp would saturate every problem past either end onto the end
+        # knot. That is the client's problemRank (rank-decomposition.js
+        # rankForSize) and fit_population_constants' weakness-prior rank feature,
+        # both unbounded — a clamp here would break parity with both, flatten the
+        # rank ordering across the whole hard tail, and hand the axes a column
+        # that is constant exactly where the residual head has the most room.
+        rk = float(interp_extrap(rsf[t][0], curve[0], curve[1]))
         feats[t] = np.concatenate([
             act[key], bw[key], mv.get(key, zero_mv), ph.get(key, zero_ph),
             [1.0 if size == 13 else 0.0],

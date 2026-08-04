@@ -22,8 +22,9 @@ rank_map.json) applies, exactly as `stats-ui.js::buildRatingHistoryChart` does:
      med_solve_min(t) the 30-day-kernel median solve time, shrunk toward the
      whole-history median in log space; alpha/g0/g1 = population_constants.time_adjust;
   2. a rank-map translation: S' = M(M⁻¹(S) + delta), then through that server's
-     coupling curve. EGF is the identity hub, so "EGF" vs "OnlyMove" differ ONLY
-     by the time adjustment.
+     coupling curve. OUR rank is the hub and every server INCLUDING EGF is an
+     ordinary coupling off it, so "EGF" vs "OnlyMove" differ by the time
+     adjustment AND the EGF coupling.
 
 Near-rank filter on/off (`--both-filters`)
 ------------------------------------------
@@ -76,7 +77,11 @@ from utils.rating.ratings_io import load_size_value_maps  # noqa: E402
 
 # --- client constants (ports of pwa/js/{irt,rank-decomposition,rank-translation}.js) ---
 SIZES = ("9", "13")
-RANK_BAND_LO, RANK_BAND_HI = -30.0, 8.0   # labelled ladder: 30k .. 9d
+# No ladder bounds here on purpose. This script recreates the Rank CHART, whose
+# labeller (stats-rank-pane.js displayLabel) is the unclamped rankToLabel — the
+# 30k..9d clamp exists only in the translation modal, which builds labels rather
+# than plot coordinates. A constant sitting here would only invite re-clamping the
+# scalar path (see to_server_scalar).
 CALIBRATION_P = 0.8
 LOGIT_CALIBRATION = math.log(CALIBRATION_P / (1 - CALIBRATION_P))
 FLOOR_MAX = 0.78
@@ -211,14 +216,21 @@ class RankingSystem:
         return interp_extrap(rating + delta, xs, ys)
 
     def to_server_scalar(self, idx, server):
+        # Returned UNCLAMPED, matching rank-translation.js internalRankToServerRank:
+        # this is the continuous value the chart plots, and the ladder bounds a
+        # LABEL only (display_label below). Clamping here pins every value past the
+        # ladder's top onto the 8d/9d border — the exact defect that was removed
+        # from the client's translation path, and it fails silently: harmless in a
+        # label, wrong in a plot, and indistinguishable from a real result in both.
+        # EGF is an ORDINARY coupling, looked up like every other server. Under
+        # the consensus mapping our rank is the hub and EGF is one server hanging
+        # off it, so an identity short-circuit here would silently report the raw
+        # internal rank as an EGF rank.
         our = idx
-        if server == "EGF":
-            return min(max(our, RANK_BAND_LO), RANK_BAND_HI)
         c = self.rank_map.get(server)
         if not c or "our" not in c or "server" not in c or len(c["our"]) < 2:
             return float("nan")
-        s = interp_extrap(our, c["our"], c["server"])
-        return min(max(s, RANK_BAND_LO), RANK_BAND_HI)
+        return interp_extrap(our, c["our"], c["server"])
 
     def skill_to_display(self, idx, delta, server):
         """Internal skill index -> display value: index for OnlyMove, else the
@@ -501,8 +513,8 @@ def main():
     lapse = lapse_from(pc)
     rs = RankingSystem(args.dir, lapse)
     server = args.server
-    if server != ONLYMOVE and server != "EGF" and server not in rs.rank_map:
-        sys.exit(f"Unknown server '{server}'. Known: OnlyMove, EGF, "
+    if server != ONLYMOVE and server not in rs.rank_map:
+        sys.exit(f"Unknown server '{server}'. Known: OnlyMove, "
                  + ", ".join(sorted(rs.rank_map)))
 
     rows, surveys, n_all = load_rows(args.db, args.user_id)

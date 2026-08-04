@@ -18,6 +18,10 @@
 import { sigmoid, weightedQuantile } from '../js/math-utils.js';
 import { interpExtrap } from './rank-math.js';
 import { clearSpan, clampFloor, clearKappa } from '../js/irt.js';
+// Baked at build time, like irt.js's LAPSE — the population rank prior below is a
+// deployment constant, not runtime state, so both the client and the Worker get it
+// from the same inlined blob with no fetch and no injection seam.
+import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 // --- Per-attempt transform to internal-rank space -------------------------------
 // Shared so the client's flattenAttempts (rank-decomposition.js) and the Worker's
@@ -71,16 +75,87 @@ export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
     };
 }
 
-// Working coordinate is the internal rank; clamp for very weak/strong users.
-const X_CLAMP_LO = -34.5;
-const X_CLAMP_HI = 25.5;
-
 export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
 const WIN_ITARGET = 16;                       // design steady-state info — the CONSTANT SE-floor fallback
-const WIN_PRIOR_SD = 4;                       // weak prior on R, in stones
-const WIN_PRIOR_INFO = 1 / (WIN_PRIOR_SD * WIN_PRIOR_SD);
-const WIN_UCB_K = 1;                          // serve at estimate + k·(se − se_floor)
+
+// --- Population rank prior ------------------------------------------------------
+// The estimate is a POSTERIOR over the user's rank, and this is its prior: the
+// measured distribution of rank across the user population
+// (pipeline.fit_population_constants → rank_prior). It replaced a Gaussian centred
+// on the user's OWN previous estimate, which damped each step but anchored the LEVEL
+// to nothing: an early excursion re-centred the prior on itself and stuck. The two
+// things that made those excursions large are both fixed by any proper prior — a
+// user's first attempts are frequently all-correct or all-wrong, where the
+// unpenalised likelihood has no interior maximum at all.
+//
+// Evaluated on a GRID rather than by Newton + Laplace because the population is
+// bimodal and so is the posterior while the window is short; a mode-and-curvature
+// approximation would report one mode with a falsely tight se, which is the unsafe
+// direction for everything downstream that scales with se. The shipped grid is
+// coarse (the JSON is inlined into the bundle); it is resampled onto a finer working
+// grid here because a converged posterior has se BELOW the shipped step and se is
+// what the display and serve offsets are built from.
+//
+// PRIOR_X's bounds are the one place the rank coordinate is bounded, and that is a
+// statement about the prior's support, not a ladder clamp: they sit far outside the
+// observed population, and the density floor in the pipeline keeps the tails
+// non-zero so an off-scale user drifts to the edge rather than breaking.
+const PRIOR_WORK_STEP = 0.1;                  // working resolution, in stones
+const { PRIOR_X, PRIOR_LOG } = (() => {
+    const p = POPULATION_CONSTANTS.rank_prior;
+    const n = p.log_density.length;
+    const hi = p.rank_lo + (n - 1) * p.rank_step;
+    const src = [];
+    for (let i = 0; i < n; i++) src.push(p.rank_lo + i * p.rank_step);
+    const m = Math.round((hi - p.rank_lo) / PRIOR_WORK_STEP) + 1;
+    const xs = new Float64Array(m), lg = new Float64Array(m);
+    for (let i = 0; i < m; i++) {
+        xs[i] = p.rank_lo + i * PRIOR_WORK_STEP;
+        lg[i] = interpExtrap(xs[i], src, p.log_density);
+    }
+    return { PRIOR_X: xs, PRIOR_LOG: lg };
+})();
+export const PRIOR_MEAN = POPULATION_CONSTANTS.rank_prior.mean;
+export const PRIOR_SD = POPULATION_CONSTANTS.rank_prior.sd;
+const WIN_PRIOR_INFO = 1 / (PRIOR_SD * PRIOR_SD);
 const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
+
+// --- Display and serve offsets --------------------------------------------------
+// Both are the posterior mean plus a multiple of its EXCESS se — the part above the
+// irreducible floor (seFloorForMeanInfo below), so both collapse onto the mean at
+// convergence and neither leaves a permanent bias. Over-rating a user is far more
+// costly than under-rating (too-hard problems, and a rank that later walks back), so
+// the DISPLAY sits K_DISPLAY excess-se below the mean.
+//
+// Serving does NOT follow the display down. Serving where you display starves the
+// estimator: the user clears almost everything, successes on far-below problems carry
+// almost no information, the posterior never narrows, and the display never comes up.
+// Serving is therefore INFORMATION-SEEKING — above the mean, where an outcome
+// discriminates in both directions:
+//     serve = min(mean + SERVE_UCB_K·excess,  display + SERVE_GAP_CAP)
+//
+// The cap is the binding half and it is a product constraint, not a tuning knob: an
+// uncapped UCB serves a 20-kyu a dan-level problem on their first attempt, which is
+// unacceptable whatever it does for onboarding speed. It also bounds the gap between
+// the badge and what is actually being served, so the two can never contradict each
+// other by more than SERVE_GAP_CAP.
+//
+// While excess > SERVE_GAP_CAP/(SERVE_UCB_K − K_DISPLAY) the cap binds and serving is
+// display + cap; below that the UCB term takes over, and both collapse onto the mean
+// as excess → 0. So the cap governs onboarding and K_DISPLAY governs the endgame.
+// Widening the cap finds a strong user faster and is exactly what re-introduces the
+// too-hard first problem — that trade was measured and settled at 5.
+export const K_DISPLAY = -2;
+export const SERVE_UCB_K = 1;
+export const SERVE_GAP_CAP = 5;
+
+// The posterior mean -> the SHOWN rank. One definition, so the live badge
+// (estimateWindowRankFromFlat) and the Rank chart's front-page-rank line
+// (windowRankSeries) can never plot different numbers for the same history.
+export function displayRankFor(rank, se, seFloor) {
+    const floor = (Number.isFinite(seFloor) && seFloor > 0) ? seFloor : WIN_SE_FLOOR;
+    return rank + K_DISPLAY * Math.max(0, se - floor);
+}
 
 // --- Rank-dependent SE floor for the UCB serve bonus ----------------------------
 // The serve bonus is k·(se − se_floor): serve above the estimate while the posterior
@@ -115,57 +190,90 @@ export function seFloorForMeanInfo(meanInfo) {
 // Weighted 4PL Newton for the internal rank R over the positionally-weighted window
 // (walking back from the newest: weight 1 at the newest, ~1/M at the oldest in-window,
 // M = min(#attempts, WIN_CAP)). `attempts` sorted oldest -> newest.
-export function windowMLE(attempts, refR) {
+// One attempt's log-likelihood across PRIOR_X. Memoized per flattened attempt: the
+// grid is fixed, so an attempt's contribution never changes, and windowRankSeries
+// re-evaluates overlapping windows hundreds of times over the same objects. The cache
+// is weak, and flattenAttempts builds fresh objects each pass, so it never outlives
+// its inputs. ONE definition of the likelihood — the series path and the live path
+// must not drift, which is the whole reason this module is shared with the Worker.
+const LL_CACHE = new WeakMap();
+function attemptLogLik(a) {
+    let ll = LL_CACHE.get(a);
+    if (ll) return ll;
+    const n = PRIOR_X.length;
+    ll = new Float64Array(n);
+    const span = clearSpan(a.floor);
+    for (let i = 0; i < n; i++) {
+        const praw = sigmoid(a.slope * (PRIOR_X[i] - a.x) + a.kappa);
+        let p = a.floor + span * praw;
+        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
+        ll[i] = a.correct ? Math.log(p) : Math.log(1 - p);
+    }
+    LL_CACHE.set(a, ll);
+    return ll;
+}
+
+// Grid posterior for the internal rank over the positionally-weighted window
+// (walking back from the newest: weight 1 at the newest, ~1/M at the oldest
+// in-window, M = min(#attempts, WIN_CAP)). `attempts` sorted oldest -> newest.
+// Returns the posterior MEAN and SD — R is the honest estimate every downstream
+// consumer scores against; the display and serve offsets are applied separately.
+export function windowMLE(attempts) {
+    const n = PRIOR_X.length;
+    const lp = new Float64Array(PRIOR_LOG);
     const M = Math.min(attempts.length, WIN_CAP);
-    const win = [];
-    for (let j = attempts.length - 1; j >= 0 && win.length < WIN_CAP; j--) {
-        const w = (M - win.length) / M;
-        win.push({ a: attempts[j], w });
+    for (let j = attempts.length - 1, age = 0; j >= 0 && age < WIN_CAP; j--, age++) {
+        const w = (M - age) / M;
+        const ll = attemptLogLik(attempts[j]);
+        for (let i = 0; i < n; i++) lp[i] += w * ll[i];
     }
-    let R = refR, info = WIN_PRIOR_INFO;
-    for (let it = 0; it < 15; it++) {
-        let score = WIN_PRIOR_INFO * (refR - R);
-        info = WIN_PRIOR_INFO;
-        for (const { a, w } of win) {
-            const span = clearSpan(a.floor);
-            const praw = sigmoid(a.slope * (R - a.x) + a.kappa);
-            let p = a.floor + span * praw;
-            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-            const g = span * a.slope * praw * (1 - praw);
-            score += w * (a.correct - p) * g / (p * (1 - p));
-            info += w * g * g / (p * (1 - p));
-        }
-        if (info < 1e-9) break;
-        let step = score / info;
-        if (step > 2) step = 2; else if (step < -2) step = -2;
-        R += step;
-        if (R < X_CLAMP_LO) R = X_CLAMP_LO; else if (R > X_CLAMP_HI) R = X_CLAMP_HI;
-        if (Math.abs(step) < 1e-6) break;
+    let mx = -Infinity;
+    for (let i = 0; i < n; i++) if (lp[i] > mx) mx = lp[i];
+    if (!Number.isFinite(mx)) return { R: PRIOR_MEAN, se: PRIOR_SD };
+    let s = 0, sx = 0, sxx = 0;
+    for (let i = 0; i < n; i++) {
+        const g = Math.exp(lp[i] - mx);
+        s += g; sx += g * PRIOR_X[i]; sxx += g * PRIOR_X[i] * PRIOR_X[i];
     }
-    return { R, se: info > 0 ? 1 / Math.sqrt(info) : Infinity };
+    if (!(s > 0)) return { R: PRIOR_MEAN, se: PRIOR_SD };
+    const mean = sx / s;
+    return { R: mean, se: Math.sqrt(Math.max(sxx / s - mean * mean, 0)) };
 }
 
 // Public window rank estimate from PRE-FLATTENED attempts (oldest -> newest).
-// prevRank warm-starts the fit; else the recent-mean fallback. Returns
-//   { rank, se, serveRank }   or null when there are no attempts.
-export function estimateWindowRankFromFlat(attempts, prevRank, seFloorFn = null) {
+// Returns { rank, se, serveRank, displayRank } or null when there are no attempts.
+//
+//   rank        the posterior MEAN — the honest estimate. Everything that has to
+//               stay calibrated scores against this: the leaderboard's stored
+//               pred_rank, the server translations, the rank-map anchors, the
+//               recall and weakness models. Skewing it would close the calibration
+//               loop on a shifted number.
+//   displayRank what the front page SHOWS. Conservative by K_DISPLAY excess-se.
+//   serveRank   what problem selection targets. Ramps from displayRank to rank.
+//
+// No warm start: the posterior is computed from the prior each call, so there is no
+// path by which a previous estimate can carry itself forward.
+export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
     if (!attempts.length) return null;
-    let ref = prevRank;
-    if (!Number.isFinite(ref)) {
-        const tail = attempts.slice(-Math.min(attempts.length, 20));
-        ref = tail.reduce((s, a) => s + a.x, 0) / tail.length;
-    }
-    const { R, se } = windowMLE(attempts, ref);
+    const { R, se } = windowMLE(attempts);
     // Rank-dependent floor from the caller (measured from the corpus pool near R);
     // fall back to the constant only when it can't be measured yet (nothing loaded
     // near the rank — e.g. the Worker, or a client before any shard has loaded).
-    let seFloor = WIN_SE_FLOOR;
-    if (seFloorFn) {
-        const f = seFloorFn(R);
-        if (Number.isFinite(f) && f > 0) seFloor = f;
-    }
-    const bonus = WIN_UCB_K * Math.max(0, se - seFloor);
-    return { rank: R, se, serveRank: R + bonus };
+    const floorAt = (rank) => {
+        if (seFloorFn) {
+            const f = seFloorFn(rank);
+            if (Number.isFinite(f) && f > 0) return f;
+        }
+        return WIN_SE_FLOOR;
+    };
+    const excess = Math.max(0, se - floorAt(R));
+    const displayRank = displayRankFor(R, se, floorAt(R));
+    return {
+        rank: R,
+        se,
+        displayRank,
+        serveRank: Math.min(R + SERVE_UCB_K * excess, displayRank + SERVE_GAP_CAP),
+    };
 }
 
 // Positional-weighted median of a per-attempt series over the SAME last-WIN_CAP

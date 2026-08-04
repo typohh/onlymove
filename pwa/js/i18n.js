@@ -757,9 +757,10 @@ export function getTerm(key, params) {
 }
 
 export function getDescriptiveRank(rank) {
-  // Ranks extend past the labelled ladder in both directions (problems harder
-  // than 9d or weaker than 20k), and the kyu/dan formula keeps working for any
-  // band: -21 -> "21 kyu", 9 -> "10 dan". The band comes from the shared
+  // Ranks extend past the labelled 30k..9d ladder in both directions (the
+  // unattempted hard tail runs above it, problems easier than M's weakest knot
+  // below it), and the kyu/dan formula keeps working for any band, so nothing
+  // here clamps: -31 -> "31 kyu", 9 -> "10 dan". The band comes from the shared
   // rankBand so this can't drift from rankToLabel; only the kyu/dan WORDING is
   // localized here, which is why this stays out of shared/rank-math.js.
   const band = rankBand(rank);

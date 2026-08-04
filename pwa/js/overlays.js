@@ -69,7 +69,7 @@ function createOverlayContent(stats, message, textColor) {
                 fontSize: `${boardContainer.offsetWidth / 25}px`,
                 marginBottom: '20px',
             });
-            const newRank = getDescriptiveRank(state.userRank);
+            const newRank = getDescriptiveRank(state.displayRank);
             const term = stats.rankChangeDirection === 'up' ? 'rankUpTo' : 'rankDownTo';
             rankChangeMessageElement.textContent = getTerm(term, { rank: newRank });
             container.appendChild(rankChangeMessageElement);

@@ -72,6 +72,7 @@ from utils.rating.features import (  # noqa: E402
     load_backend_problem_params, load_backend_rank_curve,
     load_game_phase, load_tightness_gaps, zscore_neglog,
 )
+from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
 
 DB_PATH = DB_SQLITE
 
@@ -87,7 +88,11 @@ def load_ranks():
     params = load_backend_problem_params()
     curve = load_backend_rank_curve()
     xs = np.array(curve["ratings"]); ys = np.array(curve["ranks"])
-    return {t: float(np.interp(v[0], xs, ys)) for t, v in params.items()}
+    # End-slope extrapolation, not bare np.interp: the rank coordinate is
+    # unbounded past both end knots (the corpus reaches well beyond where human
+    # declarations do), and saturating it would flatten the rank regressor across
+    # the whole tail — the same column this battery conditions on.
+    return {t: float(interp_extrap(v[0], xs, ys)) for t, v in params.items()}
 
 
 def irls(X, y, ridge=1e-6, w0=None):

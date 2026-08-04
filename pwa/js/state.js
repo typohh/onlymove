@@ -277,10 +277,26 @@ export async function syncTailExpectedToActual() {
 // histories. See mergeSharedAcrossSizes_v2.
 const shared = {
     userRank: readJSON('userRank', null),
-    // serveRank = userRank + the UCB serve bonus (uncertainty-scaled), in the same
-    // normalized-rank units. Problem SELECTION serves near serveRank (slightly harder
-    // while the rank estimate is still uncertain); everything DISPLAYED reads userRank.
+    // Three ranks, all in the same internal units, all from one posterior
+    // (shared/rank-window.js estimateWindowRankFromFlat):
+    //   userRank    the posterior MEAN. The honest, calibrated number — server
+    //               translations, the recall and weakness models and the stats panes
+    //               all read this, and it is what the Worker stores as pred_rank.
+    //   displayRank what the user is TOLD: conservative while the posterior is
+    //               wide, converging onto userRank as it tightens. Everything the
+    //               user reads as "my rank" derives from this — the badge, the
+    //               rank-change overlay, and the server translations, which have to
+    //               translate the shown number or they contradict the badge. It must
+    //               NOT flow back into anything fitted (the rank-map couplings, the
+    //               leaderboard's pred_rank), or the calibration loop closes on a
+    //               deliberately shifted number.
+    //   serveRank   what problem SELECTION targets: information-seeking (above
+    //               userRank) but capped so it never runs more than SERVE_GAP_CAP
+    //               above displayRank. The cap is what stops a beginner being handed
+    //               dan problems, and it binds for most of onboarding, so the display
+    //               conservatism really does hold back what gets served early.
     serveRank: readJSON('serveRank', null),
+    displayRank: readJSON('displayRank', null),
     // Posterior SE of the window rank estimate (rank-index units), stored with
     // each re-fit. Selection's two-regime switch reads it: information regime
     // while se >= 2x the local floor, personalization (weakness) after.
@@ -467,14 +483,22 @@ export const state = {
         writeJSON('userRank', v);
     },
 
-    // Serve rank (estimate + UCB bonus). Falls back to the displayed rank before any
-    // estimate has run, so a fresh device serves at-level until the first attempt.
+    // Both fall back to userRank before any estimate has run, so a fresh device
+    // serves and displays at-level rather than blank until the first attempt.
     get serveRank() {
         return typeof shared.serveRank === 'number' ? shared.serveRank : this.userRank;
     },
     set serveRank(v) {
         shared.serveRank = v;
         writeJSON('serveRank', v);
+    },
+
+    get displayRank() {
+        return typeof shared.displayRank === 'number' ? shared.displayRank : this.userRank;
+    },
+    set displayRank(v) {
+        shared.displayRank = v;
+        writeJSON('displayRank', v);
     },
 
     get rankSe() {
@@ -682,6 +706,10 @@ export function updateUserRank(rank) {
 
 export function updateServeRank(rank) {
     state.serveRank = rank;
+}
+
+export function updateDisplayRank(rank) {
+    state.displayRank = rank;
 }
 
 export function updateRankSe(se) {

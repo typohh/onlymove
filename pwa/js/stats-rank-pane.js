@@ -32,16 +32,15 @@ import { getLogitPerRank, MODEL_INDICES } from './recall-model.js';
 export function buildRankSummaryText(history, decomp) {
     let rankText = '';
 
-    // 95% CI on the front-page rank, from the window-MLE posterior standard error.
-    // `se` is already in internal-rank-index units (= stones = ranks; see
-    // shared/rank-window.js), so 1.96·se is directly "in ranks". Warm-start the
-    // refit at the current rank so it reproduces the front-page estimate. Sits
-    // first, right under the reactive current-rank readout (this line used to live
-    // in the front-page rank-translation modal). Omitted until there's usable
-    // history / a valid current rank.
+    // 95% CI on the rank, from the window posterior's standard deviation. `se` is
+    // already in internal-rank-index units (= stones = ranks; see
+    // shared/rank-window.js), so 1.96·se is directly "in ranks". The refit needs no
+    // seed and reproduces the estimate exactly. Sits first, right under the reactive
+    // current-rank readout (this line used to live in the front-page rank-translation
+    // modal). Omitted until there's usable history / a valid current rank.
     const rankValue = (typeof state.userRank === 'number' && Number.isFinite(state.userRank))
         ? state.userRank : null;
-    const rankEst = rankValue !== null ? estimateWindowRank(history, rankValue) : null;
+    const rankEst = rankValue !== null ? estimateWindowRank(history) : null;
     if (rankEst && Number.isFinite(rankEst.se)) {
         rankText += getTerm('rankConfidenceFormat', { ci: (1.96 * rankEst.se).toFixed(2) }) + '\n';
     }
@@ -160,13 +159,13 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         e.delta = d;
     }
 
-    // Front-page rank over time: the live headline's window MLE reconstructed
-    // across history (windowRankSeries), evaluated at the SAME grid times as the
-    // skill line so each point reuses that time's display transform + time-adjust
-    // delta. In internal-rank index space (onlymove); its right endpoint equals
-    // the current front-page rank. This is a DIFFERENT, more reactive estimator
-    // than the slow skill line S(t) — plotted so the user can see the actual
-    // displayed rank's trajectory, not just the smoothed skill trend.
+    // Front-page rank over time: the badge's own trajectory (windowRankSeries
+    // returns the SHOWN rank, conservatism offset included), evaluated at the SAME
+    // grid times as the skill line so each point reuses that time's display
+    // transform + time-adjust delta. Its right endpoint equals the current
+    // front-page rank, on OnlyMove and on every server option. This is a DIFFERENT,
+    // more reactive estimator than the slow skill line S(t) — plotted so the user
+    // can see what they were actually shown, not just the smoothed skill trend.
     const winSeries = windowRankSeries(decomp, gridEvals.map(e => e.t));
     for (let i = 0; i < gridEvals.length; i++) gridEvals[i].win = winSeries[i];
 
@@ -175,8 +174,8 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     // adjustment). Every other option shows the rank as it
     // would read ON THAT SERVER: the internal skill TIME-ADJUSTED for the user's
     // solving speed, then translated through that server's rank curve. Only
-    // servers with a usable translation curve are offered. EGF is the identity
-    // hub, so "EGF" vs "OnlyMove" differ only by the time adjustment.
+    // servers with a usable translation curve are offered. Our rank is the hub and
+    // every server INCLUDING EGF is an ordinary coupling off it.
     const ONLYMOVE = 'OnlyMove';
     const serverOptions = [ONLYMOVE, ...RANK_TRANSLATION_SERVERS.filter(
         s => Number.isFinite(internalRankToServerRank(-0.5, s)))];   // probe at 1k
