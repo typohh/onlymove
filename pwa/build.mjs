@@ -4,8 +4,13 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
+import { buildMethodologyPage } from './scripts/methodology-to-html.mjs';
 
 const EMBEDDING_META_PATH = 'tsumegos/embedding_meta.json';
+
+// docs/methodology.md is published as dist/methodology.html (method chapters only).
+// It lives outside pwa/, so esbuild's import graph can't see it — watch it directly.
+const METHODOLOGY_SOURCE = path.join('..', 'docs', 'methodology.md');
 
 // Data files inlined into the JS/Worker bundles at build time (imported, never
 // fetched). They are dead weight in dist (dropped via DIST_DEAD_FILES) AND folded
@@ -218,6 +223,9 @@ async function oneShotBuild() {
     await copyStaticAssets();
     console.log('✅ Static assets copied.');
 
+    const methodology = await buildMethodologyPage(DIST_DIR);
+    console.log(`✅ methodology.html generated (${methodology.sections} headings).`);
+
     const result = await esbuild.build(esbuildOptions(version));
     console.log('✅ JavaScript and CSS bundled and hashed.');
 
@@ -235,6 +243,7 @@ async function watchBuild() {
     await writeWorkerVersion(version);
     await clearDistContents();
     await copyStaticAssets();
+    await buildMethodologyPage(DIST_DIR);
     console.log('✅ Initial static copy + version done.');
 
     // esbuild context with onEnd plugin — every successful rebuild repatches
@@ -273,6 +282,7 @@ async function watchBuild() {
             staticRebuildTimer = null;
             try {
                 await copyStaticAssets();
+                await buildMethodologyPage(DIST_DIR);
                 const result = await ctx.rebuild();
                 await patchHtmlAfterBuild(result.metafile, version);
                 console.log('✅ static file change → rebuilt');
@@ -281,7 +291,7 @@ async function watchBuild() {
             }
         }, 100);
     };
-    for (const file of ['index.html', 'sw.js', 'about.html']) {
+    for (const file of ['index.html', 'sw.js', 'about.html', METHODOLOGY_SOURCE]) {
         try {
             fsSync.watch(file, () => scheduleStaticRebuild());
         } catch (err) {
