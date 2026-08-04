@@ -15,7 +15,9 @@ import { interpExtrap } from '../shared/rank-math.js';
 import { rankLabelToRank } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
+    applyM, slopeInRankSpace, seFloorForMeanInfo,
 } from '../shared/rank-window.js';
+import { anchorInfo } from '../js/irt.js';
 import { fetchAgaPlayer } from './aga.js';
 // Inlined at build time (wrangler bundles JSON imports, like src/server-stats.js).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
@@ -63,11 +65,55 @@ async function loadProblemParams(env) {
     return map;
 }
 
+// --- rank-dependent SE floor, Worker side ---------------------------------------
+// The display and serve offsets scale with the se ABOVE an irreducible floor, and that
+// floor varies ~3x across the ladder (flat kyu curves can never pin a rank as tightly
+// as sharp dan ones). The client measures it from the corpus near the estimate
+// (localSeFloor in rank-decomposition.js). The Worker holds the WHOLE params asset, so
+// it can measure the same quantity instead of falling back to the constant — which
+// matters now that pred_rank is the SHOWN rank: a constant floor here would put a
+// player's leaderboard row up to ~1.3 ranks off their own badge while their estimate
+// is still wide, which is exactly the disagreement storing displayRank exists to avoid.
+// Built once per isolate alongside the map: problems sorted by rank, so the 50 nearest
+// is a binary search rather than a scan of 157k entries per call.
+let _rankIndex = null;
+function buildRankIndex(map) {
+    const rows = [];
+    for (const pp of map.values()) {
+        if (!Number.isFinite(pp.rating)) continue;
+        const x = applyM(pp.rating, CURVE);
+        const sl = slopeInRankSpace(pp.rating, pp.slope, CURVE);
+        if (!Number.isFinite(x) || !Number.isFinite(sl)) continue;
+        rows.push([x, sl * sl * anchorInfo(pp.floor)]);
+    }
+    rows.sort((a, b) => a[0] - b[0]);
+    return { xs: Float64Array.from(rows, r => r[0]), info: Float64Array.from(rows, r => r[1]) };
+}
+
+// Mean per-attempt 4PL information of the 50 corpus problems nearest `rank` -> the
+// floor. Mirrors localSeFloor; the two can differ slightly because the client samples
+// only the shards it has loaded, but both converge to the same steady state.
+function workerSeFloor(rank) {
+    const ix = _rankIndex;
+    if (!ix || !ix.xs.length || !Number.isFinite(rank)) return null;
+    let lo = 0, hi = ix.xs.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (ix.xs[m] < rank) lo = m + 1; else hi = m; }
+    let a = lo, b = lo;                       // widen outward to the 50 nearest
+    let sum = 0, n = 0;
+    while (n < 50 && (a > 0 || b < ix.xs.length - 1)) {
+        const dLeft = a > 0 ? Math.abs(ix.xs[a - 1] - rank) : Infinity;
+        const dRight = b < ix.xs.length - 1 ? Math.abs(ix.xs[b + 1] - rank) : Infinity;
+        if (dLeft <= dRight) { a--; sum += ix.info[a]; } else { b++; sum += ix.info[b]; }
+        n++;
+    }
+    return n > 0 ? seFloorForMeanInfo(sum / n) : null;
+}
+
 export async function getProblemParams(env) {
     if (_params) return _params;
     if (!_paramsPromise) {
         _paramsPromise = loadProblemParams(env)
-            .then((m) => { _params = m; return m; })
+            .then((m) => { _params = m; _rankIndex = buildRankIndex(m); return m; })
             .catch((e) => { _paramsPromise = null; throw e; });
     }
     return _paramsPromise;
@@ -257,16 +303,26 @@ export function computeRank(buffer, params) {
 
     // No seed of any kind: the estimator is a posterior over the population rank
     // prior, so it is a pure function of the recent history and reproduces the
-    // client's number exactly. We store the posterior MEAN (est.rank), never the
-    // client's conservative displayRank — pred_rank has to stay calibrated.
-    const est = estimateWindowRankFromFlat(flat);
+    // client's number exactly.
+    //
+    // We store est.displayRank — the SHOWN rank, not the posterior mean. The
+    // leaderboard has to agree with the badge the player is looking at, and with the
+    // Community histogram built from the same column. Storing the mean here would put
+    // a player's own front page and their leaderboard row several ranks apart while
+    // their estimate is still wide. This does not reopen the calibration loop the
+    // display offset is otherwise kept out of: the rank-map couplings are fitted on
+    // the backend from rank_surveys + fit_user_rating, and read nothing from this
+    // table. Note the Worker passes no seFloorFn, so the offset uses the constant
+    // WIN_SE_FLOOR rather than the client's rank-dependent floor; workerSeFloor above
+    // measures the same quantity from the full params asset so the two match.
+    const est = estimateWindowRankFromFlat(flat, workerSeFloor);
     if (!est) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // The dock is DERIVED here but NOT applied: the rank is stored untimed (the frame
     // both the front page and the Community histogram want), and the two consumers that
     // need a server frame add it back forward.
     return {
-        rank: est.rank,
+        rank: est.displayRank,
         se: est.se,
         usable: flat.length,
         deltaRating: timeDockFromTimes(times),

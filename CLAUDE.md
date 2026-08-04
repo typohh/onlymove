@@ -15,7 +15,7 @@ Plus `auxiliary/` (one-off diagnostics, legacy code; not part of the main flow) 
 
 **Where the detail lives.** This file is the always-loaded operating layer: what to run, what breaks, and what not to re-try. Derivations, measurement trails and protocol detail live in `docs/`, and the notes below point into them by section. Keep the rule here and the evidence there — if a passage only tells you what the system *used* to do, it belongs in neither.
 
-- `docs/methodology.md` — ratings, ranks and motifs end to end (§1 construction, §2 client consumption, §3 modules/artifacts/constants). Self-contained by its own scope contract; update it in the same pass as any rating/rank/motif change.
+- `docs/methodology.md` — ratings, ranks and motifs end to end (§1 construction, §2 client consumption, §3 modules/artifacts/constants). Update it in the same pass as any rating/rank/motif change, and **read its "Scope — read this before editing" section before touching it** — that is a strict contract, not a preamble, and prose that reads fine anywhere else will breach it. The three rules that catch most edits: it must be **self-contained** (a reader with no other document, no commit log and no memory of this project has to follow it start to finish); it is **present tense**, so a rejected alternative is written as a standing option and its cost, never as a predecessor — the banned tells are *previously*, *used to*, *the old*, *it replaced*, *once*, *no longer*, and past tense is legitimate only for saying when a measurement was taken; and it is **not a changelog** — no release notes, no migration stories, no "as of the last refit".
 - `docs/client_sync_and_cache.md` — account sync protocol and served-data cache freshness.
 - `docs/leaderboard_and_community_stats.md` — the `/leaderboard` resolver and the Community stats aggregation.
 - `docs/worker_operations.md` — write-endpoint guards, the maintenance freeze, and `pipeline.fetch_database`.
@@ -40,6 +40,14 @@ Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves 
 ```
 
 Run on a remote Vast.ai GPU instead: `python vast_orchestration.py` (no args prints subcommands; only `tune`, `generate`, `benchmark` are remoted — the rest stay local).
+
+**Several of these steps run for HOURS, none of them checkpoint, and a naively launched run WILL be killed part-way — losing all of it.** `build_axes` is the clearest case (~50 min per K candidate, three or more candidates, then a full-data refit and the per-cell fanout: 3+ hours end to end); `generate_tsumegos`, `benchmark_bots` and `extract_activations` are the same order or worse. Three ways such a run dies quietly, and what to do instead:
+
+- **A shell that backgrounds with `&` and then exits takes the child down with it** (SIGTERM, exit 143) — including a wrapper that backgrounds the real work and then returns. Launch detached: `setsid nohup ./.venv/bin/python3 -u -m pipeline.<step> > /tmp/<step>.log 2>&1 < /dev/null &`.
+- **`timeout N` kills at N with exit 124 and no partial result.** Don't wrap a step in a timeout unless you are certain it exceeds the real runtime; a too-short guess is indistinguishable from a crash after the fact.
+- **Piping through `tail`/`head` buffers everything until exit**, so a healthy long run looks hung and a dead one looks alive. Run python with `-u`, redirect to a file, and poll the file.
+
+**`axes/`, `ratings/`, `activations/` and `pwa/tsumegos/` are all gitignored, and the steps that write them overwrite IN PLACE** — a commit is not a rollback point for any of them. Before a refit, copy the current artifacts aside (for axes: `axes/{axes.npz,labels.json,per_problem.csv,label_anchors.npz}`), or a fit that comes out wrong leaves nothing to go back to.
 
 ## PWA commands
 
