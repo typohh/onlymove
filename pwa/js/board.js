@@ -8,14 +8,12 @@ import { state, setBoard, setKifuReader, setGhostMove } from './state.js';
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
-import { APP_MODES } from './constants.js';
+import { APP_MODES, usesTapToConfirm } from './constants.js';
 import { COL_LETTERS } from './sgf.js';
 
 WGo.DIR = 'lib/wgo/';
 
 const boardContainer = document.getElementById('board-container');
-
-const isMobile = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 const handleBoardClick = (x, y) => {
     if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
@@ -25,7 +23,7 @@ const handleBoardClick = (x, y) => {
         // during the locked post-solve transition (board still showing the old
         // problem) registers a ghost that then bleeds onto the next problem.
         if (!state.acceptClicks) return;
-        if (isMobile()) {
+        if (usesTapToConfirm()) {
             if (state.ghostMove) {
                 if (state.ghostMove.x === x && state.ghostMove.y === y) {
                     // confirm

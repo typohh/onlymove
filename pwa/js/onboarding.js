@@ -18,7 +18,7 @@
 
 import { state, getMergedAnswerHistory } from './state.js';
 import { getTerm } from './i18n.js';
-import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
+import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
 
 // --- tunables ---------------------------------------------------------------
@@ -137,10 +137,15 @@ const isVisible = (node) => {
 // time gap); 'ambient' additionally waits SPACING_PROBLEMS. `anchor` names an
 // entry in `anchors`; 'board' places the bubble over the board pointing at its
 // centre. `eligible(ctx)` is the context gate on top of the fire-once flag.
+// `text` is an i18n key, or a function returning one when the wording depends
+// on the device (resolved at render time, not module-eval).
 
 const BUBBLES = {
+    // The one bubble that describes the input itself, so it has to match the
+    // branch board.js takes: two taps to play on touch, one click on desktop.
     intro: {
-        kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbIntro',
+        kind: 'trigger', anchor: 'board', placement: 'above',
+        text: () => (usesTapToConfirm() ? 'onbIntroTouch' : 'onbIntro'),
         eligible: () => historyLen() <= 1,
     },
     recall: {
@@ -317,7 +322,7 @@ function render(id, def) {
     bubble.className = 'onb-bubble';
     const body = document.createElement('div');
     body.className = 'onb-bubble-body';
-    body.textContent = getTerm(def.text);
+    body.textContent = getTerm(typeof def.text === 'function' ? def.text() : def.text);
     const arrow = document.createElement('div');
     arrow.className = 'onb-bubble-arrow';
     bubble.appendChild(body);

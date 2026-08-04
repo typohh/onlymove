@@ -14,6 +14,14 @@ export const ANALYSIS_STATUS = {
 
 export const MODEL_INPUT_HISTORY_LENGTH = 500;
 
+// True on devices that play a move in TWO taps: the first sets a ghost stone,
+// a second tap on the same point confirms it (board.js). Desktop plays on one
+// click. Defined here (not board.js) because onboarding.js words the intro
+// bubble from it and importing board.js there would close a cycle through
+// ui.js — the copy and the branch it describes must not drift apart.
+export const usesTapToConfirm = () =>
+  'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
 // Set once account-sync's one-off historical backfill has confirmed every
 // local attempt is represented server-side (set immediately on devices with
 // nothing to reconcile). The Account menu entry is gated on it: until the
