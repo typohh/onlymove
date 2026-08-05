@@ -8,11 +8,24 @@ const boardContainer = document.getElementById('board-container');
 // Signed time change for the recall-impact overlay, in the largest unit that keeps
 // the number readable: seconds under a minute, minutes under an hour, else hours.
 function formatRecallDelta(deltaHours) {
-    const sign = deltaHours >= 0 ? '+' : '−';
+    const sign = deltaHours > 0 ? '+' : deltaHours < 0 ? '−' : '';
     const secs = Math.abs(deltaHours) * 3600;
     if (secs < 60) return `${sign}${Math.round(secs)} s`;
     if (secs < 3600) return `${sign}${Math.round(secs / 60)} min`;
     return `${sign}${(secs / 3600).toFixed(1)} h`;
+}
+
+// The overlay only ever reports an adjustment that AGREES with the answer: a
+// correct answer can show a gain or nothing, a miss a loss or nothing. Both
+// numbers it shows are honest outputs that can nonetheless land on the wrong
+// side of zero — the rank is a window posterior whose display offset moves with
+// the standard error, and the recall delay is a real before/after retrain that
+// the refine loop (recallImpactWithRefine) can leave incongruent — and a "+"
+// after a miss reads as a bug to the user. Clamping is DISPLAY-ONLY: the stored
+// rank and the recall model keep whatever they actually computed.
+function clampToAnswerSign(value, isCorrect) {
+    if (!Number.isFinite(value)) return value;
+    return isCorrect ? Math.max(0, value) : Math.min(0, value);
 }
 
 
@@ -44,26 +57,32 @@ function createOverlayContent(stats, message, textColor) {
         el.textContent = ' '; // U+00A0 — a plain space collapses to zero height
         container.appendChild(el);
         const fill = ({ beforeHours, afterHours }) => {
-            el.textContent = getTerm('recallDelayFormat', { change: formatRecallDelta(afterHours - beforeHours) });
+            const change = clampToAnswerSign(afterHours - beforeHours, stats.isCorrect);
+            el.textContent = getTerm('recallDelayFormat', { change: formatRecallDelta(change) });
         };
         stats.recallImpactPromise
             .then(impact => { if (impact) fill(impact); else el.remove(); })
             .catch(() => el.remove());
-    } else if (stats && stats.rankChange) {
-        const rankChange = stats.rankChange;
-        if (rankChange !== 0) {
-            const rankChangeElement = document.createElement('div');
-            Object.assign(rankChangeElement.style, {
-                fontSize: `${boardContainer.offsetWidth / 20}px`,
-                marginBottom: '20px',
-            });
-            const sign = rankChange > 0 ? '+' : '';
-            const formattedChange = `${sign}${rankChange.toFixed(3)}`;
-            rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
-            container.appendChild(rankChangeElement);
-        }
+    } else if (stats && Number.isFinite(stats.rankChange)) {
+        // Clamped to the answer's sign, so a wrong-signed move is reported as no
+        // movement rather than suppressed — the line is always there, and 0.000
+        // is a truthful "this answer bought you nothing" (it already showed for
+        // any change rounding to zero at three decimals).
+        const rankChange = clampToAnswerSign(stats.rankChange, stats.isCorrect);
+        const rankChangeElement = document.createElement('div');
+        Object.assign(rankChangeElement.style, {
+            fontSize: `${boardContainer.offsetWidth / 20}px`,
+            marginBottom: '20px',
+        });
+        const sign = rankChange > 0 ? '+' : '';
+        const formattedChange = `${sign}${rankChange.toFixed(3)}`;
+        rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
+        container.appendChild(rankChangeElement);
 
-        if (stats.rankChangeDirection === 'up' || stats.rankChangeDirection === 'down') {
+        // The band-crossing line follows the same rule: announcing "rank down to
+        // 6k" under a clamped-to-zero gain would contradict the number above it.
+        const congruentDirection = stats.isCorrect ? 'up' : 'down';
+        if (stats.rankChangeDirection === congruentDirection) {
             const rankChangeMessageElement = document.createElement('div');
             Object.assign(rankChangeMessageElement.style, {
                 fontSize: `${boardContainer.offsetWidth / 25}px`,
