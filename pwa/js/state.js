@@ -3,7 +3,7 @@ import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH } fro
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
 import { runStateEpochGate } from './state-epoch.js';
-import { coldStartServeRank } from '../shared/rank-window.js';
+import { coldStartEstimate } from '../shared/rank-window.js';
 
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
@@ -379,15 +379,14 @@ const getOrCreateUserId = () => {
     return userId;
 };
 
-// Cold-start stand-in when no rank has been estimated yet: the weak end of the
-// labelled ladder (20 kyu). It must stay an explicit named constant — under the
-// AGA-style convention (shared/rank-math.js) a bare 0 reads as 1 DAN.
-export const DEFAULT_USER_RANK = -19.5;
-
-// Where a fresh device's first problem is drawn from: the serve rule evaluated at the
-// rank we show before anything is answered. Computed once at import — rank-window pulls
-// in only leaf modules (math-utils, irt, rank-math) and never state.js, so no cycle.
-const COLD_START_SERVE = coldStartServeRank(DEFAULT_USER_RANK);
+// What a device shows and serves before it has answered anything: the ordinary rank
+// rule evaluated on an empty window, which is the population prior exactly. Computed
+// once at import — rank-window pulls in only leaf modules (math-utils, irt, rank-math)
+// and never state.js, so no cycle. No shard is loaded this early, so the SE floor is
+// unmeasurable and the estimate concedes the full posterior width; the boot re-anchor
+// (rank-decomposition.reanchorRank, run once the first shard is in) replaces it with
+// the measured-floor value before anything the user sees depends on it.
+const COLD_START = coldStartEstimate();
 
 export const state = {
     appMode: APP_MODES.SOLVING,
@@ -483,26 +482,31 @@ export const state = {
     },
 
     get userRank() {
-        return typeof shared.userRank === 'number' ? shared.userRank : DEFAULT_USER_RANK;
+        return typeof shared.userRank === 'number' ? shared.userRank : COLD_START.rank;
     },
     set userRank(v) {
         shared.userRank = v;
         writeJSON('userRank', v);
     },
 
-    // Before any estimate has run, serving comes from the RULE applied to the shown
-    // rank (shared/rank-window.js coldStartServeRank); displayRank falls back to the
-    // named constant. The two differ on purpose — serving is always above the display.
+    // Before any estimate has run all three slots come from the same empty-window
+    // posterior (COLD_START above). They differ on purpose — serving sits above the
+    // mean to keep learning, the display below it to avoid a rank that walks back.
     get serveRank() {
-        return typeof shared.serveRank === 'number' ? shared.serveRank : COLD_START_SERVE;
+        return typeof shared.serveRank === 'number' ? shared.serveRank : COLD_START.serveRank;
     },
     set serveRank(v) {
         shared.serveRank = v;
         writeJSON('serveRank', v);
     },
 
+    // Falls back to the STORED honest rank, never to the userRank getter: that getter's
+    // own fallback is the posterior MEAN, and showing the mean is the one thing the
+    // display offset exists to prevent while the posterior is prior-wide.
     get displayRank() {
-        return typeof shared.displayRank === 'number' ? shared.displayRank : this.userRank;
+        if (typeof shared.displayRank === 'number') return shared.displayRank;
+        if (typeof shared.userRank === 'number') return shared.userRank;
+        return COLD_START.displayRank;
     },
     set displayRank(v) {
         shared.displayRank = v;

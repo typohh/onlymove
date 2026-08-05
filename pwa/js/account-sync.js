@@ -51,15 +51,15 @@
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
-    getMergedAnswerHistory, updateAnswerHistory, updateUserRank, updateServeRank, updateDisplayRank,
-    updateRankSe, evictColdTail, clearHistoryTail, syncTailExpectedToActual,
+    getMergedAnswerHistory, updateAnswerHistory,
+    evictColdTail, clearHistoryTail, syncTailExpectedToActual,
     isUnackedReportable, applyStoredIgnoredFlags,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE, generateUserId,
 } from './state.js';
 import { HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './recall-model.js';
 import { trainWeakness } from './weakness.js';
-import { estimateWindowRank } from './rank-decomposition.js';
+import { reanchorRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
 import { getTailSyncIndex, getTailDigestInfo, pruneTail } from './history-store.js';
@@ -580,15 +580,10 @@ function retrainAfterMerge(insertedEntries, mode) {
     try { calculateAndStoreStatsResults(); } catch (e) { console.warn('account-sync: recall retrain failed:', e); }
     try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
-        if (mode === 'adopt' || mode === 'feed') {
-            const est = estimateWindowRank(getMergedAnswerHistory());
-            if (est) {
-                updateUserRank(est.rank);
-                updateServeRank(est.serveRank);
-                updateDisplayRank(est.displayRank);
-                updateRankSe(est.se);
-            }
-        }
+        // 'adopt' runs before the first shard is loaded, so this estimate cannot price
+        // the SE floor and reads low; main.js re-anchors once the pool is in, behind
+        // the same splash. What it writes here is still what selects the first shard.
+        if (mode === 'adopt' || mode === 'feed') reanchorRank(getMergedAnswerHistory());
     } catch (e) {
         console.warn('account-sync: loop state update failed:', e);
     }

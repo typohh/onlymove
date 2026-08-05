@@ -76,7 +76,6 @@ export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
 }
 
 export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
-const WIN_ITARGET = 16;                       // design steady-state info — the CONSTANT SE-floor fallback
 
 // --- Population rank prior ------------------------------------------------------
 // The estimate is a POSTERIOR over the user's rank, and this is its prior: the
@@ -118,7 +117,16 @@ const { PRIOR_X, PRIOR_LOG } = (() => {
 export const PRIOR_MEAN = POPULATION_CONSTANTS.rank_prior.mean;
 export const PRIOR_SD = POPULATION_CONSTANTS.rank_prior.sd;
 const WIN_PRIOR_INFO = 1 / (PRIOR_SD * PRIOR_SD);
-const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
+
+// The stand-in floor for a caller that cannot price the rank-dependent one
+// (seFloorForMeanInfo below) from the corpus. Held at zero: a floor is a claim that
+// some of the posterior's width is irreducible, and a caller with no corpus in hand
+// has no basis for that claim, so it concedes the whole width and shows the most
+// conservative rank the rule allows. The offsets are all `max(0, se − floor)`, so
+// zero is the neutral element rather than a tuned value — it drops the term instead
+// of guessing it. Callers that CAN measure the floor still do; this only sets what
+// happens when none is available.
+const WIN_SE_FLOOR = 0;
 
 // --- Display and serve offsets --------------------------------------------------
 // Both are the posterior mean plus a multiple of its EXCESS se — the part above the
@@ -305,26 +313,18 @@ export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
     return estimateFromWindow(attempts, seFloorFn);
 }
 
-// Where a device's FIRST problem comes from, given the rank it shows before anything
-// has been answered. An empty window is not an absent posterior — windowMLE over zero
-// attempts returns the population prior exactly — so the serve rule is well defined
-// here and the first problem needs no cold-start rank of its own.
-//
-// `shownRank` is an ARGUMENT rather than the prior's own display value on purpose: at
-// boot no shard is loaded, so seFloorFn can't be measured and the constant
-// WIN_SE_FLOOR understates the floor near the prior mean, which drags the rule's own
-// display value about a rank low. Display stays a named constant; serving is derived.
-export function coldStartServeRank(shownRank) {
-    const { R, se } = windowMLE([]);
-    const excess = Math.max(0, se - WIN_SE_FLOOR);
-    return Math.min(R + SERVE_UCB_K * excess, shownRank + serveGapCap([]));
+// Every rank a device shows or serves before it has answered anything. An empty
+// window is not an absent posterior — windowMLE over zero attempts returns the
+// population prior exactly — so all three slots come from the ORDINARY rule applied
+// to that posterior, and no slot needs a stand-in constant of its own.
+export function coldStartEstimate(seFloorFn = null) {
+    return estimateFromWindow([], seFloorFn);
 }
 
 function estimateFromWindow(attempts, seFloorFn) {
     const { R, se } = windowMLE(attempts);
     // Rank-dependent floor from the caller (measured from the corpus pool near R);
-    // fall back to the constant only when it can't be measured yet (nothing loaded
-    // near the rank — e.g. the Worker, or a client before any shard has loaded).
+    // WIN_SE_FLOOR concedes the whole width when it can't be measured.
     const floorAt = (rank) => {
         if (seFloorFn) {
             const f = seFloorFn(rank);

@@ -10,7 +10,11 @@
 // It reads "stats" because the fitted output lands in state.statsResults.
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize, DEFAULT_USER_RANK } from './state.js';
+import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
+// The population's central rank — the stand-in for a GENERIC problem's difficulty when
+// a caller has none to give. A different job from the state slots' cold start (which is
+// about an unknown USER), so it reads the prior's mean directly rather than sharing it.
+import { PRIOR_MEAN } from '../shared/rank-window.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
@@ -209,14 +213,14 @@ function retentionLogit(features, params, floor) {
 // active shared rank; training rows approximate it with the current rank. When
 // userRank is unknown (very early), falls back to absolute. `slope` defaults to
 // A_REF for legacy rows that predate per-problem a_p.
-function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = DEFAULT_USER_RANK, size, r = 0, userRank, slope }) {
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = PRIOR_MEAN, size, r = 0, userRank, slope }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
-    const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : DEFAULT_USER_RANK);
+    const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : PRIOR_MEAN);
     const aP = (typeof slope === 'number' && slope > 0) ? slope : A_REF;
     f[MODEL_INDICES.INTERCEPT] = 1;
     f[MODEL_INDICES.TIME_SOLVING] = timePct;
     f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
-    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? DEFAULT_USER_RANK));
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? PRIOR_MEAN));
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
     f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
@@ -250,7 +254,7 @@ function stabilityDaysForRepeat(features, params, floor) {
 // representative difficulty — the stats panel's "a missed problem comes back in
 // ~X h" readout. Returns null when params aren't ready. Uses representative
 // per-problem 3PL inputs (corpus-mean a_p, no floor).
-export function freshFailureReviewHours(params, { problemRank = DEFAULT_USER_RANK, size, userRank, slope = A_REF, floor = 0 } = {}) {
+export function freshFailureReviewHours(params, { problemRank = PRIOR_MEAN, size, userRank, slope = A_REF, floor = 0 } = {}) {
     if (!Array.isArray(params) || params.length !== Object.keys(MODEL_INDICES).length) return null;
     const S = stabilityDaysForRepeat(buildFeatures({ isRepeat: true, reviewPct: 0, problemRank, size, r: 0, userRank, slope }), params, floor);
     return NEG_LN_080 * S * 24;

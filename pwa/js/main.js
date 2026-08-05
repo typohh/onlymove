@@ -6,7 +6,7 @@ import { initDebugLog } from './debug-log.js';
 // has the full session log, including any errors during init.
 initDebugLog();
 
-import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, initHistoryStorage, addIgnoredProblem } from './state.js';
+import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, getMergedAnswerHistory, initHistoryStorage, addIgnoredProblem } from './state.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey-prompt.js';
 import { showRankTranslation } from './rank-translation.js';
@@ -76,7 +76,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem, isExampleReviewActive, endExampleReview } from './problem-loader.js';
 import { backfillMissingEmbeddings, stampVersionsForFreshHistory } from './backfill.js';
 import { maybeShowRatingsCorrectionNotice } from './corrections-notice.js';
-import { loadRatingRankMap } from './rank-decomposition.js';
+import { loadRatingRankMap, reanchorRank, canPriceSeFloor } from './rank-decomposition.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
@@ -730,6 +730,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const intent = parseUrlIntent();
     await resolveInitialBoardSize(intent.tsumegoId);
     await loadInitialProblem(intent);
+
+    // First point in the boot where a shard is loaded, so the first point where the
+    // rank estimate can price its SE floor against the corpus. Any rank persisted
+    // before this — an account adoption re-anchors above, deliberately ahead of the
+    // problem load so the pulled rank picks the shard — conceded the whole posterior
+    // width for want of a pool. Re-run now that there is one. Idempotent (a pure
+    // function of the history) and still behind the splash, so it also repairs a value
+    // an earlier session persisted this way without needing a migration or a flag.
+    // No-ops on an empty history, and skipped entirely when the load left no pool to
+    // price against — overwriting a good stored rank with a floorless one is the very
+    // thing this is here to undo.
+    if (canPriceSeFloor()) reanchorRank(getMergedAnswerHistory());
 
     document.getElementById('title').textContent = getTerm('tsumegoMode');
     updateAllUI();

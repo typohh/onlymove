@@ -50,7 +50,7 @@
 // that can brick boot. Attempts whose size curve is missing are dropped;
 // computeRankDecomposition returns null if too few survive.
 
-import { state } from './state.js';
+import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe } from './state.js';
 import { interpExtrap } from '../shared/rank-math.js';
 import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
@@ -513,6 +513,36 @@ function localSeFloor(rank) {
 
 export function estimateWindowRank(answerHistory) {
     return estimateWindowRankFromFlat(flattenAttempts(answerHistory), localSeFloor);
+}
+
+// Recompute the three rank slots from the merged history and persist them. The ONE
+// place that writes them, so every writer prices the SE floor the same way.
+//
+// It is a pure function of the history, so calling it more often than strictly needed
+// is free of consequence — which is what lets the boot path (main.js, once the first
+// shard is in) run it unconditionally. That matters because localSeFloor can only
+// price the floor from a LOADED pool: an estimate computed with none — the account
+// adoption re-anchor, which by design runs before the first problem load so the
+// pulled rank can drive it — concedes the whole posterior width and lands well below
+// the same history's measured-floor value. Re-running once the pool exists both
+// corrects that and repairs a value some earlier session persisted the same way, with
+// no migration: the splash covers the whole interval, so no intermediate is ever seen.
+// Can the corpus pool price the SE floor yet? False before any shard is loaded, and
+// on an offline boot that fails to load one. The boot re-anchor is gated on this: with
+// no pool the estimate concedes the full posterior width, so running it anyway would
+// overwrite a stored, properly-floored rank with a worse one.
+export function canPriceSeFloor() {
+    return localSeFloor(state.userRank) !== null;
+}
+
+export function reanchorRank(answerHistory) {
+    const est = estimateWindowRank(answerHistory);
+    if (!est) return null;
+    updateUserRank(est.rank);
+    updateServeRank(est.serveRank);
+    updateDisplayRank(est.displayRank);
+    updateRankSe(est.se);
+    return est;
 }
 
 // Two-regime selection switch (problem-loader.js): the rank estimate counts as

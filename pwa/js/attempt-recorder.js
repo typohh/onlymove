@@ -6,7 +6,7 @@
 // stats-* family — the detailed-stats modal — when it is the write path for an
 // answer, not a display of one.
 
-import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
+import { state, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSolvingTime, setCurrentSolvingStartTime, setReloadPending } from './state.js';
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
@@ -21,7 +21,7 @@ import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 // The live rank is a linear-information window 4PL MLE over the recent first-time
 // history; the estimator lives in rank-decomposition.js alongside the per-attempt
 // slope/floor conversion it shares with the skill chart.
-import { estimateWindowRank } from './rank-decomposition.js';
+import { reanchorRank } from './rank-decomposition.js';
 import { postJson } from './worker-post.js';
 
 // --- Cross-tab duplicate guard --------------------------------------------
@@ -313,13 +313,7 @@ export async function updateUserStats(isCorrect, {
     // foreign attempts arrive (see account-sync's retrainAfterMerge), oldRank
     // already reflects them, so the reported change is the effect of THIS tsumego
     // alone — never the synced batch.
-    const est = estimateWindowRank(getMergedAnswerHistory());
-    if (est) {
-        updateUserRank(est.rank);
-        updateServeRank(est.serveRank);
-        updateDisplayRank(est.displayRank);
-        updateRankSe(est.se);
-    }
+    reanchorRank(getMergedAnswerHistory());
     // The just-answered problem is moved into the previous slot, and the
     // challenge reselected if it was one, by completeCurrentProblem() in the
     // caller (game-logic) — recording the attempt and rotating the slots are
