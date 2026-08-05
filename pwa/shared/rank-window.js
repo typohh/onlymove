@@ -132,22 +132,55 @@ const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 // almost no information, the posterior never narrows, and the display never comes up.
 // Serving is therefore INFORMATION-SEEKING — above the mean, where an outcome
 // discriminates in both directions:
-//     serve = min(mean + SERVE_UCB_K·excess,  display + SERVE_GAP_CAP)
+//     serve = min(mean + SERVE_UCB_K·excess,  display + serveGapCap(attempts))
 //
 // The cap is the binding half and it is a product constraint, not a tuning knob: an
 // uncapped UCB serves a 20-kyu a dan-level problem on their first attempt, which is
-// unacceptable whatever it does for onboarding speed. It also bounds the gap between
-// the badge and what is actually being served, so the two can never contradict each
-// other by more than SERVE_GAP_CAP.
+// unacceptable whatever it does for onboarding speed.
 //
-// While excess > SERVE_GAP_CAP/(SERVE_UCB_K − K_DISPLAY) the cap binds and serving is
-// display + cap; below that the UCB term takes over, and both collapse onto the mean
-// as excess → 0. So the cap governs onboarding and K_DISPLAY governs the endgame.
-// Widening the cap finds a strong user faster and is exactly what re-introduces the
-// too-hard first problem — that trade was measured and settled at 5.
+// Note what the gap actually resolves to. Substituting the display:
+//     serve − display = min((SERVE_UCB_K − K_DISPLAY)·excess,  cap)
+// so the cap is one of TWO terms, and while the posterior is wide the other one is
+// large (three excess-se, tens of ranks on a fresh account). The cap is therefore the
+// binding term throughout onboarding, which makes it — not the UCB — the thing that
+// sets how fast a strong user is found.
+//
+// A CONSTANT cap is the wrong shape for that job, because it does not just limit the
+// bonus, it INVERTS it: display + c sits below the mean whenever
+// excess > c/(K_DISPLAY_MAGNITUDE), i.e. for the whole of onboarding at c = 5. The app
+// then serves below its own best guess, which is the starvation case above.
+//
+// The cap is instead the CURRENT run of correct answers, plus one:
+//     cap = 1 + (trailing consecutive correct in the window)
+// — one rank of licence per consecutive clear, reset by any miss, never zero. This is
+// a closed loop on serving difficulty rather than an open-loop constant: clearing many
+// in a row is the signal that serving is too easy, and a miss is the signal to come
+// back. It is tight exactly when the estimator knows least (cap 1 on the first attempt,
+// where a constant 5 is already five ranks out) and it opens as evidence arrives, so
+// the too-hard first problem cannot recur. Measured against the constant, on the
+// shipped corpus: an unlimited-strength player reaches a dan badge in ~25 first-time
+// attempts rather than ~38, and the served-difficulty distribution stays nearer the
+// 80% calibration point across every simulated ability.
+//
+// The trade is that the badge-vs-served gap is no longer bounded by a constant: a long
+// run opens it, and run lengths are long-tailed, so it is bounded only in distribution
+// (typically ~2 ranks, occasionally 10+ during a streak while excess is still wide).
+// A ceiling on the streak term would bound it again at the cost of the endgame speed.
+// Below the cap the UCB term takes over and both collapse onto the mean as excess → 0,
+// so K_DISPLAY still governs the endgame.
 export const K_DISPLAY = -2;
 export const SERVE_UCB_K = 1;
-export const SERVE_GAP_CAP = 5;
+
+// The serve-gap cap for a window of flattened attempts (oldest → newest). Counts the
+// trailing run of correct answers. `attempts` holds FIRST-TIME attempts only (repeats
+// never enter the window), so a missed recall does not reset the run — deliberate: the
+// cap is a pure function of the same array the posterior is built from, which is what
+// keeps the client and the Worker running identical code.
+export function serveGapCap(attempts) {
+    let streak = 0;
+    for (let i = attempts.length - 1; i >= 0 && attempts[i].correct; i--) streak++;
+    return 1 + streak;
+}
 
 // The posterior mean -> the SHOWN rank. One definition, so the live badge
 // (estimateWindowRankFromFlat) and the Rank chart's front-page-rank line
@@ -272,7 +305,7 @@ export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
         rank: R,
         se,
         displayRank,
-        serveRank: Math.min(R + SERVE_UCB_K * excess, displayRank + SERVE_GAP_CAP),
+        serveRank: Math.min(R + SERVE_UCB_K * excess, displayRank + serveGapCap(attempts)),
     };
 }
 

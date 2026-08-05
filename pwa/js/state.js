@@ -291,10 +291,11 @@ const shared = {
     //               leaderboard's pred_rank), or the calibration loop closes on a
     //               deliberately shifted number.
     //   serveRank   what problem SELECTION targets: information-seeking (above
-    //               userRank) but capped so it never runs more than SERVE_GAP_CAP
-    //               above displayRank. The cap is what stops a beginner being handed
-    //               dan problems, and it binds for most of onboarding, so the display
-    //               conservatism really does hold back what gets served early.
+    //               userRank) but capped so it never runs more than serveGapCap()
+    //               above displayRank — one rank per consecutive clear, reset by any
+    //               miss. The cap is what stops a beginner being handed dan problems,
+    //               and it binds for most of onboarding, so it is the cap rather than
+    //               the UCB term that sets how fast a strong user is found.
     serveRank: readJSON('serveRank', null),
     displayRank: readJSON('displayRank', null),
     // Posterior SE of the window rank estimate (rank-index units), stored with
