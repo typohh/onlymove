@@ -3,41 +3,50 @@
 //
 // Read-only report: for every leaderboard player with a LINKED external account (and,
 // with --with-unlinked, every other leaderboard row appended BELOW them), print
+//   - their country      (the /leaderboard page's flag, on every row incl. anonymous)
 //   - novel (is_repeat = 0) 9x9 attempt count
 //   - novel 13x13 attempt count
 //   - median solve time over their novel attempts, and its standard deviation (raw:
 //     solve time is right-skewed and a left-open tab lands in the tail, so the sd is
 //     an outlier-sensitive spread, unlike the median beside it)
 //   - attempts per local day over the past 7 days
-//   - their onlymove rank    (the untimed front-page window MLE, decimal)
+//   - their onlymove rank    (the untimed SHOWN rank, decimal)
 //   - their est. EGF rank    (the time-adjusted EGF-coupled rank, decimal)
 //   - their real EGF rank    (from the verified 'EGD' GoR heartbeat)
 //   - the same pair in AGA units, when any listed player has a verified AGA rating
-// Then a summary CORRELATING onlymove's predicted strength against the player's real
-// verified rating — Pearson + Spearman (+ MAE / bias) over three cohorts: everyone,
-// the production >= RANK_START_MIN gate, and that gate plus production's
-// verified-activity criterion (a player's 20-year-old federation rating is stale
-// ground truth, not a model error). Pearson r is affine-invariant, so these
-// scalar-space figures equal the predicted-GoR vs actual-GoR correlations.
+//   - how many rank SURVEYS they have declared — human self-reports only, since the
+//     weekly machine heartbeats are written for them and would else swamp the count
+//
+// This is a report on what the SYSTEM SHOWS each player, not a calibration check:
+// every rank here is production's SHOWN rank (estimateWindowRankFromFlat's
+// displayRank — the posterior mean less K_DISPLAY excess-se, over the rank-dependent
+// SE floor), the same quantity the front-page badge, the stored pred_rank and the
+// /leaderboard page's onlymove column all carry. It therefore inherits that value's
+// deliberate conservatism while a posterior is wide, which is a display policy rather
+// than a model error — so do NOT read the est-vs-real columns here as the mapping's
+// bias. auxiliary/check_mapped_vs_declared_rank.py is the script for that: it scores
+// the calibrated estimate against every declared and verified rating.
 //
 // The ranks are computed BIT-IDENTICALLY to production: this script esbuild-bundles
 // pwa/src/leaderboard.js itself (so the curve/coupling/time-adjust data and every
 // helper — RANK_START_MIN, the EGF/AGA couplings, the personal time dock, the
-// verified-activity gate — are the shipped ones) and runs the shared window
-// estimator over each row's STORED buffer (the last <=500 novel attempts, the exact
-// input the Worker's computeRank uses). The onlymove rank is the untimed internal
-// rank (est.rank) — what the client's front page and
-// the /leaderboard page's onlymove units show; est. EGF/AGA re-apply the
-// median-solve-time dock and map through that server's coupling, the frame a real
-// GoR / AGA rating natively speaks. All on the one internal rank scale, where 0 is
-// the 1k/1d boundary and every band is one unit wide (integers are band EDGES).
+// rank-dependent SE floor, the verified-activity gate — are the shipped ones) and
+// runs the shared window estimator over each row's STORED buffer (the last <=500
+// novel attempts, the exact input the Worker's computeRank uses). est. EGF/AGA
+// re-apply the median-solve-time dock to that same shown rank and map through the
+// server's coupling — the frame a real GoR / AGA rating natively speaks — in the
+// same order readLeaderboardRows does. All on the one internal rank scale, where 0
+// is the 1k/1d boundary and every band is one unit wide (integers are band EDGES).
 //
 // Display identity comes from the same three tables the /leaderboard page stitches:
-// the rank buffer off `leaderboard`, the name off the claimed `invitation` row, and
-// the verified ratings off the latest-per-(user, server) machine heartbeats in
-// `rank_surveys` ('EGD' rank = raw GoR digits, 'AGAR' rank = raw AGA rating). Human
-// survey declarations are NOT read — they are calibration input, not ground truth
-// about a player's federation rating.
+// the rank buffer + edge geo-IP country off `leaderboard`, the name + invite country
+// off the claimed `invitation` row, and the verified ratings off the
+// latest-per-(user, server) machine heartbeats in `rank_surveys` ('EGD' rank = raw
+// GoR digits, 'AGAR' rank = raw AGA rating). Human survey declarations are NOT read
+// as ratings — they are calibration input, not ground truth about a player's
+// federation rating — but their country IS read, as the page's last-resort flag
+// fallback. Unlike the page, an operator report does not apply the hidden_profiles
+// opt-out: a hidden player still shows their name and country here.
 //
 // Data source: db/d1.sqlite (the local D1 mirror) + the current local
 // pwa/tsumegos/{problem_params.bin, rating_to_rank.json, rank_map.json,
@@ -46,8 +55,8 @@
 //
 // Run with --help for the flags. On --with-unlinked the two groups are sorted
 // strongest-first INDEPENDENTLY rather than merged into one order, so the linked block
-// reads exactly as it does without the flag — it is the block with verified ratings to
-// compare against, and the correlations below are computed from it alone either way.
+// reads exactly as it does without the flag — it is the block with verified ratings
+// beside the estimate.
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -62,15 +71,16 @@ const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const STALE_WARN_MS = 6 * 3600 * 1000;
 
 // --- CLI ------------------------------------------------------------------------
-const USAGE = `Per-player leaderboard report: attempt counts, solve time, the last 7 days'
-activity, and onlymove's rank estimate against each player's verified EGF/AGA rating.
+const USAGE = `Per-player leaderboard report: country, attempt counts, solve time, the last
+7 days' activity, and the rank onlymove SHOWS each player beside their verified EGF/AGA
+rating. Not a calibration check — see auxiliary/check_mapped_vs_declared_rank.py.
 
 Usage: node auxiliary/leaderboard_player_stats.mjs [options]
 
   --with-unlinked   also list every leaderboard row WITHOUT a linked external
                     account, appended below the linked players (--all is an alias)
   --user <id>       limit to this user id; repeatable
-  --json            machine-readable JSON: { correlations, players }
+  --json            machine-readable JSON: { players }
   --help, -h        show this message
 
 Reads db/d1.sqlite and the local pwa/tsumegos/ data files; run
@@ -93,10 +103,11 @@ for (let i = 0; i < args.length; i++) {
 }
 
 // --- bundle the production rank code ---------------------------------------------
-// Imports pwa/src/leaderboard.js directly, so the couplings, the time dock and the
-// activity gate can't drift from what the Worker ships. computeRankBoth mirrors its
-// computeRank but ALSO returns the untimed onlymove rank and the AGA-frame estimate,
-// and deliberately drops the RANK_START_MIN gate (see below).
+// Imports pwa/src/leaderboard.js directly, so the couplings, the time dock, the
+// SE floor and the activity gate can't drift from what the Worker ships.
+// computeRankBoth mirrors its computeRank — same flatten, same shown rank, same
+// dock-then-couple order — but ALSO returns the AGA-frame estimate, and deliberately
+// drops the RANK_START_MIN gate (see below).
 async function loadRankModule() {
     const require = createRequire(path.join(PWA_DIR, 'package.json'));
     const esbuild = require('esbuild');
@@ -108,6 +119,7 @@ async function loadRankModule() {
                 import {
                     RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToTierRank, shortRankLabel,
                     isVerifiedActive, internalToServerRank, timeDeltaRatingFromBuffer, parseBuffer,
+                    seFloorFnFor,
                 } from './src/leaderboard.js';
                 import RATING_RANK_MAP from './tsumegos/rating_to_rank.json';
 
@@ -150,20 +162,25 @@ async function loadRankModule() {
                         if (!f) continue;
                         flat.push(f);
                     }
-                    // NOTE: production gates a rank on flat.length >= RANK_START_MIN.
-                    // This report deliberately DROPS that gate — the window MLE runs on
-                    // whatever novel attempts exist (a weak prior, WIN_PRIOR_SD=4, keeps it
-                    // well-posed), so even not-yet-listed players get a (low-confidence) rank.
-                    const est = estimateWindowRankFromFlat(flat, NaN);
+                    // NOTE: production gates a rank on flat.length >= RANK_START_MIN. This
+                    // report deliberately DROPS that gate — the estimator is a posterior over
+                    // the measured population rank prior, so it is well-posed on any number of
+                    // attempts and even not-yet-listed players get a (low-confidence) rank.
+                    // Below the gate the posterior is still near the prior and the shown rank
+                    // sits well under the mean, which is what production shows a new player.
+                    const est = estimateWindowRankFromFlat(flat, seFloorFnFor(params));
                     if (!est) {
                         return { onlymoveRank: null, egfRank: null, agaRank: null, se: null, usable: flat.length };
                     }
-                    const onlymoveRank = est.rank;                            // untimed headline
-                    // The personal time dock moves the untimed rank into the server frame
-                    // the couplings (and a real GoR / AGA rating) speak.
+                    // The SHOWN rank, exactly as computeRank stores it into pred_rank: the
+                    // posterior mean less K_DISPLAY excess-se over the rank-dependent floor.
+                    const onlymoveRank = est.displayRank;
+                    // The personal time dock moves that untimed rank into the server frame
+                    // the couplings (and a real GoR / AGA rating) speak — dock BEFORE
+                    // coupling, the order readLeaderboardRows uses.
                     const deltaRating = timeDeltaRatingFromBuffer(buffer, params);
                     const timedRank = deltaRating
-                        ? rankAfterRatingDelta(est.rank, deltaRating) : est.rank;
+                        ? rankAfterRatingDelta(onlymoveRank, deltaRating) : onlymoveRank;
                     return {
                         onlymoveRank,
                         egfRank: internalToServerRank('EGF', timedRank),
@@ -253,53 +270,6 @@ function pastSevenDays() {
     return days;
 }
 
-// --- correlation helpers (Pearson + tie-aware Spearman) -------------------------
-function pearson(xs, ys) {
-    const n = Math.min(xs.length, ys.length);
-    if (n < 2) return NaN;
-    let mx = 0, my = 0;
-    for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
-    mx /= n; my /= n;
-    let sxy = 0, sxx = 0, syy = 0;
-    for (let i = 0; i < n; i++) {
-        const dx = xs[i] - mx, dy = ys[i] - my;
-        sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
-    }
-    const d = Math.sqrt(sxx * syy);
-    return d > 0 ? sxy / d : NaN;
-}
-// Fractional ranks with ties averaged (so Spearman handles equal values correctly).
-function rankdata(a) {
-    const order = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
-    const ranks = new Array(a.length);
-    for (let i = 0; i < order.length;) {
-        let j = i;
-        while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
-        const avg = (i + j) / 2 + 1;   // 1-based average rank over the tie block
-        for (let k = i; k <= j; k++) ranks[order[k][1]] = avg;
-        i = j + 1;
-    }
-    return ranks;
-}
-function spearman(xs, ys) { return pearson(rankdata(xs), rankdata(ys)); }
-
-// Correlation + error summary over [predicted, actual] pairs.
-function corrStats(pairs) {
-    const xs = pairs.map((p) => p[0]);
-    const ys = pairs.map((p) => p[1]);
-    const errs = pairs.map((p) => p[0] - p[1]);
-    const n = pairs.length;
-    const mean = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
-    return {
-        n,
-        pearson: pearson(xs, ys),
-        spearman: spearman(xs, ys),
-        mae: n ? mean(errs.map(Math.abs)) : NaN,
-        bias: n ? mean(errs) : NaN,
-        rmse: n ? Math.sqrt(mean(errs.map((e) => e * e))) : NaN,
-    };
-}
-
 async function main() {
     if (!fs.existsSync(DB_PATH)) {
         console.error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database`);
@@ -321,33 +291,48 @@ async function main() {
     const mod = await loadRankModule();
     const params = loadProblemParamsLocal();
 
-    const lbRows = sqliteJson('SELECT user_id, buffer FROM leaderboard');
+    // `country` here is the edge geo-IP stamped on every /report — the page's universal
+    // flag fallback, and the only country an anonymous row has.
+    const lbRows = sqliteJson('SELECT user_id, buffer, country FROM leaderboard');
 
-    // Display name off the claimed invitation row (frozen at invite time) — the same
-    // source readLeaderboardRows stitches. MAX(claimed_at) with bare columns picks the
-    // newest claim (documented SQLite behavior).
+    // Display name + invite country off the claimed invitation row (frozen at invite
+    // time) — the same source readLeaderboardRows stitches. MAX(claimed_at) with bare
+    // columns picks the newest claim (documented SQLite behavior).
     const invRows = sqliteJson(
-        `SELECT claimed_by_user_id AS user_id, egd_name, MAX(claimed_at)
+        `SELECT claimed_by_user_id AS user_id, egd_name, country_code, MAX(claimed_at)
            FROM invitation WHERE claimed_by_user_id IS NOT NULL
           GROUP BY claimed_by_user_id`
     );
     const invBy = new Map(invRows.map((r) => [r.user_id, r]));
     const linkedIds = new Set(sqliteJson('SELECT user_id FROM external_ids').map((r) => r.user_id));
 
-    // Verified external ratings: the latest MACHINE heartbeat per (user, server) —
-    // 'EGD' rank = raw GoR digits, 'AGAR' rank = raw AGA rating. Human survey rows
-    // (OGS/KGS/Fox/…) are deliberately not read. rank_label/last_game_at arrived with
+    // ONE latest-per-(user, server) pass over rank_surveys, exactly as
+    // readLeaderboardRows does. Only the MACHINE heartbeats are read as RATINGS —
+    // 'EGD' rank = raw GoR digits, 'AGAR' rank = raw AGA rating; a human survey row
+    // (OGS/KGS/Fox/…) contributes nothing but its geo-IP country, the page's
+    // last-resort flag fallback. rank_label/last_game_at arrived with
     // pwa/migrations/2026-07-21_rank_surveys_verified.sql, so they're probed first.
     const surveyCols = tableColumns('rank_surveys');
     const hasVerifiedCols = surveyCols.has('rank_label') && surveyCols.has('last_game_at');
     const verifiedSelect = hasVerifiedCols ? 'rank_label, last_game_at,' : '';
     const hbRows = sqliteJson(
-        `SELECT user_id, server, rank, ${verifiedSelect} MAX(id)
-           FROM rank_surveys WHERE server IN ('EGD', 'AGAR')
-          GROUP BY user_id, server`
+        `SELECT user_id, server, rank, country, ${verifiedSelect} MAX(id)
+           FROM rank_surveys GROUP BY user_id, server`
     );
     const egdBy = new Map(), agaBy = new Map();
-    for (const h of hbRows) (h.server === 'EGD' ? egdBy : agaBy).set(h.user_id, h);
+    // The 'EGD' heartbeat's country is the EGD federation code (most reliable, it comes
+    // from EGD); every other server's is Cloudflare geo-IP.
+    const egdCountryBy = new Map(), surveyCountryBy = new Map();
+    for (const h of hbRows) {
+        if (h.server === 'EGD') {
+            egdBy.set(h.user_id, h);
+            if (h.country) egdCountryBy.set(h.user_id, h.country);
+        } else if (h.server === 'AGAR') {
+            agaBy.set(h.user_id, h);
+        } else if (h.country && !surveyCountryBy.has(h.user_id)) {
+            surveyCountryBy.set(h.user_id, h.country);
+        }
+    }
 
     // Default scope: players with a linked external account (the successor to the old
     // "everyone on the EGD leaderboard" — the table now holds one row per ACTIVE USER,
@@ -445,6 +430,19 @@ async function main() {
         }];
     }));
 
+    // How many rank surveys the player has DECLARED: every rank_surveys row that isn't a
+    // machine heartbeat. Rows, not distinct servers — a re-declaration on the same server
+    // is another value reported, and re-declaring is common. The heartbeats ('EGD',
+    // 'AGAR') are excluded because the system writes them weekly on the player's behalf,
+    // so counting them would measure how long they have been linked, not what they told us.
+    const surveyCounts = sqliteJson(
+        `SELECT user_id, COUNT(*) AS n
+           FROM rank_surveys
+          WHERE server NOT IN ('EGD', 'AGAR') AND user_id IN (${idList})
+          GROUP BY user_id`
+    );
+    const surveyCountBy = new Map(surveyCounts.map((s) => [s.user_id, s.n]));
+
     // Attempts (all reports, incl. repeats) per LOCAL calendar day, last 7 days.
     const weekDays = pastSevenDays();
     const weekStart = weekDays[0].date;
@@ -484,8 +482,18 @@ async function main() {
         const staleOf = (rec, tierFallback) => (!rec || !hasVerifiedCols ? false
             : !mod.isVerifiedActive(mod.verifiedTierRank(rec.rank_label, tierFallback), rec.last_game_at));
 
+        // Country, on the page's own fallback chain: EGD federation code (from the 'EGD'
+        // heartbeat, the most reliable) -> the invitation row (EGD, frozen at invite) ->
+        // the leaderboard row's edge geo-IP (stamped on every /report — the universal
+        // fallback that gives ANY active player, anonymous included, a flag) -> an older
+        // survey's geo-IP. A rebuilt (pruned) row has no leaderboard geo-IP to offer.
+        const inv = invBy.get(r.user_id) || {};
+        const country = egdCountryBy.get(r.user_id) || inv.country_code || r.country
+            || surveyCountryBy.get(r.user_id) || null;
+
         return {
-            userId: r.user_id, name: (invBy.get(r.user_id) || {}).egd_name || r.user_id,
+            userId: r.user_id, name: inv.egd_name || r.user_id,
+            country,
             linked: isLinked(r.user_id),
             registered: linkedIds.has(r.user_id), rebuilt: !!r.rebuilt,
             gor: Number.isFinite(gor) ? gor : null,
@@ -497,6 +505,7 @@ async function main() {
             perDay, weekTotal,
             onlymoveRank, estEgfRank: egfRank, realEgfRank,
             estAgaRank: agaRank, realAgaRank,
+            surveys: surveyCountBy.get(r.user_id) || 0,
             egfStale: realEgfRank !== null && staleOf(egd, realEgfRank),
             agaStale: realAgaRank !== null && staleOf(aga, realAgaRank),
             se, usableNovel: usable,
@@ -507,45 +516,29 @@ async function main() {
     out.sort((a, b) => (Number(b.linked) - Number(a.linked))
         || ((b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity)));
 
-    // --- correlations: onlymove's predicted strength vs the player's real rating ----
-    // Pearson r is invariant under the affine GoR<->scalar map (gor = 2000 + 100·scalar),
-    // so these scalar-space numbers ARE the predicted-GoR vs actual-GoR correlations.
-    // Three cohorts: everyone with a rating, production's rank gate, and — since a
-    // long-idle federation rating is stale ground truth, not a model error — that gate
-    // plus the verified-activity criterion production itself displays on.
+    if (asJson) { console.log(JSON.stringify({ players: out }, null, 2)); return; }
+
     const RANKED_MIN = mod.RANK_START_MIN;   // production's list-entry / rank gate
-    const fin = (v) => Number.isFinite(v);
-    const pairsOf = (key, actualKey, keep) => out
-        .filter((p) => fin(p[key]) && fin(p[actualKey]) && keep(p))
-        .map((p) => [p[key], p[actualKey]]);
-    const cohorts = (key, actualKey, staleKey) => ({
-        all: corrStats(pairsOf(key, actualKey, () => true)),
-        ranked: corrStats(pairsOf(key, actualKey, (p) => p.usableNovel >= RANKED_MIN)),
-        rankedActive: corrStats(pairsOf(key, actualKey,
-            (p) => p.usableNovel >= RANKED_MIN && !p[staleKey])),
-    });
-    const correlations = {
-        estVsRealEgf: cohorts('estEgfRank', 'realEgfRank', 'egfStale'),
-        onlymoveVsRealEgf: cohorts('onlymoveRank', 'realEgfRank', 'egfStale'),
-        estVsRealAga: cohorts('estAgaRank', 'realAgaRank', 'agaStale'),
-        onlymoveVsRealAga: cohorts('onlymoveRank', 'realAgaRank', 'agaStale'),
-    };
-
-    if (asJson) { console.log(JSON.stringify({ correlations, players: out }, null, 2)); return; }
-
     // AGA columns only earn their width once someone has a verified AGA rating.
     const anyAga = out.some((p) => Number.isFinite(p.realAgaRank));
-    const W = { name: 20, s9: 8, s13: 8, med: 9, sd: 9, n: 6, wk: 7, om: 15, est: 15, real: 16 };
+    const nameCell = (p) => p.name + (p.rebuilt ? ' †' : '');
+    // Widen to the longest name rather than truncating: the country column sits right
+    // after it, so a fixed width would run the two together on a long name.
+    const W = {
+        name: Math.max(20, ...out.map((p) => nameCell(p).length + 1)),
+        cc: 5, s9: 8, s13: 8, med: 9, sd: 9, n: 6, wk: 7, om: 15, est: 15, real: 16, srv: 8,
+    };
     const dayHeader = weekDays.map((d) => padl(d.label, DAYW)).join('');
     const dayCells = (p) => weekDays.map((d) => padl((p.perDay[d.date] || 0).toLocaleString('en-US'), DAYW)).join('');
     const realStr = (v, stale) => (Number.isFinite(v) ? rankStr(mod, v) + (stale ? ' *' : '') : '—');
-    const ruleW = W.name + W.s9 + W.s13 + W.med + W.sd + W.n + 2 + weekDays.length * DAYW + W.wk + 2
-        + W.om + W.est + W.real + (anyAga ? W.est + W.real : 0);
+    const ruleW = W.name + W.cc + W.s9 + W.s13 + W.med + W.sd + W.n + 2 + weekDays.length * DAYW + W.wk + 2
+        + W.om + W.est + W.real + (anyAga ? W.est + W.real : 0) + W.srv;
     console.log(
-        pad('Player', W.name) + padl('9×9', W.s9) + padl('13×13', W.s13)
+        pad('Player', W.name) + pad('ctry', W.cc) + padl('9×9', W.s9) + padl('13×13', W.s13)
         + padl('median', W.med) + padl('sd', W.sd) + padl('buf', W.n) + '  ' + dayHeader + padl('wk', W.wk) + '  '
         + pad('onlymove', W.om) + pad('est. EGF', W.est) + pad('real EGF', W.real)
-        + (anyAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : ''));
+        + (anyAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : '')
+        + padl('surveys', W.srv));
     console.log('─'.repeat(ruleW));
     let inUnlinked = false;
     for (const p of out) {
@@ -555,7 +548,8 @@ async function main() {
             console.log('──' + caption + '─'.repeat(Math.max(0, ruleW - caption.length - 2)));
         }
         console.log(
-            pad(p.name + (p.rebuilt ? ' †' : ''), W.name)
+            pad(nameCell(p), W.name)
+            + pad(p.country || '—', W.cc)
             + padl(p.novel9.toLocaleString('en-US'), W.s9)
             + padl(p.novel13.toLocaleString('en-US'), W.s13)
             + padl(durationStr(p.medianMs), W.med)
@@ -566,7 +560,8 @@ async function main() {
             + pad(rankStr(mod, p.estEgfRank), W.est)
             + pad(realStr(p.realEgfRank, p.egfStale), W.real)
             + (anyAga ? pad(rankStr(mod, p.estAgaRank), W.est)
-                + pad(realStr(p.realAgaRank, p.agaStale), W.real) : ''));
+                + pad(realStr(p.realAgaRank, p.agaStale), W.real) : '')
+            + padl(p.surveys || '—', W.srv));
     }
     const nLinked = out.filter((p) => p.linked).length;
     console.log(
@@ -576,46 +571,21 @@ async function main() {
         + `median / sd = median and standard deviation of solve time over novel timed attempts `
         + `(the sd is raw, so a left-open tab inflates it — solve time is right-skewed); `
         + `buf = still-in-corpus attempts in the rank buffer.\n`
+        + `ctry = the flag the /leaderboard page would show: EGD federation code → invite → the row's edge geo-IP → survey geo-IP.\n`
         + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (the 7 days ${weekStart}→today); wk = that window's total.\n`
-        + `onlymove  = untimed front-page window rank.\n`
-        + `est. EGF/AGA = the time-adjusted estimate mapped through that server's coupling (the frame a real rating speaks).\n`
+        + `onlymove  = the untimed rank the player is SHOWN (the front-page badge and the stored pred_rank).\n`
+        + `est. EGF/AGA = that same shown rank, time-adjusted and mapped through the server's coupling (the frame a real rating speaks).\n`
         + `real EGF/AGA = the verified machine heartbeat — the EGD GoR ((GoR−2000)/100) / the AGA rating.\n`
-        + `Model ranks are shown for EVERYONE (the production buf ≥ ${RANKED_MIN} gate is dropped here); `
+        + `surveys = rank declarations the player has SELF-REPORTED (rows, so a re-declaration counts again); the weekly 'EGD'/'AGAR' machine heartbeats are excluded.\n`
+        + `The shown rank is deliberately conservative while a posterior is wide, so est-vs-real here is NOT the mapping's bias — `
+        + `auxiliary/check_mapped_vs_declared_rank.py measures that.\n`
+        + `Ranks are shown for EVERYONE (the production buf ≥ ${RANKED_MIN} gate is dropped here); `
         + `players below that threshold are low-confidence — see se in --json.`
         + (out.some((p) => p.rebuilt) ? `\n† = no leaderboard row (pruned as idle); buffer rebuilt from tsumego_reports, as the Worker would on their next report.` : '')
         + (hasVerifiedCols ? `\n* = production would withhold this verified rating as out of date (EGF activity criterion); kept here.` : '')
         + (withUnlinked
-            ? `\nRows below the divider have no linked external account (one per active user, anonymous included), so they carry no verified rating and enter none of the correlations.`
+            ? `\nRows below the divider have no linked external account (one per active user, anonymous included), so they carry no verified rating.`
             : `\nRun with --with-unlinked to append every other leaderboard row below.`));
-
-    // --- correlation summary --------------------------------------------------------
-    const fc = (v) => (Number.isFinite(v) ? v.toFixed(3) : '  —  ');
-    const fe = (v) => (Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}` : '—');
-    const corrLine = (label, c, withErr) => {
-        let s = `    ${pad(label, 12)} n=${padl(c.n, 4)}   Pearson r=${fc(c.pearson)}   Spearman ρ=${fc(c.spearman)}`;
-        if (withErr) s += `   MAE=${fe(c.mae)}   bias=${fe(c.bias)} stones`;
-        return s;
-    };
-    const block = (title, corr, withErr) => {
-        if (!corr.all.n) return;
-        console.log(title);
-        console.log(corrLine('all', corr.all, withErr));
-        console.log(corrLine(`buf ≥${RANKED_MIN}`, corr.ranked, withErr));
-        // The cohort production actually displays; identical without the migration's
-        // last_game_at (nothing is knowable as stale), so it's only worth a line when
-        // it drops someone.
-        if (corr.rankedActive.n && corr.rankedActive.n < corr.ranked.n) {
-            console.log(corrLine('+ active', corr.rankedActive, withErr));
-        }
-    };
-    console.log('\nCorrelations — onlymove prediction vs the verified external rating');
-    console.log('(Pearson r is affine-invariant: scalar-space r == predicted-GoR vs actual-GoR r.)\n');
-    block('  est. EGF (time-adjusted GoR prediction) vs real EGF:', correlations.estVsRealEgf, true);
-    block('  onlymove headline (untimed, not EGF-mapped) vs real EGF — association only:',
-        correlations.onlymoveVsRealEgf, false);
-    block('  est. AGA (time-adjusted AGA prediction) vs real AGA:', correlations.estVsRealAga, true);
-    block('  onlymove headline (untimed, not AGA-mapped) vs real AGA — association only:',
-        correlations.onlymoveVsRealAga, false);
 }
 
 await main();

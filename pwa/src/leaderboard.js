@@ -74,9 +74,17 @@ async function loadProblemParams(env) {
 // matters now that pred_rank is the SHOWN rank: a constant floor here would put a
 // player's leaderboard row up to ~1.3 ranks off their own badge while their estimate
 // is still wide, which is exactly the disagreement storing displayRank exists to avoid.
-// Built once per isolate alongside the map: problems sorted by rank, so the 50 nearest
-// is a binary search rather than a scan of 157k entries per call.
-let _rankIndex = null;
+// Keyed on the PARAMS MAP, not on the isolate: the floor is a property of the params
+// a caller is computing against, so deriving it from the argument is what keeps every
+// caller on the same rule. The offline rebuilds (auxiliary/update_leaderboard_ranks.mjs,
+// auxiliary/leaderboard_player_stats.mjs) load problem_params.bin themselves and never
+// call getProblemParams, so an isolate-scoped index left them on the constant
+// WIN_SE_FLOOR — writing a shown rank that disagreed with the live Worker's for the same
+// buffer. Built lazily and memoized per map (weakly, so a replaced map is collectable):
+// problems sorted by rank, so the 50 nearest is a binary search rather than a scan of
+// the whole corpus per call.
+const _seFloorByParams = new WeakMap();
+
 function buildRankIndex(map) {
     const rows = [];
     for (const pp of map.values()) {
@@ -90,30 +98,37 @@ function buildRankIndex(map) {
     return { xs: Float64Array.from(rows, r => r[0]), info: Float64Array.from(rows, r => r[1]) };
 }
 
-// Mean per-attempt 4PL information of the 50 corpus problems nearest `rank` -> the
-// floor. Mirrors localSeFloor; the two can differ slightly because the client samples
-// only the shards it has loaded, but both converge to the same steady state.
-function workerSeFloor(rank) {
-    const ix = _rankIndex;
-    if (!ix || !ix.xs.length || !Number.isFinite(rank)) return null;
-    let lo = 0, hi = ix.xs.length - 1;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (ix.xs[m] < rank) lo = m + 1; else hi = m; }
-    let a = lo, b = lo;                       // widen outward to the 50 nearest
-    let sum = 0, n = 0;
-    while (n < 50 && (a > 0 || b < ix.xs.length - 1)) {
-        const dLeft = a > 0 ? Math.abs(ix.xs[a - 1] - rank) : Infinity;
-        const dRight = b < ix.xs.length - 1 ? Math.abs(ix.xs[b + 1] - rank) : Infinity;
-        if (dLeft <= dRight) { a--; sum += ix.info[a]; } else { b++; sum += ix.info[b]; }
-        n++;
-    }
-    return n > 0 ? seFloorForMeanInfo(sum / n) : null;
+// The rank-dependent SE floor for a params map: the mean per-attempt 4PL information of
+// the 50 corpus problems nearest `rank`. Mirrors localSeFloor; the two can differ
+// slightly because the client samples only the shards it has loaded, but both converge
+// to the same steady state.
+export function seFloorFnFor(params) {
+    let fn = _seFloorByParams.get(params);
+    if (fn) return fn;
+    const ix = buildRankIndex(params);
+    fn = (rank) => {
+        if (!ix.xs.length || !Number.isFinite(rank)) return null;
+        let lo = 0, hi = ix.xs.length - 1;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (ix.xs[m] < rank) lo = m + 1; else hi = m; }
+        let a = lo, b = lo;                       // widen outward to the 50 nearest
+        let sum = 0, n = 0;
+        while (n < 50 && (a > 0 || b < ix.xs.length - 1)) {
+            const dLeft = a > 0 ? Math.abs(ix.xs[a - 1] - rank) : Infinity;
+            const dRight = b < ix.xs.length - 1 ? Math.abs(ix.xs[b + 1] - rank) : Infinity;
+            if (dLeft <= dRight) { a--; sum += ix.info[a]; } else { b++; sum += ix.info[b]; }
+            n++;
+        }
+        return n > 0 ? seFloorForMeanInfo(sum / n) : null;
+    };
+    _seFloorByParams.set(params, fn);
+    return fn;
 }
 
 export async function getProblemParams(env) {
     if (_params) return _params;
     if (!_paramsPromise) {
         _paramsPromise = loadProblemParams(env)
-            .then((m) => { _params = m; _rankIndex = buildRankIndex(m); return m; })
+            .then((m) => { _params = m; return m; })
             .catch((e) => { _paramsPromise = null; throw e; });
     }
     return _paramsPromise;
@@ -312,10 +327,11 @@ export function computeRank(buffer, params) {
     // their estimate is still wide. This does not reopen the calibration loop the
     // display offset is otherwise kept out of: the rank-map couplings are fitted on
     // the backend from rank_surveys + fit_user_rating, and read nothing from this
-    // table. Note the Worker passes no seFloorFn, so the offset uses the constant
-    // WIN_SE_FLOOR rather than the client's rank-dependent floor; workerSeFloor above
-    // measures the same quantity from the full params asset so the two match.
-    const est = estimateWindowRankFromFlat(flat, workerSeFloor);
+    // table. The offset scales with the se above a RANK-DEPENDENT floor, derived from
+    // the params map itself (seFloorFnFor) so every caller — the Worker and the offline
+    // rebuilds alike — gets the same one, matching the client's own localSeFloor rather
+    // than the constant WIN_SE_FLOOR.
+    const est = estimateWindowRankFromFlat(flat, seFloorFnFor(params));
     if (!est) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // The dock is DERIVED here but NOT applied: the rank is stored untimed (the frame
