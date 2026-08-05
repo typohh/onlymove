@@ -317,19 +317,22 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         let yLow = bandMin - Y_PAD;
         if (yHigh <= yLow) yHigh = yLow + 1;
 
-        // Grid lines mark the rank CUTOFFS (round-band boundaries, at the
-        // half-integers); each label sits AT the integer band center between two
-        // cutoffs, so it reads as "this band is rank X". Round bands (rank n spans
-        // [n-0.5, n+0.5)) match the GoR/EGF convention and getDescriptiveRank.
+        // Grid lines mark the rank CUTOFFS and each label sits at the CENTRE of the
+        // stripe between two of them, so a stripe reads as "this whole band is rank
+        // X". Under the one rank scale (shared/rank-math.js) integers are the band
+        // EDGES — band n spans [n, n+1) — so the cutoffs are the integers and the
+        // centres are the half-integers. Labelling at the integer instead would draw
+        // each label on its band's lower edge and shift every stripe half a rank down,
+        // putting a value one band above where rankBand/rankProgress place it.
         // Overlapping labels get hidden after layout (see below).
         const gridLines = [];
-        for (let n = Math.floor(yLow); n <= Math.ceil(yHigh); n++) {
-            const cut = n + 0.5;
-            if (cut >= yLow && cut <= yHigh) gridLines.push(cut);
-        }
+        for (let n = Math.ceil(yLow); n <= Math.floor(yHigh); n++) gridLines.push(n);
         const labelTicks = [];
-        for (let n = Math.ceil(yLow); n <= Math.floor(yHigh); n++) {
-            labelTicks.push({ pos: n, text: displayLabel(n) });
+        for (let n = Math.floor(yLow); n <= Math.ceil(yHigh); n++) {
+            const centre = n + 0.5;
+            if (centre >= yLow && centre <= yHigh) {
+                labelTicks.push({ pos: centre, text: displayLabel(centre) });
+            }
         }
 
         const topPct = v => (1 - (v - yLow) / (yHigh - yLow)) * 100;
