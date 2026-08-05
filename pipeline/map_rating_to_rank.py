@@ -51,11 +51,14 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     survey data supports — no rating-interaction, no power-law (see
     docs/methodology.md), and no rank-residualization line (the joint
     couplings absorb the rank-correlated part of solve time on their own).
-  * M: a MONOTONE per-segment fit with the EGF even_game_winrates.txt cubic SHAPE as a PRIOR.
+  * M: a MONOTONE per-segment fit with the EGD even_game_winrates.txt cubic SHAPE as a PRIOR.
     The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)` (>0 ⇒ monotone);
     δ_g=0 reproduces the rigid affine `α_c + β·S`, and `LAMBDA_SHAPE·Σδ_g²` penalises
     deviation. The shape is the ΔAIC-best fit to the even-game win-rate table
-    (utils.rating.rank_curve_shape) — the right convex backbone for the sparse tails. The
+    (utils.rating.rank_curve_shape) — the right convex backbone for the sparse tails. That
+    table is EGD tournament outcomes between declared grades, which is a DIFFERENT thing
+    from the EGF coupling below: the shape is a prior on the curve, EGF is one server
+    coupling off it, and neither privileges the other. The
     prior is GENTLE (LAMBDA_SHAPE small): once the curve is anchored by ALL servers it
     is no longer kyu-starved, so a strong prior over-constrains.
   * EGF IS JUST ANOTHER SERVER. Every server, EGF included, gets free ordinal thresholds

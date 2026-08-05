@@ -1,8 +1,12 @@
-"""Fit a named candidate rating→rank SHAPE to KataGo's even-game win-rate table.
+"""Fit a named candidate rating→rank SHAPE to the EGD's even-game win-rate table.
 
-`even_game_winrates.txt` is KataGo's tabulated weak-side win rate for even games at each rank gap; the
-ΔAIC-best fit to it gives the rating→rank curve's SHAPE (the EGF cubic), with only the affine
-(α, β) left for the survey fit downstream. The rank-calibration stage (pipeline.map_rating_to_rank
+`even_game_winrates.txt` is HUMAN tournament data, NOT engine self-play: the European Go Database's
+tabulated weak-side win rate for even games between DECLARED GRADES at each rank gap. So the shape is
+anchored on how European tournament grades actually play each other, and it inherits that scale's
+declared-grade noise. The ΔAIC-best fit to it gives the rating→rank curve's SHAPE (the EGD cubic), with
+only the affine (α, β) left for the survey fit downstream. Its grade rows stop at 6d, so the fit is
+INFORMED only over 20k–6d — above that the cubic is extrapolating itself, which is worth remembering
+wherever the curve reaches past the table. The rank-calibration stage (pipeline.map_rating_to_rank
 via utils.rating.fit_rank_curves) and the auxiliary rank-mapping experiments both reuse the same fitted
 shape, so the fit lives here (a dependency-free leaf — no auxiliary/ or pipeline/ imports).
 
