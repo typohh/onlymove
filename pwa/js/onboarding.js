@@ -277,7 +277,27 @@ function removeBubble() {
     window.removeEventListener('resize', onReposition);
 }
 
-function onDismiss() {
+// Kill the `click` the browser synthesizes after a pointerdown we consumed.
+// Removing the bubble on pointerdown detaches the down-target, so that click
+// hit-tests to whatever the bubble was covering — the board, which listens for
+// `click`. One-shot, with a timeout in case no click follows (a cancelled tap).
+function swallowNextClick() {
+    let timer = 0;
+    const stop = () => { document.removeEventListener('click', kill, true); clearTimeout(timer); };
+    function kill(ev) { ev.preventDefault(); ev.stopPropagation(); stop(); }
+    document.addEventListener('click', kill, true);
+    timer = setTimeout(stop, 700);
+}
+
+function onDismiss(e) {
+    // A tap ON the bubble is absorbed: it dismisses and goes no further, so
+    // reading a board-anchored bubble can't play a move. Taps elsewhere keep
+    // falling through — that's the "tap anywhere to continue" behaviour.
+    if (_bubbleEl && e && e.target instanceof Node && _bubbleEl.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        swallowNextClick();
+    }
     if (_shownAtMs && (Date.now() - _shownAtMs) < QUICK_DISMISS_MS) {
         _quickDismissals++;
         if (_quickDismissals >= BACKOFF_QUICK_DISMISSALS) _backedOff = true;
@@ -341,9 +361,10 @@ function render(id, def) {
     _shownThisSession++;
     _shownAtMs = Date.now();
 
-    // Any tap/keypress dismisses. pointer-events:none on the bubble means the
-    // tap that dismisses also reaches whatever's underneath (a board move, a
-    // menu item) — exactly the "click anywhere to continue" behaviour wanted.
+    // Any tap/keypress dismisses. A tap OUTSIDE the bubble also reaches
+    // whatever's underneath (a board move, a menu item) — the "click anywhere
+    // to continue" behaviour; a tap on the bubble itself is absorbed instead
+    // (see onDismiss), since board-anchored bubbles cover live intersections.
     document.addEventListener('pointerdown', onDismiss, true);
     document.addEventListener('keydown', onDismiss, true);
     window.addEventListener('resize', onReposition);

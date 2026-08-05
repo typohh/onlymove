@@ -1250,9 +1250,11 @@ body {
 
 /* --- First-run onboarding bubbles (js/onboarding.js) -----------------------
    A small floating callout anchored to a UI element, with an arrow pointing at
-   it. position:fixed and JS-placed. pointer-events:none is load-bearing: the
-   tap that dismisses the bubble passes straight through to the board / menu
-   item underneath, which is exactly the "click anywhere to continue" behaviour.
+   it. position:fixed and JS-placed. pointer-events:none on the CONTAINER is
+   load-bearing: a tap outside the painted box passes straight through to the
+   board / menu item underneath — the "click anywhere to continue" behaviour.
+   The painted parts take it back (see .onb-bubble-body), because a board-
+   anchored bubble covers live intersections and a tap on it must not play.
 
    Colour: ONE light-blue accent in both light and dark themes, on purpose. The
    bubble floats over unpredictable backgrounds — the wooden board, BLACK stones,
@@ -1279,9 +1281,14 @@ body {
 }
 /* The visible box lives on the body (not the container) so it can paint OVER the
    inner half of the arrow square, leaving only the pointed, bordered half. */
+/* The painted parts take pointer events even though the container does not: a tap
+   ON the bubble must be absorbed rather than reach the board intersection it is
+   covering. Taps elsewhere still fall through to what's under them, which is the
+   "tap anywhere to continue" behaviour. */
 .onb-bubble-body {
     position: relative;
     z-index: 1;
+    pointer-events: auto;
     box-sizing: border-box;
     /* Match the app's standard UI text size (title/rank/info) so the bubble
        scales identically across viewports; width + padding are em-based so they
@@ -1308,6 +1315,7 @@ body {
     width: 20px;
     height: 20px;
     z-index: 0;
+    pointer-events: auto;
     background: var(--onb-bg);
     border: 2px solid var(--onb-border);
 }
