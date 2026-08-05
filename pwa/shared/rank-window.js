@@ -162,10 +162,10 @@ const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 // attempts rather than ~38, and the served-difficulty distribution stays nearer the
 // 80% calibration point across every simulated ability.
 //
-// The trade is that the badge-vs-served gap is no longer bounded by a constant: a long
-// run opens it, and run lengths are long-tailed, so it is bounded only in distribution
+// The trade is that the badge-vs-served gap is not bounded by a constant: a long run
+// opens it, and run lengths are long-tailed, so it is bounded only in distribution
 // (typically ~2 ranks, occasionally 10+ during a streak while excess is still wide).
-// A ceiling on the streak term would bound it again at the cost of the endgame speed.
+// A ceiling on the streak term bounds it outright, at the cost of the endgame speed.
 // Below the cap the UCB term takes over and both collapse onto the mean as excess → 0,
 // so K_DISPLAY still governs the endgame.
 export const K_DISPLAY = -2;
@@ -308,18 +308,12 @@ export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
 // Where a device's FIRST problem comes from, given the rank it shows before anything
 // has been answered. An empty window is not an absent posterior — windowMLE over zero
 // attempts returns the population prior exactly — so the serve rule is well defined
-// here and the first problem does not need a hardcoded rank.
+// here and the first problem needs no cold-start rank of its own.
 //
-// That hardcoding is what this removes. A fresh device previously served at its own
-// displayed rank, which is the one case where serving follows the display down — the
-// starvation case these offsets exist to avoid — and it is why the first solve moved
-// the badge so little that the app looked like it had ignored the answer.
-//
-// `shownRank` is passed in rather than taken from the prior's own display value,
-// because at boot no shard is loaded, so there is no local pool to price the se floor
-// from and the constant WIN_SE_FLOOR understates it near the prior mean — enough to
-// drag the rule's own display value about a rank below the number a fresh device
-// shows. What is displayed stays a named constant; only the serve target is derived.
+// `shownRank` is an ARGUMENT rather than the prior's own display value on purpose: at
+// boot no shard is loaded, so seFloorFn can't be measured and the constant
+// WIN_SE_FLOOR understates the floor near the prior mean, which drags the rule's own
+// display value about a rank low. Display stays a named constant; serving is derived.
 export function coldStartServeRank(shownRank) {
     const { R, se } = windowMLE([]);
     const excess = Math.max(0, se - WIN_SE_FLOOR);

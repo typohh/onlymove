@@ -491,11 +491,8 @@ export const state = {
     },
 
     // Before any estimate has run, serving comes from the RULE applied to the shown
-    // rank (shared/rank-window.js coldStartServeRank), not from userRank. Falling back
-    // to userRank served a fresh device AT its own displayed rank — the one case where
-    // serving follows the display down, which is the starvation case the offsets exist
-    // to avoid, and the reason a first correct answer moved the badge so little that
-    // the app looked like it had ignored it. What is SHOWN is unchanged.
+    // rank (shared/rank-window.js coldStartServeRank); displayRank falls back to the
+    // named constant. The two differ on purpose — serving is always above the display.
     get serveRank() {
         return typeof shared.serveRank === 'number' ? shared.serveRank : COLD_START_SERVE;
     },
