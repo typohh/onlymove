@@ -2,11 +2,16 @@ import argparse
 import hashlib
 import os
 import signal
+import sys
 import threading
 import time
 import traceback
 
-from utils.katago.add_variations import (
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from utils.katago.add_variations import (  # noqa: E402
     CALM_UTILITY_OVERRIDE,
     VariationDepthExceeded,
     add_shallow_variations,
@@ -14,16 +19,14 @@ from utils.katago.add_variations import (
     generate_variations_directly_to_sgf,
     promote_winning_first_move,
 )
-from utils.constants import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug
-from utils.katago.add_variations import construct_initial_sgf
-from utils.katago.controller import KatagoController
-from utils.katago.queries import KatagoQueries
-from utils.katago.coords import gtp_to_sgfmill_point
-from utils.katago.models import get_model
-from utils.katago.problem_finder import ProblemFinder
-from sgfmill import boards
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.constants import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug  # noqa: E402
+from utils.katago.add_variations import construct_initial_sgf  # noqa: E402
+from utils.katago.controller import KatagoController  # noqa: E402
+from utils.katago.queries import KatagoQueries  # noqa: E402
+from utils.katago.coords import gtp_to_sgfmill_point  # noqa: E402
+from utils.katago.models import get_model  # noqa: E402
+from utils.katago.problem_finder import ProblemFinder  # noqa: E402
+from sgfmill import boards  # noqa: E402
 
 print_lock = threading.Lock()
 stop_event = threading.Event()

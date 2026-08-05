@@ -9,9 +9,13 @@ import re
 import argparse
 import traceback
 
-from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL
-from utils.katago.controller import KATAGO_PATH, CONFIG_FILE
-from utils.katago.models import get_model
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL  # noqa: E402
+from utils.katago.controller import KATAGO_PATH, CONFIG_FILE  # noqa: E402
+from utils.katago.models import get_model  # noqa: E402
 
 
 verbose = False

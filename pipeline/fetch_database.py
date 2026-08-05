@@ -18,7 +18,13 @@ RETRY_BACKOFFS = [3, 15]  # seconds between attempts; len == number of retries
 # the other tables are tolerated automatically.
 INCREMENTAL_TABLE = "tsumego_reports"
 
-from utils.paths import DB_DIR, DB_SQL, DB_SQLITE, PROJECT_ROOT
+# Make the repo importable when this file is run by path, not just as
+# `python -m pipeline.fetch_database` (which puts the root on sys.path itself).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
+
+from utils.paths import DB_DIR, DB_SQL, DB_SQLITE, PROJECT_ROOT  # noqa: E402
 
 # Page size for the remote SELECTs (keeps any single wrangler response bounded).
 FETCH_PAGE = 50000
