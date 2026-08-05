@@ -171,6 +171,17 @@ const WIN_SE_FLOOR = 1 / Math.sqrt(WIN_PRIOR_INFO + WIN_ITARGET / 2);
 export const K_DISPLAY = -2;
 export const SERVE_UCB_K = 1;
 
+// An UNBLEMISHED record (no incorrect attempt anywhere in the window, which includes
+// the empty window of a brand-new account) earns this on top of the run. Without it a
+// fresh account's first problem lands one rank above its badge — too little for the
+// first solve to move the badge at all, which reads as the app ignoring the answer.
+// At 2 the first problem sits three ranks above the badge and the first clear moves
+// the shown rank a full rank. It is self-limiting in the way the run itself is: the
+// first miss ends it for good, so a player who is genuinely at the starting rank pays
+// for it once. Raising it buys little — measured, the first-solve movement flattens
+// out above 2 while a true 20-kyu's share of over-hard problems keeps climbing.
+export const FRESH_RECORD_BONUS = 2;
+
 // The serve-gap cap for a window of flattened attempts (oldest → newest). Counts the
 // trailing run of correct answers. `attempts` holds FIRST-TIME attempts only (repeats
 // never enter the window), so a missed recall does not reset the run — deliberate: the
@@ -179,7 +190,8 @@ export const SERVE_UCB_K = 1;
 export function serveGapCap(attempts) {
     let streak = 0;
     for (let i = attempts.length - 1; i >= 0 && attempts[i].correct; i--) streak++;
-    return 1 + streak;
+    // streak === length means nothing in the window was ever missed.
+    return 1 + streak + (streak === attempts.length ? FRESH_RECORD_BONUS : 0);
 }
 
 // The posterior mean -> the SHOWN rank. One definition, so the live badge
@@ -287,7 +299,34 @@ export function windowMLE(attempts) {
 // No warm start: the posterior is computed from the prior each call, so there is no
 // path by which a previous estimate can carry itself forward.
 export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
+    // null = "no history yet", which callers branch on to leave a stored rank alone.
+    // The estimate for an empty window is not missing, though — see coldStartEstimate.
     if (!attempts.length) return null;
+    return estimateFromWindow(attempts, seFloorFn);
+}
+
+// Where a device's FIRST problem comes from, given the rank it shows before anything
+// has been answered. An empty window is not an absent posterior — windowMLE over zero
+// attempts returns the population prior exactly — so the serve rule is well defined
+// here and the first problem does not need a hardcoded rank.
+//
+// That hardcoding is what this removes. A fresh device previously served at its own
+// displayed rank, which is the one case where serving follows the display down — the
+// starvation case these offsets exist to avoid — and it is why the first solve moved
+// the badge so little that the app looked like it had ignored the answer.
+//
+// `shownRank` is passed in rather than taken from the prior's own display value,
+// because at boot no shard is loaded, so there is no local pool to price the se floor
+// from and the constant WIN_SE_FLOOR understates it near the prior mean — enough to
+// drag the rule's own display value about a rank below the number a fresh device
+// shows. What is displayed stays a named constant; only the serve target is derived.
+export function coldStartServeRank(shownRank) {
+    const { R, se } = windowMLE([]);
+    const excess = Math.max(0, se - WIN_SE_FLOOR);
+    return Math.min(R + SERVE_UCB_K * excess, shownRank + serveGapCap([]));
+}
+
+function estimateFromWindow(attempts, seFloorFn) {
     const { R, se } = windowMLE(attempts);
     // Rank-dependent floor from the caller (measured from the corpus pool near R);
     // fall back to the constant only when it can't be measured yet (nothing loaded

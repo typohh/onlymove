@@ -3,6 +3,7 @@ import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH } fro
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
 import { runStateEpochGate } from './state-epoch.js';
+import { coldStartServeRank } from '../shared/rank-window.js';
 
 const SUPPORTED_BOARD_SIZES = [9, 13];
 const DEFAULT_BOARD_SIZE = 9;
@@ -383,6 +384,11 @@ const getOrCreateUserId = () => {
 // AGA-style convention (shared/rank-math.js) a bare 0 reads as 1 DAN.
 export const DEFAULT_USER_RANK = -19.5;
 
+// Where a fresh device's first problem is drawn from: the serve rule evaluated at the
+// rank we show before anything is answered. Computed once at import — rank-window pulls
+// in only leaf modules (math-utils, irt, rank-math) and never state.js, so no cycle.
+const COLD_START_SERVE = coldStartServeRank(DEFAULT_USER_RANK);
+
 export const state = {
     appMode: APP_MODES.SOLVING,
 
@@ -484,10 +490,14 @@ export const state = {
         writeJSON('userRank', v);
     },
 
-    // Both fall back to userRank before any estimate has run, so a fresh device
-    // serves and displays at-level rather than blank until the first attempt.
+    // Before any estimate has run, serving comes from the RULE applied to the shown
+    // rank (shared/rank-window.js coldStartServeRank), not from userRank. Falling back
+    // to userRank served a fresh device AT its own displayed rank — the one case where
+    // serving follows the display down, which is the starvation case the offsets exist
+    // to avoid, and the reason a first correct answer moved the badge so little that
+    // the app looked like it had ignored it. What is SHOWN is unchanged.
     get serveRank() {
-        return typeof shared.serveRank === 'number' ? shared.serveRank : this.userRank;
+        return typeof shared.serveRank === 'number' ? shared.serveRank : COLD_START_SERVE;
     },
     set serveRank(v) {
         shared.serveRank = v;
