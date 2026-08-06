@@ -7,14 +7,14 @@
 // invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // A UNITS selector (onlymove / EGF / AGA, persisted in localStorage) picks the
-// frame both value columns speak. EVERY value cell renders as "(pct%) rank" —
+// frame both value columns speak. EVERY value cell renders as "rank (pct%)" —
 // the rank in the selected frame plus the floored progress toward the next one
 // (raw GoR / AGA rating numbers are not displayed; they remain the sort keys):
 //   * Verified — from the player's linked federation account, machine heartbeats
 //     only (EGD GoR heartbeat / AGA Ratings Explorer heartbeat), activity-gated
 //     per the EGF criteria in readLeaderboardRows. EGF units decompose the GoR
-//     round-band (2389 -> "(39%) 4d" — the GoR's own convention), AGA units the
-//     AGA rating through AGA's floor convention (agaPctRank; 5.7 -> "(70%) 5d");
+//     round-band (2389 -> "4d (39%)" — the GoR's own convention), AGA units the
+//     AGA rating through AGA's floor convention (agaPctRank; 5.7 -> "5d (70%)");
 //     onlymove units leave the column blank (there is no raw onlymove-frame
 //     source datum). Human survey declarations are NOT revealed here (they feed
 //     only calibration + the flag fallback).
@@ -140,9 +140,9 @@ export async function handleLeaderboard(env) {
 
 // { pct, t } from a continuous rank via the SHARED rankProgress — the same rank +
 // floored progress-to-next-rank decomposition the front-page rank list uses. Every
-// cell in every unit mode renders as "(pct%) rank"; the percent is derived from the
+// cell in every unit mode renders as "rank (pct%)"; the percent is derived from the
 // underlying continuous value, so it always agrees with the shown band (for GoR
-// this IS the EGF convention: 2389 -> "(39%) 4d").
+// this IS the EGF convention: 2389 -> "4d (39%)").
 function toPctRank(rank) {
     if (!Number.isFinite(rank)) return null;
     const p = rankProgress(rank);
@@ -153,7 +153,7 @@ function toPctRank(rank) {
 // floor(rating), kyu = floor(|rating|); see src/aga.js), NOT the round-band
 // convention above, so AGA cells decompose the rating in AGA's own frame: label
 // from the floor band, percent = fractional progress through it (5.7 ->
-// "(70%) 5d", -3.8 -> "(20%) 3k"). A kyu band's top edge IS its integer
+// "5d (70%)", -3.8 -> "3k (20%)"). A kyu band's top edge IS its integer
 // (rating -3.0 = the strongest 3k), hence the 99 clamp there. The (-1, 1) gap
 // holds no real AGA rating; a converted ESTIMATE landing in it snaps to the
 // nearer boundary.
@@ -394,13 +394,12 @@ function renderPage(rows, belowMin, staleVerified) {
     var v = r.ver && r.ver[units === 'egf' ? 'egf' : 'aga'];
     return v ? pctRank(v.pct, v.t) : '—';
   }
-  // Every value cell, in every unit mode, renders as "(pct%) rank" — the muted
-  // percentage is progress toward the next rank in the selected frame (as on the
-  // front-page rank list; for EGF that's the GoR's own convention, for AGA the
-  // official floor-band one).
+  // Every value cell, in every unit mode, renders as "rank (pct%)" — the muted
+  // percentage is progress toward the next rank in the selected frame (for EGF
+  // that's the GoR's own convention, for AGA the official floor-band one).
   function pctRank(pct, label) {
-    return (typeof pct === 'number'
-      ? '<span class="pct">(' + esc(pct) + '%)</span> ' : '') + esc(label);
+    return esc(label) + (typeof pct === 'number'
+      ? ' <span class="pct">(' + esc(pct) + '%)</span>' : '');
   }
   function estText(r) {
     if (!r.est) return '—';
