@@ -136,8 +136,14 @@ export async function getProblemParams(env) {
     return _paramsPromise;
 }
 
+// Every ranking system we hold a coupling for, in rank_map.json order — the
+// /leaderboard page's units selector offers all of them (plus onlymove itself),
+// and they are exactly the systems a user can declare a rank on in the survey
+// (utils/rating/rank_surveys.py SERVERS). EGF is one of them, not a special case.
+export const RANK_SYSTEMS = Object.keys(RANK_MAP || {});
+
 // Forward coupling: an internal (time-adjusted-frame) rank -> a server's rank. The
-// /leaderboard page's units selector shows the onlymove estimate in EGF and AGA
+// /leaderboard page's units selector shows the onlymove estimate in every server's
 // units via this — EGF is NOT special here, it is one coupling among the others
 // (see the consensus-mapping note in CLAUDE.md). Feed it the TIME-ADJUSTED rank:
 // the couplings were fitted against time-adjusted ratings, so passing the untimed
@@ -222,20 +228,24 @@ export function gorToRank(gor) {
     return (gor - 2000) / 100 - 0.5;
 }
 
-// --- verified-rating helpers (the /leaderboard "Verified" column) -----------------
-// The column shows ONLY machine-verified data from the player's bound external
-// account — the EGD GoR / AGA rating heartbeats — never human survey declarations.
+// --- external-rating helpers (the /leaderboard "Declared" column) -----------------
+// The column shows the player's rank on the SELECTED ranking system: their own
+// survey declaration, overridden by the machine heartbeat (EGD GoR / AGA rating)
+// on EGF and AGA when they have a federation account linked.
 
-// AGA rating -> our-rank TIER for the activity window. Deliberately COARSE — it
-// only has to land in the right dan / SDK / DDK band, so the dan region tracks the
-// rating directly and the kyu region shifts up across AGA's (-1, 1) gap, which
-// holds no real AGA rating. The -0.5 puts both on our band CENTRES, matching
-// rankLabelToRank. Not a rating conversion: agaRankToRating (leaderboard-page.js)
-// is the exact one.
-export function agaRatingToTierRank(rating) {
+// AGA rating -> a continuous rank on OUR scale, LABEL-PRESERVING: AGA's convention
+// is dan = floor(rating) / kyu = floor(|rating|) (see src/aga.js), so AGA's "5d" is
+// rating [5, 6) while ours is [4, 5) — shift the dan half down by 1 and the kyu half
+// up by 1 and every AGA band lands exactly on ours. The jump at 0 is AGA's own
+// (-1, 1) gap, which holds no real rating; null there (and on a legacy heartbeat row
+// that stored a label rather than a rating). Mirrors aga_rating_to_value in
+// utils/rating/rank_surveys.py, so a heartbeat reads the same band here as it does
+// in the calibration pipeline — which is what puts an AGA rating and an AGA
+// declaration on ONE scale in this column, and the estimate's AGA coupling with them.
+export function agaRatingToRank(rating) {
     if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
-    if (rating >= 1) return rating - 0.5;
-    if (rating <= -1) return rating + 0.5;
+    if (rating >= 1) return rating - 1;
+    if (rating <= -1) return rating + 1;
     return null;
 }
 
@@ -474,7 +484,7 @@ export async function applyGorUpdates(env, updates) {
 // persists: AGA linking still works, just without that week's refresh. Mirrors the
 // EGD get-stale / write-heartbeat shape, but self-fetches instead of accepting
 // client-submitted values. Stores rank = the raw AGA rating (e.g. '5.12'/'-3.2' —
-// what the "Verified" column shows), rank_label = the AGA's own official short
+// what the "Declared" column shows), rank_label = the AGA's own official short
 // label ("5d"), last_game_at = latest_event_date. (Pre-2026-07-21 heartbeat rows
 // stored the label IN `rank`; readers treat those as rating-less and they age out
 // with the next weekly heartbeat.)
@@ -793,23 +803,29 @@ export async function readActivePlayers(env, { activeDays = 7 } = {}) {
 // is filtered below. Registration display fields live OFF the leaderboard row:
 // name/country on the claimed invitation (frozen at invite time; bare-column +
 // MAX() subquery picks the newest claim — documented SQLite behavior), and
-// per-user VERIFIED external ratings from ONE latest-per-(user, server) pass
-// over rank_surveys, stitched in JS. Only the MACHINE heartbeats are surfaced —
-// `egd` {gor, label, lastGameAt} from the 'EGD' row and `aga` {rating, label,
-// lastGameAt} from the 'AGAR' row, each dropped (null) when inactive per the
-// EGF activity criterion (isVerifiedActive; fail-open on a missing date).
-// Human survey declarations are DELIBERATELY NOT REVEALED — they feed only the
-// calibration pipeline and the last-resort country/flag fallback here. Each
-// shown row carries the onlymove estimate in three frames for the page's units
-// selector: `currentInternal` (UNTIMED onlymove scalar — the sort key and the
-// onlymove-mode display, matching the client's front-page headline) plus
-// `currentEgf`/`currentAga` (the TIME-ADJUSTED server-frame scalars the
-// couplings speak — the frames the verified GoR/AGA rating natively live in,
-// so estimate and verified columns are comparable in those modes), and
-// `registered` (has an external_ids row; unregistered rows have name/country
-// null).
+// per-user external ranks from ONE latest-per-(user, server) pass over
+// rank_surveys, stitched in JS.
+//
+// Each shown row carries two per-system maps keyed by RANK_SYSTEMS, so the page's
+// units selector can switch frames with no further server round trip:
+//   `est`  — the onlymove estimate coupled into each system's frame, TIME-ADJUSTED
+//            (the frame those systems' own ratings speak, so the two columns are
+//            comparable). `currentInternal` is the UNTIMED onlymove scalar the
+//            onlymove-units column shows, matching the client's front-page headline.
+//   `decl` — that system's rank for this player as { v, exact }: `v` a continuous
+//            rank on the shared scale, `exact` true when it came from a MACHINE
+//            heartbeat (sub-band precision — the page shows a progress percent) and
+//            false for a human survey declaration (a band label, so `v` is only its
+//            centre). The heartbeats WIN on their own system — the 'EGD' GoR on EGF
+//            and the 'AGAR' rating on AGA — for a player with that federation
+//            account linked, so a verified rank always displaces the self-report.
+//            A heartbeat that is inactive per the EGF activity criterion
+//            (isVerifiedActive; fail-open on a missing date) is dropped and the
+//            player's own declaration stands in its place if they made one.
+// `registered` (has an external_ids row; unregistered rows have name/country null)
+// completes the row.
 export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
-    if (!env.DB) return { rows: [], belowMin: 0, staleVerified: 0 };
+    if (!env.DB) return { rows: [], belowMin: 0 };
     const JOINS = `
         LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
                      FROM invitation WHERE claimed_by_user_id IS NOT NULL
@@ -860,10 +876,11 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         try { params = await getProblemParams(env); }
         catch (e) { console.error('leaderboard params load failed:', e); }
     }
-    // Users who opted to hide their profile (bottom of the /leaderboard page):
-    // withhold name, country, and every self-declared / GoR survey rank. Small
-    // opt-in table, read whole. A hidden user still gets their onlymove estimate
-    // (they render as an anonymous row carrying only that estimate).
+    // Users who opted to hide their profile (bottom of the /leaderboard page, or
+    // the checkbox in the rank survey — one flag, one table): withhold name,
+    // country, and every declared / verified rank. Small opt-in table, read whole.
+    // A hidden user still gets their onlymove estimate (they render as an
+    // anonymous row carrying only that estimate).
     let hidden = new Set();
     try {
         const hres = await env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all();
@@ -875,7 +892,6 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // unregistered ranked player and a registered one are shown alike, and a registered
     // sub-gate player is not shown at all.
     let belowMin = 0;
-    let staleVerified = 0;   // shown players whose verified rating was withheld as out of date
     const visible = [];
     for (const r of rows) {
         const isHidden = hidden.has(r.user_id);
@@ -885,18 +901,18 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         // Below the list-entry gate: not shown, only tallied. (A hidden sub-gate row is
         // counted too — the tally is a raw activity aggregate, not identifying.)
         if (rank === null) { belowMin++; continue; }
-        // Verified external ratings: ONLY the machine heartbeats ('EGD' GoR, 'AGAR'
-        // AGA rating) are surfaced — human survey declarations are not revealed;
-        // their rows are read solely for the last-resort country/flag fallback.
-        // Country is harvested in the same pass — the 'EGD' heartbeat's country is
-        // the EGD federation code (the most reliable, since it comes from EGD), a
-        // human survey's is Cloudflare geo-IP. All skipped entirely for a hidden
-        // user — their verified ratings and country are exactly what they've opted
-        // to hide.
+        // External ranks: the machine heartbeats ('EGD' GoR, 'AGAR' AGA rating) and
+        // the player's own survey declarations, which the Declared column shows for
+        // every system they have no linked account on. Country is harvested in the
+        // same pass — the 'EGD' heartbeat's country is the EGD federation code (the
+        // most reliable, since it comes from EGD), a human survey's is Cloudflare
+        // geo-IP. All skipped entirely for a hidden user — their ranks and country
+        // are exactly what they've opted to hide.
         let egd = null;             // { gor, label, lastGameAt } — verified EGD data
         let aga = null;             // { rating, label, lastGameAt } — verified AGA data
         let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
         let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
+        const declared = new Map(); // system -> the player's own latest declared label
         if (!isHidden) for (const d of (declByUser.get(r.user_id) || [])) {
             if (d.server === 'EGD') {
                 const gor = parseInt(d.rank, 10);
@@ -919,34 +935,55 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
                         lastGameAt: isoDateOrNull(d.last_game_at),
                     };
                 }
-            } else if (d.country && !surveyCountry) {
-                surveyCountry = d.country;
+            } else {
+                // A human declaration. Unknown/retired system names are ignored —
+                // `decl` is keyed by the systems we hold a coupling for.
+                if (RANK_MAP && RANK_MAP[d.server]) declared.set(d.server, d.rank);
+                if (d.country && !surveyCountry) surveyCountry = d.country;
             }
         }
-        // EGF activity criterion: an inactive rating (last tournament too long ago
-        // for its tier) is withheld entirely — and the player counted in the
-        // footer's staleVerified tally, so an empty Verified cell on a linked
-        // player is explained. Tier comes from the official label when present
-        // (pro = dan tier), else from the rating itself; a missing date fails
-        // open (register-seeded heartbeats have none for <= a week).
-        let staleDropped = false;
+        // EGF activity criterion: an inactive rating (last tournament too long ago for
+        // its tier) is dropped, which under the precedence below hands that system's
+        // cell back to the player's own declaration if they made one. Tier comes from
+        // the official label when present (pro = dan tier), else from the rating
+        // itself; a missing date fails open (register-seeded heartbeats have none for
+        // <= a week).
         if (egd) {
             const tier = tierRankFromLabel(egd.label) ?? gorToRank(egd.gor);
-            if (!isVerifiedActive(tier, egd.lastGameAt)) { egd = null; staleDropped = true; }
+            if (!isVerifiedActive(tier, egd.lastGameAt)) egd = null;
         }
         if (aga) {
-            const tier = tierRankFromLabel(aga.label) ?? agaRatingToTierRank(aga.rating);
-            if (!isVerifiedActive(tier, aga.lastGameAt)) { aga = null; staleDropped = true; }
+            const tier = tierRankFromLabel(aga.label) ?? agaRatingToRank(aga.rating);
+            if (!isVerifiedActive(tier, aga.lastGameAt)) aga = null;
         }
-        if (staleDropped) staleVerified++;
-        // The onlymove estimate in the three frames the units selector displays: the
-        // stored untimed internal scalar (onlymove mode + the sort key), and the two
-        // time-adjusted server frames — the frames the verified GoR/AGA rating natively
-        // speak, so the dock MUST be added before either coupling is applied.
+        // The onlymove estimate in every frame the units selector displays: the stored
+        // untimed internal scalar (onlymove mode + that mode's sort key), and one
+        // TIME-ADJUSTED coupling per ranking system — the frame those systems' own
+        // ratings speak, so the dock MUST be added before any coupling is applied.
         const currentInternal = rank;
         const internalTimed = addTimeDockToInternalRank(rank, deltaRating);
-        const currentEgf = internalToServerRank('EGF', internalTimed);
-        const currentAga = internalToServerRank('AGA', internalTimed);
+        const est = {};
+        for (const server of RANK_SYSTEMS) {
+            const v = internalToServerRank(server, internalTimed);
+            if (Number.isFinite(v)) est[server] = v;
+        }
+        // The Declared column's value per system, on the shared rank scale. A
+        // declaration is a band label, so its scalar is that band's CENTRE and
+        // carries no within-band progress (exact: false); a heartbeat resolves
+        // within the band, and OVERRIDES the declaration on its own system.
+        const decl = {};
+        for (const server of RANK_SYSTEMS) {
+            const v = rankLabelToRank(declared.get(server));
+            if (Number.isFinite(v)) decl[server] = { v, exact: false };
+        }
+        if (egd) {
+            const v = gorToRank(egd.gor);
+            if (Number.isFinite(v)) decl.EGF = { v, exact: true };
+        }
+        if (aga) {
+            const v = agaRatingToRank(aga.rating);
+            if (Number.isFinite(v)) decl.AGA = { v, exact: true };
+        }
         // A hidden user is stripped of name/country and reported as unregistered, so the
         // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
         // reliable) → invitation (EGD, frozen at invite) → leaderboard row (edge geo-IP,
@@ -957,7 +994,7 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const country = isHidden ? null
             : (egdCountry || r.country_code || r.country || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
-        visible.push({ name, country, registered, currentInternal, currentEgf, currentAga, egd, aga });
+        visible.push({ name, country, registered, currentInternal, est, decl });
     }
-    return { rows: visible, belowMin, staleVerified };
+    return { rows: visible, belowMin };
 }

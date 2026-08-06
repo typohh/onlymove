@@ -117,7 +117,7 @@ async function loadRankModule() {
                 import { interpExtrap, rankToLabel, rankLabelToRank } from './shared/rank-math.js';
                 import { estimateWindowRankFromFlat, flattenAttempt } from './shared/rank-window.js';
                 import {
-                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToTierRank, shortRankLabel,
+                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToRank, shortRankLabel,
                     isVerifiedActive, internalToServerRank, timeDeltaRatingFromBuffer, parseBuffer,
                     seFloorFnFor,
                 } from './src/leaderboard.js';
@@ -127,7 +127,7 @@ async function loadRankModule() {
                 const CURVE = RATING_RANK_MAP['9'] || Object.values(RATING_RANK_MAP)[0] || null;
 
                 export {
-                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToTierRank,
+                    RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToRank,
                     isVerifiedActive, rankToLabel, parseBuffer,
                 };
 
@@ -478,7 +478,7 @@ async function main() {
         const agaRating = aga ? Number(aga.rank) : NaN;   // legacy label rows -> NaN
         const realEgfRank = Number.isFinite(gor) && gor > 0 ? mod.gorToRank(gor) : null;
         const realAgaRank = Number.isFinite(agaRating) && Math.abs(agaRating) >= 1
-            ? mod.agaRatingToTierRank(agaRating) : null;
+            ? mod.agaRatingToRank(agaRating) : null;
         const staleOf = (rec, tierFallback) => (!rec || !hasVerifiedCols ? false
             : !mod.isVerifiedActive(mod.verifiedTierRank(rec.rank_label, tierFallback), rec.last_game_at));
 

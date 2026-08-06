@@ -117,10 +117,9 @@ def aga_rating_to_value(rating):
     close ours at the weak end, so a rating landing on an exact integer tick reads
     one band strong.
 
-    NOT the inverse of agaRankToRating in pwa/src/handlers/leaderboard-page.js: that
-    one shifts by half a band, which is what the display needs to stay continuous
-    across the gap but leaves it half a band off the declaration scale this compares
-    against."""
+    Mirrors agaRatingToRank in pwa/src/leaderboard.js exactly — the /leaderboard page
+    puts an AGA rating, an AGA declaration and the AGA-coupled estimate in one column,
+    so all three have to reach this scale by the same shift."""
     try:
         r = float(rating)
     except (TypeError, ValueError):

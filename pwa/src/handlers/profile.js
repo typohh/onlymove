@@ -2,9 +2,14 @@
 //
 // Per-user "hide my profile" preference for the public /leaderboard page.
 // Presence of a hidden_profiles row = hidden: the user's display name, country,
-// and self-declared / GoR survey ranks are withheld from readLeaderboardRows
-// (see src/leaderboard.js). A hidden player still appears on /leaderboard as an
-// anonymous row carrying only their onlymove estimate.
+// and declared / verified ranks are withheld from readLeaderboardRows (see
+// src/leaderboard.js). A hidden player still appears on /leaderboard as an
+// anonymous row carrying only their predicted rank.
+//
+// Two entry points, one flag: the control at the foot of the /leaderboard page,
+// and the checkbox at the foot of the in-app rank survey (js/rank-survey-prompt.js),
+// which is where a declaration is made in the first place. The survey reads the
+// flag with GET before offering it, so it can write only on an actual change.
 //
 // Keyed by user_id and applying to ANY account — a never-registered player can
 // still have declared ranks (rank_surveys) that this hides — so the flag lives

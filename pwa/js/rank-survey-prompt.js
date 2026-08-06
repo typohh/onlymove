@@ -7,6 +7,15 @@
 // with the dialog (submit or explicit dismiss). If the dialog gets blown
 // away by a reload, an SW takeover, or a tab close, the next stable session
 // brings it back.
+//
+// A declaration is also SHOWN — it is what the /leaderboard page's Declared
+// column reads for every server without a linked federation account — so the
+// dialog states what the answers are for and carries the opt-out at the bottom.
+// That checkbox is the SAME hidden_profiles flag as the one at the foot of
+// /leaderboard (POST /profile/hide), not a second preference: it is read back on
+// open so an existing opt-out shows as already checked, and written only when the
+// user actually changes it, so submitting a survey can never silently un-hide
+// someone who opted out on the leaderboard page.
 
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
@@ -89,12 +98,36 @@ function showRankSurvey() {
         selectedRanks[server] = '';
     }
 
+    // The leaderboard opt-out, reflected from the server on open (see the module
+    // note) and written back on close only if the user moved it.
+    const hideCheckbox = document.createElement('input');
+    hideCheckbox.type = 'checkbox';
+    let hiddenAtOpen = false;
+    if (state.userId) {
+        fetch(`/profile/hide?userId=${encodeURIComponent(state.userId)}`)
+            .then(r => (r.ok ? r.json() : null))
+            .then(j => {
+                if (j && typeof j.hidden === 'boolean') {
+                    hiddenAtOpen = j.hidden;
+                    hideCheckbox.checked = j.hidden;
+                }
+            })
+            .catch(() => {});
+    }
+
     let modalApi;
     // Commit the cooldown only here, on actual user click. If the user never
     // interacts (page reload, tab close, SW takeover), the dialog comes back
     // next stable session.
     const closeWithCooldown = () => {
         localStorage.setItem(STORAGE_KEY, String(Date.now()));
+        // Fire and forget, like the declarations themselves. Applied on BOTH
+        // buttons: the visibility choice is independent of whether the user
+        // submitted any ranks this time.
+        if (state.userId && hideCheckbox.checked !== hiddenAtOpen) {
+            postJson('/profile/hide', { userId: state.userId, hidden: hideCheckbox.checked })
+                .catch(err => console.warn('Profile visibility update failed:', err));
+        }
         document.removeEventListener('click', handleDocumentClick);
         closeActivePopover();
         modalApi.close();
@@ -106,6 +139,18 @@ function showRankSurvey() {
         dismissable: false,
         build: (modal) => {
             modal.appendChild(modalTitle(getTerm('rankSurveyTitle')));
+
+            // What the answers are for, under the header. Small + muted so it
+            // reads as a note rather than a second heading (same treatment as
+            // the rank-translation modal's caption). Muted by opacity only, so
+            // it works on both the dark and light modal backgrounds.
+            const intro = document.createElement('div');
+            intro.textContent = getTerm('rankSurveyIntro');
+            intro.style.fontSize = '0.8em';
+            intro.style.opacity = '0.7';
+            intro.style.maxWidth = '30em';
+            intro.style.marginBottom = '0.5vmin';
+            modal.appendChild(intro);
 
             const grid = modalRankGrid();
 
@@ -310,6 +355,23 @@ function showRankSurvey() {
                 }
                 closeWithCooldown();
             };
+
+            const hideRow = document.createElement('label');
+            hideRow.style.display = 'flex';
+            hideRow.style.alignItems = 'flex-start';
+            hideRow.style.gap = '1vmin';
+            hideRow.style.fontSize = '0.8em';
+            hideRow.style.opacity = '0.7';
+            hideRow.style.textAlign = 'left';
+            hideRow.style.maxWidth = '30em';
+            hideRow.style.cursor = 'pointer';
+            hideCheckbox.style.flex = 'none';
+            hideCheckbox.style.marginTop = '0.25em';
+            const hideText = document.createElement('span');
+            hideText.textContent = getTerm('rankSurveyHide');
+            hideRow.appendChild(hideCheckbox);
+            hideRow.appendChild(hideText);
+            modal.appendChild(hideRow);
 
             modal.appendChild(modalButtonRow([
                 modalButton(getTerm('rankSurveyDismiss'), closeWithCooldown),

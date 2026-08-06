@@ -13,8 +13,10 @@
 // that used to coexist with this one were collapsed into it.
 //
 // AGA-STYLE, not AGA. Real AGA ratings carry a (-1, 1) gap and put 2d at [2, 3);
-// converting to that frame is a real conversion and lives in the AGA display path
-// (agaScalarToRating / agaPctRank in src/handlers/leaderboard-page.js).
+// converting an AGA rating INTO this frame is a real conversion and lives in
+// agaRatingToRank (src/leaderboard.js), mirrored by aga_rating_to_value in
+// utils/rating/rank_surveys.py. It is LABEL-PRESERVING, so an AGA rating and one of
+// our ranks that carry the same label land in the same band here.
 
 /**
  * Linear interpolation with end-slope extrapolation. `xs` must be strictly

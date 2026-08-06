@@ -156,7 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_recall_due_exit
 -- SERVERS. See the external_ids note. Heartbeat rows also carry `rank_label`
 -- (the source's OWN official short rank — EGD Grade "4d"/"3p", AGA rank_label
 -- "5d") and `last_game_at` (ISO date of the player's last tournament — EGD
--- Last_Appearance / AGA latest_event_date), which the /leaderboard "Verified"
+-- Last_Appearance / AGA latest_event_date), which the /leaderboard "Declared"
 -- column shows and activity-gates on (EGF activity criteria). Both NULL on
 -- human survey rows and on heartbeats from sources that omitted them.
 CREATE TABLE IF NOT EXISTS rank_surveys (
@@ -340,7 +340,9 @@ CREATE TABLE IF NOT EXISTS invitation (
 -- /tournament listing). Keyed by user_id, applying to ANY account — a
 -- never-registered player can still have declared ranks in rank_surveys that
 -- this hides — so it is its own table rather than a column on external_ids.
--- Toggled from the bottom of the /leaderboard page (POST /profile/hide).
+-- Toggled from the bottom of the /leaderboard page AND from a checkbox at the
+-- foot of the in-app rank survey (both POST /profile/hide) — one flag, two
+-- entry points.
 CREATE TABLE IF NOT EXISTS hidden_profiles (
     user_id    TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
