@@ -7,8 +7,12 @@
 // invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // A UNITS selector — onlymove, or any ranking system we hold a coupling for
-// (RANK_SYSTEMS), persisted in localStorage — picks the frame both value columns
-// speak. Every value cell renders as "rank" or "rank (pct%)", the percent being
+// (RANK_SYSTEMS) — picks the frame both value columns speak. It reads `?units=`
+// first (so /leaderboard?units=Fox opens on Fox), then the per-device preference in
+// localStorage; the selection is mirrored back into the URL, so the address bar is
+// always shareable. The RESPONSE does not depend on the param — every frame is
+// inlined in the row data and the switch is pure client work — so the param costs
+// only its own edge-cache entry, never a second D1 read path. Every value cell renders as "rank" or "rank (pct%)", the percent being
 // the floored progress toward the next rank in the selected frame; the raw GoR /
 // AGA rating numbers are never displayed, they only reach here as the shared-scale
 // scalars the cells sort by.
@@ -360,16 +364,39 @@ function renderPage(rows, belowMin) {
   var sortDir = -1;    // 1 ascending, -1 descending
   var tbody = document.getElementById('rows');
 
-  // Units selector state: 'om' (onlymove) or a ranking-system name; persisted per
-  // device. The two units that predate the any-system selector were stored
-  // lowercase, so map those forward rather than resetting the reader to onlymove.
+  // Units selector state: 'om' (onlymove) or a ranking-system name. Resolved as
+  // ?units= (an explicit request, so a link opens straight on that system) over the
+  // per-device preference over onlymove. Matching is CASE-INSENSITIVE and takes
+  // "onlymove" for om — the param is typed by hand as often as it is copied — which
+  // also carries forward the lowercase 'egf'/'aga' the two-system selector stored,
+  // rather than resetting those readers to onlymove.
   var UNITS = ${unitsJson};
+  function normalizeUnits(v) {
+    if (!v) return null;
+    var s = String(v).toLowerCase();
+    if (s === 'om' || s === 'onlymove') return 'om';
+    for (var i = 0; i < UNITS.length; i++) if (UNITS[i].toLowerCase() === s) return UNITS[i];
+    return null;   // unknown system: fall through to the next source
+  }
   var units = 'om';
-  try {
-    var u0 = localStorage.getItem('lbUnits');
-    if (u0 === 'egf') u0 = 'EGF'; else if (u0 === 'aga') u0 = 'AGA';
-    if (UNITS.indexOf(u0) >= 0) units = u0;
-  } catch (e) {}
+  try { units = normalizeUnits(localStorage.getItem('lbUnits')) || units; } catch (e) {}
+  try { units = normalizeUnits(new URLSearchParams(location.search).get('units')) || units; } catch (e) {}
+
+  // Keep the address bar on what the table shows, so copying the URL shares this
+  // view and a reload can't snap back to a stale ?units=. A ?units= arriving in
+  // some other case is normalized by the same pass. The default is expressed by the
+  // param's ABSENCE, which keeps the bare /leaderboard canonical. Selecting a system
+  // does NOT push history — it is a display toggle, not a navigation, so Back still
+  // leaves the page.
+  function syncUrl() {
+    if (!window.history || !history.replaceState) return;
+    try {
+      var u = new URL(location.href);
+      if (units === 'om') u.searchParams.delete('units');
+      else u.searchParams.set('units', units);
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch (e) {}
+  }
 
   ${ESC_SNIPPET}
 
@@ -485,13 +512,15 @@ function renderPage(rows, belowMin) {
   var unitsSel = document.getElementById('unitsSel');
   unitsSel.value = units;
   unitsSel.addEventListener('change', function () {
-    var next = unitsSel.value;
-    if (UNITS.indexOf(next) < 0 || next === units) return;
+    var next = normalizeUnits(unitsSel.value);
+    if (!next || next === units) return;
     units = next;
     try { localStorage.setItem('lbUnits', units); } catch (e) {}
+    syncUrl();
     render();
   });
 
+  syncUrl();
   render();
 })();
 </script>
