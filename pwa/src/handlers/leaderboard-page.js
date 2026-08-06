@@ -262,6 +262,10 @@ function renderPage(rows, belowMin, staleVerified) {
      Both value columns render it (pctRank), so scope on the class, not on
      td.val — the Verified cell is a td.decl. */
   .pct { font-size: .8em; opacity: .6; font-weight: 400; }
+  /* The percent digits sit in a fixed two-digit box, right-aligned. The cells are
+     right-aligned, so without it a one-digit percent shortens the whole string and
+     pushes that row's rank label — and the parentheses — a digit out of column. */
+  .pctn { display: inline-block; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
   td.decl { opacity: .7; font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
   /* Unregistered players — muted so named (registered) rows stand out. */
@@ -396,10 +400,13 @@ function renderPage(rows, belowMin, staleVerified) {
   }
   // Every value cell, in every unit mode, renders as "rank (pct%)" — the muted
   // percentage is progress toward the next rank in the selected frame (for EGF
-  // that's the GoR's own convention, for AGA the official floor-band one).
+  // that's the GoR's own convention, for AGA the official floor-band one). The
+  // parenthetical is FIXED WIDTH (.pctn), so in these right-aligned cells the gap
+  // between the rank and the "(" falls at the same place on every row whatever the
+  // rank label's length and however many digits the percent has.
   function pctRank(pct, label) {
     return esc(label) + (typeof pct === 'number'
-      ? ' <span class="pct">(' + esc(pct) + '%)</span>' : '');
+      ? ' <span class="pct">(<span class="pctn">' + esc(pct) + '</span>%)</span>' : '');
   }
   function estText(r) {
     if (!r.est) return '—';
