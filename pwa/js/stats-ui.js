@@ -15,7 +15,7 @@ import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';
-import { computeRankDecomposition } from './rank-decomposition.js';
+import { computeRankDecomposition, flattenAttempts } from './rank-decomposition.js';
 import { showLoading, hideLoading, showConfirm } from './overlays.js';
 import {
     refreshHistoryFromServer,
@@ -202,8 +202,15 @@ export async function showDetailedStats() {
         const activityPane = combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
         // Community/server-wide stats (null if the endpoint isn't ready or the
-        // fetch fails — the tab is then dropped).
-        const serverPane = await buildServerStatsPane(merged);
+        // fetch fails — the tab is then dropped). The rank histogram's "you"
+        // marker is placed from the rank the user is actually SHOWN and the
+        // count of first-time attempts backing it — the same two quantities the
+        // Worker gates and stores per player, so the marker lands in the frame
+        // the bars are drawn in (see computeUserCommunityBuckets).
+        const serverPane = await buildServerStatsPane(merged, {
+            shownRank: state.displayRank,
+            usableAttempts: flattenAttempts(merged).length,
+        });
 
         // The Rank and Time charts are the heavy part (rank decomposition +
         // kernel smoothing + bootstrap CI), but they're built eagerly here —

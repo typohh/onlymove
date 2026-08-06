@@ -9,6 +9,7 @@
 
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { rankToLabel, rankBand, clampRankBand } from '../shared/rank-math.js';
+import { RANK_START_MIN } from '../shared/rank-window.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
 
 // Display bins in SECONDS over the server's fine-bucket histogram (the
@@ -47,9 +48,12 @@ export function binHist(hist, bucketSec) {
 // Locate the current user within each Community distribution, reproducing the
 // Worker's per-user bucketing (computeServerStats in src/server-stats.js) on the
 // client's own last-7-day merged history. Returns a bin index per bar-list
-// category (-1 when not determinable) plus an answer-derived rank label.
+// category (-1 when not determinable) plus the rank label to mark.
 // `timeBins` is the seconds-based display-bin table from the caller (TIME_BINS).
-export function computeUserCommunityBuckets(history, timeBins) {
+// `rankContext` carries the rank half, which is NOT derived here — see the rank
+// block at the bottom: `shownRank` is state.displayRank (the badge's own number)
+// and `usableAttempts` is the flattened first-time count that gates it.
+export function computeUserCommunityBuckets(history, timeBins, rankContext = {}) {
     const out = { attemptsPerDay: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
     if (!Array.isArray(history) || !history.length) return out;
 
@@ -119,18 +123,32 @@ export function computeUserCommunityBuckets(history, timeBins) {
     const recallMed = median(recallGaps);
     if (recallMed != null) out.recall = RECALL_HI.findIndex(hi => recallMed < hi);
 
-    // Answer-derived rank: mean internal rank of distinct first-time problems →
-    // label (the server's recipe, minus shard rounding).
-    const MIN_RANK_PROBLEMS = 10;
-    const firstByProblem = new Map();
-    for (const a of recent) {
-        if (a.isRepeat || typeof a.problemRank !== 'number') continue;
-        if (!firstByProblem.has(a.problemId)) firstByProblem.set(a.problemId, a.problemRank);
-    }
-    if (firstByProblem.size >= MIN_RANK_PROBLEMS) {
-        let sum = 0;
-        for (const r of firstByProblem.values()) sum += r;
-        out.rankLabel = rankToLabel(clampRankBand(rankBand(sum / firstByProblem.size)));
+    // Rank: the SHOWN rank (state.displayRank) banded exactly as the Worker bands
+    // the bars — the histogram is one bin per active player's stored pred_rank,
+    // which IS this same displayRank off the same window posterior
+    // (computeLeaderboardStats, src/server-stats.js), so the marker and the bar it
+    // sits in are one number, and one number with the front-page badge too.
+    //
+    // Do NOT go back to averaging the difficulty of the problems the user was
+    // SERVED in the window. That proxy was retired on the Worker side and the same
+    // reasons apply here: selection centres on serveRank (the estimate plus a
+    // non-negative UCB bonus), not on the estimate, so an unconverged user reads
+    // too strong against bars drawn in the display frame — which is the mean LESS
+    // the display offset, i.e. the gap is the two offsets added, not cancelled;
+    // it never sees whether the user actually solved anything; and weakness-regime
+    // selection weights by weaknessScore rather than by proximity to the rank, so
+    // the served mean is not an estimator of anything.
+    //
+    // Gated on the leaderboard's own RANK_START_MIN so the marker appears only for
+    // a user who would BE one of the bars — below it the Worker stores no rank and
+    // the player is absent from the histogram, while the client's displayRank getter
+    // still answers (the cold-start prior), which would plant a "you" bar for someone
+    // the distribution excludes. The 7-day early return above is the other half of
+    // that population match: no attempt in the window, no leaderboard activity, no
+    // marker.
+    const { shownRank = null, usableAttempts = 0 } = rankContext;
+    if (Number.isFinite(shownRank) && usableAttempts >= RANK_START_MIN) {
+        out.rankLabel = rankToLabel(clampRankBand(rankBand(shownRank)));
     }
 
     return out;

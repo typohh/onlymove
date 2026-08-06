@@ -13,7 +13,11 @@ import { flag } from '../shared/flag.js';
 // Worker cron, served from /server-stats). Returns null on any failure or when
 // there's no activity, so showStatsModal drops the tab. Labels are localized
 // via getTerm (stats* keys in i18n.js).
-export async function buildServerStatsPane(history = []) {
+// `rankContext` ({ shownRank, usableAttempts }) comes from the orchestrator — the
+// user's own displayed rank and the flattened first-time count that gates it — and
+// is passed straight through to computeUserCommunityBuckets, which places the "you"
+// marker on the rank histogram from it rather than deriving a rank of its own.
+export async function buildServerStatsPane(history = [], rankContext = {}) {
     let data;
     // The requester's own edge geo-IP country, stamped on the response by the
     // Worker (the client has no other read of its own geo); marks the "you" bar
@@ -81,7 +85,7 @@ export async function buildServerStatsPane(history = []) {
     // last-7-day history with the SAME bucket boundaries the Worker uses
     // server-side (see computeServerStats in src/server-stats.js), so the highlighted
     // bar is consistent with the community bars around it.
-    const you = computeUserCommunityBuckets(history, TIME_BINS);
+    const you = computeUserCommunityBuckets(history, TIME_BINS, rankContext);
 
     const pane = document.createElement('div');
     pane.className = 'server-stats';
@@ -146,8 +150,9 @@ export async function buildServerStatsPane(history = []) {
          pane.append(h, makeBarList(data.recallDist.map(b => ({ label: b.label, value: b.value })), you.recall));
      }
 
-    // Ranks already arrive ordered weakest→strongest on the EGF scale, one entry
-    // per active user (answer-derived from the last 7 days), so render as-is.
+    // Ranks already arrive ordered weakest→strongest on the internal onlymove
+    // scale, one entry per player active in the window carrying a stored rank
+    // (computeLeaderboardStats), so render as-is.
     if (data.ranks && data.ranks.length) {
         const h = document.createElement('div');
         h.className = 'server-stats-heading';

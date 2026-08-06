@@ -77,6 +77,15 @@ export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
 
 export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
 
+// Minimum VALID (still-in-corpus) first-time attempts before a user is treated as
+// carrying a rank at all. Shared because every consumer has to draw the line in the
+// same place: the Worker emits `pred_rank`/lists the player on /leaderboard only
+// above it (computeRank, src/leaderboard.js), the Community rank histogram is built
+// from exactly those players, and the client's own "you are here" marker on that
+// histogram must appear on the same condition or it marks someone who is not among
+// the bars.
+export const RANK_START_MIN = 30;
+
 // --- Population rank prior ------------------------------------------------------
 // The estimate is a POSTERIOR over the user's rank, and this is its prior: the
 // measured distribution of rank across the user population

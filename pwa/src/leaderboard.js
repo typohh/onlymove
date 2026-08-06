@@ -15,7 +15,7 @@ import { interpExtrap } from '../shared/rank-math.js';
 import { rankLabelToRank } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
-    applyM, slopeInRankSpace, seFloorForMeanInfo,
+    applyM, slopeInRankSpace, seFloorForMeanInfo, RANK_START_MIN,
 } from '../shared/rank-window.js';
 import { anchorInfo } from '../js/irt.js';
 import { fetchAgaPlayer } from './aga.js';
@@ -24,14 +24,16 @@ import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
-// Rank is emitted — and the player LISTED — only once the buffer holds this many VALID
-// (still-in-corpus) novel attempts, the exact set computeRank fits. This is the uniform
-// list-entry gate: a user below it (pred_rank NULL) is NOT shown regardless of
+// Rank is emitted — and the player LISTED — only once the buffer holds RANK_START_MIN
+// VALID (still-in-corpus) novel attempts, the exact set computeRank fits. This is the
+// uniform list-entry gate: a user below it (pred_rank NULL) is NOT shown regardless of
 // registration (no EGD-pin bypass), and the page shows no sample count — only a footer
 // tally of how many active players are still below it. The count is the valid one, NOT
 // the raw buffer length: problems that leave the corpus drop out, so a player can fall
-// back below the gate until they solve more still-in-corpus problems.
-export const RANK_START_MIN = 30;
+// back below the gate until they solve more still-in-corpus problems. It lives in
+// shared/rank-window.js because the client applies the same gate to its Community
+// "you" marker; re-exported here, where every Worker-side consumer already reads it.
+export { RANK_START_MIN };
 const TIME_MIN_TIMED = 20;              // >= this many valid solve times for a time dock
 export const BUFFER_CAP = WIN_CAP;      // 500 — the buffer + the rank window share it
 
