@@ -22,6 +22,11 @@ import { clearSpan, clampFloor, clearKappa } from '../js/irt.js';
 // deployment constant, not runtime state, so both the client and the Worker get it
 // from the same inlined blob with no fetch and no injection seam.
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
+// The corpus's mean per-attempt information vs rank (pipeline.package_for_pwa
+// emit_se_floor_curve). Inlined for the same reason as the constants above: it is a
+// deployment constant, and both the client and the Worker must price the SE floor
+// from the identical numbers or they show different ranks for the same history.
+import SE_FLOOR_CURVE from '../tsumegos/se_floor.json';
 
 // --- Per-attempt transform to internal-rank space -------------------------------
 // Shared so the client's flattenAttempts (rank-decomposition.js) and the Worker's
@@ -127,16 +132,6 @@ export const PRIOR_MEAN = POPULATION_CONSTANTS.rank_prior.mean;
 export const PRIOR_SD = POPULATION_CONSTANTS.rank_prior.sd;
 const WIN_PRIOR_INFO = 1 / (PRIOR_SD * PRIOR_SD);
 
-// The stand-in floor for a caller that cannot price the rank-dependent one
-// (seFloorForMeanInfo below) from the corpus. Held at zero: a floor is a claim that
-// some of the posterior's width is irreducible, and a caller with no corpus in hand
-// has no basis for that claim, so it concedes the whole width and shows the most
-// conservative rank the rule allows. The offsets are all `max(0, se − floor)`, so
-// zero is the neutral element rather than a tuned value — it drops the term instead
-// of guessing it. Callers that CAN measure the floor still do; this only sets what
-// happens when none is available.
-const WIN_SE_FLOOR = 0;
-
 // --- Display and serve offsets --------------------------------------------------
 // Both are the posterior mean plus a multiple of its EXCESS se — the part above the
 // irreducible floor (seFloorForMeanInfo below), so both collapse onto the mean at
@@ -214,14 +209,13 @@ export function serveGapCap(attempts) {
 // The posterior mean -> the SHOWN rank. One definition, so the live badge
 // (estimateWindowRankFromFlat) and the Rank chart's front-page-rank line
 // (windowRankSeries) can never plot different numbers for the same history.
-export function displayRankFor(rank, se, seFloor) {
-    const floor = (Number.isFinite(seFloor) && seFloor > 0) ? seFloor : WIN_SE_FLOOR;
-    return rank + K_DISPLAY * Math.max(0, se - floor);
+export function displayRankFor(rank, se) {
+    return rank + K_DISPLAY * Math.max(0, se - seFloorAt(rank));
 }
 
-// --- Rank-dependent SE floor for the UCB serve bonus ----------------------------
-// The serve bonus is k·(se − se_floor): serve above the estimate while the posterior
-// is loose, collapse to the user's OWN rank as it tightens. But "tight" is not a
+// --- Rank-dependent SE floor for the display and serve offsets -------------------
+// Both offsets are k·(se − se_floor): move off the estimate while the posterior is
+// loose, collapse onto the user's OWN rank as it tightens. But "tight" is not a
 // global constant. The floor is the irreducible SE the window MLE would report with a
 // FULL window of problems AT the user's rank, each cleared at the 80% calibration
 // point — i.e. the SE at which serving MORE at-rank problems stops helping. That
@@ -229,8 +223,7 @@ export function displayRankFor(rank, se, seFloor) {
 // window, and <I> the mean per-attempt information of problems near the user's rank.
 // Flat kyu curves (small slope) genuinely can't pin a rank as tightly as sharp dan
 // ones, so a constant floor mis-scales by ~4× across the ladder and leaves flat-region
-// users perpetually served above their rank, never converging. The caller measures <I>
-// from the loaded corpus pool near the estimate and passes it via seFloorFn.
+// users perpetually served above their rank, never converging.
 //
 // <I> is the FULL 4PL information anchorInfo(floor)·slope² (irt.js), matching the
 // g²/(p(1−p)) windowMLE accumulates below. It used to be the 2PL constant
@@ -247,6 +240,45 @@ export const WIN_STEADY_WEIGHT = (WIN_CAP + 1) / 2;   // Σ of the (M−age)/M r
 export function seFloorForMeanInfo(meanInfo) {
     const info = WIN_PRIOR_INFO + WIN_STEADY_WEIGHT * meanInfo;
     return info > 0 ? 1 / Math.sqrt(info) : Infinity;
+}
+
+// <I> at a rank, off the shipped corpus curve (package_for_pwa emit_se_floor_curve).
+// It is a corpus property, so it is MEASURED ONCE over every problem shipped rather
+// than by each reader over the problems it happens to hold. A reader-side scan is what
+// this replaces, and it was wrong in two ways at once: the client saw only the shards
+// loaded this session — which cluster around the SERVE rank, above the mean the floor
+// is priced at — while the Worker saw the whole params map, so the badge and the
+// stored pred_rank could disagree on identical history; and a 50-problem sample mean
+// moved as the estimate drifted or a shard landed, which the display doubles into
+// stones and which re-crosses band edges under a user whose skill has not moved.
+//
+// The knots are the rank prior's own grid. windowMLE evaluates the posterior on that
+// grid and returns a weighted mean over it, so a rank reaching this function is always
+// inside — interpExtrap therefore never extrapolates, and there is no end convention
+// to get wrong. That matters more than it looks: extending interpolated INFORMATION
+// linearly can take it below zero, and a non-positive information gives an infinite
+// floor, which drops the excess term entirely and silently shows the raw mean.
+const FLOOR_X = (() => {
+    const { rank_lo, rank_step, mean_info } = SE_FLOOR_CURVE;
+    const xs = new Float64Array(mean_info.length);
+    for (let i = 0; i < mean_info.length; i++) xs[i] = rank_lo + i * rank_step;
+    return xs;
+})();
+const FLOOR_INFO = Float64Array.from(SE_FLOOR_CURVE.mean_info);
+
+// The lookup is CLAMPED to the knot range rather than extrapolated. On the shipped
+// grids that changes nothing — the prior's support is the knot range, so no reachable
+// rank is outside — and that is the point: it makes "never extrapolated" structural
+// instead of a property two files have to keep agreeing on. Extending information
+// linearly takes it negative within a few stones of either end, and seFloorForMeanInfo
+// maps a non-positive information to Infinity, which drops the excess term and shows
+// the raw posterior mean — a silent failure with no symptom at the call site. Holding
+// the end knots is also the right answer on its own terms: past the last measured
+// rank the best available problems are the ones at that rank.
+export function seFloorAt(rank) {
+    if (!Number.isFinite(rank)) return seFloorForMeanInfo(FLOOR_INFO[0]);
+    const x = Math.min(Math.max(rank, FLOOR_X[0]), FLOOR_X[FLOOR_X.length - 1]);
+    return seFloorForMeanInfo(interpExtrap(x, FLOOR_X, FLOOR_INFO));
 }
 
 // Weighted 4PL Newton for the internal rank R over the positionally-weighted window
@@ -315,34 +347,25 @@ export function windowMLE(attempts) {
 //
 // No warm start: the posterior is computed from the prior each call, so there is no
 // path by which a previous estimate can carry itself forward.
-export function estimateWindowRankFromFlat(attempts, seFloorFn = null) {
+export function estimateWindowRankFromFlat(attempts) {
     // null = "no history yet", which callers branch on to leave a stored rank alone.
     // The estimate for an empty window is not missing, though — see coldStartEstimate.
     if (!attempts.length) return null;
-    return estimateFromWindow(attempts, seFloorFn);
+    return estimateFromWindow(attempts);
 }
 
 // Every rank a device shows or serves before it has answered anything. An empty
 // window is not an absent posterior — windowMLE over zero attempts returns the
 // population prior exactly — so all three slots come from the ORDINARY rule applied
 // to that posterior, and no slot needs a stand-in constant of its own.
-export function coldStartEstimate(seFloorFn = null) {
-    return estimateFromWindow([], seFloorFn);
+export function coldStartEstimate() {
+    return estimateFromWindow([]);
 }
 
-function estimateFromWindow(attempts, seFloorFn) {
+function estimateFromWindow(attempts) {
     const { R, se } = windowMLE(attempts);
-    // Rank-dependent floor from the caller (measured from the corpus pool near R);
-    // WIN_SE_FLOOR concedes the whole width when it can't be measured.
-    const floorAt = (rank) => {
-        if (seFloorFn) {
-            const f = seFloorFn(rank);
-            if (Number.isFinite(f) && f > 0) return f;
-        }
-        return WIN_SE_FLOOR;
-    };
-    const excess = Math.max(0, se - floorAt(R));
-    const displayRank = displayRankFor(R, se, floorAt(R));
+    const excess = Math.max(0, se - seFloorAt(R));
+    const displayRank = displayRankFor(R, se);
     return {
         rank: R,
         se,

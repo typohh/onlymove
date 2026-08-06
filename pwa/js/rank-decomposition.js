@@ -52,7 +52,7 @@
 
 import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe } from './state.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, slopeInRankSpace, seFloorForMeanInfo, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, seFloorAt, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan, anchorInfo } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
@@ -152,8 +152,9 @@ export function loadRatingRankMap() {
 // into, which tell you less about their rank for the same 80% clear rate). Expect
 // its effect HERE to be second-order: a difficulty-matched pool holds problems of
 // similar floor, so this factor varies far less across candidates than a_p² does.
-// It is the SE floor (localSeFloor below) where the same 2PL constant was
-// load-bearing; this site is the consistency half of that fix. Returned RAW (not
+// It is the SE floor (seFloorAt, off the shipped corpus curve) where the same 2PL
+// constant was load-bearing; this site is the consistency half of that fix — both
+// read the same anchorInfo. Returned RAW (not
 // on any [0,1] range):
 // weightedRandomSelect normalizes, so only relative information matters — a sharp
 // problem is quadratically preferred and a flat or guessable one down-weighted, by
@@ -477,64 +478,21 @@ export function flattenAttempts(answerHistory) {
 //   se          — the posterior standard deviation (rank units)
 //   displayRank — what the front page shows: conservative while se is wide
 //   serveRank   — what problem SELECTION targets; ramps from displayRank onto rank
-// Both offsets scale with the EXCESS se over a RANK-DEPENDENT floor (localSeFloor
-// below): the irreducible SE a full at-rank window would leave, set by the local
-// corpus slope, so both collapse onto the user's OWN rank at convergence on every
-// part of the ladder — not just where a constant floor happened to fit.
+// Both offsets scale with the EXCESS se over a RANK-DEPENDENT floor (seFloorAt in
+// rank-window.js, off the shipped corpus curve): the irreducible SE a full at-rank
+// window would leave, set by the local corpus slope, so both collapse onto the user's
+// OWN rank at convergence on every part of the ladder — not just where a constant
+// floor happened to fit.
 // null when no usable (first-time, curve-mapped) attempt exists.
-// Rank-dependent UCB serve-bonus floor (see seFloorForMeanInfo in rank-window.js):
-// the irreducible SE the window MLE converges to once the user has a full window of
-// AT-their-rank problems. We estimate the local mean per-attempt 4PL information —
-// anchorInfo(floor)·slope² in rank space — from the ≤50 corpus problems nearest the
-// estimate that are ALREADY LOADED on the active size; no fetch on the hot path, the
-// selector's normal shard loading keeps this pool warm and it self-refines as the
-// user's rank drifts into new bands. The per-problem transform runs only on those 50,
-// not the whole pool. Returns null when nothing is loaded yet (or the curve is
-// missing), so the estimator keeps the constant WIN_SE_FLOOR — a harmless fallback
-// since se dominates the bonus that early anyway.
-function localSeFloor(rank) {
-    const pool = state.allProblems;
-    if (!pool || pool.length === 0) return null;
-    const curve = curveForSize(state.boardSize);
-    if (!curve) return null;
-    const nearest = pool
-        .slice()
-        .sort((a, b) => Math.abs(a.rank - rank) - Math.abs(b.rank - rank))
-        .slice(0, 50);
-    let sumInfo = 0, n = 0;
-    for (const p of nearest) {
-        if (typeof p.rating !== 'number') continue;
-        const s = slopeInRankSpace(p.rating, p.slope, curve);
-        sumInfo += s * s * anchorInfo(p.floor);
-        n++;
-    }
-    return n > 0 ? seFloorForMeanInfo(sumInfo / n) : null;
-}
-
 export function estimateWindowRank(answerHistory) {
-    return estimateWindowRankFromFlat(flattenAttempts(answerHistory), localSeFloor);
+    return estimateWindowRankFromFlat(flattenAttempts(answerHistory));
 }
 
 // Recompute the three rank slots from the merged history and persist them. The ONE
-// place that writes them, so every writer prices the SE floor the same way.
-//
-// It is a pure function of the history, so calling it more often than strictly needed
-// is free of consequence — which is what lets the boot path (main.js, once the first
-// shard is in) run it unconditionally. That matters because localSeFloor can only
-// price the floor from a LOADED pool: an estimate computed with none — the account
-// adoption re-anchor, which by design runs before the first problem load so the
-// pulled rank can drive it — concedes the whole posterior width and lands well below
-// the same history's measured-floor value. Re-running once the pool exists both
-// corrects that and repairs a value some earlier session persisted the same way, with
-// no migration: the splash covers the whole interval, so no intermediate is ever seen.
-// Can the corpus pool price the SE floor yet? False before any shard is loaded, and
-// on an offline boot that fails to load one. The boot re-anchor is gated on this: with
-// no pool the estimate concedes the full posterior width, so running it anyway would
-// overwrite a stored, properly-floored rank with a worse one.
-export function canPriceSeFloor() {
-    return localSeFloor(state.userRank) !== null;
-}
-
+// place that writes them, so every writer prices the SE floor the same way. A pure
+// function of the history — and, since the floor comes off a shipped curve rather
+// than the loaded shards, of nothing else — so it is idempotent and needs no
+// ordering against problem loading.
 export function reanchorRank(answerHistory) {
     const est = estimateWindowRank(answerHistory);
     if (!est) return null;
@@ -552,13 +510,12 @@ export function reanchorRank(answerHistory) {
 // because past this point extra rank information is worth less than weakness
 // personalization (and a user parked in a band depletes its high-slope tail
 // anyway, so slope-priority stops changing the served set). Fails CLOSED
-// (not converged → information regime) when no se is stored yet or the local
-// pool can't price a floor — matching the pre-regime behavior.
+// (not converged → information regime) when no se is stored yet.
 export function rankConverged() {
     const se = state.rankSe;
     if (typeof se !== 'number' || !Number.isFinite(se)) return false;
-    const floor = localSeFloor(state.userRank);
-    if (typeof floor !== 'number' || !(floor > 0)) return false;
+    const floor = seFloorAt(state.userRank);
+    if (!(floor > 0) || !Number.isFinite(floor)) return false;
     return se < 2 * floor;
 }
 
@@ -588,10 +545,10 @@ export function windowRankSeries(decomp, times) {
         if (idx === 0) continue;   // no first-time attempt yet
         const prefix = attempts.slice(Math.max(0, idx - WIN_CAP), idx);
         const { R, se } = windowMLE(prefix);
-        // Same rank-dependent floor the live badge uses, measured at this point's
-        // own estimate — so the line is the badge's own trajectory, not an
-        // approximation of it.
-        if (Number.isFinite(R)) out[i] = displayRankFor(R, se, localSeFloor(R));
+        // Same rank-dependent floor the live badge uses, taken at this point's own
+        // estimate — so the line is the badge's own trajectory, not an approximation
+        // of it.
+        if (Number.isFinite(R)) out[i] = displayRankFor(R, se);
     }
     return out;
 }

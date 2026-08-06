@@ -21,6 +21,7 @@ const INLINED_DATA_FILES = [
     'tsumegos/rating_to_rank.json',
     'tsumegos/rank_map.json',
     'tsumegos/population_constants.json',
+    'tsumegos/se_floor.json',
     EMBEDDING_META_PATH,
 ];
 
@@ -108,10 +109,10 @@ async function writeWorkerVersion(version) {
     );
 }
 
-// rating_to_rank.json, rank_map.json and population_constants.json are inlined
-// into the JS and Worker bundles at build time (rank-decomposition.js,
-// rank-translation.js, population-constants.js, src/index.js), so they're never
-// fetched at runtime. The pipeline still writes them to tsumegos/ as the import
+// rating_to_rank.json, rank_map.json, population_constants.json and se_floor.json are
+// inlined into the JS and Worker bundles at build time (rank-decomposition.js,
+// rank-translation.js, population-constants.js, shared/rank-window.js, src/index.js),
+// so they're never fetched at runtime. The pipeline still writes them to tsumegos/ as the import
 // source, but the served copies are dead weight — drop them from dist. Safe
 // because every client force-upgrades on a version change, so nothing is still
 // fetching the old served path.

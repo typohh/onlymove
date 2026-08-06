@@ -67,64 +67,13 @@ async function loadProblemParams(env) {
     return map;
 }
 
-// --- rank-dependent SE floor, Worker side ---------------------------------------
-// The display and serve offsets scale with the se ABOVE an irreducible floor, and that
-// floor varies ~3x across the ladder (flat kyu curves can never pin a rank as tightly
-// as sharp dan ones). The client measures it from the corpus near the estimate
-// (localSeFloor in rank-decomposition.js). The Worker holds the WHOLE params asset, so
-// it can measure the same quantity instead of falling back to the constant — which
-// matters now that pred_rank is the SHOWN rank: a constant floor here would put a
-// player's leaderboard row up to ~1.3 ranks off their own badge while their estimate
-// is still wide, which is exactly the disagreement storing displayRank exists to avoid.
-// Keyed on the PARAMS MAP, not on the isolate: the floor is a property of the params
-// a caller is computing against, so deriving it from the argument is what keeps every
-// caller on the same rule. The offline rebuilds (auxiliary/update_leaderboard_ranks.mjs,
-// auxiliary/leaderboard_player_stats.mjs) load problem_params.bin themselves and never
-// call getProblemParams, so an isolate-scoped index left them on the constant
-// WIN_SE_FLOOR — writing a shown rank that disagreed with the live Worker's for the same
-// buffer. Built lazily and memoized per map (weakly, so a replaced map is collectable):
-// problems sorted by rank, so the 50 nearest is a binary search rather than a scan of
-// the whole corpus per call.
-const _seFloorByParams = new WeakMap();
-
-function buildRankIndex(map) {
-    const rows = [];
-    for (const pp of map.values()) {
-        if (!Number.isFinite(pp.rating)) continue;
-        const x = applyM(pp.rating, CURVE);
-        const sl = slopeInRankSpace(pp.rating, pp.slope, CURVE);
-        if (!Number.isFinite(x) || !Number.isFinite(sl)) continue;
-        rows.push([x, sl * sl * anchorInfo(pp.floor)]);
-    }
-    rows.sort((a, b) => a[0] - b[0]);
-    return { xs: Float64Array.from(rows, r => r[0]), info: Float64Array.from(rows, r => r[1]) };
-}
-
-// The rank-dependent SE floor for a params map: the mean per-attempt 4PL information of
-// the 50 corpus problems nearest `rank`. Mirrors localSeFloor; the two can differ
-// slightly because the client samples only the shards it has loaded, but both converge
-// to the same steady state.
-export function seFloorFnFor(params) {
-    let fn = _seFloorByParams.get(params);
-    if (fn) return fn;
-    const ix = buildRankIndex(params);
-    fn = (rank) => {
-        if (!ix.xs.length || !Number.isFinite(rank)) return null;
-        let lo = 0, hi = ix.xs.length - 1;
-        while (lo < hi) { const m = (lo + hi) >> 1; if (ix.xs[m] < rank) lo = m + 1; else hi = m; }
-        let a = lo, b = lo;                       // widen outward to the 50 nearest
-        let sum = 0, n = 0;
-        while (n < 50 && (a > 0 || b < ix.xs.length - 1)) {
-            const dLeft = a > 0 ? Math.abs(ix.xs[a - 1] - rank) : Infinity;
-            const dRight = b < ix.xs.length - 1 ? Math.abs(ix.xs[b + 1] - rank) : Infinity;
-            if (dLeft <= dRight) { a--; sum += ix.info[a]; } else { b++; sum += ix.info[b]; }
-            n++;
-        }
-        return n > 0 ? seFloorForMeanInfo(sum / n) : null;
-    };
-    _seFloorByParams.set(params, fn);
-    return fn;
-}
+// The rank-dependent SE floor is no longer measured here (nor on the client): it is
+// shipped as a corpus curve in se_floor.json and read through rank-window's seFloorAt,
+// which estimateWindowRankFromFlat applies internally. That removal is the point —
+// pred_rank is the SHOWN rank, so the Worker and the badge must price the floor from
+// the same numbers, and a per-caller scan could not guarantee it (the client saw only
+// the shards it had loaded; the offline rebuilds, which load problem_params.bin
+// themselves and never call getProblemParams, saw a different index again).
 
 export async function getProblemParams(env) {
     if (_params) return _params;
@@ -339,11 +288,10 @@ export function computeRank(buffer, params) {
     // their estimate is still wide. This does not reopen the calibration loop the
     // display offset is otherwise kept out of: the rank-map couplings are fitted on
     // the backend from rank_surveys + fit_user_rating, and read nothing from this
-    // table. The offset scales with the se above a RANK-DEPENDENT floor, derived from
-    // the params map itself (seFloorFnFor) so every caller — the Worker and the offline
-    // rebuilds alike — gets the same one, matching the client's own localSeFloor rather
-    // than the constant WIN_SE_FLOOR.
-    const est = estimateWindowRankFromFlat(flat, seFloorFnFor(params));
+    // table. The offset scales with the se above a RANK-DEPENDENT floor, which comes
+    // off the shipped se_floor.json curve inside the estimator — one set of numbers
+    // for the Worker, the offline rebuilds and the client's own badge.
+    const est = estimateWindowRankFromFlat(flat);
     if (!est) return { rank: null, se: null, usable: flat.length, deltaRating: 0 };
 
     // The dock is DERIVED here but NOT applied: the rank is stored untimed (the frame

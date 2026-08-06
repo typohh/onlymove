@@ -119,7 +119,6 @@ async function loadRankModule() {
                 import {
                     RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToRank, shortRankLabel,
                     isVerifiedActive, internalToServerRank, timeDeltaRatingFromBuffer, parseBuffer,
-                    seFloorFnFor,
                 } from './src/leaderboard.js';
                 import RATING_RANK_MAP from './tsumegos/rating_to_rank.json';
 
@@ -168,7 +167,7 @@ async function loadRankModule() {
                     // attempts and even not-yet-listed players get a (low-confidence) rank.
                     // Below the gate the posterior is still near the prior and the shown rank
                     // sits well under the mean, which is what production shows a new player.
-                    const est = estimateWindowRankFromFlat(flat, seFloorFnFor(params));
+                    const est = estimateWindowRankFromFlat(flat);
                     if (!est) {
                         return { onlymoveRank: null, egfRank: null, agaRank: null, se: null, usable: flat.length };
                     }
