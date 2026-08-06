@@ -178,10 +178,24 @@ function scheduleIdle(fn, timeout = 2000) {
     }
 }
 
-const getRankInfo = (rank) => {
-    // The shared rankBand, so a rank-up/down fires exactly when the DISPLAYED
-    // label changes (getDescriptiveRank uses the same band).
-    return { band: rankBand(rank) };
+// Does this answer earn a "rank up/down to X" line? The shown rank before this
+// attempt against the shown rank after it, in bands. Bands come from the shared
+// rankBand, so a line fires exactly when the badge's label changes
+// (getDescriptiveRank uses the same band), and only when the crossing AGREES with the
+// answer — "rank down" under a correct answer reads as a bug.
+//
+// Re-crossing an edge back and forth, and being told each time, is CORRECT: the shown
+// rank really is moving across the boundary and the badge really is changing with it.
+// What this must not do is report a crossing the answer did not cause, which is why
+// both sides come from the same estimator over the same corpus floor — for a user with
+// a full window a single answer moves the shown rank by well under a tenth of a rank,
+// so a whole-band jump means an input changed, not the player.
+function rankBandCrossing(oldRank, isCorrect) {
+    const oldBand = rankBand(oldRank);
+    const newBand = rankBand(state.displayRank);
+    if (newBand === oldBand) return 'same';
+    const crossing = newBand > oldBand ? 'up' : 'down';
+    return crossing === (isCorrect ? 'up' : 'down') ? crossing : 'same';
 }
 
 // Match (by problemId + creation date) the just-recorded answer entry and
@@ -320,11 +334,7 @@ export async function updateUserStats(isCorrect, {
     // kept separate.
     updateAllUI();
 
-    const oldRankInfo = getRankInfo(oldRank);
-    const newRankInfo = getRankInfo(state.displayRank);
-    let rankChangeDirection = 'same';
-    if (newRankInfo.band > oldRankInfo.band) rankChangeDirection = 'up';
-    else if (newRankInfo.band < oldRankInfo.band) rankChangeDirection = 'down';
+    const rankChangeDirection = rankBandCrossing(oldRank, isCorrect);
 
     // For a recall (repeat) attempt the rank barely moves (rank is fit on
     // first-time attempts only). Instead the overlay shows how recording this
