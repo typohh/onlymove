@@ -228,6 +228,7 @@ def generate_variations_directly_to_sgf(
         is_primary: bool,
         exclude_move=None,
         override_settings=None,
+        mark_children=True,
 ):
     """
     Recursively generates variations and adds them directly as child nodes to the parent_sgf_node.
@@ -235,15 +236,33 @@ def generate_variations_directly_to_sgf(
 
     override_settings is forwarded to KataGo (e.g. utility reweighting for the calm post-solution line).
     Existing comments are left untouched so the first pass's numbers win on nodes shared between passes.
+
+    Returns True when some line at or under this node was read all the way to a
+    DOUBLE PASS, and marks every child that was, with `TE[1]`.
+
+    That mark is the whole point: it records which branches this function
+    actually finished, so no consumer has to guess afterwards. Guessing is what
+    the client used to do — it treated "a pass appears somewhere in the subtree"
+    as "this line was pursued to a conclusion", which is false for every branch
+    abandoned at the MIN_PLAYOUT_PERC cutoff below, and let it walk a solver
+    into a lost position. Only lines that reach the double pass are marked; the
+    abandoned ones are left bare precisely so they can be told apart.
+
+    mark_children=False marks nothing at THIS level while still marking deeper
+    ones, and the caller that builds the refuted first moves passes it. A mark
+    on a decision-node child reads as "this is the move to find", so a refuted
+    first move must never carry one: were the answer's own lines to fail to
+    resolve, the client would find only refuted moves marked and offer one of
+    them as the solution. The answer is marked by the caller instead.
     """
     if len(current_moves) >= MAX_VARIATION_DEPTH:
         raise VariationDepthExceeded(current_moves)
 
     if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
-        return
+        return True
 
     if cumulative_playout_perc < MIN_PLAYOUT_PERC and not is_primary:
-        return
+        return False
 
     current_pos_analysis = queries.query(
         current_moves,
@@ -252,11 +271,13 @@ def generate_variations_directly_to_sgf(
         override_settings=override_settings,
     )
     if not current_pos_analysis or "moveInfos" not in current_pos_analysis:
-        return
+        return False
 
     total_visits = sum(info.get("visits", 0) for info in current_pos_analysis["moveInfos"])
     if total_visits == 0:
-        return
+        return False
+
+    reached_end = False
 
     for move_info in current_pos_analysis["moveInfos"]:
         visits = move_info.get("visits", 0)
@@ -273,7 +294,7 @@ def generate_variations_directly_to_sgf(
             var_node.set("C", f"{move_info['winrate'] * 100:.1f}%/{move_info['scoreLead']:.1f}")
 
         # Recursively add deeper variations from this new node
-        generate_variations_directly_to_sgf(
+        child_reached_end = generate_variations_directly_to_sgf(
             queries,
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
@@ -282,7 +303,14 @@ def generate_variations_directly_to_sgf(
             override_settings=override_settings,
         )
 
+        if child_reached_end:
+            if mark_children:
+                var_node.set("TE", 1)
+            reached_end = True
+
         is_primary = False
 
         if cumulative_playout_perc < MIN_PLAYOUT_PERC:
             break
+
+    return reached_end

@@ -1,4 +1,5 @@
 import argparse
+import functools
 import hashlib
 import os
 import signal
@@ -186,8 +187,31 @@ def get_orientation_invariant_hash(board):
         hashes.append(h)
     return min(hashes)
 
+RETIRED_IDS_PATH = os.path.join(PROJECT_ROOT, "tsumegos", "retired_ids.txt")
+
+
+@functools.lru_cache(maxsize=1)
+def _retired_ids():
+    """Ids of removed problems that still carry attempt rows in the DB.
+
+    Read once per process. A missing file yields an empty set: the check is a
+    guard against reuse, and a generator run should not be blocked because the
+    list has not been produced yet."""
+    retired = set()
+    try:
+        with open(RETIRED_IDS_PATH) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    retired.add(line)
+    except FileNotFoundError:
+        pass
+    return retired
+
+
 def tsumego_id_taken(filename):
-    """True if a tsumego with this id already exists on ANY board size.
+    """True if a tsumego with this id already exists on ANY board size, or the
+    id has been RETIRED.
 
     Never overwrite an existing id: attempts/, activations/, ratings/ and the
     PWA all key rows by the 8-hex id, so replacing the SGF would silently
@@ -196,7 +220,16 @@ def tsumego_id_taken(filename):
     (expected collisions grow with the SQUARE of the corpus size), and the
     generator can legitimately rediscover an already-generated position. The id
     namespace is checked across ALL sizes because downstream id-keyed consumers
-    share it, so an id must be unique across the whole namespace, not per size."""
+    share it, so an id must be unique across the whole namespace, not per size.
+
+    A retired id is taken even though no SGF holds it: the problem left the
+    corpus but its attempt rows were kept, so a new problem under that id would
+    inherit other people's history — the one failure mode that produces no
+    error anywhere and cannot be untangled afterwards. tsumegos/retired_ids.txt
+    is the list."""
+    tid = os.path.splitext(filename)[0]
+    if tid in _retired_ids():
+        return True
     return any(
         os.path.exists(os.path.join(PROJECT_ROOT, "tsumegos", str(s), filename))
         for s in ALL_BOARD_SIZES)
@@ -237,12 +270,21 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     game,node,answer = construct_initial_sgf(moves, solution, queries.board_size)
 
                     STATS.set_state("deep_variations")
-                    generate_variations_directly_to_sgf(queries, answer, moves + [solution], 1.0, True, None)
-                    generate_variations_directly_to_sgf(
+                    answer_resolved = generate_variations_directly_to_sgf(
+                        queries, answer, moves + [solution], 1.0, True, None)
+                    answer_resolved |= generate_variations_directly_to_sgf(
                         queries, answer, moves + [solution], 1.0, True, None,
                         override_settings=CALM_UTILITY_OVERRIDE,
                     )
-                    generate_variations_directly_to_sgf(queries, node, moves, 1.0, True, solution)
+                    # The refuted first moves are built with mark_children off:
+                    # a mark on a decision-node child means "this is the move to
+                    # find", which only the answer may claim. Their deeper
+                    # branches are still marked normally.
+                    generate_variations_directly_to_sgf(
+                        queries, node, moves, 1.0, True, solution,
+                        mark_children=False)
+                    if answer_resolved:
+                        answer.set("TE", 1)
 
                     STATS.set_state("shallow_variations")
                     add_shallow_variations(queries, node, moves)

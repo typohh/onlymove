@@ -10,7 +10,7 @@ import sys
 import time
 
 # Retry policy for the (network-bound) wrangler calls.
-RETRY_BACKOFFS = [3, 15]  # seconds between attempts; len == number of retries
+RETRY_BACKOFFS = [3, 10]  # seconds between attempts; len == number of retries
 
 # The one big, append-only table we pull incrementally by its AUTOINCREMENT id.
 # Everything else is small and re-fetched whole, so the table list never has to
@@ -111,7 +111,18 @@ def _run_wrangler_json(command, pwa_dir):
                 data = None
             if data is not None:
                 if isinstance(data, dict) and data.get("error"):
-                    print(f"\nD1 query failed: {data['error']}\n  query: {command}")
+                    # A STRUCTURED error is retried like any other failure. The
+                    # Cloudflare account authorization check (code 7403) fails
+                    # spuriously on a first call often enough that treating a
+                    # structured error as fatal aborts routine fetches; the
+                    # same call succeeds seconds later. A genuinely malformed
+                    # query costs the backoff ladder before failing the same
+                    # way, which is cheap next to a false abort mid-pipeline.
+                    print(f"\nD1 query failed (attempt {attempt + 1}/"
+                          f"{total_attempts}): {data['error']}\n  query: {command}")
+                    if attempt < len(RETRY_BACKOFFS):
+                        time.sleep(RETRY_BACKOFFS[attempt])
+                        continue
                     sys.exit(1)
                 if proc.returncode == 0:
                     return data

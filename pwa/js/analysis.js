@@ -185,18 +185,31 @@ async function requestAndDisplayAnalysis() {
         // API for a position we've already evaluated this session.
         const allEvaluatedCandidates = [];
         const sgfChildrenLeadingToEnd = [];
+        const markedChildren = [];   // TE — branches the pipeline played out to a double pass
         let bestChild = null;        // first %/ child of any origin (best overall)
         let bestSgfChild = null;     // first %/ child that isn't an API addition
         for (const child of children) {
             if (!child.move || !child.comment || !child.comment.match(/%\//)) continue;
             allEvaluatedCandidates.push({ x: child.move.x, y: child.move.y });
             const isApi = child._origin === 'api';
+            if (!isApi && child.TE) {
+                markedChildren.push(child);
+            }
             if (!isApi && subtreeReachesPass(child)) {
                 sgfChildrenLeadingToEnd.push(child);
             }
             if (!bestChild) bestChild = child;
             if (!bestSgfChild && !isApi) bestSgfChild = child;
         }
+
+        // Prefer the marked branches wherever the SGF has them. TE means the
+        // pipeline drove that branch to a DOUBLE pass and it resolved the way
+        // the problem claims, which is what subtreeReachesPass was standing in
+        // for and could not express: a single pass anywhere in a subtree is not
+        // a conclusion, so the fallback can offer a line that ends with the
+        // solver losing. Selection below is unchanged — only the pool narrows,
+        // so a node marking two white moves still draws two ghosts.
+        const displayPool = markedChildren.length > 0 ? markedChildren : null;
 
         if (allEvaluatedCandidates.length > 0) {
             const isBlackToPlay = state.kifuReader.game.turn === WGo.B;
@@ -211,16 +224,23 @@ async function requestAndDisplayAnalysis() {
                 // children[0]=lg 60.6%/-0.5 loses, real answer ji 78.5%/+2.3), and
                 // trusting document order marked that losing move as the solution —
                 // disagreeing with what isCorrectMove would accept.
-                displayChild = findBestMoveFromChildren(children) || bestChild;
+                //
+                // The pool narrows to the marked branches when there are any,
+                // but the RULE stays findBestMoveFromChildren so that display
+                // and isCorrectMove cannot diverge. Correctness itself is never
+                // read off the mark: a data annotation must not redefine what
+                // counts as the right answer.
+                displayChild = findBestMoveFromChildren(displayPool || children)
+                    || findBestMoveFromChildren(children) || bestChild;
                 candidatesToShow = [{ x: displayChild.move.x, y: displayChild.move.y }];
-            } else if (sgfChildrenLeadingToEnd.length > 0) {
+            } else if (displayPool || sgfChildrenLeadingToEnd.length > 0) {
                 // Comments are reported with reportAnalysisWinratesAs = BLACK, so
                 // white's best = lowest winrate / lowest score among the candidates.
                 let bestWinrateChild = null;
                 let bestWinrate = Infinity;
                 let bestScoreChild = null;
                 let bestScore = Infinity;
-                for (const child of sgfChildrenLeadingToEnd) {
+                for (const child of (displayPool || sgfChildrenLeadingToEnd)) {
                     const wr = getWinrateFromComment(child.comment);
                     if (wr !== null && wr < bestWinrate) {
                         bestWinrate = wr;
@@ -242,8 +262,10 @@ async function requestAndDisplayAnalysis() {
                     picks.push(child);
                 }
                 if (picks.length === 0) {
-                    // Fall back to the SGF order when neither metric was parseable.
-                    picks.push(sgfChildrenLeadingToEnd[0]);
+                    // Fall back to the SGF order when neither metric was
+                    // parseable — from the same pool we just scanned, since a
+                    // marked node need not have any subtreeReachesPass child.
+                    picks.push((displayPool || sgfChildrenLeadingToEnd)[0]);
                 }
                 displayChild = picks[0];
                 candidatesToShow = picks.map(c => ({ x: c.move.x, y: c.move.y }));
