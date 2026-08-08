@@ -127,21 +127,6 @@
         "ja": "ヨセ",
         "ko": "끝내기"
       }
-    },
-    {
-      "motif_id": "ax_b758482e",
-      "positive": "reading",
-      "positive_i18n": {
-        "zh": "计算力",
-        "ja": "読み",
-        "ko": "수읽기"
-      },
-      "negative": "shape",
-      "negative_i18n": {
-        "zh": "棋形",
-        "ja": "形",
-        "ko": "모양"
-      }
     }
   ]
 }
