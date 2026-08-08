@@ -5,6 +5,8 @@
 // chart builders all create raw SVG nodes, the same chart frame (container +
 // title + plot row + y-axis), a legend strip, and a y-tick overlap-hiding
 // observer; these helpers provide the shared building blocks.
+import { appMetrics, resolveLength } from './viewport.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Create an SVG element, applying `attrs` via setAttribute. */
@@ -38,16 +40,23 @@ export function hGridLine(y, W) {
 // height:auto with uniform scaling, so a W×H viewBox paints at
 // renderedW × renderedW·(H/W); matching H/W to (visible height)/(width) makes
 // the whole chart block (title + plot + legend) fit inside the scrollable
-// 70vh body without being taller than the viewport — visible whole on scroll.
+// modal body without being taller than the viewport — visible whole on scroll.
+//
+// The modal's box is READ from the --stats-* tokens style.css declares, not
+// restated as fractions here: this used to carry its own copies of 70vh / 90vw
+// / 3vmin, which a change on the CSS side would silently invalidate with no
+// error — the charts would just size themselves for a modal that no longer
+// exists. `chrome` and `yAxisCol` stay literals because they estimate rendered
+// content (title, legend, axis labels), not a stylesheet constant.
 export function chartViewBoxHeight(W) {
-    const vw = window.innerWidth || 1024;
-    const vh = window.innerHeight || 768;
-    const bodyVisibleH = 0.70 * vh;            // .stats-modal-body max-height: 70vh
+    const vp = appMetrics();
+    const bodyVisibleH = resolveLength('var(--stats-body-max-h)', 0.7 * vp.h);
+    const cardPadX = resolveLength('var(--stats-card-pad-x)', 3 * vp.u);
+    const cardMaxW = resolveLength('var(--stats-card-max-w)', 0.9 * vp.w);
     const chrome = 120;                        // title + legend + x-axis + margins (px)
     const plotH = Math.max(150, bodyVisibleH - chrome);
-    const cardPad = 0.06 * Math.min(vw, vh);   // .stats-modal-card padding: 3vmin each side
     const yAxisCol = 42;                       // y-tick label column
-    const plotW = Math.max(220, 0.9 * vw - cardPad - yAxisCol);
+    const plotW = Math.max(220, cardMaxW - 2 * cardPadX - yAxisCol);
     // Clamp to a sane band: never taller than square, never an extreme letterbox.
     const ratio = Math.max(0.42, Math.min(plotH / plotW, 1.0));
     return Math.round(W * ratio);

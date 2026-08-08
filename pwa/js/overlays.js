@@ -3,7 +3,11 @@
 import { state } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
 
-const boardContainer = document.getElementById('board-container');
+// Sizes below are CSS token expressions, not measurements. The result overlay's
+// type is a fraction of --board-side (the board's edge length, which style.css
+// already derives per layout) rather than a read of #board-container.offsetWidth
+// — measuring made this file a scaling system of its own, on a basis nothing
+// else shared, and it re-measured on every overlay build.
 
 // Display resolution of each of the two numbers below, in that number's own unit:
 // what one step of the last digit the format prints is worth. Both double as the
@@ -61,7 +65,7 @@ function createOverlayContent(stats, message, textColor) {
         // overlay's hold. A null impact (model not ready) removes the blank line.
         const el = document.createElement('div');
         Object.assign(el.style, {
-            fontSize: `${boardContainer.offsetWidth / 20}px`,
+            fontSize: `calc(var(--board-side) / 20)`,
             marginBottom: '20px',
         });
         el.textContent = ' '; // U+00A0 — a plain space collapses to zero height
@@ -80,7 +84,7 @@ function createOverlayContent(stats, message, textColor) {
         const rankChange = signedAtLeast(stats.rankChange, stats.isCorrect, RANK_CHANGE_STEP);
         const rankChangeElement = document.createElement('div');
         Object.assign(rankChangeElement.style, {
-            fontSize: `${boardContainer.offsetWidth / 20}px`,
+            fontSize: `calc(var(--board-side) / 20)`,
             marginBottom: '20px',
         });
         const sign = rankChange < 0 ? '−' : '+';
@@ -94,7 +98,7 @@ function createOverlayContent(stats, message, textColor) {
         if (stats.rankChangeDirection !== 'same') {
             const rankChangeMessageElement = document.createElement('div');
             Object.assign(rankChangeMessageElement.style, {
-                fontSize: `${boardContainer.offsetWidth / 25}px`,
+                fontSize: `calc(var(--board-side) / 25)`,
                 marginBottom: '20px',
             });
             const newRank = getDescriptiveRank(state.displayRank);
@@ -107,7 +111,7 @@ function createOverlayContent(stats, message, textColor) {
     if (message) {
         const messageElement = document.createElement('div');
         Object.assign(messageElement.style, {
-            fontSize: `${boardContainer.offsetWidth / 30}px`,
+            fontSize: `calc(var(--board-side) / 30)`,
             maxWidth: '80%',
         });
         messageElement.textContent = message;
@@ -139,7 +143,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         const messageElement = document.createElement('div');
         Object.assign(messageElement.style, {
             color: 'white', fontWeight: 'bold', textAlign: 'center',
-            fontSize: `${boardContainer.offsetWidth / 25}px`, padding: '20px'
+            fontSize: `calc(var(--board-side) / 25)`, padding: '20px'
         });
         messageElement.textContent = message;
         content.appendChild(messageElement);
@@ -168,7 +172,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         button.textContent = buttonText;
         Object.assign(button.style, {
             marginTop: '20px', padding: '10px 20px',
-            fontSize: `${boardContainer.offsetWidth / 30}px`, cursor: 'pointer',
+            fontSize: `calc(var(--board-side) / 30)`, cursor: 'pointer',
             border: '1px solid white', borderRadius: '5px',
             backgroundColor: 'transparent', color: 'white', fontWeight: 'bold',
         });
@@ -211,7 +215,7 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
                 Object.assign(button.style, {
                     marginTop: '20px',
                     padding: '10px 20px',
-                    fontSize: `${boardContainer.offsetWidth / 30}px`,
+                    fontSize: `calc(var(--board-side) / 30)`,
                     cursor: 'pointer',
                     border: `1px solid ${colors.text}`,
                     borderRadius: '5px',
@@ -419,7 +423,7 @@ function getToastContainer() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '1vmin',
+        gap: 'calc(1 * var(--u))',
         zIndex: '10000',
         pointerEvents: 'none',
     });
@@ -439,10 +443,10 @@ export function showToast(text, { isError = false, autoDismiss = true } = {}) {
     Object.assign(message.style, {
         backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
         color: 'white',
-        padding: '1vmin 2vmin',
-        borderRadius: '0.5vmin',
+        padding: '0.3333em 0.6667em',
+        borderRadius: '0.1667em',
         fontWeight: 'bold',
-        fontSize: '3vmin',
+        fontSize: 'calc(3 * var(--u))',
         pointerEvents: 'none',
         whiteSpace: 'nowrap',
         textAlign: 'center',

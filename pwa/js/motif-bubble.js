@@ -18,6 +18,7 @@
 import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { APP_MODES } from './constants.js';
+import { appMetrics, layoutMode } from './viewport.js';
 
 const MIN_Z = 3.0;        // include a motif only if its component score >= 3 std
 const MAX_MOTIFS = 3;
@@ -28,7 +29,9 @@ let _hasMotifs = false;
 
 const el = (id) => document.getElementById(id);
 
-const isPortrait = () => window.matchMedia('(max-aspect-ratio: 125/100)').matches;
+// Asks style.css which layout it selected instead of re-testing the aspect
+// ratio here — see layoutMode().
+const isPortrait = () => layoutMode() === 'portrait';
 
 /**
  * Portrait parking is board/buttons-relative but the buttons' bottom edge isn't
@@ -45,12 +48,18 @@ export function refreshMotifBubbleMetrics() {
     if (!isPortrait()) return;
     const controls = el('controls-wrapper');
     if (!controls) return;
-    const gap = Math.min(window.innerWidth, window.innerHeight) * 0.01;  // ~1vmin
-    const parkTop = controls.getBoundingClientRect().bottom + gap;
+    const vp = appMetrics();
+    // getBoundingClientRect and `top` on a position:fixed element share an
+    // origin, so the park offset needs no inset correction of its own.
+    const parkTop = controls.getBoundingClientRect().bottom + vp.u;  // the 1·--u park gap
     bubble.style.setProperty('--mb-park-top', `${parkTop}px`);
     // Height is transform-invariant, so measuring while parked or lifted is fine.
     const bubbleHeight = bubble.getBoundingClientRect().height;
-    const lift = (window.innerHeight / 2) - (parkTop + bubbleHeight / 2);
+    // Centre of the USABLE band, not of the screen: under a notch or a browser
+    // toolbar those differ, and the board this lifts over is centred in the
+    // usable band too.
+    const usableCentre = vp.safeTop + vp.h / 2;
+    const lift = usableCentre - (parkTop + bubbleHeight / 2);
     bubble.style.setProperty('--mb-lift', `${lift}px`);
 }
 

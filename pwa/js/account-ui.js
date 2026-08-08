@@ -28,12 +28,12 @@ export function showAccountModal() {
             input.spellcheck = false;
             Object.assign(input.style, {
                 display: 'block',
-                margin: '0.5vmin auto',
-                padding: '0.5vmin 0.8vmin',
+                margin: '0.119em auto',
+                padding: '0.119em 0.1905em',
                 borderRadius: 'var(--radius)',
                 background: '#444',
                 color: '#fff',
-                border: '0.2vmin solid #555',
+                border: 'calc(0.2 * var(--u)) solid #555',
                 fontFamily: 'monospace',
                 fontSize: '1.2em',
                 letterSpacing: '0.15em',

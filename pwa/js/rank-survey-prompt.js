@@ -149,7 +149,7 @@ function showRankSurvey() {
             intro.style.fontSize = '0.8em';
             intro.style.opacity = '0.7';
             intro.style.maxWidth = '30em';
-            intro.style.marginBottom = '0.5vmin';
+            intro.style.marginBottom = '0.1786em';
             modal.appendChild(intro);
 
             const grid = modalRankGrid();
@@ -166,11 +166,11 @@ function showRankSurvey() {
 
                 if (isMobile) {
                     const select = document.createElement('select');
-                    select.style.padding = '0.5vmin 0.8vmin';
+                    select.style.padding = '0.1429em 0.2286em';
                     select.style.borderRadius = 'var(--radius)';
                     select.style.background = '#444';
                     select.style.color = '#fff';
-                    select.style.border = '0.2vmin solid #555';
+                    select.style.border = 'calc(0.2 * var(--u)) solid #555';
                     select.style.fontSize = 'inherit';
                     select.style.width = '8em';
                     select.style.boxSizing = 'border-box';
@@ -197,11 +197,11 @@ function showRankSurvey() {
                     // Desktop Custom Popover Dropdown Button
                     const btn = document.createElement('button');
                     btn.className = 'btn btn-inline';
-                    btn.style.padding = '0.5vmin 1.2vmin';
+                    btn.style.padding = '0.1429em 0.3429em';
                     btn.style.borderRadius = 'var(--radius)';
                     btn.style.background = '#444';
                     btn.style.color = '#fff';
-                    btn.style.border = '0.2vmin solid #555';
+                    btn.style.border = 'calc(0.2 * var(--u)) solid #555';
                     btn.style.fontSize = 'inherit';
                     btn.style.width = '8em';
                     btn.style.boxSizing = 'border-box';
@@ -245,11 +245,11 @@ function showRankSurvey() {
                         const picker = document.createElement('div');
                         picker.style.fontSize = window.getComputedStyle(modal).fontSize;
                         picker.style.background = '#333';
-                        picker.style.border = '0.2vmin solid #555';
+                        picker.style.border = 'calc(0.2 * var(--u)) solid #555';
                         picker.style.borderRadius = 'var(--radius)';
-                        picker.style.boxShadow = '0 1vmin 3vmin rgba(0,0,0,0.6)';
+                        picker.style.boxShadow = '0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,0.6)';
                         picker.style.width = '240px';
-                        picker.style.maxWidth = '90vw';
+                        picker.style.maxWidth = 'var(--stats-card-max-w)';
                         picker.style.display = 'flex';
                         picker.style.flexDirection = 'column';
                         picker.style.boxSizing = 'border-box';
@@ -257,7 +257,7 @@ function showRankSurvey() {
 
                         const header = document.createElement('div');
                         header.textContent = server;
-                        header.style.padding = '1.2vmin 2vmin';
+                        header.style.padding = '0.3429em 0.5714em';
                         header.style.fontWeight = 'bold';
                         header.style.background = '#2a2a2a';
                         header.style.borderBottom = '1px solid #444';
@@ -267,14 +267,14 @@ function showRankSurvey() {
 
                         const list = document.createElement('div');
                         list.style.overflowY = 'auto';
-                        list.style.maxHeight = '50vh';
+                        list.style.maxHeight = 'calc(0.5 * var(--app-h))';
                         list.style.display = 'flex';
                         list.style.flexDirection = 'column';
 
                         const addOption = (val, labelText) => {
                             const opt = document.createElement('div');
                             opt.textContent = labelText;
-                            opt.style.padding = '0.8vmin 2vmin';
+                            opt.style.padding = '0.2286em 0.5714em';
                             opt.style.cursor = 'pointer';
                             opt.style.color = '#fff';
                             opt.style.textAlign = 'center';
@@ -359,7 +359,7 @@ function showRankSurvey() {
             const hideRow = document.createElement('label');
             hideRow.style.display = 'flex';
             hideRow.style.alignItems = 'flex-start';
-            hideRow.style.gap = '1vmin';
+            hideRow.style.gap = '0.3571em';
             hideRow.style.fontSize = '0.8em';
             hideRow.style.opacity = '0.7';
             hideRow.style.textAlign = 'left';

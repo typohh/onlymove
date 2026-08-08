@@ -223,21 +223,29 @@ export async function showDetailedStats() {
         // the summary text both need it, so compute it ONCE here and pass it to
         // both (null = too little data; both handle it).
         const rankDecomp = computeRankDecomposition(merged);
-        const rankBuild = buildRatingHistoryChart(merged, rankDecomp);
-        const rankPane = combineChartWithText(
-            rankBuild && rankBuild.chart,
-            buildRankSummaryText(merged, rankDecomp),
-            rankBuild && rankBuild.readout);
-        const timePane = combineChartWithText(buildTimeUsageChart(merged), timingText);
+        // The three chart panes are also handed a `make` so a resize can
+        // re-derive their aspect ratio (see showStatsModal). Each closes over
+        // the data already computed above — rankDecomp especially, which is the
+        // expensive part of the Rank pane — so a rebuild redraws the chart
+        // without redoing the analysis.
+        const makeRankPane = () => {
+            const build = buildRatingHistoryChart(merged, rankDecomp);
+            return combineChartWithText(
+                build && build.chart,
+                buildRankSummaryText(merged, rankDecomp),
+                build && build.readout);
+        };
+        const makeTimePane = () => combineChartWithText(buildTimeUsageChart(merged), timingText);
+        const makeActivityPane = () => combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
         // Weaknesses is the default (first) page; Community is last. Empty panes
         // (no weaknesses, too little data for a chart, server stats unavailable)
         // are dropped by showStatsModal.
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: issuesElement },
-            { label: getTerm('statsTabRank'), content: rankPane },
-            { label: getTerm('statsTabTime'), content: timePane },
-            { label: getTerm('statsTabActivity'), content: activityPane },
+            { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
+            { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
+            { label: getTerm('statsTabActivity'), content: activityPane, make: makeActivityPane },
             { label: getTerm('statsTabCommunity'), content: serverPane },
         ]);
 
@@ -305,10 +313,20 @@ export function discardStatsModal() {
     if (activeStatsModal) activeStatsModal.close();
 }
 
+// A tab is `{ label, content }` for a static pane, or `{ label, content, make }`
+// where `make()` rebuilds the pane from scratch. `make` marks a pane whose
+// layout is viewport-dependent (the three chart panes): its chart bakes an
+// aspect ratio chosen from the modal's visible box at build time
+// (chartViewBoxHeight), so a rotate or a window resize would otherwise leave
+// the chart at the previous viewport's proportions — the exact thing that
+// sizing is for. Panes are rebuilt lazily: a resize invalidates every
+// viewport-dependent pane, the visible one is rebuilt at once and the rest when
+// their tab is next selected, so a rotate costs one chart rebuild rather than
+// re-running every pane's data pipeline.
 function showStatsModal(tabs) {
     const entries = tabs
         .filter(t => t.content)
-        .map(t => ({ label: t.label, node: t.content }));
+        .map(t => ({ label: t.label, node: t.content, make: t.make || null }));
     if (entries.length === 0) return;
 
     // A modal still hidden behind an example review is superseded by a freshly
@@ -327,6 +345,8 @@ function showStatsModal(tabs) {
 
     const close = () => {
         document.removeEventListener('keydown', onKey);
+        window.removeEventListener('resize', onResize);
+        clearTimeout(resizeTimer);
         backdrop.remove();
         if (activeStatsModal && activeStatsModal.backdrop === backdrop) activeStatsModal = null;
     };
@@ -344,10 +364,34 @@ function showStatsModal(tabs) {
 
     let current = entries[0];
 
-    const renderBody = () => {
-        body.replaceChildren(current.node);
-        body.scrollTop = 0;
+    // Rebuild a pane invalidated by a resize. A make() that returns nothing
+    // leaves the existing node in place rather than blanking the tab.
+    const nodeFor = (entry) => {
+        if (!entry.node && entry.make) entry.node = entry.make() || entry.node;
+        return entry.node;
     };
+
+    const renderBody = ({ keepScroll = false } = {}) => {
+        const scroll = body.scrollTop;
+        body.replaceChildren(nodeFor(current));
+        body.scrollTop = keepScroll ? scroll : 0;
+    };
+
+    // Debounced: a drag-resize fires continuously, and a rebuild redraws a
+    // chart. Only the visible pane is rebuilt now; the others are dropped and
+    // rebuilt when selected.
+    let resizeTimer = 0;
+    const onResize = () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            let changed = false;
+            for (const e of entries) {
+                if (e.make) { e.node = null; changed = true; }
+            }
+            if (changed && current.make) renderBody({ keepScroll: true });
+        }, 200);
+    };
+    window.addEventListener('resize', onResize);
     const renderTabbar = () => {
         // The bar is omitted when only one pane remains.
         tabbar.style.display = entries.length > 1 ? '' : 'none';

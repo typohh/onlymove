@@ -95,7 +95,7 @@ export async function showRankTranslation() {
             caption.style.textAlign = 'center';
             caption.style.fontSize = '0.8em';
             caption.style.opacity = '0.6';
-            caption.style.marginBottom = '1vmin';
+            caption.style.marginBottom = '0.3571em';
             modal.appendChild(caption);
 
             // One system per row: bold name on the left, "<rank> (<progress>%)" on
