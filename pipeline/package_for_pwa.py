@@ -21,6 +21,7 @@ if PROJECT_ROOT not in sys.path:
 from utils.constants import ALL_BOARD_SIZES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
+from utils.rating import se_floor  # noqa: E402
 from pipeline.benchmark_bots import parse_tsumego_sgf
 
 
@@ -927,30 +928,10 @@ def emit_problem_params(output_dir):
 # params map, so the two disagree on the same history — and the client's own value
 # jumps as shards land. Both are display-visible: the shown rank is mean − 2·excess,
 # so an error in the floor is twice that in stones, and a floor that moves under a
-# stationary user re-crosses rank-band edges and re-announces promotions.
-# Gaussian kernel half-width in stones, over problem rank. Measured: against a
-# 500-problem local mean it is the point where the estimate stops moving with the
-# window (a fixed 50-nearest window moves ~5x more per quarter-stone) without yet
-# flattening the one sharp feature in the curve, the fall from the kyu plateau into
-# the dan range. Wider trades that feature away; see CLAUDE.md for the sweep.
-SE_FLOOR_BANDWIDTH = 0.25
-# Below this effective sample a knot is a handful of problems and the run aborts.
-# It is a tripwire, NOT a bandwidth trigger: widening the kernel where the corpus
-# thins is the obvious repair and it is wrong here, because the nearest dense region
-# is the slope-clamp ridge just below 20k (see the note in emit_se_floor_curve), so a
-# widened tail knot imports that ridge and lands 5x off its own neighbours. A sparse
-# tail knot's honest answer is its own few problems: noisy, but LOCAL and static, and
-# static noise moves nobody's rank around.
-SE_FLOOR_MIN_EFFECTIVE = 5
-
-
-def _kernel_stats(rank, ranks, infos):
-    """(mean info, effective sample count) at `rank` under the fixed-width kernel."""
-    w = np.exp(-0.5 * ((ranks - rank) / SE_FLOOR_BANDWIDTH) ** 2)
-    sw = w.sum()
-    if not (sw > 0):
-        return float("nan"), 0.0
-    return float((w * infos).sum() / sw), float(sw * sw / (w * w).sum())
+# The SE-floor geometry (kernel width, the measurability bar, the corpus read and
+# the edge/interpolation rules) lives in utils.rating.se_floor, because
+# fit_population_constants CHOOSES the rank grid with exactly these and this step
+# EMITS the curve on it. One definition, so the two cannot drift apart.
 
 
 def emit_se_floor_curve(output_dir):
@@ -977,7 +958,7 @@ def emit_se_floor_curve(output_dir):
     property of the shipped curve, reproduced faithfully here rather than smoothed
     away: the per-attempt information the estimator itself accumulates has the same
     ridge, so flattening it here would make the floor disagree with the se it is a
-    floor ON. Do not widen the kernel to hide it — see SE_FLOOR_MIN_EFFECTIVE."""
+    floor ON. Do not widen the kernel to hide it — see se_floor.SE_FLOOR_MIN_EFFECTIVE."""
     ratings_root = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
     curve_path = os.path.join(output_dir, "tsumegos", "rating_to_rank.json")
     with open(curve_path) as f:
@@ -990,52 +971,28 @@ def emit_se_floor_curve(output_dir):
     rank_lo, rank_step = float(prior["rank_lo"]), float(prior["rank_step"])
     n_knots = len(prior["log_density"])
 
-    ranks, infos = [], []
-    for size in ALL_BOARD_SIZES:
-        curve = curves.get(str(size))
-        if curve is None:
-            continue
-        cr = np.asarray(curve["ratings"], dtype=float)
-        ck = np.asarray(curve["ranks"], dtype=float)
-        rmap, smap, fmap = load_size_value_maps(ratings_root, size, missing_ok=True)
-        tids = [t for t in rmap if t in smap and t in fmap]
-        if not tids:
-            continue
-        rating = np.array([rmap[t] for t in tids], dtype=float)
-        slope = np.array([smap[t] for t in tids], dtype=float)
-        floor = np.array([fmap[t] for t in tids], dtype=float)
-        # The client's own per-attempt transform (shared/rank-window.js
-        # slopeInRankSpace + js/irt.js anchorInfo), evaluated here so the shipped
-        # curve is in the units the reader accumulates.
-        ranks.append(_interp_extrap(rating, cr, ck))
-        infos.append(_rank_space_slope(rating, slope, cr, ck) ** 2
-                     * _anchor_info(floor, lapse))
-    if not ranks:
+    # The client's own per-attempt transform (shared/rank-window.js
+    # slopeInRankSpace + js/irt.js anchorInfo), evaluated so the shipped curve is
+    # in the units the reader accumulates.
+    r, inf = se_floor.corpus_rank_information(
+        ratings_root, curves, lapse, ALL_BOARD_SIZES)
+    if r.size == 0:
         raise RuntimeError("no rated problems found — cannot emit se_floor.json")
-    r = np.concatenate(ranks)
-    inf = np.concatenate(infos)
-    order = np.argsort(r)
-    r, inf = r[order], inf[order]
 
     grid = rank_lo + rank_step * np.arange(n_knots)
-    mean_info, n_eff = [], []
-    for x in grid:
-        mi, ne = _kernel_stats(x, r, inf)
-        mean_info.append(mi)
-        n_eff.append(ne)
-    thin = [(x, ne) for x, ne in zip(grid, n_eff) if ne < SE_FLOOR_MIN_EFFECTIVE]
-    if thin or not np.isfinite(mean_info).all():
-        raise RuntimeError(
-            "se_floor: the corpus does not cover the rank prior's grid — "
-            f"{len(thin)} knot(s) below {SE_FLOOR_MIN_EFFECTIVE} effective problems, "
-            f"worst {min(thin, key=lambda t: t[1]) if thin else 'n/a'}. The estimator "
-            "can place a user anywhere on that grid, so every knot must be measurable.")
+    # Raises if an edge is unmeasurable even absorbing, or an interior gap is too
+    # wide to bridge. fit_population_constants derived this grid against the same
+    # call, so a failure here means the two artifacts are out of step — re-run it.
+    mean_info, n_eff, interpolated = se_floor.mean_info_curve(grid, r, inf)
+    for rank_x, ne_x in interpolated:
+        print(f"    NOTE knot {rank_x:+.1f} had only {ne_x:.1f} effective problems; "
+              f"interpolated from its neighbours")
     out = {
         "rank_lo": rank_lo,
         "rank_step": rank_step,
         "mean_info": [float(v) for v in mean_info],
         # Provenance only; no reader branches on these.
-        "bandwidth": SE_FLOOR_BANDWIDTH,
+        "bandwidth": se_floor.SE_FLOOR_BANDWIDTH,
         "n_problems": int(len(r)),
     }
     out_path = os.path.join(output_dir, "tsumegos", "se_floor.json")
@@ -1057,45 +1014,11 @@ def emit_se_floor_curve(output_dir):
 _WIN_CAP = 500
 _WIN_STEADY_WEIGHT = (_WIN_CAP + 1) / 2
 _CALIBRATION_P = 0.8
-_FLOOR_MAX = 0.78
-_SLOPE_LO, _SLOPE_HI, _MSLOPE_FLOOR = 0.05, 3.0, 1e-3
 
 
 def _win_prior_info(prior):
     sd = float(prior["sd"])
     return 1.0 / (sd * sd)
-
-
-def _interp_extrap(x, xs, ys):
-    """np.interp with LINEAR extension past both ends — pwa/shared/rank-math.js
-    interpExtrap. M is extrapolated by design (the corpus runs past the labelled
-    ladder at both ends); see the "the rank is never clamped" note in CLAUDE.md."""
-    x = np.asarray(x, dtype=float)
-    y = np.interp(x, xs, ys)
-    lo, hi = x < xs[0], x > xs[-1]
-    if lo.any():
-        y[lo] = ys[0] + (x[lo] - xs[0]) * (ys[1] - ys[0]) / (xs[1] - xs[0])
-    if hi.any():
-        y[hi] = ys[-1] + (x[hi] - xs[-1]) * (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
-    return y
-
-
-def _rank_space_slope(rating, a_p, cr, ck):
-    """Raw 2PL discrimination → logit-per-internal-rank, via M's local steepness."""
-    h = 1e-3
-    m_slope = (_interp_extrap(rating + h, cr, ck)
-               - _interp_extrap(rating - h, cr, ck)) / (2 * h)
-    return np.clip(a_p / np.maximum(np.abs(m_slope), _MSLOPE_FLOOR),
-                   _SLOPE_LO, _SLOPE_HI)
-
-
-def _anchor_info(floor_raw, lapse):
-    """Fisher information one AT-rank attempt carries, per unit squared slope."""
-    c = np.clip(np.asarray(floor_raw, dtype=float), 0.0, _FLOOR_MAX)
-    span = np.maximum(0.0, 1.0 - c - lapse)
-    q = np.clip((_CALIBRATION_P - c) / (1.0 - c - lapse), 1e-6, 1 - 1e-6)
-    g = span * q * (1 - q)
-    return g * g / (_CALIBRATION_P * (1 - _CALIBRATION_P))
 
 
 def emit_correct_embeddings(output_dir):

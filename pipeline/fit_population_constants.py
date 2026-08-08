@@ -93,6 +93,8 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
+from utils.rating import se_floor  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
 # CALIBRATION_P (the 80%-clear margin) is the single source in utils.rating.fit_rank_curves.
@@ -133,9 +135,19 @@ MIN_BIAS_USERS = 50                    # below this, keep the bias defaults
 # actually sit.
 MIN_PRIOR_ATTEMPTS = 50                # novel rated attempts to place a user in the prior
 MIN_PRIOR_USERS = 200                  # below this the prior is too sparse to ship
-PRIOR_GRID_LO, PRIOR_GRID_HI = -40.0, 20.0   # rank grid bounds (UNBOUNDED scale: wide)
 PRIOR_GRID_STEP = 0.5                  # inlined into the JS bundle — keep it coarse
 PRIOR_BANDWIDTH = 1.0                  # KDE width, in stones
+# Grid half-width, in population SDs. The bounds are DERIVED, not hardcoded: they
+# are this envelope around the fitted user distribution, then narrowed to what the
+# corpus can actually price a floor on (utils.rating.se_floor). Both halves matter
+# and a fixed pair could satisfy neither — the grid is the one place the rank
+# coordinate is bounded, so too tight pins an off-scale user, while too wide hands
+# package_for_pwa a knot with no measurement behind it and the run aborts.
+PRIOR_GRID_SD = 4.0
+# The grid must always contain the labelled ladder, or a legitimately ranked user
+# cannot be represented at all. Not a clamp on the rank scale (which is unbounded
+# by design) — a floor under how far the derivation may narrow.
+PRIOR_GRID_MUST_CONTAIN = (-30.0, 9.0)       # 30k .. 9d, clampRankBand's range
 
 # --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
 # The per-axis L2 precision on the client's weakness betas is fit by empirical
@@ -286,7 +298,7 @@ def read_rating_lapse(ratings_dir):
 # ---------------------------------------------------------------------------
 # Population rank prior (the client window estimator's prior over user rank)
 # ---------------------------------------------------------------------------
-def fit_rank_prior(by_user, params, apply_m, lapse):
+def fit_rank_prior(by_user, params, apply_m, lapse, ratings_dir, curves):
     """Distribution of user RANK across the population, as a KDE log-density on a
     fixed grid.
 
@@ -338,7 +350,31 @@ def fit_rank_prior(by_user, params, apply_m, lapse):
         return None, f"only {len(ranks)} users with >={MIN_PRIOR_ATTEMPTS} rated novel attempts"
 
     r = np.asarray(ranks, float)
-    grid = np.arange(PRIOR_GRID_LO, PRIOR_GRID_HI + 1e-9, PRIOR_GRID_STEP)
+
+    # Bounds: the population envelope, narrowed to where the corpus can price a
+    # floor. package_for_pwa emits se_floor.json on exactly this grid and checks
+    # the same criterion, so choosing it here is what keeps the two in step —
+    # a grid picked without asking the corpus is how a knot ends up unmeasurable.
+    corpus_r, corpus_i = se_floor.corpus_rank_information(
+        ratings_dir, curves, lapse, ALL_BOARD_SIZES)
+    lo_t, hi_t = r.mean() - PRIOR_GRID_SD * r.std(ddof=1), r.mean() + PRIOR_GRID_SD * r.std(ddof=1)
+    grid = se_floor.grid_from_bounds(lo_t, hi_t, PRIOR_GRID_STEP)
+    if corpus_r.size:
+        # Walk the bounds inward until the emitter's own read of this grid is
+        # clean. Edges absorb and isolated interior knots interpolate, so this
+        # normally does nothing; it moves only when the corpus genuinely stops.
+        while grid.size > 2:
+            try:
+                se_floor.mean_info_curve(grid, corpus_r, corpus_i)
+                break
+            except RuntimeError:
+                grid = grid[1:-1]
+    must_lo, must_hi = PRIOR_GRID_MUST_CONTAIN
+    if grid.size < 3 or grid[0] > must_lo or grid[-1] < must_hi:
+        span = f"[{grid[0]:+.1f}, {grid[-1]:+.1f}]" if grid.size else "empty"
+        return None, (f"rank grid narrowed to {span}, which does not contain the "
+                      f"labelled ladder [{must_lo:+.0f}, {must_hi:+.0f}] — the corpus "
+                      f"cannot price a floor across the ranks users actually hold")
     # Gaussian KDE, then normalised to a pmf over the grid. Mass falling outside
     # the grid is folded in by the normalisation rather than dropped, so the tails
     # stay proper — the rank scale is unbounded and the grid is only a resolution
@@ -347,7 +383,7 @@ def fit_rank_prior(by_user, params, apply_m, lapse):
     dens = np.maximum(dens, dens.max() * 1e-9)          # keep log finite everywhere
     dens /= dens.sum()
     prior = {
-        "rank_lo": float(PRIOR_GRID_LO),
+        "rank_lo": float(grid[0]),
         "rank_step": float(PRIOR_GRID_STEP),
         "log_density": [round(float(v), 4) for v in np.log(dens)],
         "mean": round(float(r.mean()), 4),
@@ -930,7 +966,12 @@ def main():
     # posterior has no anchor, and the failure is invisible — an unanchored estimator
     # still returns a number, it just tracks wherever it last drifted.
     print("Fitting population rank prior ...")
-    rp, rp_info = fit_rank_prior(by_user, params, apply_m, out["fat_finger_rate"])
+    # The raw curve file (both board keys), not apply_m: the grid derivation reads
+    # per-size knots to map the corpus into rank space the way se_floor does.
+    with open(os.path.join(args.ratings_dir, "rating_to_rank.json")) as _f:
+        _curves = json.load(_f)
+    rp, rp_info = fit_rank_prior(by_user, params, apply_m, out["fat_finger_rate"],
+                                 args.ratings_dir, _curves)
     if rp is None:
         raise RuntimeError(
             f"could not fit rank_prior ({rp_info}). It is mandatory and has no "
