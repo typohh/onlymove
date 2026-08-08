@@ -7,7 +7,15 @@
 //
 //   node auxiliary/purge_tsumegos.mjs --db db/d1.sqlite \
 //        --ids data/tsumego_audit/bad_terminal_results.txt \
+//        [--rows surgery/bad_rows.txt] \
 //        [--apply] [--emit-sql surgery/purge.sql] [--emit-corpus-map surgery/purge_map.json]
+//
+// --ids removes a PROBLEM and everything keyed to it. --rows removes INDIVIDUAL
+// attempt rows by tsumego_reports.id while the problem survives, for rows that
+// are wrong rather than problems that are — e.g. an attempt whose `size` names a
+// different board than the problem it reports. Both feed one purge_row set, so
+// mixing them plans a single coherent digest repair; --rows contributes nothing
+// to recall_schedule, share_events or the corpus map, since its problems stay.
 //
 // What it touches, and why:
 //   tsumego_reports  — DELETE the attempts. This is the load-bearing part: the
@@ -68,20 +76,38 @@ const argOf = (name, dflt = null) => {
 const DB_PATH = argOf('--db');
 const IDS_PATH = argOf('--ids');
 const IDS_INLINE = argOf('--id');
+const ROWS_PATH = argOf('--rows');
 const APPLY = args.includes('--apply');
 const PURGE_BROKEN = args.includes('--purge-broken-digest');
 const EMIT_SQL = argOf('--emit-sql');
 const EMIT_MAP = argOf('--emit-corpus-map');
-if (!DB_PATH || (!IDS_PATH && !IDS_INLINE)) {
-  console.error('usage: node auxiliary/purge_tsumegos.mjs --db <sqlite> (--ids <file> | --id a,b,c) '
+if (!DB_PATH || (!IDS_PATH && !IDS_INLINE && !ROWS_PATH)) {
+  console.error('usage: node auxiliary/purge_tsumegos.mjs --db <sqlite> '
+    + '(--ids <file> | --id a,b,c | --rows <file>) '
     + '[--apply] [--emit-sql <path>] [--emit-corpus-map <path>]');
   process.exit(2);
 }
 
 const rawIds = IDS_PATH
   ? readFileSync(IDS_PATH, 'utf8').split('\n')
-  : IDS_INLINE.split(',');
+  : (IDS_INLINE ? IDS_INLINE.split(',') : []);
 const ids = [...new Set(rawIds.map((s) => s.trim().toLowerCase()).filter(Boolean))];
+
+// Explicit tsumego_reports row ids, for deleting INDIVIDUAL attempts rather
+// than every attempt on a problem — e.g. rows whose `size` belongs to a
+// different board than the problem they name. The problem itself survives, so
+// unlike --ids this touches neither recall_schedule nor share_events, and the
+// id contributes no corpus-map entry. Both sources feed the one purge_row set,
+// so a mixed run plans a single coherent digest repair.
+const rowIds = ROWS_PATH
+  ? [...new Set(readFileSync(ROWS_PATH, 'utf8').split('\n')
+      .map((s) => s.trim()).filter(Boolean))]
+  : [];
+const badRow = rowIds.filter((r) => !/^\d+$/.test(r));
+if (badRow.length) {
+  console.error(`HARD STOP: ${badRow.length} row id(s) are not integers, e.g. ${badRow.slice(0, 3).join(', ')}`);
+  process.exit(1);
+}
 const badFormat = ids.filter((t) => !/^[0-9a-f]{8}$/.test(t));
 if (badFormat.length) {
   console.error(`HARD STOP: ${badFormat.length} id(s) are not 8-hex, e.g. ${badFormat.slice(0, 3).join(', ')}`);
@@ -105,6 +131,25 @@ db.exec('CREATE TEMP TABLE purge_id(problem TEXT PRIMARY KEY)');
 {
   const ins = db.prepare('INSERT OR IGNORE INTO purge_id VALUES (?)');
   for (const t of ids) ins.run(t);
+}
+
+// One temp set drives the local apply, the digest planning and the emitted SQL,
+// so the three can never disagree about what is going away. Built BEFORE the
+// chain audit so the "must start from a correct chain" pre-check below sees the
+// --rows users too, not just the --ids ones.
+db.exec('CREATE TEMP TABLE purge_row(id INTEGER PRIMARY KEY)');
+db.exec(`INSERT OR IGNORE INTO purge_row
+           SELECT id FROM tsumego_reports WHERE problem IN (SELECT problem FROM purge_id)`);
+if (rowIds.length) {
+  const ins = db.prepare('INSERT OR IGNORE INTO purge_row VALUES (?)');
+  for (const r of rowIds) ins.run(Number(r));
+  const present = count(
+    `SELECT COUNT(*) FROM tsumego_reports WHERE id IN (${rowIds.join(',')})`);
+  if (present !== rowIds.length) {
+    fail(`--rows: ${rowIds.length - present} of ${rowIds.length} row id(s) are not in `
+      + `tsumego_reports. Re-fetch the snapshot and regenerate the list.`);
+  }
+  console.log(`rows: ${rowIds.length} individual attempt row(s) to delete`);
 }
 
 // Every row whose stored (user_seq, running_sum) disagrees with an independent
@@ -157,7 +202,7 @@ const baseline = (() => {
   // case that user is rebuilt from absolute values instead of shifted.
   if (!PURGE_BROKEN) {
     const affectedBroken = all(
-      `SELECT DISTINCT user_id FROM tsumego_reports WHERE problem IN (SELECT problem FROM purge_id)`)
+      `SELECT DISTINCT user_id FROM tsumego_reports WHERE id IN (SELECT id FROM purge_row)`)
       .map((r) => r.user_id).filter((u) => audit.byUser.has(u));
     if (affectedBroken.length) {
       fail(`pre: ${affectedBroken.length} user(s) whose history this purge rewrites already have a `
@@ -190,11 +235,8 @@ if (PURGE_BROKEN) {
 }
 
 // ------------------------------------------------- rows to delete
-// One temp set drives the local apply, the digest planning and the emitted SQL,
-// so the three can never disagree about what is going away.
-db.exec('CREATE TEMP TABLE purge_row(id INTEGER PRIMARY KEY)');
-db.exec(`INSERT OR IGNORE INTO purge_row
-           SELECT id FROM tsumego_reports WHERE problem IN (SELECT problem FROM purge_id)`);
+// purge_row is populated above (from --ids and --rows); the broken-digest rows
+// can only be added here, once the audit that identifies them has run.
 if (brokenIds.length) {
   const ins = db.prepare('INSERT OR IGNORE INTO purge_row VALUES (?)');
   for (const id of brokenIds) ins.run(id);
@@ -340,6 +382,10 @@ if (APPLY) {
     ['recall rows on purged ids', `SELECT COUNT(*) FROM recall_schedule WHERE problem_id IN (SELECT problem FROM purge_id)`, 0],
     ['share rows on purged ids', `SELECT COUNT(*) FROM share_events WHERE problem_id IN (SELECT problem FROM purge_id)`, 0],
   ];
+  if (rowIds.length) {
+    checks.push(['individually purged rows still present',
+      `SELECT COUNT(*) FROM tsumego_reports WHERE id IN (${rowIds.join(',')})`, 0]);
+  }
   for (const [label, sql, expect] of checks) {
     const n = count(sql);
     if (n !== expect) bad++;
@@ -394,7 +440,10 @@ if (EMIT_SQL) {
     parts.push(`DELETE FROM recall_schedule WHERE problem_id IN (${list});`);
     parts.push(`DELETE FROM share_events WHERE problem_id IN (${list});`);
   }
-  for (const c of chunk(brokenIds, 400)) {
+  // Individual rows (--rows, and --purge-broken-digest) delete by row id: the
+  // problem they name survives, so the problem-scoped DELETEs above must not
+  // widen to them.
+  for (const c of chunk([...rowIds.map(Number), ...brokenIds], 400)) {
     parts.push(`DELETE FROM tsumego_reports WHERE id IN (${c.join(',')});`);
   }
   for (const { user_id, ranges } of repairPlan) {
