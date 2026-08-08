@@ -326,16 +326,23 @@ What genuinely remains is a **labelling** risk rather than a modelling one, and 
 
 **Labels are two-tailed.** The axes are bipolar: both extremes are real, opposite directions, not "motif present" versus "motif absent". Measurement supports this — there are no U-shaped even components at the extremes, and users' coefficients on the two tails are near-antipodal on the trade-off axes. So each axis may name its positive tail, its negative tail, or both, and some axes genuinely have a nameable motif on only one side. Packaging **refuses to publish** while any axis has neither tail named, which forces the intended loop: new data grows an axis, a human inspects both extremes and names it, publishing proceeds. Per-axis tail structure varies — some axes are trade-offs, one is common competence across both tails, one is dominated by its positive tail — so no symmetry should be read into the linear model.
 
-**The motifs the fit currently carries**, in shipped order — a snapshot rather than a fixed vocabulary, since the count is selected and the names are assigned by hand (the published label set is authoritative, and every name also carries Chinese, Japanese and Korean forms):
+**The named motifs are a growing vocabulary, and a fit draws a subset of it.** Because identity is append-only, every motif a human has ever named keeps that name and its frozen direction whether or not the current fit recovers the direction, so the bank is the standing vocabulary and the shipped set is one draw from it. In bank order, with the tails named (the published label set is authoritative, and every name also carries Chinese, Japanese and Korean forms):
 
-| Positive tail | Negative tail |
-| --- | --- |
-| judgement | *unnamed* |
-| counting | *unnamed* |
-| opening | endgame |
-| killing | ko threats |
+| Positive tail | Negative tail | In the current fit |
+| --- | --- | --- |
+| judgement | *unnamed* | yes |
+| counting | *unnamed* | yes |
+| opening | endgame | yes |
+| reading | shape | no |
+| complexity | *unnamed* | no |
+| attack | defence | no |
+| killing | ko threats | no |
 
-The first two are the one-sided case above: their negative tail is simply the right move standing out by a wide margin, which describes an undemanding position rather than a skill. Three further motifs are named in the bank but absent from the current fit — **reading** / **shape**, **complexity**, and **attack** / **defence**; they keep their names and their frozen directions, so a later fit that recovers one of those directions re-adopts its name.
+The first two are the one-sided case above: their negative tail is simply the right move standing out by a wide margin, which describes an undemanding position rather than a skill.
+
+**Which subset a fit draws is a property of the run, not a fixed answer.** The axis count is selected against held-out likelihood, and the loadings are refit from scratch at every candidate count rather than extended one axis at a time, so a rating refit that moves the features, the problem set or the attempt volume can drop a motif or recover one — and the drop carries no verdict, since a direction the data cannot currently separate is not thereby refuted. This is what the frozen anchors are for: a motif that returns is recognized as itself rather than renamed.
+
+**The first three are the exception, and structurally so.** They are the axes the hand-crafted seed directions initialize, in that order — win-rate tightness sharpens into judgement, score tightness into counting, game phase into the opening/endgame trade-off — so a fit reaches them from a starting point that already points at the motif, while every axis beyond the third begins cold. They are consequently present in every fit, and the rest of the vocabulary is what appears when the data supports a count above three. Their persistence should be read as the seeding working, not as evidence that they are the only real motifs.
 
 ## 1.15 Publishing
 
