@@ -16,6 +16,7 @@ import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHi
 // about an unknown USER), so it reads the prior's mean directly rather than sharing it.
 import { PRIOR_MEAN } from '../shared/rank-window.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { tsumegoIdOf } from './sgf.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingPerRank } from './rank-decomposition.js';
@@ -509,6 +510,23 @@ export function getRecallCandidates(options = {}) {
     }
 
     return recallCandidates;
+}
+
+// How many due recalls are WAITING for the active size — the Recall button's
+// badge. The one on screen is being served, not waiting, so it is excluded;
+// answering it drops it out of its window anyway, so the badge falls by one
+// either way and never counts the same problem twice. Never throws: the badge
+// must not be able to break a repaint (0 = no badge, the safe reading).
+export function waitingRecallCount() {
+    try {
+        const shown = state.currentProblem;
+        const shownId = shown && shown.isRepeat ? tsumegoIdOf(shown.filename) : null;
+        const candidates = getRecallCandidates();
+        return shownId ? candidates.filter((c) => c.problemId !== shownId).length : candidates.length;
+    } catch (error) {
+        console.error('waiting recall count failed:', error);
+        return 0;
+    }
 }
 
 // Predicts the unix-ms timestamps at which each candidate problem will cross

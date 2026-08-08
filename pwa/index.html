@@ -86,9 +86,14 @@
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>
         <a href="#" id="button4" class="btn"></a>
-        <!-- Share, always the last button in both layouts (so button
-             positions don't jump when switching modes); ui.js disables it
-             outside review mode. -->
+        <!-- Recall (challenge mode) and Share (review mode) trade places in the
+             last button slot; exactly one is shown at a time, so button
+             positions don't jump when switching modes. The recall badge counts
+             the problems currently due (ui.js). -->
+        <a href="#" id="button-recall" class="btn" role="button" tabindex="0">
+          <span id="button-recall-label"></span>
+          <span id="button-recall-count" class="btn-badge" hidden></span>
+        </a>
         <a href="#" id="button-share" class="btn" role="button" tabindex="0"></a>
         <!-- Review-mode "why this move" bubble. In landscape it's a plain
              in-flow block below the buttons (always fully visible, exactly

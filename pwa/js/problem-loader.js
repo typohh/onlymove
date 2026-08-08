@@ -710,20 +710,45 @@ export async function advanceToNextProblem() {
 // downloaded) does a grey "loading next problem" fade cover the wait, held up
 // until the swap has painted so it never lifts onto the stale review board.
 const SELECT_GRACE_MS = 150;
-async function advanceAfterReview() {
-    setAcceptClicks(false);
+async function paintWhenSelected(selection, paint) {
     let settled = false;
-    const selection = selectNextProblem().finally(() => { settled = true; });
-    await Promise.race([selection, new Promise(resolve => setTimeout(resolve, SELECT_GRACE_MS))]);
+    const tracked = selection.finally(() => { settled = true; });
+    await Promise.race([tracked, new Promise(resolve => setTimeout(resolve, SELECT_GRACE_MS))]);
     if (settled) {
-        await displayNextProblem(await selection);
+        await paint(await tracked);
         return;
     }
     await new Promise((resolve) => {
         fadeOverlay(500, async () => {
-            try { await displayNextProblem(await selection); }
+            try { await paint(await tracked); }
             finally { resolve(); }
         }, null, getTerm('loadingNextProblem'), { background: 'rgb(128, 128, 128)', text: 'white' });
+    });
+}
+
+async function advanceAfterReview() {
+    setAcceptClicks(false);
+    await paintWhenSelected(selectNextProblem(), displayNextProblem);
+}
+
+// The Recall button: the user explicitly asked for a due recall, so this
+// bypasses the stochastic serve gate exactly as a notification click does
+// (recallGateAllows shapes what we serve UNPROMPTED). Otherwise it is an
+// ordinary recall serve — same most-due pick, same random reorientation — and
+// the standing challenge is left untouched, so it comes back as soon as this
+// recall is answered.
+export async function showDueRecall() {
+    setAcceptClicks(false);
+    await paintWhenSelected(getDueRecallProblem(), async (recall) => {
+        // The candidate left its window (or its shard wouldn't load) between
+        // the button's paint and this click: leave the board alone and let the
+        // repaint settle the button's own state.
+        if (!recall) {
+            setAcceptClicks(true);
+            updateAllUI();
+            return;
+        }
+        await displayNextProblem(recall);
     });
 }
 

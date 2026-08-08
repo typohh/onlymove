@@ -73,7 +73,7 @@ function showBoardSizePicker({ dismissable = false } = {}) {
     });
 }
 
-import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem, isExampleReviewActive, endExampleReview } from './problem-loader.js';
+import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem, isExampleReviewActive, endExampleReview, showDueRecall } from './problem-loader.js';
 import { backfillMissingEmbeddings, stampVersionsForFreshHistory } from './backfill.js';
 import { maybeShowRatingsCorrectionNotice } from './corrections-notice.js';
 import { loadRatingRankMap, reanchorRank } from './rank-decomposition.js';
@@ -400,12 +400,24 @@ function wireActionButtons() {
         }
     });
 
-    // Share button — same action as the hamburger menu's Share item; always
-    // visible, disabled outside analysis mode.
+    // Share button — same action as the hamburger menu's Share item; shown in
+    // analysis and view mode (Recall takes the slot while solving).
     document.getElementById('button-share').addEventListener('click', (e) => {
         e.preventDefault();
         if (e.target.classList.contains('disabled')) return;
         performShare();
+    });
+
+    // Recall button — brings the most-due recall onto the board. currentTarget,
+    // not target: the click can land on the label or the badge span.
+    document.getElementById('button-recall').addEventListener('click', (e) => {
+        e.preventDefault();
+        if (e.currentTarget.classList.contains('disabled')) return;
+        // The button is repainted on updateAllUI, so a mid-answer-sequence
+        // click can reach here with the board already locked — swapping the
+        // problem out from under it would strand the attempt.
+        if (!state.acceptClicks) return;
+        showDueRecall();
     });
 }
 

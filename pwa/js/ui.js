@@ -62,6 +62,7 @@ import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
 import { canCreateInvites } from './invite-access.js';
+import { waitingRecallCount } from './recall-model.js';
 import { onReviewScoreShown as onboardingReviewScoreShown, onScoreUnreliable as onboardingScoreUnreliable } from './onboarding.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
@@ -405,15 +406,44 @@ const updateSolvingModeUI = () => {
     // Show button4 as Install button
     updateInstallButton();
 
-    // The Share button stays visible in every mode (so button positions
-    // don't jump on mode switches) but only acts on the problem under
-    // review — disabled here, enabled in analysis mode.
+    // Last button slot: Recall while solving, Share (disabled — it acts on the
+    // problem under review) in view mode. Exactly one is shown, so the other
+    // buttons keep their positions across mode switches.
     const shareButton = document.getElementById('button-share');
-    shareButton.textContent = getTerm('share');
-    shareButton.classList.add('disabled');
+    const recallButton = document.getElementById('button-recall');
+    if (state.appMode === APP_MODES.LINKED) {
+        recallButton.style.display = 'none';
+        shareButton.style.display = '';
+        shareButton.textContent = getTerm('share');
+        shareButton.classList.add('disabled');
+    } else {
+        shareButton.style.display = 'none';
+        recallButton.style.display = '';
+        updateRecallButton();
+    }
 
     updateMenuItems();
 }
+
+/**
+ * Paints the Recall button: label, the waiting-recall badge, and its enabled
+ * state. It brings a due recall forward, so it is disabled once one is already
+ * on screen — as it is with nothing waiting, and during the post-answer
+ * transition (acceptClicks, same guard as button1).
+ */
+const updateRecallButton = () => {
+    const btn = document.getElementById('button-recall');
+    document.getElementById('button-recall-label').textContent = getTerm('recall');
+
+    const waiting = waitingRecallCount();
+    const badge = document.getElementById('button-recall-count');
+    badge.textContent = String(waiting);
+    badge.hidden = waiting === 0;
+
+    const onRecall = !!state.currentProblem?.isRepeat;
+    if (waiting > 0 && !onRecall && state.acceptClicks) btn.classList.remove('disabled');
+    else btn.classList.add('disabled');
+};
 
 const updateAnalysisModeUI = () => {
     // Update Title Display
@@ -464,8 +494,11 @@ const updateAnalysisModeUI = () => {
     // Ignore lives in the hamburger menu; button4 has no analyzing-mode role.
     document.getElementById('button4').style.display = 'none';
 
-    // Share acts on the problem under review, so this is where it enables.
+    // Share acts on the problem under review, so this is where it enables —
+    // taking the last slot back from Recall (see updateSolvingModeUI).
+    document.getElementById('button-recall').style.display = 'none';
     const shareButton = document.getElementById('button-share');
+    shareButton.style.display = '';
     shareButton.textContent = getTerm('share');
     shareButton.classList.remove('disabled');
 

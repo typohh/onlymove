@@ -129,6 +129,33 @@ body {
     cursor: not-allowed;
     pointer-events: none;
 }
+/* Count badge in a button's corner (the Recall button's waiting-recall count).
+   Positioned out of flow so the label stays centred in the button — same
+   centring as every other button, whether or not the badge is showing — and
+   vertically centred rather than corner-hung because the buttons are only
+   about one line tall in portrait. */
+#button-recall {
+    position: relative;
+}
+.btn-badge {
+    position: absolute;
+    top: 50%;
+    right: 0.6em;
+    transform: translateY(-50%);
+    min-width: 1.4em;
+    padding: 0.1em 0.3em;
+    border-radius: 1em;
+    background-color: #ddd;
+    color: #333;
+    font-size: 0.72em;
+    line-height: 1.2;
+    text-align: center;
+    font-weight: bold;
+}
+.btn.disabled .btn-badge {
+    background-color: #555;
+    color: #222;
+}
 /* Dialog buttons: reset .btn's full-width stretch so modal buttons size to
    content (was an inline-style quartet repeated across every dialog). The
    doubled selector out-specifies the later media-query `.btn { width: 100% }`
