@@ -54,10 +54,12 @@ Steps 2–7 are the window. Do them back to back.
 5. **Plan, verify, emit — against the canonical local DB, not a copy.**
    ```bash
    node auxiliary/purge_tsumegos.mjs --db db/d1.sqlite --ids <ids.txt> \
-        [--purge-broken-digest] --apply --emit-sql surgery/purge.sql \
-        --emit-corpus-map surgery/purge_map.json
+        [--rows <row-ids.txt>] [--purge-broken-digest] --apply \
+        --emit-sql surgery/purge.sql --emit-corpus-map surgery/purge_map.json
    ```
-   Stop unless it prints `post-verification PASSED`; the script fails closed and emits no SQL otherwise. Operating on `db/d1.sqlite` itself is deliberate — see *the local mirror cannot re-sync itself* below — and step 4's backup is the undo.
+   Stop unless it prints `post-verification PASSED`; the script fails closed and emits no SQL otherwise.
+
+   **Put every deletion in ONE run.** `--ids` removes whole problems, `--rows` removes individual `tsumego_reports` rows whose problem survives (an attempt whose `size` names a different board than the problem it reports, say). Both feed the same row set, so one run plans one digest repair. Splitting them into two surgeries means two *relative* repairs, and the second is stated against a snapshot the first has already moved — the same hazard the freeze exists to prevent, reintroduced by hand. Operating on `db/d1.sqlite` itself is deliberate — see *the local mirror cannot re-sync itself* below — and step 4's backup is the undo.
 
 6. **Apply remotely.**
    ```bash
