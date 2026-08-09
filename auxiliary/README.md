@@ -54,6 +54,10 @@ Faithful offline ports of client code, for debugging one account against the loc
 - **`rank_activity_buckets.py`** — recently-active users (24h / 7d) bucketed by rank band × tsumegos-per-day. Writes `rank_activity_buckets.png` (gitignored; `--no-plot` to skip).
 - **`db_stats.py`** — top-line stats from `db/d1.sql`: totals, recent weekly activity, tenure × activity-rate cohort grid.
 
+## Live system
+
+- **`check_live_status.mjs`** — probe the deployed Worker: SPA routes, static assets, packaged data files, and whether writes are frozen. `pwa/deploy.mjs` runs it after every deploy and `npm run status` runs it on demand; `--expect-frozen` / `--expect-unfrozen` assert the freeze state for the runbook's two flips. It encodes the two 404s that are CORRECT and read as an outage by hand — the SPA fallback answers `/`, `/9`, `/13` only for a navigation-shaped request, and the five inlined data files are compiled into the bundle rather than served. Retries, because a fresh deploy propagates over a few seconds. Node stdlib only.
+
 ## Admin
 
 - **`generate_invite.py`** — mint an EGD-leaderboard invitation: validates an EGD PIN against the European Go Database, inserts the `invitation` row via wrangler, and prints the `/register?t=` link. A non-numeric argument is a name search instead (no DB write). The in-app equivalent is the `GET /invite` page (`pwa/src/handlers/invite-tool.js`). `<EGD_PIN>|<name...> [--local]`. Stdlib only.

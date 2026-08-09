@@ -40,7 +40,7 @@ Steps 2–7 are the window. Do them back to back.
    ```bash
    cd pwa && npm run deploy
    ```
-   Confirm it took: `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://onlymove.net/sync` → `503`.
+   Confirm it took: `node auxiliary/check_live_status.mjs --expect-frozen`. It retries, which a bare `curl` does not — a deploy propagates over a few seconds, and until it does the previous version still answers, so a single probe can report the old state either way.
 
 3. **Let in-flight requests drain.** A few seconds. Requests already inside a handler are not interrupted by the deploy.
 
@@ -82,7 +82,7 @@ Steps 2–7 are the window. Do them back to back.
    ```
    Its other ordering rule — run it only after the deploy carrying the new ratings, or the next `/report` recomputes on the old scale and overwrites the work — is satisfied twice over: the freeze deploy already shipped them, and no `/report` can run anyway. It reads the local `db/d1.sqlite` and the local `pwa/tsumegos/`, both of which are now the intended post-state, and it supersedes the purge's own leaderboard edits (which exist so the purge is correct when run standalone).
 
-9. **Unfreeze and release.** Set `MAINTENANCE_MODE = "0"`, bump `CURRENT_STATE_EPOCH` if this release includes one, `npm run deploy`.
+9. **Unfreeze and release.** Set `MAINTENANCE_MODE = "0"`, bump `CURRENT_STATE_EPOCH` if this release includes one, `npm run deploy`. Confirm the lift with `node auxiliary/check_live_status.mjs --expect-unfrozen` — `npm run deploy` already runs the same checks without the freeze assertion. Writes reopening is the one thing worth confirming rather than assuming: a lift that silently did not take leaves every client's outbox queuing behind a 503.
 
 10. **After the window** — corpus and pipeline artifacts, if the ids are leaving the corpus for good and this was not already done as part of a larger release:
     ```bash

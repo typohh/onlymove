@@ -56,10 +56,13 @@ cd pwa
 npm install
 npm run build      # esbuild → pwa/dist/
 npm run dev        # build + wrangler dev → http://localhost:8787 (use this for local testing)
-npm run deploy     # build + wrangler deploy
+npm run deploy     # build + wrangler deploy, then verifies the result (exit 2 = deployed but checks failed)
+npm run status     # probe the LIVE Worker on demand (auxiliary/check_live_status.mjs)
 ```
 
 Local testing must go through `npm run dev`: the Worker runs `/report` and the SPA fallback (URL-based size hints), so opening the static bundle alone will misbehave. Deployment is **manual** — there is no git-triggered auto-deploy.
+
+**Two live routes return 404 ON PURPOSE, and probing them by hand reads as an outage — use `npm run status` rather than a bare `curl`.** (a) `/`, `/9` and `/13` have no file behind them: the Worker's SPA fallback rewrites them to index.html **only for a navigation-shaped request** (`sec-fetch-dest: document`, or an `Accept` naming text/html), because an asset-style miss has to keep 404ing so a stale service worker re-fetches instead of receiving HTML where JS is expected. `curl` defaults to `Accept: */*` and therefore gets the 404. (b) The five `INLINED_DATA_FILES` (`build.mjs`) are compiled into the bundle, so `/tsumegos/{rating_to_rank,rank_map,population_constants,se_floor,embedding_meta}.json` 404 — and a 200 there is the real regression, since it would let a client fetch a curve under a fixed name with no `?v=DATA_VERSION` and pin itself to a stale one. `check_live_status.mjs` asserts both directions, plus the freeze state (`--expect-frozen` / `--expect-unfrozen` for the runbook's two flips). **It retries**, because a deploy propagates over seconds and the previous version answers until it does — an unfreeze that still reports `maintenance` on the first probe is usually propagation, not a failed unfreeze.
 
 ## Rating pipeline (combined cross-board MLP-2PL)
 
