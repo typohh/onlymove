@@ -47,7 +47,7 @@ Run on a remote Vast.ai GPU instead: `python vast_orchestration.py` (no args pri
 - **`timeout N` kills at N with exit 124 and no partial result.** Don't wrap a step in a timeout unless you are certain it exceeds the real runtime; a too-short guess is indistinguishable from a crash after the fact.
 - **Piping through `tail`/`head` buffers everything until exit**, so a healthy long run looks hung and a dead one looks alive. Run python with `-u`, redirect to a file, and poll the file.
 
-**`axes/`, `ratings/`, `activations/` and `pwa/tsumegos/` are all gitignored, and the steps that write them overwrite IN PLACE** — a commit is not a rollback point for any of them. Before a refit, copy the current artifacts aside (for axes: `axes/{axes.npz,labels.json,per_problem.csv,label_anchors.npz}`), or a fit that comes out wrong leaves nothing to go back to.
+**The steps that write `ratings/`, `activations/`, `pwa/tsumegos/` and `axes/` overwrite IN PLACE — do NOT copy them aside before a refit.** They are derived artifacts: the inputs (corpus, attempts DB, committed code) are what's kept, and a fit that comes out wrong is reverted by re-running the step, not by restoring a snapshot. Copying them aside costs GB and creates a second thing to keep straight, so back one up only when the user asks. The exception worth knowing is that three files under `axes/` are TRACKED — `axes.npz`, `labels.json`, `label_anchors.npz` — while the rest of that directory and all of the others are gitignored, so `git diff axes/labels.json` after a refit is what tells you which motifs the fit gained or lost.
 
 ## PWA commands
 
