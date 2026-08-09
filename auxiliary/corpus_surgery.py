@@ -327,9 +327,21 @@ def rewrite_move_evals(size, old_to_final, survivor_old, quarantined, log, apply
         log.hit(f"move_evals_{size}: FALLBACK loser rows kept", fallback)
     if not apply or (changed == 0 and dropped == 0 and len(keep_idx) == len(tids)):
         return
-    feats = d["feats"][np.array(keep_idx, dtype=np.intp)]
+    # Carry EVERY row-aligned array through, not just `feats`: the cache holds one row per tid
+    # across several blocks (`feats`, `cont`, …), and naming them here means a block added later
+    # is dropped by a purge — which reads downstream as "this cache predates that block" and
+    # forces a full re-extract, or worse is read as a legitimately narrower cache. Selecting by
+    # first-axis length keeps the rule to "row-aligned arrays are re-indexed".
+    idx = np.array(keep_idx, dtype=np.intp)
+    arrays = {name: d[name][idx] for name in d.files
+              if name != "tids" and d[name].shape[0] == len(tids)}
+    unaligned = [n for n in d.files if n != "tids" and n not in arrays]
+    if unaligned:
+        raise RuntimeError(
+            f"move_evals_{size}: arrays not aligned to tids ({unaligned}); refusing to rewrite "
+            f"— surgery cannot know how their rows map to the surviving problems")
     tmp = path + ".tmp-surgery.npz"
-    np.savez(tmp, tids=np.array(final_ids), feats=feats)
+    np.savez(tmp, tids=np.array(final_ids), **arrays)
     os.replace(tmp, path)
 
 
