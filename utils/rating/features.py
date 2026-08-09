@@ -230,6 +230,186 @@ def build_correct_vec_cache(size, workers=None, force=False):
         json.dump(ids, f)
 
 
+def _cache_alt_vecs_path(size):
+    return os.path.join(CACHE_DIR, f"alt_vecs_{size}.npy")
+
+
+def _load_alt_vec_chunk(task):
+    """Worker: the BEST-ALTERNATIVE cell's vector for a chunk of problems.
+
+    The alternative is addressed by (x, y) against the npz's own `xys`, never by row
+    position — the npz is board-scan order over every legal cell, so a positional guess
+    reads a different move's activations while looking entirely healthy.
+
+    A problem with no non-pass alternative gets a NaN row, which the loader turns into a
+    dropped key so the trainer mean-imputes it like any other missing block row. That is
+    the one absence here that is genuinely uninformative: filling it with the correct
+    cell's own vector would make the contrast exactly zero, i.e. "the runner-up is
+    indistinguishable from the answer" — the most confusable reading possible, and the
+    opposite of what having no alternative means.
+    """
+    start, act_dir, items = task
+    out = np.empty((len(items), N_FEATS), dtype=np.float16)
+    for i, (tid, npz_name, xy) in enumerate(items):
+        if xy[0] < 0:
+            out[i] = np.nan
+            continue
+        npz_path = os.path.join(act_dir, npz_name)
+        try:
+            with np.load(npz_path) as s:
+                xys = s["xys"]
+                row = np.flatnonzero((xys[:, 0] == xy[0]) & (xys[:, 1] == xy[1]))
+                if not len(row):
+                    raise RuntimeError(
+                        f"best-alternative cell {tuple(xy)} is not an embedded cell")
+                out[i] = s["candidates"][int(row[0])].astype(np.float16)
+        except Exception as e:
+            raise RuntimeError(f"corrupt/unreadable .npz at {npz_path} ({tid})") from e
+    return start, out
+
+
+def build_alt_vec_cache(size, workers=None, force=False):
+    """Build/refresh one board's BEST-ALTERNATIVE cell activation cache — alt_vecs_<size>.npy,
+    row-aligned with correct_ids_<size>.json exactly like correct_vecs_<size>.npy.
+
+    The alternative cell's coordinate comes from the move-eval cache's `alt_xy` array
+    (pipeline.cache_rating_features), which ranks the root moves the way the mover would and
+    takes the runner-up. Sharing that one ranking is what keeps this block addressing the same
+    move the 20-column move block calls slot 1.
+
+    INCREMENTAL on the same terms as build_correct_vec_cache: each row is a pure per-problem
+    read, so rows already cached are reused and only missing tids are loaded. force=True
+    re-reads every .npz (hours — the whole point of the incremental path).
+    """
+    workers = workers or os.cpu_count() or 1
+    act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+    if not os.path.isdir(act_dir):
+        raise SystemExit(f"no activations dir for size {size}: {act_dir}")
+    ids_path = _cache_ids_path(size)
+    if not os.path.exists(ids_path):
+        raise SystemExit(f"no activation id cache ({ids_path}) — run cache_rating_features")
+    ids = json.load(open(ids_path))
+
+    mv_path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+    if not os.path.exists(mv_path):
+        raise SystemExit(f"move-eval cache {mv_path} missing — run cache_rating_features")
+    with np.load(mv_path) as d:
+        if "alt_xy" not in d.files:
+            raise SystemExit(
+                f"{mv_path} has no alt_xy — re-run `python -m pipeline.cache_rating_features`")
+        alt_xy = {t: tuple(int(v) for v in xy)
+                  for t, xy in zip(d["tids"].tolist(), d["alt_xy"])}
+    missing_xy = [t for t in ids if t not in alt_xy]
+    if missing_xy:
+        raise SystemExit(
+            f"size {size}: {len(missing_xy)} tids in correct_ids have no alt_xy row "
+            f"(e.g. {missing_xy[:5]}); the two caches are out of step — re-run "
+            f"pipeline.cache_rating_features")
+
+    npz = {f[:-4]: f for f in os.listdir(act_dir) if f.endswith(".npz")}
+    _assert_activations_subset_of_corpus(size, sorted(npz))
+    n = len(ids)
+
+    vecs_path = _cache_alt_vecs_path(size)
+    old_row, old_vecs = {}, None
+    if not force and os.path.exists(vecs_path):
+        cand = np.load(vecs_path, mmap_mode="r")
+        # The file carries no id list of its own: it is defined as row-aligned to correct_ids,
+        # so a length change means correct_ids moved and every row's identity is in doubt.
+        # Rebuilding is the only safe reading of that.
+        if cand.shape == (n, N_FEATS):
+            old_vecs, old_row = cand, {t: i for i, t in enumerate(ids)}
+            print(f"[size {size}] alt-vector cache up to date ({n} problems)", flush=True)
+            return
+        print(f"[size {size}] alt-vector cache is {cand.shape[0]} rows against {n} "
+              f"problems — rebuilding", flush=True)
+
+    todo = [(t, npz.get(t), alt_xy[t]) for t in ids]
+    absent = [t for t, f, _ in todo if f is None]
+    if absent:
+        raise SystemExit(
+            f"size {size}: {len(absent)} problems in correct_ids have no .npz "
+            f"(e.g. {absent[:5]}) — run pipeline.extract_activations")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    print(f"[size {size}] alt-vector cache: {n} problems -> {vecs_path} "
+          f"({n * N_FEATS * 2 / 1e9:.2f} GB)", flush=True)
+
+    tmp_path = vecs_path + ".tmp"
+    chunk = 1024
+    tasks = [(s, act_dir, todo[s:s + chunk]) for s in range(0, n, chunk)]
+    t0, done, n_nan = time.time(), 0, 0
+    try:
+        mm = np.lib.format.open_memmap(tmp_path, mode="w+", dtype=np.float16,
+                                       shape=(n, N_FEATS))
+        try:
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                for start, arr in ex.map(_load_alt_vec_chunk, tasks):
+                    mm[start:start + len(arr)] = arr
+                    n_nan += int((~np.isfinite(arr)).all(axis=1).sum())
+                    done += len(arr)
+                    rate = done / max(time.time() - t0, 1e-9)
+                    print(f"\r  {done}/{n} ({rate:.0f}/s)", end="", flush=True)
+            print(flush=True)
+            mm.flush()
+        finally:
+            del mm
+            del old_vecs
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)  # never leave a rejected build to be mistaken for a cache
+        raise
+    os.replace(tmp_path, vecs_path)
+    print(f"[size {size}] wrote {n} alt rows in {time.time() - t0:.0f}s "
+          f"({n_nan} with no alternative -> imputed at load)", flush=True)
+
+
+def load_joint_alt_activations(sizes, tids_by_size, pca_dim, seed):
+    """The BEST-ALTERNATIVE cell's activations, projected through the SAME joint-PCA basis the
+    correct-move block uses. Returns {(size, tid): vec}, k.
+
+    Same basis, not a refit: the point of the block is that the runner-up lands in the correct
+    move's coordinate system, so the trunk can read the two together. A separate basis would put
+    the two blocks on different axes and make any comparison between them meaningless.
+
+    The post-PCA standardization (m2, s2) is likewise the correct-cell one and is deliberately
+    NOT re-fit here, so the alternative's OFFSET from where correct cells sit is preserved
+    rather than centred away — that offset is the signal. Re-standardizing costs nothing in
+    expressiveness (a linear first layer spans the same functions either way) but it would
+    quietly rescale the one comparison the block exists to support.
+
+    Problems with no non-pass alternative carry a NaN row in the cache and are simply absent
+    from the returned map, which routes them onto the trainer's ordinary mean-imputation path.
+    """
+    basis = load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed)
+    m1, s1, C = basis["m1"], basis["s1"], basis["C"]
+    pca_mean, m2, s2 = basis["pca_mean"], basis["m2"], basis["s2"]
+    out, k = {}, C.shape[0]
+    for size in sizes:
+        path = _cache_alt_vecs_path(size)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"alt-activation cache {path} missing — build it with "
+                f"utils.rating.features.build_alt_vec_cache({size})")
+        ids = json.load(open(_cache_ids_path(size)))
+        vecs = np.load(path, mmap_mode="r")
+        if vecs.shape != (len(ids), N_FEATS):
+            raise RuntimeError(
+                f"{path} is {vecs.shape} against {len(ids)} problems in correct_ids; the two "
+                f"are row-aligned by definition — rebuild the alt cache")
+        row = {t: i for i, t in enumerate(ids)}
+        want = [t for t in tids_by_size[size] if t in row]
+        rows = np.array([row[t] for t in want], dtype=np.intp)
+        for s0 in range(0, len(rows), 4096):                # chunked: the raw block is GB-scale
+            sl = rows[s0:s0 + 4096]
+            X = np.asarray(vecs[sl], dtype=np.float32)
+            finite = np.isfinite(X).all(axis=1)
+            Z = (((X - m1) / s1 - pca_mean) @ C.T - m2) / s2
+            for j, t in enumerate(want[s0:s0 + 4096]):
+                if finite[j]:
+                    out[(size, t)] = Z[j].astype(np.float32)
+    return out, int(k)
+
+
 def load_first_time_attempts():
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
     columns [user_id, problem, success, size, created_at].
@@ -460,6 +640,47 @@ def load_joint_move_features(sizes, tids_by_size):
             if i is not None:
                 keys.append((size, t))
                 rows.append(feats[i].copy())              # detach from `feats`'s base so it can free
+    X = np.array(rows, dtype=np.float64)
+    X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
+    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, ncol
+
+
+def load_joint_continuation(sizes, tids_by_size):
+    """Continuation evaluations — the principal line AFTER the answer, each node's explored
+    children as (logit win-prob, score) oriented to the SOLVER — pooled and z-scored across
+    boards. Reads the `cont` array of the same per-size cache load_joint_move_features reads
+    (pipeline.cache_rating_features writes both from one parse). Returns {(size, tid): vec},
+    n_cols.
+
+    This is the block that carries branching PAST the first move: how many continuations
+    still hold the win, and how sharply the losing ones are punished. The move block above
+    cannot carry it — the corpus has exactly one winning first move by construction, so its
+    alternative slots are pinned at the loss clip. Kept RAW and separate for the same reason
+    every other block is: the counting is the net's job, and a distinct column range is what
+    lets it take its own dropout.
+
+    Raises with a build hint if a cache is missing, and treats a cache without the array as
+    missing too — a pre-continuation cache must be rebuilt, not silently read as zero-width."""
+    keys, rows, ncol = [], [], None
+    for size in sizes:
+        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"move-feature cache {path} missing — run "
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features` first")
+        d = np.load(path, allow_pickle=False)
+        if "cont" not in d.files:
+            raise FileNotFoundError(
+                f"{path} predates the continuation block — re-run "
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features` to add it")
+        cont = d["cont"]                                  # decompress ONCE (NpzFile re-reads)
+        ncol = int(cont.shape[1])
+        row = {t: i for i, t in enumerate(d["tids"].tolist())}
+        for t in tids_by_size[size]:
+            i = row.get(t)
+            if i is not None:
+                keys.append((size, t))
+                rows.append(cont[i].copy())               # detach so `cont`'s base can free
     X = np.array(rows, dtype=np.float64)
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, ncol

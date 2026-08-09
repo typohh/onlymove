@@ -94,8 +94,9 @@ if PROJECT_ROOT not in sys.path:
 # NOTE (prototype tech-debt): these live in auxiliary/ today. When this backend stabilizes,
 # promote load_joint_*/build_profiles + the activation-cache helpers into utils/.
 from auxiliary.rating_dev.model_comparison import (  # noqa: E402
-    build_profiles, load_joint_activations, load_joint_bot_winrate,
-    load_joint_game_phase, load_joint_move_features,
+    build_profiles, load_joint_activations, load_joint_alt_activations,
+    load_joint_bot_winrate, load_joint_continuation, load_joint_game_phase,
+    load_joint_move_features,
 )
 from utils.rating.features import _cache_ids_path, load_first_time_attempts  # noqa: E402
 from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
@@ -231,7 +232,8 @@ class RatingNet(nn.Module):
                  mech_floor_botf=None, mech_floor_scale_fixed=None,
                  floor_resid=False, n_problems=0, per_problem=False, lapse_human_only=False,
                  lapse_fixed=None, act_dropout=0.0, act_dim=0, bw_dropout=0.0, bw_dim=0,
-                 move_dropout=0.0, move_dim=0, separate_trunks=False, gauge="theta",
+                 move_dropout=0.0, move_dim=0, cont_dropout=0.0, cont_dim=0,
+                 separate_trunks=False, gauge="theta",
                  theta_posterior=False, act_dropout_mode="block"):
         super().__init__()
         # --theta-posterior: per-profile posterior sd + learned population prior sd (see the flag
@@ -291,6 +293,12 @@ class RatingNet(nn.Module):
         # prior to treat it as corroborating, not load-bearing. Block sits at cols
         # [act_dim+bw_dim : act_dim+bw_dim+move_dim] (before the trailing size indicator).
         self.move_dropout, self.move_dim = float(move_dropout), int(move_dim)
+        # Continuation block (--cont-features), at cols
+        # [act_dim+bw_dim+move_dim : +cont_dim], i.e. straight after the move block and still
+        # before the phase columns and the trailing size indicator. Production masks all four
+        # wide blocks as ONE region (pipeline.train_rating's INPUT_DROPOUT); the per-block flags
+        # are kept here because ablating a single block is what this trainer exists for.
+        self.cont_dropout, self.cont_dim = float(cont_dropout), int(cont_dim)
         # --global-slope: ONE learned discrimination for the whole corpus (3PL+lapse reference
         # model). Motivated by an (accidental but clean) finding: a constant-slope fit had the
         # best held-out-problem transfer and honest-val calibration of any healthy run — much of
@@ -468,6 +476,12 @@ class RatingNet(nn.Module):
                         >= self.move_dropout).float() / (1.0 - self.move_dropout)
                 feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.move_dim] * keep,
                                   feat[:, d0 + self.move_dim:]], dim=1)
+            if self.training and self.cont_dropout > 0 and self.cont_dim > 0:
+                d0 = self.act_dim + self.bw_dim + self.move_dim
+                keep = (torch.rand(len(feat), self.cont_dim, device=feat.device)
+                        >= self.cont_dropout).float() / (1.0 - self.cont_dropout)
+                feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.cont_dim] * keep,
+                                  feat[:, d0 + self.cont_dim:]], dim=1)
             if self.separate:                                  # one independent trunk per output
                 o = torch.cat([self.net_b(feat), self.net_a(feat), self.net_c(feat)], dim=1)
             else:
@@ -645,10 +659,12 @@ PRODUCTION_FLAGS = {
     "epochs": 200,
     "features": "bw_act",
     "move_features": True,               # bw_act ⊕ candidate-move-eval block
+    "cont_features": False,              # continuation block: measured-rejected, see --cont-features
     "phase_features": True,              # ⊕ game-phase raw components (feature-parity policy)
     "pca_dim": 128,
     "diff_hidden": [128, 64],
-    "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,  # uniform 0.3
+    "dropout": 0.3, "act_dropout": 0.3, "bw_dropout": 0.3, "move_dropout": 0.3,
+    "cont_dropout": 0.3,                 # rate the block takes when an experiment turns it on
     "act_dropout_mode": "column",        # per-PC, not whole-block (2026-07-26; see the flag help)
     "anchors": False,                    # no bot-anchor examinees
     "hier_slope": False, "mech_floor": False, "floor_residual": False,  # no M0b machinery
@@ -711,6 +727,33 @@ def main():
                          "between the bot-winrate columns and the size indicator, so --act-dropout "
                          "/ --bw-dropout are unaffected. The scorable problem set is unchanged "
                          "(problems missing a move-feature row are mean-imputed).")
+    ap.add_argument("--alt-act-features", action=argparse.BooleanOptionalAction, default=False,
+                    help="Add the BEST-ALTERNATIVE cell's trunk activations, projected through "
+                         "the SAME joint-PCA basis as the correct-move block (no refit, so the "
+                         "runner-up lands in the correct move's coordinate system and the trunk "
+                         "can read the two together). Sits immediately after the activation "
+                         "block and is covered by --act-dropout as one activation region, since "
+                         "it is the same kind of near-unique per-problem code. No separate "
+                         "contrast feature is needed: [correct, alt] and [correct, alt-correct] "
+                         "span the same functions through a linear layer. Needs "
+                         "utils.rating.features.build_alt_vec_cache run for each size.")
+    ap.add_argument("--cont-features", action=argparse.BooleanOptionalAction, default=False,
+                    help="Add the CONTINUATION block (pipeline.cache_rating_features' `cont` "
+                         "array): the principal line after the answer, CONT_PLIES deep and "
+                         "CONT_MOVES wide, plus the opponent's other tries at its first node "
+                         "each with the solver's best answers — all raw (logit win-prob, score) "
+                         "oriented to the SOLVER. Covers what the root block cannot: the "
+                         "single-solution gate leaves exactly one winning first move with every "
+                         "rival decisively lost, so the root block's alternative slots are "
+                         "saturated at the win-prob clip by construction, while the branching a "
+                         "solver actually has to read lives past move 1. Appended after the move "
+                         "block, before phase.")
+    ap.add_argument("--cont-dropout", type=float, default=0.0,
+                    help="Elementwise dropout on the continuation columns (--cont-features), "
+                         "same rate and rationale as --move-dropout: the block is wide enough "
+                         "to fingerprint a problem and shares its SGF with the move block, so "
+                         "unmasked it hands the net a second uncorrupted copy of a partly shared "
+                         "signal. No-op without --cont-features. 0 = off.")
     ap.add_argument("--phase-features", action=argparse.BooleanOptionalAction, default=False,
                     help="Append the game-phase RAW-component block "
                          "[moves_before_position, main_line_len] "
@@ -1292,6 +1335,10 @@ def main():
     key_idx = {key: i for i, key in enumerate(keys)}
     use_act = args.features in ("bw_act", "act")
     use_bw = args.features in ("bw_act", "bw")
+    use_alt = args.alt_act_features and use_act
+    alt, nalt = (load_joint_alt_activations(SIZES, tids_by_size, args.pca_dim, args.seed)
+                 if use_alt else ({}, 0))
+    zero_alt = np.zeros(nalt, dtype=np.float32)
     use_mv = args.move_features or args.features == "move"   # --features move = move block only
     # The move block is appended AFTER the bot columns and BEFORE the size indicator, so the
     # [act | bw | move | size] layout keeps --act-dropout (cols :k) and --bw-dropout (cols
@@ -1301,25 +1348,42 @@ def main():
     zero_mv = np.zeros(nmv, dtype=np.float32)
     # --phase-features: appended AFTER move and BEFORE the size indicator, so every existing
     # block-dropout column range (act :k, bw, move — all indexed from the front) stays valid.
+    # --cont-features: the continuation block, appended AFTER move and BEFORE phase, so every
+    # block-dropout column range ahead of it (act :k, bw, move) stays valid.
+    use_ct = args.cont_features
+    ct, nct = (load_joint_continuation(SIZES, tids_by_size) if use_ct else ({}, 0))
+    zero_ct = np.zeros(nct, dtype=np.float32)
     use_ph = args.phase_features
     ph, nph = (load_joint_game_phase(SIZES, tids_by_size) if use_ph else ({}, 0))
     zero_ph = np.zeros(nph, dtype=np.float32)
-    fdim = (k if use_act else 0) + (nb if use_bw else 0) + nmv + nph + 1  # + size_is_13 indicator
+    # The alt block sits directly after the activations and is folded into act_dim, so it takes
+    # the activation dropout as one region and every later block's column range shifts with it.
+    act_block = (k if use_act else 0) + (nalt if use_alt else 0)
+    fdim = act_block + (nb if use_bw else 0) + nmv + nct + nph + 1  # + size_is_13
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
-        blocks = ([act[key]] if use_act else []) + ([bw[key]] if use_bw else [])
+        blocks = ([act[key]] if use_act else [])
+        if use_alt:
+            blocks.append(alt.get(key, zero_alt))
+        blocks += ([bw[key]] if use_bw else [])
         if use_mv:
             blocks.append(mv.get(key, zero_mv))
+        if use_ct:
+            blocks.append(ct.get(key, zero_ct))
         if use_ph:
             blocks.append(ph.get((key[0], key[1]), zero_ph))
         feat[i] = np.concatenate(blocks + [[1.0 if key[0] == 13 else 0.0]])
     n_mv_miss = sum(1 for key in keys if key not in mv) if use_mv else 0
+    n_ct_miss = sum(1 for key in keys if key not in ct) if use_ct else 0
     n_ph_miss = sum(1 for key in keys if key not in ph) if use_ph else 0
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
           f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
-          f"[{args.features}{'+move' if use_mv else ''}{'+phase' if use_ph else ''}] "
-          f"(act {k if use_act else 0} + bot "
+          f"[{args.features}{'+alt' if use_alt else ''}{'+move' if use_mv else ''}"
+          f"{'+cont' if use_ct else ''}"
+          f"{'+phase' if use_ph else ''}] "
+          f"(act {k if use_act else 0}{f' + alt {nalt}' if use_alt else ''} + bot "
           f"{nb if use_bw else 0}{f' + move {nmv} ({n_mv_miss} imputed)' if use_mv else ''}"
+          f"{f' + cont {nct} ({n_ct_miss} imputed)' if use_ct else ''}"
           f"{f' + phase {nph} ({n_ph_miss} imputed)' if use_ph else ''} "
           f"+ size_is_13)")
 
@@ -1550,9 +1614,10 @@ def main():
                       floor_resid=False, n_problems=len(keys), per_problem=False,
                       lapse_human_only=args.lapse_human_only, lapse_init=args.lapse_init,
                       lapse_fixed=(None if free_lapse else args.lapse_fixed),
-                      act_dropout=args.act_dropout, act_dim=k if use_act else 0,
+                      act_dropout=args.act_dropout, act_dim=act_block,
                       bw_dropout=args.bw_dropout, bw_dim=nb if use_bw else 0,
                       move_dropout=args.move_dropout, move_dim=nmv if use_mv else 0,
+                      cont_dropout=args.cont_dropout, cont_dim=nct if use_ct else 0,
                       separate_trunks=args.separate_trunks, gauge=args.gauge,
                       act_dropout_mode=args.act_dropout_mode).to(device)
         m.staged = True
@@ -1692,11 +1757,13 @@ def main():
                       lapse_init=args.lapse_init,
                       lapse_fixed=(None if args.free_lapse else args.lapse_fixed),
                       act_dropout=args.act_dropout,
-                      act_dim=k if use_act else 0,
+                      act_dim=act_block,
                       bw_dropout=args.bw_dropout,
                       bw_dim=nb if use_bw else 0,
                       move_dropout=args.move_dropout,
                       move_dim=nmv if use_mv else 0,
+                      cont_dropout=args.cont_dropout,
+                      cont_dim=nct if use_ct else 0,
                       separate_trunks=args.separate_trunks,
                       gauge=args.gauge,
                       act_dropout_mode=args.act_dropout_mode,
