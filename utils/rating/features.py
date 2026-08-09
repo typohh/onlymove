@@ -538,26 +538,71 @@ def _game_phase_chunk(paths):
 
 def load_game_phase(rebuild=False, sizes=(9, 13)):
     """tid -> (n_setup, prefix_moves, main_len, size); cached per size in the
-    signal cache (multiprocess SGF parse on first build)."""
+    signal cache (multiprocess SGF parse).
+
+    INCREMENTAL and RECONCILING IN BOTH DIRECTIONS, like the other roll-ups in
+    the signal cache: each entry is a pure per-SGF parse, so reusing the cached
+    entries and parsing only the corpus tids missing from them is identical to a
+    full rebuild while skipping the parses that dominate. "Up to date" means the
+    cached tid set EQUALS the corpus, never just "nothing new to add", and BOTH
+    directions are load-bearing here:
+
+      a tid the cache LACKS is not a neutral omission — the two consumers
+      disagree about it. build_axes hard-filters on this block, so the problem
+      leaves the axes fit (and then packaging refuses to ship, the loud path);
+      train_rating instead substitutes a zero vector, which after the pooled
+      z-score IS the population mean, so the problem is rated on an imputed
+      phase block with nothing anywhere recording it.
+
+      a DEPARTED tid left behind is not inert either — phase_ratio_z takes its
+      z-scores over this cache's whole population, so a purged problem shifts
+      the feature for every problem that remains.
+
+    rebuild=True re-parses every SGF (for a corrupt cache, not routine)."""
     import json as _json
     from concurrent.futures import ProcessPoolExecutor, as_completed
     res = {}
     for size in sizes:
         cache = _game_phase_cache_path(size)
-        if os.path.exists(cache) and not rebuild:
-            res.update({t: (*v, size) for t, v in _json.load(open(cache)).items()})
-            continue
         sgf_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
-        paths = [os.path.join(sgf_dir, n) for n in os.listdir(sgf_dir) if n.endswith(".sgf")]
-        print(f"parsing {len(paths)} SGFs for size {size} (cached to {cache}) ...")
-        got = {}
-        with ProcessPoolExecutor() as ex:
-            futs = [ex.submit(_game_phase_chunk, paths[i:i + 500]) for i in range(0, len(paths), 500)]
-            for fu in as_completed(futs):
-                got.update(fu.result())
-        got = {t: v for t, v in got.items() if v is not None}
-        _json.dump(got, open(cache, "w"))
-        res.update({t: (*v, size) for t, v in got.items()})
+        ids = sorted(n[:-4] for n in os.listdir(sgf_dir) if n.endswith(".sgf"))
+        old = {}
+        if os.path.exists(cache) and not rebuild:
+            old = _json.load(open(cache))
+        keep = {t: old[t] for t in ids if t in old}      # prunes the departed
+        missing = [t for t in ids if t not in keep]
+        departed = len(old) - len(keep)
+        if missing:
+            print(f"[size {size}] game-phase cache: {len(ids)} problems "
+                  f"({len(missing)} to parse, {len(keep)} reused"
+                  f"{f', {departed} departed pruned' if departed else ''}) "
+                  f"-> {cache}", flush=True)
+            paths = [os.path.join(sgf_dir, t + ".sgf") for t in missing]
+            got = {}
+            with ProcessPoolExecutor() as ex:
+                futs = [ex.submit(_game_phase_chunk, paths[i:i + 500])
+                        for i in range(0, len(paths), 500)]
+                for fu in as_completed(futs):
+                    got.update(fu.result())
+            # A parse failure stays OUT of the cache, so it is retried next run
+            # rather than cached as absent — but it is announced, because an
+            # absent tid is exactly the silent split described above.
+            failed = sorted(t for t, v in got.items() if v is None)
+            if failed:
+                print(f"  [size {size}] {len(failed)} SGFs failed to parse and are "
+                      f"NOT cached (e.g. {failed[:5]}) — build_axes will drop them "
+                      f"and train_rating will impute them", flush=True)
+            keep.update({t: got[t] for t in missing
+                         if got.get(t) is not None})
+        elif departed:
+            print(f"[size {size}] game-phase cache: pruning {departed} departed "
+                  f"tids ({len(keep)} problems)", flush=True)
+        if rebuild or set(keep) != set(old):
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(cache + ".tmp", "w") as f:
+                _json.dump(keep, f)
+            os.replace(cache + ".tmp", cache)
+        res.update({t: (*v, size) for t, v in keep.items()})
     return res
 
 
