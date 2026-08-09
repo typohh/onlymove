@@ -104,6 +104,11 @@ axes/per_problem.csv
 # pipeline input and stay in attempts/<size>/.
 /db/d1.sql
 /db/d1.sqlite
+# SQLite's own write-ahead-log sidecars, which exist only while a connection is
+# open — a `git status` that catches them mid-query would otherwise offer to
+# commit the engine's scratch space.
+/db/d1.sqlite-shm
+/db/d1.sqlite-wal
 # Timestamped pre-change backups of the production DB (manual `cp` snapshots);
 # local insurance only, never committed.
 /db/d1.backup-*.sqlite
