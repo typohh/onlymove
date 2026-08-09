@@ -21,9 +21,11 @@ a single GLOBAL ceiling (fat-finger / lapse) λ is learned.
 There are NO per-problem residuals: the shared net IS the model, so every problem — including the
 never-attempted and the one-sided — gets its 4PL straight from features. The only training target is
 the HUMAN first-time attempts (bot data enters only through the features). The feature trunk uses 0.3
-COLUMN dropout on each of the activation, bot-winrate and candidate-move-eval blocks (every feature
-column dropped independently), and 0.3 dropout between the trunk's own hidden layers. The activation
-block used BLOCK dropout (all columns on/off together) until 2026-07-26; see the ACT_DROPOUT note.
+COLUMN dropout over the wide input region as a whole — activations, bot winrate and move evals,
+every feature column dropped independently — and 0.3 dropout between the trunk's own
+hidden layers. The game-phase columns and the size indicator sit past that region and are exempt.
+The activation block used BLOCK dropout (all columns on/off together) until 2026-07-26; see the
+INPUT_DROPOUT note.
 
 The fit is a SINGLE JOINT pass (replaced the two-phase staged coordinate descent, 2026-07-24): all
 three per-problem heads and the global ceiling train together, made well-posed by three measured
@@ -124,8 +126,15 @@ SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
 DIFF_HIDDEN = (128, 64)          # shared feature→4PL trunk hidden layers
 DROPOUT = 0.3                    # trunk dropout (0.3 uniformly — the backbone-overfit fix)
-# COLUMN dropout on the activation block (train only) — each PC dropped independently, the same
-# convention as the bot-winrate and move blocks. Replaced BLOCK dropout (one keep bit per row for all
+# ONE COLUMN dropout across the whole wide input region — activations, bot winrate, move evals —
+# each column dropped independently, at one rate. The blocks are masked together
+# rather than one range at a time because a per-block mask has to be extended by hand for every
+# block added, and a block that lands outside every range is regularized by nothing with no symptom
+# at the call site. The exempt tail is deliberate and stays exempt: the two game-phase columns and
+# the size indicator are smooth and cannot fingerprint a problem, so they sit past the mask.
+#
+# Rate and granularity are measured on the activation block, and carry to the rest.
+# Replaced BLOCK dropout (one keep bit per row for all
 # PCA_DIM columns at once) on 2026-07-26 after a paired 3-seed measurement: column granularity is
 # worth ~0.006-0.012 nats of held-out-PROBLEM logloss (every seed, every cluster-bootstrap CI
 # excluding zero) AND shrinks the phase-2 correction (gain 8.0 -> 5.5 mnat, s 1.63 -> 1.52 mean).
@@ -136,9 +145,7 @@ DROPOUT = 0.3                    # trunk dropout (0.3 uniformly — the backbone
 # unreliable on every row, while the smooth low-order signal survives everywhere. The dose response
 # is a broad plateau (0.3 and 0.5 tie, 0.7 slightly worse) and only degrades past ~0.9, where so few
 # PCs survive that it reverts to the block regime — which is also the mechanism's own prediction.
-ACT_DROPOUT = 0.3
-BW_DROPOUT = 0.3                 # column dropout on the bot-winrate columns (train only)
-MOVE_DROPOUT = 0.3               # column dropout on the candidate-move-eval columns (train only)
+INPUT_DROPOUT = 0.3
 LR = 0.01
 BATCH = 65536
 EPOCHS = 200                     # single joint pass (matches the old 2×100 staged budget)
@@ -270,11 +277,12 @@ class RatingNet(nn.Module):
     θ is a free embedding (no whitening; its spread is identified by the b pin).
     a = softplus(·).clamp(min=SLOPE_FLOOR); c is ceiling-coupled to [0, 1 − 2λ]."""
 
-    def __init__(self, fdim, n_users, act_dim, bw_dim, move_dim):
+    def __init__(self, fdim, n_users, input_dim):
         super().__init__()
-        self.act_dim = int(act_dim)         # activation block = cols [:act_dim]  (column-dropped)
-        self.bw_dim = int(bw_dim)           # bot-winrate block = cols [act_dim:+bw_dim] (col-drop)
-        self.move_dim = int(move_dim)       # move-eval block = cols [act_dim+bw_dim:+move_dim]
+        # Columns [:input_dim] are the wide per-problem blocks (activations ⊕ bot winrate ⊕ move
+        # evals) and take the column dropout as one region; everything past it (the
+        # game-phase columns, the size indicator) is deliberately exempt.
+        self.input_dim = int(input_dim)
         self.register_buffer("b_mu", torch.zeros(()))   # rating-gauge EMA (train stats → eval)
         self.register_buffer("b_sd", torch.ones(()))
         # (theta is constructed BEFORE the trunk so the RNG draw order is fixed.)
@@ -294,23 +302,12 @@ class RatingNet(nn.Module):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
     def _dropped(self, feat):
-        """Train-time column dropout on the feature blocks (eval passes through)."""
-        if self.training and self.act_dim > 0:               # column-drop the activation block
-            keep = (torch.rand(len(feat), self.act_dim, device=feat.device)
-                    >= ACT_DROPOUT).float() / (1.0 - ACT_DROPOUT)
-            feat = torch.cat([feat[:, :self.act_dim] * keep, feat[:, self.act_dim:]], dim=1)
-        if self.training and self.bw_dim > 0:                # column-drop the bot-winrate block
-            d0 = self.act_dim
-            keep = (torch.rand(len(feat), self.bw_dim, device=feat.device)
-                    >= BW_DROPOUT).float() / (1.0 - BW_DROPOUT)
-            feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.bw_dim] * keep,
-                              feat[:, d0 + self.bw_dim:]], dim=1)
-        if self.training and self.move_dim > 0:              # column-drop the move-eval block
-            d0 = self.act_dim + self.bw_dim
-            keep = (torch.rand(len(feat), self.move_dim, device=feat.device)
-                    >= MOVE_DROPOUT).float() / (1.0 - MOVE_DROPOUT)
-            feat = torch.cat([feat[:, :d0], feat[:, d0:d0 + self.move_dim] * keep,
-                              feat[:, d0 + self.move_dim:]], dim=1)
+        """Train-time column dropout over the wide input region (eval passes through)."""
+        if self.training and self.input_dim > 0:
+            keep = (torch.rand(len(feat), self.input_dim, device=feat.device)
+                    >= INPUT_DROPOUT).float() / (1.0 - INPUT_DROPOUT)
+            feat = torch.cat([feat[:, :self.input_dim] * keep,
+                              feat[:, self.input_dim:]], dim=1)
         return feat
 
     def params(self, feat):
@@ -369,11 +366,14 @@ def main():
     zero_mv = np.zeros(nmv, dtype=np.float32)
     # game-phase raw components [moves_before_position, main_line_len] (shared source with the
     # secondary-axis work — utils.rating.features.load_joint_game_phase). Included by FEATURE-PARITY
-    # POLICY (see the old staged trainer's notes); no dedicated dropout (2 smooth columns cannot
-    # fingerprint problems).
+    # POLICY (see the old staged trainer's notes); outside the input dropout with the size indicator
+    # (2 smooth columns cannot fingerprint problems).
     ph, nph = load_joint_game_phase(SIZES, tids_by_size)
     zero_ph = np.zeros(nph, dtype=np.float32)
-    fdim = k + nb + nmv + nph + 1                             # act ⊕ bw ⊕ move ⊕ phase ⊕ size_is_13
+    # [ act | bw | move | phase | size_is_13 ]: the wide blocks first, as one column-dropped
+    # region, then the exempt tail. A new wide block belongs INSIDE input_dim.
+    input_dim = k + nb + nmv
+    fdim = input_dim + nph + 1
     feat = np.empty((len(keys), fdim), dtype=np.float32)
     for key, i in key_idx.items():
         feat[i] = np.concatenate([act[key], bw[key], mv.get(key, zero_mv), ph.get(key, zero_ph),
@@ -383,7 +383,7 @@ def main():
     print(f"scorable problems {len(keys)} (9:{sum(s == 9 for s, _ in keys)} "
           f"13:{sum(s == 13 for s, _ in keys)}) | feat dim {fdim} "
           f"(act {k} + bot {nb} + move {nmv} ({n_mv_miss} imputed) + phase {nph} "
-          f"({n_ph_miss} imputed) + size_is_13)")
+          f"({n_ph_miss} imputed) + size_is_13) | input-dropout region {input_dim}")
 
     # --- HUMAN first-time attempts, pooled, shared 2-month profiles (no size in profile id) ---
     df = load_first_time_attempts()
@@ -416,7 +416,7 @@ def main():
 
     # ---- single joint pass: BCE + the two divergence barriers (see the module docstring) ----
     torch.manual_seed(SEED)
-    m = RatingNet(fdim, n_profiles, act_dim=k, bw_dim=nb, move_dim=nmv).to(device)
+    m = RatingNet(fdim, n_profiles, input_dim=input_dim).to(device)
     print(f"\n=== JOINT rating-gauge fit | {EPOCHS} epochs | dropout {DROPOUT} uniform | "
           f"shallow-slope w {SHALLOW_SLOPE_PENALTY:g} | high-floor w {HIGH_FLOOR_PENALTY:g} | "
           f"ceiling LEARNED ===")
@@ -512,8 +512,8 @@ def main():
                   f, indent=2)
     config = {"features": "bw_act", "move_features": True, "phase_features": True,
               "pca_dim": PCA_DIM, "diff_hidden": list(DIFF_HIDDEN), "dropout": DROPOUT,
-              "act_dropout": ACT_DROPOUT, "act_dropout_mode": "column",
-              "bw_dropout": BW_DROPOUT, "move_dropout": MOVE_DROPOUT,
+              "input_dropout": INPUT_DROPOUT, "input_dropout_mode": "column",
+              "input_dim": input_dim,
               "lr": LR, "batch": BATCH, "epochs": EPOCHS,
               "gauge": "rating", "gauge_mom": GAUGE_MOM,
               "shallow_slope_penalty": SHALLOW_SLOPE_PENALTY,
@@ -523,7 +523,8 @@ def main():
               "slope_floor": SLOPE_FLOOR, "lapse_cap": LAPSE_CAP,
               "lapse_init": LAPSE_INIT, "floor_cap": FLOOR_CAP, "seed": SEED}
     torch.save({"state_dict": m.state_dict(), "keys": keys, "fdim": fdim, "k": k,
-                "n_bot_cols": nb, "n_move_cols": nmv, "n_anchor": 0, "anchor_ranks": [],
+                "n_bot_cols": nb, "n_move_cols": nmv,
+                "input_dim": input_dim, "n_anchor": 0, "anchor_ranks": [],
                 "lapse": lam, "args": config}, os.path.join(OUT_DIR, "model.pt"))
     print(f"\n=== JOINT complete === wrote ratings + user_theta.csv ({n_profiles} profiles) + "
           f"rating_constants.json (λ={lam:.5f}) + model.pt to {OUT_DIR}")
