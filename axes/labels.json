@@ -112,45 +112,60 @@
       },
       "negative": null,
       "negative_i18n": null
+    },
+    "ax_1296d682": {
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
+    },
+    "ax_6dde2f3b": {
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
+    },
+    "ax_43f48879": {
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
+    },
+    "ax_bbab00d6": {
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
     }
   },
   "components": [
     {
-      "motif_id": "ax_50def44d",
-      "positive": "judgement",
-      "positive_i18n": {
-        "zh": "形势判断",
-        "ja": "形勢判断",
-        "ko": "형세판단"
-      },
+      "motif_id": "ax_1296d682",
+      "positive": null,
+      "positive_i18n": null,
       "negative": null,
       "negative_i18n": null
     },
     {
-      "motif_id": "ax_a268d22a",
-      "positive": "counting",
-      "positive_i18n": {
-        "zh": "数目",
-        "ja": "目算",
-        "ko": "계가"
-      },
+      "motif_id": "ax_6dde2f3b",
+      "positive": null,
+      "positive_i18n": null,
       "negative": null,
       "negative_i18n": null
     },
     {
-      "motif_id": "ax_07955482",
-      "positive": "opening",
-      "positive_i18n": {
-        "zh": "布局",
-        "ja": "序盤",
-        "ko": "포석"
-      },
-      "negative": "endgame",
-      "negative_i18n": {
-        "zh": "官子",
-        "ja": "ヨセ",
-        "ko": "끝내기"
-      }
+      "motif_id": "ax_43f48879",
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
+    },
+    {
+      "motif_id": "ax_bbab00d6",
+      "positive": null,
+      "positive_i18n": null,
+      "negative": null,
+      "negative_i18n": null
     }
   ]
 }

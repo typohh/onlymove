@@ -18,9 +18,11 @@ Fixed training regimen (each element is load-bearing; see the doc):
     loading scale lets one strong direction dodge the v-prior via cloning;
     a trunk-shared g can only combine r-relevant features).
   - lenient orthogonality penalty (mutual + vs r, batch cosines, weight 0.5).
-  - the first 3 axes warm-start at the hand-crafted scalar directions
-    (wr-gap, score-gap, phase-ratio) — breaks the v=0 bootstrap deadlock;
-    the learned refinements subsume the hand-crafted forms.
+  - EVERY axis warm-starts at a data-derived direction: the top eigenvectors
+    of the centred between-user residual score moment (eigen_directions).
+    At v=0 the loading gradient is identically zero, so an axis left at a
+    random init escapes along its draw rather than along the data; these are
+    the closed-form escape directions of that same linearization.
 
 Features are the rating trainer's EXACT inputs (same loaders, same joint-PCA
 cache/seed) plus the rating model's outputs — LITERAL parity with
@@ -50,7 +52,15 @@ from utils.rating.slope_calibration import load_client_lapse
 from utils.paths import PROJECT_ROOT
 
 # training regimen
-EPOCHS = 40
+# EPOCHS sits at the plateau of the held-out gain, and stopping short of it is
+# NOT the conservative choice: an under-trained block leaves gain on the table
+# invisibly, so the K search then compares candidates none of which converged.
+# The upper side is bounded by a different quantity — the per-user coefficient
+# displacement that distinguishes between-user weakness from population
+# difficulty saturates EARLIER than the gain does, so there is a window where
+# more training is uncompensated and, past the gain plateau, only displacement
+# keeps creeping. This is the end of that window. Figures in CLAUDE.md.
+EPOCHS = 400
 SEED = 0
 ORTHO_WEIGHT = 0.5
 SEED_RIDGE = 10.0
@@ -58,8 +68,8 @@ BATCH = 8192
 MIN_USER_ATTEMPTS = 50
 
 # incremental-K selection
-K_START = 3                 # the three scalar seeds
-K_MAX = 12                  # runaway backstop, far above expected selection
+K_START = 3                 # floor; every candidate count is warm-started alike
+K_MAX = 12                  # runaway backstop
 STOP_FRACTION = 0.03        # stop when gain < (1 - this) * peak; select K-1
 
 # walk-forward eval protocol (client replica — same as utils.rating.slope_calibration)
@@ -165,11 +175,71 @@ def load_axis_attempts():
 
 
 def seed_directions(F, S_mat, k_seed):
-    """Ridge-regress each hand-crafted scalar onto the (z-scored) features;
-    unit rows. The warm start that breaks the v=0 deadlock."""
+    """Ridge-regress each hand-crafted scalar (wr gap, score gap, phase ratio)
+    onto the (z-scored) features; unit rows.
+
+    NOT ON THE PRODUCTION PATH — eigen_directions is. Retained because the
+    auxiliary comparison harnesses reproduce this arm, and because it is the
+    only way to re-measure what the hand-crafted start was worth. It warm-starts
+    at most three axes and leaves every later one random, which is what made the
+    axis count and the initialization confounded with each other."""
     G0 = np.linalg.solve(F.T @ F + SEED_RIDGE * np.eye(F.shape[1]),
                          F.T @ S_mat[:, :k_seed])
     return (G0 / (np.linalg.norm(G0, axis=0, keepdims=True) + 1e-9)).T
+
+
+def eigen_directions(rows_by_user, train_users, F, tid_index, rank, params,
+                     lapse, k):
+    """The production warm start: the top-k directions of BETWEEN-USER residual
+    variation, computed from `train_users` only. Returns (k, n_feat), unit rows.
+
+    At v=0 the bilinear term contributes nothing to the logit and the loading
+    gradient is identically zero, so an axis left at a random init escapes along
+    whichever way its draw happened to point. The direction the model wants is
+    available in closed form. Linearizing around v=0, each user pulls the
+    loadings along their own residual score under the axis-free baseline,
+
+        s_u = sum_p (y_up - p_hat_up) * x_p
+
+    and the dominant escape directions are the leading eigenvectors of the
+    CENTRED second moment of those scores.
+
+    Centring is not a detail. The uncentred leading direction is the one in
+    which the baseline mispredicts for EVERYONE, which is population residual
+    difficulty — the quantity the r head is quarantined to absorb and the axes
+    are forbidden to carry. Seeding from it would put difficulty into every axis
+    at initialization, for the mean-zero prior to fight back out.
+
+    Train users only: directions taken from the users an axis set is scored on
+    would leak, and the K selection would then reward the leak."""
+    all_r0 = np.array([v[0] for v in params.values()])
+    grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
+    scores = []
+    for u in train_users:
+        a = rows_by_user[u]
+        tids = [t for t, _ in a]
+        y = np.array([s for _, s in a], dtype=float)
+        R0 = np.array([params[t][0] for t in tids])
+        A = np.array([params[t][1] for t in tids])
+        C = np.clip(np.array([params[t][2] for t in tids]), 0.0, FLOOR_MAX)
+        span = np.maximum(1.0 - C - lapse, 1e-6)
+        q = np.clip((CALIBRATION_P - C) / span, 1e-6, 1 - 1e-6)
+        kap = np.log(q / (1 - q))
+        th = _fit_theta(R0, A, C, span, kap, y, grid)
+        P4 = _p4pl(th, R0, A, C, span, kap)
+        off = np.log(P4 / (1 - P4))
+        X = np.column_stack([np.ones(len(tids)),
+                             np.array([rank[t] for t in tids])])
+        w = _irls_off(X, y, off, ridge=1e-6)
+        p = 1.0 / (1.0 + np.exp(-np.clip(off + X @ w, -35, 35)))
+        idx = np.array([tid_index[t] for t in tids])
+        scores.append(F[idx].astype(np.float64).T @ (y - p))
+    S = np.stack(scores)
+    S = S - S.mean(axis=0, keepdims=True)
+    _ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
+    top = vec[:, ::-1][:, :k].T
+    return (top / (np.linalg.norm(top, axis=1, keepdims=True) + 1e-9)
+            ).astype(np.float32)
 
 
 # ------------------------------------------------------------------ training
@@ -396,13 +466,12 @@ def select_and_fit(device="cuda"):
       all-users fit, tids (aligned), W/rms/v_sd (per-cell fanout), feat_mu/
       feat_sd (the F standardization), act_dim, axis_mu/axis_sd (loading
       standardization for shipping)."""
-    feats, scalars, rank, params, act_dim = build_axis_features()
+    feats, _scalars, rank, params, act_dim = build_axis_features()
     tids = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids)}
     F = np.stack([feats[t] for t in tids])
     feat_mu, feat_sd = F.mean(axis=0), F.std(axis=0) + 1e-9
     F = ((F - feat_mu) / feat_sd).astype(np.float32)
-    S_mat = np.stack([scalars[t] for t in tids])
     lapse = load_client_lapse(0.0328)
 
     rows = load_axis_attempts()
@@ -417,16 +486,25 @@ def select_and_fit(device="cuda"):
     print(f"axes: {len(tids)} problems, {len(users)} users "
           f"({sum(len(rows_by_user[u]) for u in users)} attempts)")
 
+    # Warm-start directions per fold, computed ONCE at the widest count the
+    # search can reach and sliced per candidate: they are the eigenvectors of a
+    # fold's residual score moment, so they do not depend on K, and recomputing
+    # them per candidate would repeat a full baseline pass for nothing.
+    folds = {f: [u for u in users if fold_of[u] != f] for f in (0, 1)}
+    eigen_by_fold = {
+        f: eigen_directions(rows_by_user, tr, F, tid_index, rank, params,
+                            lapse, K_MAX)
+        for f, tr in folds.items()}
+
     gains, peak, breached = {}, -np.inf, None
     k = K_START
     while k <= K_MAX:
-        g_init = seed_directions(F, S_mat, min(3, k))
         total_gain, total_n = 0.0, 0
         for fold in (0, 1):
-            tr = [u for u in users if fold_of[u] != fold]
+            tr = folds[fold]
             ev = [u for u in users if fold_of[u] == fold]
             g, _W, _rms, _sd = train_axes(rows_by_user, tr, F, tid_index, k,
-                                          g_init, device)
+                                          eigen_by_fold[fold][:k], device)
             gain, n = axes_ll_gain(rows_by_user, ev, g, rank, params,
                                    tid_index, lapse)
             total_gain += gain
@@ -465,7 +543,12 @@ def select_and_fit(device="cuda"):
           + (f", K={breached} breached at {gains[breached]:.3f})"
              if breached is not None else ", K_MAX backstop reached)"))
 
-    g_init = seed_directions(F, S_mat, min(3, k_sel))
+    # The final fit trains on ALL users, so its warm start is derived from all
+    # of them too — the per-fold directions above exist only to keep the
+    # selection honest, and reusing one here would start the shipped fit from
+    # half the data.
+    g_init = eigen_directions(rows_by_user, users, F, tid_index, rank, params,
+                              lapse, k_sel)
     g_final, W, rms, v_sd = train_axes(rows_by_user, users, F, tid_index,
                                        k_sel, g_init, device)
     axis_mu = g_final.mean(axis=0)
