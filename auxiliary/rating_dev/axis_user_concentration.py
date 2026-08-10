@@ -43,11 +43,19 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.residual_axes import (  # noqa: E402
-    EIGEN_WEIGHTING, EVAL_BLOCK, MIN_USER_ATTEMPTS, WARMUP,
-    _user_score_matrix, build_axis_features, load_axis_attempts,
-    normalize_scores,
+    EVAL_BLOCK, MIN_USER_ATTEMPTS, WARMUP, _user_score_matrix,
+    build_axis_features, load_axis_attempts,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
+
+
+# Production normalises by attempt count and carries no switch; the two
+# alternatives live here because comparing them is this script's whole purpose.
+WEIGHTINGS = {
+    "sum": lambda S, n: S,                    # raw: weight grows with n^2
+    "rootn": lambda S, n: S / np.sqrt(n)[:, None],
+    "user": lambda S, n: S / n[:, None],      # what production does
+}
 
 
 def participation(c):
@@ -68,7 +76,7 @@ def main():
                          "support in what ships")
     args = ap.parse_args()
 
-    feats, _s, rank, params, _ad = build_axis_features()
+    feats, rank, params, _ad = build_axis_features()
     tids = sorted(feats)
     ti = {t: i for i, t in enumerate(tids)}
     F = np.stack([feats[t] for t in tids])
@@ -103,8 +111,8 @@ def main():
     R = rng.normal(size=(F.shape[1], 32))
     R /= np.linalg.norm(R, axis=0, keepdims=True)
 
-    for weighting in ("sum", "rootn", "user"):
-        S = normalize_scores(S_raw, n_by_user, weighting)
+    for weighting in WEIGHTINGS:
+        S = WEIGHTINGS[weighting](S_raw, n_by_user)
         S = S - S.mean(axis=0, keepdims=True)
         ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
         order = np.argsort(ev)[::-1]
@@ -130,12 +138,11 @@ def main():
             return
         d = np.load(path, allow_pickle=False)
         W = d["W"]                                   # (K, n_feat), same space as S
-        S = normalize_scores(S_raw, n_by_user, EIGEN_WEIGHTING)
+        S = WEIGHTINGS["user"](S_raw, n_by_user)
         S = S - S.mean(axis=0, keepdims=True)
         base = [participation((S @ R[:, j]) ** 2) for j in range(R.shape[1])]
-        print(f"\nSHIPPED axes (axes.npz, K={W.shape[0]}, weighting="
-              f"{EIGEN_WEIGHTING!r}; random baseline effN "
-              f"{np.median(base):.1f})")
+        print(f"\nSHIPPED axes (axes.npz, K={W.shape[0]}; random baseline "
+              f"effN {np.median(base):.1f})")
         print("  axis   effN   top-1%  top-3%  top-5%  top-10%   corr(contrib, attempts)")
         for k in range(W.shape[0]):
             w = W[k] / (np.linalg.norm(W[k]) + 1e-12)

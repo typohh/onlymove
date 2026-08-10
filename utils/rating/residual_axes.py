@@ -43,7 +43,7 @@ import numpy as np
 from utils.rating.features import (
     _cache_ids_path, load_backend_problem_params, load_joint_activations,
     load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features,
-    load_tightness_gaps, phase_ratio_z, zscore_neglog, SQLITE_PATH,
+    SQLITE_PATH,
 )
 from utils.rating.fit_rank_curves import interp_extrap
 from utils.rating.slope_calibration import load_client_lapse
@@ -62,24 +62,8 @@ from utils.paths import PROJECT_ROOT
 EPOCHS = 400
 SEED = 0
 ORTHO_WEIGHT = 0.5
-SEED_RIDGE = 10.0
 BATCH = 8192
 MIN_USER_ATTEMPTS = 50
-
-# Per-user normalisation of the residual scores the warm-start directions are
-# taken from (normalize_scores). Load-bearing: unnormalised, a user's weight in
-# the moment grows with the SQUARE of their attempt count, and the axes end up
-# describing a handful of accounts rather than a skill.
-#
-# "user" over "rootn" is MEASURED, not assumed. The test is whether a user's
-# contribution to an axis still tracks how much they played, since an axis that
-# does is describing accounts rather than skills: under "user" that correlation
-# sits near zero (slightly negative — light users' normalised scores are noisier),
-# while "rootn" leaves it clearly positive on the leading axes because it keeps
-# sqrt(n) signal scaling by design. "user" is also the only option for which
-# centring removes population difficulty exactly, that component entering s_u in
-# proportion to n_u. Figures in CLAUDE.md.
-EIGEN_WEIGHTING = "user"
 
 # incremental-K selection
 K_START = 3                 # floor; every candidate count is warm-started alike
@@ -145,9 +129,8 @@ def corpus_tid_size():
 
 
 def build_axis_features():
-    """Literal rating-trainer feature parity. Returns (feats, scalars, rank,
-    params, act_dim): feats tid -> raw feature vec (z-scored by the caller),
-    scalars tid -> [wr, sc, phase] (eval baselines + seed targets), rank tid ->
+    """Literal rating-trainer feature parity. Returns (feats, rank, params,
+    act_dim): feats tid -> raw feature vec (z-scored by the caller), rank tid ->
     normalized problemRank, params tid -> (rating, slope, floor), act_dim =
     width of the leading joint-PCA activation block (per-cell fanout needs it)."""
     from pipeline.train_rating import PCA_DIM, SEED as PCA_SEED, SIZES
@@ -160,16 +143,12 @@ def build_axis_features():
     zero_mv = np.zeros(nmv, dtype=np.float32)
     zero_ph = np.zeros(nph, dtype=np.float32)
 
-    f_sc = zscore_neglog(load_tightness_gaps("score_gap"))
-    f_wr = zscore_neglog(load_tightness_gaps("wr_gap"))
-    f_ph = phase_ratio_z()
-
     curve = _load_rank_curve()
     rsf = {t: np.array(v, dtype=np.float32)
            for t, v in load_backend_problem_params().items()}
 
     tid_size = corpus_tid_size()
-    feats, scalars, rank, params = {}, {}, {}, {}
+    feats, rank, params = {}, {}, {}
     for key in act:
         size, t = key
         t = str(t)
@@ -177,8 +156,7 @@ def build_axis_features():
         # of this size (stale ids from purges; see corpus_tid_size)
         if tid_size.get(t) != size:
             continue
-        if (key not in bw or t not in f_sc or t not in f_wr or t not in f_ph
-                or t not in rsf):
+        if key not in bw or t not in rsf:
             continue
         # M is applied with END-SLOPE EXTRAPOLATION, never bare np.interp: the
         # curve's knots span only where human declarations reach, so a bare
@@ -194,10 +172,9 @@ def build_axis_features():
             [1.0 if size == 13 else 0.0],
             rsf[t], [rk],
         ]).astype(np.float32)
-        scalars[t] = np.array([f_wr[t], f_sc[t], f_ph[t]], dtype=np.float32)
         rank[t] = rk
         params[t] = rsf[t]
-    return feats, scalars, rank, params, int(act_dim)
+    return feats, rank, params, int(act_dim)
 
 
 def _load_rank_curve():
@@ -219,20 +196,6 @@ def load_axis_attempts():
     ).fetchall()
     con.close()
     return rows
-
-
-def seed_directions(F, S_mat, k_seed):
-    """Ridge-regress each hand-crafted scalar (wr gap, score gap, phase ratio)
-    onto the (z-scored) features; unit rows.
-
-    NOT ON THE PRODUCTION PATH — eigen_directions is. Retained because the
-    auxiliary comparison harnesses reproduce this arm, and because it is the
-    only way to re-measure what the hand-crafted start was worth. It warm-starts
-    at most three axes and leaves every later one random, which is what made the
-    axis count and the initialization confounded with each other."""
-    G0 = np.linalg.solve(F.T @ F + SEED_RIDGE * np.eye(F.shape[1]),
-                         F.T @ S_mat[:, :k_seed])
-    return (G0 / (np.linalg.norm(G0, axis=0, keepdims=True) + 1e-9)).T
 
 
 def _user_score_matrix(rows_by_user, users, F, tid_index, rank, params, lapse):
@@ -269,39 +232,8 @@ def _user_score_matrix(rows_by_user, users, F, tid_index, rank, params, lapse):
     return np.stack(S), np.asarray(n, dtype=float)
 
 
-def normalize_scores(S, n, weighting):
-    """Per-user normalisation applied BEFORE centring and the moment.
-
-    "sum"    raw. The contribution of a user to the moment scales with n_u^2, so
-             the directions are set by whoever played most — measured on the
-             shipped corpus, one account supplied 24-36% of every axis and three
-             supplied over half, against an effective contributor count below
-             the 10th percentile of RANDOM directions in the same space. Kept
-             only so the defect can be reproduced.
-    "rootn"  s_u / sqrt(n_u). A sum of n independent mean-zero terms has scale
-             sqrt(n), so this puts every user's NOISE on the same footing while
-             genuine structure still grows as sqrt(n) — a heavy account keeps
-             more influence than a light one, which is right because it carries
-             more evidence, but not quadratically more.
-    "user"   s_u / n_u, the mean per-attempt score: every user counts alike. This
-             one also makes the centring EXACT for population difficulty, which
-             the others cannot: that component enters s_u in proportion to n_u,
-             so dividing by n_u renders it identical across users and subtracting
-             the mean removes it outright, whereas under sqrt it survives
-             centring in proportion to sqrt(n_u). The cost is that a light user's
-             noise carries full weight (scale 1/sqrt(n_u)), bounded only by
-             MIN_USER_ATTEMPTS."""
-    if weighting == "sum":
-        return S
-    if weighting == "rootn":
-        return S / np.sqrt(n)[:, None]
-    if weighting == "user":
-        return S / n[:, None]
-    raise ValueError(f"unknown score weighting {weighting!r}")
-
-
 def eigen_directions(rows_by_user, train_users, F, tid_index, rank, params,
-                     lapse, k, weighting=None):
+                     lapse, k):
     """The production warm start: the top-k directions of BETWEEN-USER residual
     variation, computed from `train_users` only. Returns (k, n_feat), unit rows.
 
@@ -326,7 +258,7 @@ def eigen_directions(rows_by_user, train_users, F, tid_index, rank, params,
     would leak, and the K selection would then reward the leak."""
     S, n = _user_score_matrix(rows_by_user, train_users, F, tid_index, rank,
                               params, lapse)
-    S = normalize_scores(S, n, weighting or EIGEN_WEIGHTING)
+    S = S / n[:, None]
     S = S - S.mean(axis=0, keepdims=True)
     _ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
     top = vec[:, ::-1][:, :k].T
@@ -615,7 +547,7 @@ def select_and_fit(device="cuda"):
       all-users fit, tids (aligned), W/rms/v_sd (per-cell fanout), feat_mu/
       feat_sd (the F standardization), act_dim, axis_mu/axis_sd (loading
       standardization for shipping)."""
-    feats, _scalars, rank, params, act_dim = build_axis_features()
+    feats, rank, params, act_dim = build_axis_features()
     tids = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids)}
     F = np.stack([feats[t] for t in tids])

@@ -104,7 +104,7 @@ def main():
     args = ap.parse_args()
 
     t0 = time.time()
-    feats, _scalars, rank, params, _ad = build_axis_features()
+    feats, rank, params, _ad = build_axis_features()
     tids_all = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids_all)}
     F = np.stack([feats[t] for t in tids_all])

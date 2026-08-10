@@ -46,9 +46,12 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rating.residual_axes import (  # noqa: E402
     MIN_USER_ATTEMPTS, axes_ll_gain, build_axis_features, load_axis_attempts,
-    seed_directions, train_axes,
+    train_axes,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
+from auxiliary.rating_dev.hand_seeds import (  # noqa: E402
+    hand_scalars, seed_directions,
+)
 
 SCALAR_NAMES = ("wr_gap", "score_gap", "phase")
 
@@ -88,12 +91,12 @@ def main():
     print(f"device: {device}", flush=True)
 
     t0 = time.time()
-    feats, scalars, rank, params, _act_dim = build_axis_features()
+    feats, rank, params, _act_dim = build_axis_features()
     tids = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids)}
     F = np.stack([feats[t] for t in tids])
     F = ((F - F.mean(0)) / (F.std(0) + 1e-9)).astype(np.float32)
-    S_mat = np.stack([scalars[t] for t in tids])
+    S_mat = hand_scalars(tids)
     lapse = load_client_lapse(0.0328)
 
     rows_by_user = defaultdict(list)

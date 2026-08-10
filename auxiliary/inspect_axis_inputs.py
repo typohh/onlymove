@@ -293,7 +293,7 @@ def main():
     if not args.quick:
         import utils.rating.residual_axes as ra
         print("loading features (use --quick to skip) ...")
-        feats, _sc, _rk, _pa, _ad = ra.build_axis_features()
+        feats, _rk, _pa, _ad = ra.build_axis_features()
         tids = sorted(feats)
         F = (np.stack([feats[t] for t in tids]) - ax["feat_mu"]) / ax["feat_sd"]
         pp = pd.read_csv(os.path.join(EMBED_DIR, "per_problem.csv"))

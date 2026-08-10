@@ -57,9 +57,11 @@ from utils.rating.residual_axes import (  # noqa: E402
     BATCH, CALIBRATION_P, FLOOR_MAX, MIN_USER_ATTEMPTS, ORTHO_WEIGHT,
     _axis_prior, _fit_theta, _irls_off, _logloss, _p4pl, _stratified_folds,
     _walk_forward, build_axis_features, eigen_directions, load_axis_attempts,
-    seed_directions,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
+from auxiliary.rating_dev.hand_seeds import (  # noqa: E402
+    hand_scalars, seed_directions,
+)
 
 
 def train_axes_checkpointed(rows_by_user, train_users, F, tid_index, k_axes,
@@ -234,12 +236,12 @@ def main():
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
     t0 = time.time()
-    feats, scalars, rank, params, _ad = build_axis_features()
+    feats, rank, params, _ad = build_axis_features()
     tids = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids)}
     F = np.stack([feats[t] for t in tids])
     F = ((F - F.mean(0)) / (F.std(0) + 1e-9)).astype(np.float32)
-    S_mat = np.stack([scalars[t] for t in tids])
+    S_mat = hand_scalars(tids)
     lapse = load_client_lapse(0.0328)
 
     rows_by_user = defaultdict(list)
