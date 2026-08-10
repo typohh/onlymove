@@ -452,6 +452,7 @@ def check_axis_prior(output_dir):
         _pop = json.load(f)
     lam = _pop.get("weakness_axis_lambda")
     con = _pop.get("weakness_contrast_mean")
+    amu = _pop.get("weakness_axis_mean")
     if not isinstance(lam, list) or len(lam) != K:
         raise SystemExit(
             f"REFUSING to package: weakness_axis_lambda has "
@@ -487,8 +488,26 @@ def check_axis_prior(output_dir):
             f"REFUSING to package: weakness_contrast_mean entries {bad} are not "
             f"finite ({[con[i] for i in bad]}) — re-run "
             f"pipeline.fit_population_constants.")
+    # The SUM direction's centre, mandatory for the same reason the other two are:
+    # weakness.js centres its ridge on it and stats-weaknesses.js tests level one
+    # against it, and BOTH skip rather than substitute a value — so a constants
+    # file predating this vector ships a client that quietly trains nothing.
+    if not isinstance(amu, list) or len(amu) != K:
+        raise SystemExit(
+            f"REFUSING to package: weakness_axis_mean has "
+            f"{len(amu) if isinstance(amu, list) else 'no'} entries but K={K} "
+            f"(from {source}). Re-run pipeline.fit_population_constants — "
+            f"shipping as-is disables weakness training on every client with no "
+            f"visible error.")
+    bad_amu = [i for i, v in enumerate(amu)
+               if not isinstance(v, (int, float)) or not math.isfinite(v)]
+    if bad_amu:
+        raise SystemExit(
+            f"REFUSING to package: weakness_axis_mean entries {bad_amu} are not "
+            f"finite ({[amu[i] for i in bad_amu]}).")
     print(f"  axis prior OK: weakness_axis_lambda has K={K} finite positive "
-          f"entries and weakness_contrast_mean K={K} finite (K from {source})")
+          f"entries, weakness_contrast_mean and weakness_axis_mean K={K} finite "
+          f"(K from {source})")
 
 
 def _read_embedding_version(embed_dir):
