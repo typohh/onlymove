@@ -1,38 +1,49 @@
 #!/usr/bin/env python3
-"""Inspect the extreme-loading problems on the residual-MIRT secondary axes.
+"""Inspect the extreme-loading problems on the shipped SKILL AXES.
 
-Renders the supervised axes trained by auxiliary.rating_dev.train_residual_axes
-(loaded from the activations/_signal_cache/residual_axes_k<K>_seed<S>.npz it
-saves). Three structural differences from the skew-ICA embedding it replaced,
-all following from the model:
+Run with no arguments to render the current axes/per_problem.csv — the axis set
+pipeline.build_axes produced and package_for_pwa will publish. That is the
+labelling workflow: package_for_pwa refuses to ship while any axis has neither
+tail named, so this page is what a name gets chosen from.
 
-  - BOTH tails are rendered. The residual axes carry no skew
-    sign-canonicalization: a negative loading is a real direction (problems
-    where a user with positive axis position does WORSE), not Gaussian
-    baseline, so unlike the ICA inspector the LOW side is meaningful here.
-  - Folds are NEVER pooled. The training objective is rotation-invariant
-    within the K-dim subspace, so each fold's axes are an arbitrary basis of
-    its own fit — fold 0 axis 2 and fold 1 axis 2 are unrelated components.
-    Every (fold, axis) pair is its own dropdown entry; eyeballing whether any
-    fold-0 axis visually matches any fold-1 axis is exactly the kind of
-    stability check this page is for.
-  - The population r head (residual difficulty the 4PL missed) is included
-    as an extra component per fold — its extremes show what the rating model
-    systematically over/under-rates.
+Each axis shows both tails, and above them a table of WHAT DRIVES each tail.
+The axis is a linear map on the standardized features, so a problem's value is
+the sum over columns of weight x standardized input, and the mean of that
+product across a tail's problems is exactly that column's contribution — an
+exact decomposition, not a surrogate model. Inputs are grouped to be readable:
 
-Default mode is HTML: one self-contained page, a dropdown over every
-(fold, component), and each tail's `--rows` × `--cols` most extreme problems,
-strongest signal first. Use --open to launch the page, or --no-html to print
-PWA dev-server URLs instead.
+  - ACTIVATIONS collapse to one row carrying MAGNITUDE ONLY. The block is a PCA
+    basis, so a component's sign is a property of the basis rather than of the
+    world. This row is often most of the magnitude, and when it is, the boards
+    rather than the table are the evidence — the named rows below it are then
+    describing a minority of the signal.
+  - BOTS keep their sign, and adjacent rungs of a ladder merge when they agree
+    in sign and magnitude ("humanv0 rank ladder 12k-8k x5"). Merging is on the
+    ladder only, never on contribution alone.
+  - Everything else keeps its own signed row.
+
+BOTH tails are rendered because the axes are bipolar: they carry no skew
+sign-canonicalization, so a negative loading is a real direction — problems a
+user with positive axis position does WORSE on — rather than baseline.
+
+Per-fold development artifacts from auxiliary.rating_dev.train_residual_axes are
+available via --npz, and differ in two ways. Folds are NEVER pooled, since the
+objective is rotation-invariant within the K-dim subspace and each fold's axes
+are an arbitrary basis of its own fit: fold 0 axis 2 and fold 1 axis 2 are
+unrelated, and eyeballing whether any fold-0 axis matches any fold-1 axis is the
+stability check that view is for. Those artifacts also include the population r
+head (residual difficulty the rating model missed), whose extremes show what it
+systematically over- and under-rates. They store loadings but no weight matrix,
+so no input attribution is possible there.
 
 Board rendering (parse / simulate / SVG) lives in utils/board_render.py — the
 single shared copy used by every inspection tool.
 
 Usage:
-  python -m auxiliary.rating_dev.inspect_residual_axes                # k=4 seed=0
-  python -m auxiliary.rating_dev.inspect_residual_axes --k 2 --open
-  python -m auxiliary.rating_dev.inspect_residual_axes --npz path/to/file.npz
-  python -m auxiliary.rating_dev.inspect_residual_axes --no-html --n 10
+  python -m auxiliary.rating_dev.inspect_residual_axes            # the shipped axes
+  python -m auxiliary.rating_dev.inspect_residual_axes --open
+  python -m auxiliary.rating_dev.inspect_residual_axes --no-inputs   # boards only
+  python -m auxiliary.rating_dev.inspect_residual_axes --npz --k 2   # a dev fold fit
 """
 
 import argparse
@@ -405,18 +416,24 @@ def _build_page(source, options_html, sections_html, cols):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--k", type=int, default=4,
-                        help="K used at training time — picks the default npz (default 4)")
-    parser.add_argument("--seed", type=int, default=0,
-                        help="seed used at training time — picks the default npz (default 0)")
-    parser.add_argument("--npz", default=None,
-                        help="explicit path to a residual_axes_*.npz (overrides --k/--seed)")
-    parser.add_argument("--per-problem", nargs="?", default=None,
+    # No arguments renders the SHIPPED axes, which is the labelling workflow and
+    # the only thing most runs want. The per-fold dev artifacts are opt-in.
+    parser.add_argument("--per-problem", nargs="?",
+                        default=os.path.join(PROJECT_ROOT, "axes",
+                                             "per_problem.csv"),
                         const=os.path.join(PROJECT_ROOT, "axes",
                                            "per_problem.csv"),
-                        help="PRODUCTION mode: render the shipped axes from "
-                             "pipeline.build_axes' per_problem.csv (default "
-                             "path if no value given) — the labeling workflow")
+                        help="path to the shipped per_problem.csv (default: "
+                             "axes/per_problem.csv)")
+    parser.add_argument("--npz", default=None,
+                        help="render a per-fold dev artifact instead of the "
+                             "shipped axes (auxiliary.rating_dev."
+                             "train_residual_axes output). Folds are separate "
+                             "fits, so no input attribution is available")
+    parser.add_argument("--k", type=int, default=4,
+                        help="with --npz and no path: K used at training time")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="with --npz and no path: seed used at training time")
     parser.add_argument("--n", type=int, default=10,
                         help="N top problems per tail in --no-html mode (default 10)")
     parser.add_argument("--host", default="http://localhost:8787",
@@ -426,9 +443,9 @@ def main():
                              "stay board-comparable)")
     parser.add_argument("--html", action=argparse.BooleanOptionalAction, default=True,
                         help="Render static HTML (default). --no-html prints PWA URLs instead.")
-    parser.add_argument("--rows", type=int, default=5,
+    parser.add_argument("--rows", type=int, default=4,
                         help="rows of extremes per tail; rows × cols problems shown, strongest first (default 5)")
-    parser.add_argument("--cols", type=int, default=5, help="HTML grid columns (default 5)")
+    parser.add_argument("--cols", type=int, default=6, help="HTML grid columns (default 6)")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/residual_axes_extremes.html)")
     parser.add_argument("--no-inputs", action="store_true",
@@ -442,26 +459,24 @@ def main():
                         help="Open the rendered HTML in the default browser.")
     args = parser.parse_args()
 
-    if not args.per_problem:
-        # the per-fold dev npz stores loadings but no weight matrix, so there is
-        # nothing to decompose; only the shipped fit can be attributed
-        args.no_inputs = True
     if args.html and args.size == "all":
         args.size = "9"
 
-    if args.per_problem:
-        npz_path = args.per_problem
-        if not os.path.exists(npz_path):
-            raise SystemExit(f"missing {npz_path}; run pipeline.build_axes first")
-        tids, components = load_per_problem_csv(npz_path)
-    else:
-        npz_path = args.npz or os.path.join(
+    use_npz = args.npz is not None or "--npz" in sys.argv
+    if use_npz:
+        npz_path = args.npz if isinstance(args.npz, str) else os.path.join(
             CACHE_DIR, f"residual_axes_k{args.k}_seed{args.seed}.npz")
         if not os.path.exists(npz_path):
             raise SystemExit(
                 f"missing {npz_path}; run auxiliary.rating_dev.train_residual_axes first "
                 f"(or point --npz at an existing artifact)")
         tids, components = load_axes_npz(npz_path)
+        args.no_inputs = True      # per-fold artifacts carry no weight matrix
+    else:
+        npz_path = args.per_problem
+        if not os.path.exists(npz_path):
+            raise SystemExit(f"missing {npz_path}; run pipeline.build_axes first")
+        tids, components = load_per_problem_csv(npz_path)
     source = os.path.basename(npz_path)
 
     lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
