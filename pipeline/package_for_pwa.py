@@ -449,7 +449,9 @@ def check_axis_prior(output_dir):
             f"REFUSING to package: no {RATINGS_ROOT}/population_constants.json "
             f"— run pipeline.fit_population_constants")
     with open(path, encoding="utf-8") as f:
-        lam = json.load(f).get("weakness_axis_lambda")
+        _pop = json.load(f)
+    lam = _pop.get("weakness_axis_lambda")
+    con = _pop.get("weakness_contrast_mean")
     if not isinstance(lam, list) or len(lam) != K:
         raise SystemExit(
             f"REFUSING to package: weakness_axis_lambda has "
@@ -466,8 +468,27 @@ def check_axis_prior(output_dir):
             f"finite positive precisions ({[lam[i] for i in bad]}). The client "
             f"requires every entry positive and finite and skips training "
             f"otherwise — re-run pipeline.fit_population_constants.")
+    # The contrast centre selection subtracts before scoring (pwa/js/weakness.js).
+    # Same K dependency and the same silent-failure shape as the precisions above, one
+    # regime over: a stale or missing centre doesn't disable weakness training, it
+    # drops selection back to the information regime — problems still get served, just
+    # never personalized, with nothing anywhere saying so.
+    if not isinstance(con, list) or len(con) != K:
+        raise SystemExit(
+            f"REFUSING to package: weakness_contrast_mean has "
+            f"{len(con) if isinstance(con, list) else 'no'} entries but K={K} "
+            f"(from {source}). Re-run pipeline.fit_population_constants, then package "
+            f"again. Shipping as-is would leave every client's selection stuck in the "
+            f"information regime with no visible error.")
+    bad = [i for i, v in enumerate(con)
+           if not isinstance(v, (int, float)) or not math.isfinite(v)]
+    if bad:
+        raise SystemExit(
+            f"REFUSING to package: weakness_contrast_mean entries {bad} are not "
+            f"finite ({[con[i] for i in bad]}) — re-run "
+            f"pipeline.fit_population_constants.")
     print(f"  axis prior OK: weakness_axis_lambda has K={K} finite positive "
-          f"entries (K from {source})")
+          f"entries and weakness_contrast_mean K={K} finite (K from {source})")
 
 
 def _read_embedding_version(embed_dir):
