@@ -36,12 +36,6 @@ import { adamUpdate } from './optimizer.js';
 // loader for the rest of this blob. We read only the weakness ridge prior here.
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
-// Recommender temperature for weight = quality * exp(T * weaknessScore).
-// Higher T = more aggressive mining of weak directions. Owned here because
-// any reporting/analytics that wants to mirror the recommender's behavior
-// (expected logit penalty etc.) needs the same constant.
-export const WEAKNESS_TEMPERATURE = 0.5;
-
 const MIN_TRAINING_ATTEMPTS = 20;
 // Prior precision on each per-PC beta_k (beta_k ~ N(0, 1/lambda_k)):
 // weakness_axis_lambda — a per-axis vector fit by empirical Bayes in
@@ -56,6 +50,12 @@ const MIN_TRAINING_ATTEMPTS = 20;
 // embedding K here (only a transient cache skew), we skip training rather than
 // fabricate a prior.
 const AXIS_LAMBDA = POPULATION_CONSTANTS.weakness_axis_lambda;
+// Population mean of the CONTRAST β_correct − β_picked, per axis, from the same
+// empirical-Bayes pass as AXIS_LAMBDA (pipeline.fit_population_constants). Scoring
+// subtracts it; see weaknessScore for why the contrast — unlike the sum — is centred
+// on a shipped mean rather than on zero. Validated at boot by
+// population-constants.js, which is what lets weaknessScore index it unguarded.
+const AXIS_CONTRAST_MEAN = POPULATION_CONSTANTS.weakness_contrast_mean;
 const MAX_EPOCHS = 200;
 const MAX_TRAINING_TIME_MS = 1000;
 const LEARNING_RATE = 0.05;
@@ -278,6 +278,20 @@ export async function trainWeakness() {
 // problems an overplayer should see LESS of). The per-axis empirical-Bayes prior
 // shrinks β_picked toward 0 with no picking signal, so the contrast degrades
 // gracefully to β_correct alone when there's no direction to read.
+//
+// The contrast is CENTRED on a shipped population mean before it is scored, and that
+// is what makes it personal. A wrong pick differs from the answer by a systematic
+// corpus offset — a description of what wrong moves look like, not of who played
+// them — and the likelihood routes that offset into β_picked, so every user's raw
+// contrast carries the same component. Scoring it uncentred ranks candidates by a
+// fixed corpus preference and serves everyone the same corner of the pool in the
+// shape of personalization; subtracting the mean leaves the part that actually
+// differs between users. Note this is the opposite treatment from the SUM, which is
+// centred on zero and whose population displacement HALTS the offline fit: a shared
+// sum coefficient is residual difficulty belonging upstream in build_axes, so
+// centring it would hide a defect, while a shared contrast is measured geometry and
+// centring it removes a known nuisance.
+
 // Whether the shared weakness model has trained parameters at all — the
 // two-regime selector falls back to the information (slope²) regime when this
 // is false, rather than sampling uniformly over flat zero scores.
@@ -290,13 +304,17 @@ export function weaknessScore(problem) {
     if (!params || params.length < 4) return 0;
     const K = (params.length - 2) / 2;
     if (!Number.isInteger(K) || K <= 0) return 0;
+    // Also what makes AXIS_CONTRAST_MEAN[k] safe to index below: it is length K for the
+    // axis set package_for_pwa shipped (check_axis_prior refuses otherwise), and this
+    // line establishes that the trained model's K is that same shipped K.
     if (!problem.embedding || problem.embedding.length !== K) return 0;
     let score = 0;
     for (let k = 0; k < K; k++) {
-        // β_correct[k] − β_picked[k]: the identified over/under weakness
-        // direction (see the note above on why β_picked enters with a MINUS,
-        // not the inverted + of the old sum).
-        const betaEff = params[2 + k] - params[2 + K + k];
+        // (β_correct[k] − β_picked[k]) − population mean: the identified over/under
+        // weakness direction (see the note above on why β_picked enters with a MINUS,
+        // not the inverted + of the old sum), with the offset every user shares
+        // removed so what's left is this user's own deviation.
+        const betaEff = params[2 + k] - params[2 + K + k] - AXIS_CONTRAST_MEAN[k];
         score += -betaEff * problem.embedding[k];
     }
     return score;
