@@ -41,7 +41,6 @@ Usage:
 """
 
 import argparse
-import hashlib
 import os
 import sys
 import time
@@ -53,63 +52,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.rating import residual_axes as RA  # noqa: E402
 from utils.rating.residual_axes import (  # noqa: E402
     BATCH, CALIBRATION_P, FLOOR_MAX, MIN_USER_ATTEMPTS, ORTHO_WEIGHT,
-    _axis_prior, _fit_theta, _irls_off, _logloss, _p4pl, _walk_forward,
-    build_axis_features, load_axis_attempts, seed_directions,
+    _axis_prior, _fit_theta, _irls_off, _logloss, _p4pl, _stratified_folds,
+    _walk_forward, build_axis_features, eigen_directions, load_axis_attempts,
+    seed_directions,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
-
-
-def eigen_init(rows_by_user, train_users, F, tid_index, rank, params, lapse, k):
-    """Data-derived warm start: the top-k directions of the between-user
-    residual, computed from the TRAINING users only.
-
-    At v = 0 the loading gradient is identically zero, so which direction an
-    axis escapes along is decided by its random draw. The direction the model
-    actually wants is available in closed form: linearizing around v = 0, each
-    user pulls the loadings along their own residual score
-
-        s_u = sum_p (y_up - p_hat_up) * x_p
-
-    under the axis-free baseline, and the dominant escape directions are the top
-    eigenvectors of the CENTRED second moment of those scores. Centring is what
-    keeps this about between-user structure — the uncentred mean direction is
-    population residual difficulty, which the axes are forbidden to carry.
-
-    This is a warm start in the same sense the hand-crafted scalars are, with
-    the difference that nothing about it is specified by hand: the model picks
-    its own directions from what it has not yet explained. Deterministic, so it
-    removes the initialization lottery rather than merely damping it. Train
-    users only — seeding from the eval fold's residuals would leak."""
-    all_r0 = np.array([v[0] for v in params.values()])
-    grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
-    scores = []
-    for u in train_users:
-        a = rows_by_user[u]
-        tids = [t for t, _ in a]
-        y = np.array([s for _, s in a], dtype=float)
-        R0 = np.array([params[t][0] for t in tids])
-        A = np.array([params[t][1] for t in tids])
-        C = np.clip(np.array([params[t][2] for t in tids]), 0.0, FLOOR_MAX)
-        span = np.maximum(1.0 - C - lapse, 1e-6)
-        q = np.clip((CALIBRATION_P - C) / span, 1e-6, 1 - 1e-6)
-        kap = np.log(q / (1 - q))
-        th = _fit_theta(R0, A, C, span, kap, y, grid)
-        P4 = _p4pl(th, R0, A, C, span, kap)
-        off = np.log(P4 / (1 - P4))
-        X = np.column_stack([np.ones(len(tids)),
-                             np.array([rank[t] for t in tids])])
-        w = _irls_off(X, y, off, ridge=1e-6)
-        p = 1.0 / (1.0 + np.exp(-np.clip(off + X @ w, -35, 35)))
-        idx = np.array([tid_index[t] for t in tids])
-        scores.append(F[idx].astype(np.float64).T @ (y - p))
-    S = np.stack(scores)
-    S = S - S.mean(axis=0, keepdims=True)
-    ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
-    top = vec[:, ::-1][:, :k].T                      # (k, n_feat)
-    return (top / (np.linalg.norm(top, axis=1, keepdims=True) + 1e-9)
-            ).astype(np.float32)
 
 
 def train_axes_checkpointed(rows_by_user, train_users, F, tid_index, k_axes,
@@ -220,20 +170,27 @@ def train_axes_checkpointed(rows_by_user, train_users, F, tid_index, k_axes,
 def gain_and_leakage(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
     """residual_axes.axes_ll_gain, additionally returning the per-axis
     coefficient displacement from the penalized pass."""
-    _o, _s, _y, c0 = _walk_forward(rows_by_user, eval_users, g, rank, params,
-                                   tid_index, lapse)
-    off, sc, y, coefs = _walk_forward(rows_by_user, eval_users, g, rank, params,
-                                      tid_index, lapse,
-                                      penalty=_axis_prior(c0))
+    _o, _s, _y, _u, c0 = _walk_forward(rows_by_user, eval_users, g, rank,
+                                       params, tid_index, lapse)
+    off, sc, y, uid, coefs = _walk_forward(rows_by_user, eval_users, g, rank,
+                                           params, tid_index, lapse,
+                                           penalty=_axis_prior(c0))
     sc = (sc - sc.mean()) / (sc.std() + 1e-9)
     Xk = np.column_stack([np.ones(len(y)), sc])
     w = _irls_off(Xk, y, off, ridge=1e-9)
     gain = _logloss(off, y) - _logloss(off + Xk @ w, y)
+    p0 = np.clip(1/(1+np.exp(-np.clip(off, -35, 35))), 1e-9, 1-1e-9)
+    p1 = np.clip(1/(1+np.exp(-np.clip(off + Xk @ w, -35, 35))), 1e-9, 1-1e-9)
+    row = (y*np.log(p1) + (1-y)*np.log(1-p1)
+           - y*np.log(p0) - (1-y)*np.log(1-p0))
+    cnt = np.bincount(uid); tot = np.bincount(uid, weights=row)
+    ok = cnt > 0
+    per_user = float(np.mean(tot[ok]/cnt[ok]) * 1000.0)
     mu = coefs.mean(axis=0)
     second = (coefs ** 2).mean(axis=0)
     share = mu ** 2 / np.maximum(second, 1e-30)
     sign = np.mean(np.sign(coefs) == np.sign(mu)[None, :], axis=0)
-    return gain, len(y), share, sign, mu
+    return gain, len(y), share, sign, mu, per_user
 
 
 def main():
@@ -242,6 +199,14 @@ def main():
     ap.add_argument("--arms", default="cold,warm")
     ap.add_argument("--seeds", default="0,1")
     ap.add_argument("--checkpoints", default="400,800,1600,3200")
+    ap.add_argument("--warmup", type=int, default=None,
+                    help="override residual_axes.WARMUP — attempts a user needs "
+                         "before their first scored block. With EVAL_BLOCK it "
+                         "sets who is scorable at all (WARMUP+EVAL_BLOCK), which "
+                         "is what decides whether the measured population "
+                         "resembles the one axis-driven selection is live for")
+    ap.add_argument("--eval-block", type=int, default=None,
+                    help="override residual_axes.EVAL_BLOCK")
     ap.add_argument("--normalize-g", action="store_true",
                     help="project g_lin rows to unit norm after each step "
                          "(optimization fix; see train_axes_checkpointed)")
@@ -260,6 +225,12 @@ def main():
     seeds = [int(x) for x in args.seeds.split(",")]
     cps = sorted(int(x) for x in args.checkpoints.split(","))
 
+    # Patch the module globals _walk_forward reads, before anything calls it.
+    if args.warmup is not None:
+        RA.WARMUP = args.warmup
+    if args.eval_block is not None:
+        RA.EVAL_BLOCK = args.eval_block
+
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
     t0 = time.time()
@@ -277,24 +248,33 @@ def main():
             rows_by_user[u].append((p, int(bool(s))))
     users = sorted(u for u, a in rows_by_user.items()
                    if len(a) >= MIN_USER_ATTEMPTS)
-    fold_of = {u: int(hashlib.md5(u.encode()).hexdigest(), 16) % 2 for u in users}
+    fold_of = _stratified_folds(users, rows_by_user)
+    print(f"scorable threshold: WARMUP {RA.WARMUP} + EVAL_BLOCK {RA.EVAL_BLOCK} "
+          f"= {RA.WARMUP + RA.EVAL_BLOCK} attempts", flush=True)
     print(f"device {device}, loaded in {time.time() - t0:.0f}s: {len(tids)} "
           f"problems, {len(users)} users, checkpoints {cps}", flush=True)
 
-    acc = defaultdict(lambda: [0.0, 0, [], []])   # (k,arm,ep,seed) -> g,n,share,sign
+    # eigen directions do not depend on K, so compute each fold's set once at the
+    # widest count requested and slice — otherwise every candidate repeats a full
+    # per-user baseline pass for nothing.
+    tu_by_fold = {f: [u for u in users if fold_of[u] != f] for f in (0, 1)}
+    eigen_by_fold = ({f: eigen_directions(rows_by_user, tu, F, tid_index, rank,
+                                          params, lapse, max(ks))
+                      for f, tu in tu_by_fold.items()}
+                     if "eigen" in arms else {})
+
+    acc = defaultdict(lambda: [0.0, 0, [], [], []])  # g,n,share,sign,per_user
     for k in ks:
         g_seed = seed_directions(F, S_mat, min(3, k))
         for seed in seeds:
             for arm in arms:
                 for fold in (0, 1):
-                    tu = [u for u in users if fold_of[u] != fold]
+                    tu = tu_by_fold[fold]
                     eu = [u for u in users if fold_of[u] == fold]
                     if arm == "warm":
                         g_init = g_seed
                     elif arm == "eigen":
-                        # per FOLD, from that fold's training users only
-                        g_init = eigen_init(rows_by_user, tu, F, tid_index,
-                                            rank, params, lapse, k)
+                        g_init = eigen_by_fold[fold][:k]
                     else:
                         g_init = None
                     for ep, g, norms in train_axes_checkpointed(
@@ -302,27 +282,28 @@ def main():
                             seed, cps, normalize_g=args.normalize_g,
                             g_lr=args.g_lr, v_init_sd=args.v_init_sd):
                         ts = time.time()
-                        gain, n, share, sign, mu = gain_and_leakage(
+                        gain, n, share, sign, mu, pu = gain_and_leakage(
                             rows_by_user, eu, g, rank, params, tid_index, lapse)
                         a = acc[(k, arm, ep, seed)]
                         a[0] += gain
                         a[1] += n
                         a[2].append(share)
                         a[3].append(sign)
-                        print(f"  K={k} {arm:4s} ep={ep:5d} seed={seed} "
-                              f"fold={fold}: gain {gain / n * 1000:.3f} "
-                              f"share {np.round(share, 3)} sign "
-                              f"{np.round(sign, 2)} |g| {np.round(norms, 2)} "
-                              f"({time.time() - ts:.0f}s)", flush=True)
+                        a[4].append(pu)
+                        print(f"  K={k} {arm:5s} ep={ep:5d} seed={seed} "
+                              f"fold={fold}: pooled {gain / n * 1000:.3f} "
+                              f"per-user {pu:.3f} share "
+                              f"{np.round(share, 3)} ({time.time() - ts:.0f}s)",
+                              flush=True)
                         if a[1] and len(a[2]) == 2:
                             print(f"K={k} {arm} ep={ep} seed={seed}: POOLED "
-                                  f"{a[0] / a[1] * 1000:.3f} mnat/attempt  "
-                                  f"worst-axis share "
+                                  f"{a[0] / a[1] * 1000:.3f}  PER-USER "
+                                  f"{np.mean(a[4]):.3f}  worst-share "
                                   f"{np.max(np.mean(a[2], axis=0)):.3f}",
                                   flush=True)
 
     print("\n===== epoch curve: gain vs displacement =====", flush=True)
-    print("   K arm   epochs   gain(mnat)  sd    worst-share  worst-sign")
+    print("   K arm   epochs   pooled   sd     per-user   ratio  worst-share")
     for k in ks:
         for arm in arms:
             for ep in cps:
@@ -331,10 +312,11 @@ def main():
                 if not vals:
                     continue
                 g = [a[0] / a[1] * 1000 for a in vals if a[1]]
+                pu = [np.mean(a[4]) for a in vals if a[4]]
                 sh = np.max([np.mean(a[2], axis=0) for a in vals])
-                sg = np.max([np.mean(a[3], axis=0) for a in vals])
-                print(f"  {k:2d} {arm:4s} {ep:6d}   {np.mean(g):8.3f}  "
-                      f"{np.std(g):5.3f}      {sh:6.3f}      {sg:6.3f}")
+                print(f"  {k:2d} {arm:5s} {ep:6d} {np.mean(g):8.3f} "
+                      f"{np.std(g):6.3f} {np.mean(pu):9.3f} "
+                      f"{np.mean(pu) / max(np.mean(g), 1e-9):6.2f}  {sh:9.3f}")
     print(f"\ntotal {time.time() - t0:.0f}s", flush=True)
 
 

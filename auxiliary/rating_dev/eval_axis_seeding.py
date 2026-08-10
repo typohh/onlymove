@@ -127,8 +127,8 @@ def main():
                                                       epochs=ep)
                         t_tr = time.time() - ts
                         ts = time.time()
-                        gain, n = axes_ll_gain(rows_by_user, eu, g, rank,
-                                               params, tid_index, lapse)
+                        gain, n, _gu, _nu = axes_ll_gain(rows_by_user, eu, g, rank,
+                                                         params, tid_index, lapse)
                         loadings[(k, arm, ep, seed, fold)] = g
                         tg += gain
                         tn += n
