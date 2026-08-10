@@ -34,7 +34,6 @@ by user) stays within STOP_FRACTION of the running peak; the selected K is the
 last one before the breach, so the axis set grows naturally with data volume.
 """
 
-import hashlib
 import json
 import os
 from collections import defaultdict
@@ -67,12 +66,60 @@ SEED_RIDGE = 10.0
 BATCH = 8192
 MIN_USER_ATTEMPTS = 50
 
+# Per-user normalisation of the residual scores the warm-start directions are
+# taken from (normalize_scores). Load-bearing: unnormalised, a user's weight in
+# the moment grows with the SQUARE of their attempt count, and the axes end up
+# describing a handful of accounts rather than a skill.
+#
+# "user" over "rootn" is MEASURED, not assumed. The test is whether a user's
+# contribution to an axis still tracks how much they played, since an axis that
+# does is describing accounts rather than skills: under "user" that correlation
+# sits near zero (slightly negative — light users' normalised scores are noisier),
+# while "rootn" leaves it clearly positive on the leading axes because it keeps
+# sqrt(n) signal scaling by design. "user" is also the only option for which
+# centring removes population difficulty exactly, that component entering s_u in
+# proportion to n_u. Figures in CLAUDE.md.
+EIGEN_WEIGHTING = "user"
+
 # incremental-K selection
 K_START = 3                 # floor; every candidate count is warm-started alike
 K_MAX = 12                  # runaway backstop
 STOP_FRACTION = 0.03        # stop when gain < (1 - this) * peak; select K-1
 
-# walk-forward eval protocol (client replica — same as utils.rating.slope_calibration)
+# Walk-forward eval protocol. The window and the per-user fit mirror the client's,
+# but WARMUP and EVAL_BLOCK are set from a different question than
+# utils.rating.slope_calibration's identically-named constants, and the two are
+# deliberately NOT kept in step: that module scores the global slope/floor scale,
+# for which any user with enough history will do, while this one scores whether
+# the AXES help — and the axes only influence what anyone is served once the
+# client's two gates open (weaknessModelReady, needing 20 embedded attempts, and
+# rankConverged, se < 2*seFloorAt(rank)).
+#
+# WARMUP + EVAL_BLOCK is therefore the threshold that decides whether the measured
+# population resembles the population the feature is live for. Set too high, the
+# evaluation silently restricts itself to long-history accounts and says nothing
+# about the users who have just reached the gate. auxiliary/simulate_rank_convergence.mjs
+# measures where that gate opens by simulation — a replay of real histories cannot,
+# because retroactive re-rating means the stored ratings are not the ones the serve
+# decisions were taken under — and puts it near 80 attempts for ranks around the
+# population prior, rising to ~175 in the far kyu tail. WARMUP is just under that
+# typical figure, which argues for lowering WARMUP toward it.
+#
+# It is NOT lowered, because WARMUP is also a CONDITIONING knob and that binds
+# first. The per-user design is [1, rank, K axes], fit by IRLS on the trailing
+# window; on a short window those columns can come near enough to collinear that
+# the fit is unbounded and returns coefficients orders of magnitude too large,
+# whose scores then swamp the pooled calibration. The guard is _axis_prior, whose
+# scale is estimated from the SAME unpenalized pass that degenerates — so when
+# short windows make many of those fits wild, the spread they supply is itself
+# large, the prior goes slack, and it adapts to the degeneracy instead of
+# correcting it. Measured at WARMUP 60 / EVAL_BLOCK 25: per-fold gains of +17.6
+# and -22.4 mnat/attempt against a normal range of 0.5-1.5.
+#
+# So the population question stands unresolved rather than answered: the
+# evaluation still restricts itself to long-history accounts, and closing that
+# gap needs a prior that cannot go slack (a cap on the EB scale, or a floor on
+# the effective window) rather than a smaller WARMUP on its own.
 WINDOW = 500
 EVAL_BLOCK = 50
 WARMUP = 120
@@ -188,8 +235,73 @@ def seed_directions(F, S_mat, k_seed):
     return (G0 / (np.linalg.norm(G0, axis=0, keepdims=True) + 1e-9)).T
 
 
+def _user_score_matrix(rows_by_user, users, F, tid_index, rank, params, lapse):
+    """RAW per-user residual score vectors under the axis-free baseline, plus each
+    user's attempt count. Returns (S (n_users, n_feat), n (n_users,)).
+
+    s_u = sum_p (y_up - p_hat_up) * x_p, a SUM over that user's attempts — so its
+    magnitude grows with how much they played, and its contribution to any second
+    moment grows with the SQUARE of that. Callers must decide how to normalise
+    before forming a moment; see eigen_directions."""
+    all_r0 = np.array([v[0] for v in params.values()])
+    grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
+    S, n = [], []
+    for u in users:
+        a = rows_by_user[u]
+        tids = [t for t, _ in a]
+        y = np.array([s for _, s in a], dtype=float)
+        R0 = np.array([params[t][0] for t in tids])
+        A = np.array([params[t][1] for t in tids])
+        C = np.clip(np.array([params[t][2] for t in tids]), 0.0, FLOOR_MAX)
+        span = np.maximum(1.0 - C - lapse, 1e-6)
+        q = np.clip((CALIBRATION_P - C) / span, 1e-6, 1 - 1e-6)
+        kap = np.log(q / (1 - q))
+        th = _fit_theta(R0, A, C, span, kap, y, grid)
+        P4 = _p4pl(th, R0, A, C, span, kap)
+        off = np.log(P4 / (1 - P4))
+        X = np.column_stack([np.ones(len(tids)),
+                             np.array([rank[t] for t in tids])])
+        w = _irls_off(X, y, off, ridge=1e-6)
+        p = 1.0 / (1.0 + np.exp(-np.clip(off + X @ w, -35, 35)))
+        idx = np.array([tid_index[t] for t in tids])
+        S.append(F[idx].astype(np.float64).T @ (y - p))
+        n.append(len(a))
+    return np.stack(S), np.asarray(n, dtype=float)
+
+
+def normalize_scores(S, n, weighting):
+    """Per-user normalisation applied BEFORE centring and the moment.
+
+    "sum"    raw. The contribution of a user to the moment scales with n_u^2, so
+             the directions are set by whoever played most — measured on the
+             shipped corpus, one account supplied 24-36% of every axis and three
+             supplied over half, against an effective contributor count below
+             the 10th percentile of RANDOM directions in the same space. Kept
+             only so the defect can be reproduced.
+    "rootn"  s_u / sqrt(n_u). A sum of n independent mean-zero terms has scale
+             sqrt(n), so this puts every user's NOISE on the same footing while
+             genuine structure still grows as sqrt(n) — a heavy account keeps
+             more influence than a light one, which is right because it carries
+             more evidence, but not quadratically more.
+    "user"   s_u / n_u, the mean per-attempt score: every user counts alike. This
+             one also makes the centring EXACT for population difficulty, which
+             the others cannot: that component enters s_u in proportion to n_u,
+             so dividing by n_u renders it identical across users and subtracting
+             the mean removes it outright, whereas under sqrt it survives
+             centring in proportion to sqrt(n_u). The cost is that a light user's
+             noise carries full weight (scale 1/sqrt(n_u)), bounded only by
+             MIN_USER_ATTEMPTS."""
+    if weighting == "sum":
+        return S
+    if weighting == "rootn":
+        return S / np.sqrt(n)[:, None]
+    if weighting == "user":
+        return S / n[:, None]
+    raise ValueError(f"unknown score weighting {weighting!r}")
+
+
 def eigen_directions(rows_by_user, train_users, F, tid_index, rank, params,
-                     lapse, k):
+                     lapse, k, weighting=None):
     """The production warm start: the top-k directions of BETWEEN-USER residual
     variation, computed from `train_users` only. Returns (k, n_feat), unit rows.
 
@@ -212,29 +324,9 @@ def eigen_directions(rows_by_user, train_users, F, tid_index, rank, params,
 
     Train users only: directions taken from the users an axis set is scored on
     would leak, and the K selection would then reward the leak."""
-    all_r0 = np.array([v[0] for v in params.values()])
-    grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
-    scores = []
-    for u in train_users:
-        a = rows_by_user[u]
-        tids = [t for t, _ in a]
-        y = np.array([s for _, s in a], dtype=float)
-        R0 = np.array([params[t][0] for t in tids])
-        A = np.array([params[t][1] for t in tids])
-        C = np.clip(np.array([params[t][2] for t in tids]), 0.0, FLOOR_MAX)
-        span = np.maximum(1.0 - C - lapse, 1e-6)
-        q = np.clip((CALIBRATION_P - C) / span, 1e-6, 1 - 1e-6)
-        kap = np.log(q / (1 - q))
-        th = _fit_theta(R0, A, C, span, kap, y, grid)
-        P4 = _p4pl(th, R0, A, C, span, kap)
-        off = np.log(P4 / (1 - P4))
-        X = np.column_stack([np.ones(len(tids)),
-                             np.array([rank[t] for t in tids])])
-        w = _irls_off(X, y, off, ridge=1e-6)
-        p = 1.0 / (1.0 + np.exp(-np.clip(off + X @ w, -35, 35)))
-        idx = np.array([tid_index[t] for t in tids])
-        scores.append(F[idx].astype(np.float64).T @ (y - p))
-    S = np.stack(scores)
+    S, n = _user_score_matrix(rows_by_user, train_users, F, tid_index, rank,
+                              params, lapse)
+    S = normalize_scores(S, n, weighting or EIGEN_WEIGHTING)
     S = S - S.mean(axis=0, keepdims=True)
     _ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
     top = vec[:, ::-1][:, :k].T
@@ -370,12 +462,18 @@ def _walk_forward(rows_by_user, eval_users, g, rank, params, tid_index, lapse,
                   penalty=None):
     """One causal pass per user: fit ability and the per-user logistic on a
     trailing window, score the next block. Returns the pooled baseline offset,
-    axis score and outcome, plus every per-user axis-coefficient vector the
-    pass produced (the empirical-Bayes input)."""
+    axis score and outcome, a per-row user tag, and every per-user
+    axis-coefficient vector the pass produced (the empirical-Bayes input).
+
+    The user tag is what makes a per-USER read of the gain possible at all.
+    Without it the only available statistic is the attempt-pooled one, in which
+    a user contributes in proportion to how much they have played — and the
+    attempt distribution is steep enough that a single account can carry a
+    sixth of a fold."""
     all_r0 = np.array([v[0] for v in params.values()])
     grid = np.arange(all_r0.min() - 3.0, all_r0.max() + 3.0, 0.05)
-    offs, scores, ys, coefs = [], [], [], []
-    for u in eval_users:
+    offs, scores, ys, coefs, uidx = [], [], [], [], []
+    for ui, u in enumerate(eval_users):
         a = rows_by_user[u]
         if len(a) < WARMUP + EVAL_BLOCK:
             continue
@@ -411,8 +509,9 @@ def _walk_forward(rows_by_user, eval_users, g, rank, params, tid_index, lapse,
             scores.append(X_ax[t0:hi, 2:] @ w_ax[2:])
             ys.append(y[t0:hi])
             coefs.append(w_ax[2:].copy())
+            uidx.append(np.full(hi - t0, ui, dtype=np.int64))
     return (np.concatenate(offs), np.concatenate(scores), np.concatenate(ys),
-            np.stack(coefs))
+            np.concatenate(uidx), np.stack(coefs))
 
 
 def _axis_prior(coefs):
@@ -430,21 +529,57 @@ def _axis_prior(coefs):
     return np.concatenate([[0.0, 0.0], 1.0 / tau ** 2])   # intercept, rank free
 
 
+def _stratified_folds(users, rows_by_user):
+    """Assign users to two folds balancing ATTEMPT MASS, heaviest first.
+
+    A hash of the user id splits the accounts evenly but says nothing about how
+    much each one played, and the attempt distribution is steep — a handful of
+    accounts hold a quarter of all attempts — so the two halves can carry very
+    different amounts of evidence. Balancing mass is necessary but NOT
+    sufficient and should not be sold as a fix for fold disagreement on its own:
+    an even split of mass still leaves *which* heavy accounts land where to
+    chance, and individual accounts differ enough in how well the axes predict
+    them that the two folds' pooled rates can still diverge. What bounds that is
+    reading the per-user rate beside the pooled one (see axes_ll_gain).
+
+    Greedy longest-processing-time: walk users heaviest first, each to whichever
+    fold currently holds less. Deterministic, ties broken by user id, so a rerun
+    on unchanged data reproduces the split exactly."""
+    order = sorted(users, key=lambda u: (-len(rows_by_user[u]), u))
+    mass = [0, 0]
+    fold_of = {}
+    for u in order:
+        f = 0 if mass[0] <= mass[1] else 1
+        fold_of[u] = f
+        mass[f] += len(rows_by_user[u])
+    return fold_of
+
+
 def axes_ll_gain(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
-    """Held-out walk-forward LL gain (nats TOTAL, plus n) of the axes block
-    over the production-form 4PL baseline, with the global calibration fit
-    (intercept + kappa) applied to the pooled axis scores.
+    """Held-out walk-forward LL gain of the axes block over the production-form
+    4PL baseline, with the global calibration fit (intercept + kappa) applied to
+    the pooled axis scores. Returns (gain_nats_total, n_attempts,
+    per_user_mnat_per_attempt, n_users).
+
+    TWO WEIGHTINGS, because they answer different questions and can disagree.
+    The attempt-pooled rate (gain/n) is total predictive value delivered, and it
+    is what the count selection reads. The per-user mean of each user's own
+    per-attempt rate weights every user alike, and is the closer read of "does
+    this help a typical user" — the attempt distribution is steep enough that
+    pooling lets a handful of accounts decide the number. An axis set that wins
+    on one and loses on the other is exactly the case worth seeing rather than
+    silently resolving, so both are reported.
 
     Two passes: the first supplies the between-user coefficient spread, the
     second is the scored fit under that prior. The per-user coefficients are
     shrunk exactly as the client shrinks them -- unpenalized, a window whose
     design is near-singular admits an arbitrarily large coefficient, and the
     resulting scores swamp the pooled calibration."""
-    _o, _s, _y, coefs = _walk_forward(rows_by_user, eval_users, g, rank,
-                                      params, tid_index, lapse)
-    off, sc, y, _c = _walk_forward(rows_by_user, eval_users, g, rank, params,
-                                   tid_index, lapse,
-                                   penalty=_axis_prior(coefs))
+    _o, _s, _y, _u, coefs = _walk_forward(rows_by_user, eval_users, g, rank,
+                                          params, tid_index, lapse)
+    off, sc, y, uid, _c = _walk_forward(rows_by_user, eval_users, g, rank,
+                                        params, tid_index, lapse,
+                                        penalty=_axis_prior(coefs))
     # Standardize the pooled axis score before calibrating. A converged logistic
     # fit is invariant to an affine rescale of a regressor -- the coefficient
     # absorbs it and the intercept absorbs the centering -- so this leaves the
@@ -456,7 +591,21 @@ def axes_ll_gain(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
     sc = (sc - sc.mean()) / (sc.std() + 1e-9)
     Xk = np.column_stack([np.ones(len(y)), sc])
     w = _irls_off(Xk, y, off, ridge=1e-9)
-    return _logloss(off, y) - _logloss(off + Xk @ w, y), len(y)
+    # Per-user rates use the SAME globally-fitted calibration as the pooled
+    # figure: the two differ only in how the per-row gains are aggregated, so a
+    # disagreement between them is about the weighting and nothing else.
+    z0 = np.clip(off, -35, 35)
+    z1 = np.clip(off + Xk @ w, -35, 35)
+    p0 = np.clip(1 / (1 + np.exp(-z0)), 1e-9, 1 - 1e-9)
+    p1 = np.clip(1 / (1 + np.exp(-z1)), 1e-9, 1 - 1e-9)
+    row = (y * np.log(p1) + (1 - y) * np.log(1 - p1)
+           - y * np.log(p0) - (1 - y) * np.log(1 - p0))
+    cnt = np.bincount(uid)
+    tot = np.bincount(uid, weights=row)
+    ok = cnt > 0
+    per_user = float(np.mean(tot[ok] / cnt[ok]) * 1000.0)
+    return (_logloss(off, y) - _logloss(off + Xk @ w, y), len(y),
+            per_user, int(ok.sum()))
 
 
 # ------------------------------------------------------------------ selection
@@ -481,10 +630,12 @@ def select_and_fit(device="cuda"):
             rows_by_user[u].append((p, int(bool(s))))
     users = sorted(u for u, a in rows_by_user.items()
                    if len(a) >= MIN_USER_ATTEMPTS)
-    fold_of = {u: int(hashlib.md5(u.encode()).hexdigest(), 16) % 2
-               for u in users}
+    fold_of = _stratified_folds(users, rows_by_user)
+    m0 = sum(len(rows_by_user[u]) for u in users if fold_of[u] == 0)
+    m1 = sum(len(rows_by_user[u]) for u in users if fold_of[u] == 1)
     print(f"axes: {len(tids)} problems, {len(users)} users "
-          f"({sum(len(rows_by_user[u]) for u in users)} attempts)")
+          f"({sum(len(rows_by_user[u]) for u in users)} attempts); "
+          f"folds {m0}/{m1} attempts")
 
     # Warm-start directions per fold, computed ONCE at the widest count the
     # search can reach and sliced per candidate: they are the eigenvectors of a
@@ -496,21 +647,30 @@ def select_and_fit(device="cuda"):
                             lapse, K_MAX)
         for f, tr in folds.items()}
 
-    gains, peak, breached = {}, -np.inf, None
+    gains, per_user_gains, peak, breached = {}, {}, -np.inf, None
     k = K_START
     while k <= K_MAX:
-        total_gain, total_n = 0.0, 0
+        total_gain, total_n, fold_rate, pu = 0.0, 0, [], []
         for fold in (0, 1):
             tr = folds[fold]
             ev = [u for u in users if fold_of[u] == fold]
             g, _W, _rms, _sd = train_axes(rows_by_user, tr, F, tid_index, k,
                                           eigen_by_fold[fold][:k], device)
-            gain, n = axes_ll_gain(rows_by_user, ev, g, rank, params,
-                                   tid_index, lapse)
+            gain, n, gain_u, n_u = axes_ll_gain(rows_by_user, ev, g, rank,
+                                                params, tid_index, lapse)
             total_gain += gain
             total_n += n
+            fold_rate.append(gain / n * 1000.0)
+            pu.append((gain_u, n_u))
         gains[k] = total_gain / total_n * 1000.0
-        print(f"  K={k}: axes LL gain {gains[k]:.3f} mnat/attempt")
+        # Per-user rate across both folds, each fold weighted by its user count
+        # so the two halves contribute in proportion to how many people they
+        # hold rather than how much those people played.
+        per_user_gains[k] = (sum(r * m for r, m in pu)
+                             / max(sum(m for _r, m in pu), 1))
+        print(f"  K={k}: axes LL gain {gains[k]:.3f} mnat/attempt "
+              f"(per-user {per_user_gains[k]:.3f}; "
+              f"folds {fold_rate[0]:.3f}/{fold_rate[1]:.3f})")
         peak = max(peak, gains[k])
         # The stop rule below is a FRACTION OF THE PEAK, which orders candidates
         # only while the peak is positive. Against a non-positive peak the
@@ -554,7 +714,8 @@ def select_and_fit(device="cuda"):
     axis_mu = g_final.mean(axis=0)
     axis_sd = g_final.std(axis=0) + 1e-9
     return {
-        "k_sel": k_sel, "gains": gains, "tids": tids,
+        "k_sel": k_sel, "gains": gains, "per_user_gains": per_user_gains,
+        "tids": tids,
         "loadings": ((g_final - axis_mu) / axis_sd).astype(np.float32),
         "W": W.astype(np.float32), "rms": rms.astype(np.float32),
         "v_sd": v_sd.astype(np.float32),

@@ -328,6 +328,10 @@ def main():
         axis_mu=fit["axis_mu"], axis_sd=fit["axis_sd"],
         gains_k=np.array(sorted(fit["gains"])),
         gains=np.array([fit["gains"][k] for k in sorted(fit["gains"])]),
+        # the same candidates under per-USER weighting, recorded beside the
+        # attempt-pooled figures the selection reads (residual_axes.axes_ll_gain)
+        gains_per_user=np.array([fit["per_user_gains"][k]
+                                 for k in sorted(fit["gains"])]),
         motif_ids=np.array([m for m, _ in matches]))
 
     with open(os.path.join(OUT_DIR, "labels.json"), "w") as f:
