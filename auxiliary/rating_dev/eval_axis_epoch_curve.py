@@ -56,12 +56,100 @@ from utils.rating import residual_axes as RA  # noqa: E402
 from utils.rating.residual_axes import (  # noqa: E402
     BATCH, CALIBRATION_P, FLOOR_MAX, MIN_USER_ATTEMPTS, ORTHO_WEIGHT,
     _axis_prior, _fit_theta, _irls_off, _logloss, _p4pl, _stratified_folds,
-    _walk_forward, build_axis_features, eigen_directions, load_axis_attempts,
+    _user_score_matrix, _walk_forward, build_axis_features, eigen_directions,
+    load_axis_attempts,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
 from auxiliary.rating_dev.hand_seeds import (  # noqa: E402
     hand_scalars, seed_directions,
 )
+
+
+def fold_moment(rows_by_user, users, F, tid_index, rank, params, lapse):
+    """The centred, per-user-normalised residual score moment — the matrix
+    eigen_directions eigendecomposes. Returned so anchors can be scored on the
+    SAME quantity the eigenvalues measure."""
+    S, n = _user_score_matrix(rows_by_user, users, F, tid_index, rank, params,
+                              lapse)
+    S = S / n[:, None]
+    S = S - S.mean(axis=0, keepdims=True)
+    return S.T @ S / S.shape[0]
+
+
+def named_anchor_directions(F, tid_index, Sigma, ridge=10.0):
+    """Feature-space directions for the NAMED banked motifs, ranked by the
+    between-user variation each captures (e' Sigma e — the same quantity an
+    eigenvalue is).
+
+    NAMED ONLY, deliberately. The bank also holds motifs from fits nobody has
+    labelled, and those carry no vocabulary worth preserving: re-adopting one
+    keeps an opaque identifier alive, which is the outcome this whole mechanism
+    exists to avoid. A motif earns priority by having a human name, not by
+    having been fitted before.
+
+    An anchor differs from an eigenvector in the way that matters for a warm
+    start: an eigenvector is a guess, while an anchor is a previous fit's
+    ANSWER. Measured, guesses are walked ~80 degrees away from and anchors
+    ~45-65, so a previous optimum is closer to stationary without being fixed."""
+    import json
+    d = np.load(os.path.join(PROJECT_ROOT, "axes", "label_anchors.npz"),
+                allow_pickle=False)
+    a_tids = [str(t) for t in d["tids"]]
+    a_ids = [str(i) for i in d["ids"]]
+    M = d["M"]
+    with open(os.path.join(PROJECT_ROOT, "axes", "labels.json")) as f:
+        bank = json.load(f)["bank"]
+    keep = [(i, tid_index[t]) for i, t in enumerate(a_tids) if t in tid_index]
+    ai = np.array([x[0] for x in keep])
+    ni = np.array([x[1] for x in keep])
+    Fa = F[ni].astype(np.float64)
+    A = Fa.T @ Fa + ridge * np.eye(F.shape[1])
+    out = []
+    for j, mid in enumerate(a_ids):
+        ent = bank.get(mid) or {}
+        name = ent.get("positive") or ent.get("negative")
+        if not name:
+            continue                      # unnamed: no vocabulary to preserve
+        y = M[j, ai].astype(np.float64)
+        if y.std() < 1e-9:
+            continue
+        y = (y - y.mean()) / y.std()
+        e = np.linalg.solve(A, Fa.T @ y)
+        nrm = np.linalg.norm(e)
+        if nrm < 1e-12:
+            continue
+        e = e / nrm
+        out.append((float(e @ Sigma @ e), mid, name, e))
+    out.sort(key=lambda r: -r[0])
+    return out
+
+
+def blend_toward_anchors(eig, anchors, alpha):
+    """Tilt each eigen direction toward its nearest NAMED anchor, greedily 1-1.
+
+    This is the marginal version: at alpha 0 the warm start is unchanged, and as
+    alpha grows the start moves toward a named motif. A direction with no close
+    anchor is barely moved, so an axis the vocabulary has nothing to say about
+    is left to the data — which is the point of tilting rather than replacing."""
+    if not anchors or alpha <= 0:
+        return eig, ["-"] * len(eig)
+    A = np.stack([a[3] for a in anchors])
+    names = [a[2] for a in anchors]
+    out, used, picked = [], set(), []
+    for k in range(eig.shape[0]):
+        cs = np.abs(A @ eig[k])
+        for j in np.argsort(-cs):
+            if j not in used:
+                used.add(int(j))
+                sgn = np.sign(float(A[j] @ eig[k])) or 1.0
+                v = eig[k] + alpha * sgn * A[j]
+                out.append(v / (np.linalg.norm(v) + 1e-12))
+                picked.append(f"{names[j]}({cs[j]:.2f})")
+                break
+        else:
+            out.append(eig[k])
+            picked.append("-")
+    return np.stack(out).astype(np.float32), picked
 
 
 def train_axes_checkpointed(rows_by_user, train_users, F, tid_index, k_axes,
@@ -165,8 +253,21 @@ def train_axes_checkpointed(rows_by_user, train_users, F, tid_index, k_axes,
                 gh = g_lin(X)
                 rms = gh.pow(2).mean(dim=0).sqrt() + 1e-6
                 g_all = (gh / rms).cpu().numpy() * v.std(dim=0).cpu().numpy()[None, :]
-                norms = g_lin.weight.norm(dim=1).cpu().numpy()
-            yield ep, g_all, norms
+                W_now = g_lin.weight.detach().cpu().numpy()
+                norms = np.linalg.norm(W_now, axis=1)
+                # |cos| between each axis and the direction it STARTED at. A warm
+                # start that survives training keeps this near 1; one the fit
+                # walks away from drops toward 0, and the axis is then not about
+                # whatever the starting direction was about.
+                if g_init is not None:
+                    gi = np.asarray(g_init, dtype=np.float64)
+                    kept = np.array([
+                        abs(float(W_now[i] @ gi[i]) /
+                            ((np.linalg.norm(W_now[i]) * np.linalg.norm(gi[i])) + 1e-12))
+                        for i in range(min(len(gi), W_now.shape[0]))])
+                else:
+                    kept = np.array([])
+            yield ep, g_all, norms, kept
 
 
 def gain_and_leakage(rows_by_user, eval_users, g, rank, params, tid_index, lapse):
@@ -201,6 +302,16 @@ def main():
     ap.add_argument("--arms", default="cold,warm")
     ap.add_argument("--seeds", default="0,1")
     ap.add_argument("--checkpoints", default="400,800,1600,3200")
+    ap.add_argument("--anchor-blend", type=float, default=0.0,
+                    help="tilt each eigen warm-start direction toward its "
+                         "nearest NAMED banked motif by this weight (0 = off, "
+                         "1 = equal parts). The marginal-boost knob")
+    ap.add_argument("--eigen-idx", default=None,
+                    help="comma-separated eigenvector indices to warm-start "
+                         "from, instead of the leading K. Profile them with "
+                         "auxiliary.rating_dev.axis_direction_profile. Sets K "
+                         "to the number given, so '2,6' fits a two-axis model "
+                         "on the score-margin and game-phase directions")
     ap.add_argument("--warmup", type=int, default=None,
                     help="override residual_axes.WARMUP — attempts a user needs "
                          "before their first scored block. With EVAL_BLOCK it "
@@ -222,7 +333,9 @@ def main():
                          "note v runs at 1e-2 and the bilinear gradient on each "
                          "factor scales with the other)")
     args = ap.parse_args()
-    ks = [int(x) for x in args.ks.split(",")]
+    eigen_idx = ([int(x) for x in args.eigen_idx.split(",")]
+                 if args.eigen_idx else None)
+    ks = [len(eigen_idx)] if eigen_idx else [int(x) for x in args.ks.split(",")]
     arms = args.arms.split(",")
     seeds = [int(x) for x in args.seeds.split(",")]
     cps = sorted(int(x) for x in args.checkpoints.split(","))
@@ -260,10 +373,23 @@ def main():
     # widest count requested and slice — otherwise every candidate repeats a full
     # per-user baseline pass for nothing.
     tu_by_fold = {f: [u for u in users if fold_of[u] != f] for f in (0, 1)}
+    n_dir = (max(eigen_idx) + 1) if eigen_idx else max(ks)
     eigen_by_fold = ({f: eigen_directions(rows_by_user, tu, F, tid_index, rank,
-                                          params, lapse, max(ks))
+                                          params, lapse, n_dir)
                       for f, tu in tu_by_fold.items()}
                      if "eigen" in arms else {})
+    anchors_by_fold = {}
+    if args.anchor_blend > 0:
+        for f, tu in tu_by_fold.items():
+            Sig = fold_moment(rows_by_user, tu, F, tid_index, rank, params, lapse)
+            anchors_by_fold[f] = named_anchor_directions(F, tid_index, Sig)
+        top = anchors_by_fold[0][:6]
+        print("named anchors by captured between-user variation: "
+              + ", ".join(f"{n} {q:.3g}" for q, _m, n, _e in top), flush=True)
+    if eigen_idx:
+        eigen_by_fold = {f: E[eigen_idx] for f, E in eigen_by_fold.items()}
+        print(f"warm start from eigenvector indices {eigen_idx} "
+              f"(K={len(eigen_idx)})", flush=True)
 
     acc = defaultdict(lambda: [0.0, 0, [], [], []])  # g,n,share,sign,per_user
     for k in ks:
@@ -275,11 +401,21 @@ def main():
                     eu = [u for u in users if fold_of[u] == fold]
                     if arm == "warm":
                         g_init = g_seed
+                    elif arm == "eigen" and args.anchor_blend > 0:
+                        base = (eigen_by_fold[fold] if eigen_idx
+                                else eigen_by_fold[fold][:k])
+                        g_init, picked = blend_toward_anchors(
+                            base.astype(np.float64), anchors_by_fold[fold],
+                            args.anchor_blend)
+                        if fold == 0:
+                            print(f"  blend a={args.anchor_blend} K={k}: {picked}",
+                                  flush=True)
                     elif arm == "eigen":
-                        g_init = eigen_by_fold[fold][:k]
+                        g_init = (eigen_by_fold[fold] if eigen_idx
+                                  else eigen_by_fold[fold][:k])
                     else:
                         g_init = None
-                    for ep, g, norms in train_axes_checkpointed(
+                    for ep, g, norms, kept in train_axes_checkpointed(
                             rows_by_user, tu, F, tid_index, k, g_init, device,
                             seed, cps, normalize_g=args.normalize_g,
                             g_lr=args.g_lr, v_init_sd=args.v_init_sd):
@@ -295,7 +431,8 @@ def main():
                         print(f"  K={k} {arm:5s} ep={ep:5d} seed={seed} "
                               f"fold={fold}: pooled {gain / n * 1000:.3f} "
                               f"per-user {pu:.3f} share "
-                              f"{np.round(share, 3)} ({time.time() - ts:.0f}s)",
+                              f"{np.round(share, 3)} kept|cos| "
+                              f"{np.round(kept, 3)} ({time.time() - ts:.0f}s)",
                               flush=True)
                         if a[1] and len(a[2]) == 2:
                             print(f"K={k} {arm} ep={ep} seed={seed}: POOLED "
