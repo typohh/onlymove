@@ -156,10 +156,10 @@ export function loadRatingRankMap() {
 // constant was load-bearing; this site is the consistency half of that fix — both
 // read the same anchorInfo. Returned RAW (not
 // on any [0,1] range):
-// weightedRandomSelect normalizes, so only relative information matters — a sharp
-// problem is quadratically preferred and a flat or guessable one down-weighted, by
-// genuine information rather than a min-max remap. A missing floor reads as 0,
-// which recovers the plain 2PL-with-lapse weight.
+// selection only ranks candidates, so only the ORDER matters — a sharp problem is
+// quadratically preferred and a flat or guessable one down-weighted, by genuine
+// information rather than a min-max remap. A missing floor reads as 0, which
+// recovers the plain 2PL-with-lapse weight.
 export function problemInfoWeight(slope, floor) {
     if (typeof slope !== 'number' || !Number.isFinite(slope) || slope <= 0) return 0;
     return slope * slope * anchorInfo(floor);

@@ -10,20 +10,31 @@ import { getTerm } from './i18n.js';
 import { reorientSgf, tsumegoIdOf } from './sgf.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, APP_MODES } from './constants.js';
 import { getRecallCandidates, recallServeShare } from './recall-model.js';
-import { weaknessScore, weaknessModelReady, WEAKNESS_TEMPERATURE } from './weakness.js';
+import { weaknessScore, weaknessModelReady } from './weakness.js';
 import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
 import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
-function weightedRandomSelect(items, weightFn) {
-    const totalWeight = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
-    if (totalWeight === 0) return items[0]; // fallback to first if no weights
-    let random = Math.random() * totalWeight;
+// The best candidate by `scoreFn`, ties going to the earliest — which, because the
+// pool arrives sorted by distance from the serve rank, means the closest-to-rank of
+// equally good problems. Both selection regimes take the MAXIMUM rather than sampling
+// in proportion to it: a proportional draw over 50 difficulty-matched candidates
+// barely departs from uniform (the weights span a narrow range, so the effective pool
+// stays near its full size), which spends the whole candidate set to move the served
+// problem almost not at all. Variety comes from the pool turning over instead — every
+// answered problem is excluded for the next RECALL_CANDIDATE_HISTORY_LENGTH attempts,
+// so the maximum is a different problem each time.
+function selectBest(items, scoreFn) {
+    let best = items[0];
+    let bestScore = -Infinity;
     for (const item of items) {
-        random -= Math.max(0, weightFn(item));
-        if (random <= 0) return item;
+        const s = scoreFn(item);
+        if (Number.isFinite(s) && s > bestScore) {
+            bestScore = s;
+            best = item;
+        }
     }
-    return items[0]; // fallback
+    return best;
 }
 
 // Picks the most-due recall candidate (a raw pool problem, no SGF yet), or null
@@ -92,27 +103,24 @@ function selectChallengeCandidate() {
         }
     }
 
-    // TWO-REGIME weighting (2026-07-18; replaced the quality·exp(T·score)
-    // product, which balanced two incommensurable units with one opaque
-    // constant). While the rank estimate is still converging, serve for
-    // INFORMATION: weight by quality = the 4PL Fisher information at the
-    // 80%-clear anchor, slope²·anchorInfo(floor) — the pool is difficulty-matched
-    // so the anchor is the right common reference, but the floor factor varies
-    // across it and is NOT absorbed by the normalization. Once converged
-    // (rankConverged: se < 2× the local floor), serve for PERSONALIZATION:
-    // weight by the weakness softmax alone, in its own calibrated units. The
-    // regimes partition where the physics does — slope-priority only changes
-    // the served set while the local pool is FRESH (a moving user), because a
-    // user parked in a band consumes its high-slope tail and converges to the
-    // band average regardless; and that fresh phase is exactly when se is
-    // still high. Boundary flapping between consecutive picks is a harmless
-    // soft blend. Falls back to the information regime while the weakness
-    // model is untrained (flat zero scores would otherwise sample uniformly).
+    // TWO REGIMES, each taking the BEST candidate in its own criterion. While the
+    // rank estimate is still converging, serve for INFORMATION: quality = the 4PL
+    // Fisher information at the 80%-clear anchor, slope²·anchorInfo(floor) — the pool
+    // is difficulty-matched so the anchor is the right common reference, but the floor
+    // factor varies across it. Once converged (rankConverged: se < 2× the local
+    // floor), serve for PERSONALIZATION: the centred weakness contrast alone, in its
+    // own units. The regimes partition where the physics does — slope-priority only
+    // changes the served set while the local pool is FRESH (a moving user), because a
+    // user parked in a band consumes its high-slope tail and converges to the band
+    // average regardless; and that fresh phase is exactly when se is still high.
+    // Boundary flapping between consecutive picks is harmless, the two criteria being
+    // applied to the same pool. Falls back to the information regime while the
+    // weakness model is untrained (flat zero scores would otherwise pick whichever
+    // candidate happened to sort first).
     if (rankConverged() && weaknessModelReady()) {
-        return weightedRandomSelect(candidateProblems,
-            p => Math.exp(WEAKNESS_TEMPERATURE * weaknessScore(p)));
+        return selectBest(candidateProblems, weaknessScore);
     }
-    return weightedRandomSelect(candidateProblems, p => Math.max(0, p.quality || 0));
+    return selectBest(candidateProblems, p => Math.max(0, p.quality || 0));
 }
 
 // Turns a raw pool candidate into a ready-to-display problem object: fetches the
