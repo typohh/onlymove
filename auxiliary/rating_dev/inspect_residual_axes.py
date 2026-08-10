@@ -425,6 +425,13 @@ def main():
                                            "per_problem.csv"),
                         help="path to the shipped per_problem.csv (default: "
                              "axes/per_problem.csv)")
+    parser.add_argument("--axes-npz", default=None,
+                        help="axes.npz supplying W for the driver tables "
+                             "(default: axes/axes.npz). Point this at a "
+                             "fit_axes_at_k output alongside its per_problem.csv "
+                             "— attribution decomposes the weights of THAT fit, "
+                             "so a mismatched pair silently describes one fit's "
+                             "tails with another fit's weights")
     parser.add_argument("--npz", default=None,
                         help="render a per-fold dev artifact instead of the "
                              "shipped axes (auxiliary.rating_dev."
@@ -443,8 +450,8 @@ def main():
                              "stay board-comparable)")
     parser.add_argument("--html", action=argparse.BooleanOptionalAction, default=True,
                         help="Render static HTML (default). --no-html prints PWA URLs instead.")
-    parser.add_argument("--rows", type=int, default=4,
-                        help="rows of extremes per tail; rows × cols problems shown, strongest first (default 5)")
+    parser.add_argument("--rows", type=int, default=8,
+                        help="rows of extremes per tail; rows × cols problems shown, strongest first (default 8)")
     parser.add_argument("--cols", type=int, default=6, help="HTML grid columns (default 6)")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/residual_axes_extremes.html)")
@@ -501,8 +508,9 @@ def main():
             import utils.rating.residual_axes as _ra
             from auxiliary.inspect_axis_inputs import column_names
             feats, _rk, _pa, act_dim = _ra.build_axis_features()
-            d = np.load(os.path.join(PROJECT_ROOT, "axes", "axes.npz"),
-                        allow_pickle=False)
+            axes_npz = args.axes_npz or os.path.join(PROJECT_ROOT, "axes",
+                                                     "axes.npz")
+            d = np.load(axes_npz, allow_pickle=False)
             W, feat_mu, feat_sd = d["W"], d["feat_mu"], d["feat_sd"]
             # the shipped value is the raw W.z rescaled by v_sd/(rms*axis_sd), a
             # positive per-axis constant, so applying it makes the decomposition
