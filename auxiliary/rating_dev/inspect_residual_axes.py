@@ -38,6 +38,7 @@ Usage:
 import argparse
 import html
 import os
+import re
 import sys
 from functools import lru_cache
 
@@ -95,6 +96,154 @@ def load_axes_npz(path):
     if not components:
         raise SystemExit(f"no g_fold*/r_fold* arrays in {path}")
     return tids, components
+
+
+
+# ---- input attribution --------------------------------------------------
+# What drives each tail, by exact linear decomposition. The axis is a linear map
+# on the standardized features, so a problem's axis value is the SUM over columns
+# of W[k,j]*z[j] and the mean of that product over a tail's problems is exactly
+# that column's contribution to the tail. No approximation and no surrogate
+# model: the parts add up to the whole by construction.
+
+BOT_PATTERNS = [
+    # (regex, family label, how to read the ordinal from the match)
+    (re.compile(r"humanv0_(\d+)k_t([\d.]+)$"),
+     lambda m: (f"humanv0 {m.group(1)}k, temperature", float(m.group(2)))),
+    (re.compile(r"humanv0_(\d+)([kd])$"),
+     lambda m: ("humanv0 rank ladder",
+                -int(m.group(1)) if m.group(2) == "k" else int(m.group(1)))),
+    (re.compile(r"^kata1-.*_t([\d.]+)$"),
+     lambda m: ("KataGo full, temperature", float(m.group(1)))),
+    (re.compile(r"^kata9x9-.*_t([\d.]+)$"),
+     lambda m: ("KataGo 9x9, temperature", float(m.group(1)))),
+]
+
+
+def _bot_slot(name):
+    """(family, ordinal) for a bot that sits on a ladder, else None. The ladders
+    are what make grouping meaningful: neighbouring ranks and neighbouring
+    temperatures are near-duplicate opponents, so listing them separately says
+    the same thing a dozen times."""
+    for rx, read in BOT_PATTERNS:
+        m = rx.search(name)
+        if m:
+            return read(m)
+    return None
+
+
+def _ord_label(family, o):
+    if "rank ladder" in family:
+        return f"{-o}k" if o < 0 else f"{o}d"
+    return f"t{o:g}"
+
+
+def _merge_runs(entries, rel_tol=2.5):
+    """Collapse ADJACENT ladder entries whose contributions agree in sign and sit
+    within rel_tol of each other in magnitude. Adjacency is on the ladder, never
+    on contribution alone — merging two similar but distant rungs would invent a
+    grouping the data does not have."""
+    out = []
+    for o, contrib in entries:
+        if out:
+            prev = out[-1]
+            mean = prev["sum"] / prev["n"]
+            same_sign = (mean >= 0) == (contrib >= 0)
+            hi = max(abs(mean), abs(contrib))
+            lo = min(abs(mean), abs(contrib))
+            close = hi <= rel_tol * max(lo, 1e-4)
+            if same_sign and close:
+                prev["sum"] += contrib
+                prev["n"] += 1
+                prev["hi"] = o
+                continue
+        out.append({"lo": o, "hi": o, "sum": contrib, "n": 1})
+    return out
+
+
+def _group_contributions(contrib, names, blocks):
+    """(activation_magnitude, groups) for one tail.
+
+    Activations are reported as MAGNITUDE ONLY and never split: the block is a
+    PCA basis, so an individual component's sign is arbitrary and "PC17 pushes
+    the axis up" is not a statement about the world. Everything else keeps its
+    sign, because "this bot's pass rate raises the axis" is one.
+    """
+    act = [i for i, b in enumerate(blocks) if b == "activation"]
+    act_mag = float(np.abs(contrib[act]).sum())
+
+    groups, ladders = [], {}
+    for i, b in enumerate(blocks):
+        if b == "activation":
+            continue
+        if b == "bot winrate":
+            slot = _bot_slot(names[i])
+            if slot:
+                fam, o = slot
+                ladders.setdefault(fam, []).append((o, float(contrib[i])))
+                continue
+        groups.append((names[i], b, float(contrib[i]), 1))
+
+    for fam, entries in ladders.items():
+        entries.sort(key=lambda e: e[0])
+        for run in _merge_runs(entries):
+            span = (_ord_label(fam, run["lo"]) if run["n"] == 1
+                    else f'{_ord_label(fam, run["lo"])}\u2013{_ord_label(fam, run["hi"])}')
+            groups.append((f"{fam} {span}", "bot winrate", run["sum"], run["n"]))
+    groups.sort(key=lambda g: -abs(g[2]))
+    return act_mag, groups
+
+
+def compute_attribution(tids, vals, W_row, feats, feat_mu, feat_sd, scale,
+                        names, blocks, tail_frac):
+    """Per-tail grouped contributions for one axis. Returns (pos, neg), each
+    (mean_axis_value, activation_magnitude, groups, n_problems)."""
+    keep = [i for i, t in enumerate(tids) if t in feats]
+    Z = (np.stack([feats[tids[i]] for i in keep]) - feat_mu) / feat_sd
+    y = np.asarray([vals[i] for i in keep], dtype=float)
+    w = W_row * scale
+    m = max(1, int(round(len(y) * tail_frac)))
+    order = np.argsort(y)
+    out = []
+    for sel in (order[-m:], order[:m]):
+        contrib = (Z[sel] * w[None, :]).mean(0)
+        act_mag, groups = _group_contributions(contrib, names, blocks)
+        out.append((float(y[sel].mean()), act_mag, groups, m))
+    return out[0], out[1]
+
+
+def _attribution_html(pos, neg, top):
+    def table(tag, packed):
+        mean_val, act_mag, groups, m = packed
+        named_mag = sum(abs(g[2]) for g in groups)
+        total_mag = act_mag + named_mag or 1e-9
+        rows = [
+            f'<tr class="actrow"><td>activations (PCA block)</td>'
+            f'<td class="blk">activation</td>'
+            f'<td class="mag">magnitude {act_mag:.3f}</td>'
+            f'<td class="shr">{act_mag / total_mag:.0%}</td></tr>']
+        for name, blk, c, n in groups[:top]:
+            cnt = f" &times;{n}" if n > 1 else ""
+            rows.append(
+                f'<tr><td>{html.escape(name)}{cnt}</td>'
+                f'<td class="blk">{html.escape(blk)}</td>'
+                f'<td class="{"up" if c >= 0 else "dn"}">{c:+.3f}</td>'
+                f'<td class="shr">{abs(c) / total_mag:.0%}</td></tr>')
+        return (
+            f'<div class="attr"><h4>{tag} tail drivers '
+            f'<span class="sub">({m} problems, mean axis value {mean_val:+.3f})</span></h4>'
+            f'<table><thead><tr><th>input</th><th>block</th>'
+            f'<th>contribution</th><th>share</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+    return (f'<div class="attrwrap">{table("positive", pos)}'
+            f'{table("negative", neg)}</div>'
+            '<p class="attrnote">Contributions are the exact additive '
+            'decomposition of the axis value (mean of weight&times;standardized '
+            'input over the tail), so they sum to the tail mean. Ladder bots '
+            '(adjacent ranks or temperatures) are merged where they agree in '
+            'sign and magnitude. Activations carry magnitude only \u2014 the '
+            'block is a PCA basis, so an individual component\u2019s sign is '
+            'arbitrary.</p>')
 
 
 # ---- HTML page generation ----------------------------------------------
@@ -165,6 +314,23 @@ def _render_tail_html(tids, vals, sign, rows, cols, lookup):
     return "".join(out)
 
 
+ATTR_CSS = """
+.attrwrap{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 14px}
+.attr{flex:1 1 420px;min-width:340px}
+.attr h4{margin:6px 0 4px;font-size:14px}
+.attr .sub{font-weight:400;opacity:.7}
+.attr table{border-collapse:collapse;width:100%;font-size:12px}
+.attr th,.attr td{padding:3px 6px;border-bottom:1px solid rgba(128,128,128,.25);text-align:left}
+.attr th{font-weight:600;opacity:.75}
+.attr td.blk{opacity:.65}
+.attr td.up{color:#1a7f37;text-align:right;font-variant-numeric:tabular-nums}
+.attr td.dn{color:#b3261e;text-align:right;font-variant-numeric:tabular-nums}
+.attr td.mag,.attr td.shr{text-align:right;font-variant-numeric:tabular-nums;opacity:.8}
+.attr tr.actrow td{font-style:italic}
+.attrnote{font-size:11px;opacity:.7;max-width:900px;margin:0 0 18px}
+"""
+
+
 def _style_block(cols):
     return f"""<style>
   body {{ font-family: system-ui, sans-serif; margin: 1.5rem; background:#fafafa; color:#222; }}
@@ -207,7 +373,7 @@ def _build_page(source, options_html, sections_html, cols):
 <head>
 <meta charset="utf-8">
 <title>Residual axes extremes ({html.escape(source)})</title>
-{_style_block(cols)}
+{_style_block(cols)}\n<style>{ATTR_CSS}</style>
 </head>
 <body>
 <h1>Residual-MIRT axes — both tails</h1>
@@ -265,10 +431,21 @@ def main():
     parser.add_argument("--cols", type=int, default=5, help="HTML grid columns (default 5)")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/residual_axes_extremes.html)")
+    parser.add_argument("--no-inputs", action="store_true",
+                        help="skip the per-axis input attribution (it loads the "
+                             "full feature matrix, about a minute)")
+    parser.add_argument("--tail-frac", type=float, default=0.02,
+                        help="fraction of problems per tail for the attribution")
+    parser.add_argument("--top-inputs", type=int, default=14,
+                        help="grouped inputs listed per tail")
     parser.add_argument("--open", dest="open_browser", action="store_true",
                         help="Open the rendered HTML in the default browser.")
     args = parser.parse_args()
 
+    if not args.per_problem:
+        # the per-fold dev npz stores loadings but no weight matrix, so there is
+        # nothing to decompose; only the shipped fit can be attributed
+        args.no_inputs = True
     if args.html and args.size == "all":
         args.size = "9"
 
@@ -303,6 +480,22 @@ def main():
 
     if args.html:
         scope = f"{source}, size {args.size}"
+        attrib = None
+        if not args.no_inputs:
+            print("  loading features for input attribution...", flush=True)
+            import utils.rating.residual_axes as _ra
+            from auxiliary.inspect_axis_inputs import column_names
+            feats, _rk, _pa, act_dim = _ra.build_axis_features()
+            d = np.load(os.path.join(PROJECT_ROOT, "axes", "axes.npz"),
+                        allow_pickle=False)
+            W, feat_mu, feat_sd = d["W"], d["feat_mu"], d["feat_sd"]
+            # the shipped value is the raw W.z rescaled by v_sd/(rms*axis_sd), a
+            # positive per-axis constant, so applying it makes the decomposition
+            # land in the units the page already shows
+            scale = d["v_sd"] / (d["rms"] * d["axis_sd"])
+            names, blocks = column_names(W.shape[1], int(act_dim))
+            attrib = (feats, W, feat_mu, feat_sd, scale, names, blocks)
+
         options, sections = [], []
         for i, (key, title, vals) in enumerate(components):
             selected = " selected" if i == 0 else ""
@@ -311,10 +504,18 @@ def main():
             print(f"  rendering {title} ({i + 1}/{len(components)})...", flush=True)
             pos_html = _render_tail_html(tids, vals, +1, args.rows, args.cols, lookup)
             neg_html = _render_tail_html(tids, vals, -1, args.rows, args.cols, lookup)
+            attr_html = ""
+            if attrib is not None and i < attrib[1].shape[0]:
+                feats, W, feat_mu, feat_sd, scale, names, blocks = attrib
+                p_att, n_att = compute_attribution(
+                    tids, vals, W[i], feats, feat_mu, feat_sd, scale[i],
+                    names, blocks, args.tail_frac)
+                attr_html = _attribution_html(p_att, n_att, args.top_inputs)
             active = " active" if i == 0 else ""
             sections.append(
                 f'<section class="comp-section{active}" data-comp="{key}">'
                 f'<h2><span class="comp-label">{html.escape(title)}</span></h2>'
+                f'{attr_html}'
                 f'<h3>positive tail</h3>{pos_html}'
                 f'<h3>negative tail</h3>{neg_html}'
                 f'</section>')
