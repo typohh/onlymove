@@ -138,10 +138,18 @@
       "negative_i18n": null
     },
     "ax_0860ca04": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null
+      "positive": "killing",
+      "positive_i18n": {
+        "zh": "杀棋",
+        "ja": "殺し",
+        "ko": "잡기"
+      },
+      "negative": "defending territory",
+      "negative_i18n": {
+        "zh": "守地",
+        "ja": "地を守る",
+        "ko": "집 지키기"
+      }
     },
     "ax_6f7067cc": {
       "positive": null,
@@ -159,10 +167,18 @@
   "components": [
     {
       "motif_id": "ax_0860ca04",
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null
+      "positive": "killing",
+      "positive_i18n": {
+        "zh": "杀棋",
+        "ja": "殺し",
+        "ko": "잡기"
+      },
+      "negative": "defending territory",
+      "negative_i18n": {
+        "zh": "守地",
+        "ja": "地を守る",
+        "ko": "집 지키기"
+      }
     },
     {
       "motif_id": "ax_6f7067cc",
