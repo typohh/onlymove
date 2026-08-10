@@ -209,7 +209,14 @@ WEAKNESS_EB_LAMBDA_MAX = 5000.0
 # would halt on nothing. This bar corresponds to a pooled mean a third of the
 # between-user spread, which displaces level one's credibility test by about a fifth
 # of its bar — borderline material, and the side to err on.
-WEAKNESS_MEAN_SHARE_MAX = 0.10
+# The bar is on whether the population mean EXCEEDS the between-user spread
+# (share > 0.5 <=> mu > sigma), not on whether a mean exists at all: a real
+# dimension may carry an offset, and the offset is shipped rather than refused.
+WEAKNESS_MEAN_SHARE_MAX = 0.50
+# Between-user variance must clear this multiple of the mean per-user estimation
+# variance. Below it, individual coefficients are not distinguishable from the
+# population's and "personalisation" on the axis is fitting noise.
+WEAKNESS_AXIS_MIN_VAR_RATIO = 0.25
 # Attempts whose resolvable picked cell differs from the answer, pooled over the fit.
 # Only these separate beta_correct from beta_picked, so below this the contrast is the
 # prior talking and its pooled mean is not a measurement — the fit raises rather than
@@ -865,13 +872,13 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
     Returns (list of K lambdas, list of K contrast means, info), or (None, None, info)
     when the data is too sparse."""
     if apply_m is None:
-        return None, None, "no rating_to_rank.json — no per-axis prior"
+        return None, None, None, "no rating_to_rank.json — no per-axis prior"
     if not embeddings:
-        return None, None, "no embeddings — no per-axis prior"
+        return None, None, None, "no embeddings — no per-axis prior"
     rank_feat = {k: apply_m(v[0]) for k, v in params.items()}
     data = list(_weakness_user_datasets(by_user, rank_feat, embeddings, picked_embeddings))
     if len(data) < WEAKNESS_EB_MIN_USERS:
-        return None, None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "
+        return None, None, None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "
                             f"attempts (<{WEAKNESS_EB_MIN_USERS}) — no per-axis prior")
     K = _weakness_k_embed()
     d = 2 + 2 * K
@@ -883,7 +890,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
               for X, _ in data]
     n_split = sum(splits)
     if n_split < WEAKNESS_CONTRAST_MIN_ROWS:
-        return None, None, (f"only {n_split} attempts with a resolvable picked cell "
+        return None, None, None, (f"only {n_split} attempts with a resolvable picked cell "
                             f"distinct from the answer (<{WEAKNESS_CONTRAST_MIN_ROWS}) "
                             f"— the beta_correct/beta_picked contrast is unidentified")
     # tau^2 bounds in client-lambda terms (lambda_k = 2/tau_k^2).
@@ -906,7 +913,8 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
         lam_vec[2:2 + K] = 2.0 / tau2
         lam_vec[2 + K:] = 2.0 / tau2
         second_sum = np.zeros(K)          # Σ_u ((bc+bp)^2 + var(bc+bp)) — sets tau^2
-        first_sum = np.zeros(K)           # Σ_u (bc+bp) — the difficulty-leak check
+        first_sum = np.zeros(K)           # Σ_u (bc+bp) — the SHIPPED sum centre
+        var_sum = np.zeros(K)             # Σ_u var(bc+bp) — per-user estimation noise
         # Contrast moments over POINT ESTIMATES only, and only over users whose
         # contrast is identified at all. Both restrictions follow from what the number
         # is for: selection scores the fitted contrast itself, so the posterior
@@ -936,15 +944,17 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
             # understating the sum's and overstating the contrast's.
             vcp = cov[np.arange(2, 2 + K), np.arange(2 + K, d)]
             s, c = bc + bp, bc - bp
-            second_sum += s ** 2 + np.maximum(vc + vp + 2 * vcp, 0.0)
+            v_s = np.maximum(vc + vp + 2 * vcp, 0.0)
+            second_sum += s ** 2 + v_s
             first_sum += s
+            var_sum += v_s
             n_ok += 1
             if splits[i]:
                 second_con += c ** 2
                 first_con += c
                 n_con += 1
         if n_ok < WEAKNESS_EB_MIN_USERS:
-            return None, None, f"only {n_ok} converged per-user fits — no per-axis prior"
+            return None, None, None, f"only {n_ok} converged per-user fits — no per-axis prior"
         new_tau2 = np.clip(second_sum / n_ok, tau2_lo, tau2_hi)
         rel = float(np.max(np.abs(new_tau2 - tau2) / np.maximum(tau2, 1e-12)))
         tau2 = new_tau2
@@ -968,32 +978,65 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
     # what ships as variance is really displacement.
     mu = first_sum / n_ok
     raw2 = second_sum / n_ok
+    v_est = var_sum / n_ok                     # mean per-user estimation variance
+    # raw2 is a POSTERIOR second moment (beta^2 + var), so it already estimates
+    # E[theta^2] rather than the spread of point estimates. Subtracting mu^2
+    # therefore gives the between-user variance with estimation noise removed.
+    tau2_c = np.maximum(raw2 - mu ** 2, 0.0)
     share = mu ** 2 / np.maximum(raw2, 1e-12)
-    print("  weakness prior zero-mean check, SUM direction (prior is centred at 0):")
+    resolve = tau2_c / np.maximum(v_est, 1e-12)
+    print("  weakness SUM direction (centre is SHIPPED as weakness_axis_mean):")
     for k in range(K):
-        print(f"    axis {k}: pooled mean {mu[k]:+.4f}  sd {np.sqrt(max(raw2[k] - mu[k] ** 2, 0.0)):.4f}"
-              f"  mean^2/second-moment {share[k]:6.1%}")
-    print(f"    worst axis: {share.max():.1%} of the shipped second moment is "
-          f"pooled mean rather than between-user spread")
-    if share.max() > WEAKNESS_MEAN_SHARE_MAX and not allow_axis_mean:
-        k_bad = int(np.argmax(share))
+        print(f"    axis {k}: pooled mean {mu[k]:+.4f}  between-user sd "
+              f"{np.sqrt(tau2_c[k]):.4f}  mean^2/second-moment {share[k]:6.1%}"
+              f"  var ratio {resolve[k]:5.1f}x")
+    print(f"    worst axis: {share.max():.1%} of the second moment is pooled mean; "
+          f"lowest between-user/estimation variance ratio {resolve.min():.1f}x")
+
+    # WHAT THIS REFUSES, AND WHAT IT NO LONGER REFUSES.
+    #
+    # The harm a non-zero population mean does is real but specific: the client's
+    # prior is centred at zero, so tau^2 is inflated by mu^2 (a looser prior than
+    # the data asks for) and level-one tests every user against zero, which flags a
+    # user holding the population-TYPICAL coefficient as having a finding. Both are
+    # removed by shipping the centre, which is what now happens — the same treatment
+    # the contrast direction already gets, and the sum/contrast asymmetry goes with
+    # it.
+    #
+    # So a non-zero mean is no longer sufficient to refuse. It cannot be: the
+    # statistic mu^2/(mu^2+sigma^2) at a 10% bar demands mu <= 0.33*sigma, and an
+    # ordinary between-user dimension is entitled to a population mean a third the
+    # size of its spread. Refusing there vetoes real axes — measured: an axis with
+    # between-user sd 0.26 against a mean of 0.11, i.e. 84% of its second moment
+    # surviving centring, was refused as "difficulty".
+    #
+    # What genuinely is difficulty in disguise is an axis on which users do not
+    # differ at all: every true coefficient equal, the apparent spread all fitting
+    # error. That is what tau2_c and the variance ratio measure, and it is what this
+    # refuses on. Two independent conditions, because they fail differently — an
+    # axis can be mostly offset while still resolvable, or well-centred while no
+    # individual coefficient is distinguishable from the population's.
+    bad_share = share > WEAKNESS_MEAN_SHARE_MAX
+    bad_resolve = resolve < WEAKNESS_AXIS_MIN_VAR_RATIO
+    if (bad_share | bad_resolve).any() and not allow_axis_mean:
+        k_bad = int(np.argmax(np.where(bad_share | bad_resolve, share, -1.0)))
+        why = ("its pooled mean EXCEEDS its between-user spread"
+               if bad_share[k_bad] else
+               "its between-user variance is not credibly above per-user "
+               "estimation noise")
         raise RuntimeError(
-            f"axis {k_bad}'s pooled per-user coefficient is {share[k_bad]:.1%} of its "
-            f"second moment (mean {mu[k_bad]:+.4f} against spread "
-            f"{np.sqrt(max(raw2[k_bad] - mu[k_bad] ** 2, 0.0)):.4f}), over the "
-            f"{WEAKNESS_MEAN_SHARE_MAX:.0%} bar.\n"
-            "A coefficient that is non-zero for EVERYONE is not a weakness — it is "
-            "residual difficulty, which build_axes quarantines its population "
-            "residual head to keep OUT of the axes. So read this as that quarantine "
-            "leaking, and look there first: re-centring the prior here would make the "
-            "numbers self-consistent while leaving an axis carrying difficulty that "
-            "belongs to the rating model, and the panel would go on reporting it as a "
-            "property of people.\n"
-            "If the mean is genuinely about users rather than problems, the fix is to "
-            "SHIP it (a per-axis mean beside the precision, the client's prior centred "
-            "at half of it per slot, and a decision on whether level one starts testing "
-            "against the mean) — not to widen this bar. --allow-axis-mean ships the "
-            "zero-centred prior anyway, deliberately.")
+            f"axis {k_bad} is a population effect rather than a per-user one: {why} "
+            f"(mean {mu[k_bad]:+.4f}, between-user sd {np.sqrt(tau2_c[k_bad]):.4f}, "
+            f"mean^2/second-moment {share[k_bad]:.1%} against the "
+            f"{WEAKNESS_MEAN_SHARE_MAX:.0%} bar, variance ratio "
+            f"{resolve[k_bad]:.1f}x against {WEAKNESS_AXIS_MIN_VAR_RATIO:.1f}x).\n"
+            "An axis everyone responds to identically is residual difficulty, which "
+            "build_axes quarantines its population residual head to keep OUT of the "
+            "axes — so read this as that quarantine leaking and look there first. "
+            "Shipping a centre does NOT repair this case: centring an axis with no "
+            "between-user variation leaves nothing to personalise on, and the panel "
+            "would report the remaining noise as findings.\n"
+            "--allow-axis-mean ships anyway, deliberately.")
 
     # CONTRAST DIRECTION. beta_correct - beta_picked is what problem-loader.js scores
     # candidates on (weaknessScore), and it is displaced for a reason the sum check
@@ -1014,7 +1057,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
     # zero-mean by construction, which is the condition the sum check enforces by
     # refusing.
     if n_con < WEAKNESS_EB_MIN_USERS:
-        return None, None, (f"only {n_con} users have an identified contrast "
+        return None, None, None, (f"only {n_con} users have an identified contrast "
                             f"(<{WEAKNESS_EB_MIN_USERS}) — no contrast centre")
     mu_con = first_con / n_con
     raw2_con = second_con / n_con
@@ -1030,10 +1073,12 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
 
     info = (f"{len(data)} users, {it + 1} EM iters; per-coefficient lambda "
             f"min/median/max = {lam_axis.min():.0f}/{float(np.median(lam_axis)):.0f}/"
-            f"{lam_axis.max():.0f}; sum zero-mean worst {share.max():.1%}; "
+            f"{lam_axis.max():.0f}; sum centre worst share {share.max():.1%}, "
+            f"lowest var ratio {resolve.min():.1f}x; "
             f"contrast offset worst {share_con.max():.1%} ({n_con} users, {n_split} split rows)")
     return ([round(float(l), 2) for l in lam_axis],
-            [round(float(m), 5) for m in mu_con], info)
+            [round(float(m), 5) for m in mu_con],
+            [round(float(m), 5) for m in mu], info)
 
 
 # ---------------------------------------------------------------------------
@@ -1156,7 +1201,7 @@ def main():
     embeddings = load_problem_embeddings(needed)
     picked_embeddings = load_picked_embeddings(rows)
     print(f"  resolved {len(picked_embeddings)} picked-move cells from axes/per_cell/")
-    wa, wc, wa_info = fit_weakness_axis_priors(by_user, params, embeddings,
+    wa, wc, wm, wa_info = fit_weakness_axis_priors(by_user, params, embeddings,
                                                picked_embeddings, apply_m,
                                                args.allow_axis_mean)
     if wa is None:
@@ -1169,6 +1214,14 @@ def main():
     # as the precision vector: shipping the lambdas without it leaves consumers
     # scoring an uncentred contrast, which is the whole defect this pair fixes.
     out["weakness_contrast_mean"] = wc
+    # The SUM direction's population centre. Shipped for the same reason the
+    # contrast's is: the client's prior would otherwise sit at zero while the
+    # population sits elsewhere, which both loosens the prior (tau^2 inflated by
+    # mu^2) and makes level one test every user against a point the typical user
+    # does not occupy. An axis may legitimately carry an offset; what it may not
+    # carry is the absence of between-user variation, which the refusal above is
+    # what now guards.
+    out["weakness_axis_mean"] = wm
     print(f"  {wa_info}")
 
     # --- Population rank prior (the window estimator's prior over user rank) ---

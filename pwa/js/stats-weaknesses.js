@@ -11,6 +11,7 @@ import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
 import { getRecallCandidates } from './recall-model.js';
+import { AXIS_SUM_MEAN } from './weakness.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
@@ -102,7 +103,9 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
         Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
         Array.isArray(weaknessAxisCov) &&
-        weaknessAxisCov.length === (weaknessParams.length - 2) / 2
+        weaknessAxisCov.length === (weaknessParams.length - 2) / 2 &&
+        Array.isArray(AXIS_SUM_MEAN) &&
+        AXIS_SUM_MEAN.length === (weaknessParams.length - 2) / 2
     );
     if (!haveModel) {
         const empty = document.createElement('div');
@@ -130,7 +133,16 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
         const varSum = var_c + var_p + 2 * cov;
         if (!(varSum > 0)) continue;
-        const pWeakPos = normCdf(-(mu_c + mu_p) / Math.sqrt(varSum));
+        // Tested against the POPULATION CENTRE, not against zero. The axes may
+        // carry a shared offset — a dimension everyone sits somewhere on — and
+        // measuring against zero would report that shared position as this
+        // user's finding, for every user at once. What is actionable is where
+        // this user sits RELATIVE to the population, which is what the shipped
+        // centre makes available.
+        const centre = AXIS_SUM_MEAN[k];
+        if (!Number.isFinite(centre)) continue;
+        const sumRel = mu_c + mu_p - centre;
+        const pWeakPos = normCdf(-sumRel / Math.sqrt(varSum));
         if (pWeakPos >= WEAK_PROB_THRESHOLD) {
             candidates.push({ k, p: pWeakPos, side: 'positive' });
         } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD

@@ -56,6 +56,17 @@ const AXIS_LAMBDA = POPULATION_CONSTANTS.weakness_axis_lambda;
 // on a shipped mean rather than on zero. Validated at boot by
 // population-constants.js, which is what lets weaknessScore index it unguarded.
 const AXIS_CONTRAST_MEAN = POPULATION_CONSTANTS.weakness_contrast_mean;
+// Population centre of the identified SUM (beta_correct[k] + beta_picked[k]).
+// The prior is centred HERE rather than at zero: an axis may legitimately carry
+// a population offset — people differ in how sharply a problem's discrimination
+// affects them, around a mean that need not be zero — and pinning the prior at
+// zero would both inflate tau^2 by mu^2 (a looser prior than the data asks for)
+// and make the level-one test in stats-weaknesses.js measure every user against
+// a point the typical user does not occupy, turning the population's own centre
+// into a per-user finding. Mandatory and length-checked like the precision
+// vector; a missing or stale entry skips training rather than substituting zero,
+// because zero is exactly the wrong answer when the true centre is not zero.
+export const AXIS_SUM_MEAN = POPULATION_CONSTANTS.weakness_axis_mean;
 const MAX_EPOCHS = 200;
 const MAX_TRAINING_TIME_MS = 1000;
 const LEARNING_RATE = 0.05;
@@ -98,6 +109,18 @@ export async function trainWeakness() {
             return;
         }
         const lambdaForAxis = (k) => axisLambda[k];
+        // Half the sum's centre per slot: the penalty below pulls each of the two
+        // slots toward it, so their SUM is pulled toward the population centre
+        // while their CONTRAST is still pulled toward zero — which is what the
+        // separately shipped contrast centre handles.
+        const axisSumMean = (Array.isArray(AXIS_SUM_MEAN) &&
+            AXIS_SUM_MEAN.length === K &&
+            AXIS_SUM_MEAN.every(Number.isFinite)) ? AXIS_SUM_MEAN : null;
+        if (!axisSumMean) {
+            console.warn(`weakness: no valid per-axis sum centre for K=${K}; skipping training`);
+            return;
+        }
+        const halfMean = (k) => axisSumMean[k] / 2;
 
         // Augmented features: [1, rating, correct_emb_0..K-1, picked_emb_0..K-1].
         // For correct attempts picked = correct (definition); for wrong attempts
@@ -156,8 +179,10 @@ export async function trainWeakness() {
             // shipped, the scalar CV lambda otherwise.
             for (let k = 0; k < K; k++) {
                 const lam = lambdaForAxis(k);
-                l2 += lam * (params[2 + k] * params[2 + k] +
-                             params[2 + K + k] * params[2 + K + k]);
+                const h = halfMean(k);
+                const dc = params[2 + k] - h;
+                const dp = params[2 + K + k] - h;
+                l2 += lam * (dc * dc + dp * dp);
             }
             loss = loss / N + l2 / (2 * N);
 
@@ -166,8 +191,9 @@ export async function trainWeakness() {
             for (let j = 0; j < numParams; j++) grad[j] /= N;
             for (let k = 0; k < K; k++) {
                 const lam = lambdaForAxis(k);
-                grad[2 + k] += (lam / N) * params[2 + k];
-                grad[2 + K + k] += (lam / N) * params[2 + K + k];
+                const h = halfMean(k);
+                grad[2 + k] += (lam / N) * (params[2 + k] - h);
+                grad[2 + K + k] += (lam / N) * (params[2 + K + k] - h);
             }
             adamUpdate(params, grad, adam, LEARNING_RATE);
 
