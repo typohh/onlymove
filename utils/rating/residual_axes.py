@@ -62,6 +62,23 @@ from utils.paths import PROJECT_ROOT
 EPOCHS = 400
 SEED = 0
 ORTHO_WEIGHT = 0.5
+# Column dropout on the axis map's input. Measured on a 3-seed x 3-rate paired
+# sweep against the unregularized map: PER-USER gain is positive in 9 of 9
+# comparisons and peaks here (+0.164 mnat/attempt, ~12%); the attempt-POOLED
+# figure is positive in only 6 of 9 and its mean is too small to claim, so this
+# is adopted on the typical-user criterion and not on the pooled one. The rate
+# is an interior optimum — 0.15 and 0.5 are both positive but smaller, and 0.5
+# falls below the control on pooled for one seed. K is unchanged at 3 under it
+# (swept 2-5, the peak does not move), so nothing downstream changes length.
+AXIS_INPUT_DROPOUT = 0.3
+# Width of the tail build_axis_features appends after the wide per-problem
+# blocks: [ act | bot | move || phase(2) | size(1) | rating-model(3) | rank(1) ].
+# The dropout masks the wide region only — the tail is smooth and cannot
+# fingerprint a problem, and `rank` must survive because the model reads it
+# structurally as beta_u's regressor. build_axis_features asserts this stays in
+# step, so a change to any tail block fails loudly rather than silently shifting
+# the mask onto the wrong columns.
+EXEMPT_TAIL_COLS = 2 + 1 + 3 + 1
 BATCH = 8192
 MIN_USER_ATTEMPTS = 50
 
@@ -142,6 +159,10 @@ def build_axis_features():
     ph, nph = load_joint_game_phase(SIZES, tids_by_size)
     zero_mv = np.zeros(nmv, dtype=np.float32)
     zero_ph = np.zeros(nph, dtype=np.float32)
+
+    assert nph + 1 + 3 + 1 == EXEMPT_TAIL_COLS, (
+        f"feature tail changed ({nph} phase cols): update EXEMPT_TAIL_COLS, "
+        "which the axis-input dropout mask is sized from")
 
     curve = _load_rank_curve()
     rsf = {t: np.array(v, dtype=np.float32)
@@ -288,6 +309,7 @@ def train_axes(rows_by_user, train_users, F, tid_index, k_axes, g_init, device,
     RANK = X[:, -1].clone()
 
     n_u, n_feat = len(uids), F.shape[1]
+    input_dim = n_feat - EXEMPT_TAIL_COLS
     trunk = nn.Sequential(
         nn.Linear(n_feat, 64), nn.ReLU(), nn.Dropout(0.3),
         nn.Linear(64, 32), nn.ReLU(), nn.Dropout(0.3),
@@ -318,13 +340,43 @@ def train_axes(rows_by_user, train_users, F, tid_index, k_axes, g_init, device,
             u, p, y = U[idx], P[idx], Y[idx]
             h = trunk(X[p])
             rh = head_r(h)
-            gh = g_lin(X[p])
+            # COLUMN DROPOUT on the axis map's input. g_lin is otherwise the
+            # only component here with no regularization of its own: the trunk
+            # has dropout between its layers and weight decay, while the ortho
+            # penalty and the unit-RMS normalisation constrain axes against each
+            # OTHER rather than the weights within one. On a design whose columns
+            # are near-collinear — adjacent rungs of a bot ladder, neighbouring
+            # PCA components — that lets a large positive weight sit beside a
+            # large negative one at no cost to the loss, which shows up in the
+            # inspection tables as ladders whose signs alternate and cancel.
+            #
+            # The mask covers the WIDE per-problem blocks only; the tail is
+            # exempt (EXEMPT_TAIL_COLS). Inverted, so extraction below reads
+            # clean inputs.
+            keep = (torch.rand(len(idx), input_dim, device=X.device)
+                    >= AXIS_INPUT_DROPOUT).float() / (1.0 - AXIS_INPUT_DROPOUT)
+            xg = torch.cat([X[p][:, :input_dim] * keep, X[p][:, input_dim:]],
+                           dim=1)
+            gh = g_lin(xg)
             gh = gh / (gh.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
             logit = (alpha[u] + beta[u] * RANK[p] + rh.squeeze(-1)
                      + (gh * v[u]).sum(-1))
             loss = bce(logit, y) \
                 + 0.5 * ((v[u] ** 2).sum(dim=1) / counts[u]).sum() / len(idx) \
                 + 10.0 * (v.mean(dim=0) ** 2).sum()
+            # The decorrelation is TWO penalties on two blocks of one
+            # correlation matrix, weighted separately because they are not the
+            # same case. AXIS-AGAINST-AXIS discourages duplicate axes, which the
+            # likelihood already disfavours on its own (two identical axes are a
+            # saddle, not a minimum — the duplicate buys nothing and any
+            # separation toward unexplained signal lowers the loss).
+            # AXIS-AGAINST-r is the quarantine, and there the likelihood pulls
+            # the WRONG way: an axis duplicating r, with per-user coefficients
+            # centred near 1, fits at least as well as r alone and better if
+            # users differ in how much population residual difficulty costs them.
+            # That is the leak fit_population_constants refuses at ship time.
+            # Defaults leave both at ortho_weight, reproducing the single
+            # combined penalty exactly.
             M = torch.cat([gh, rh], dim=1)
             Mc = M - M.mean(dim=0, keepdim=True)
             Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
