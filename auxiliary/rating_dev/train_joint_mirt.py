@@ -50,16 +50,14 @@ WHAT THE ARCHITECTURE INHERITS FROM MEASUREMENT, not from taste:
   shipped 16k. A correction that small and that bounded is what a per-problem
   difficulty fitted jointly with the axes should absorb.
 
-  THE HIGH-FLOOR BARRIER is kept unchanged — it is already one-sided, acting
-  only on floors past the divergence point. THE SHALLOW-SLOPE BARRIER IS
-  REPLACED by a one-sided form; see SHALLOW_TAU. The barriers are not
-  4PL-specific: the shipped
-  rating is (kappa - d)/a, so a slope collapsing toward its floor sends that
-  ratio to infinity, and the barrier acts on the PRE-CLAMP slope because the
-  clamp zeroes the gradient exactly where a collapsed slope needs lifting. The
-  high-floor barrier is its counterpart on the easy tail. Omitting them produced
-  a 99th-percentile rating of 172 against an expected ceiling near 13 — the
-  failure is loud, but only in a percentile nobody would print by default.
+  THERE IS ONE BARRIER, on the slope, in a one-sided form; see SHALLOW_TAU. It
+  is not 4PL-specific: the rating is derived as b + kappa(c)/a, so a slope
+  collapsing toward its floor sends that ratio to infinity, and the barrier acts
+  on the PRE-SOFTPLUS slope because the clamp zeroes the gradient exactly where a
+  collapsed slope needs lifting. Omitting it produced a 99th-percentile rating of
+  172 against an expected ceiling near 13 — the failure is loud, but only in a
+  percentile nobody would print by default. The rating trainer's counterpart on
+  the easy tail, a high-floor barrier, is NOT carried here.
 
   The AXIS WARM START is kept: at v = 0 the loading gradient is identically
   zero, so a randomly-started axis escapes along its draw rather than the data.
@@ -98,8 +96,8 @@ if PROJECT_ROOT not in sys.path:
 from datetime import datetime  # noqa: E402
 
 from pipeline.train_rating import (  # noqa: E402
-    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
-    HIGH_FLOOR_PENALTY, LAPSE_CAP, LAPSE_INIT, MIN_ATTEMPTS, MIN_PROFILE,
+    DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
+    LAPSE_CAP, LAPSE_INIT,
     PCA_DIM, SEED, SHALLOW_SLOPE_PENALTY, SIZES, SLOPE_FLOOR, clear_logit_vec,
 )
 from utils.rating.features import (  # noqa: E402
@@ -112,7 +110,15 @@ from utils.rating.residual_axes import (  # noqa: E402
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
 
-EPOCHS = 400                     # a CAP; the run stops when progress flattens
+# A RUNAWAY FAILSAFE, not a budget. Convergence is decided by FLAT_PATIENCE on
+# the stop split, and reaching this cap is FATAL — the run is discarded rather
+# than reported, since a fit cut off mid-descent is not the fit the stopping rule
+# describes. So the cap must sit far above any epoch a healthy run reaches
+# (whole-history fits stop in the mid-hundreds); at a value that can plausibly
+# bind, every configuration change risks failing for want of budget rather than
+# for anything about the model, and the natural repair — raise it and re-run — is
+# indistinguishable from tuning the stop.
+EPOCHS = 10000
 CHECK_EVERY = 10
 # NO-NEW-BEST patience, not a relative-improvement threshold. The stop split
 # holds ~27k rows, so its BCE carries roughly +/-0.004 of sampling noise; a
@@ -121,7 +127,8 @@ CHECK_EVERY = 10
 # robust to exactly this: noise yields occasional lucky checks but not a
 # sustained run of them.
 FLAT_PATIENCE = 5                # checks without a new best before stopping
-MIN_EPOCHS = 40
+# (no MIN_EPOCHS: patience cannot fire before FLAT_PATIENCE*CHECK_EVERY = 50
+#  epochs anyway, so a separate floor below that was never reachable.)
 BATCH = 65536
 # Split rates — see JointMIRT.param_groups. A single 0.01 for both the network
 # and the free per-user fields diverges late in every arrangement measured.
@@ -149,8 +156,11 @@ GAUGE_MOM = 0.01
 # replaced. So this acts on the PRE-SOFTPLUS slope logit, where the scale is
 # comparable and the penalty falls away properly.
 #
-#   floor:  softplus(o_c    - o_div)^2      above a divergence point
 #   slope:  softplus(o_tau  - o_a  )^2      below a threshold
+#
+# The floor barrier the slope form was modelled on — softplus(o_c - o_div)^2,
+# holding the floor below the point where the 80%-clear rating stops existing —
+# is NOT carried here. There is one barrier, on the slope.
 SHALLOW_TAU = 0.1                # threshold expressed as a SLOPE, converted below
 # Measured, 30-epoch sweep at 0 / 0.3 / 1 / 3. Both failure modes are real and
 # they are not mirror images. Too weak and slopes collapse onto the clamp,
@@ -173,6 +183,28 @@ HELD_OUT_SEED = 0
 # epochs before the training loss flattened, so the stop has to watch a held-out
 # signal, and that signal must not be the one being reported.
 STOP_SPLIT_FRAC = 0.33
+# Share of TRAINING rows set aside purely as a stopping signal when there is
+# no problem holdout. Small: it is a convergence detector, not a criterion,
+# and every row spent on it is a row the model does not learn from.
+STOP_ROW_FRAC = 0.03
+# THE ONLY INCLUSION RULE. It replaces both of the rating trainer's — the 5-of-
+# each user filter (MIN_ATTEMPTS) and the 8-attempt profile floor (MIN_PROFILE) —
+# because those are judgements about how WELL a parameter is estimated, while
+# this is the condition for it to be estimable at all, and only the second kind
+# belongs in a filter. A thin profile is not bad data; it is data carrying little
+# information, which the likelihood already weighs correctly by giving it few
+# terms. Discarding it instead throws away the attempts too.
+#
+# IDENTIFIABILITY: under the 4PL an all-correct record has likelihood
+# rising monotonically to (1-lambda)^n as ability grows without bound, and an
+# all-wrong one rises monotonically to (1-c)^n as it falls, so neither has an
+# interior maximum and the ability is not determined by the data at all. One of
+# each outcome is exactly the condition for an interior optimum to exist, and
+# anything above it is a judgement about how well ability should be estimated
+# rather than whether it can be. Applied to USERS (their axis position) and again
+# to PROFILES (their ability), since a user with one of each need not have one of
+# each inside every window.
+MIN_BOTH_OUTCOMES = 1
 
 
 def build_profiles_at(df, window_months, overlap=True):
@@ -346,9 +378,8 @@ class JointMIRT:
         return self.nn.functional.softplus(a_src).clamp_min(1e-4)
 
     def floor_logit(self, feat):
-        """Raw floor logit; the high-floor barrier acts here rather than in
-        q-space, where it loses its gradient exactly where floors pass the
-        calibration point."""
+        """Raw floor logit. No barrier acts on it — the floor is bounded
+        structurally instead, by `cap` in problem_params."""
         return self.head(self.trunk(feat))[:, 2]
 
     def problem_params(self, feat):
@@ -408,13 +439,44 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
-    ap.add_argument("--epochs", type=int, default=EPOCHS)
+    ap.add_argument("--epochs", type=int, default=EPOCHS,
+                    help="runaway failsafe, not a budget — reaching it is fatal. "
+                         "Stopping is FLAT_PATIENCE on the stop split. Lower it "
+                         "only to bound a deliberately broken diagnostic.")
     ap.add_argument("--shallow-w", type=float, default=SHALLOW_W,
                     help="weight on the one-sided shallow-slope barrier "
                          "softplus(tau - a)^2, the floor barrier's own form; "
                          "0 disables it")
     ap.add_argument("--no-barriers", action="store_true",
-                    help="disable the two divergence barriers (diagnostic)")
+                    help="disable the shallow-slope divergence barrier "
+                         "(diagnostic). Equivalent to --shallow-w 0.")
+    ap.add_argument("--holdout-problem-frac", type=float,
+                    default=HELD_OUT_PROBLEM_FRAC,
+                    help="fraction of PROBLEMS held out; 0 disables it, which is "
+                         "what a pure row- or user-holdout run wants. Left at the "
+                         "benchmark value by default so existing comparisons are "
+                         "unaffected.")
+    ap.add_argument("--holdout-user-frac", type=float, default=0.0,
+                    help="hold out this fraction of USERS entirely (shared "
+                         "generator, hash-printed) so a walk-forward on them is "
+                         "leak-free")
+    ap.add_argument("--holdout-row-frac", type=float, default=0.0,
+                    help="hold out this fraction of ATTEMPTS, keyed (user, "
+                         "problem) — the client's condition: the problem keeps "
+                         "its other attempts, only this one is unseen")
+    ap.add_argument("--holdout-seed", type=int, default=HELD_OUT_SEED,
+                    help="seed for the SHARED held-out problem generator. Must "
+                         "match the production run it is compared against; the "
+                         "hash printed by both confirms it.")
+    ap.add_argument("--axis-holdout-fold", type=int, default=-1,
+                    help="hold this user fold OUT of the axis fit (0 or 1; -1 = "
+                         "none). Their rows still train difficulty/slope/floor "
+                         "and their own ability, but their axis positions are "
+                         "pinned at zero so they contribute no gradient to the "
+                         "loadings — the same protocol build_axes uses, where "
+                         "the 4PL saw every user and only the axis stage does "
+                         "CV. WITHOUT this there is no held-out-user axis "
+                         "measurement and none may be reported.")
     ap.add_argument("--dump-params", default=None,
                     help="write per-problem (rating, difficulty, slope, floor, "
                          "loading) plus abilities and axis positions to this "
@@ -428,11 +490,18 @@ def main():
     ap.add_argument("--lr-field", type=float, default=LR_FIELD,
                     help="learning rate for the free per-user fields. Must run "
                          "well above --lr-net; equal rates diverge late")
-    ap.add_argument("--window-months", type=int, default=2,
-                    help="ability window WIDTH in months, sliding one month at "
-                         "a time; 2 = production exactly. 0 = one unit per user "
-                         "(whole history, the simplest option — it also makes "
-                         "ability and axis-position granularity coincide)")
+    ap.add_argument("--window-months", type=int, default=0,
+                    help="ability window WIDTH in months, sliding one month at a "
+                         "time. DEFAULT 0 = one unit per user, the whole history: "
+                         "measured best (both seeds, both criteria, monotone in "
+                         "how much windowing there is) and the simplest object. "
+                         "Pass 2 only to reproduce production's ability structure "
+                         "for a specific diagnostic — NOT for benchmarking. Each "
+                         "model is compared at ITS OWN best; production's eval "
+                         "rows duplicate each attempt across two overlapping "
+                         "profiles, and that denominator difference is corrected "
+                         "at SCORING time by comparing per attempt, never by "
+                         "handicapping this model into a worse window.")
     ap.add_argument("--disjoint-blocks", action="store_true",
                     help="disjoint blocks of that width instead of a sliding "
                          "window. Production slides, which writes every attempt "
@@ -489,13 +558,19 @@ def main():
     df = df[df["size"].isin(SIZES)].copy()
     g = df.groupby("user_id")["success"].agg(c="sum", n="count")
     g["w"] = g["n"] - g["c"]
-    df = df[df["user_id"].isin(set(g.index[(g["c"] >= MIN_ATTEMPTS)
-                                           & (g["w"] >= MIN_ATTEMPTS)]))].copy()
+    df = df[df["user_id"].isin(set(g.index[(g["c"] >= MIN_BOTH_OUTCOMES)
+                                           & (g["w"] >= MIN_BOTH_OUTCOMES)]))].copy()
     prob2size = dict(zip(df["problem"], df["size"]))
     prof_df = build_profiles_at(df, args.window_months,
                                 overlap=not args.disjoint_blocks)
-    pc = prof_df["profile"].value_counts()
-    prof_df = prof_df[prof_df["profile"].isin(set(pc.index[pc >= MIN_PROFILE]))]
+    # The SAME condition at the level the ability actually lives at. One win and
+    # one loss for the user does not give one of each in every window, and it is
+    # the profile that carries theta.
+    pg = prof_df.groupby("profile")["success"].agg(c="sum", n="count")
+    pg["w"] = pg["n"] - pg["c"]
+    keep_prof = set(pg.index[(pg["c"] >= MIN_BOTH_OUTCOMES)
+                             & (pg["w"] >= MIN_BOTH_OUTCOMES)])
+    prof_df = prof_df[prof_df["profile"].isin(keep_prof)]
     prof_df = prof_df[prof_df["problem"].map(
         lambda t: (prob2size.get(t), t) in key_idx)].reset_index(drop=True)
     profiles = pd.Categorical(prof_df["profile"])
@@ -531,7 +606,11 @@ def main():
     # with rows that cannot move it. A local draw over all 153,720 keys is a
     # different universe and its numbers are not comparable to anything.
     from auxiliary.rating_dev.holdout_set import held_out_keys
-    ho_keys, ho_hash = held_out_keys(HELD_OUT_SEED, HELD_OUT_PROBLEM_FRAC)
+    if args.holdout_problem_frac > 0:
+        ho_keys, ho_hash = held_out_keys(args.holdout_seed,
+                                         args.holdout_problem_frac)
+    else:
+        ho_keys, ho_hash = [], "none"
     ho_set = set(ho_keys)
     ho = np.array([k in ho_set for k in keys])
     # The stop split is carved OUT of the held-out set by a separate deterministic
@@ -540,14 +619,67 @@ def main():
     # like-for-like comparison is therefore production's whole held-out set
     # against this model's REPORT split, both being random subsets of the same
     # universe.
-    sub = np.random.default_rng(HELD_OUT_SEED + 1000).random(len(keys))
+    sub = np.random.default_rng(args.holdout_seed + 1000).random(len(keys))
     stop_p = ho & (sub < STOP_SPLIT_FRAC)
     rep_p = ho & ~stop_p
-    tr_rows = ~ho[prob_idx]
-    print(f"  held-out set hash {ho_hash} | {len(ho_keys)} attempted problems "
-          f"held out, {int(ho.sum())} of them featured -> stop "
-          f"{int(stop_p.sum())} / report {int(rep_p.sum())}; train rows "
-          f"{int(tr_rows.sum())}", flush=True)
+    # USER and ROW holdouts, ORed with the problem holdout. All three exclude
+    # rows from TRAINING; which of them a given evaluation should read back is
+    # the evaluator's business, not the trainer's.
+    extra_ho = np.zeros(len(prof_df), bool)
+    uid_arr = np.array(uids)
+    if args.holdout_user_frac > 0:
+        from auxiliary.rating_dev.holdout_set import held_out_users
+        hu_list, hu_hash = held_out_users(args.holdout_seed,
+                                          args.holdout_user_frac)
+        hu = set(hu_list)
+        extra_ho |= np.array([u in hu for u in uid_arr[user_idx]], bool)
+        print(f"  HELD-OUT USERS: hash {hu_hash} | {len(hu_list)} accounts, "
+              f"{int(extra_ho.sum())} rows", flush=True)
+    if args.holdout_row_frac > 0:
+        from auxiliary.rating_dev.holdout_set import held_out_rows
+        hr_list, hr_hash = held_out_rows(args.holdout_seed,
+                                         args.holdout_row_frac)
+        hr = set(hr_list)
+        m_r = np.array([(uid_arr[ui], str(t)) in hr for ui, t
+                        in zip(user_idx, prof_df["problem"])], bool)
+        extra_ho |= m_r
+        print(f"  HELD-OUT ROWS: hash {hr_hash} | {len(hr_list)} attempts, "
+              f"{int(m_r.sum())} profile rows (both window copies masked)",
+              flush=True)
+    # WHICH ROWS THE STOPPING RULE READS — and it must be rows whose ABILITY
+    # THIS MODEL FITTED. A held-out user's theta embedding gets no gradient, so
+    # it sits at its random init; scoring their rows measures theta-at-init, not
+    # the model, and stopping on that signal stops on noise. (Observed: a
+    # user-holdout run's stop split read 0.5313 where every comparable run read
+    # ~0.50.) The EVALUATION is unaffected — eval_user_holdout fits ability
+    # online from zero, which is the point of it — but the stopping rule cannot.
+    #
+    # So the stop signal always comes from rows the model can actually score:
+    # the problem holdout when there is one, otherwise a small extra draw of
+    # TRAINING-user rows set aside for this and excluded from training.
+    tr_rows = (~ho[prob_idx]) & (~extra_ho)
+    if args.holdout_problem_frac > 0:
+        ho_rows, stop_rows, rep_rows = ho[prob_idx], stop_p[prob_idx], rep_p[prob_idx]
+    else:
+        sub_r = np.random.default_rng(args.holdout_seed + 2000).random(len(prof_df))
+        stop_rows = tr_rows & (sub_r < STOP_ROW_FRAC)
+        tr_rows = tr_rows & ~stop_rows
+        rep_rows = extra_ho          # reported by eval_user_holdout, not here
+        ho_rows = extra_ho
+        print(f"  stop signal: {int(stop_rows.sum())} TRAINING-user rows held "
+              f"aside (their abilities ARE fitted, so the signal is real); "
+              f"the held-out users' {int(extra_ho.sum())} rows are scored "
+              f"separately by eval_user_holdout", flush=True)
+    if args.holdout_problem_frac > 0:
+        print(f"  held-out PROBLEMS hash {ho_hash} | {len(ho_keys)} held out, "
+              f"{int(ho.sum())} featured -> stop {int(stop_p.sum())} / report "
+              f"{int(rep_p.sum())}; train rows {int(tr_rows.sum())}", flush=True)
+    else:
+        # Printing "stop 0 / report 0" here reads like a broken run when the
+        # evaluation set is simply coming from a different holdout; the carve-out
+        # a few lines above already reported the real split.
+        print(f"  problem holdout OFF; train rows {int(tr_rows.sum())}",
+              flush=True)
 
     # WINDOWING-SENSITIVE USERS — the only ones a window-length arm can reach.
     # A user whose attempts fall inside a single calendar month gets, under EVERY
@@ -575,15 +707,15 @@ def main():
     tu = torch.tensor(user_idx, device=device)
     ty = torch.tensor(y, device=device)
     tr = torch.tensor(np.where(tr_rows)[0], device=device)
-    i_stop = torch.tensor(np.where(stop_p[prob_idx])[0], device=device)
-    i_rep = torch.tensor(np.where(rep_p[prob_idx])[0], device=device)
-    i_rep_s = torch.tensor(np.where(rep_p[prob_idx] & sens_row)[0],
+    i_stop = torch.tensor(np.where(stop_rows)[0], device=device)
+    i_rep = torch.tensor(np.where(rep_rows)[0], device=device)
+    i_rep_s = torch.tensor(np.where(rep_rows & sens_row)[0],
                            device=device)
     # The FULL held-out set — production's evaluation row set exactly, since it
     # carves out no stop split. Mildly optimistic here because a third of it
     # steered the stopping rule, so quote the report split as this model's honest
     # number and this one only when putting it beside production.
-    i_ho = torch.tensor(np.where(ho[prob_idx])[0], device=device)
+    i_ho = torch.tensor(np.where(ho_rows)[0], device=device)
 
     # --- axis warm start, from the two-stage machinery (same construction), on
     # the axis trainer's feature matrix restricted to these columns' semantics.
@@ -602,24 +734,59 @@ def main():
 
     for seed in args.seeds:
         # the warm start is built on TRAIN-fold users only, as production does
-        tu_ax = [u for u in ax_users if fold_of[u] != 0]
-        gi_full = eigen_directions(rbu, tu_ax, Fax, ti_ax, rank_ax, params_ax,
-                                   lapse_c, args.k)
-        gi = gi_full[:, :fdim] if gi_full.shape[1] >= fdim else None
+        # The warm start is built on TRAIN-fold users only. That was already
+        # fold-clean, which is exactly why the leak below went unnoticed for so
+        # long: protecting the INITIALISATION does nothing about the fit.
+        ax_fold = args.axis_holdout_fold
+        held_fold = ax_fold if ax_fold in (0, 1) else 0
+        tu_ax = [u for u in ax_users if fold_of[u] != held_fold]
+        # K=0 is the ABLATION: no axis block at all, i.e. the joint fit reduced
+        # to its rating heads. It answers whether the axes cost the rating, which
+        # no amount of staring at the axis-on/axis-off difference can, since that
+        # difference is measured with the axes already having shaped the fit.
+        if args.k > 0:
+            gi_full = eigen_directions(rbu, tu_ax, Fax, ti_ax, rank_ax,
+                                       params_ax, lapse_c, args.k)
+            gi = gi_full[:, :fdim] if gi_full.shape[1] >= fdim else None
+        else:
+            gi = None
         m = JointMIRT(fdim, len(profiles.categories), len(uids), args.k,
                       input_dim, device, seed, g_init=gi,
                       global_slope=args.global_slope, act=args.act,
                       hidden=tuple(args.hidden))
+        tr_eff = tr
+        if ax_fold in (0, 1):
+            # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
+            # offered a "mask" mode that kept their rows and only pinned their
+            # axis positions at zero, on the theory that it matched build_axes
+            # (whose 4PL saw every user and whose axis stage alone does CV). It
+            # does not: in a JOINT fit the rating heads co-adapt with the axes,
+            # so those rows still reach the loadings indirectly through a channel
+            # the two-stage pipeline structurally cannot have. It is removed
+            # rather than defaulted off — a leaky protocol available behind a
+            # flag is one forgotten flag away from a wrong number that looks fine.
+            mask = np.array([0.0 if fold_of.get(u, -1) == ax_fold else 1.0
+                             for u in uids], dtype=np.float32)
+            keep = mask[user_idx] > 0
+            tr_eff = torch.tensor(np.where(tr_rows & keep)[0], device=device)
+            print(f"  AXIS HOLDOUT: fold {ax_fold}, {int((mask == 0).sum())}/"
+                  f"{len(uids)} users excluded entirely — {len(tr)} -> "
+                  f"{len(tr_eff)} training rows. Note this also removes them "
+                  f"from the RATING fit, which build_axes does not do to its "
+                  f"users; the resulting axis gain is biased AGAINST this model.",
+                  flush=True)
+
         opt = torch.optim.Adam(m.param_groups(args.lr_net, args.lr_field))
         # threshold in the slope head's own (pre-softplus) space
         o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
-        n = len(tr)
+        n = len(tr_eff)
         best, best_state, flat, best_epoch = float("inf"), None, 0, 0
+        stopped_early = False
         print(f"\n=== joint fit seed {seed} | {args.epochs} epochs | K={args.k} "
               f"===", flush=True)
         for ep in range(args.epochs):
             m.train(True)
-            perm = tr[torch.randperm(n, device=device)]
+            perm = tr_eff[torch.randperm(n, device=device)]
             for i in range(0, n, BATCH):
                 bi = perm[i:i + BATCH]
                 pred, gh = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
@@ -632,18 +799,12 @@ def main():
                 Cm = Mn.T @ Mn
                 loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
                     args.k, device=device)) ** 2).sum()
-                # divergence barriers, over the FULL corpus with dropout off
+                # divergence barrier, over the FULL corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
                   short = torch.nn.functional.softplus(
                       o_tau - m.slope_logit(tfeat)).pow(2).mean()
                   loss = loss + args.shallow_w * short
-                  lam_d = m.lapse().detach()
-                  cap_d = (1.0 - 2.0 * lam_d).clamp(min=EPS, max=FLOOR_CAP)
-                  ratio = (CALIBRATION_P / cap_d).clamp(EPS, 1.0 - EPS)
-                  o_div = torch.log(ratio / (1.0 - ratio))
-                  loss = loss + HIGH_FLOOR_PENALTY * torch.nn.functional.softplus(
-                      m.floor_logit(tfeat) - o_div).pow(2).mean()
                   m.train(True)
                 opt.zero_grad(); loss.backward(); opt.step()
             if (ep + 1) % CHECK_EVERY == 0 or ep == args.epochs - 1:
@@ -663,11 +824,19 @@ def main():
                 print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  stop-split "
                       f"{bce_st:.4f}  best {best:.4f}@{best_epoch}  "
                       f"stale {flat}/{FLAT_PATIENCE}", flush=True)
-                if ep + 1 >= MIN_EPOCHS and flat >= FLAT_PATIENCE:
+                if flat >= FLAT_PATIENCE:
                     print(f"  stopped at epoch {ep + 1}; best stop-split "
                           f"{best:.4f} at epoch {best_epoch}; restoring it",
                           flush=True)
+                    stopped_early = True
                     break
+        if not stopped_early:
+            raise SystemExit(
+                f"EPOCH CAP HIT: ran the full {args.epochs} epochs without the "
+                f"patience rule firing (best stop-split {best:.4f} at epoch "
+                f"{best_epoch}). The fit never plateaued, so this is not a "
+                f"converged solution and its numbers are not comparable with "
+                f"anything in docs/mirt_benchmark.md. Raise --epochs and re-run.")
         if best_state is not None:
             with torch.no_grad():
                 for q, b in zip(m.params(), best_state):
@@ -823,6 +992,10 @@ def main():
         # --- criterion 2: held-out users, scored by the SAME harness and the
         # SAME shipped-4PL baseline as every other axis measurement, so the
         # number is comparable rather than merely internally consistent.
+        if args.k == 0:
+            print("  K=0: no axis block — axis criteria skipped", flush=True)
+            print(f"\ntotal {time.time() - t0:.0f}s")
+            return
         gmap = {}
         for (sz, t), i in key_idx.items():
             gmap[t] = g_np[i]
@@ -832,7 +1005,13 @@ def main():
             if t in gmap:
                 garr[i] = gmap[t]
                 hit += 1
-        ev_ax = [u for u in ax_users if fold_of[u] == 0]
+        # Evaluate on the fold that was pinned out of the axis fit. When no fold
+        # was held out, fold 0 is still scored — but those users DID shape the
+        # loadings, so the figures below are in-sample and are labelled as such.
+        ev_ax = [u for u in ax_users if fold_of[u] == held_fold]
+        held = ax_fold in (0, 1)
+        tag = (f"HELD-OUT USERS (fold {ax_fold})" if held
+               else "IN-SAMPLE USERS — NOT a holdout")
         # PRIMARY: score against THIS MODEL'S OWN rating/slope/floor. The axes
         # were fitted to explain the residual against it, so scoring them
         # against a different 4PL asks them to explain a residual they were
@@ -853,7 +1032,7 @@ def main():
         have = [t for t in ti_ax if t in params_own]
         gain_o, n_o, gu_o, nu_o = axes_ll_gain(
             rbu, ev_ax, garr, rank_own, params_own, ti_ax, float(lam))
-        print(f"  AXIS criterion    (held-out USERS, vs THIS MODEL's own 4PL): "
+        print(f"  AXIS criterion    ({tag}, vs THIS MODEL's own 4PL): "
               f"pooled {gain_o / n_o * 1000:.3f}  per-user {gu_o:.3f}  "
               f"({nu_o} users, {len(have)} problems priced)", flush=True)
         # SECONDARY: the shipped 4PL as a fixed reference, which holds the
@@ -863,9 +1042,12 @@ def main():
         gain, nn_, gu, nu = axes_ll_gain(rbu, ev_ax, garr, rank_ax, params_ax,
                                          ti_ax, lapse_c)
         print(f"  axis loadings mapped for {hit}/{len(tids_ax)} problems")
-        print(f"  reference         (held-out USERS, vs SHIPPED 4PL, fixed "
-              f"across models): pooled {gain / nn_ * 1000:.3f}  "
+        print(f"  reference         ({tag}, vs SHIPPED 4PL, fixed across "
+              f"models): pooled {gain / nn_ * 1000:.3f}  "
               f"per-user {gu:.3f}  ({nu} users)", flush=True)
+        if not held:
+            print("      ^ these users SHAPED the loadings. Comparable with "
+                  "build_axes only under --axis-holdout-fold.", flush=True)
 
     print(f"\ntotal {time.time() - t0:.0f}s")
 
