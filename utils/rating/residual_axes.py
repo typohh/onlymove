@@ -364,19 +364,16 @@ def train_axes(rows_by_user, train_users, F, tid_index, k_axes, g_init, device,
             loss = bce(logit, y) \
                 + 0.5 * ((v[u] ** 2).sum(dim=1) / counts[u]).sum() / len(idx) \
                 + 10.0 * (v.mean(dim=0) ** 2).sum()
-            # The decorrelation is TWO penalties on two blocks of one
-            # correlation matrix, weighted separately because they are not the
-            # same case. AXIS-AGAINST-AXIS discourages duplicate axes, which the
-            # likelihood already disfavours on its own (two identical axes are a
-            # saddle, not a minimum — the duplicate buys nothing and any
-            # separation toward unexplained signal lowers the loss).
-            # AXIS-AGAINST-r is the quarantine, and there the likelihood pulls
-            # the WRONG way: an axis duplicating r, with per-user coefficients
-            # centred near 1, fits at least as well as r alone and better if
-            # users differ in how much population residual difficulty costs them.
-            # That is the leak fit_population_constants refuses at ship time.
-            # Defaults leave both at ortho_weight, reproducing the single
-            # combined penalty exactly.
+            # Decorrelation, mutual and against the residual head. The two
+            # halves are not the same case and only the mutual one looks
+            # droppable: the likelihood already disfavours duplicate axes, since
+            # two identical axes are a saddle rather than a minimum. It is NOT
+            # droppable — zeroing it collapses the fit, one fold going negative,
+            # and supplying the input dropout above does not rescue it. The two
+            # constrain different things: dropout bounds what one axis can fit,
+            # this bounds what the axes duplicate of each other and of r. On a
+            # TRUNK-based axis map the sign reverses, so the finding only holds
+            # with the model it was measured on. Figures in CLAUDE.md.
             M = torch.cat([gh, rh], dim=1)
             Mc = M - M.mean(dim=0, keepdim=True)
             Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
