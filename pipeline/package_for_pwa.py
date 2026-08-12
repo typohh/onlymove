@@ -594,18 +594,19 @@ def load_embeddings(board_size, meta_only=False):
         with open(labels_path, "r", encoding="utf-8") as f:
             labels = json.load(f)
 
-    # SHIP GATE: every axis must have at least one tail named. An unlabeled
-    # component means build_axes grew a new axis from fresh data — name it in
-    # axes/labels.json (positive and/or negative) before shipping.
+    # Labels are OPTIONAL to ship. An axis with neither tail named is published
+    # as a working dimension that says nothing about itself: it steers selection
+    # and weakness detection exactly like a named one, and the client prints no
+    # sentence for a tail it has no name for (stats-weaknesses.js skips such an
+    # axis, motif-bubble.js skips such a tail). Naming it in axes/labels.json is
+    # what turns it into a readable finding, so report which axes are waiting.
     comps = (labels or {}).get("components", [])
     unlabeled = [i for i, c in enumerate(comps)
                  if not ((c or {}).get("positive") or (c or {}).get("negative"))]
     if len(comps) != K or unlabeled:
-        raise SystemExit(
-            f"REFUSING to package: axis labels incomplete "
-            f"({len(comps)} components for K={K}; unlabeled axes {unlabeled}). "
-            f"Name at least one tail of each axis in axes/labels.json "
-            f"and re-run.")
+        print(f"  NOTE: axis labels incomplete ({len(comps)} components for "
+              f"K={K}; unlabeled axes {unlabeled}) — those axes ship and work, "
+              f"but stay silent on the client until named in axes/labels.json")
 
     embedding_meta = {
         "K": K,

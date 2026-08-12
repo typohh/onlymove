@@ -1,7 +1,7 @@
 {
   "version": 4,
   "space": "residual_axes_v1",
-  "_doc": "Two-tailed axis labels. components[k] names the k-th shipped axis: positive/negative label either tail's motif (null = unnamed; at least ONE tail must be named for package_for_pwa to ship). bank persists labels for motifs absent from the current fit. Anchors (label_anchors.npz) freeze each motif's loading direction; edit TEXT here, never anchors.",
+  "_doc": "Two-tailed axis labels. components[k] names the k-th shipped axis: positive/negative label either tail's motif (null = unnamed; an unnamed tail is shipped and used, the client just says nothing about it). bank persists labels for motifs absent from the current fit. Anchors (label_anchors.npz) freeze each motif's loading direction; edit TEXT here, never anchors.",
   "bank": {
     "ax_50def44d": {
       "positive": "judgement",

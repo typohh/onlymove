@@ -63,16 +63,14 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     const weaknessSe = state.weaknessSe;
     const weaknessAxisCov = state.weaknessAxisCov;
     const labelMap = state.embeddingLabels || {};
-    // side: which TAIL of the bipolar axis the weakness sits on. A negative-
-    // side weakness is only surfaced when that tail is actually named
-    // (labelFor returns null then and the axis is skipped) — some axes only
-    // carry a motif on one side (labels.json v4).
-    const labelFor = (k, side = 'positive') => {
-        const entry = labelMap[String(k)];
-        const text = localizedMotif(entry, side);
-        if (text) return text;
-        return side === 'positive' ? getTerm('statsStyleFallback', { k }) : null;
-    };
+    // side: which TAIL of the bipolar axis the weakness sits on. EITHER tail
+    // may be unnamed (labels.json v4 — some axes carry a motif on one side
+    // only, and a freshly grown axis carries none until a human names it), and
+    // an unnamed tail returns null so the axis is skipped. Symmetric on
+    // purpose: a placeholder like "style #2" is not a finding a user can act
+    // on, and printing one is worse than the pane staying quiet about an axis
+    // it cannot describe. The axis still steers selection and detection.
+    const labelFor = (k, side = 'positive') => localizedMotif(labelMap[String(k)], side);
     // Skill-noun templates (labels are nouns like "reading"/"shape", not move
     // recipes): the level-2 direction picks one of three blunt sentences about
     // the flagged motif — rely-too-much / don't-trust-enough / weak-at.
@@ -120,9 +118,11 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // Level 1: flag axes whose identified sum coefficient is credibly non-zero
     // in EITHER direction — the axes are BIPOLAR (residual skill axes,
     // 2026-07-18): a credibly NEGATIVE sum = weak at the positive-tail motif,
-    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. The negative
-    // side only surfaces when that tail is named in labels.json; an unnamed
-    // tail has nothing actionable to say and is skipped.
+    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. Either side
+    // surfaces only when that tail is named in labels.json — an unnamed tail
+    // has nothing actionable to say. The naming test sits HERE rather than at
+    // render time so an unshowable axis doesn't consume the error budget below
+    // and truncate the list ahead of an issue the user could have read.
     const candidates = [];
     for (let k = 0; k < K; k++) {
         const mu_c = weaknessParams[2 + k];
@@ -144,7 +144,9 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         const sumRel = mu_c + mu_p - centre;
         const pWeakPos = normCdf(-sumRel / Math.sqrt(varSum));
         if (pWeakPos >= WEAK_PROB_THRESHOLD) {
-            candidates.push({ k, p: pWeakPos, side: 'positive' });
+            if (labelFor(k, 'positive')) {
+                candidates.push({ k, p: pWeakPos, side: 'positive' });
+            }
         } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD
                    && labelFor(k, 'negative')) {
             candidates.push({ k, p: 1 - pWeakPos, side: 'negative' });

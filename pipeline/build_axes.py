@@ -25,8 +25,9 @@ Axes keep their identity across refits via frozen per-motif loading anchors
 (corr >= 0.8 over shared problems, greedy 1-1); an axis matching an anchor
 with NEGATIVE correlation is sign-flipped to the anchor's canonical
 orientation before anything is written, so labels never swap sides. Unmatched
-axes get fresh motif ids with null labels — pipeline.package_for_pwa REFUSES
-to ship while any component is entirely unlabeled (name it in labels.json).
+axes get fresh motif ids with null labels; those ship and work like any other
+axis, and the client simply says nothing about a tail it has no name for, so
+naming one in labels.json is what makes it readable rather than shippable.
 
 Usage: ./.venv/bin/python3 -m pipeline.build_axes     (no flags — production)
 """
@@ -83,12 +84,12 @@ def _load_labels_and_anchors():
         labels = {"version": 4, "space": LABELS_SPACE,
                   "_doc": ("Two-tailed axis labels. components[k] names the "
                            "k-th shipped axis: positive/negative label either "
-                           "tail's motif (null = unnamed; at least ONE tail "
-                           "must be named for package_for_pwa to ship). bank "
-                           "persists labels for motifs absent from the "
-                           "current fit. Anchors (label_anchors.npz) freeze "
-                           "each motif's loading direction; edit TEXT here, "
-                           "never anchors."),
+                           "tail's motif (null = unnamed; an unnamed tail is "
+                           "shipped and used, the client just says nothing "
+                           "about it). bank persists labels for motifs absent "
+                           "from the current fit. Anchors (label_anchors.npz) "
+                           "freeze each motif's loading direction; edit TEXT "
+                           "here, never anchors."),
                   "bank": {}, "components": []}
     anchors = {"tids": None, "ids": [], "M": None}
     if os.path.exists(apath) and labels["bank"]:
@@ -347,8 +348,9 @@ def main():
                  if not (c.get("positive") or c.get("negative"))]
     print(f"\nbuild_axes complete: K={k_sel}, embedding_version={version}")
     if unlabeled:
-        print(f"  NOTE: axes {unlabeled} are UNLABELED — package_for_pwa will "
-              f"refuse to ship until labels.json names at least one tail of each")
+        print(f"  NOTE: axes {unlabeled} are UNLABELED — they ship and steer "
+              f"selection, but name a tail in labels.json to have the client "
+              f"surface them as findings")
 
 
 if __name__ == "__main__":
