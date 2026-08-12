@@ -110,6 +110,10 @@ from utils.rating.residual_axes import (  # noqa: E402
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
 
+from auxiliary.rating_dev.burn_in_warm_start import (  # noqa: E402
+    burn_in_directions,
+)
+
 # A RUNAWAY FAILSAFE, not a budget. Convergence is decided by FLAT_PATIENCE on
 # the stop split, and reaching this cap is FATAL — the run is discarded rather
 # than reported, since a fit cut off mid-descent is not the fit the stopping rule
@@ -187,6 +191,10 @@ STOP_SPLIT_FRAC = 0.33
 # no problem holdout. Small: it is a convergence detector, not a criterion,
 # and every row spent on it is a row the model does not learn from.
 STOP_ROW_FRAC = 0.03
+# Epochs trained with v pinned at zero before --warm-start burnin reads the axis
+# directions off the model's own residuals. Not free-standing: it is a schedule
+# point inside one fit, not a stage, and the epochs are the rating heads' own.
+BURN_IN_EPOCHS = 100
 # THE ONLY INCLUSION RULE. It replaces both of the rating trainer's — the 5-of-
 # each user filter (MIN_ATTEMPTS) and the 8-attempt profile floor (MIN_PROFILE) —
 # because those are judgements about how WELL a parameter is estimated, while
@@ -477,6 +485,17 @@ def main():
                          "the 4PL saw every user and only the axis stage does "
                          "CV. WITHOUT this there is no held-out-user axis "
                          "measurement and none may be reported.")
+    ap.add_argument("--warm-start", choices=("eigen", "burnin", "none"),
+                    default="eigen",
+                    help="how the axis map is initialized. 'burnin' derives it "
+                         "inside the pass from the model's own residuals at "
+                         "v = 0, over TRAINING ROWS ONLY — no shipped ratings/, "
+                         "no rank curve, nothing from a held-out user. 'eigen' "
+                         "borrows the two-stage warm start, which reads the "
+                         "shipped fit and therefore leaks under any holdout "
+                         "(see docs/mirt_benchmark.md). 'none' is the ablation: "
+                         "random init, which the warm start has never been "
+                         "measured against IN THIS MODEL.")
     ap.add_argument("--dump-params", default=None,
                     help="write per-problem (rating, difficulty, slope, floor, "
                          "loading) plus abilities and axis positions to this "
@@ -744,7 +763,7 @@ def main():
         # to its rating heads. It answers whether the axes cost the rating, which
         # no amount of staring at the axis-on/axis-off difference can, since that
         # difference is measured with the axes already having shaped the fit.
-        if args.k > 0:
+        if args.k > 0 and args.warm_start == "eigen":
             gi_full = eigen_directions(rbu, tu_ax, Fax, ti_ax, rank_ax,
                                        params_ax, lapse_c, args.k)
             gi = gi_full[:, :fdim] if gi_full.shape[1] >= fdim else None
@@ -782,9 +801,32 @@ def main():
         n = len(tr_eff)
         best, best_state, flat, best_epoch = float("inf"), None, 0, 0
         stopped_early = False
+        # BURN-IN: epochs trained with v pinned at zero, after which the warm
+        # start is read off the model's OWN residuals. Not a separate stage —
+        # at v = 0 the loading gradient is identically zero, so these epochs are
+        # the axis-free baseline the residual scores are defined against, and
+        # they are the rating heads' own fit either way.
+        burn = BURN_IN_EPOCHS if (args.k > 0
+                                  and args.warm_start == "burnin") else 0
+        if burn:
+            m.v.requires_grad_(False)
         print(f"\n=== joint fit seed {seed} | {args.epochs} epochs | K={args.k} "
-              f"===", flush=True)
+              f" | warm start {args.warm_start}"
+              f"{f' after {burn} burn-in epochs' if burn else ''} ===",
+              flush=True)
         for ep in range(args.epochs):
+            if burn and ep == burn:
+                gi_bi, n_seen = burn_in_directions(
+                    m, tfeat, tp, tprof, tu, ty, tr_eff, args.k, len(uids),
+                    batch=BATCH)
+                with torch.no_grad():
+                    m.g_lin.weight.copy_(torch.tensor(gi_bi, device=device))
+                m.v.requires_grad_(True)
+                # The burn-in's own convergence says nothing about the joint
+                # fit's, so its patience is discarded rather than carried in.
+                best, best_state, flat, best_epoch = float("inf"), None, 0, 0
+                print(f"  warm start taken at epoch {burn} from {n_seen} "
+                      f"training users' own residuals; v released", flush=True)
             m.train(True)
             perm = tr_eff[torch.randperm(n, device=device)]
             for i in range(0, n, BATCH):
@@ -792,13 +834,16 @@ def main():
                 pred, gh = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
                 loss = torch.nn.functional.binary_cross_entropy(
                     pred, ty[bi], reduction="none").sum() / len(bi)
-                loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
-                loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
-                Mc = gh - gh.mean(dim=0, keepdim=True)
-                Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
-                Cm = Mn.T @ Mn
-                loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
-                    args.k, device=device)) ** 2).sum()
+                # While v is pinned at zero the axis terms are either identically
+                # zero or act on a g that the warm start is about to overwrite.
+                if ep >= burn:
+                    loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
+                    loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
+                    Mc = gh - gh.mean(dim=0, keepdim=True)
+                    Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
+                    Cm = Mn.T @ Mn
+                    loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
+                        args.k, device=device)) ** 2).sum()
                 # divergence barrier, over the FULL corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
@@ -807,7 +852,11 @@ def main():
                   loss = loss + args.shallow_w * short
                   m.train(True)
                 opt.zero_grad(); loss.backward(); opt.step()
-            if (ep + 1) % CHECK_EVERY == 0 or ep == args.epochs - 1:
+            # No stop checks during the burn-in: a plateau of the axis-free fit
+            # is not convergence of the joint one, and letting patience fire
+            # there would end the run before the axes have trained at all.
+            if ep >= burn and ((ep + 1) % CHECK_EVERY == 0
+                               or ep == args.epochs - 1):
                 m.train(False)
                 with torch.no_grad():
                     pr, _ = m.forward(tprof, tu, tfeat[tp])

@@ -80,7 +80,11 @@ Production's side is clean in both: `fit_axes_userholdout` excludes held-out use
 
 The rank curve is a second, smaller leak shared by BOTH models: `build_axis_features` reads the shipped `rating_to_rank.json` for its rank column regardless of `params_dir`.
 
-The fix under construction is `auxiliary/rating_dev/burn_in_warm_start.py` — the warm start derived inside the pass. At `v = 0` the loading gradient is identically zero, so a burn-in with `v` pinned at zero trains exactly the axis-free baseline the residual scores are defined against, and taking them over training rows only excludes held-out users and rows by construction rather than by a filter. Whether it is needed at all is the prior question: **the warm start has never been ablated in the MIRT.** The 0.973-vs-0.830 figures on record are from `train_axes`, where the 4PL is frozen.
+The fix is `auxiliary/rating_dev/burn_in_warm_start.py`, wired in as `--warm-start burnin`: the warm start derived inside the pass. At `v = 0` the loading gradient is identically zero, so a burn-in with `v` pinned at zero trains exactly the axis-free baseline the residual scores are defined against, and taking them over training rows only excludes held-out users and rows by construction rather than by a filter. It reads no shipped artifact, so the rank-curve leak leaves the MIRT with it.
+
+A second defect of the borrowed form, independent of the leak: `eigen_directions` works in the 216-column axis feature space and the result is truncated by `gi_full[:, :fdim]` to the MIRT's 212 **without renormalising**, so the initialization is a non-unit projection of directions chosen partly along four coordinates this model does not have — including the two-stage model's own rating and slope.
+
+The default stays `eigen` pending the prior question, which is whether a warm start is needed at all: **it has never been ablated in the MIRT.** The 0.973-vs-0.830 figures on record are from `train_axes`, where the 4PL is frozen and the axes are the only thing moving. `--warm-start none` is that ablation. If `burnin` and `none` are indistinguishable, both come out.
 
 ## Results — held-out samples, 2 folds, mean ± sd
 
