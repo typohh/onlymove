@@ -148,6 +148,8 @@ Two-thirds of fitted users have all their attempts inside a single calendar mont
 
 ## Head-to-head against `pipeline.train_rating` — MEASURED 2026-08-12: NOT competitive yet
 
+**Provenance, the full two-fold table, survey rho and the reproduction commands live in `docs/mirt_benchmark.md`.** Pin the DB hash and the held-out set hashes from there before comparing any future run; the summary below is the reading, not the record.
+
 Both models trained excluding the SAME 20,315 problems (shared `holdout_set`, seed 0, frac 0.15, hash `6619fdc487345fc0`, confirmed by hash on both sides), and the joint model run at production's ability structure so the row sets match exactly — 81,439 held-out rows either way.
 
 ```

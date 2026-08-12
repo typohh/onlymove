@@ -104,6 +104,12 @@ axes/per_problem.csv
 # pipeline input and stay in attempts/<size>/.
 /db/d1.sql
 /db/d1.sqlite
+# Pinned baseline snapshots of the attempts DB, named by their sha256 prefix.
+# docs/mirt_benchmark.md's held-out sets are DRAWN from this DB, so a
+# pipeline.fetch_database changes the universe, changes the draw, and voids
+# every comparison recorded there. These copies are the only way back to a
+# baseline; they are large binaries and never belong in git.
+/db/d1.baseline-*.sqlite
 # SQLite's own write-ahead-log sidecars, which exist only while a connection is
 # open — a `git status` that catches them mid-query would otherwise offer to
 # commit the engine's scratch space.
