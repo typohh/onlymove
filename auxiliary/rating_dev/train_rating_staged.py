@@ -927,6 +927,22 @@ def main():
                          "measured. Writes the (subset-trained) CSVs to --out-dir (refuses the "
                          "production ratings/); validate with auxiliary.rating_dev.validate_ratings or "
                          "--validate.")
+    ap.add_argument("--holdout-user-frac", type=float, default=0.0,
+                    help="If >0, hold out this fraction of USERS (whole accounts, via "
+                         "auxiliary.rating_dev.holdout_set, seed-keyed, hash-printed). Their rows "
+                         "leave training entirely, so the fitted parameters never saw them — which "
+                         "is what makes a WALK-FORWARD on those users leak-free. "
+                         "utils.rating.slope_calibration's walk-forward scores rows whose problems' "
+                         "parameters were fitted ON those same rows; that rewards confidence and "
+                         "biases the slope scale upward.")
+    ap.add_argument("--holdout-row-frac", type=float, default=0.0,
+                    help="If >0, hold out this fraction of ATTEMPTS, keyed on (user, problem) which "
+                         "is unique for first-time attempts. This is the CLIENT's condition: a "
+                         "held-out problem keeps its other attempts in training, so its parameters "
+                         "are informed by other people exactly as in deployment, and only this "
+                         "user's next attempt is unseen. Between the problem holdout (parameters "
+                         "from the feature prior alone) and a time-ordered walk-forward (parameters "
+                         "fitted on the scored rows), this is the one that matches.")
     ap.add_argument("--validate", action="store_true",
                     help="After writing, run auxiliary.rating_dev.validate_ratings.run_validation on --out-dir "
                          "for the same (seed, held-out frac) — held-out logloss + Δskill flatness + "
@@ -1467,6 +1483,31 @@ def main():
         print(f"HELD-OUT eval: held-out-set hash {ho_hash} | {len(ho_keys)} attempted problems held "
               f"out ({len(ho_problems)} scorable, {int(ho_mask_h.sum())} human rows) — feature-prior "
               f"generalization test (confirm via auxiliary.rating_dev.validate_ratings --expect-hash {ho_hash})")
+
+    # USER and ROW holdouts ride the SAME mask as the problem holdout, so they
+    # are excluded from training (train_h = ~ho_mask_h) and scored as held-out
+    # without any further plumbing. `ho_problems` is deliberately NOT extended:
+    # it drives the ANCHOR exclusion, which is a statement about problems, and a
+    # held-out user says nothing about whether a problem's anchor rows belong.
+    if args.holdout_user_frac > 0:
+        from auxiliary.rating_dev.holdout_set import held_out_users
+        hu_list, hu_hash = held_out_users(args.seed, args.holdout_user_frac)
+        hu = set(hu_list)
+        m_u = np.array([str(p)[:8] in hu for p in prof_df["profile"]], bool)
+        ho_mask_h = ho_mask_h | m_u
+        print(f"HELD-OUT USERS: hash {hu_hash} | {len(hu_list)} accounts held out "
+              f"({int(m_u.sum())} rows) — parameters never see them, so a "
+              f"walk-forward on these users is leak-free")
+    if args.holdout_row_frac > 0:
+        from auxiliary.rating_dev.holdout_set import held_out_rows
+        hr_list, hr_hash = held_out_rows(args.seed, args.holdout_row_frac)
+        hr = set(hr_list)
+        m_r = np.array([(str(p)[:8], str(t)) in hr
+                        for p, t in zip(prof_df["profile"], prof_df["problem"])], bool)
+        ho_mask_h = ho_mask_h | m_r
+        print(f"HELD-OUT ROWS: hash {hr_hash} | {len(hr_list)} attempts held out "
+              f"({int(m_r.sum())} profile rows; overlapping windows duplicate each "
+              f"attempt, and BOTH copies are masked)")
 
     # --- bot 'anchor users': extra examinees (learned ability) with soft-target responses on every
     #     problem. Coverage is the prior; each rung is a point on every problem's success curve, so
@@ -2526,7 +2567,18 @@ def main():
         # on (ho_hash), so a mismatch — e.g. an attempts-DB drift mid-run — fails loud.
         from auxiliary.rating_dev.validate_ratings import run_validation
         print("\n--validate: scoring the written ratings via auxiliary.rating_dev.validate_ratings ...")
-        run_validation(args.out_dir, args.seed, args.holdout_problem_frac, expect_hash=ho_hash)
+        # If USERS were held out, the prequential walk-forward must score THOSE
+        # users and no others. Passing everyone measures the model on accounts it
+        # trained on: measured, that reads 27.6 mnat better than the truth, which
+        # is eight times the effect sizes this bench is used to judge — and it
+        # looks entirely plausible while doing it. So the held-out set is derived
+        # here rather than left to the caller to remember.
+        pq_users = None
+        if args.holdout_user_frac > 0:
+            from auxiliary.rating_dev.holdout_set import held_out_users
+            pq_users, _h = held_out_users(args.seed, args.holdout_user_frac)
+        run_validation(args.out_dir, args.seed, args.holdout_problem_frac,
+                       expect_hash=ho_hash, prequential_users=pq_users)
 
 
 if __name__ == "__main__":

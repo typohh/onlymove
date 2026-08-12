@@ -905,13 +905,20 @@ def load_joint_game_phase(sizes, tids_by_size):
 RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 
 
-def load_backend_problem_params(sizes=(9, 13)):
+def load_backend_problem_params(sizes=(9, 13), ratings_dir=None):
     """tid -> (rating, slope, floor) from ratings/<size>/tsumego_{ratings,quality,
     tsumego_{ratings,slopes,floors}.csv. Fails loud on a missing file (run
-    pipeline.train_rating)."""
+    pipeline.train_rating).
+
+    `ratings_dir` overrides the default RATINGS_DIR and exists for HELD-OUT
+    evaluation: these values feed the axis features and the axis baseline, so
+    reading the shipped fit while measuring on a held-out problem set hands the
+    axes rating/slope/floor derived from attempts on exactly the problems being
+    scored. Production passes nothing and is unaffected."""
+    root = ratings_dir or RATINGS_DIR
     out = {}
     for size in sizes:
-        d = os.path.join(RATINGS_DIR, str(size))
+        d = os.path.join(root, str(size))
         frames = {}
         for name, col in ((RATINGS_CSV, "rating"),
                           (SLOPE_CSV, "slope"),

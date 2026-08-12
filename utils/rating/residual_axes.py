@@ -145,11 +145,21 @@ def corpus_tid_size():
     return out
 
 
-def build_axis_features():
+def build_axis_features(params_dir=None):
     """Literal rating-trainer feature parity. Returns (feats, rank, params,
     act_dim): feats tid -> raw feature vec (z-scored by the caller), rank tid ->
     normalized problemRank, params tid -> (rating, slope, floor), act_dim =
-    width of the leading joint-PCA activation block (per-cell fanout needs it)."""
+    width of the leading joint-PCA activation block (per-cell fanout needs it).
+
+    `params_dir` overrides where the rating model's outputs are read from, for
+    HELD-OUT evaluation only; production passes nothing. Those outputs are four
+    of the feature columns AND the 4PL baseline the axis gain is measured
+    against, so scoring a held-out problem set against the shipped fit would
+    feed the axes parameters derived from attempts on the very problems being
+    scored. NOTE the rank curve is still the shipped one: it is a global
+    monotone rating->rank map fitted on survey declarations rather than on
+    held-out outcomes, so its leak is second-order — but it is not zero, and a
+    fully clean run would refit it too."""
     from pipeline.train_rating import PCA_DIM, SEED as PCA_SEED, SIZES
 
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
@@ -166,7 +176,8 @@ def build_axis_features():
 
     curve = _load_rank_curve()
     rsf = {t: np.array(v, dtype=np.float32)
-           for t, v in load_backend_problem_params().items()}
+           for t, v in load_backend_problem_params(
+               ratings_dir=params_dir).items()}
 
     tid_size = corpus_tid_size()
     feats, rank, params = {}, {}, {}

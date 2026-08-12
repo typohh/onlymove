@@ -301,7 +301,90 @@ def heldout_metrics(rat, slp, flr, lam, theta, ho_tids, nbins=10):
             "n_rows": len(sub), "n_problems": int(np.unique(tids).size)}
 
 
-def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
+def prequential_logloss(rat, slp, flr, lam, user_ids=None, loadings=None,
+                        k_axes=0, grid_n=161, v_lr=0.05):
+    """ONE-STEP-AHEAD log loss: predict each attempt from everything before it.
+
+    For each user, attempts in time order, starting at the FIRST one. Every
+    attempt is predicted using only earlier attempts, then folded into the
+    estimate. No warmup, no evaluation blocks, no trailing window — the score is
+    just the average -log P over every attempt the user ever made, which is the
+    quantity the app's own accuracy consists of.
+
+    That plainness is the point. A blocked walk-forward with a warmup answers
+    "how well does this do for an established user once enough history exists",
+    which silently discards the early attempts where the estimate is worst and
+    where most users actually live.
+
+    Ability is a running GRID posterior, exactly as the client's estimator is:
+    the grid log-likelihood is additive in attempts, so maintaining it costs one
+    vector add per attempt and the whole pass is O(n * grid) rather than a refit
+    per step. Theta is the posterior MEAN, again as the client takes it.
+
+    With `loadings` (tid -> K-vector) the axis term sum_k g_k * v_u[k] is added
+    to the logit and v_u is learned online by SGD on the same likelihood, one
+    step per attempt, from zero. Run it both ways: the difference is what the
+    axes contribute to prediction, measured causally rather than by refitting
+    them on the history they are then scored against.
+
+    Returns {'logloss', 'n', 'n_users', 'constant_logloss', 'improvement'}."""
+    from collections import defaultdict
+    floor_max = 0.78                      # the client's floor clamp (irt.js)
+    df = load_first_time_attempts()
+    df = df[df["size"].isin(SIZES)]
+    if user_ids is not None:
+        df = df[df["user_id"].astype(str).isin(set(user_ids))]
+    df = df.sort_values("created_at")
+    rows = defaultdict(list)
+    for u, t, ok in zip(df["user_id"].astype(str), df["problem"].astype(str),
+                        df["success"]):
+        if t in rat:
+            rows[u].append((t, int(ok)))
+    if not rows:
+        return None
+    allr = np.array(list(rat.values()), dtype=float)
+    grid = np.linspace(allr.min() - 2.0, allr.max() + 2.0, grid_n)
+    # Prior: the population spread of problem ratings. Uninformative enough not
+    # to decide anything, proper enough that the FIRST attempt has a sane
+    # prediction instead of one read off an arbitrary grid edge.
+    prior = -0.5 * ((grid - allr.mean()) / (allr.std() + 1e-9)) ** 2
+
+    tot, n, nu = 0.0, 0, 0
+    ys = []
+    for u, seq in rows.items():
+        ll = prior.copy()
+        v = np.zeros(k_axes) if k_axes else None
+        nu += 1
+        for tid, y in seq:
+            a = float(slp[tid]); c = float(np.clip(flr[tid], 0.0, floor_max))
+            r = float(rat[tid])
+            span = max(1.0 - c - lam, 1e-6)
+            kap = float(clear_logit_vec(np.array([c]), lam)[0])
+            w = np.exp(ll - ll.max()); w /= w.sum()
+            th = float((w * grid).sum())                      # posterior mean
+            g = (np.asarray(loadings[tid], dtype=float)
+                 if (loadings is not None and tid in loadings) else None)
+            ax = float(g @ v) if (g is not None and v is not None) else 0.0
+            z = np.clip(a * (th - r) + kap + ax, -35, 35)
+            p = float(np.clip(c + span / (1 + np.exp(-z)), EPS, 1 - EPS))
+            tot += -(y * np.log(p) + (1 - y) * np.log(1 - p))  # PREDICT first
+            n += 1
+            ys.append(y)
+            zg = np.clip(a * (grid - r) + kap + ax, -35, 35)   # then UPDATE
+            pg = np.clip(c + span / (1 + np.exp(-zg)), EPS, 1 - EPS)
+            ll += y * np.log(pg) + (1 - y) * np.log(1 - pg)
+            if g is not None and v is not None:
+                v += v_lr * (y - p) * (span * p * (1 - p) / max(p * (1 - p), EPS)) * g
+    ya = np.array(ys, dtype=float)
+    base = float(np.clip(ya.mean(), EPS, 1 - EPS))
+    const = -(base * np.log(base) + (1 - base) * np.log(1 - base))
+    ll_mean = tot / max(n, 1)
+    return {"logloss": ll_mean, "n": n, "n_users": nu,
+            "constant_logloss": const, "improvement": const - ll_mean}
+
+
+def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False,
+                   loadings=None, k_axes=0, prequential_users=None):
     """Derive the held-out set (seed, frac), confirm/print its hash, and report held-out logloss +
     Δskill flatness (frac>0) and survey-ρ. Prints results and returns a dict. Shared by the CLI and
     by auxiliary.rating_dev.train_rating_staged --validate (one definition, no duplication)."""
@@ -335,6 +418,27 @@ def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False):
                 print(f"  held-out Δskill flatness : std {fl[0]:.4f} worst {fl[1]:+.4f} "
                       f"spread {fl[2]:.4f}  (rating bins; lower = flatter held-out error)")
 
+    # PREQUENTIAL one-step-ahead logloss — every attempt predicted from the ones
+    # before it, starting at the first. Reported rank-only and, when loadings are
+    # supplied, rank+axis, so the axes' contribution is measured causally instead
+    # of by fitting them on the history they are then scored against.
+    pq = prequential_logloss(rat, slp, flr, lam, user_ids=prequential_users)
+    if pq:
+        out.update(prequential_logloss=pq["logloss"], prequential_n=pq["n"])
+        print(f"  PREQUENTIAL (1-step, from first attempt, RANK only) : "
+              f"{pq['logloss']:.4f}  ({pq['n']} attempts, {pq['n_users']} users; "
+              f"constant {pq['constant_logloss']:.4f}, "
+              f"improvement {pq['improvement']:+.4f} nats)")
+        if loadings is not None and k_axes:
+            pqa = prequential_logloss(rat, slp, flr, lam,
+                                      user_ids=prequential_users,
+                                      loadings=loadings, k_axes=k_axes)
+            if pqa:
+                out.update(prequential_logloss_axes=pqa["logloss"])
+                print(f"  PREQUENTIAL (1-step, from first attempt, RANK+AXIS): "
+                      f"{pqa['logloss']:.4f}  -> axes add "
+                      f"{(pq['logloss'] - pqa['logloss']) * 1000:+.3f} mnat/attempt")
+
     if not no_survey:
         # weighted (non-time-adjusted) survey rho is still computed + returned in `out` (and the
         # per-server breakdown drives the time-adjustment), but no longer PRINTED — the time-adjusted
@@ -355,6 +459,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ratings-dir", required=True,
                     help="Dir of rating outputs (per-size CSVs + rating_constants.json + user_theta.csv).")
+    ap.add_argument("--holdout-user-frac", type=float, default=0.0,
+                    help="restrict the prequential walk-forward to the users held "
+                         "out at this fraction (must match the training run)")
     ap.add_argument("--seed", type=int, required=True, help="Held-out seed (must match the test run).")
     ap.add_argument("--holdout-problem-frac", type=float, required=True,
                     help="Held-out fraction (must match the test run). 0 => survey-ρ only.")
@@ -362,7 +469,13 @@ def main():
                     help="Assert the derived held-out-set hash equals this (the test run's printed hash).")
     ap.add_argument("--no-survey", action="store_true", help="Skip the survey-ρ metrics.")
     args = ap.parse_args()
+    pq_users = None
+    if args.holdout_user_frac > 0:
+        from auxiliary.rating_dev.holdout_set import held_out_users
+        pq_users, _h = held_out_users(args.seed, args.holdout_user_frac)
+        print(f"prequential restricted to {len(pq_users)} held-out users")
     run_validation(args.ratings_dir, args.seed, args.holdout_problem_frac,
+                   prequential_users=pq_users,
                    expect_hash=args.expect_hash, no_survey=args.no_survey)
 
 

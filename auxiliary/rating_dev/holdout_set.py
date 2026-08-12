@@ -61,13 +61,87 @@ def held_out_keys(seed, frac, universe=None):
     return ho, hash_keys(ho)
 
 
+def all_users():
+    """Sorted user ids over first-time attempts — the user-holdout universe.
+
+    Deliberately NOT restricted to users who pass a trainer's MIN_ATTEMPTS
+    filter: those filters differ between train_rating_staged and the joint MIRT,
+    so drawing from a filtered set would make the two models hold out DIFFERENT
+    users from the same seed. Drawing from everyone keeps the split identical
+    across models; each trainer then applies its own filter to whatever remains,
+    and the walk-forward simply scores whichever held-out users have the history
+    to be scored."""
+    df = load_first_time_attempts()
+    df = df[df["size"].isin(SIZES)]
+    return sorted(set(df["user_id"].astype(str).tolist()))
+
+
+def all_rows():
+    """Sorted (user_id, problem) pairs — the SAMPLE-holdout universe.
+
+    The pair is a unique key because these are FIRST-TIME attempts: one row per
+    user per problem, verified 0 duplicates. Holding out rows this way leaves
+    each held-out problem with its other attempts still in training, which is
+    the client's actual condition — parameters informed by other people's
+    attempts, predicting this user's next one — and is the protocol a problem
+    holdout (parameters from the feature prior alone) and a time-ordered
+    walk-forward (parameters fitted on the very rows being scored) each miss
+    from opposite sides."""
+    df = load_first_time_attempts()
+    df = df[df["size"].isin(SIZES)]
+    return sorted(zip(df["user_id"].astype(str).tolist(),
+                      df["problem"].astype(str).tolist()))
+
+
+def _draw(keys, seed, frac, fmt):
+    n_ho = int(round(frac * len(keys)))
+    rng = np.random.default_rng(seed)
+    sel = rng.choice(len(keys), size=n_ho, replace=False)
+    ho = sorted(keys[i] for i in sel)
+    h = hashlib.sha256()
+    for k in ho:
+        h.update(fmt(k).encode())
+    return ho, h.hexdigest()[:16]
+
+
+def held_out_users(seed, frac, universe=None):
+    """(sorted held-out user ids, hash). Whole users, for the WALK-FORWARD:
+    parameters that never saw them, then theta fitted causally on their trailing
+    window and the next block scored. That is production's walk-forward with its
+    leak removed — utils.rating.slope_calibration scores rows whose problems'
+    parameters were fitted ON those same rows, which rewards confidence and
+    biases the slope scale upward."""
+    return _draw(sorted(universe) if universe is not None else all_users(),
+                 seed, frac, lambda u: f"{u}\n")
+
+
+def held_out_rows(seed, frac, universe=None):
+    """(sorted held-out (user, problem) pairs, hash) — the SAMPLE holdout."""
+    return _draw(sorted(universe) if universe is not None else all_rows(),
+                 seed, frac, lambda k: f"{k[0]}:{k[1]}\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kind", choices=("problem", "user", "row"),
+                    default="problem", help="what to hold out")
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--frac", type=float, required=True, help="Fraction of attempted problems to hold out.")
     ap.add_argument("--out", default=None, help="If set, write the held-out 'size,tid' list here.")
     args = ap.parse_args()
+    if args.kind == "user":
+        universe = all_users()
+        ho, h = held_out_users(args.seed, args.frac, universe)
+        print(f"universe (users): {len(universe)}")
+        print(f"held out: {len(ho)} ({args.frac:g}) | seed {args.seed} | hash {h}")
+        return
+    if args.kind == "row":
+        universe = all_rows()
+        ho, h = held_out_rows(args.seed, args.frac, universe)
+        print(f"universe (first-time attempts): {len(universe)}")
+        print(f"held out: {len(ho)} ({args.frac:g}) | seed {args.seed} | hash {h}")
+        return
     universe = attempted_keys()
     ho, h = held_out_keys(args.seed, args.frac, universe)
     by_size = {s: sum(1 for sz, _ in ho if sz == s) for s in SIZES}
