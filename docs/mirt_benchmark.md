@@ -40,7 +40,30 @@ Reproduce:
     --prod-dir /tmp/prod_ho --seed 0 --frac 0.15 --k 3
 ```
 
-## Results — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
+## CURRENT BASELINE — held-out USERS, 2 folds, Newton scorer — MEASURED 2026-08-13
+
+Supersedes the 2026-08-12 table below, whose axis and combined columns were produced by the mis-scaled online axis estimator (see the scorer section). Both models at their own best configuration: the MIRT at current defaults (burn-in warm start at 300, lr 3e-4 / 1e-2, one barrier, 1-of-each filter, axis map reading the rating head's outputs), production as `train_rating_staged --production-flags` with its per-fold axis fit. Fold s = holdout seed s, model seed s.
+
+```
+                      rating           rating+axis        axis adds (mnat)
+  MIRT            0.4930 / 0.4998    0.4911 / 0.4977      +1.89 / +2.09
+  production      0.4955 / 0.5031    0.4919 / 0.5007      +3.66 / +2.41
+  MIRT - prod       -2.5 / -3.3        -0.8 / -3.0        +1.77 / +0.32
+
+  partitions of the same walk, axis adds:
+    seen (81%)      prod 1.37 / 0.66     MIRT 0.93 / 0.44
+    never trained   prod 13.57 / 9.70    MIRT 6.03 / 8.95
+
+  worst |corr(v, theta)|: MIRT 0.081 / 0.053   (no axis is doubling as ability)
+```
+
+**THE MIRT LEADS ON THE COMBINED NUMBER, on both folds.** Its rating head leads by 2.5 and 3.3 mnat, as it always has; what changed is that its axes are worth ~2 mnat rather than ~0, so production's axis layer no longer cancels the rating advantage. The joint fit is ahead of the two-stage pipeline on the criterion that matters — a new user, predicted one attempt ahead from their first.
+
+Two qualifications, both about the axis column. **The MIRT's axes are the more CONSISTENT** — +1.99 +/- 0.14 against production's +3.04 +/- 0.88 — so "production's axes are better" holds decisively on fold 0 (+1.77) and barely on fold 1 (+0.32). And **production's advantage is concentrated in the never-trained partition** (13.57 vs 6.03 on fold 0), which is 19% of attempts; on the 81% majority the two are close and both positive. The earlier finding that the MIRT's axes HURT on problems training saw was entirely the scorer.
+
+Survey rho remains unusable on this holdout: MIRT 0.9123 / 0.7752 against production 0.9108 / 0.8061, on 92 and 67 declarations.
+
+## SUPERSEDED — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
 
 The user holdout is the criterion from here; the problem- and row-holdout tables below are kept as what they are, measurements of different questions.
 
