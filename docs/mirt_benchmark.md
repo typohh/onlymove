@@ -190,6 +190,72 @@ So the bar was: **beat K=3 by >= 2 sd (0.84 mnat) on fold 0 AND replicate on fol
 tests the choice rather than adjusting a p-value for it. Nothing came close
 enough for the replication step to run.
 
+## AXIS IDENTITY DOES NOT SURVIVE A REFIT — MEASURED 2026-08-14
+
+The question is whether a refit's axes can be matched to the previously NAMED motifs in `axes/labels.json`, so a name carries forward. They cannot, and the reason is structural rather than a tuning failure.
+
+**The objective is exactly invariant to rotating the axis space.** The likelihood reads the loadings and the user positions only through their product, so rotating both by the same orthogonal matrix leaves it unchanged. `V_RIDGE` is isotropic, `V_MEAN_PENALTY` acts on the mean vector, and `ORTHO_WEIGHT` targets the loading correlation being the identity — a condition every rotation preserves. The fit therefore has a continuum of exactly-equal solutions and no preference among them; which one comes out is decided entirely by where the warm start drops it, and the warm start is read off the burn-in residuals, hence off the data.
+
+Similarity is measured three ways on the problem side, over the problems two fits share, after per-axis z-scoring: **pairwise** correlation under an optimal 1-1 assignment (`scipy.optimize.linear_sum_assignment` on `-|corr|`, so a permutation costs nothing and a sign flip means swapping a motif's two tail labels, not losing it); **canonical correlations** between the two K-dim spans, which bound what any linear alignment can achieve; and **tail overlap**, the shared problems among each axis's top and bottom 500, restricted to the shared problem set so corpus growth cannot deflate it. Tail overlap is the one that speaks to naming, since a name is a claim about the extremes and the client only ever reads a flagged tail.
+
+| comparison | canonical correlations | best axis's tails, of 1000 |
+|---|---|---|
+| same data, seed 0 vs 1 | 0.409 / 0.792 / 0.959 | 334 |
+| same data, seed 0 vs 2 | 0.596 / 0.699 / 0.967 | 428 |
+| same data, seed 1 vs 2 | 0.659 / 0.755 / 0.965 | 507 |
+| production `train_mirt` vs dev trainer, both seed 0 | 0.599 / 0.869 / 0.982 | — |
+| seed 0, minus the most recent 2% of attempts (~9 days) | 0.391 / 0.655 / 0.944 | 200 |
+| seed 0, minus the most recent 5% (~2.5 weeks) | 0.572 / 0.700 / 0.964 | 314 |
+| disjoint user halves | 0.025 / 0.490 / 0.847 | 252 |
+| both seeds trained to convergence (`--flat-patience 30`) | 0.335 / 0.804 / 0.964 | 219 |
+| ONE seed, patience 5 (@360) vs patience 30 (@850) | 0.863 / 0.938 / 0.990 | 612 |
+
+Read in order, those rows rule out every post-hoc remedy:
+
+- **A 2% data change disturbs the basis as much as a different seed does.** Same seed, 98% shared data, and the axes land as far apart as two independent fits. There is no refit cadence short enough to keep them close.
+- **The disturbance does not scale with the data delta.** The 5% cut agrees BETTER with the full fit than the 2% cut does. All the cut rows sit in the same band as the seed rows, which is the signature of a re-draw rather than a drift.
+- **Training to convergence does not help**, and slightly hurts. Two seeds run to their own optima agree no better than two stopped early. Nothing pulls them together, because the objective scores every rotation identically.
+- **Along ONE trajectory the axes barely move** (0.863 across 490 extra epochs, against 0.409 for a seed change). They are set early by the warm start and refined locally thereafter.
+- **Rotation is part of the story but not all of it.** Orthogonal Procrustes lifts the worst pairwise correlation from 0.492 to 0.754 on one seed pair but only 0.603 to 0.612 on the 2% cut, because the SUBSPACE moves as well as the basis inside it.
+
+### Per shipped axis — which one could be named
+
+Canonical correlations describe the SPAN. A name attaches to a COLUMN of `axes/per_problem.csv`, so the figure that governs naming is per-axis, and it is lower. Max |corr| of each of seed 0's axes against any axis of the other fit:
+
+| | seed1 | seed2 | pat30 s0 | pat30 s1 | half0 | half1 |
+|---|---|---|---|---|---|---|
+| seed0 axis 0 | 0.751 | 0.829 | 0.917 | 0.753 | 0.642 | 0.654 |
+| seed0 axis 1 | 0.631 | 0.681 | 0.932 | 0.631 | 0.565 | 0.433 |
+| seed0 axis 2 | 0.768 | 0.883 | 0.976 | 0.766 | 0.806 | 0.646 |
+
+allowing the best linear COMBINATION of the other fit's axes — i.e. what a gauge fix would recover:
+
+| | seed1 | seed2 | pat30 s0 | pat30 s1 | half0 | half1 |
+|---|---|---|---|---|---|---|
+| seed0 axis 0 | 0.828 | 0.841 | 0.940 | 0.820 | 0.851 | 0.766 |
+| seed0 axis 1 | 0.756 | 0.711 | 0.933 | 0.764 | 0.690 | 0.579 |
+| seed0 axis 2 | 0.890 | 0.929 | 0.977 | 0.890 | 0.848 | 0.806 |
+
+**Axis 2 is the one direction worth naming.** It leads on all six comparisons including the halves, and axis 1 trails on all six. The single-axis to combination gap is the free rotation; what remains after it is genuine subspace movement, which no alignment recovers.
+
+### The 16 motifs in the bank are gone
+
+The names in `axes/labels.json` were fitted against the two-stage axes and do not transfer. Current MIRT axes against all 16 frozen anchors in `label_anchors.npz`, over 152,346 shared problems: best single-anchor correlation **0.41**, R² on the full 16-anchor span 0.16 / 0.21 / 0.28, canonical correlations against the three motifs the previous fit shipped **0.009 / 0.411 / 0.582**. `ax_0860ca04` "killing / defending territory", which sits in `components[0]`, shares 10, 8 and 3 tail problems of 1000 with the three new axes. `train_mirt` writes no `motif_ids` and `package_for_pwa` reads `components` positionally, so shipping today would attach that name to an axis correlating 0.10 with it.
+
+### Reproduction
+
+```bash
+# each arm is one training run; --dump-params writes tid/size/loading/theta/v
+./.venv/bin/python3 -m auxiliary.rating_dev.train_joint_mirt \
+    --seeds 0 --holdout-problem-frac 0 --dump-params seed0.npz
+#   --drop-recent-frac 0.02    an earlier refit of itself (date cut)
+#   --axis-holdout-fold 0|1    disjoint user halves
+#   --flat-patience 30         trained to convergence
+#   --init-from M.pt           continue a previous fit instead of re-deriving a basis
+```
+
+`--holdout-problem-frac 0` matters: the dev default is the benchmark's 20% problem holdout, and a problem no fit saw is priced from the feature prior alone, which inflates the apparent instability with variation production does not have.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
@@ -225,7 +291,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `GAUGE_MOM` | 0.01 | EMA rate for the difficulty gauge. |
 | `BATCH` | 65536 | |
 | `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |
-| `CHECK_EVERY` / `FLAT_PATIENCE` | 10 / 5 | the stopping rule picks within 0.3 mnat of the held-out optimum, so this is low priority — but the pair was never swept jointly. |
+| `CHECK_EVERY` / `FLAT_PATIENCE` | 10 / 30 | MEASURED 2026-08-14 and raised from 5. The stop split improves in bursts separated by long flat stretches; the largest gap before the final optimum was 25 checks on one seed and 10 on the other, so anything under 25 halts mid-stretch. At 5 both seeds stopped near epoch 350 against optima at 850 and 580, costing 0.5 and 0.7 mnat of RATING (paired, same seed either side). Buys no axis stability. Runtime ~9 -> ~25 min; the experiment surface keeps 5. Two pairs only — a third seed would firm it up. |
 | `PRIOR_AX_SD` (scorer) | 0.5 | the ONLY constant left in the fixed scorer. Sits slightly below both models' hand-tuned optima, so both are scored a little short of their peak. |
 | `DROPOUT`, `INPUT_DROPOUT` | 0.3 | inherited unswept in this model; measured only on the two-stage one. |
 
@@ -233,6 +299,9 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 
 - **Where production's remaining axis advantage lives.** It is concentrated in the never-trained partition (13.57 vs 6.03 mnat on fold 0), which is 19% of attempts; on the 81% majority the two are close. That points at how each model prices unattempted content, not at the axis machinery.
 - **The axis block overfits faster than the rating heads** — measured on the stopping diagnostic, the axes swing +0.8 to −4.1 mnat between epochs 350 and 650 while the rating moves 1.9. A separate stopping signal for the axis path has never been tried.
+- **Whether CARRYING THE PREVIOUS FIT OVER buys axis identity, and what it costs.** The only remedy the measurements above leave standing: initialize a refit from the previous fit's model (`--init-from`) so consecutive runs continue the same axes instead of re-deriving a basis. Two readouts are needed, not one — stability along the chain, AND the held-out loss against a cold fit on the same data, because a carried fit starts near its optimum and may stop almost immediately, which would produce excellent stability that means only that it never moved. If anchoring costs real mnats, that is the price of nameable axes and should be quoted as such.
+- **An LR warmup schedule** (`--lr-warmup-epochs`, linear ramp from zero). The case for it is ENDPOINT CONSISTENCY, and it is stronger than it first looks: because the axis objective is rotation-invariant, nothing pulls two runs together and the endpoint is decided ENTIRELY by the path — so a path less sensitive to perturbation should land two runs closer, even though the degenerate set is the same size either way. "The objective cannot prefer a point" does not imply "the optimizer cannot land consistently". The case against is which perturbation dominates here: warmup damps sensitivity to OPTIMIZER noise (init draw, early large steps, batch order), but the 2% time cut re-rolled the basis at the SAME seed and same init, which is sensitivity to the DATA — and that points at the warm start itself, the top-K eigenvectors of the burn-in residual moment, whose trailing eigenvalues sit within 1.4x of each other (0.00048 vs 0.00034 in the trained `cov(v)`). Eigenvectors of a near-degenerate matrix swing under any perturbation of the matrix, which is closed-form arithmetic and not a gradient path. The two mechanisms are separable and the test is direct: two seeds with warmup against the no-warmup seed pair's 0.409 / 0.792 / 0.959. Note the fit's KNOWN divergence mode is not the shape warmup usually treats — a SHARED rate diverging late (0.460 at epoch 70 to 0.521 at epoch 90), fixed by splitting the rates.
+- **Trunk initialization and input scaling.** Both currently unexamined rather than chosen: no explicit init on the trunk or rating head (PyTorch defaults), and every input block pooled column z-scored with no normalization layer inside the trunk. At 216 -> 128 -> 64 neither is expected to matter, but that is an argument from the architecture and not a measurement.
 - **Fold sensitivity of the axis comparison.** Production's axis lead is +1.77 on fold 0 and +0.32 on fold 1. Two folds cannot resolve that; a third and fourth would.
 
 ## SUPERSEDED — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
@@ -412,9 +481,9 @@ K is fixed at 3, and measured as an interior optimum rather than inherited — s
 
 ```
 holdout_set.py            the shared problem holdout; hash-confirmed on both sides
-train_rating_staged.py    --production-flags --holdout-problem-frac  (production)
-train_joint_mirt.py       --holdout-seed --window-months --dump-params  (MIRT)
-prod_axis_heldout.py      production's constructed rating+axis on the same rows
+train_joint_mirt.py       --holdout-seed --window-months --dump-params --drop-recent-frac
+eval_user_holdout.py      the Newton scorer: rating / rating+axis / axis increment
+axis_by_history.py        the same walk, split by attempts PRECEDING the scored one
 compare_heldout_logloss.py  paired logloss, user-CLUSTERED bootstrap
 compare_survey_rho.py     paired survey rho, user bootstrap
 ```

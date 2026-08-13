@@ -582,6 +582,27 @@ def main():
                          "what a pure row- or user-holdout run wants. Left at the "
                          "benchmark value by default so existing comparisons are "
                          "unaffected.")
+    ap.add_argument("--lr-warmup-epochs", type=int, default=0,
+                    help="linearly ramp both learning rates from 0 to their full "
+                         "value over this many epochs. The claim under test is "
+                         "ENDPOINT CONSISTENCY: the axis objective is invariant to "
+                         "rotating the latent space, so the endpoint is decided by "
+                         "the path, and a less perturbation-sensitive path should "
+                         "land two runs closer together.")
+    ap.add_argument("--init-from", default=None,
+                    help="continue from a previous fit's saved model (--save-model). "
+                         "The problem-side modules load directly; theta and the axis "
+                         "positions are scattered by profile/user NAME, so accounts "
+                         "that did not exist in that fit start at zero. Implies no "
+                         "burn-in: the carried axes ARE the warm start.")
+    ap.add_argument("--save-model", default=None,
+                    help="write the fitted model (post best-epoch restore) so a "
+                         "later run can --init-from it")
+    ap.add_argument("--drop-recent-frac", type=float, default=0.0,
+                    help="drop the most recent fraction of ATTEMPTS by date, "
+                         "making the run an earlier refit of itself. Compare "
+                         "its axes against the full fit at the same seed to "
+                         "measure what one refit's worth of new data moves.")
     ap.add_argument("--holdout-user-frac", type=float, default=0.0,
                     help="hold out this fraction of USERS entirely (shared "
                          "generator, hash-printed) so a walk-forward on them is "
@@ -772,6 +793,24 @@ def main():
     # 2-month block carries far too few attempts to fit one).
     df = load_first_time_attempts()
     df = df[df["size"].isin(SIZES)].copy()
+    if args.drop_recent_frac > 0:
+        # SIMULATE THE PREVIOUS REFIT. Cutting by DATE is what makes this an
+        # earlier run of this same script rather than an ablation: it removes
+        # the accounts that had not arrived yet AND truncates the histories of
+        # the ones that had, which is both halves of what a refit adds back.
+        # Dropping a random fraction of USERS instead is a different and much
+        # harsher perturbation — it takes long-history accounts, and those are
+        # the ones the axes are fitted from (the axis block pays nothing below
+        # ~500 attempts), while the users a refit actually gains are new and
+        # short. The cut sits BEFORE the outcome filter so the filter applies to
+        # the truncated data, exactly as the earlier run would have applied it.
+        ts = df["created_at"].astype(str)
+        cut = ts.quantile(1.0 - args.drop_recent_frac, interpolation="lower")
+        before = len(df)
+        df = df[ts <= cut].copy()
+        print(f"  TIME CUT: dropped the most recent {args.drop_recent_frac:.0%} "
+              f"of attempts (> {cut}) — {before} -> {len(df)} rows, "
+              f"{df['user_id'].nunique()} users remain", flush=True)
     g = df.groupby("user_id")["success"].agg(c="sum", n="count")
     g["w"] = g["n"] - g["c"]
     df = df[df["user_id"].isin(set(g.index[(g["c"] >= MIN_BOTH_OUTCOMES)
@@ -988,6 +1027,42 @@ def main():
                       axis_reads_rating=not args.axis_blind,
                       axis_from_trunk=not args.axis_from_features,
                       axis_trunk_coupled=not args.axis_trunk_detached)
+        if args.init_from:
+            # CONTINUE the previous fit rather than rediscovering a basis. The
+            # axis objective is invariant to rotating the K-dim latent space, so
+            # an independent fit has no reason to land in the previous fit's
+            # basis and measurably does not; carrying the map over is what makes
+            # a motif NAME survive a refit. Problem-side modules transfer whole.
+            # theta and v are per-account, so they scatter BY NAME and accounts
+            # that did not exist yet start at zero — which is what they would
+            # have been initialized to anyway.
+            st = torch.load(args.init_from, map_location=device)
+            if int(st["k"]) != args.k:
+                raise SystemExit(f"--init-from has K={st['k']}, this run K={args.k}")
+            m.trunk.load_state_dict(st["trunk"])
+            m.head.load_state_dict(st["head"])
+            m.g_lin.load_state_dict(st["g_lin"])
+            with torch.no_grad():
+                m.lapse_raw.copy_(st["lapse_raw"].to(device))
+                m.a_raw.copy_(st["a_raw"].to(device))
+                m.b_mu.copy_(st["b_mu"].to(device))
+                m.b_sd.copy_(st["b_sd"].to(device))
+                pidx = {str(x): i for i, x in enumerate(st["profiles"])}
+                th, nth = st["theta"].to(device), 0
+                for j, pr_ in enumerate(profiles.categories):
+                    i = pidx.get(str(pr_))
+                    if i is not None:
+                        m.theta.weight[j].copy_(th[i]); nth += 1
+                uidx = {str(x): i for i, x in enumerate(st["users"])}
+                vv, nv = st["v"].to(device), 0
+                for j, u_ in enumerate(uids):
+                    i = uidx.get(str(u_))
+                    if i is not None:
+                        m.v[j].copy_(vv[i]); nv += 1
+            print(f"  CONTINUED from {os.path.basename(args.init_from)}: "
+                  f"trunk/heads/axis map whole, {nth}/{len(profiles.categories)} "
+                  f"profiles and {nv}/{len(uids)} users carried, the rest at zero",
+                  flush=True)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
@@ -1011,6 +1086,7 @@ def main():
                   flush=True)
 
         opt = torch.optim.Adam(m.param_groups(args.lr_net, args.lr_field))
+        base_lrs = [gp["lr"] for gp in opt.param_groups]
 
         def _extract():
             """Per-problem parameters as of NOW, always in eval mode — the gauge
@@ -1058,7 +1134,8 @@ def main():
         # hands over at its own best epoch, restored — which is exactly what the
         # two-stage pipeline does, train_rating converging before build_axes
         # reads it, and is why the borrowed warm start works at all.
-        burnin_on = (args.k > 0 and args.warm_start == "burnin")
+        burnin_on = (args.k > 0 and args.warm_start == "burnin"
+                     and not args.init_from)
         burn_fixed = args.burn_in if (burnin_on and args.burn_in > 0) else 0
         in_burn = burnin_on
         if in_burn:
@@ -1069,6 +1146,12 @@ def main():
                  else " after a burn-in to convergence" if in_burn else "")
               + " ===", flush=True)
         for ep in range(args.epochs):
+            if args.lr_warmup_epochs:
+                # Ramp from one step's worth up to full, never from exactly 0 —
+                # a first epoch at lr 0 is an epoch of pure bookkeeping.
+                scale = min(1.0, (ep + 1) / args.lr_warmup_epochs)
+                for gp, b in zip(opt.param_groups, base_lrs):
+                    gp["lr"] = b * scale
             m.train(True)
             perm = tr_eff[torch.randperm(n, device=device)]
             for i in range(0, n, BATCH):
@@ -1175,6 +1258,20 @@ def main():
             with torch.no_grad():
                 for q, b in zip(m.params(), best_state):
                     q.copy_(b)
+
+        if args.save_model:
+            torch.save({"trunk": m.trunk.state_dict(),
+                        "head": m.head.state_dict(),
+                        "g_lin": m.g_lin.state_dict(),
+                        "theta": m.theta.weight.detach().cpu(),
+                        "profiles": [str(x) for x in profiles.categories],
+                        "v": m.v.detach().cpu(),
+                        "users": [str(x) for x in uids],
+                        "lapse_raw": m.lapse_raw.detach().cpu(),
+                        "a_raw": m.a_raw.detach().cpu(),
+                        "b_mu": m.b_mu.cpu(), "b_sd": m.b_sd.cpu(),
+                        "k": args.k}, args.save_model)
+            print(f"  wrote model -> {args.save_model}", flush=True)
 
         # --- criterion 1: held-out problems (the rating side), on the split
         # the stopping rule never saw
