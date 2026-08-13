@@ -82,7 +82,17 @@ from utils.rating.features import (  # noqa: E402
 
 EPOCHS = 10000                   # runaway failsafe; the patience rule ends the run
 CHECK_EVERY = 10
-FLAT_PATIENCE = 5                # checks without a new best before stopping
+# Checks without a new best before stopping. SIZED FROM THE GAPS BETWEEN
+# IMPROVEMENTS, not chosen: the stop split keeps improving in bursts separated
+# by long flat stretches, and the largest gap before the final optimum measured
+# 25 checks on one seed and 10 on the other. Anything under that stops in a
+# stretch rather than at the end — at 5 both seeds halted around epoch 350 while
+# their true optima sat at 850 and 580, costing 0.5 and 0.7 mnat of RATING (a
+# paired comparison, same seed either side, so it is not the across-seed noise).
+# The axes are indifferent to this: 490 extra epochs move them 0.86 canonical,
+# far less than a seed change does, so raising it buys rating accuracy and NOT
+# axis stability. The cost is runtime, ~9 minutes to ~25.
+FLAT_PATIENCE = 30
 BATCH = 65536
 # SPLIT RATES, and the split is mandatory. What the grid measures is the RATIO
 # lr_field/lr_net, monotone and saturating near 30x: below 10x the fit loses

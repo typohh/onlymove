@@ -42,7 +42,7 @@ Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves 
 
 Run on a remote Vast.ai GPU instead: `python vast_orchestration.py` (no args prints subcommands; only `tune`, `generate`, `benchmark` are remoted — the rest stay local).
 
-**Several of these steps run for HOURS, none of them checkpoint, and a naively launched run WILL be killed part-way — losing all of it.** `pipeline.train_mirt` is ~9 minutes and `pipeline.write_mirt_per_cell` ~15 (the latter RESUMES by file existence, so an interruption costs only the batch in flight). `generate_tsumegos`, `benchmark_bots` and `extract_activations` are a different order entirely — hours. Three ways such a run dies quietly, and what to do instead:
+**Several of these steps run for HOURS, none of them checkpoint, and a naively launched run WILL be killed part-way — losing all of it.** `pipeline.train_mirt` is ~25 minutes and `pipeline.write_mirt_per_cell` ~15 (the latter RESUMES by file existence, so an interruption costs only the batch in flight). `generate_tsumegos`, `benchmark_bots` and `extract_activations` are a different order entirely — hours. Three ways such a run dies quietly, and what to do instead:
 
 - **A shell that backgrounds with `&` and then exits takes the child down with it** (SIGTERM, exit 143) — including a wrapper that backgrounds the real work and then returns. Launch detached: `setsid nohup ./.venv/bin/python3 -u -m pipeline.<step> > /tmp/<step>.log 2>&1 < /dev/null &`.
 - **`timeout N` kills at N with exit 124 and no partial result.** Don't wrap a step in a timeout unless you are certain it exceeds the real runtime; a too-short guess is indistinguishable from a crash after the fact.
