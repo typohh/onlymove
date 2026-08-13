@@ -30,7 +30,12 @@ Outputs, matching what the two-stage pair wrote so downstream is unchanged:
   ratings/user_theta.csv                profile, theta, n_attempts
   ratings/rating_constants.json         {"fat_finger_rate": lambda, "slope_scale": s}
   axes/per_problem.csv                  tsumego_id, size, embed_0..embed_{K-1}
-  axes/axes.npz                         the model + the content-hash embedding_version
+  axes/mirt_axes.npz                    the model + the content-hash embedding_version
+
+NOT axes/axes.npz: that is tracked and holds build_axes' FEATURE-space map, whose
+readers require keys (rms, v_sd, feat_mu, feat_sd) that describe a standardization
+this model does not have. Same name, different object — writing there would be a
+silent format break while the two-stage path is still needed.
 
 WHAT THIS DOES NOT DO, and must be run alongside until it does:
   - `axes/per_cell/` — a K-vector for every legal cell, needed because the client
@@ -502,11 +507,19 @@ def main():
                 m.head.weight.detach().cpu().numpy()):
         h.update(np.ascontiguousarray(arr, dtype=np.float32).tobytes())
     ev = h.hexdigest()[:16]
-    np.savez_compressed(os.path.join(AXES_DIR, "axes.npz"),
+    # DELIBERATELY NOT axes/axes.npz. That file is tracked, and build_axes writes
+    # a FEATURE-space map there — W is (K, 216) with rms/v_sd/feat_mu/feat_sd
+    # describing the standardization it was fitted under, and readers such as
+    # eval_user_holdout.project_loadings require those keys. This model's map is
+    # (K, trunk_width) over the trunk's output: a different object under the same
+    # name, so writing it there would not be an upgrade but a silent format
+    # break, and the two-stage path is still needed for per_cell and labels.
+    np.savez_compressed(os.path.join(AXES_DIR, "mirt_axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),
+                        trunk_width=np.array(m.g_lin.weight.shape[1]),
                         embedding_version=np.array(ev))
-    print(f"  wrote axes/per_problem.csv + axes.npz (K={K_AXES}, "
+    print(f"  wrote axes/per_problem.csv + mirt_axes.npz (K={K_AXES}, "
           f"embedding_version {ev})", flush=True)
 
     # RETIRE ANY per_cell/ FROM THE PREVIOUS AXIS MAP. package_for_pwa reads the

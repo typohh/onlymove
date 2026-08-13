@@ -100,6 +100,14 @@ def _load(prod_dir, dump, axes_npz=None):
 # the magnitude in v so V_RIDGE can bound it; production's carry RMS 0.41).
 PRIOR_AX_SD = 0.5
 
+# Prefix-length bins: how many attempts PRECEDE the one being scored. Both latent
+# user quantities are estimated from that prefix, so this is the axis along which
+# to ask whether the axes need history before they pay — a question the
+# seen/unseen split is blind to, since it describes the PROBLEM rather than how
+# much is known about the USER.
+PREFIX_BINS = ((0, 30, "pfx 0-30"), (30, 100, "pfx 30-100"),
+               (100, 500, "pfx 100-500"), (500, 10 ** 9, "pfx 500+"))
+
 
 def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
                  k_axes=0):
@@ -135,15 +143,23 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
     allr = np.array(list(rate.values()), float)
     grid = np.linspace(allr.min() - 2.0, allr.max() + 2.0, GRID_N)
     prior = -0.5 * ((grid - allr.mean()) / (allr.std() + 1e-9)) ** 2
-    acc = {"all": [0.0, 0, []], "seen": [0.0, 0, []], "unseen": [0.0, 0, []]}
+    # [logloss sum, n, outcomes, |p-y| sum, correct-at-0.5 count]. The last two
+    # are the same comparison in probability space: mnat is the right currency
+    # for model selection but says nothing a reader can picture, whereas "the
+    # predicted chance of success is off by X percentage points on average" does.
+    acc = {"all": [0.0, 0, [], 0.0, 0], "seen": [0.0, 0, [], 0.0, 0],
+           "unseen": [0.0, 0, [], 0.0, 0]}
+    for _lo, _hi, _lbl in PREFIX_BINS:
+        acc[_lbl] = [0.0, 0, [], 0.0, 0]
     eye = np.eye(k_axes) if k_axes else None
+    bin_of = {}          # prefix length -> label, filled lazily per length seen
     for _u, seq in seqs.items():
         ll = prior.copy()
         v = np.zeros(k_axes) if k_axes else None
         # Laplace posterior precision, seeded at the prior. SPD throughout: the
         # seed is positive definite and every update adds a PSD rank-1 term.
         prec = eye * prior_prec if k_axes else None
-        for tid, y in seq:
+        for pos, (tid, y) in enumerate(seq):
             a = float(slope[tid])
             c = float(np.clip(floor[tid], 0.0, FLOOR_MAX))
             r = float(rate[tid])
@@ -157,10 +173,20 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
             z = np.clip(a * (th - r) + kap + ax, -35, 35)
             p = float(np.clip(c + span / (1 + np.exp(-z)), 1e-9, 1 - 1e-9))
             loss = -(y * np.log(p) + (1 - y) * np.log(1 - p))
-            for key in ("all", "seen" if tid in seen_problems else "unseen"):
+            # `pos` is the number of attempts that PRECEDE this one for this
+            # user, i.e. how much history both latent estimates have had. It is
+            # the axis of interest when asking whether the axes need history to
+            # pay off, which the seen/unseen split cannot answer.
+            pb = bin_of.get(pos)
+            if pb is None:
+                pb = next(l for lo, hi, l in PREFIX_BINS if lo <= pos < hi)
+                bin_of[pos] = pb
+            for key in ("all", "seen" if tid in seen_problems else "unseen", pb):
                 acc[key][0] += loss
                 acc[key][1] += 1
                 acc[key][2].append(y)
+                acc[key][3] += abs(p - y)
+                acc[key][4] += int((p >= 0.5) == (y >= 0.5))
             zg = np.clip(a * (grid - r) + kap + ax, -35, 35)
             pg = np.clip(c + span / (1 + np.exp(-zg)), 1e-9, 1 - 1e-9)
             ll += y * np.log(pg) + (1 - y) * np.log(1 - pg)
@@ -175,12 +201,13 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
                 prec = prec + w * np.outer(g, g)
                 v = v + np.linalg.solve(prec, score)
     out = {}
-    for key, (tot, n, ys) in acc.items():
+    for key, (tot, n, ys, abserr, ncorr) in acc.items():
         if not n:
             continue
         base = float(np.clip(np.mean(ys), 1e-9, 1 - 1e-9))
         const = -(base * np.log(base) + (1 - base) * np.log(1 - base))
-        out[key] = {"logloss": tot / n, "n": n, "constant": const}
+        out[key] = {"logloss": tot / n, "n": n, "constant": const,
+                    "mae": abserr / n, "acc": ncorr / n, "base_rate": base}
     return out
 
 
