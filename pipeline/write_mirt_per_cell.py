@@ -153,6 +153,17 @@ def main():
     act_dirs = {s: os.path.join(PROJECT_ROOT, "activations", str(s)) for s in SIZES}
     tasks = [(s, t) for s in SIZES for t in tids_by_size[s]
              if tid_size.get(t) == s and (s, t) in bw]
+    # RESUMABLE by file existence, the same idiom extract_activations uses. Every
+    # write goes through a tmp file and os.replace, so a file that exists is
+    # complete — an interrupted run loses at most the batch in flight. Worth
+    # having: this is a ~15 minute pass over 125 GB, and it is the last step
+    # before packaging, so it is exactly the one that gets interrupted.
+    n_all = len(tasks)
+    tasks = [(s, t) for s, t in tasks
+             if not os.path.exists(os.path.join(OUT_DIR, str(s), t + ".npz"))]
+    if len(tasks) < n_all:
+        print(f"  resuming: {n_all - len(tasks)} already written, "
+              f"{len(tasks)} to go", flush=True)
     for s in SIZES:
         os.makedirs(os.path.join(OUT_DIR, str(s)), exist_ok=True)
     print(f"{len(tasks)} problems to project, K={K_AXES}, device {device}",
