@@ -33,17 +33,24 @@ Outputs, matching what the two-stage pair wrote so downstream is unchanged:
   axes/axes.npz                         the model + the content-hash embedding_version
 
 WHAT THIS DOES NOT DO, and must be run alongside until it does:
-  - `axes/per_cell/` (the PWA's picked-move sidecar). The two-stage axis map was
-    linear on features, so a cell cost one dot product; here the axis map reads
-    the trunk, so a cell costs a trunk pass — about 7.7M of them corpus-wide.
+  - `axes/per_cell/` — a K-vector for every legal cell, needed because the client
+    scores the move the user PICKED and not only the answer. The two-stage axis
+    map was linear on features so a cell cost one dot product; this map reads the
+    trunk, so a cell costs a trunk pass, about 7.7M corpus-wide.
   - K selection. `build_axes` grows K with the data; K is fixed here.
   - `axes/labels.json`, which a human writes against a fit.
 
-SLOPE_SCALE IS 1.0, deliberately. `pipeline.train_rating` shipped 1.694 from an
-in-sample phase-2 fit; re-run on users held out of training entirely, the optimal
-scale is 0.90-0.95, i.e. the multiplier was fitting its own leak (the walk-forward
-that endorsed it scored rows whose problems' parameters were fitted ON those
-rows). This model has no phase 2 and ships its slopes as fitted.
+SLOPE_SCALE IS 1.0, and that CORRECTS an overstatement rather than giving one up.
+`pipeline.train_rating` shipped 1.694 from an in-sample phase-2 fit; on users held
+out of training entirely the optimum is 0.90-0.95, so the multiplier was fitting
+its own leak (the walk-forward that endorsed it scored rows whose problems'
+parameters were fitted ON those rows). A slope scaled by 1.694 hands the client
+1.694^2 ~ 2.87x the Fisher information it earned, so se runs too tight and rank
+convergence too fast.
+
+1.0 is nonetheless UNMEASURED HERE: 0.90-0.95 was measured against train_rating's
+slopes, and these are a different fit. Measure this model's own scale on held-out
+users before treating 1.0 as anything more than "as fitted".
 """
 
 import hashlib
