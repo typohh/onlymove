@@ -63,6 +63,97 @@ Two qualifications, both about the axis column. **The MIRT's axes are the more C
 
 Survey rho remains unusable on this holdout: MIRT 0.9123 / 0.7752 against production 0.9108 / 0.8061, on 92 and 67 declarations.
 
+## SWEEP RESULTS — 2026-08-13, shared-trunk architecture, Newton scorer
+
+All arms fold 0, single seed, against the fold-0 baseline. **Read the COMBINED
+column, never "axis adds" alone**: a degraded rating leaves more residual for the
+axes to explain, so axis adds RISES as the model gets worse — it read +10.25 on
+the arm that destroyed the rating and +4.33 on an over-burned one.
+
+**Same-fold seed noise, measured (fold 0, model seeds 0 vs 1, current build).**
+Every earlier judgement used ~0.0004 rating / ~0.2 axis borrowed from the old
+architecture and the broken scorer; the real thresholds are 2-2.5x wider, and
+several calls had to be revised against them.
+
+```
+                seed 0     seed 1       sd
+  rating        0.4930     0.4942     0.00085
+  combined      0.4910     0.4916     0.00042
+  axis adds     +1.93      +2.63      0.49
+```
+
+n = 2, so these are crude; a third seed would tighten them.
+
+```
+arm                  rating   combined   axis    verdict
+  baseline           0.4930    0.4910    +1.93   --
+  shallow_w 0        0.5154    0.5052   +10.25   CATASTROPHIC
+  hidden 256 128     0.4988    0.4984    +0.35   worse, 6.8 sd
+  hidden 64 32       0.4941    0.4927    +1.38   worse on combined (4 sd)
+  burn-in 150        0.4964    0.4949    +1.46   worse, 4 sd
+  burn-in 450        0.4931    0.4905    +2.55   1.2 sd — NOT established
+  burn-in 600        0.4949    0.4906    +4.33   rating worse, 2.2 sd
+  burn-in 750        0.4950    0.4914    +3.64   worse
+  V_RIDGE 0.15       0.4934    0.4912    +2.15   indistinguishable
+  warm start none    0.4951    0.4940    +1.10   worse, and 1360 epochs
+  global slope       0.4948    0.4929    +1.88   worse, 1.8 mnat
+```
+
+**Settled, and why each is closed:**
+
+- **Trunk 128x64 is an interior optimum**, bracketed both sides. Wider costs 4x what narrower does — the overfitting gradient the LR sweep found, appearing in capacity too. Unswept in `pipeline.train_rating` as well; the inherited value turns out right.
+- **`V_RIDGE` is not binding.** 0.05, 0.15 and 0.5 all score alike. It is not what limits the axes.
+- **`SHALLOW_W = 0` is refuted and the barrier is load-bearing.** Without it slopes collapse (median 0.94, 0.1th percentile 0.097) and derived ratings blow out to a range of [-225, +146], since rating = b + kappa(c)/a diverges as a falls. That is exactly the failure the barrier is written to stop.
+- **The per-problem slope head earns its place** — one global slope costs 1.8 mnat. This REFUTES, in this model, the on-record claim that per-problem slope is largely assignment noise; that finding is from the two-stage production model.
+- **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
+- **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs.
+
+## AXIS VALUE BY USER HISTORY — the axes need ~500 attempts before they pay
+
+Held-out-user walk binned by how many attempts PRECEDE each scored one, both
+folds pooled (`auxiliary/rating_dev/axis_by_history.py`). This is the USER-side
+partition; seen/never-trained describes the PROBLEM and is blind to it.
+
+```
+                    all      pfx 0-30   pfx 30-100  pfx 100-500   pfx 500+
+      n =        104,096      14,470      15,529       28,371      45,726
+  rating         0.4963      0.4440      0.5001       0.4925      0.5140
+  rating+axis    0.4942      0.4440      0.5003       0.4926      0.5090
+  axis adds      +2.12       +0.03       -0.13        -0.13       +4.95
+
+  mean |predicted P(correct) - outcome|, percentage points
+    rating        32.01       24.31       31.65        32.18       34.46
+    +axis         31.61       24.38       31.70        32.05       33.59
+    effect       -0.405      +0.070      +0.046       -0.138      -0.874
+
+  accuracy at the 0.5 threshold, %
+    rating        78.32       82.73       78.11        78.49       76.89
+    +axis         78.48       82.76       78.11        78.53       77.21
+```
+
+**The axes contribute nothing below ~500 attempts and everything above it.** The
+headline +2.12 is an average over a population where most attempts get nothing.
+In probability terms, a user past 500 attempts gets their predicted chance of
+success moved 0.87 percentage points closer to the outcome and 0.32 points more
+predictions on the correct side of 50%; below 500, nothing.
+
+Read the percentage-point figures against the floor, not against 34: binary
+outcomes bound this metric below by mean 2p(1-p), about 34 points at a 78% base
+rate, so the rating is already near the irreducible level and the axes take their
+0.87 out of the thin remainder.
+
+Two things this cannot separate. The 500+ bin conflates LONG HISTORY with HEAVY
+USER — the same accounts — so "the axes need history" and "the axes work on people
+who play a lot" are not distinguished. And the bin is unbounded, so where inside
+it the payoff begins is unknown; a finer split (500-1000 / 1000-3000 / 3000+)
+would say.
+
+**It also reframes the model comparison.** Production's axis advantage is
+entirely a 500+ effect (+8.58 vs +4.09 on fold 0); in the 30-500 band production
+is WORSE than the MIRT on both folds. And it bears on the client, whose weakness
+pane gates at 20 attempts — a different estimator, so not a direct read-across,
+but the direction is worth checking against `weaknessModelReady`.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
