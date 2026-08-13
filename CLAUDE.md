@@ -79,7 +79,15 @@ Local testing must go through `npm run dev`: the Worker runs `/report` and the S
 
 **Three things it does NOT do, so the two-stage pair cannot be deleted yet:** it writes no `axes/per_cell/` (the per-legal-cell K-vectors, needed because the client scores the move the user PICKED, not only the answer), does not select K (fixed at 3), and writes no `labels.json`. It renames any existing `per_cell/` aside rather than leaving it — mixing this fit's correct-move vectors with the previous fit's picked-move vectors ships a shard whose two embedding sources disagree, and both files are individually well-formed so nothing downstream can catch it.
 
-**`slope_scale` is 1.0, and dropping production's 1.694 CORRECTS an overstatement rather than costing anything.** That multiplier came from an in-sample phase-2 fit; on users held out of training entirely the optimum is 0.90–0.95, so it was fitting its own leak. A slope scaled by 1.694 hands the client 1.694² ≈ 2.87× the Fisher information it has earned, so `se` is too tight, rank convergence too fast and the SE floor too low — shipping 1.0 stops inflating them. Note 1.0 is nonetheless UNMEASURED for this model: 0.90–0.95 was measured against `train_rating`'s slopes, and the MIRT's are a different fit whose own optimal scale has not been checked. "As fitted" is a default, not a result.
+**`slope_scale` is 1.0, which is within noise of this model's MEASURED optimum, and dropping production's 1.694 corrects an overstatement rather than costing anything.** Swept on held-out users and split by whether training saw the problem — the split matters, because a never-trained problem is priced from the feature prior alone and honestly wants a shallower slope, so pooling it in drags the optimum down and would confound "the multiplier fits its own leak" with "a fifth of these rows are harder to price":
+
+```
+best s        all     SEEN    unseen        cost of shipping 1.694 on SEEN
+  production  0.700   0.800   0.700               19.9 mnat
+  MIRT        0.900   0.900   0.800                9.2 mnat
+```
+
+The dilution is worth about 0.1 in `s`, against the ~0.9 separating 0.8 from 1.694 — so the confound is real and far too small to rescue the multiplier. On problems training DID see, production's optimum is 0.80 and shipping 1.694 costs 19.9 mnat; a slope scaled that way hands the client 1.694² ≈ 2.87× the Fisher information it earned, so `se` runs too tight and rank convergence too fast. The MIRT's optimum is 0.90 and 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise. (Production's sweep hits the grid edge at 0.700, so 19.9 mnat is a LOWER bound.)
 
 **Not yet measured:** held-out PROBLEMS under the fixed scorer. A third of the shipped corpus has no attempts, so pricing unattempted content is a real requirement and the last measurement there predates the scorer fix, the filter change and the shared trunk.
 

@@ -40,17 +40,22 @@ WHAT THIS DOES NOT DO, and must be run alongside until it does:
   - K selection. `build_axes` grows K with the data; K is fixed here.
   - `axes/labels.json`, which a human writes against a fit.
 
-SLOPE_SCALE IS 1.0, and that CORRECTS an overstatement rather than giving one up.
-`pipeline.train_rating` shipped 1.694 from an in-sample phase-2 fit; on users held
-out of training entirely the optimum is 0.90-0.95, so the multiplier was fitting
-its own leak (the walk-forward that endorsed it scored rows whose problems'
-parameters were fitted ON those rows). A slope scaled by 1.694 hands the client
-1.694^2 ~ 2.87x the Fisher information it earned, so se runs too tight and rank
-convergence too fast.
+SLOPE_SCALE IS 1.0, within noise of this model's MEASURED optimum. Swept on
+held-out users and split by whether training saw the problem — the split is
+necessary, since a never-trained problem is priced from the feature prior alone
+and honestly wants a shallower slope, so pooling those rows in drags the optimum
+down and confounds a leak with a pricing difficulty:
 
-1.0 is nonetheless UNMEASURED HERE: 0.90-0.95 was measured against train_rating's
-slopes, and these are a different fit. Measure this model's own scale on held-out
-users before treating 1.0 as anything more than "as fitted".
+    best s        all     SEEN    unseen
+      production  0.700   0.800   0.700
+      MIRT        0.900   0.900   0.800
+
+The dilution is worth ~0.1 in s, against the ~0.9 separating 0.8 from 1.694. So
+train_rating's multiplier really was fitting its own leak — on problems training
+DID see, its optimum is 0.80 and shipping 1.694 costs 19.9 mnat, handing the
+client 1.694^2 ~ 2.87x the Fisher information it earned, so se runs too tight and
+rank convergence too fast. This model's optimum is 0.90; 1.0 costs 0.2 mnat
+against it, inside the 0.85 mnat seed noise.
 """
 
 import hashlib

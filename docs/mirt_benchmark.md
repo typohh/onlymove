@@ -376,6 +376,16 @@ All evaluations here use `load_first_time_attempts`, which filters `is_repeat = 
 
 `pipeline.train_rating`'s phase 2 fits a global slope multiplier (shipped s = 1.694) and reports 7.181 mnat, in-sample. `utils.rating.slope_calibration`'s walk-forward returns 1.667 and is described as the client-condition cross-check — **but its per-problem parameters come from a fit trained on every first-time attempt, including the rows it then scores.** Those predictions are partly memorised, memorised predictions are more accurate, and more accuracy rewards more confidence, so the optimal steepness under that protocol is biased upward. The synthetic certificate (0.993 on outcomes from TRUE parameters) does not cover this: it validates the estimator when the parameters are correct, not when they were fitted on the scored rows.
 
+**A confound this measurement has, and its size.** Held-out users' attempts include ~19% on problems training never saw, priced from the feature prior alone and so honestly wanting a shallower slope; production's in-sample phase-2 fit uses only problems WITH attempts. Pooling the two populations would confound "the multiplier fits its own leak" with "a fifth of these rows are harder to price". Swept and split (2026-08-13, prequential walk, Newton scorer):
+
+```
+best s        all     SEEN    unseen        cost of 1.694 on SEEN
+  production  0.700   0.800   0.700              19.9 mnat
+  MIRT        0.900   0.900   0.800               9.2 mnat
+```
+
+The dilution is worth about 0.1 in `s`, against the ~0.9 separating 0.8 from 1.694 — real, correctly identified, and far too small to rescue the multiplier. On problems training DID see, production's optimum is 0.80. Its sweep hits the grid edge at 0.700, so 19.9 mnat is a LOWER bound on what 1.694 costs. The MIRT's optimum is 0.90 and shipping 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise.
+
 Re-run on users held out of training entirely — same WINDOW/WARMUP/EVAL_BLOCK, same mode-'slope' application, same profile-likelihood theta refit, differing in exactly one respect:
 
 ```
