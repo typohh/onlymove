@@ -512,16 +512,29 @@ export function getRecallCandidates(options = {}) {
     return recallCandidates;
 }
 
-// How many due recalls are WAITING for the active size — the Recall button's
-// badge. The one on screen is being served, not waiting, so it is excluded;
-// answering it drops it out of its window anyway, so the badge falls by one
-// either way and never counts the same problem twice. Never throws: the badge
-// must not be able to break a repaint (0 = no badge, the safe reading).
-export function waitingRecallCount() {
+// Whether the recall model can answer "what is due" at all. getRecallCandidates
+// returns an empty list both when nothing is due and when the model isn't
+// loaded yet, which are the same answer for a badge (show nothing) but opposite
+// answers for the notification countdown (leave it alone vs. take it down).
+export function recallModelReady() {
+    return !!state.modelParams && state.modelParams.length === Object.keys(MODEL_INDICES).length;
+}
+
+// How many due recalls are WAITING — the Recall button's badge. The one on
+// screen is being served, not waiting, so it is excluded; answering it drops it
+// out of its window anyway, so the badge falls by one either way and never
+// counts the same problem twice. Never throws: the badge must not be able to
+// break a repaint (0 = no badge, the safe reading).
+//
+// Defaults to the ACTIVE size, because the button can only serve a recall on
+// the board in front of the user. Callers counting a cross-size backlog — the
+// notification countdown, whose schedule is uploaded for both sizes — pass the
+// merged history explicitly.
+export function waitingRecallCount(history = undefined) {
     try {
         const shown = state.currentProblem;
         const shownId = shown && shown.isRepeat ? tsumegoIdOf(shown.filename) : null;
-        const candidates = getRecallCandidates();
+        const candidates = getRecallCandidates(history ? { history } : {});
         return shownId ? candidates.filter((c) => c.problemId !== shownId).length : candidates.length;
     } catch (error) {
         console.error('waiting recall count failed:', error);
