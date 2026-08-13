@@ -81,7 +81,7 @@ Local testing must go through `npm run dev`: the Worker runs `/report` and the S
 
 **`slope_scale` is 1.0 and slopes ship as fitted — no post-hoc multiplier.** Swept on held-out users and split by whether training saw the problem, since a never-trained problem is priced from the feature prior alone and honestly wants a shallower slope, so pooling those rows drags the optimum down. Measured optimum is **0.90** on both `all` and the seen partition; 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise.
 
-**Not yet measured:** held-out PROBLEMS. A third of the shipped corpus has no attempts, so pricing unattempted content is a real requirement, and the held-out-USER criterion this model is tuned against does not test it — 81% of those rows are on problems training saw.
+**Pricing unattempted content is measured, in the never-trained partition of the same walk** — 19% of held-out users' rows are on problems no training user ever attempted, so those are priced from features alone. Rating-only logloss there: 0.5186 / 0.5458 across the two folds. That partition is a SELECTION (problems nobody played) rather than a random draw of attempted problems, so it is not identical to a dedicated problem holdout, but it does test feature-only pricing directly.
 
 ## Rating pipeline (combined cross-board MLP-2PL)
 
