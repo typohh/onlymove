@@ -299,8 +299,8 @@ class JointMIRT:
     def __init__(self, fdim, n_profiles, n_users, k_axes, input_dim, device,
                  seed, g_init=None, global_slope=False, act="swiglu",
                  hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
-                 axis_reads_rating=True, axis_from_trunk=False,
-                 axis_trunk_coupled=False):
+                 axis_reads_rating=True, axis_from_trunk=True,
+                 axis_trunk_coupled=True):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
@@ -498,11 +498,20 @@ class JointMIRT:
         # appended AFTER the dropout mask, matching production's exemption of
         # these columns (EXEMPT_TAIL_COLS).
         if self.axis_from_trunk:
-            # DETACHED by default. The trunk is shared either way — the axes see
-            # the same representation — but coupling also lets the axis objective
-            # RESHAPE it, and the trunk is what the rating depends on. Detaching
-            # is the frozen-baseline semantics production gets for free; coupling
-            # is what "one model" means. Which is better is a measurement.
+            # COUPLED by default: the axis objective reaches the trunk, so the
+            # trunk learns representations the AXES need and not only the ones
+            # the rating needs. Detaching would make this feature reuse rather
+            # than a joint fit — the axes taking whatever a rating-optimised
+            # representation happens to offer — which is the two-stage split
+            # again, one layer down, in a model whose premise is that the split
+            # is artificial.
+            #
+            # Measured indistinguishable (rating 0.4930 vs 0.4928, axis +1.93 vs
+            # +1.91), so this is a choice about what the model IS, not a score.
+            # The cost is that nothing structurally stops the axes reshaping what
+            # the rating depends on; V_RIDGE is the only brake, and the check is
+            # corr(v, theta) — measured 0.110 coupled against 0.097 detached, the
+            # predicted direction and small.
             g_in = h if self.axis_trunk_coupled else h.detach()
         else:
             g_in = self._drop(feat, self.axis_dropout)
@@ -595,17 +604,25 @@ def main():
                          "POPULATION difficulty, which would load every user the "
                          "same sign; it does not stop one carrying individual "
                          "ability, since a centred copy satisfies it exactly.")
-    ap.add_argument("--axis-from-trunk", action="store_true",
-                    help="the axis map reads the TRUNK's representation instead "
-                         "of the raw features. Adds no capacity — it is the same "
-                         "linear map on a different input — so the measured "
-                         "rejection of a SEPARATE axis trunk does not cover it. "
-                         "Gives the axes the representation difficulty is "
-                         "computed from, rather than the 3 scalars it emits.")
-    ap.add_argument("--axis-trunk-coupled", action="store_true",
-                    help="with --axis-from-trunk, let axis gradients reshape the "
-                         "shared trunk. Default detached, which preserves the "
-                         "rating's claim on the representation.")
+    ap.add_argument("--axis-from-features", action="store_true",
+                    help="read the raw features instead of the trunk, which is "
+                         "what this model did before 2026-08-13. ONE trunk now "
+                         "produces every output. That adds no capacity — the same "
+                         "linear map on a different input, and fewer parameters, "
+                         "Linear(64,K) against Linear(215,K) — so the measured "
+                         "rejection of a SEPARATE axis trunk beside the linear "
+                         "map, which IS a capacity increase, does not cover it. "
+                         "Measured indistinguishable, and adopted because a "
+                         "single trunk feeding every head is what the model "
+                         "claims to be; it also makes AXIS_INPUT_DROPOUT inert "
+                         "and subsumes feeding the axis map b, a and c.")
+    ap.add_argument("--axis-trunk-detached", action="store_true",
+                    help="with --axis-from-trunk, block axis gradients from the "
+                         "shared trunk. NOT the default: it makes the trunk "
+                         "learn for the rating alone and hands the axes whatever "
+                         "that produces, which is feature reuse rather than a "
+                         "joint fit. Kept as the ablation for whether the axes "
+                         "shaping the representation costs the rating anything.")
     ap.add_argument("--axis-blind", action="store_true",
                     help="withhold the rating head's outputs from the axis map, "
                          "which is what this model did before 2026-08-13. A "
@@ -959,8 +976,8 @@ def main():
                       hidden=tuple(args.hidden),
                       axis_dropout=args.axis_dropout,
                       axis_reads_rating=not args.axis_blind,
-                      axis_from_trunk=args.axis_from_trunk,
-                      axis_trunk_coupled=args.axis_trunk_coupled)
+                      axis_from_trunk=not args.axis_from_features,
+                      axis_trunk_coupled=not args.axis_trunk_detached)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
