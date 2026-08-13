@@ -63,6 +63,55 @@ Two qualifications, both about the axis column. **The MIRT's axes are the more C
 
 Survey rho remains unusable on this holdout: MIRT 0.9123 / 0.7752 against production 0.9108 / 0.8061, on 92 and 67 declarations.
 
+## WHAT STILL NEEDS ABLATING OR SWEEPING
+
+Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
+
+### A. VOID — measured, but through the mis-scaled scorer, so the numbers mean nothing
+
+Each of these was run on 2026-08-13 and read off the broken axis estimator. The rating side of each is still valid; only the axis and combined columns need re-running. Re-run cost is one training run per arm.
+
+| knob | current | what was measured, and is void |
+|---|---|---|
+| `AXIS_INPUT_DROPOUT` | 0.3 | 0.15 / 0.5 swept, read as flat |
+| axis map reading `(b, a, c)` | on | read as no effect; `--axis-blind` is the ablation |
+| `V_RIDGE` | 0.5 | 0.05 swept, read as no effect |
+| warm start | `burnin` | `eigen` / `burnin` / `none` — the `none` arm's ~2.8 mnat margin is the one most likely to move, since the overshoot penalty scales with axis quality and so punished the worse arm harder |
+| `BURN_IN_EPOCHS` | 300 | 100 / 300 / 500 / run-to-convergence |
+
+### B. NEVER TESTED — structural
+
+| choice | current | why it is open |
+|---|---|---|
+| **shared trunk** | separate | one head emitting `Linear(hidden, 3+K)` instead of a trunk plus a separate `g_lin`. The measured rejection on record is for a SEPARATE axis trunk alongside the linear map — a capacity increase — and says nothing about sharing, which adds no parameters and gives the axes the representation difficulty is computed from rather than a 3-number summary of it. NOT IMPLEMENTED. |
+| axis path coupled vs detached | detached `(b,a,c)` | whether the axis objective may reshape the trunk. Coupled is what "one model" means; detached is what preserves the rating's role. |
+| `--global-slope` | off | the Rasch reduction: one corpus-wide discrimination. Per-problem slope is on record as largely assignment noise, so if held-out logloss is unchanged the head is fitting noise and the model gets simpler. Never run. |
+| `--hidden` (trunk width) | 128 64 | inherited from `pipeline.train_rating`, unswept THERE TOO. Queued twice, never run. |
+| `--act relu` | swiglu | SwiGLU doubles trunk parameters at a given width, so width and activation are confounded until one is held fixed. |
+| K | hardcoded 3 | `build_axes` SELECTS K incrementally; the MIRT inherits its answer. Matched-K comparisons are fair as architecture comparisons, not as system comparisons. |
+| ability granularity | per-user (`--window-months 0`) | measured best on the rating side, but the axes are per-user while ability could be per-window; the mixed-granularity question is dodged rather than answered. |
+
+### C. NEVER SWEPT — constants
+
+| constant | current | note |
+|---|---|---|
+| `V_MEAN_PENALTY` | 10.0 | strong. It is the only thing stopping an axis carrying population difficulty. |
+| `ORTHO_WEIGHT` | 0.5 | inherited from `residual_axes`. Its mutual half is load-bearing THERE; never checked here. |
+| `SHALLOW_TAU` | 0.1 | the barrier's threshold. Only its WEIGHT was swept (30 epochs, 0/0.3/1/3). |
+| `SHALLOW_W` | 0.3 | swept at 30 epochs on the OLD configuration; `0` specifically has never run. Queued twice. |
+| `GAUGE_MOM` | 0.01 | EMA rate for the difficulty gauge. |
+| `BATCH` | 65536 | |
+| `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |
+| `CHECK_EVERY` / `FLAT_PATIENCE` | 10 / 5 | the stopping rule picks within 0.3 mnat of the held-out optimum, so this is low priority — but the pair was never swept jointly. |
+| `PRIOR_AX_SD` (scorer) | 0.5 | the ONLY constant left in the fixed scorer. Sits slightly below both models' hand-tuned optima, so both are scored a little short of their peak. |
+| `DROPOUT`, `INPUT_DROPOUT` | 0.3 | inherited from `pipeline.train_rating`, where they ARE measured — but on the two-stage model. |
+
+### D. Open questions that are not knobs
+
+- **Where production's remaining axis advantage lives.** It is concentrated in the never-trained partition (13.57 vs 6.03 mnat on fold 0), which is 19% of attempts; on the 81% majority the two are close. That points at how each model prices unattempted content, not at the axis machinery.
+- **The axis block overfits faster than the rating heads** — measured on the stopping diagnostic, the axes swing +0.8 to −4.1 mnat between epochs 350 and 650 while the rating moves 1.9. A separate stopping signal for the axis path has never been tried.
+- **Fold sensitivity of the axis comparison.** Production's axis lead is +1.77 on fold 0 and +0.32 on fold 1. Two folds cannot resolve that; a third and fourth would.
+
 ## SUPERSEDED — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
 
 The user holdout is the criterion from here; the problem- and row-holdout tables below are kept as what they are, measurements of different questions.
@@ -252,7 +301,7 @@ Note `train_rating_staged --production-flags` has no phase 2, so every productio
 
 ## K is hardcoded in the MIRT
 
-`build_axes` selects K incrementally (K_START 3 to K_MAX 12, growing while held-out gain stays within STOP_FRACTION of the peak; currently selects 3). The MIRT takes `--k`, default 3 — no search, no criterion. It is inheriting production's selected answer, which is right today and silently wrong as soon as the data supports a fourth axis. Matched-K comparisons here are fair as comparisons of ARCHITECTURE; they are not comparisons of the two SYSTEMS, one of which grows K and one of which does not.
+`build_axes` selects K incrementally (K_START 3 to K_MAX 12, growing while held-out gain stays within STOP_FRACTION of the peak; currently selects 3). The MIRT takes `--k`, default 3 — no search, no criterion. It is inheriting production's selected answer, which is right today and silently wrong as soon as the data supports a fourth axis. Matched-K comparisons here are fair as comparisons of ARCHITECTURE; they are not comparisons of the two SYSTEMS, one of which grows K and one of which does not. Listed in the open-work inventory above; nothing in the evaluator assumes an axis count, so only the trainer needs a criterion.
 
 ## The framework
 
