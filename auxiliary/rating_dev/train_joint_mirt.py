@@ -136,7 +136,18 @@ FLAT_PATIENCE = 5                # checks without a new best before stopping
 BATCH = 65536
 # Split rates — see JointMIRT.param_groups. A single 0.01 for both the network
 # and the free per-user fields diverges late in every arrangement measured.
-LR_NET = 1e-3
+# SWEPT as a 4x3 grid on held-out users (2026-08-13, whole history, one barrier,
+# 1-of-each filter). What the grid actually measures is the RATIO lr_field/lr_net,
+# monotone and saturating near 30x: ratio 1-3.3x scores 0.4982-0.5009, 10x scores
+# 0.4953-0.4978, and 30x upward is flat at 0.4928-0.4941. So "an order of
+# magnitude" is NOT enough — 10x is 2.5 mnat down. Given a ratio past 30x, a
+# slower net buys the last 0.8: lr_net 1e-4 and 3e-4 tie at 0.4928 while 1e-3
+# gives 0.4953 and 3e-3 gives 0.4982.
+#
+# 3e-4 over 1e-4 on the two things that separate a tie: better axes at identical
+# rating (+0.54 vs -0.65 mnat, a comparison only legitimate because the rating
+# is equal), and 380 epochs against 850.
+LR_NET = 3e-4
 LR_FIELD = 1e-2
 V_RIDGE = 0.5
 V_MEAN_PENALTY = 10.0
@@ -485,6 +496,20 @@ def main():
                          "the 4PL saw every user and only the axis stage does "
                          "CV. WITHOUT this there is no held-out-user axis "
                          "measurement and none may be reported.")
+    ap.add_argument("--flat-patience", type=int, default=FLAT_PATIENCE,
+                    help="checks without a new best stop-split before stopping. "
+                         "Set far above any reachable check count to disable "
+                         "early stopping, which only the diagnostic wants.")
+    ap.add_argument("--dump-every", type=int, default=0,
+                    help="also dump params every N epochs, as <dump>.epNNNNN.npz "
+                         "(needs --dump-params). DIAGNOSTIC MODE: it also makes "
+                         "reaching --epochs an endpoint rather than a fatal "
+                         "error, since outrunning the stopping rule is the point "
+                         "of it. The question it answers is whether the stop "
+                         "split picks the epoch the held-out USERS would: the "
+                         "two criteria are anti-correlated across the learning-"
+                         "rate grid, and the stop split cannot see population "
+                         "overfitting because it shares the population.")
     ap.add_argument("--warm-start", choices=("eigen", "burnin", "none"),
                     default="eigen",
                     help="how the axis map is initialized. 'burnin' derives it "
@@ -796,6 +821,34 @@ def main():
                   flush=True)
 
         opt = torch.optim.Adam(m.param_groups(args.lr_net, args.lr_field))
+
+        def _extract():
+            """Per-problem parameters as of NOW, always in eval mode — the gauge
+            reads its EMA there, and a dropout sample is not the model."""
+            was = m.training
+            m.train(False)
+            with torch.no_grad():
+                b_a, a_a, c_a, g_a = m.problem_params(tfeat)
+                lm = float(m.lapse())
+            m.train(was)
+            b_, a_ = b_a.cpu().numpy(), a_a.cpu().numpy()
+            c_, g_ = c_a.cpu().numpy(), g_a.cpu().numpy()
+            r_ = b_ + clear_logit_vec(c_, lm) / np.maximum(a_, 1e-6)
+            return b_, a_, c_, g_, lm, r_
+
+        def _write_dump(path):
+            b_, a_, c_, g_, lm, r_ = _extract()
+            tids_o = [t for (sz, t) in key_idx]
+            szs_o = [sz for (sz, t) in key_idx]
+            idxs = [key_idx[(sz, t)] for sz, t in zip(szs_o, tids_o)]
+            np.savez_compressed(
+                path, tid=np.array(tids_o), size=np.array(szs_o),
+                rating=r_[idxs], difficulty=b_[idxs], slope=a_[idxs],
+                floor=c_[idxs], loading=g_[idxs], lapse=np.array(lm),
+                theta=m.theta.weight.detach().cpu().numpy().ravel(),
+                profile=np.array([str(p) for p in profiles.categories]),
+                v=m.v.detach().cpu().numpy(), user=np.array(uids))
+
         # threshold in the slope head's own (pre-softplus) space
         o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
         n = len(tr_eff)
@@ -872,20 +925,32 @@ def main():
                 flat = 0 if improved else flat + 1
                 print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  stop-split "
                       f"{bce_st:.4f}  best {best:.4f}@{best_epoch}  "
-                      f"stale {flat}/{FLAT_PATIENCE}", flush=True)
-                if flat >= FLAT_PATIENCE:
+                      f"stale {flat}/{args.flat_patience}", flush=True)
+                if args.dump_every and args.dump_params and \
+                        (ep + 1) % args.dump_every == 0:
+                    _write_dump(f"{args.dump_params[:-4]}.ep{ep + 1:05d}.npz")
+                if flat >= args.flat_patience:
                     print(f"  stopped at epoch {ep + 1}; best stop-split "
                           f"{best:.4f} at epoch {best_epoch}; restoring it",
                           flush=True)
                     stopped_early = True
                     break
         if not stopped_early:
-            raise SystemExit(
-                f"EPOCH CAP HIT: ran the full {args.epochs} epochs without the "
-                f"patience rule firing (best stop-split {best:.4f} at epoch "
-                f"{best_epoch}). The fit never plateaued, so this is not a "
-                f"converged solution and its numbers are not comparable with "
-                f"anything in docs/mirt_benchmark.md. Raise --epochs and re-run.")
+            # Under --dump-every, running to the cap is the POINT: the diagnostic
+            # deliberately outruns the stopping rule to see what lies past it, so
+            # the cap is an endpoint there rather than a failure.
+            if args.dump_every:
+                print(f"  reached epoch {args.epochs} with stopping disabled "
+                      f"(diagnostic mode); best stop-split {best:.4f} at epoch "
+                      f"{best_epoch}", flush=True)
+            else:
+                raise SystemExit(
+                    f"EPOCH CAP HIT: ran the full {args.epochs} epochs without "
+                    f"the patience rule firing (best stop-split {best:.4f} at "
+                    f"epoch {best_epoch}). The fit never plateaued, so this is "
+                    f"not a converged solution and its numbers are not "
+                    f"comparable with anything in docs/mirt_benchmark.md. "
+                    f"Raise --epochs and re-run.")
         if best_state is not None:
             with torch.no_grad():
                 for q, b in zip(m.params(), best_state):
@@ -946,15 +1011,11 @@ def main():
         print(f"  AXIS criterion    (held-out problems, marginal): "
               f"{(bce_rep0 - bce_rep) * 1000:+.3f} mnat/attempt   "
               f"[full model {bce_rep:.4f}]", flush=True)
-        with torch.no_grad():
-            b_all, a_all, c_all, g_all = m.problem_params(tfeat)
-            lam = float(m.lapse())
-        b_np, a_np = b_all.cpu().numpy(), a_all.cpu().numpy()
-        c_np, g_np = c_all.cpu().numpy(), g_all.cpu().numpy()
-        # The ability at which the curve reaches CALIBRATION_P. With the gauge on
-        # difficulty this is a whitened head output PLUS a slope-dependent
+        # One extraction path, shared with the periodic dumps — the rating is the
+        # ability at which the curve reaches CALIBRATION_P, and with the gauge on
+        # difficulty that is a whitened head output PLUS a slope-dependent
         # correction, so the slope perturbs the rating rather than scaling it.
-        rating = b_np + clear_logit_vec(c_np, lam) / np.maximum(a_np, 1e-6)
+        b_np, a_np, c_np, g_np, lam, rating = _extract()
         # AN EXTREME RATING IS NOT A SYMPTOM AND MUST NOT BE READ AS ONE. The
         # corpus holds genuinely trivial problems and a KataGo-hard tail nobody
         # clears, and the rank coordinate is deliberately unbounded, so extreme
@@ -985,16 +1046,7 @@ def main():
         # extreme rating comes from a small slope or a large difficulty — has
         # cost a full re-run. It does not, once this file exists.
         if args.dump_params:
-            tids_o = [t for (sz, t) in key_idx]
-            szs_o = [sz for (sz, t) in key_idx]
-            idxs = [key_idx[(sz, t)] for sz, t in zip(szs_o, tids_o)]
-            np.savez_compressed(
-                args.dump_params, tid=np.array(tids_o), size=np.array(szs_o),
-                rating=rating[idxs], difficulty=b_np[idxs], slope=a_np[idxs],
-                floor=c_np[idxs], loading=g_np[idxs], lapse=np.array(lam),
-                theta=m.theta.weight.detach().cpu().numpy().ravel(),
-                profile=np.array([str(p) for p in profiles.categories]),
-                v=m.v.detach().cpu().numpy(), user=np.array(uids))
+            _write_dump(args.dump_params)
             print(f"  wrote per-problem params -> {args.dump_params}", flush=True)
 
         # --- SURVEY RHO: the ONLY criterion on which this model and
