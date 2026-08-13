@@ -67,7 +67,9 @@ axis adds (mnat)              production            MIRT
     never trained           12.33 / 9.96         5.95 / 6.37
 ```
 
-**Joining the fits improves the rating and degrades the axes, and the two nearly cancel.** MIRT's rating head leads by ~2.9 mnat (6/6 paired), production's axis layer leads by ~2.6 mnat (6/6), and the combined systems are indistinguishable — the only comparison whose folds disagree on sign is the one where the two effects meet. The sharpest localization of the axis failure: MIRT's axes HURT on problems training saw, both folds, while production's help.
+**THE AXIS AND COMBINED ROWS ABOVE ARE VOID** — they were taken through the mis-scaled online axis estimator described in the next section, which ran the two models at ~6x different effective rates. The RATING rows stand: the scorer's axis path never enters them. Rescored on fold 0 under the Newton estimator, production's axes give +3.66 and the MIRT's +1.48, for combined 0.4919 against 0.4915 — the MIRT ahead on the joint number rather than behind, because its 2.5 mnat rating lead exceeds production's 2.2 mnat axis lead. Read the rating conclusion below; ignore the axis one.
+
+**Joining the fits improves the rating and degrades the axes.** MIRT's rating head leads by ~2.9 mnat (6/6 paired) and production's axis layer leads, though by how much is now a question for the re-measurement rather than these numbers.
 
 **Survey rho is not usable on this holdout.** It is restricted to held-out accounts' declarations — 92 on seed 0, 67 on seed 1, against the 374 that gave the ±0.012 resolution quoted below. Production 0.9108 / 0.8061, MIRT 0.9167 / 0.7766: the fold-to-fold swing of 0.10 dwarfs both model differences, which flip sign between folds. Do not quote it.
 
@@ -117,8 +119,10 @@ A second defect of the borrowed form, independent of the leak: `eigen_directions
 
 Two fixes landed. `--holdout-user-frac` now reaches the warm start's own user set — it previously reached only the SGD row mask, which is why held-out accounts were in it — and `--axis-params-dir` lets the `eigen` construction read a per-fold rating fit instead of the shipped one. With both, a clean `eigen` is measurable, and the default moved to `burnin`, which reads no external fit at all.
 
+The axis column here is VOID (mis-scaled scorer, see its section); the rating column and the seed spreads stand, and the warm start's ~2.8 mnat margin over random init is far too large to be an artefact of the estimator's rate.
+
 ```
-                       rating              axis adds (mnat)
+                       rating              axis adds (mnat, VOID)
   eigen (leaky)     0.4930 +/- 0.0003      +0.68 +/- 0.19
   eigen (clean)     0.4931 +/- 0.0001      +0.17 +/- 0.30
   burnin (300)      0.4933 +/- 0.0004      -0.13 +/- 0.23   <-- default
