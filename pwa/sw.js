@@ -114,6 +114,12 @@ self.addEventListener('push', event => {
         icon: '/icon-192.png',
         badge: '/icon-192.png',
         tag: 'recall-batch',          // one stacked notification, not many
+        // A review reminder has no deadline attached to it, so it posts without
+        // sound or vibration and waits in the tray. `renotify` still re-surfaces
+        // the banner when a newer push replaces the tagged one — silent governs
+        // the alert, renotify governs whether it re-appears. (Must not be set
+        // alongside `vibrate`: the pair is a TypeError.)
+        silent: true,
         renotify: true,
         data: { url: payload.url || '/', ids: payload.ids || [] },
     };
