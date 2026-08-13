@@ -34,15 +34,27 @@ const PRECACHE_URLS = [
     // the hashed bundle and can't fail to load (was Sentry JAVASCRIPT-2V/2W).
 ];
 
+// Pathname lookup for the list above. The fetch handler routes these to the
+// precache BY NAME rather than through caches.match() — see the ordering note
+// there — so it needs to recognise one without re-scanning the array.
+const PRECACHE_PATHS = new Set(PRECACHE_URLS);
+
 self.addEventListener('install', event => {
   self.skipWaiting();
-  event.waitUntil(
-        caches.open(PRECACHE_NAME)
-            .then(cache => {
-                console.log('Opened precache and caching static libraries.');
-                return cache.addAll(PRECACHE_URLS);
-            })
-    );
+  event.waitUntil((async () => {
+        const cache = await caches.open(PRECACHE_NAME);
+        console.log('Opened precache and caching static libraries.');
+        // Deliberately NOT cache.addAll: that is all-or-nothing, so a single
+        // flaky fetch rejects the whole install and the device runs the session
+        // with NO precache — every entry then falls through to the fetch
+        // handler and is fetched over the network. Per-URL, a failure costs
+        // only its own entry, and the handler re-fills it on first use.
+        const results = await Promise.allSettled(
+            PRECACHE_URLS.map(url => cache.add(url))
+        );
+        const failed = PRECACHE_URLS.filter((_, i) => results[i].status === 'rejected');
+        if (failed.length) console.warn('Precache incomplete, will fill on demand:', failed);
+    })());
 });
 
 self.addEventListener('activate', event => {
@@ -74,6 +86,17 @@ self.addEventListener('activate', event => {
       if (url.origin !== self.location.origin
           || ['/server-stats', '/push/vapid-public-key', '/invite'].includes(url.pathname)) {
         console.log('Pruning no-longer-intercepted cache entry:', req.url);
+        return runtimeCache.delete(req);
+      }
+      // A runtime copy of a PRECACHE asset SHADOWS the precache permanently:
+      // caches.match() searches caches in creation order, and activate deletes
+      // + recreates the version-stamped precache, which moves it AFTER the
+      // runtime cache from the first deploy onward. These URLs carry no ?v=, so
+      // the version prune below never reaches them either — a copy that stored
+      // badly would be served for the life of the install. The fetch handler no
+      // longer creates these; this clears the ones it already did.
+      if (PRECACHE_PATHS.has(url.pathname) && !url.search) {
+        console.log('Pruning runtime copy shadowing the precache:', req.url);
         return runtimeCache.delete(req);
       }
       const v = url.searchParams.get('v');
@@ -343,33 +366,50 @@ self.addEventListener('fetch', event => {
     // Strategy 2: Cache-First for all other assets (CSS, JS, images, etc.).
     // Since your assets are hashed by the build script, their URLs are immutable.
     // If we have an asset in the cache, it's guaranteed to be the correct version.
-    event.respondWith(
-        caches.match(request).then(cachedResponse => {
-            // If the asset is in the cache, return it immediately.
-            if (cachedResponse) {
-                return cachedResponse;
+    // Precache assets are fixed-name and unversioned, so they must resolve
+    // against their OWN cache, looked up by name. caches.match() searches every
+    // cache in creation order and activate recreates the version-stamped
+    // precache, putting it after the runtime cache from the first deploy on —
+    // so a runtime copy of one of these would outrank the precache forever, and
+    // being unversioned it survives the prune too. They are therefore written
+    // back to the PRECACHE on a miss (self-repairing an install that only
+    // partly succeeded), never to the runtime cache.
+    const isPrecacheAsset = PRECACHE_PATHS.has(requestUrl.pathname) && !requestUrl.search;
+    const targetCacheName = isPrecacheAsset ? PRECACHE_NAME : RUNTIME_CACHE_NAME;
+
+    event.respondWith((async () => {
+        // A Cache Storage read error must degrade to a network fetch, not sink
+        // the request: respondWith() rejecting is a hard network error with no
+        // browser-level fallback and no retry.
+        const cachedResponse = await (isPrecacheAsset
+            ? caches.open(PRECACHE_NAME).then(cache => cache.match(request))
+            : caches.match(request)
+        ).catch(err => {
+            console.error('Cache match failed:', err);
+            return undefined;
+        });
+
+        // If the asset is in the cache, return it immediately.
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+
+        // Otherwise, fetch it from the network, add it to the cache for next time, and return it.
+        const networkResponse = await fetch(request);
+        // Ensure we have a valid response and it's a GET request before caching
+        if (networkResponse && networkResponse.status === 200 && request.method === 'GET') {
+            let cacheable = true;
+            if (request.url.endsWith('.zip')) {
+                const contentType = networkResponse.headers.get('content-type');
+                cacheable = !!contentType && (contentType.includes('application/zip') || contentType.includes('application/octet-stream'));
             }
-            // Otherwise, fetch it from the network, add it to the cache for next time, and return it.
-            return fetch(request).then(networkResponse => {
-                // Ensure we have a valid response and it's a GET request before caching
-                if (networkResponse && networkResponse.status === 200 && request.method === 'GET') {
-                    if (request.url.endsWith('.zip')) {
-                        const contentType = networkResponse.headers.get('content-type');
-                        if (contentType && (contentType.includes('application/zip') || contentType.includes('application/octet-stream'))) {
-                            const responseToCache = networkResponse.clone();
-                            caches.open(RUNTIME_CACHE_NAME).then(cache => {
-                                cache.put(request, responseToCache);
-                            }).catch(err => console.error('Cache put failed:', err));
-                        }
-                    } else {
-                        const responseToCache = networkResponse.clone();
-                        caches.open(RUNTIME_CACHE_NAME).then(cache => {
-                            cache.put(request, responseToCache);
-                        }).catch(err => console.error('Cache put failed:', err));
-                    }
-                }
-                return networkResponse;
-            });
-        })
-    );
+            if (cacheable) {
+                const responseToCache = networkResponse.clone();
+                caches.open(targetCacheName).then(cache => {
+                    cache.put(request, responseToCache);
+                }).catch(err => console.error('Cache put failed:', err));
+            }
+        }
+        return networkResponse;
+    })());
 });
