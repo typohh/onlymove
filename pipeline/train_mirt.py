@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""ONE model producing the rating and the K skill axes together — the production
-trainer, replacing `pipeline.train_rating` + `pipeline.build_axes`.
+"""ONE model producing the rating and the K skill axes together: compensatory
+M4PL with per-problem parameters predicted from features.
 
     P = c_p + (1 - c_p - lambda) * sigmoid( a_p*(theta_u - b_p)
                                             + sum_k g_k(x_p)*v_u[k] )
@@ -11,56 +11,54 @@ trainer, replacing `pipeline.train_rating` + `pipeline.build_axes`.
         v_u[k]          per-user position on axis k
         lambda          one global slip rate
 
-Under the standard multidimensional-IRT reading, fitting these in two stages is
-artificial: the axes are factors 2..K+1 of one model and the rating is factor 1.
-ONE TRUNK produces every output, axes included — a Linear's output rows are
-independent, so a shared head emitting (b, a, c, g_1..g_K) is exactly this.
+The axes are factors 2..K+1 of this model and the rating is factor 1. ONE TRUNK
+produces every output, axes included — a Linear's output rows are independent, so
+a shared head emitting (b, a, c, g_1..g_K) is exactly this. The axis path is
+COUPLED: the axis objective reaches the trunk, so the trunk learns what the axes
+need and not only what the rating needs.
+
+The one unavoidable departure from textbook MIRT is that a_p, b_p, c_p and g_k
+come from a FEATURE NET rather than being free per item: a third of the corpus
+has no attempts at all, so free per-item parameters cannot price it.
 
 PRODUCTION ONLY. No argparse, no flags, config baked in as constants, always seed
-0, always writes `ratings/` and `axes/`. The experiment surface — every ablation,
-sweep, holdout form and alternative architecture — lives in
-`auxiliary.rating_dev.train_joint_mirt`, so a test tweak cannot reach the shipped
-fit. Measurements behind every constant here: `docs/mirt_benchmark.md`.
+0. The experiment surface — every ablation, sweep, holdout form and alternative
+architecture — lives in `auxiliary.rating_dev.train_joint_mirt`, so a test tweak
+cannot reach the shipped fit. The measurement behind every constant here:
+`docs/mirt_benchmark.md`.
 
-Outputs, matching what the two-stage pair wrote so downstream is unchanged:
+Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first;
+the move-eval cache is a hard prerequisite.
+
+Writes:
 
   ratings/<size>/tsumego_ratings.csv    tsumego_id, rating (the 80%-clear point)
   ratings/<size>/tsumego_slopes.csv     tsumego_id, slope
   ratings/<size>/tsumego_floors.csv     tsumego_id, floor
   ratings/user_theta.csv                profile, theta, n_attempts
-  ratings/rating_constants.json         {"fat_finger_rate": lambda, "slope_scale": s}
+  ratings/rating_constants.json         {"fat_finger_rate": lambda, "slope_scale"}
   axes/per_problem.csv                  tsumego_id, size, embed_0..embed_{K-1}
-  axes/mirt_axes.npz                    the model + the content-hash embedding_version
+  axes/mirt_axes.npz                    the axis map + its content-hash version
 
-NOT axes/axes.npz: that is tracked and holds build_axes' FEATURE-space map, whose
-readers require keys (rms, v_sd, feat_mu, feat_sd) that describe a standardization
-this model does not have. Same name, different object — writing there would be a
-silent format break while the two-stage path is still needed.
-
-WHAT THIS DOES NOT DO, and must be run alongside until it does:
-  - `axes/per_cell/` — a K-vector for every legal cell, needed because the client
-    scores the move the user PICKED and not only the answer. The two-stage axis
-    map was linear on features so a cell cost one dot product; this map reads the
-    trunk, so a cell costs a trunk pass, about 7.7M corpus-wide.
-  - K selection. `build_axes` grows K with the data; K is fixed here.
-  - `axes/labels.json`, which a human writes against a fit.
-
-SLOPE_SCALE IS 1.0, within noise of this model's MEASURED optimum. Swept on
+SLOPE_SCALE IS 1.0, within noise of this model's measured optimum. Swept on
 held-out users and split by whether training saw the problem — the split is
 necessary, since a never-trained problem is priced from the feature prior alone
 and honestly wants a shallower slope, so pooling those rows in drags the optimum
-down and confounds a leak with a pricing difficulty:
+down. Measured optimum 0.90 on both `all` and the seen partition; 1.0 costs 0.2
+mnat against it, inside the 0.85 mnat seed noise. No post-hoc multiplier is
+applied: slopes ship as fitted.
 
-    best s        all     SEEN    unseen
-      production  0.700   0.800   0.700
-      MIRT        0.900   0.900   0.800
+`pipeline.build_axes` is required alongside this, for three things it does not
+produce: `axes/per_cell/` (a K-vector for every legal cell, needed because the
+client scores the move the user PICKED and not only the answer), the selection of
+K, and `axes/labels.json`. It does NOT write `axes/axes.npz` — build_axes owns
+that file and its readers require keys describing a feature-space standardization
+this model has no equivalent of.
 
-The dilution is worth ~0.1 in s, against the ~0.9 separating 0.8 from 1.694. So
-train_rating's multiplier really was fitting its own leak — on problems training
-DID see, its optimum is 0.80 and shipping 1.694 costs 19.9 mnat, handing the
-client 1.694^2 ~ 2.87x the Fisher information it earned, so se runs too tight and
-rank convergence too fast. This model's optimum is 0.90; 1.0 costs 0.2 mnat
-against it, inside the 0.85 mnat seed noise.
+It retires any existing `axes/per_cell/` by renaming it: per-cell vectors
+projected through a different axis map than `per_problem.csv` give a shard whose
+two embedding sources disagree, and both files are individually well-formed, so
+nothing downstream can catch it.
 """
 
 import hashlib

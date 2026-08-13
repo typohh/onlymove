@@ -67,7 +67,7 @@ Local testing must go through `npm run dev`: the Worker runs `/report` and the S
 
 **Two live routes return 404 ON PURPOSE, and probing them by hand reads as an outage — use `npm run status` rather than a bare `curl`.** (a) `/`, `/9` and `/13` have no file behind them: the Worker's SPA fallback rewrites them to index.html **only for a navigation-shaped request** (`sec-fetch-dest: document`, or an `Accept` naming text/html), because an asset-style miss has to keep 404ing so a stale service worker re-fetches instead of receiving HTML where JS is expected. `curl` defaults to `Accept: */*` and therefore gets the 404. (b) The five `INLINED_DATA_FILES` (`build.mjs`) are compiled into the bundle, so `/tsumegos/{rating_to_rank,rank_map,population_constants,se_floor,embedding_meta}.json` 404 — and a 200 there is the real regression, since it would let a client fetch a curve under a fixed name with no `?v=DATA_VERSION` and pin itself to a stale one. `check_live_status.mjs` asserts both directions, plus the freeze state (`--expect-frozen` / `--expect-unfrozen` for the runbook's two flips). **It retries**, because a deploy propagates over seconds and the previous version answers until it does — an unfreeze that still reports `maintenance` on the first probe is usually propagation, not a failed unfreeze.
 
-## Single-stage rating + axes (`pipeline.train_mirt`) — the replacement in progress
+## Single-stage rating + axes (`pipeline.train_mirt`)
 
 **One model produces the rating and the K skill axes together**, a compensatory M4PL where the axes are factors 2…K+1 and the rating is factor 1:
 
@@ -75,23 +75,15 @@ Local testing must go through `npm run dev`: the Worker runs `/report` and the S
 
 **ONE TRUNK feeds every head, axes included.** A `Linear`'s output rows are independent, so this is exactly a shared head emitting `(b, a, c, g_1..g_K)`. The axis path is COUPLED — the axis objective reaches the trunk, so the trunk learns what the AXES need and not only what the rating needs. Detaching measures the same but is feature reuse rather than a joint fit, which is the two-stage split again one layer down.
 
-**Measured against production on held-out users, both folds** (`docs/mirt_benchmark.md`): the MIRT leads on rating by 2.5 / 2.8 mnat and on rating+axis by 0.9 / 2.8. Production's axis layer still leads, but that lead is fold-dependent (+1.73 / +0.06) and lives **entirely in users past 500 attempts**.
+**The axes pay only for long-history users.** Binned by how many attempts precede the one being scored, the axis contribution is ~0 below 500 attempts and +4.95 mnat above it — so the headline figure is an average over a population most of whom get nothing. In probability terms a user past 500 attempts gets their predicted chance of success moved 0.87 percentage points closer to the outcome, and 0.32 points more predictions on the correct side of 50%. `auxiliary/rating_dev/axis_by_history.py` measures it.
 
-**Three things it does NOT do, so the two-stage pair cannot be deleted yet:** it writes no `axes/per_cell/` (the per-legal-cell K-vectors, needed because the client scores the move the user PICKED, not only the answer), does not select K (fixed at 3), and writes no `labels.json`. It renames any existing `per_cell/` aside rather than leaving it — mixing this fit's correct-move vectors with the previous fit's picked-move vectors ships a shard whose two embedding sources disagree, and both files are individually well-formed so nothing downstream can catch it.
+**Three things it does NOT do, so `build_axes` is still required:** it writes no `axes/per_cell/` (the per-legal-cell K-vectors, needed because the client scores the move the user PICKED, not only the answer), does not select K (fixed at 3), and writes no `labels.json`. It renames any existing `per_cell/` aside rather than leaving it — mixing this fit's correct-move vectors with the previous fit's picked-move vectors ships a shard whose two embedding sources disagree, and both files are individually well-formed so nothing downstream can catch it.
 
-**`slope_scale` is 1.0, which is within noise of this model's MEASURED optimum, and dropping production's 1.694 corrects an overstatement rather than costing anything.** Swept on held-out users and split by whether training saw the problem — the split matters, because a never-trained problem is priced from the feature prior alone and honestly wants a shallower slope, so pooling it in drags the optimum down and would confound "the multiplier fits its own leak" with "a fifth of these rows are harder to price":
+**`slope_scale` is 1.0 and slopes ship as fitted — no post-hoc multiplier.** Swept on held-out users and split by whether training saw the problem, since a never-trained problem is priced from the feature prior alone and honestly wants a shallower slope, so pooling those rows drags the optimum down. Measured optimum is **0.90** on both `all` and the seen partition; 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise.
 
-```
-best s        all     SEEN    unseen        cost of shipping 1.694 on SEEN
-  production  0.700   0.800   0.700               19.9 mnat
-  MIRT        0.900   0.900   0.800                9.2 mnat
-```
+**Not yet measured:** held-out PROBLEMS. A third of the shipped corpus has no attempts, so pricing unattempted content is a real requirement, and the held-out-USER criterion this model is tuned against does not test it — 81% of those rows are on problems training saw.
 
-The dilution is worth about 0.1 in `s`, against the ~0.9 separating 0.8 from 1.694 — so the confound is real and far too small to rescue the multiplier. On problems training DID see, production's optimum is 0.80 and shipping 1.694 costs 19.9 mnat; a slope scaled that way hands the client 1.694² ≈ 2.87× the Fisher information it earned, so `se` runs too tight and rank convergence too fast. The MIRT's optimum is 0.90 and 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise. (Production's sweep hits the grid edge at 0.700, so 19.9 mnat is a LOWER bound.)
-
-**Not yet measured:** held-out PROBLEMS under the fixed scorer. A third of the shipped corpus has no attempts, so pricing unattempted content is a real requirement and the last measurement there predates the scorer fix, the filter change and the shared trunk.
-
-## Rating pipeline (combined cross-board MLP-2PL) — the two-stage incumbent
+## Rating pipeline (combined cross-board MLP-2PL)
 
 The rating backend writes under `ratings/`, and `package_for_pwa` ships it to `pwa/tsumegos/`. The three commands — `train_rating`, `map_rating_to_rank`, `package_for_pwa` — are listed under "Pipeline commands" above.
 
