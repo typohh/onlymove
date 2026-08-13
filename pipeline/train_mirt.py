@@ -239,8 +239,12 @@ class JointMIRT:
         cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=FLOOR_CAP)
         c = cap * torch.sigmoid(o[:, 2])
         g = self.g_lin(h)
-        g = g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
-        return b, a, c, g
+        # Per-axis RMS over the batch. When called on the whole corpus this is a
+        # corpus constant, and the per-cell fanout MUST reuse it: a cell scaled
+        # by its own batch's RMS would not be comparable with the correct-move
+        # vector in per_problem.csv, and nothing downstream could tell.
+        self.g_rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6).detach()
+        return b, a, c, g / self.g_rms
 
     def trunk_out(self, feat):
         """The axis map's input basis with dropout off — the space the warm
@@ -516,7 +520,15 @@ def main():
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),
                         trunk_width=np.array(m.g_lin.weight.shape[1]),
+                        g_rms=m.g_rms.cpu().numpy().ravel(),
                         embedding_version=np.array(ev))
+    # The trunk too: the per-cell fanout has to run it, and unlike the two-stage
+    # map this projection does not fold into a matrix (see write_mirt_per_cell).
+    torch.save({"trunk": m.trunk.state_dict(), "head": m.head.state_dict(),
+                "g_lin": m.g_lin.state_dict(),
+                "b_mu": m.b_mu, "b_sd": m.b_sd,
+                "g_rms": m.g_rms.cpu()},
+               os.path.join(OUT_DIR, "mirt_model.pt"))
     print(f"  wrote axes/per_problem.csv + mirt_axes.npz (K={K_AXES}, "
           f"embedding_version {ev})", flush=True)
 
