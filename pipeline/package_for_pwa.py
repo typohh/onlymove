@@ -22,7 +22,7 @@ from utils.constants import ALL_BOARD_SIZES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
 from utils.rating import se_floor  # noqa: E402
-from pipeline.benchmark_bots import parse_tsumego_sgf
+from utils.katago.sgf_parsing import parse_tsumego_sgf
 
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the

@@ -65,7 +65,8 @@ if PROJECT_ROOT not in sys.path:
 from utils.rating.features import (  # noqa: E402
     CACHE_DIR, _cache_ids_path, build_correct_vec_cache,
 )
-from pipeline.benchmark_bots import parse_tsumego_sgf, sgf_to_gtp  # noqa: E402
+from utils.katago.coords import sgf_to_gtp  # noqa: E402
+from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 
 # Feature layout: the winning move + N_ALT best alternatives, each as (logit win-prob, score).

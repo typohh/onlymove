@@ -135,7 +135,7 @@ def corpus_tid_size():
     they are incremental and can carry stale ids from purged problems, and a
     tid landing in both lists silently mis-sizes its features and its
     per_problem.csv row (the 000d0d75 packaging abort, 2026-07-18)."""
-    from pipeline.train_rating import SIZES
+    from utils.rating.model_constants import SIZES
     out = {}
     for s in SIZES:
         d = os.path.join(PROJECT_ROOT, "tsumegos", str(s))
@@ -160,7 +160,7 @@ def build_axis_features(params_dir=None):
     monotone rating->rank map fitted on survey declarations rather than on
     held-out outcomes, so its leak is second-order — but it is not zero, and a
     fully clean run would refit it too."""
-    from pipeline.train_rating import PCA_DIM, SEED as PCA_SEED, SIZES
+    from utils.rating.model_constants import PCA_DIM, SEED as PCA_SEED, SIZES
 
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
     act, act_dim = load_joint_activations(SIZES, tids_by_size, PCA_DIM, PCA_SEED)

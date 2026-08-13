@@ -52,7 +52,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from pipeline.train_rating import (  # noqa: E402
+from utils.rating.model_constants import (  # noqa: E402
     CALIBRATION_P, CLIENT_FLOOR_MAX, EPS, P2_BIN_MONTHS, P2_LR, P2_STEPS,
 )
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402

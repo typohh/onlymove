@@ -50,7 +50,7 @@ from katago.game.gamestate import GameState
 from katago.train.load_model import load_model
 from katago.train.model_pytorch import ExtraOutputs
 
-from pipeline.benchmark_bots import parse_tsumego_sgf
+from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.constants import ALL_BOARD_SIZES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 

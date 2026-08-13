@@ -605,7 +605,7 @@ def main():
     # problem — and `rank` in particular must survive, since the model reads it
     # structurally as beta_u's regressor. Only the phase width is not implied by
     # what build_axis_features returns, so it is read from its own loader.
-    from pipeline.train_rating import SIZES
+    from utils.rating.model_constants import SIZES
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
     _ph, nph = load_joint_game_phase(SIZES, tids_by_size)
     exempt = nph + 1 + 3 + 1

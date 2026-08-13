@@ -55,7 +55,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from pipeline.train_rating import PCA_DIM, SEED, SIZES  # noqa: E402
+from utils.rating.model_constants import (  # noqa: E402
+    K_AXES, PCA_DIM, SEED, SIZES)
 from utils.rating.features import (  # noqa: E402
     _cache_ids_path, load_joint_activation_basis, load_joint_bot_winrate,
     load_joint_game_phase, load_joint_move_features)
@@ -130,8 +131,7 @@ def main():
         def forward(self, x):
             return torch.nn.functional.silu(self.w(x)) * self.v(x)
 
-    from pipeline.train_rating import DIFF_HIDDEN
-    from pipeline.train_mirt import K_AXES
+    from utils.rating.model_constants import DIFF_HIDDEN
     bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
     mv, nmv = load_joint_move_features(SIZES, tids_by_size)
     ph, nph = load_joint_game_phase(SIZES, tids_by_size)

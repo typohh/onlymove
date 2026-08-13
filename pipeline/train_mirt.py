@@ -73,14 +73,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from pipeline.train_rating import (  # noqa: E402
+from utils.rating.model_constants import (  # noqa: E402
     DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
-    PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
+    K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
     _cache_ids_path, load_first_time_attempts, load_joint_activations,
     load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features)
 
-K_AXES = 3                       # inherited from build_axes' selection; see docstring
 EPOCHS = 10000                   # runaway failsafe; the patience rule ends the run
 CHECK_EVERY = 10
 FLAT_PATIENCE = 5                # checks without a new best before stopping

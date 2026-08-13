@@ -103,7 +103,7 @@ def build_problem_features():
     the trainer too (scorable iff act∩bw; move/phase mean-imputed to zero),
     further gated on the eval-side inputs (scalars, rank, rating params).
     """
-    from pipeline.train_rating import PCA_DIM, SEED, SIZES
+    from utils.rating.model_constants import PCA_DIM, SEED, SIZES
 
     tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
     act, _k_act = load_joint_activations(SIZES, tids_by_size, PCA_DIM, SEED)
@@ -461,7 +461,7 @@ def main():
     feats, scalars, rank, params = build_problem_features()
     lapse = load_lapse()
     if args.no_act:
-        from pipeline.train_rating import PCA_DIM
+        from utils.rating.model_constants import PCA_DIM
         feats = {t: v[PCA_DIM:] for t, v in feats.items()}
     tids = sorted(feats)
     tid_index = {t: i for i, t in enumerate(tids)}

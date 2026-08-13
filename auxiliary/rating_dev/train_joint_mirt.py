@@ -95,10 +95,10 @@ if PROJECT_ROOT not in sys.path:
 
 from datetime import datetime  # noqa: E402
 
-from pipeline.train_rating import (  # noqa: E402
+from utils.rating.model_constants import (  # noqa: E402
     DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
     LAPSE_CAP, LAPSE_INIT,
-    PCA_DIM, SEED, SHALLOW_SLOPE_PENALTY, SIZES, SLOPE_FLOOR, clear_logit_vec,
+    PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec,
 )
 from utils.rating.features import (  # noqa: E402
     _cache_ids_path, load_first_time_attempts, load_joint_activations,

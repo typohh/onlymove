@@ -66,7 +66,7 @@ def bot_column_names(n_expected):
     shift every name after the dropped one, so the names are only returned when
     the count still matches; otherwise the caller falls back to indices rather
     than printing a confidently wrong bot."""
-    from pipeline.train_rating import SIZES
+    from utils.rating.model_constants import SIZES
     sets = []
     for s in SIZES:
         d = os.path.join(PROJECT_ROOT, "attempts", str(s))
