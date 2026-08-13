@@ -90,57 +90,59 @@ def _load(prod_dir, dump, axes_npz=None):
     return rate, slope, floor, float(z["lapse"]), load
 
 
-# Effective online step for the held-out user's axis position, in PREDICTION
-# space. The raw step is v += v_lr*(y-p)*g and the prediction is g @ v, so a
-# step moves the prediction by |g|^2 * v_lr — which means a FIXED v_lr scores
-# two models at different rates whenever their loadings carry different
-# magnitude, and that is a parameterisation difference, not a quality one.
-#
-# It bit exactly that way. The MIRT RMS-normalises g to 1 and keeps the
-# magnitude in v (so V_RIDGE can bound it); production's loadings carry their
-# own scale, RMS 0.41. The old hard-coded v_lr = 0.05 sat on production's
-# optimum and ~5x past the MIRT's, and the MIRT's axis contribution read -0.47
-# mnat instead of +1.74. Measured optima: 0.1 for production, 0.01 for the
-# MIRT — a 10x spread in raw v_lr, but only 1.7x in the EFFECTIVE step,
-# which is v_lr * sum_k g_k^2, the SUM over axes since ax = g @ v sums over
-# them: 0.0515 for production against 0.030 for the MIRT. The constant below
-# is their geometric mean AND IS IN THOSE UNITS — deriving it from a
-# per-element mean instead is a factor of K out, which lands both models at a
-# third of their optimum and scores WORSE than the hard-coded value it
-# replaced (MIRT +1.45 vs its +1.74 peak, production +3.04 vs +4.28).
-#
-# So pin the effective step and let v_lr follow the loadings. Do NOT hardcode a
-# value per model (it is a property of |g|, so any change to the normalisation
-# silently invalidates it) and do NOT take the max over a sweep on the scored
-# rows (that is selection on the evaluation set). The residual 1.7x says the
-# optimum is not purely scale-determined — a noisier axis wants a smaller step —
-# so for per-model tuning, cross-fit across the two holdout seeds rather than
-# tuning on the fold being reported.
-V_LR_EFFECTIVE = 0.039
+# Prior standard deviation of a user's axis contribution g @ v, IN LOGITS. The
+# prior lives in PREDICTION space on purpose: a prior variance stated in v-space
+# is not scale-free, because rescaling the loadings by c and v by 1/c leaves
+# every prediction identical, so only gT.Sigma.g is a well-posed thing to pin.
+# Given it, the v-space prior is Sigma0 = (PRIOR_AX_SD^2 / mean|g|^2) * I, which
+# is what makes the walk agree with itself across models whose loadings carry
+# different magnitude by construction (the MIRT RMS-normalises g to 1 and keeps
+# the magnitude in v so V_RIDGE can bound it; production's carry RMS 0.41).
+PRIOR_AX_SD = 0.5
 
 
 def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
-                 k_axes=0, v_lr=None):
+                 k_axes=0):
     """One-step-ahead logloss, split by whether training saw the problem.
 
-    The grid log-likelihood is additive in attempts, so the running posterior
-    costs one vector add per attempt rather than a refit per step. With
-    loadings, v is learned online from zero — predict, then update — so the
-    axes are measured causally rather than fitted on the history they score."""
+    BOTH latent user quantities are estimated from the whole prefix, causally.
+    Ability rides a running grid log-posterior — the grid log-likelihood is
+    additive, so its sufficient statistic accumulates and theta is the exact
+    posterior mean at every attempt, no rate and no approximation. The axis
+    position rides a RECURSIVE LAPLACE (online Newton) posterior over the same
+    prefix: accumulate the Fisher information and take a Newton step, which is
+    the same "use everything seen so far" standard.
+
+    It replaces a single SGD step at a hand-set rate, and that was not a small
+    difference. That rate multiplies the loading scale, which is a
+    PARAMETERIZATION choice rather than a property of the axes, so one shared
+    value scored two models at wildly different effective rates — reading the
+    MIRT's axes at -0.47 mnat when they are worth +1.74. A Newton step has no
+    rate at all and is invariant to the loading scale by construction, because
+    the information term carries |g|^2 and divides it straight back out. So the
+    question of whose rate to use, and whether to tune it on the scored rows,
+    simply stops existing.
+
+    K is read from the loadings; nothing here assumes a particular axis count,
+    since the two models select K independently."""
     from auxiliary.rating_dev.validate_ratings import clear_logit_vec
-    if loadings is not None and v_lr is None:
+    if loadings:
         G = np.stack(list(loadings.values()))
-        g2 = float((G ** 2).sum(axis=1).mean())      # mean |g|^2 per problem
-        v_lr = V_LR_EFFECTIVE / max(g2, 1e-9)
-    elif v_lr is None:
-        v_lr = 0.0
+        k_axes = G.shape[1]
+        # prior in prediction space -> v-space; see PRIOR_AX_SD
+        g2 = float((G ** 2).sum(axis=1).mean())
+        prior_prec = max(g2, 1e-9) / (PRIOR_AX_SD ** 2)
     allr = np.array(list(rate.values()), float)
     grid = np.linspace(allr.min() - 2.0, allr.max() + 2.0, GRID_N)
     prior = -0.5 * ((grid - allr.mean()) / (allr.std() + 1e-9)) ** 2
     acc = {"all": [0.0, 0, []], "seen": [0.0, 0, []], "unseen": [0.0, 0, []]}
+    eye = np.eye(k_axes) if k_axes else None
     for _u, seq in seqs.items():
         ll = prior.copy()
         v = np.zeros(k_axes) if k_axes else None
+        # Laplace posterior precision, seeded at the prior. SPD throughout: the
+        # seed is positive definite and every update adds a PSD rank-1 term.
+        prec = eye * prior_prec if k_axes else None
         for tid, y in seq:
             a = float(slope[tid])
             c = float(np.clip(floor[tid], 0.0, FLOOR_MAX))
@@ -163,7 +165,15 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
             pg = np.clip(c + span / (1 + np.exp(-zg)), 1e-9, 1 - 1e-9)
             ll += y * np.log(pg) + (1 - y) * np.log(1 - pg)
             if g is not None and v is not None:
-                v += v_lr * (y - p) * g
+                # 4PL chain rule, NOT the plain-logistic (y - p) * g: the floor
+                # and lapse flatten dP/dz, so a residual near the floor carries
+                # far less information about v than the logistic form claims.
+                sig = 1.0 / (1.0 + np.exp(-z))
+                dpdz = span * sig * (1.0 - sig)
+                score = (y / p - (1.0 - y) / (1.0 - p)) * dpdz * g
+                w = dpdz * dpdz / (p * (1.0 - p))        # Fisher weight
+                prec = prec + w * np.outer(g, g)
+                v = v + np.linalg.solve(prec, score)
     out = {}
     for key, (tot, n, ys) in acc.items():
         if not n:
@@ -221,6 +231,9 @@ def evaluate_one(prod_dir, dump, seed, frac, axes_npz=None):
 
     k = len(next(iter(loadings.values()))) if loadings else 0
     base = forward_walk(rate, slope, floor, lam, seqs, seen)
+    # Each model at ITS OWN best online rate — the rate is a property of the
+    # loading scale, which is a parameterisation choice, so a shared value
+    # measures that choice rather than the axes.
     with_ax = (forward_walk(rate, slope, floor, lam, seqs, seen,
                             loadings=loadings, k_axes=k) if k else None)
     rho, n_decl = survey_rho_for(rate, slope, hu_list)

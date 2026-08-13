@@ -71,6 +71,33 @@ axis adds (mnat)              production            MIRT
 
 **Survey rho is not usable on this holdout.** It is restricted to held-out accounts' declarations — 92 on seed 0, 67 on seed 1, against the 374 that gave the ±0.012 resolution quoted below. Production 0.9108 / 0.8061, MIRT 0.9167 / 0.7766: the fold-to-fold swing of 0.10 dwarfs both model differences, which flip sign between folds. Do not quote it.
 
+## THE SCORER WAS MIS-SCALED — found and fixed 2026-08-13. EVERY AXIS NUMBER BELOW IS VOID.
+
+`eval_user_holdout.forward_walk` estimates a held-out user's latent quantities causally, from their own prefix, and it estimated the two of them to wildly different standards.
+
+**Ability** rode a running grid log-posterior: the grid log-likelihood is additive, so the sufficient statistic accumulates and `theta` is the exact posterior mean given every prior attempt. No rate, no approximation.
+
+**The axis position** rode ONE SGD step per attempt, `v += v_lr*(y-p)*g`, at a hard-coded `v_lr = 0.05`. Three defects, compounding:
+
+1. **The rate multiplies the loading scale, which is a parameterisation choice.** A step moves the prediction by `v_lr * sum_k g_k^2`. The MIRT RMS-normalises `g` to 1 and keeps the magnitude in `v` so `V_RIDGE` can bound it; production's loadings carry their own scale, RMS 0.41. So one shared rate ran the MIRT's axis positions ~6x faster than production's. Swept on fold 0:
+
+```
+                 0.005    0.01    0.02    0.05    0.1     0.2     0.4
+  MIRT           +1.51   +1.74   +1.50   -0.47   -5.38  -13.06  -26.16
+  production     +1.06   +1.77   +2.67   +3.82   +4.28   +3.93   +1.86
+                                          ^ the hard-coded default
+```
+
+The default sat on production's optimum and ~5x past the MIRT's. **The MIRT's axes read -0.47 mnat when they are worth +1.74.**
+
+2. **The gradient was the plain-logistic `(y - p)*g`**, not the 4PL one. With a floor and lapse, `dP/dz = span*s(1-s)`, so a miss on a high-floor problem carries far less information about `v` than the logistic form claims, and the update over-credited it.
+
+3. **One step is not what causality requires.** Causality only asks that attempt *t* be predicted from attempts 1..*t*-1, which a full refit satisfies too — as the ability estimator demonstrates in the same loop.
+
+Fixed by replacing the SGD step with a **recursive Laplace (online Newton) posterior** over the same prefix: accumulate the Fisher information `sum w*g g^T` with `w = (dP/dz)^2 / (P(1-P))`, take a Newton step. **This has no rate and is invariant to the loading scale by construction**, since the information term carries `|g|^2` and divides it back out — so the question of whose rate to use, and whether to tune it on the scored rows, stops existing. The single remaining constant `PRIOR_AX_SD` is stated in PREDICTION space (logits) rather than on `v`, because rescaling `g` by `c` and `v` by `1/c` leaves predictions identical, so only `g^T.Sigma.g` is well-posed. K is read from the loadings; nothing assumes an axis count, since the two models select K independently.
+
+**Consequence: every axis figure recorded in this document, and every axis-side conclusion drawn on 2026-08-13 — axis dropout, the rating-output columns, `V_RIDGE`, the warm-start arms — was measured through the broken scorer and is void.** Rating figures are untouched: the scorer's axis path never enters them.
+
 ## THE WARM-START LEAK — found and fixed 2026-08-13
 
 `train_joint_mirt` initializes its axis map from `eigen_directions`, which needs an axis-free 4PL to take residuals against. A single-stage model has none at initialization, so it calls `build_axis_features()` with no `params_dir` — reading the **shipped `ratings/`**, a two-stage fit trained on every user and every problem. Two independent leaks follow, both favouring the MIRT:
