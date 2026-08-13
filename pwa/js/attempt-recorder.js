@@ -14,6 +14,7 @@ import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
 import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
 import { trainWeakness } from './weakness.js';
+import { syncRecallNotification } from './notifications.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
 // EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale
 // PINs, we fetch their GoR from EGD (the Worker can't) and send it on the next report.
@@ -333,6 +334,10 @@ export async function updateUserStats(isCorrect, {
     // caller (game-logic) — recording the attempt and rotating the slots are
     // kept separate.
     updateAllUI();
+    // Count a lingering recall reminder down by whatever this attempt cleared —
+    // and take it down once nothing is waiting. Runs after the history append
+    // above, so the just-answered problem has already left the due set.
+    syncRecallNotification();
 
     const rankChangeDirection = rankBandCrossing(oldRank, isCorrect);
 

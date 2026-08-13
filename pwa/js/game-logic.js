@@ -14,7 +14,6 @@ import { sendReport, updateUserStats } from './attempt-recorder.js';
 import { completeCurrentProblem, advanceToNextProblem } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { fetchPickedEmbedding } from './picked-embedding.js';
-import { clearShownNotifications } from './notifications.js';
 
 const median = (values) => {
     if (!values.length) return 0;
@@ -230,10 +229,6 @@ export function handleBoardClick(x, y) {
     }
 
     setAcceptClicks(false);
-
-    // The user is actively solving — dismiss any lingering recall reminder in
-    // the notification tray. Fire-and-forget; doesn't gate the move.
-    clearShownNotifications();
 
     const children = getCurrentNode().children;
     const moveIndex = children.indexOf(moveNode);

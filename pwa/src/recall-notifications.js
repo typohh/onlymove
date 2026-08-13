@@ -250,5 +250,16 @@ function buildNotificationMessage(enteredIds, exitingIds, backlog, lang) {
   const allIds = [...enteredIds, ...exitingIds];
   const url = '/?recall=1';
 
-  return { title, body, url, ids: allIds };
+  // `count` + `t` drive the client-side countdown: as the user works through
+  // the backlog the service worker re-renders the title at the new count and
+  // replaces the tray entry in place. The templates travel with the push (with
+  // `{n}` left unsubstituted) because only the server holds this string table,
+  // and the reminder must count down in the language it was sent in.
+  const t = {
+    one: notifTerm(lang, 'titleOne'),
+    many: notifTerm(lang, 'titleMany'),
+    tap: notifTerm(lang, 'bodyTap'),
+  };
+
+  return { title, body, url, ids: allIds, count: total, t };
 }

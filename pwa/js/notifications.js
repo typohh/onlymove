@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { buildRecallSchedule } from './recall-model.js';
+import { buildRecallSchedule, waitingRecallCount } from './recall-model.js';
 import { postJson } from './worker-post.js';
 
 const SUPPORTED_SIZES = [9, 13];
@@ -27,19 +27,24 @@ export async function getCurrentSubscription() {
     }
 }
 
-// Dismisses any recall reminder the service worker is still displaying. Called
-// when the user attempts to solve a problem: by then the reminder has done its
-// job (it brought them back, or they're here anyway), so leaving it stacked in
-// the tray is just noise. Fire-and-forget and silent — a failed clear is
-// cosmetic. Closes every notification owned by this registration; they all
-// share the 'recall-batch' tag today, but closing all is future-proof and
-// avoids a needless tag filter.
-export async function clearShownNotifications() {
+// Tells the service worker how many problems are still waiting to be reviewed,
+// so a reminder sitting in the tray counts down as the user works through the
+// backlog and is taken down when nothing is left. Called after an attempt is
+// recorded and once at boot (another device may have cleared the backlog).
+//
+// Only the count crosses the boundary: the service worker owns the tray and
+// knows whether a reminder is outstanding at all, which this side cannot see —
+// getNotifications() is empty here for a notification shown by a since-dead
+// browser process, which is every reminder that arrived while the app was
+// closed. Fire-and-forget and silent; a lost message just leaves the tray
+// showing a number that is one attempt stale.
+export async function syncRecallNotification() {
     if (!supportsNotifications()) return;
     try {
+        const count = waitingRecallCount();
         const reg = await navigator.serviceWorker.ready;
-        const notes = await reg.getNotifications();
-        for (const note of notes) note.close();
+        const worker = navigator.serviceWorker.controller || reg.active;
+        if (worker) worker.postMessage({ type: 'recall-count', count });
     } catch {}
 }
 

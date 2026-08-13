@@ -34,7 +34,7 @@ try {
 import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
 import { getRecallCandidates } from './recall-model.js';
 import { showDetailedStats } from './stats-ui.js';
-import { maybeUploadSchedule } from './notifications.js';
+import { maybeUploadSchedule, syncRecallNotification } from './notifications.js';
 import { recordShareEvent } from './attempt-recorder.js';
 import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
@@ -592,6 +592,10 @@ function startBackgroundServices() {
     // Push the current recall schedule to the Worker so the notification cron
     // has up-to-date enter/exit timestamps. No-op for users who haven't opted in.
     maybeUploadSchedule();
+    // Bring a reminder still sitting in the tray up to date with the backlog as
+    // it stands now — it was rendered when the push was sent, and another device
+    // may have worked through some of it since.
+    syncRecallNotification();
 
     // Account sync: pull attempts made on other devices under this userId — on
     // load (now) and when the tab becomes visible. During active play the

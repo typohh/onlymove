@@ -87,6 +87,114 @@ self.addEventListener('activate', event => {
   })());
 });
 
+// ---------------------------------------------------------------------------
+// Outstanding-reminder state.
+//
+// getNotifications() cannot answer "is a reminder still in the tray?" on Chrome
+// for Android: the displayed set is served out of an in-memory map in the
+// browser process that showed the notification, and a recall push is shown
+// while the app is closed, so by the time the user opens the app that process
+// is gone and the call returns an empty list. We therefore track it ourselves,
+// from the events that DO fire — push (shown), notificationclick and
+// notificationclose (gone).
+//
+// Persisted in a Cache rather than a variable because the service worker is
+// killed between the push and the user opening the app. Deliberately NOT named
+// with the precache prefix, so activate's stale-precache sweep leaves it alone.
+const NOTIF_STATE_CACHE = 'only-move-notif-state';
+// Synthetic key. Never fetched — the fetch handler only sees network requests,
+// and nothing ever requests this path.
+const NOTIF_STATE_URL = '/__recall-notification-state';
+
+async function readNotifState() {
+    try {
+        const cache = await caches.open(NOTIF_STATE_CACHE);
+        const res = await cache.match(NOTIF_STATE_URL);
+        return res ? await res.json() : null;
+    } catch {
+        return null;
+    }
+}
+
+// `null` clears. Failures are swallowed: losing the record costs a stale tray
+// entry, which is the behaviour we had before it existed.
+async function writeNotifState(next) {
+    try {
+        const cache = await caches.open(NOTIF_STATE_CACHE);
+        if (next === null) await cache.delete(NOTIF_STATE_URL);
+        else await cache.put(NOTIF_STATE_URL, new Response(JSON.stringify(next)));
+    } catch {}
+}
+
+// Re-renders the title at a new count from the templates the push carried, so
+// the countdown stays in the language the reminder was sent in. `{n}` is the
+// count; a payload without templates (pre-countdown Worker) returns null and
+// the caller leaves the text alone.
+function renderCountTitle(t, count) {
+    if (!t) return null;
+    if (count === 1) return typeof t.one === 'string' ? t.one : null;
+    return typeof t.many === 'string' ? t.many.replace('{n}', String(count)) : null;
+}
+
+// Notification options for a reminder. Split out because the countdown re-shows
+// the notification to update it, and every field except title/body must match
+// the original — `tag` above all, since that is what makes the platform REPLACE
+// the tray entry instead of stacking a second one.
+function notifOptions({ body, data, renotify }) {
+    return {
+        body: body || '',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'recall-batch',          // one stacked notification, not many
+        // A review reminder has no deadline attached to it, so it posts without
+        // sound or vibration and waits in the tray. `renotify` governs whether a
+        // replacement re-surfaces the banner — set on a genuine new push, clear
+        // on a countdown update so the number changes in place, unobtrusively.
+        // (`silent` must not be set alongside `vibrate`: the pair is a TypeError.)
+        silent: true,
+        renotify: !!renotify,
+        data: data || { url: '/', ids: [] },
+    };
+}
+
+// Applies the remaining-due count reported by the page. Only ever UPDATES a
+// reminder we believe is outstanding — never creates one, since a count arrives
+// after every attempt and most of them have no reminder to speak to.
+async function applyRecallCount(count) {
+    if (!Number.isFinite(count) || count < 0) return;
+    const st = await readNotifState();
+    if (!st) return;
+
+    if (count > 0) {
+        if (count === st.count) return;      // already showing this number
+        const title = renderCountTitle(st.t, count);
+        if (!title) return;                  // no templates to re-render from
+        await self.registration.showNotification(
+            title,
+            notifOptions({ body: st.t && st.t.tap, data: st.data, renotify: false })
+        );
+        await writeNotifState({ ...st, title, count });
+        return;
+    }
+
+    // Nothing left to review — take the reminder down. close() needs a handle
+    // from getNotifications(), which is empty for a notification shown by a
+    // since-dead browser process (see above). Tag REPLACEMENT has no such
+    // problem: it is keyed on origin + tag by the platform, so re-showing
+    // adopts the stale tray entry as one this process owns, and that one we can
+    // close. Silent and immediately closed, so it costs at most a flicker.
+    let shown = await self.registration.getNotifications({ tag: 'recall-batch' });
+    if (shown.length === 0) {
+        await self.registration.showNotification(
+            st.title || renderCountTitle(st.t, 1) || '',
+            notifOptions({ body: st.t && st.t.tap, data: st.data, renotify: false })
+        );
+        shown = await self.registration.getNotifications({ tag: 'recall-batch' });
+    }
+    for (const note of shown) note.close();
+    await writeNotifState(null);
+}
+
 // Localized fallback title for a push with no/invalid JSON title. The normal
 // path uses the server-rendered payload.title (already localized per the
 // device's stored lang); this only covers a malformed payload. Mirrors the
@@ -109,27 +217,43 @@ self.addEventListener('push', event => {
         }
     }
     const title = payload.title || fallbackNotifTitle();
-    const options = {
-        body: payload.body || '',
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag: 'recall-batch',          // one stacked notification, not many
-        // A review reminder has no deadline attached to it, so it posts without
-        // sound or vibration and waits in the tray. `renotify` still re-surfaces
-        // the banner when a newer push replaces the tagged one — silent governs
-        // the alert, renotify governs whether it re-appears. (Must not be set
-        // alongside `vibrate`: the pair is a TypeError.)
-        silent: true,
-        renotify: true,
-        data: { url: payload.url || '/', ids: payload.ids || [] },
-    };
-    event.waitUntil(self.registration.showNotification(title, options));
+    const data = { url: payload.url || '/', ids: payload.ids || [] };
+    event.waitUntil((async () => {
+        await self.registration.showNotification(
+            title,
+            notifOptions({ body: payload.body, data, renotify: true })
+        );
+        // Record it as outstanding so the page's countdown has something to
+        // update, and so we never conjure a reminder that was never sent.
+        await writeNotifState({
+            title,
+            count: Number.isFinite(payload.count) ? payload.count : null,
+            t: payload.t || null,
+            data,
+        });
+    })());
+});
+
+// The page reports how many problems are still waiting after an attempt; the
+// service worker owns the tray and decides what that means for it.
+self.addEventListener('message', event => {
+    const msg = event.data;
+    if (!msg || msg.type !== 'recall-count') return;
+    event.waitUntil(applyRecallCount(msg.count));
+});
+
+// Swiped away. Drop the record so the countdown's dismissal path can't re-post
+// a reminder the user has already dealt with.
+self.addEventListener('notificationclose', event => {
+    event.waitUntil(writeNotifState(null));
 });
 
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     const targetUrl = (event.notification.data && event.notification.data.url) || '/';
     event.waitUntil((async () => {
+        await writeNotifState(null);
+
         let allClients = [];
         try {
             allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
