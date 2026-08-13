@@ -299,7 +299,8 @@ class JointMIRT:
     def __init__(self, fdim, n_profiles, n_users, k_axes, input_dim, device,
                  seed, g_init=None, global_slope=False, act="swiglu",
                  hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
-                 axis_reads_rating=True):
+                 axis_reads_rating=True, axis_from_trunk=False,
+                 axis_trunk_coupled=False):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
@@ -308,8 +309,11 @@ class JointMIRT:
         self.axis_dropout = float(axis_dropout)
         # The axis map reads the rating head's outputs (difficulty, slope,
         # floor) as extra input columns. See problem_params.
-        self.axis_reads_rating = bool(axis_reads_rating)
-        self.axis_extra = 3 if axis_reads_rating else 0
+        self.axis_from_trunk = bool(axis_from_trunk)
+        self.axis_trunk_coupled = bool(axis_trunk_coupled)
+        # Reading the trunk supersedes reading its 3 scalar outputs.
+        self.axis_reads_rating = bool(axis_reads_rating) and not self.axis_from_trunk
+        self.axis_extra = 3 if self.axis_reads_rating else 0
 
         # theta is constructed BEFORE the trunk so the RNG draw order is fixed,
         # matching the rating trainer.
@@ -342,8 +346,13 @@ class JointMIRT:
         self.a_raw = torch.tensor(0.0, device=device, requires_grad=True)
         # The axis map is LINEAR on the features, deliberately — see the module
         # docstring. It is NOT fed by the trunk.
-        self.g_lin = nn.Linear(fdim + self.axis_extra, k_axes,
-                               bias=False).to(device)
+        # From the TRUNK's representation, or from the raw features. The
+        # rejection on record — a trunk on the axis path costs 0.43 mnat — is
+        # for a SEPARATE trunk beside the linear map, i.e. added capacity. This
+        # adds none: it reads the representation the rating heads already
+        # compute, which is strictly more than the 3 scalars they emit.
+        g_in_dim = d if self.axis_from_trunk else fdim + self.axis_extra
+        self.g_lin = nn.Linear(g_in_dim, k_axes, bias=False).to(device)
         if g_init is not None:
             with torch.no_grad():
                 # g_init may be narrower than g_lin's input (the eigen form is
@@ -452,7 +461,8 @@ class JointMIRT:
         of the rating — and it was selected on held-out logloss, which is exactly
         invariant to the scale it was choosing."""
         torch, nn = self.torch, self.nn
-        o = self.head(self.trunk(self._drop(feat, INPUT_DROPOUT)))
+        h = self.trunk(self._drop(feat, INPUT_DROPOUT))
+        o = self.head(h)
         b = o[:, 0]
         if self.training:
             mu, sd = b.mean(), b.std() + EPS
@@ -487,10 +497,18 @@ class JointMIRT:
         # head — which is the frozen-fit semantics production gets for free — and
         # appended AFTER the dropout mask, matching production's exemption of
         # these columns (EXEMPT_TAIL_COLS).
-        g_in = self._drop(feat, self.axis_dropout)
-        if self.axis_reads_rating:
-            g_in = torch.cat([g_in, b.detach()[:, None], a.detach()[:, None],
-                              c.detach()[:, None]], dim=1)
+        if self.axis_from_trunk:
+            # DETACHED by default. The trunk is shared either way — the axes see
+            # the same representation — but coupling also lets the axis objective
+            # RESHAPE it, and the trunk is what the rating depends on. Detaching
+            # is the frozen-baseline semantics production gets for free; coupling
+            # is what "one model" means. Which is better is a measurement.
+            g_in = h if self.axis_trunk_coupled else h.detach()
+        else:
+            g_in = self._drop(feat, self.axis_dropout)
+            if self.axis_reads_rating:
+                g_in = torch.cat([g_in, b.detach()[:, None], a.detach()[:, None],
+                                  c.detach()[:, None]], dim=1)
         g = self.g_lin(g_in)
         g = g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
         return b, a, c, g
@@ -500,10 +518,16 @@ class JointMIRT:
         residual scores must be taken against, so its directions live in the
         same space the map is parameterized over."""
         torch = self.torch
-        if not self.axis_reads_rating:
-            return feat
         was = self.training
         self.train(False)
+        if self.axis_from_trunk:
+            with torch.no_grad():
+                out = self.trunk(feat)
+            self.train(was)
+            return out
+        if not self.axis_reads_rating:
+            self.train(was)
+            return feat
         with torch.no_grad():
             b, a, c, _g = self.problem_params(feat)
         self.train(was)
@@ -571,6 +595,17 @@ def main():
                          "POPULATION difficulty, which would load every user the "
                          "same sign; it does not stop one carrying individual "
                          "ability, since a centred copy satisfies it exactly.")
+    ap.add_argument("--axis-from-trunk", action="store_true",
+                    help="the axis map reads the TRUNK's representation instead "
+                         "of the raw features. Adds no capacity — it is the same "
+                         "linear map on a different input — so the measured "
+                         "rejection of a SEPARATE axis trunk does not cover it. "
+                         "Gives the axes the representation difficulty is "
+                         "computed from, rather than the 3 scalars it emits.")
+    ap.add_argument("--axis-trunk-coupled", action="store_true",
+                    help="with --axis-from-trunk, let axis gradients reshape the "
+                         "shared trunk. Default detached, which preserves the "
+                         "rating's claim on the representation.")
     ap.add_argument("--axis-blind", action="store_true",
                     help="withhold the rating head's outputs from the axis map, "
                          "which is what this model did before 2026-08-13. A "
@@ -923,7 +958,9 @@ def main():
                       global_slope=args.global_slope, act=args.act,
                       hidden=tuple(args.hidden),
                       axis_dropout=args.axis_dropout,
-                      axis_reads_rating=not args.axis_blind)
+                      axis_reads_rating=not args.axis_blind,
+                      axis_from_trunk=args.axis_from_trunk,
+                      axis_trunk_coupled=args.axis_trunk_coupled)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
