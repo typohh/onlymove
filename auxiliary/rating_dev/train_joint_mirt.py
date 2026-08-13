@@ -298,12 +298,18 @@ class JointMIRT:
 
     def __init__(self, fdim, n_profiles, n_users, k_axes, input_dim, device,
                  seed, g_init=None, global_slope=False, act="swiglu",
-                 hidden=DIFF_HIDDEN):
+                 hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
+                 axis_reads_rating=True):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
         self.torch, self.nn, self.k = torch, nn, k_axes
         self.input_dim = int(input_dim)
+        self.axis_dropout = float(axis_dropout)
+        # The axis map reads the rating head's outputs (difficulty, slope,
+        # floor) as extra input columns. See problem_params.
+        self.axis_reads_rating = bool(axis_reads_rating)
+        self.axis_extra = 3 if axis_reads_rating else 0
 
         # theta is constructed BEFORE the trunk so the RNG draw order is fixed,
         # matching the rating trainer.
@@ -336,10 +342,14 @@ class JointMIRT:
         self.a_raw = torch.tensor(0.0, device=device, requires_grad=True)
         # The axis map is LINEAR on the features, deliberately — see the module
         # docstring. It is NOT fed by the trunk.
-        self.g_lin = nn.Linear(fdim, k_axes, bias=False).to(device)
+        self.g_lin = nn.Linear(fdim + self.axis_extra, k_axes,
+                               bias=False).to(device)
         if g_init is not None:
             with torch.no_grad():
-                self.g_lin.weight[:g_init.shape[0]].copy_(
+                # g_init may be narrower than g_lin's input (the eigen form is
+                # built on the feature matrix alone); seed those columns and
+                # leave the rating-output columns at their init.
+                self.g_lin.weight[:g_init.shape[0], :g_init.shape[1]].copy_(
                     torch.tensor(g_init, dtype=torch.float32, device=device))
         self.v = torch.zeros(n_users, k_axes, device=device, requires_grad=True)
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
@@ -458,9 +468,46 @@ class JointMIRT:
         lam = self.lapse()
         cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=FLOOR_CAP)
         c = cap * torch.sigmoid(o[:, 2])
-        g = self.g_lin(self._drop(feat, AXIS_INPUT_DROPOUT))
+        # THE AXIS MAP READS THE RATING HEAD'S OUTPUTS. A residual only has a
+        # meaning relative to a baseline: the same miss carries different
+        # information on an easy problem than on a hard one, so a loading that
+        # cannot condition on difficulty is describing the wrong thing. The map
+        # is LINEAR and the difficulty is a NONLINEAR function of the features
+        # (the trunk computes it), so it cannot recover b from feat even in
+        # principle — the columns have to be supplied. Production's axis fit does
+        # exactly this, reading rating/slope/floor as three of its own input
+        # columns; withholding them here while keeping the map linear inherits
+        # the "linear is enough" result from a setting that had them.
+        #
+        # This is NOT the circularity the module docstring warns about. Building
+        # FEATURES out of a previous fit's outputs and treating them as exogenous
+        # is circular; reading your own intermediate activations further down the
+        # same forward pass is ordinary composition, with no fixed point and no
+        # leakage. DETACHED, so the axis objective cannot reshape the rating
+        # head — which is the frozen-fit semantics production gets for free — and
+        # appended AFTER the dropout mask, matching production's exemption of
+        # these columns (EXEMPT_TAIL_COLS).
+        g_in = self._drop(feat, self.axis_dropout)
+        if self.axis_reads_rating:
+            g_in = torch.cat([g_in, b.detach()[:, None], a.detach()[:, None],
+                              c.detach()[:, None]], dim=1)
+        g = self.g_lin(g_in)
         g = g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
         return b, a, c, g
+
+    def axis_input(self, feat):
+        """The axis map's input basis with dropout off — what the warm start's
+        residual scores must be taken against, so its directions live in the
+        same space the map is parameterized over."""
+        torch = self.torch
+        if not self.axis_reads_rating:
+            return feat
+        was = self.training
+        self.train(False)
+        with torch.no_grad():
+            b, a, c, _g = self.problem_params(feat)
+        self.train(was)
+        return torch.cat([feat, b[:, None], a[:, None], c[:, None]], dim=1)
 
     def forward(self, prof, uid, feat):
         torch = self.torch
@@ -513,6 +560,33 @@ def main():
                          "the 4PL saw every user and only the axis stage does "
                          "CV. WITHOUT this there is no held-out-user axis "
                          "measurement and none may be reported.")
+    ap.add_argument("--v-ridge", type=float, default=V_RIDGE,
+                    help="ridge on the per-user axis positions. THE AXES' WHOLE "
+                         "MAGNITUDE LIVES HERE: g is RMS-normalised per column, "
+                         "so v alone sets how much an axis can contribute, and "
+                         "too large a value pins the axes flat and reads as "
+                         "'the axes are not predictive'.")
+    ap.add_argument("--v-mean-penalty", type=float, default=V_MEAN_PENALTY,
+                    help="penalty on mean_u(v_k). Stops an axis carrying "
+                         "POPULATION difficulty, which would load every user the "
+                         "same sign; it does not stop one carrying individual "
+                         "ability, since a centred copy satisfies it exactly.")
+    ap.add_argument("--axis-blind", action="store_true",
+                    help="withhold the rating head's outputs from the axis map, "
+                         "which is what this model did before 2026-08-13. A "
+                         "residual is defined against a baseline, so a loading "
+                         "that cannot see difficulty cannot say what it is a "
+                         "residual OF; and since the map is linear and "
+                         "difficulty is a nonlinear function of the features, it "
+                         "cannot rederive it. Kept as the ablation.")
+    ap.add_argument("--axis-dropout", type=float, default=AXIS_INPUT_DROPOUT,
+                    help="column dropout on the AXIS map's input. Inherited at "
+                         "0.3 from train_axes, where the axes train against a "
+                         "FROZEN 4PL; here they train against a moving one and "
+                         "have more to chase, and the stopping diagnostic shows "
+                         "the axis block overfitting ~2.5x faster than the "
+                         "rating heads. So the inherited value has no claim to "
+                         "being right in this model.")
     ap.add_argument("--axis-params-dir", default=None,
                     help="read the rating model's outputs for the EIGEN warm "
                          "start from this ratings/ directory instead of the "
@@ -847,7 +921,9 @@ def main():
         m = JointMIRT(fdim, len(profiles.categories), len(uids), args.k,
                       input_dim, device, seed, g_init=gi,
                       global_slope=args.global_slope, act=args.act,
-                      hidden=tuple(args.hidden))
+                      hidden=tuple(args.hidden),
+                      axis_dropout=args.axis_dropout,
+                      axis_reads_rating=not args.axis_blind)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
@@ -939,8 +1015,8 @@ def main():
                 # While v is pinned at zero the axis terms are either identically
                 # zero or act on a g that the warm start is about to overwrite.
                 if not in_burn:
-                    loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
-                    loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
+                    loss = loss + args.v_ridge * (m.v[tu[bi]] ** 2).sum() / len(bi)
+                    loss = loss + args.v_mean_penalty * (m.v.mean(dim=0) ** 2).sum()
                     Mc = gh - gh.mean(dim=0, keepdim=True)
                     Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
                     Cm = Mn.T @ Mn
@@ -990,7 +1066,8 @@ def main():
                         # its seed spread against handing over in place.
                         gi_bi, n_seen = burn_in_directions(
                             m, tfeat, tp, tprof, tu, ty, tr_eff, args.k,
-                            len(uids), batch=BATCH)
+                            len(uids), batch=BATCH,
+                            xfeat=m.axis_input(tfeat))
                         with torch.no_grad():
                             m.g_lin.weight.copy_(
                                 torch.tensor(gi_bi, device=device))

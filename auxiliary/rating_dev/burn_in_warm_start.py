@@ -48,7 +48,7 @@ import numpy as np
 
 
 def burn_in_directions(m, tfeat, tp, tprof, tu, ty, tr, k, n_users,
-                       batch=65536):
+                       batch=65536, xfeat=None):
     """Top-k escape directions from the model's OWN axis-free residuals.
 
     Call after the burn-in epochs, with the model's v still at zero. Returns
@@ -57,7 +57,12 @@ def burn_in_directions(m, tfeat, tp, tprof, tu, ty, tr, k, n_users,
     Requires v == 0: the residual is defined under the axis-free baseline, and
     a non-zero v would make p_hat depend on the very loadings being chosen."""
     torch = m.torch
-    fdim = tfeat.shape[1]
+    # The directions must live in the space g_lin is PARAMETERIZED over, which is
+    # wider than the feature matrix once the axis map reads the rating head's
+    # outputs. Passing the model's own axis input keeps init and parameters in
+    # the same basis; a mismatch would silently seed only the leading columns.
+    xf = tfeat if xfeat is None else xfeat
+    fdim = xf.shape[1]
     S = torch.zeros(n_users, fdim, dtype=torch.float64, device=tfeat.device)
     n = torch.zeros(n_users, dtype=torch.float64, device=tfeat.device)
 
@@ -71,7 +76,7 @@ def burn_in_directions(m, tfeat, tp, tprof, tu, ty, tr, k, n_users,
             bi = tr[i:i + batch]
             pred, _g = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
             resid = (ty[bi] - pred).double()
-            x = tfeat[tp[bi]].double()
+            x = xf[tp[bi]].double()
             S.index_add_(0, tu[bi], resid[:, None] * x)
             n.index_add_(0, tu[bi], torch.ones_like(resid))
     m.train(was_training)

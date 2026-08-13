@@ -90,8 +90,37 @@ def _load(prod_dir, dump, axes_npz=None):
     return rate, slope, floor, float(z["lapse"]), load
 
 
+# Effective online step for the held-out user's axis position, in PREDICTION
+# space. The raw step is v += v_lr*(y-p)*g and the prediction is g @ v, so a
+# step moves the prediction by |g|^2 * v_lr — which means a FIXED v_lr scores
+# two models at different rates whenever their loadings carry different
+# magnitude, and that is a parameterisation difference, not a quality one.
+#
+# It bit exactly that way. The MIRT RMS-normalises g to 1 and keeps the
+# magnitude in v (so V_RIDGE can bound it); production's loadings carry their
+# own scale, RMS 0.41. The old hard-coded v_lr = 0.05 sat on production's
+# optimum and ~5x past the MIRT's, and the MIRT's axis contribution read -0.47
+# mnat instead of +1.74. Measured optima: 0.1 for production, 0.01 for the
+# MIRT — a 10x spread in raw v_lr, but only 1.7x in the EFFECTIVE step,
+# which is v_lr * sum_k g_k^2, the SUM over axes since ax = g @ v sums over
+# them: 0.0515 for production against 0.030 for the MIRT. The constant below
+# is their geometric mean AND IS IN THOSE UNITS — deriving it from a
+# per-element mean instead is a factor of K out, which lands both models at a
+# third of their optimum and scores WORSE than the hard-coded value it
+# replaced (MIRT +1.45 vs its +1.74 peak, production +3.04 vs +4.28).
+#
+# So pin the effective step and let v_lr follow the loadings. Do NOT hardcode a
+# value per model (it is a property of |g|, so any change to the normalisation
+# silently invalidates it) and do NOT take the max over a sweep on the scored
+# rows (that is selection on the evaluation set). The residual 1.7x says the
+# optimum is not purely scale-determined — a noisier axis wants a smaller step —
+# so for per-model tuning, cross-fit across the two holdout seeds rather than
+# tuning on the fold being reported.
+V_LR_EFFECTIVE = 0.039
+
+
 def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
-                 k_axes=0, v_lr=0.05):
+                 k_axes=0, v_lr=None):
     """One-step-ahead logloss, split by whether training saw the problem.
 
     The grid log-likelihood is additive in attempts, so the running posterior
@@ -99,6 +128,12 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
     loadings, v is learned online from zero — predict, then update — so the
     axes are measured causally rather than fitted on the history they score."""
     from auxiliary.rating_dev.validate_ratings import clear_logit_vec
+    if loadings is not None and v_lr is None:
+        G = np.stack(list(loadings.values()))
+        g2 = float((G ** 2).sum(axis=1).mean())      # mean |g|^2 per problem
+        v_lr = V_LR_EFFECTIVE / max(g2, 1e-9)
+    elif v_lr is None:
+        v_lr = 0.0
     allr = np.array(list(rate.values()), float)
     grid = np.linspace(allr.min() - 2.0, allr.max() + 2.0, GRID_N)
     prior = -0.5 * ((grid - allr.mean()) / (allr.std() + 1e-9)) ** 2
