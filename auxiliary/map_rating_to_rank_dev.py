@@ -148,7 +148,7 @@ def build_decls(args):
         merged_slopes.update(load_slopes(args.dir, s))
         merged_floors.update(load_floors(args.dir, s))
     if not merged_ratings:
-        sys.exit("No v2 per-problem ratings — run train_rating first.")
+        sys.exit("No v2 per-problem ratings — run train_mirt first.")
     lapse = load_lapse(args.dir)
 
     # Shipped M (rating → rank_index, 20k=0 axis) + production time dock constants,

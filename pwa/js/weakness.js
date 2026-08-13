@@ -350,7 +350,7 @@ export async function trainWeakness() {
 // shape of personalization; subtracting the mean leaves the part that actually
 // differs between users. Note this is the opposite treatment from the SUM, which is
 // centred on zero and whose population displacement HALTS the offline fit: a shared
-// sum coefficient is residual difficulty belonging upstream in build_axes, so
+// sum coefficient is residual difficulty belonging upstream in the axis fit, so
 // centring it would hide a defect, while a shared contrast is measured geometry and
 // centring it removes a known nuisance.
 

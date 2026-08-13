@@ -1,7 +1,7 @@
 """Map the combined cross-board rating to a CONSENSUS rank, and fit the per-server
 rank couplings — self-contained, from rank_surveys alone.
 
-The rating model (pipeline.train_rating) puts problem difficulty and user ability on
+The rating model (pipeline.train_mirt) puts problem difficulty and user ability on
 ONE shared logit scale across both boards, so the rating→rank curve is a SINGLE shared
 curve. This step produces, from the survey declarations:
 
@@ -425,7 +425,7 @@ def main():
         merged_slopes.update(load_slopes(args.dir, s))
         merged_floors.update(load_floors(args.dir, s))
     if not merged_ratings:
-        sys.exit("No per-problem ratings found — run train_rating first.")
+        sys.exit("No per-problem ratings found — run train_mirt first.")
     lapse = load_lapse(args.dir)
     # First-time attempts only: the client's rank estimator anchors on first-time
     # attempts, so build the survey anchor from novel problems too — repeats'

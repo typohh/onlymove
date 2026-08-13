@@ -15,7 +15,7 @@ import os
 
 import numpy as np
 
-# Backend per-size CSVs (written by pipeline.train_rating, keyed by tsumego_id).
+# Backend per-size CSVs (written by pipeline.train_mirt, keyed by tsumego_id).
 RATINGS_CSV = "tsumego_ratings.csv"   # value col 'rating' — 80%-clear b_p
 SLOPE_CSV = "tsumego_slopes.csv"      # value col 'slope'  — 2PL discrimination a_p
 FLOOR_CSV = "tsumego_floors.csv"      # value col 'floor'  — 3PL guessing floor c_p
@@ -63,11 +63,11 @@ def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
 
 def load_lapse(ratings_dir):
     """The global 4PL ceiling λ (fat-finger / lapse rate) the shipped ratings were
-    derived under and the client uses. train_rating writes it to rating_constants.json
+    derived under and the client uses. train_mirt writes it to rating_constants.json
     (the authoritative source — it learns λ jointly); fit_population_constants only
     reads it THROUGH into population_constants.json. So prefer rating_constants.json,
     fall back to population_constants.json, then 0.0 — otherwise a re-run of
-    train_rating (fresh λ) followed by map_rating_to_rank would anchor the curve under
+    train_mirt (fresh λ) followed by map_rating_to_rank would anchor the curve under
     a one-cycle-stale λ still sitting in population_constants.json. fit_user_rating's
     4PL must use THIS λ so the anchor matches the client's rank estimator
     (pwa/js/irt.js LAPSE)."""

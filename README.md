@@ -96,26 +96,26 @@ Builds the candidate-move-eval cache the rating trainer reads.
 ./.venv/bin/python3 -m pipeline.cache_rating_features
 ```
 
-### 7. Train rating
-Fits the cross-board rating model on human first-time attempts (activation, bot-winrate, move-eval and game-phase features) into `ratings/<size>/`. Takes no arguments — the shipped configuration is baked in; the experiment surface lives in `auxiliary/rating_dev/`.
+### 7. Train the MIRT
+Fits the rating and the K skill axes together, as one compensatory model on human first-time attempts (activation, bot-winrate, move-eval and game-phase features), into `ratings/<size>/` and `axes/`. Takes no arguments — the shipped configuration is baked in; the experiment surface lives in `auxiliary/rating_dev/train_joint_mirt.py`.
 ```bash
-./.venv/bin/python3 -m pipeline.train_rating
+./.venv/bin/python3 -m pipeline.train_mirt
 ```
 
-### 8. Map rating to rank
-Fits the rating→rank curve and the per-server couplings against the rank surveys, into `ratings/rating_to_rank.json` and `ratings/rank_map.json`. Board-independent and needs no GPU, but it sits *inside* the sequence: the axes step reads the curve.
+### 8. Write per-cell axis vectors
+Fans the axis projection out to every legal cell into `axes/per_cell/<size>/<tid>.npz`, which the client needs because it scores the move the user picked and not only the answer. Resumable by file existence.
+```bash
+./.venv/bin/python3 -m pipeline.write_mirt_per_cell
+```
+
+### 9. Map rating to rank
+Fits the rating→rank curve and the per-server couplings against the rank surveys, into `ratings/rating_to_rank.json` and `ratings/rank_map.json`. Board-independent and needs no GPU, but it sits *inside* the sequence: it reads the ratings the MIRT wrote.
 ```bash
 ./.venv/bin/python3 -m pipeline.map_rating_to_rank
 ```
 
-### 9. Build axes
-Fits the supervised residual skill axes (the motifs) into `axes/`, selecting the axis count from held-out gain. Consumes the rating outputs and the rank curve, so it follows both preceding steps.
-```bash
-./.venv/bin/python3 -m pipeline.build_axes
-```
-
 ### 10. Fit population constants
-Fits the retention and time-bias constants and the per-axis weakness prior into `ratings/population_constants.json`. It fits one prior entry per axis, so it must follow `build_axes` — packaging refuses to run on a stale prior vector.
+Fits the retention and time-bias constants and the per-axis weakness prior into `ratings/population_constants.json`. It fits one prior entry per axis, so it must follow `train_mirt` — packaging refuses to run on a stale prior vector.
 ```bash
 ./.venv/bin/python3 -m pipeline.fit_population_constants
 ```

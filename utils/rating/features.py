@@ -8,7 +8,7 @@ helpers those feature loaders read.
 
 These functions used to live in auxiliary/ (the research area) and were imported back into the
 pipeline; they are leaf utilities (no auxiliary/ or pipeline/ imports), so both the production
-trainer (pipeline.train_rating) and the experiment scripts (auxiliary.rating_dev.*) import
+trainer (pipeline.train_mirt) and the experiment scripts (auxiliary.rating_dev.*) import
 them from here. The auxiliary modules that historically defined them now re-export from here so
 their other callers are unaffected.
 """
@@ -506,7 +506,7 @@ def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
     """The full joint-PCA TRANSFORM (not just the projected values): raw 6912-dim
     activation vector -> standardize (m1, s1) -> PCA components C -> standardize
     (m2, s2). Needed to project arbitrary (non-correct) CELLS into the same
-    activation space — pipeline.build_axes' per-cell fanout. Reads the basis from
+    activation space — pipeline.write_mirt_per_cell. Reads the basis from
     the joint-PCA cache; a pre-basis cache file (older format) is refit in place."""
     cpath = _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed)
     if os.path.exists(cpath):
@@ -691,8 +691,8 @@ def load_joint_continuation(sizes, tids_by_size):
 # (from the SGFs, cached). These are the forward-validated per-user axes of
 # docs/methodology.md AND candidate rating-model features (the residual-
 # MIRT prototype's r head found predictable residual difficulty on exactly this
-# surface — see auxiliary.rating_dev.train_residual_axes). Living here keeps the
-# production trainer (pipeline.train_rating), the experiment surface
+# surface — see auxiliary.rating_dev.train_joint_mirt). Living here keeps the
+# production trainer (pipeline.train_mirt), the experiment surface
 # (auxiliary.rating_dev.*) and the axis analyses (auxiliary.eval_score_gap_axis)
 # on ONE set of definitions: same caches, same transforms, in sync by construction.
 
@@ -768,12 +768,13 @@ def load_game_phase(rebuild=False, sizes=(9, 13)):
     cached tid set EQUALS the corpus, never just "nothing new to add", and BOTH
     directions are load-bearing here:
 
-      a tid the cache LACKS is not a neutral omission — the two consumers
-      disagree about it. build_axes hard-filters on this block, so the problem
-      leaves the axes fit (and then packaging refuses to ship, the loud path);
-      train_rating instead substitutes a zero vector, which after the pooled
-      z-score IS the population mean, so the problem is rated on an imputed
-      phase block with nothing anywhere recording it.
+      a tid the cache LACKS is not a neutral omission. train_mirt keys its
+      problem set on the activation and bot blocks alone and substitutes a zero
+      vector here (`ph.get(key, zero_ph)`), which after the pooled z-score IS
+      the population mean — so the problem is rated, given an axis vector and
+      shipped on an imputed phase block, with nothing anywhere recording it.
+      There is no loud path: one trainer means one behaviour, and it is the
+      silent one.
 
       a DEPARTED tid left behind is not inert either — phase_ratio_z takes its
       z-scores over this cache's whole population, so a purged problem shifts
@@ -811,8 +812,8 @@ def load_game_phase(rebuild=False, sizes=(9, 13)):
             failed = sorted(t for t, v in got.items() if v is None)
             if failed:
                 print(f"  [size {size}] {len(failed)} SGFs failed to parse and are "
-                      f"NOT cached (e.g. {failed[:5]}) — build_axes will drop them "
-                      f"and train_rating will impute them", flush=True)
+                      f"NOT cached (e.g. {failed[:5]}) — train_mirt will impute "
+                      f"them", flush=True)
             keep.update({t: got[t] for t in missing
                          if got.get(t) is not None})
         elif departed:
@@ -908,7 +909,7 @@ RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 def load_backend_problem_params(sizes=(9, 13), ratings_dir=None):
     """tid -> (rating, slope, floor) from ratings/<size>/tsumego_{ratings,quality,
     tsumego_{ratings,slopes,floors}.csv. Fails loud on a missing file (run
-    pipeline.train_rating).
+    pipeline.train_mirt).
 
     `ratings_dir` overrides the default RATINGS_DIR and exists for HELD-OUT
     evaluation: these values feed the axis features and the axis baseline, so
@@ -925,7 +926,7 @@ def load_backend_problem_params(sizes=(9, 13), ratings_dir=None):
                           (FLOOR_CSV, None)):
             path = os.path.join(d, name)
             if not os.path.exists(path):
-                raise FileNotFoundError(f"{path} missing — run pipeline.train_rating first")
+                raise FileNotFoundError(f"{path} missing — run pipeline.train_mirt first")
             frames[name] = pd.read_csv(path)
         r = frames[RATINGS_CSV].set_index("tsumego_id")["rating"]
         q = frames[SLOPE_CSV].set_index("tsumego_id")["slope"]

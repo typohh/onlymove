@@ -32,7 +32,7 @@ EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
 
 # Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
-# pipeline.train_rating + pipeline.map_rating_to_rank) is the only rating
+# pipeline.train_mirt + pipeline.map_rating_to_rank) is the only rating
 # backend — package_for_pwa is the single writer of pwa/tsumegos/ and always
 # reads ratings/. RATING_MODEL_TAG is stamped into embedding_meta.json as
 # `rating_model` for provenance (the PWA does not branch on it).
@@ -50,11 +50,11 @@ def project_cells_for_problem(per_cell_path, sgf_path):
     """Load pre-projected per-cell embeddings for one tsumego in the order the
     PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells). A missing,
     corrupt, or SGF-inconsistent .npz RAISES — packaging requires a per-cell projection
-    for every problem (build_axes fills the whole corpus), so a gap is a hard
+    for every problem (write_mirt_per_cell fills the whole corpus), so a gap is a hard
     error, never silently skipped.
 
     Reads axes/per_cell/<size>/<tid>.npz, written upstream by
-    pipeline.build_axes (per-cell fanout). Those rows are in *extraction
+    pipeline.write_mirt_per_cell. Those rows are in *extraction
     order*, which is board-scan order (sorted by (y, x)) — NOT the order the PWA
     uses. The PWA recovers a picked move's cell index via
     children.indexOf(moveNode), i.e. SGF root-variation document order, then
@@ -77,7 +77,7 @@ def project_cells_for_problem(per_cell_path, sgf_path):
     if not os.path.exists(per_cell_path):
         raise FileNotFoundError(
             f"missing per-cell projection {per_cell_path} — corpus and per_cell/ are "
-            f"out of sync; run pipeline.build_axes")
+            f"out of sync; run pipeline.write_mirt_per_cell")
 
     # A file that exists but won't load is corruption, not a coverage gap — let it
     # propagate and abort the run rather than silently dropping the sidecar.
@@ -218,7 +218,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
         {output_dir}/lookup.txt   (merged across sizes; rows: "id zipHash size")
 
     When per_cell_dir is supplied (pre-projected per-problem .npz files written
-    by pipeline.build_axes (per-cell fanout)), each shard also gets:
+    by pipeline.write_mirt_per_cell), each shard also gets:
       - a sibling .embeddings.bin with fp16 per-cell K-dim vectors concatenated
         in SGF variation order, one tsumego after another;
       - embeddings_index.json inside the zip listing {tid: {offset, n_cells}}.
@@ -386,7 +386,7 @@ def print_rating_distribution(metadata):
 
 
 def _axes_dir():
-    """The skill-axis source dir (axes/, written by pipeline.build_axes), or None
+    """The skill-axis source dir (axes/, written by pipeline.train_mirt and pipeline.write_mirt_per_cell), or None
     if it hasn't been built (the axes-absent sentinel — the size's shards are then
     left frozen at their older rating era). Returns (dir, is_joint) or (None, False);
     is_joint is always True for a built fit — the axes are fit jointly across board
@@ -428,11 +428,11 @@ def check_axis_prior(output_dir):
 
     The client's weakness model requires weakness_axis_lambda to be an array of
     exactly K finite positive precisions and SKIPS TRAINING otherwise — there is
-    no scalar fallback by design (pwa/js/weakness.js). So a build_axes run that
+    no scalar fallback by design (pwa/js/weakness.js). So an axis refit that
     changes K without a following fit_population_constants ships perfectly valid
     files that silently disable weakness detection for every user: an empty
     findings pane and selection stuck in the information regime, with no error
-    anywhere. That ordering is a real data dependency (build_axes →
+    anywhere. That ordering is a real data dependency (train_mirt →
     fit_population_constants → package_for_pwa) and this is what enforces it.
 
     A PRE-FLIGHT rather than a gate beside the axis-label check in
@@ -512,9 +512,8 @@ def check_axis_prior(output_dir):
 
 def _read_embedding_version(embed_dir):
     """The content-hash embedding_version stamped into axes.npz by
-    pipeline.build_axes (the residual-axes model that replaced the ICA
-    embedding, 2026-07-18; the PWA reads it to auto-invalidate localStorage
-    on refits), or None."""
+    pipeline.train_mirt (the PWA reads it to auto-invalidate localStorage on
+    refits), or None."""
     axes_path = os.path.join(embed_dir, "axes.npz")
     if not os.path.exists(axes_path):
         return None
@@ -566,10 +565,10 @@ def load_embeddings(board_size, meta_only=False):
     """
     embed_dir, is_joint = _axes_dir()
     if embed_dir is None:
-        # The whole embeddings artifact is missing (build_axes never ran) — a
+        # The whole embeddings artifact is missing (train_mirt never ran) — a
         # misconfigured run, not a per-problem coverage gap. Abort.
         raise FileNotFoundError(
-            "no embeddings at axes/per_problem.csv — run pipeline.build_axes")
+            "no embeddings at axes/per_problem.csv — run pipeline.train_mirt")
 
     per_problem = os.path.join(embed_dir, "per_problem.csv")
     # meta_only: read just the header to count K columns, skip the row map.
@@ -711,12 +710,12 @@ def load_rating_artifacts(ratings_dir, ratings_csv):
 
     slope_csv = os.path.join(ratings_dir, SLOPE_CSV)
     if not os.path.exists(slope_csv):
-        raise FileNotFoundError(f"no slopes at {slope_csv} — run train_rating")
+        raise FileNotFoundError(f"no slopes at {slope_csv} — run train_mirt")
     slope_map = load_value_map(slope_csv, "slope")
 
     floor_csv = os.path.join(ratings_dir, FLOOR_CSV)
     if not os.path.exists(floor_csv):
-        raise FileNotFoundError(f"no floors at {floor_csv} — run train_rating")
+        raise FileNotFoundError(f"no floors at {floor_csv} — run train_mirt")
     floor_map = load_value_map(floor_csv, "floor")
 
     print(f"  ratings: {len(ratings_map)}, slopes: {len(slope_map)}, "
@@ -800,7 +799,7 @@ def process_size(board_size, output_dir, n_workers=None,
         raise FileNotFoundError(f"no tsumegos dir at {TSUMEGOS_DIR}")
     ratings_csv = os.path.join(RATINGS_DIR, RATINGS_CSV)
     if not os.path.exists(ratings_csv):
-        raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_rating")
+        raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_mirt")
 
     inputs_hash = size_inputs_hash(board_size)
     zip_dir = os.path.join(output_dir, "tsumegos", str(board_size))
@@ -832,7 +831,7 @@ def process_size(board_size, output_dir, n_workers=None,
             return None, None, None
         raise FileNotFoundError(
             f"no embeddings at axes/ AND no existing "
-            f"shards in {zip_dir} — run pipeline.build_axes first")
+            f"shards in {zip_dir} — run pipeline.train_mirt first")
 
     if (not force and prev and have_zips
             and prev.get("inputs_hash") == inputs_hash
@@ -861,7 +860,7 @@ def process_size(board_size, output_dir, n_workers=None,
 
     if not os.path.isdir(PER_CELL_DIR):
         raise FileNotFoundError(
-            f"no per_cell dir at {PER_CELL_DIR} — run pipeline.build_axes")
+            f"no per_cell dir at {PER_CELL_DIR} — run pipeline.write_mirt_per_cell")
     per_cell_arg = PER_CELL_DIR
 
     print(f"  building shards ...")

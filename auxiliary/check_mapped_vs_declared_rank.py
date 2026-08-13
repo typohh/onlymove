@@ -477,7 +477,7 @@ def main():
         merged_slopes.update(load_slopes(args.dir, s))
         merged_floors.update(load_floors(args.dir, s))
     if not merged_ratings:
-        sys.exit("No v2 per-problem ratings — run train_rating first.")
+        sys.exit("No v2 per-problem ratings — run train_mirt first.")
     lapse = load_lapse(args.dir)   # global 4PL ceiling λ — match the client / anchor
 
     # first_time_only: match the production anchor (and the client's first-time-only

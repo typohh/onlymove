@@ -155,7 +155,8 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
 
     // MULTIPLICITY. WEAK_PROB_THRESHOLD bounds each issue's OWN error
     // probability, not the pane's: every axis is screened for every user and K
-    // GROWS with the corpus (build_axes selects it incrementally), so a fixed
+    // is whatever the current fit shipped (read from embedding_meta.json and
+    // free to change between refits), so a fixed
     // per-axis bar lets the expected number of spurious issues grow linearly
     // with the axis count — the pane would get noisier as the data improves.
     // So the shown set spends an error BUDGET: strongest first, an issue is

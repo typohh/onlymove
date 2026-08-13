@@ -62,7 +62,7 @@ Five groups of constants:
    the corpus in the shape of personalisation. Consumers subtract this vector before
    scoring, leaving the part that actually differs between users. Note the deliberate
    asymmetry with (4): a shared SUM coefficient is residual difficulty and HALTS the
-   fit, because centring it would paper over a defect belonging upstream in build_axes;
+   fit, because centring it would paper over a defect belonging upstream in the axis fit;
    a shared CONTRAST is measured wrong-move geometry, and centring it removes a known
    nuisance rather than hiding one.
 
@@ -70,7 +70,7 @@ All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
 
 Needs the backend ratings/<size>/ 3PL params (tsumego_ratings.csv,
-tsumego_slopes.csv, tsumego_floors.csv — written by train_rating)
+tsumego_slopes.csv, tsumego_floors.csv — written by train_mirt)
 ratings/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
 axes/per_problem.csv (the weakness ridge's correct-move embeddings),
 axes/per_cell/ (the picked-move block of the same design),
@@ -172,7 +172,7 @@ PRIOR_GRID_MUST_CONTAIN = (-30.0, 9.0)       # 30k .. 9d, clampRankBand's range
 WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
 # Per-CELL axis vectors, for the picked-move block of the client's design. Same
 # arrays package_for_pwa fans out into the per-shard .embeddings.bin sidecars, read
-# here straight from the build_axes output (nothing upstream of packaging depends on
+# here straight from the axis fit's output (nothing upstream of packaging depends on
 # pwa/). Keyed in the extraction frame: xys is board-scan order with y counting from
 # the BOTTOM, so a reported "C7" is (x=2, y=6) — see _picked_xy.
 WEAKNESS_PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
@@ -185,7 +185,7 @@ WEAKNESS_MOVE_COLS = "ABCDEFGHJKLMNOPQRST"
 
 def _weakness_k_embed():
     """Axis count K, from the per_problem.csv header — the axis set grows with
-    data (pipeline.build_axes selects K incrementally), so it is never fixed."""
+    data the shipped axis count is whatever the current fit wrote, so it is never hardcoded."""
     with open(WEAKNESS_EMBED_CSV, newline="") as f:
         header = csv.DictReader(f).fieldnames or []
     return sum(1 for c in header if c.startswith("embed_"))
@@ -318,13 +318,13 @@ def cold_solve_logit(theta, rating, slope, floor):
 
 
 # Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is no longer fit here.
-# pipeline.train_rating LEARNS it jointly with the rating model (a single global ceiling on
+# pipeline.train_mirt LEARNS it jointly with the rating model (a single global ceiling on
 # the success curve) and writes it to ratings/rating_constants.json; main() reads it through
 # into population_constants.json so the JS-bundle contract is unchanged (see read_rating_lapse).
 
 
 def read_rating_lapse(ratings_dir):
-    """The global ceiling λ produced by the rating model (train_rating →
+    """The global ceiling λ produced by the rating model (train_mirt →
     ratings/rating_constants.json: {"fat_finger_rate": λ}). Returns float or None."""
     path = os.path.join(ratings_dir, "rating_constants.json")
     if not os.path.exists(path):
@@ -1031,7 +1031,7 @@ def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, app
             f"{WEAKNESS_MEAN_SHARE_MAX:.0%} bar, variance ratio "
             f"{resolve[k_bad]:.1f}x against {WEAKNESS_AXIS_MIN_VAR_RATIO:.1f}x).\n"
             "An axis everyone responds to identically is residual difficulty, which "
-            "build_axes quarantines its population residual head to keep OUT of the "
+            "the rating factor carries and the axes must stay OUT of — "
             "axes — so read this as that quarantine leaking and look there first. "
             "Shipping a centre does NOT repair this case: centring an axis with no "
             "between-user variation leaves nothing to personalise on, and the panel "
@@ -1139,15 +1139,15 @@ def main():
     out = dict(DEFAULTS)
     out["retention"] = dict(DEFAULTS["retention"])
 
-    # --- Fat-finger (lapse) rate: PRODUCED by the rating model (train_rating), read through ---
+    # --- Fat-finger (lapse) rate: PRODUCED by the rating model (train_mirt), read through ---
     lam = read_rating_lapse(args.ratings_dir)
     if lam is not None:
         out["fat_finger_rate"] = round(lam, 4)
         print(f"Fat-finger (lapse) rate from the rating model: {out['fat_finger_rate']} "
-              f"(ratings/rating_constants.json — train_rating learns it jointly)")
+              f"(ratings/rating_constants.json — train_mirt learns it jointly)")
     else:
         _resort_to_default("fat_finger_rate",
-                           "no rating_constants.json (run train_rating first)",
+                           "no rating_constants.json (run train_mirt first)",
                            args.allow_defaults)
 
     # --- Time / review bias ---
@@ -1207,7 +1207,7 @@ def main():
     if wa is None:
         raise RuntimeError(
             f"could not fit weakness_axis_lambda ({wa_info}). It is mandatory and has "
-            f"no fallback — fix the inputs (run map_rating_to_rank + build_axes, "
+            f"no fallback — fix the inputs (run map_rating_to_rank + train_mirt, "
             f"or wait for more attempts) and re-run. Not shipping without it.")
     out["weakness_axis_lambda"] = wa
     # The centre for the direction selection scores on. Mandatory for the same reason

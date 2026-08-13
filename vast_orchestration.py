@@ -3,7 +3,7 @@
 Two pipeline steps benefit from a beefier GPU than what's available locally:
   * pipeline.generate_tsumegos  — long-running tsumego search
   * pipeline.benchmark_bots     — bot performance evaluation
-The rest (train_rating, package_for_pwa, fetch_database) stays local.
+The rest (train_mirt, package_for_pwa, fetch_database) stays local.
 This wrapper:
   * provisions a Vast.ai NVIDIA-GPU instance,
   * uploads pipeline/utils code, the KataGo binary, and the analysis cfg,

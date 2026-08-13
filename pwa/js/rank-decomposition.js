@@ -68,7 +68,7 @@ const KERNEL_TRUNC_SIGMA = 4;
 
 // rank = the level you clear at this rate (CALIBRATION_P; matches recall-model.js /
 // fit_rank_curves). The per-problem 3PL guessing floor c (problemFloor, shipped
-// by train_rating from the bot ladder) gives P(clear) = c + (1−c)·σ(slope·
+// by train_mirt from the bot ladder) gives P(clear) = c + (1−c)·σ(slope·
 // (R−x)+κ(c)); κ(c) keeps P(clear)=80% at R==x for any c. Far below a problem
 // (R≪x) P→c, so a success there is weak evidence of skill — which correctly
 // discounts a strong user's lucky above-rank clears. The 3PL constants + κ/floor

@@ -48,10 +48,14 @@ down. Measured optimum 0.90 on both `all` and the seen partition; 1.0 costs 0.2
 mnat against it, inside the 0.85 mnat seed noise. No post-hoc multiplier is
 applied: slopes ship as fitted.
 
-`pipeline.build_axes` is required alongside this, for three things it does not
-produce: `axes/per_cell/` (a K-vector for every legal cell, needed because the
-client scores the move the user PICKED and not only the answer), the selection of
-K, and `axes/labels.json`. It retires any existing `axes/per_cell/` by renaming it: per-cell vectors
+Two things this does NOT produce. `axes/per_cell/` — a K-vector for every legal
+cell, needed because the client scores the move the user PICKED and not only the
+answer — comes from `pipeline.write_mirt_per_cell`, a separate pass because it
+reads the trunk once per cell rather than folding into a matmul. `axes/labels.json`
+is hand-maintained: a human names an axis by eyeballing its extremes, and an
+unnamed axis ships and works, the client just stays silent about it.
+
+It retires any existing `axes/per_cell/` by renaming it: per-cell vectors
 projected through a different axis map than `per_problem.csv` give a shard whose
 two embedding sources disagree, and both files are individually well-formed, so
 nothing downstream can catch it.

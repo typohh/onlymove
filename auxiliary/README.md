@@ -2,7 +2,7 @@
 
 Diagnostics, surgery tools and the rating research package — recurring helpers for debugging the live rank/rating system, inspecting the skill axes, auditing the corpus and repairing the database. They read the artifacts the pipeline produces (`db/d1.sqlite` / `d1.sql`, `ratings/<size>/`, `activations/<size>/`, `axes/`, `tsumegos/<size>/`, `pwa/tsumegos/`) and emit stdout reports, HTML or SQL. Nothing here is part of the in-order pipeline.
 
-**Import direction.** `pipeline/` and `utils/` never import from here. The genuinely shared helpers — the activation-cache builder and contract, the attempt/survey loaders, the profile/feature builders — live in `utils/rating/features.py` and `utils/rating/rank_surveys.py`, so everything in this directory is a leaf: deletable without touching production code. `rating_dev/` imports `utils/` and its own modules; two top-level scripts import a sibling (`map_rating_to_rank_dev` ← `check_mapped_vs_declared_rank`, `eval_rank_endpoint_bias` ← `recreate_rank_graph`) and `rating_dev/train_residual_axes` imports `eval_score_gap_axis`.
+**Import direction.** `pipeline/` and `utils/` never import from here. The genuinely shared helpers — the activation-cache builder and contract, the attempt/survey loaders, the profile/feature builders — live in `utils/rating/features.py` and `utils/rating/rank_surveys.py`, so everything in this directory is a leaf: deletable without touching production code. `rating_dev/` imports `utils/` and its own modules; two top-level scripts import a sibling (`map_rating_to_rank_dev` ← `check_mapped_vs_declared_rank`, `eval_rank_endpoint_bias` ← `recreate_rank_graph`).
 
 **What does NOT live here.** One-off scripts are deleted once their job is done rather than kept as dead weight — the 2026-07-21 id surgery drivers, the momentum-vs-window-MLE estimator bake-off, the ICA-era motif labeler and inspector, and the closed single-hypothesis CV harnesses were all removed on 2026-08-02. Where a result matters it is stated in `CLAUDE.md` or `docs/methodology.md`; where the code matters, `git log --diff-filter=D --name-only -- auxiliary/` finds it.
 
@@ -64,18 +64,16 @@ Faithful offline ports of client code, for debugging one account against the loc
 
 ## Skill-axis inspection
 
-- **`rating_dev/inspect_residual_axes.py`** — renders the extreme-loading problems on each production axis, both tails, straight from `axes/per_problem.csv`. This is the motif-labeling tool: `build_axes` grows an axis, you eyeball its tails here, name them in `axes/labels.json`, re-run `package_for_pwa` (which REFUSES to ship an axis with neither tail labeled). `--per-problem --size --rows --cols --open`.
-- **`inspect_axis_inputs.py`** — the other half: which INPUT columns drive an axis and how concentrated that reliance is (participation ratio), each tail decomposed additively, plus correlation against every frozen anchor so a new axis can be placed as a known motif, a near-miss, or genuinely new. `--quick` reads `axes.npz` alone.
-- **`eval_score_gap_axis.py`** — between-user predictive power of the best-vs-second-best score-gap axis (`--feature wr_gap` for the winrate comparator). Also the loader battery `rating_dev/train_residual_axes.py` imports.
+- **`rating_dev/inspect_axes.py`** — renders the extreme-loading problems on each production axis, both tails, straight from `axes/per_problem.csv`. This is the motif-labeling tool: a refit produces an axis, you eyeball its tails here, name them in `axes/labels.json`, re-run `package_for_pwa`. The boards are the whole evidence — naming an axis by what DRIVES it needs the axis to be a linear map on nameable inputs, and the MIRT's trunk means no such decomposition exists. `--per-problem --size --rows --cols --open`.
+- **`eval_score_gap_axis.py`** — between-user predictive power of the best-vs-second-best score-gap axis (`--feature wr_gap` for the winrate comparator).
 
 ---
 
 ## `rating_dev/`
 
-The rating-model research package. `pipeline/train_rating.py` is deliberately CLI-free with its config baked in; all experimentation happens here so a test tweak cannot perturb the shipped ratings. It imports only `utils/` and its own modules.
+The rating-model research package. `pipeline/train_mirt.py` is deliberately CLI-free with its config baked in; all experimentation happens here so a test tweak cannot perturb the shipped ratings. It imports only `utils/` and its own modules.
 
 - **`train_rating_staged.py`** — the experiment surface and production superset: `--production-flags` reproduces the shipped configuration, and the rest of the flag set (gauge, divergence barriers, EIV probes, the staged/M0b legacy configs, the eval suite, the alternative objectives incl. `--even-error`) is where the model's design decisions were measured. `--staged` fits the per-problem 4PL heads one at a time instead of jointly.
-- **`train_residual_axes.py`** — the research surface for the skill axes; `pipeline/build_axes.py` is the production entry point and `utils/rating/residual_axes.py` the shared model.
 - **`validate_ratings.py`** — the single home of rating validation. Scores a ratings directory on a hash-confirmed holdout: held-out-problem logloss, held-out Δskill flatness, survey-ρ (base + time-adjusted). `--ratings-dir --seed --holdout-problem-frac [--expect-hash]`.
 - **`holdout_set.py`** — deterministic held-out problem-set generator: `(seed, fraction)` → a reproducible subset plus a 16-hex content hash, so trainer and bench can prove they used the same set. `--seed --frac [--out file]`.
 - **`eval_phase2_units.py`** — the certificate harness for the phase-2 global scale fit: regenerates outcomes from the fitted model at a known true scale and checks what the estimator returns. This is what established that the slope scale is real and the floor scale was a Neyman–Scott artifact. `--synthetic-outcomes`, unit-granularity and drift sweeps.

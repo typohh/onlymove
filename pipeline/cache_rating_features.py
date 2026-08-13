@@ -10,7 +10,7 @@ colour), sorts the moves by win probability, and keeps the WINNING move plus the
 alternatives. For each of those 10 moves it stores (logit win-prob, clipped score): a fixed
 20-dim raw feature vector per problem describing how sharply the best move stands out from its
 rivals — a difficulty signal orthogonal to the trunk activations and the bot-ladder win rates
-that train_rating already feeds.
+that train_mirt already feeds.
 
 It ALSO reads the CONTINUATION — the principal line after the answer, plus the opponent's other
 tries at its first node, every node's explored children kept as (logit win-prob, score) oriented
@@ -21,7 +21,7 @@ winning first move with every rival decisively lost (measured: the 5th percentil
 alternative slot sits AT the win-prob clip), so the block above is saturated by construction on
 its alternatives.
 
-Output (one per board size), consumed by train_rating through
+Output (one per board size), consumed by train_mirt through
 utils.rating.features.load_joint_move_features + load_joint_continuation:
   activations/_signal_cache/move_evals_<size>.npz
       tids   (n,)      <U8   canonical problem id (orientation-invariant hash)
@@ -36,7 +36,7 @@ cached only when both are present, so the two can never drift apart.
 
 The npz stores RAW features; the loader pools + z-scores them across boards at train time, so
 the cache is reusable across tid subsets. The tid set is the activation id cache for the size
-(activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_rating can
+(activations/_signal_cache/correct_ids_<size>.json) — exactly the problems train_mirt can
 score.
 
 This step ALSO refreshes that activation cache (utils.rating.features.build_correct_vec_cache),
@@ -349,7 +349,7 @@ def _process_chunk(task):
     Fail-loud: an unreadable/corrupt SGF, or a problem with no usable move
     evaluations, RAISES and aborts the whole build (the exception surfaces in
     the parent at fu.result()). Dropping such a problem would silently desync
-    the cache from correct_ids — train_rating would then score a different
+    the cache from correct_ids — train_mirt would then score a different
     problem set than it thinks — so a bad input must be fixed, not skipped."""
     size, tids = task
     tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))

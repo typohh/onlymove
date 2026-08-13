@@ -159,7 +159,7 @@ def main():
     ratings, slopes, floors = load_problem_maps(args.dir)
     lapse = load_lapse(args.dir)   # 4PL ceiling λ — match the client / EGF anchor
     if not ratings:
-        sys.exit(f"No v2 ratings under {args.dir} — run train_rating.")
+        sys.exit(f"No v2 ratings under {args.dir} — run train_mirt.")
     xs, ys = load_curve(args.dir)
 
     rows, surveys = load_user_attempts(args.db, args.user_id,

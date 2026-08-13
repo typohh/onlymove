@@ -17,7 +17,7 @@ For each SGF in tsumegos/<size>/:
       xys         (n_legal, 2)    int32    -- KataGo (x, y) per row (scan order)
       correct_idx ()              int32    -- scan-order index of the correct cell
 
-Downstream consumers: pipeline.build_axes reads the correct-cell row via
+Downstream consumers: pipeline.train_mirt reads the correct-cell row (through utils.rating.features) via
 candidates[correct_idx]; package_for_pwa re-parses the SGF and remaps cells into
 SGF-variation order by (x, y) (the npz being a superset of the SGF's non-pass
 variations is what makes that remap total).
@@ -99,7 +99,7 @@ def vecs_at_cells(activations_by_name, block_names, xys) -> np.ndarray:
     concatenated in `block_names` order (same layout as the previous
     single-cell vec_at_cell so PCA loadings stay compatible). fp16 halves
     disk relative to fp32; precision loss is well below the z-scoring noise
-    in pipeline.build_axes.
+    in pipeline.train_mirt.
     """
     xs = np.array([x for x, _ in xys], dtype=np.int64)
     ys = np.array([y for _, y in xys], dtype=np.int64)
@@ -145,7 +145,7 @@ def process_one_sgf(sgf_path: str, model, block_names):
     # Embed EVERY legal cell (a superset of the SGF variations), in scan order,
     # and record where the correct move lands in that scan. Note this is
     # independent of the SGF's variation set/order — the client recovers a
-    # picked move's cell via its (x, y), and pipeline.build_axes via correct_idx.
+    # picked move's cell via its (x, y), and the backend via correct_idx.
     candidate_xys = enumerate_legal_cells(state.board, pla, size)
     try:
         correct_idx = candidate_xys.index(correct_xy)

@@ -676,20 +676,18 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 | --- | --- |
 | feature loaders, attempt loading, profile construction | `utils/rating/features.py` |
 | the rating fit, gauge, slope barrier | `pipeline/train_mirt.py` |
-| walk-forward calibration harness (validation only) | `utils/rating/slope_calibration.py` |
 | consensus rank mapping | `pipeline/map_rating_to_rank.py` |
 | the user-rating anchor and ordinal likelihood | `utils/rating/fit_rank_curves.py` |
 | the win-rate-table shape prior | `utils/rating/rank_curve_shape.py` |
 | survey loading and rank values | `utils/rating/rank_surveys.py` |
-| the residual-axes model and axis-count selection | `utils/rating/residual_axes.py` |
 | axis fit (factors 2…K+1 of the same model) | `pipeline/train_mirt.py` |
 | per-cell fanout | `pipeline/write_mirt_per_cell.py` |
 | population constants | `pipeline/fit_population_constants.py` |
 | publishing | `pipeline/package_for_pwa.py` |
 
-**The rank-collinearity invariant** (section 1.14) lives in two specifics in `utils/rating/residual_axes.py`. In `train_axes`, `alpha` and `beta` sit in an optimizer group with **no** `weight_decay` and appear in no penalty term, while `v` carries `0.5·(v²/counts)` plus `10·mean(v)²`, and `gh` is unit-RMS normalized before meeting `v` — that is the free/penalized asymmetry which routes rank-shaped variation into `beta`. In `axes_ll_gain`, the baseline design matrix is `X_b = [1, rk]` against the augmented `X_ax = [1, rk, G]`, which is the rank-containing baseline the selection criterion is scored against.
+**The rating-vs-axis separation invariant** (section 1.14) is a free/penalized asymmetry inside `pipeline/train_mirt.py`. The rating factor — the per-problem slope and difficulty heads and the per-user ability `theta` — carries no penalty, while the axis positions `v` carry `V_RIDGE·v²` plus `V_MEAN_PENALTY·mean(v)²` and the loadings are unit-RMS normalized before meeting `v`. Population-wide and rank-shaped variation is therefore cheapest to express through the rating and expensive to express through an axis, which is what keeps factor 1 the average and the axes between-user. `V_MEAN_PENALTY` is the specific term: an axis whose population mean is non-zero is describing difficulty every user shares, and `fit_population_constants` refuses such an axis at ship time rather than centring it away.
 
-Experiments live in `auxiliary/rating_dev/` (notably `train_rating_staged.py`, whose `--production-flags` reproduces the shipped rating configuration) and in `auxiliary/eval_*.py` — `eval_rank_map_cv.py` validated the career-block anchors and rejected confidence weighting; `eval_recall_model.py` produces every measurement in section 2.8's closing subsection, and re-running it is how those figures get refreshed. `auxiliary/check_mapped_vs_declared_rank.py` is the end-to-end calibration diagnostic of section 1.12: it maps each surveyed user's shipped rating forward through the curve and their server's coupling, reports the error against what they declared, and — where linked federation accounts supply machine-written ratings — runs both honesty routes of section 1.12, the rank-matched contrast against self-reporters holding no verified rating and the same-user exact-match limit. The production modules carry no experiment flags, so a test tweak cannot reach shipped output.
+Experiments live in `auxiliary/rating_dev/` (notably `train_joint_mirt.py`, the experiment surface whose defaults are the shipped configuration) and in `auxiliary/eval_*.py` — `eval_rank_map_cv.py` validated the career-block anchors and rejected confidence weighting; `eval_recall_model.py` produces every measurement in section 2.8's closing subsection, and re-running it is how those figures get refreshed. `auxiliary/check_mapped_vs_declared_rank.py` is the end-to-end calibration diagnostic of section 1.12: it maps each surveyed user's shipped rating forward through the curve and their server's coupling, reports the error against what they declared, and — where linked federation accounts supply machine-written ratings — runs both honesty routes of section 1.12, the rank-matched contrast against self-reporters holding no verified rating and the same-user exact-match limit. The production modules carry no experiment flags, so a test tweak cannot reach shipped output.
 
 ## 3.3 Client modules
 
@@ -765,22 +763,22 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 
 | Constant | Value | Where |
 | --- | --- | --- |
-| `CALIBRATION_P` | 0.8 | `irt.js`, `fit_rank_curves.py`, `train_rating.py` |
+| `CALIBRATION_P` | 0.8 | `irt.js`, `fit_rank_curves.py`, `train_mirt.py` |
 | `FLOOR_MAX` | 0.78 | `irt.js`, `fit_rank_curves.py` (`CLIENT_FLOOR_MAX` in the trainer) |
-| lapse (`fat_finger_rate`) | learned, capped at 0.05 | `train_rating.py` → `rating_constants.json`, read through to `population_constants.json` |
-| `SLOPE_FLOOR` | 0.01 | `train_rating.py` |
-| `SHALLOW_SLOPE_PENALTY` / `HIGH_FLOOR_PENALTY` | 1e-4 / 0.01 | `train_rating.py` |
-| `PCA_DIM` | 128 — the activation block's width, measured-optimal (section 1.3); imported from `utils/rating/model_constants.py`, never re-declared | `train_rating.py` |
-| `DROPOUT`, `INPUT_DROPOUT` | 0.3; column granularity, one mask over the wide feature region | `train_rating.py` |
-| `MIN_ATTEMPTS` / `MIN_PROFILE` | 5 each side / 8 (see the name clash below) | `train_rating.py` |
-| `P2_BIN_MONTHS` | 2, non-overlapping | `train_rating.py` |
-| slope scale | ≈1.6, refit each run; the floor is not scaled (section 1.10) | `rating_constants.json` |
+| lapse (`fat_finger_rate`) | learned, capped at 0.05 | `train_mirt.py` → `rating_constants.json`, read through to `population_constants.json` |
+| `SLOPE_FLOOR` / `FLOOR_CAP` | 0.01 / 1.0 | `model_constants.py` |
+| `SHALLOW_TAU` / `SHALLOW_W` | 0.1 / 0.3 — the one divergence barrier, one-sided on the pre-softplus slope; the rating is `b + kappa(c)/a`, so a slope collapsing toward its floor sends it to infinity. There is no floor barrier, the floor being bounded structurally by `1 - 2*lambda` | `train_mirt.py` |
+| `PCA_DIM` | 128 — the activation block's width, measured-optimal (section 1.3) | `model_constants.py` |
+| `DROPOUT`, `INPUT_DROPOUT` | 0.3; column granularity, one mask over the wide feature region | `model_constants.py` |
+| `MIN_BOTH_OUTCOMES` | 1 — the ONLY inclusion rule: a profile needs at least one correct and one incorrect attempt. Under the 4PL an all-correct record's likelihood rises monotonically to `(1-lambda)^n` and an all-wrong one to `(1-c)^n`, so neither has an interior maximum; one of each outcome is the condition for the ability to be estimable at all, and anything above it is a judgement about how WELL that the likelihood already makes by giving a thin record few terms | `train_mirt.py` |
+| `LR_NET` / `LR_FIELD` | 3e-4 / 1e-2. The split is mandatory and what the grid measures is the RATIO, monotone and saturating near 30x — below 10x the fit loses 2.5–5 mnat (section 1.4) | `train_mirt.py` |
+| `V_RIDGE` / `V_MEAN_PENALTY` / `ORTHO_WEIGHT` | 0.5 (not binding — 0.05/0.15/0.5 score alike) / 10.0, which stops an axis carrying POPULATION difficulty / 0.5 | `train_mirt.py` |
+| `BURN_IN_EPOCHS` | 300 epochs with the axis positions pinned at zero, after which the warm start is read off the model's own residuals. A fixed count beats running to the axis-free fit's own convergence, which sounds strictly better but is seed-dependent and the outcome is epoch-sensitive, so the criterion inherits that variance (section 1.14) | `train_mirt.py` |
+| `EPOCHS` / `FLAT_PATIENCE` / `STOP_ROW_FRAC` | 10000, a runaway failsafe rather than a budget / 5 checks without a new best / 0.03 of rows held aside purely to detect convergence | `train_mirt.py` |
+| slope scale | 1.0 — slopes ship as fitted, with no post-hoc multiplier (section 1.10) | `rating_constants.json` |
 | `BLOCK_DAYS` / `BLOCK_STEP` / `MIN_ATTEMPTS` | 60 / 30 / 20 (see the name clash below) | `map_rating_to_rank.py` |
 | `LAMBDA_SHAPE` / `SERVER_LAMBDA` / `GAUGE_WEIGHT` / `EPS_CONTAMINATION` | 0.3 / 5.0 / 1.0 / 0.005 | `map_rating_to_rank.py` |
-| `K_START` / `K_MAX` / `STOP_FRACTION` / `ORTHO_WEIGHT` | 3 / 12 / 0.03 / 0.5 | `residual_axes.py` |
-| axis-fit `EPOCHS` | 400 — where the held-out gain reaches its plateau and where the free part of the curve ends (section 1.14) | `residual_axes.py` |
-| `AXIS_INPUT_DROPOUT` / `EXEMPT_TAIL_COLS` | 0.3, column dropout on the axis head's inputs — an interior optimum, adopted on the per-user criterion (section 1.14) / 7, the width of the exempt tail the mask stops short of, asserted against the feature layout | `residual_axes.py` |
-| axis count `K` | selected per fit | `axes.npz` → `embedding_meta.json` |
+| axis count `K_AXES` | 3, an interior optimum — K=2 costs 1.9 mnat and K=4 gains nothing (section 1.14). Consumers read the shipped count rather than assuming it | `model_constants.py` → `axes.npz` → `embedding_meta.json` |
 | the rank convention | 0 = the 1k/1d boundary, one unit per rank, integers are band EDGES, band = FLOOR (section 1.12); `RANK_BAND_LO`/`HI` = −30/8 bound LABELS only | `shared/rank-math.js` |
 | `WIN_CAP` / `K_DISPLAY` / `SERVE_UCB_K` / `serveGapCap` | 500 attempts / −2, the displayed rank's offset in excess standard errors / 1, the serve rank's offset in the other direction / one rank per consecutive cleared problem plus one, reset by any miss — the ceiling on how far serving may run above the displayed rank (section 2.3) | `shared/rank-window.js` |
 | selection weight / SE floor | `problemInfoWeight` = `slope²·anchorInfo(floor)`; the floor is `seFloorForMeanInfo` applied to `seFloorAt`, which reads the shipped corpus curve `se_floor.json` — mean information on the rank prior's grid, a 0.25-rank Gaussian kernel over every published problem, clamped to the knot range (section 2.3) | `shared/rank-window.js`, `irt.js`, `pipeline/package_for_pwa.py` |
@@ -801,4 +799,4 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | review motif threshold | 3σ, at most 3 | `motif-bubble.js` |
 | community stats window / `MIN_RANK_PROBLEMS` | 7 days / 10 distinct first-time problems | `pwa/src/server-stats.js` |
 
-**`MIN_ATTEMPTS` names two unrelated thresholds**, the same trap as `quality` above and with no shared meaning to fall back on. In `train_rating.py` it is **5**, and it is an identifiability requirement: a user needs at least that many correct *and* that many incorrect first-time attempts before an ability can be estimated at all (section 1.4). In `map_rating_to_rank.py` it is **20**, and it is a precision requirement: a survey user's two-month career block needs that many joined attempts before its 80%-clear rating is worth anchoring a declaration to (section 1.12). Neither number constrains the other, and moving one for the other's reasons is the mistake the shared name invites.
+**Two thresholds decide which profiles are usable, and they answer different questions.** `MIN_BOTH_OUTCOMES` in `train_mirt.py` is **1**, and it is an identifiability requirement: one correct and one incorrect first-time attempt is the condition for an ability to be estimable at all (section 1.4). `MIN_ATTEMPTS` in `map_rating_to_rank.py` is **20**, and it is a precision requirement: a survey user's two-month career block needs that many joined attempts before its 80%-clear rating is worth anchoring a declaration to (section 1.12). Neither constrains the other, and moving one for the other's reasons is the mistake to avoid.
