@@ -650,17 +650,17 @@ pipeline.benchmark_bots <size>         → attempts/<size>/*.txt
 pipeline.extract_activations           → activations/<size>/<id>.npz
 pipeline.cache_rating_features           → activations/_signal_cache/move_evals_<size>.npz
 pipeline.fetch_database                → db/d1.{sqlite,sql}   (attempt log + surveys)
-pipeline.train_rating                  → ratings/
+pipeline.train_mirt                    → ratings/ + axes/
 pipeline.map_rating_to_rank            → ratings/rating_to_rank.json, ratings/rank_map.json
-pipeline.build_axes                    → axes/
+pipeline.write_mirt_per_cell           → axes/per_cell/
 pipeline.fit_population_constants      → ratings/population_constants.json
 pipeline.package_for_pwa               → pwa/tsumegos/          (single writer)
 ```
 
 **The last five are ordered by hard data dependencies, not by convention.** Two of them — `map_rating_to_rank` and `fit_population_constants` — are board-independent and need no GPU, which makes it tempting to treat them as side steps. "Board-independent" is not "detachable": both sit *inside* the sequence.
 
-- `map_rating_to_rank` consumes `ratings/` and must precede `build_axes`, whose features include the rating outputs and the rank derived through the curve (`utils/rating/residual_axes.py` reads `ratings/rating_to_rank.json` directly).
-- `fit_population_constants` consumes `axes/per_problem.csv` and must therefore follow `build_axes` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
+- `map_rating_to_rank` consumes `ratings/` and must therefore follow the fit that writes them.
+- `fit_population_constants` consumes `axes/per_problem.csv` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
 
 `pipeline.fetch_database` supplies the human attempt log and the survey rows, so it precedes everything that fits against them — the rating trainer, the rank map and the axes alike. It takes no board size, pulls incrementally by row id, and is the one step in the block that reads the production database rather than the artifact tree.
 
@@ -675,14 +675,15 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 | Method | Module |
 | --- | --- |
 | feature loaders, attempt loading, profile construction | `utils/rating/features.py` |
-| the rating fit, gauge, barriers, phase-two calibration | `pipeline/train_rating.py` |
+| the rating fit, gauge, slope barrier | `pipeline/train_mirt.py` |
 | walk-forward calibration harness (validation only) | `utils/rating/slope_calibration.py` |
 | consensus rank mapping | `pipeline/map_rating_to_rank.py` |
 | the user-rating anchor and ordinal likelihood | `utils/rating/fit_rank_curves.py` |
 | the win-rate-table shape prior | `utils/rating/rank_curve_shape.py` |
 | survey loading and rank values | `utils/rating/rank_surveys.py` |
 | the residual-axes model and axis-count selection | `utils/rating/residual_axes.py` |
-| axis fit, labelling, anchors, per-cell fanout | `pipeline/build_axes.py` |
+| axis fit (factors 2…K+1 of the same model) | `pipeline/train_mirt.py` |
+| per-cell fanout | `pipeline/write_mirt_per_cell.py` |
 | population constants | `pipeline/fit_population_constants.py` |
 | publishing | `pipeline/package_for_pwa.py` |
 
@@ -769,7 +770,7 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | lapse (`fat_finger_rate`) | learned, capped at 0.05 | `train_rating.py` → `rating_constants.json`, read through to `population_constants.json` |
 | `SLOPE_FLOOR` | 0.01 | `train_rating.py` |
 | `SHALLOW_SLOPE_PENALTY` / `HIGH_FLOOR_PENALTY` | 1e-4 / 0.01 | `train_rating.py` |
-| `PCA_DIM` | 128 — the activation block's width, measured-optimal (section 1.3); imported by `build_axes` / `residual_axes.py`, never re-declared | `train_rating.py` |
+| `PCA_DIM` | 128 — the activation block's width, measured-optimal (section 1.3); imported from `utils/rating/model_constants.py`, never re-declared | `train_rating.py` |
 | `DROPOUT`, `INPUT_DROPOUT` | 0.3; column granularity, one mask over the wide feature region | `train_rating.py` |
 | `MIN_ATTEMPTS` / `MIN_PROFILE` | 5 each side / 8 (see the name clash below) | `train_rating.py` |
 | `P2_BIN_MONTHS` | 2, non-overlapping | `train_rating.py` |

@@ -116,7 +116,7 @@ The common case: an epoch bump, a re-rate, a corpus removal and the DB purge all
 
 Order:
 
-1. *(unfrozen, hours)* `corpus_surgery` → `extract_activations` → `cache_rating_features` → `train_rating` → `map_rating_to_rank` → `build_axes` → `fit_population_constants` → `package_for_pwa`. Do **not** deploy yet.
+1. *(unfrozen, hours)* `corpus_surgery` → `extract_activations` → `cache_rating_features` → `train_mirt` → `write_mirt_per_cell` → `map_rating_to_rank` → `fit_population_constants` → `package_for_pwa`. Do **not** deploy yet.
 
    Take the `db/d1.sqlite` this chain reads from a **pre-freeze** fetch; it is only training input, and it does not need to be the surgical snapshot.
 

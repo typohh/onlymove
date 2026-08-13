@@ -2,7 +2,7 @@
 
 The fixed reference point for judging whether a change to `auxiliary/rating_dev/train_joint_mirt.py` is progress. Every number below is reproducible from the provenance in the first section; a future run that changes any of it is measuring something else and must say so.
 
-Development only. Nothing here ships, and `pipeline.train_rating` is untouched.
+The MIRT is now the production trainer (`pipeline.train_mirt`); this document is its development record, and is allowed history and alternatives where `docs/methodology.md` is not.
 
 ## Provenance — pin these before comparing anything
 
@@ -27,17 +27,18 @@ Reproduce:
 
 ```bash
 ./.venv/bin/python3 -m auxiliary.rating_dev.holdout_set --seed 0 --frac 0.15
-# production
+# the two-stage pair it is compared against, still runnable from auxiliary
 ./.venv/bin/python3 -m auxiliary.rating_dev.train_rating_staged \
-    --production-flags --holdout-problem-frac 0.15 --seed 0 \
-    --out-dir /tmp/prod_ho --validate
-# MIRT, production's ability structure
+    --production-flags --holdout-user-frac 0.15 --seed 0 --out-dir /tmp/prod_uh_s0
+./.venv/bin/python3 -m auxiliary.rating_dev.fit_axes_userholdout \
+    --prod-dir /tmp/prod_uh_s0 --seed 0 --frac 0.15 --k 3 --out /tmp/axes_uh_s0.npz
+# the joint fit, at the shipped configuration
 ./.venv/bin/python3 -m auxiliary.rating_dev.train_joint_mirt \
-    --k 3 --seeds 0 --window-months 2 --holdout-seed 0 \
-    --dump-params /tmp/joint_params_prodwindow_s0.npz
-# production's axis layer on the same rows
-./.venv/bin/python3 -m auxiliary.rating_dev.prod_axis_heldout \
-    --prod-dir /tmp/prod_ho --seed 0 --frac 0.15 --k 3
+    --k 3 --seeds 0 --holdout-seed 0 --lr-net 3e-4 --lr-field 1e-2 \
+    --holdout-problem-frac 0 --holdout-user-frac 0.15 --dump-params /tmp/k3.npz
+# score either
+./.venv/bin/python3 -m auxiliary.rating_dev.eval_user_holdout \
+    --dumps /tmp/k3.npz --seeds 0 --label MIRT
 ```
 
 ## CURRENT BASELINE — held-out USERS, 2 folds, Newton scorer — MEASURED 2026-08-13
@@ -101,7 +102,7 @@ arm                  rating   combined   axis    verdict
 
 **Settled, and why each is closed:**
 
-- **Trunk 128x64 is an interior optimum**, bracketed both sides. Wider costs 4x what narrower does — the overfitting gradient the LR sweep found, appearing in capacity too. Unswept in `pipeline.train_rating` as well; the inherited value turns out right.
+- **Trunk 128x64 is an interior optimum**, bracketed both sides. Wider costs 4x what narrower does — the overfitting gradient the LR sweep found, appearing in capacity too. The value was inherited unswept; it turns out right.
 - **`V_RIDGE` is not binding.** 0.05, 0.15 and 0.5 all score alike. It is not what limits the axes.
 - **`SHALLOW_W = 0` is refuted and the barrier is load-bearing.** Without it slopes collapse (median 0.94, 0.1th percentile 0.097) and derived ratings blow out to a range of [-225, +146], since rating = b + kappa(c)/a diverges as a falls. That is exactly the failure the barrier is written to stop.
 - **The per-problem slope head earns its place** — one global slope costs 1.8 mnat. This REFUTES, in this model, the on-record claim that per-problem slope is largely assignment noise; that finding is from the two-stage production model.
@@ -154,6 +155,41 @@ is WORSE than the MIRT on both folds. And it bears on the client, whose weakness
 pane gates at 20 attempts — a different estimator, so not a direct read-across,
 but the direction is worth checking against `weaknessModelReady`.
 
+## K IS 3, BRACKETED BOTH WAYS — MEASURED 2026-08-13
+
+Fold 0, single seed, shared-trunk architecture. K is baked into the shared head,
+so each value is a full training run; there is no incremental path of the kind
+the two-stage axis stage had, where a frozen 4PL let K grow cheaply.
+
+```
+  K      rating    combined    axis adds
+  2      0.4936     0.4929       +0.64
+  3      0.4930     0.4910       +1.93     <-- shipped
+  4      0.4933     0.4910       +2.38
+  5      not run
+```
+
+**K=2 costs 1.9 mnat (4.5 sd), so the third axis earns its place. K=4 gains
+exactly nothing.** K=5 was dropped rather than run: with 4 flat there is no path
+by which 5 helps.
+
+**READ THE COMBINED COLUMN. The axis column here is a trap, and this sweep is the
+cleanest demonstration of it in the whole document.** Axis adds rises
+monotonically with K — +0.64, +1.93, +2.38 — because more axes mechanically
+absorb more residual whether or not the model predicts better. Read alone it
+recommends K=4 or higher. On the criterion that matters the fourth axis buys
+nothing at all, and it arrives with a slightly WORSE rating.
+
+**The decision rule was fixed before the numbers, and that mattered.** Taking the
+argmin over 4 candidates inflates the winner by about 1.03 sd under a pure null —
+with the combined column's measured sd of 0.42 mnat, roughly 0.43 mnat of
+apparent gain out of nothing. Single seed per K makes each estimate carry the
+full sd rather than an averaged-down one, and the sd is itself an n=2 estimate.
+So the bar was: **beat K=3 by >= 2 sd (0.84 mnat) on fold 0 AND replicate on fold
+1**, with replication doing the real work, since an out-of-sample confirmation
+tests the choice rather than adjusting a p-value for it. Nothing came close
+enough for the replication step to run.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
@@ -174,12 +210,8 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 
 | choice | current | why it is open |
 |---|---|---|
-| **shared trunk** | separate | one head emitting `Linear(hidden, 3+K)` instead of a trunk plus a separate `g_lin`. The measured rejection on record is for a SEPARATE axis trunk alongside the linear map — a capacity increase — and says nothing about sharing, which adds no parameters and gives the axes the representation difficulty is computed from rather than a 3-number summary of it. NOT IMPLEMENTED. |
-| axis path coupled vs detached | detached `(b,a,c)` | whether the axis objective may reshape the trunk. Coupled is what "one model" means; detached is what preserves the rating's role. |
-| `--global-slope` | off | the Rasch reduction: one corpus-wide discrimination. Per-problem slope is on record as largely assignment noise, so if held-out logloss is unchanged the head is fitting noise and the model gets simpler. Never run. |
-| `--hidden` (trunk width) | 128 64 | inherited from `pipeline.train_rating`, unswept THERE TOO. Queued twice, never run. |
+| axis path coupled vs detached | COUPLED (shipped) | measured indistinguishable; coupled chosen because detaching makes the trunk learn for the rating alone and hands the axes the result, which is feature reuse rather than a joint fit. |
 | `--act relu` | swiglu | SwiGLU doubles trunk parameters at a given width, so width and activation are confounded until one is held fixed. |
-| K | hardcoded 3 | `build_axes` SELECTS K incrementally; the MIRT inherits its answer. Matched-K comparisons are fair as architecture comparisons, not as system comparisons. |
 | ability granularity | per-user (`--window-months 0`) | measured best on the rating side, but the axes are per-user while ability could be per-window; the mixed-granularity question is dodged rather than answered. |
 
 ### C. NEVER SWEPT — constants
@@ -195,7 +227,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |
 | `CHECK_EVERY` / `FLAT_PATIENCE` | 10 / 5 | the stopping rule picks within 0.3 mnat of the held-out optimum, so this is low priority — but the pair was never swept jointly. |
 | `PRIOR_AX_SD` (scorer) | 0.5 | the ONLY constant left in the fixed scorer. Sits slightly below both models' hand-tuned optima, so both are scored a little short of their peak. |
-| `DROPOUT`, `INPUT_DROPOUT` | 0.3 | inherited from `pipeline.train_rating`, where they ARE measured — but on the two-stage model. |
+| `DROPOUT`, `INPUT_DROPOUT` | 0.3 | inherited unswept in this model; measured only on the two-stage one. |
 
 ### D. Open questions that are not knobs
 
@@ -372,37 +404,9 @@ The ROW holdout is the client's steady-state condition: the problem keeps its ot
 
 All evaluations here use `load_first_time_attempts`, which filters `is_repeat = 0` and then dedups to the earliest attempt per (user, problem). Training and scoring are NOVEL attempts throughout: one row per user per problem, the first time they saw it.
 
-## Phase 2 does not survive a leak-free test — MEASURED 2026-08-12
-
-`pipeline.train_rating`'s phase 2 fits a global slope multiplier (shipped s = 1.694) and reports 7.181 mnat, in-sample. `utils.rating.slope_calibration`'s walk-forward returns 1.667 and is described as the client-condition cross-check — **but its per-problem parameters come from a fit trained on every first-time attempt, including the rows it then scores.** Those predictions are partly memorised, memorised predictions are more accurate, and more accuracy rewards more confidence, so the optimal steepness under that protocol is biased upward. The synthetic certificate (0.993 on outcomes from TRUE parameters) does not cover this: it validates the estimator when the parameters are correct, not when they were fitted on the scored rows.
-
-**A confound this measurement has, and its size.** Held-out users' attempts include ~19% on problems training never saw, priced from the feature prior alone and so honestly wanting a shallower slope; production's in-sample phase-2 fit uses only problems WITH attempts. Pooling the two populations would confound "the multiplier fits its own leak" with "a fifth of these rows are harder to price". Swept and split (2026-08-13, prequential walk, Newton scorer):
-
-```
-best s        all     SEEN    unseen        cost of 1.694 on SEEN
-  production  0.700   0.800   0.700              19.9 mnat
-  MIRT        0.900   0.900   0.800               9.2 mnat
-```
-
-The dilution is worth about 0.1 in `s`, against the ~0.9 separating 0.8 from 1.694 — real, correctly identified, and far too small to rescue the multiplier. On problems training DID see, production's optimum is 0.80. Its sweep hits the grid edge at 0.700, so 19.9 mnat is a LOWER bound on what 1.694 costs. The MIRT's optimum is 0.90 and shipping 1.0 costs 0.2 mnat against it, inside the 0.85 mnat seed noise.
-
-Re-run on users held out of training entirely — same WINDOW/WARMUP/EVAL_BLOCK, same mode-'slope' application, same profile-likelihood theta refit, differing in exactly one respect:
-
-```
-                                    optimal s    cost of shipping 1.694
-  fold 0  (576 users, 38,639 att)      0.90           13.4 mnat
-  fold 1  (576 users, 32,018 att)      0.95            9.6 mnat
-```
-
-Both folds land essentially at unity, both curves single-minimum. `auxiliary/rating_dev/walk_forward_heldout.py`.
-
-**A caution against a tempting but wrong explanation.** It is NOT the case that attempted problems are better priced and therefore tolerate steeper slopes: per-problem parameters come from a shared FEATURE NET, not free per-item parameters, so an attempt reaches its own problem's rating only diffusely through the net. That story requires the net to fingerprint individual problems — precisely what `INPUT_DROPOUT` at column granularity exists to suppress. The leak is in the ESTIMATOR's protocol, not in per-problem parameter quality.
-
-Note `train_rating_staged --production-flags` has no phase 2, so every production number in this document is ALREADY phase-2-free and removing the stage would not move them. What it changes is the shipped artifact: `slope_scale` in `rating_constants.json`, shipped as `quality = s*slope`. Dropping it divides every shipped slope by 1.694, cutting client-side information ~2.9x, which moves `se`, rank convergence, the SE floor curve and the serve gap for every user.
-
 ## K is hardcoded in the MIRT
 
-`build_axes` selects K incrementally (K_START 3 to K_MAX 12, growing while held-out gain stays within STOP_FRACTION of the peak; currently selects 3). The MIRT takes `--k`, default 3 — no search, no criterion. It is inheriting production's selected answer, which is right today and silently wrong as soon as the data supports a fourth axis. Matched-K comparisons here are fair as comparisons of ARCHITECTURE; they are not comparisons of the two SYSTEMS, one of which grows K and one of which does not. Listed in the open-work inventory above; nothing in the evaluator assumes an axis count, so only the trainer needs a criterion.
+K is fixed at 3, and measured as an interior optimum rather than inherited — see the K section above. There is no incremental search: K is baked into the shared head, so each value is a full training run.
 
 ## The framework
 
