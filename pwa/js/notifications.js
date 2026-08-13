@@ -1,5 +1,5 @@
-import { state } from './state.js';
-import { buildRecallSchedule, waitingRecallCount } from './recall-model.js';
+import { state, getMergedAnswerHistory } from './state.js';
+import { buildRecallSchedule, waitingRecallCount, recallModelReady } from './recall-model.js';
 import { postJson } from './worker-post.js';
 
 const SUPPORTED_SIZES = [9, 13];
@@ -40,8 +40,15 @@ export async function getCurrentSubscription() {
 // showing a number that is one attempt stale.
 export async function syncRecallNotification() {
     if (!supportsNotifications()) return;
+    // An unloaded model reports nothing due, which would read as "backlog
+    // cleared" and take a legitimate reminder down. Say nothing instead; the
+    // next attempt reports once the model is up.
+    if (!recallModelReady()) return;
     try {
-        const count = waitingRecallCount();
+        // Merged history, not the active size: the schedule the reminder was
+        // built from covers both boards, so counting one board would dismiss it
+        // while the other board's problems are still waiting.
+        const count = waitingRecallCount(getMergedAnswerHistory());
         const reg = await navigator.serviceWorker.ready;
         const worker = navigator.serviceWorker.controller || reg.active;
         if (worker) worker.postMessage({ type: 'recall-count', count });
