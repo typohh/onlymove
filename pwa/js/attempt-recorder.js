@@ -12,7 +12,7 @@ import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
-import { calculateAndStoreStatsResults, recallImpactWithRefine, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
+import { calculateAndStoreStatsResults, recallImpact, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
 import { trainWeakness } from './weakness.js';
 import { syncRecallNotification } from './notifications.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
@@ -349,24 +349,18 @@ export async function updateUserStats(isCorrect, {
     // no cap: the delta is the genuine before/after the model produces (a correct
     // recall generally pushes it later, a miss earlier, but since it's the real
     // retrain over a finite window the magnitude — and rarely the sign — is
-    // whatever the model actually learns). The retrain (≤~2s of work, usually
-    // far less warm-started) is deliberately NOT awaited here: it's deferred to
-    // idle so the result overlay's fade starts immediately, and the overlay
-    // reserves the impact line and fills it in when this promise resolves
-    // (createOverlayContent). The epoch loop itself yield-slices the main
-    // thread (trainUserModel), so the page stays responsive while it runs
-    // behind the overlay.
+    // whatever the model actually learns). The retrain is deferred to idle so the
+    // result overlay's fade starts immediately, and the overlay reserves the
+    // impact line and fills it in when this promise resolves
+    // (createOverlayContent).
     let recallImpactPromise = null;
     if (isRepeatAttempt) {
         // The genuine before/after the recall model produces from teaching it this
-        // answer (generic average-difficulty problem), THEN — if the displayed delay
-        // moved the wrong way for this answer — a few extra Adam steps one at a time
-        // until it agrees with the answer's sign (recallImpactWithRefine, shared with
-        // the offline contradiction sim so both run the identical path).
+        // answer (generic average-difficulty problem).
         recallImpactPromise = new Promise(resolve => {
-            scheduleIdle(async () => {
+            scheduleIdle(() => {
                 try {
-                    const { beforeHours, afterHours } = await recallImpactWithRefine(isCorrect);
+                    const { beforeHours, afterHours } = recallImpact();
                     resolve((beforeHours !== null && afterHours !== null)
                         ? { beforeHours, afterHours }
                         : null);

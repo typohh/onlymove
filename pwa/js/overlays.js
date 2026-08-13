@@ -31,8 +31,8 @@ function formatRecallDelta(deltaHours) {
 // last digit shown, a miss a loss of at least that much. Both numbers it shows are
 // honest outputs that can nonetheless land on the wrong side of zero — the rank is a
 // window posterior whose display offset moves with the standard error, and the recall
-// delay is a real before/after retrain that the refine loop (recallImpactWithRefine)
-// can leave incongruent — and a "+" after a miss, or a flat zero after a correct
+// delay is a real before/after retrain whose two heads can disagree on a window
+// (recallImpact) — and a "+" after a miss, or a flat zero after a correct
 // answer, each read as a bug to the user. The floor is at the display resolution
 // rather than at zero for the same reason: "+0.000" claims the answer bought nothing,
 // which is never what the model means. DISPLAY-ONLY: the stored rank and the recall

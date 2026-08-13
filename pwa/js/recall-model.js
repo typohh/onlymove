@@ -10,7 +10,7 @@
 // It reads "stats" because the fitted output lands in state.statsResults.
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, setModelParams, setAdamState, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
+import { state, setStatsResults, setModelParams, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
 // The population's central rank — the stand-in for a GENERIC problem's difficulty when
 // a caller has none to give. A different job from the state slots' cold start (which is
 // about an unknown USER), so it reads the prior's mean directly rather than sharing it.
@@ -20,7 +20,7 @@ import { tsumegoIdOf } from './sgf.js';
 import { sigmoid, normCdf } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingPerRank } from './rank-decomposition.js';
-import { adamUpdate } from './optimizer.js';
+import { newtonBlockStep } from './optimizer.js';
 
 function findFirst(sortedArr, target) {
     let low = 0;
@@ -138,7 +138,7 @@ let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to thi
 // population_constants.json via setTimeBias(). Two roles, both load-bearing and
 // they MUST agree: (1) it is the prior the per-user TIME_SOLVING/REVIEW_TIME
 // coefficients are L2-shrunk toward (converted to per-percentile per training
-// run, see trainUserModel), and (2) the displayed/gated "% chance more time
+// run, see fitUserModel), and (2) the displayed/gated "% chance more time
 // helps" recenters the fitted coefficient by it (benefitConfidence). If the
 // shrinkage prior and the recentering offset disagree, an uninformative user
 // can never read 50% — anchoring both here keeps them consistent.
@@ -640,12 +640,12 @@ export const MODEL_INDICES = {
     // coefficient (growth is a population constant, not per-user).
     SUCCESS_SINCE_FAILURE: 5,
     // Per-user base log-stability (S at p=0.7). The only retention parameter that
-    // is fit; L2-shrunk to LN_C_PRIOR (see trainUserModel).
+    // is fit; L2-shrunk to LN_C_PRIOR (see fitUserModel).
     LN_C: 6,
 };
 
 const L2_REGULARIZATION_TARGETS = {
-    // Placeholders only — trainUserModel OVERRIDES these per training run with the
+    // Placeholders only — fitUserModel OVERRIDES these per training run with the
     // population time/review confound (TIME_BIAS_PER_MIN/REVIEW_BIAS_PER_MIN)
     // converted from per-minute to this feature's per-percentile scale via that
     // run's time_per_percentile_min. The prior the coefficient shrinks toward MUST
@@ -710,7 +710,7 @@ export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior, first_s
 // backend's fitted bias verbatim (the fitter owns its sign/magnitude; the
 // frontend does not second-guess it). population-constants.js calls this at boot
 // before any training; the per-user time coefficients are L2-shrunk toward it
-// (see trainUserModel) and the confidence readout recenters by it.
+// (see fitUserModel) and the confidence readout recenters by it.
 export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
     if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
     if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
@@ -765,26 +765,13 @@ export function getLogitPerRank(statsResults) {
     return Math.max(0.05, blended);
 }
 
-let isCalculatingStats = false;
-let statsRerunQueued = false;
-
 // NOTE: the one-shot wipe of pre-3PL persisted params lives in migrations.js
 // (migrateModelArch3pl), which runMigrations() runs at boot before any training.
-
-export async function calculateAndStoreStatsResults(trainOpts = {}) {
-    if (isCalculatingStats) {
-        // Real overlap is possible now that the epoch loop yields (a training
-        // run spans seconds of interleavable time, not microseconds). Don't
-        // drop this caller's data on the floor: queue ONE coalesced follow-up
-        // retrain to run when the in-flight one finishes — a retrain always
-        // trains on the full current history, so a single default-opts rerun
-        // covers any number of skipped callers. (A skipped caller still gets
-        // null back; the recall-refine steps already tolerate that.)
-        statsRerunQueued = true;
-        return null;
-    }
-    isCalculatingStats = true;
-
+//
+// No in-flight guard and no coalescing queue: the fit is synchronous end to end
+// (a few Newton steps over the window, no yielding), so two callers cannot
+// interleave and there is nothing to drop or to re-run.
+export function calculateAndStoreStatsResults() {
     try {
         // Shared recall model: trained on the union of both sizes' histories.
         // Every feature it reads (problemRank, time/review percentiles, the
@@ -798,22 +785,19 @@ export async function calculateAndStoreStatsResults(trainOpts = {}) {
 
         const trainingData = prepareTrainingData(history, validHistory);
 
+        // Every fit starts from the same point rather than from the stored
+        // parameters: both blocks converge in a handful of Newton steps either
+        // way, and starting cold makes the model a pure function of the history —
+        // the same window gives the same fit on every device, with no path
+        // dependence on where a previous run's iterations happened to end. LN_C
+        // starts at the population prior so the first steps are well scaled (it
+        // is also the base stability a user with no repeats keeps, since the
+        // penalty is then the whole of its objective).
         const numParams = Object.keys(MODEL_INDICES).length;
-        let params;
-        if (state.modelParams && state.modelParams.length === numParams) {
-            params = [...state.modelParams];
-        } else {
-            // Fresh start: seed the base-stability level at the population prior
-            // so first repeats schedule sanely (~25h) while LN_C is untrained.
-            params = Array(numParams).fill(0);
-            params[MODEL_INDICES.LN_C] = LN_C_PRIOR;
-        }
+        const params = Array(numParams).fill(0);
+        params[MODEL_INDICES.LN_C] = LN_C_PRIOR;
 
-        let adamState = (state.adamState && state.adamState.m.length === numParams)
-            ? JSON.parse(JSON.stringify(state.adamState))
-            : { m: Array(numParams).fill(0), v: Array(numParams).fill(0), t: 0 };
-
-        const { trainedParams, finalAdamState, epochsRun, stopReason } = await trainUserModel(trainingData, { params, adamState }, trainOpts);
+        const { trainedParams } = fitUserModel(trainingData, params);
 
         // Sanity check for non-numeric values
         const areParamsValid = trainedParams.every(p => isFinite(p));
@@ -821,36 +805,19 @@ export async function calculateAndStoreStatsResults(trainOpts = {}) {
         if (areParamsValid) {
             const finalResults = calculateResultsAndStdErrors(trainedParams, trainingData);
             setModelParams(trainedParams);
-            setAdamState(finalAdamState);
             setStatsResults(finalResults);
-            return { epochsRun, stopReason };
         } else {
             console.error("Model training resulted in non-numeric weights. Wiping model state.");
             Sentry.captureMessage("Model training resulted in non-numeric weights.");
             setModelParams(null);
-            setAdamState(null);
             setStatsResults(null);
         }
 
     } catch (error) {
         console.error('Unified model training failed:', error);
         Sentry.captureException(error);
-    } finally {
-        isCalculatingStats = false;
-        if (statsRerunQueued) {
-            statsRerunQueued = false;
-            // Fire-and-forget: the rerun logs its own failures, and its
-            // callers-by-proxy (the skipped ones) have already moved on.
-            calculateAndStoreStatsResults();
-        }
     }
 }
-
-// Max extra one-at-a-time Adam steps the recall-impact refine loop may take when
-// the displayed delay contradicts the answer. 5 captures essentially all the
-// realizable benefit at ~1% extra compute; 10 only shaves the residual ~0.3pp at
-// ~2x cost (the rest is a structural floor where the two heads genuinely disagree).
-const RECALL_REFINE_MAX_STEPS = 5;
 
 // Mean internal rank over the user's repeats — the "typical repeat difficulty"
 // a hypothetical fresh failure is scored at. Shared by the recall-impact
@@ -861,37 +828,24 @@ export function averageRepeatRank(history, fallback) {
     return ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : fallback;
 }
 
-// Per-attempt recall impact for the result overlay, with an experimental refine
-// loop. After the DEFAULT retrain it takes ONE extra Adam step at a time (up to
-// maxExtraSteps), re-checking after each whether the GENERIC fresh-failure delay
-// has moved the way the just-recorded answer implies — a correct recall should
-// push it LATER, a miss SOONER — and stops as soon as it does. Returns
-// { beforeHours, afterHours, extraSteps } (hours; nulls if the model isn't ready).
-// Shared by updateUserStats and the offline contradiction sim so both run the
-// identical path. maxExtraSteps = 0 takes no extra steps (just the default retrain).
-export async function recallImpactWithRefine(isCorrect, maxExtraSteps = RECALL_REFINE_MAX_STEPS) {
+// Per-attempt recall impact for the result overlay: the time until first repeat
+// of a GENERIC problem, before and after teaching the model this attempt.
+// Returns { beforeHours, afterHours } (nulls if the model isn't ready).
+//
+// There is no refine loop. Extra optimizer steps used to be taken, one at a
+// time, whenever the displayed delay moved against the answer's sign — which
+// only ever worked because the fit was stopping short of its optimum, so more
+// steps still had somewhere to go. From a converged fit they have nowhere: the
+// remaining disagreement is the two heads genuinely disagreeing on this window,
+// and the overlay shows the delta the model actually produces.
+export function recallImpact() {
     const genericProblemRank = averageRepeatRank(getMergedAnswerHistory(), state.userRank);
     const opts = { problemRank: genericProblemRank, size: state.boardSize, userRank: state.userRank };
 
     const beforeHours = freshFailureReviewHours(state.modelParams, opts);
-    const defaultMeta = await calculateAndStoreStatsResults();   // the default update
-    let afterHours = freshFailureReviewHours(state.modelParams, opts);
-
-    // Congruent = the displayed delay change agrees with the answer's sign.
-    const congruent = (h) => (beforeHours == null || h == null)
-        ? true
-        : (isCorrect ? h >= beforeHours : h <= beforeHours);
-
-    let extraSteps = 0;
-    while (!congruent(afterHours) && extraSteps < maxExtraSteps) {
-        // One more Adam step on the same window, continuing the optimizer.
-        await calculateAndStoreStatsResults({ minEpochs: 1, maxEpochs: 1, maxTrainingTimeMs: Infinity });
-        afterHours = freshFailureReviewHours(state.modelParams, opts);
-        extraSteps++;
-    }
-    // defaultEpochs = Adam epochs the default update ran (so the extra-step cost
-    // can be judged relative to it); each extra step is exactly one more epoch.
-    return { beforeHours, afterHours, extraSteps, defaultEpochs: defaultMeta?.epochsRun ?? null };
+    calculateAndStoreStatsResults();
+    const afterHours = freshFailureReviewHours(state.modelParams, opts);
+    return { beforeHours, afterHours };
 }
 
 export function prepareTrainingData(history, validHistory) {
@@ -959,46 +913,46 @@ export function prepareTrainingData(history, validHistory) {
     };
 }
 
-// How much work trainUserModel does between yields — ~2 frames: long enough
-// that yield overhead is negligible (~60 yields across a full 2s budget),
-// short enough that input and the result overlay's timers stay responsive
-// while a retrain runs.
-const YIELD_SLICE_MS = 30;
+// Newton iteration cap per block, and the convergence tolerance on the Newton
+// decrement (twice the loss reduction the quadratic model predicts, in nats over
+// the whole window). Both blocks converge in a handful of steps, so the cap is a
+// runaway guard rather than a budget the fit is expected to spend — which is why
+// there is no wall-clock cap beside it and no cooperative yielding: a fit is now
+// tens of passes over the window instead of thousands, well inside one frame.
+//
+// The decrement is what replaces a loss-delta stop. It is curvature-weighted, so
+// it does not go small merely because the objective is flat in a direction — and
+// the difficulty multiplier, which the whole recall schedule is scaled by, sits
+// in exactly such a direction (its prior carries it, the window holding well
+// under a nat about it).
+const MAX_NEWTON_ITERS = 50;
+const NEWTON_TOL = 1e-8;
+// Numerical guard on the unpenalized diagonal (the intercept). Same value the
+// posterior-covariance step uses, now shared with the step that produces the
+// parameters it describes.
+const RIDGE_GUARD = 1e-6;
 
-// Yield the main thread so the browser can paint and dispatch input between
-// epoch slices. scheduler.yield() where available (prioritized continuation);
-// otherwise a MessageChannel task — a real macrotask boundary WITHOUT
-// setTimeout's nested ~4ms clamp, which would starve the training budget at
-// one yield per slice. (A bare `await Promise.resolve()` would not work:
-// microtasks don't give the browser a rendering or input opportunity.)
-function yieldToBrowser() {
-    if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
-        return scheduler.yield();
-    }
-    if (typeof MessageChannel === 'function') {
-        return new Promise(resolve => {
-            const ch = new MessageChannel();
-            ch.port1.onmessage = () => resolve();
-            ch.port2.postMessage(null);
-        });
-    }
-    return new Promise(resolve => setTimeout(resolve, 0));
-}
-
-async function trainUserModel(trainingData, modelState, trainOpts = {}) {
+// Fit the two heads by damped Newton, each against the loss it owns.
+//
+// The objective SEPARATES, and the fit follows that structure rather than
+// working around it: the correctness head owns the five logit parameters, and
+// the retention head owns LN_C alone while reading the cold-solve logit z as a
+// constant (predictAndGrad's stop-gradient — the correctness head owns z). So
+// the correctness block's objective does not involve LN_C at all and is fit
+// first, to convergence; LN_C is then fit against the z that block settled on.
+// No alternation is needed for that to be exact.
+//
+// Curvature per block: the correctness head steps on the EXPECTED information
+// Σ wᵢ·vᵢ·xᵢxᵢᵀ with vᵢ = (dP/dinner)²/(P(1−P)) — the same Fisher matrix the SE
+// step computes — because a 4PL log-likelihood with a non-zero guessing floor is
+// not concave everywhere, and the expected information is positive semi-definite
+// where the observed Hessian need not be. The retention head uses its exact
+// second derivative, which is non-negative for both outcomes (for a success it
+// is u; for a failure u·R·[u − (1−R)]/(1−R)², and u ≥ 1−e^(−u) for all u ≥ 0).
+function fitUserModel(trainingData, params) {
     const { y, weights, elapsedDays, isRepeatArr, n, floors,
             time_per_percentile_min, time_per_percentile_min_r } = trainingData;
-    let { params, adamState } = modelState;
-
-    const learningRate = 0.02;
-    // Convergence budget is overridable so the per-attempt "refine until the
-    // displayed recall change agrees with the answer" experiment can force extra
-    // Adam steps (minEpochs) or a tighter stop. Defaults reproduce the shipped fit.
-    const maxEpochs = trainOpts.maxEpochs ?? 10000;
-    const maxTrainingTimeMs = trainOpts.maxTrainingTimeMs ?? 2000;
-    const lossConvergenceThreshold = trainOpts.convThreshold ?? 1e-6;
-    const minEpochs = trainOpts.minEpochs ?? 0;
-    let epochsRun = 0, stopReason = 'maxEpochs';
+    const M = MODEL_INDICES;
     const lambda = 10; // L2 regularization parameter
 
     // Per-run L2 targets. The TIME_SOLVING/REVIEW_TIME coefficients live in
@@ -1008,76 +962,146 @@ async function trainUserModel(trainingData, modelState, trainOpts = {}) {
     // the offset the confidence readout later recenters by — an uninformative user
     // then reads ~50%, not the ~100% a fixed -0.1 target would produce.
     const targets = { ...L2_REGULARIZATION_TARGETS };
-    targets[MODEL_INDICES.TIME_SOLVING] = (TIME_BIAS_PER_MIN ?? 0) * (time_per_percentile_min || 0);
-    targets[MODEL_INDICES.REVIEW_TIME] = (REVIEW_BIAS_PER_MIN ?? 0) * (time_per_percentile_min_r || 0);
+    targets[M.TIME_SOLVING] = (TIME_BIAS_PER_MIN ?? 0) * (time_per_percentile_min || 0);
+    targets[M.REVIEW_TIME] = (REVIEW_BIAS_PER_MIN ?? 0) * (time_per_percentile_min_r || 0);
 
-    let prevLoss = Infinity;
-    // Cooperative scheduling: the epoch loop yields every YIELD_SLICE_MS of
-    // work so the page stays responsive during a retrain (it used to run as
-    // one ≤~2s main-thread block). The time budget counts WORK time only —
-    // yield gaps and whatever foreign tasks run inside them are excluded — so
-    // slicing doesn't shrink how many epochs a training gets.
-    let sliceStart = Date.now();
-    let workMs = 0;
+    // INTERCEPT (logit level) is the only unregularized parameter; LN_C is
+    // shrunk to its population prior (LN_C_PRIOR) via L2 like the others.
+    const targetFor = (j) => targets[j] || 0;
+    const precisionFor = (j) => (j === M.INTERCEPT ? 0 : LAMBDA_SCALE(j) * lambda);
 
     // Features are independent of params, so build the design matrix once.
-    const numFeatures = Object.keys(MODEL_INDICES).length;
     const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
 
-    for (let epoch = 0; epoch < maxEpochs; epoch++) {
-        adamState.t++;
+    // Everything below is in RAW SUMS over the window (not per-attempt means):
+    // the loss, gradient and curvature share one scaling, which is all a Newton
+    // step needs, and it is the scaling the Fisher/SE step already works in.
 
-        const gradient = Array(params.length).fill(0);
-        let currentLoss = 0;
+    // --- Block A: the correctness head over the logit parameters ---------------
+    const LOGIT_IDX = [M.INTERCEPT, M.TIME_SOLVING, M.REVIEW_TIME, M.PROBLEM_DIFFICULTY, M.SIZE_IS_13];
 
+    // Per-row 4PL quantities: the clipped probability and dP/dinner.
+    const solveRow = (p, i) => {
+        const c = clampFloor(floors[i]), span = clearSpan(c);
+        const praw = sigmoid(logitZ(X[i], p) + clearKappa(c));
+        const P = Math.max(1e-15, Math.min(1 - 1e-15, c + span * praw));
+        return { P, dP: span * praw * (1 - praw) };
+    };
+    const solveLoss = (p) => {
+        let loss = 0;
         for (let i = 0; i < n; i++) {
-            const { loss, grad } = predictAndGrad(X[i], params, { isRepeat: isRepeatArr[i], elapsedDays: elapsedDays[i], y: y[i], floor: floors[i] });
-            currentLoss += weights[i] * loss;
-            for (let j = 0; j < numFeatures; j++) gradient[j] += weights[i] * grad[j];
+            const { P } = solveRow(p, i);
+            loss += weights[i] * (-y[i] * Math.log(P) - (1 - y[i]) * Math.log(1 - P));
         }
-
-        // INTERCEPT (logit level) is the only unregularized parameter; LN_C is
-        // shrunk to its population prior (LN_C_PRIOR) via L2 like the others.
-        const isUnregularized = (j) => j === MODEL_INDICES.INTERCEPT;
-
-        let l2_penalty = 0;
-        for (let j = 0; j < params.length; j++) {
-            if (isUnregularized(j)) continue;
-            const target = targets[j] || 0;
-            l2_penalty += LAMBDA_SCALE(j) * Math.pow(params[j] - target, 2);
+        for (const j of LOGIT_IDX) {
+            const d = p[j] - targetFor(j);
+            loss += 0.5 * precisionFor(j) * d * d;
         }
-        currentLoss += (lambda / 2) * l2_penalty;
-        currentLoss /= n;
-
-        // Finalize the gradient (mean-reduce + L2 toward each param's target),
-        // then apply the shared Adam moment update.
-        for (let j = 0; j < params.length; j++) {
-            gradient[j] /= n;
-            if (!isUnregularized(j)) {
-                const target = targets[j] || 0;
-                gradient[j] += (LAMBDA_SCALE(j) * lambda / n) * (params[j] - target);
+        return loss;
+    };
+    const solveGrad = (p) => {
+        const g = new Array(LOGIT_IDX.length).fill(0);
+        for (let i = 0; i < n; i++) {
+            const { P, dP } = solveRow(p, i);
+            const e = weights[i] * (P - y[i]) / (P * (1 - P)) * dP;
+            for (let b = 0; b < LOGIT_IDX.length; b++) g[b] += e * X[i][LOGIT_IDX[b]];
+        }
+        for (let b = 0; b < LOGIT_IDX.length; b++) {
+            const j = LOGIT_IDX[b];
+            g[b] += precisionFor(j) * (p[j] - targetFor(j));
+        }
+        return g;
+    };
+    const solveHess = (p) => {
+        const nb = LOGIT_IDX.length;
+        const H = Array.from({ length: nb }, () => new Array(nb).fill(0));
+        for (let i = 0; i < n; i++) {
+            const { P, dP } = solveRow(p, i);
+            const v = weights[i] * dP * dP / (P * (1 - P));
+            for (let a = 0; a < nb; a++) {
+                const va = v * X[i][LOGIT_IDX[a]];
+                if (va === 0) continue;
+                for (let b = a; b < nb; b++) H[a][b] += va * X[i][LOGIT_IDX[b]];
             }
         }
-        adamUpdate(params, gradient, adamState, learningRate);
-        epochsRun = epoch + 1;
-
-        const converged = Math.abs(prevLoss - currentLoss) < lossConvergenceThreshold;
-        const timedOut = workMs + (Date.now() - sliceStart) > maxTrainingTimeMs;
-        // minEpochs lets a caller force extra Adam steps past convergence (the
-        // per-attempt recall-refine experiment forces exactly one at a time).
-        if (epoch + 1 >= minEpochs && (converged || timedOut)) {
-            stopReason = converged ? 'converged' : 'timeCap';
-            break;
+        for (let a = 0; a < nb; a++) {
+            H[a][a] += precisionFor(LOGIT_IDX[a]) + RIDGE_GUARD;
+            for (let b = a + 1; b < nb; b++) H[b][a] = H[a][b];
         }
-        prevLoss = currentLoss;
+        return H;
+    };
 
-        if (Date.now() - sliceStart > YIELD_SLICE_MS) {
-            workMs += Date.now() - sliceStart;
-            await yieldToBrowser();
-            sliceStart = Date.now();
-        }
+    // --- Block B: the retention head over LN_C ---------------------------------
+    // Only repeat rows with a known elapsed gap carry retention information;
+    // without a true interval the retention likelihood is meaningless (see
+    // predictAndGrad). A row whose stability lands on a training rail contributes
+    // its loss but no derivative — the clamp owns lnS there.
+    const retentionRows = [];
+    for (let i = 0; i < n; i++) {
+        if (isRepeatArr[i] && elapsedDays[i] !== null) retentionRows.push(i);
     }
-    return { trainedParams: params, finalAdamState: adamState, epochsRun, stopReason };
+    const retentionRow = (p, i) => {
+        const c = clampFloor(floors[i]);
+        const z = retentionLogit(X[i], p, c);
+        const lnSRaw = p[M.LN_C] + KAPPA * (z - Z0) + GROWTH * X[i][M.SUCCESS_SINCE_FAILURE]
+            + (X[i][M.SUCCESS_SINCE_FAILURE] >= 1 ? FIRST_SUCCESS_STEP : 0);
+        const lnS = Math.max(LN_S_TRAIN_MIN, Math.min(LN_S_TRAIN_MAX, lnSRaw));
+        const u = elapsedDays[i] / Math.exp(lnS);
+        const R = Math.exp(-u);
+        return { clamped: lnSRaw !== lnS, u, R };
+    };
+    const retentionLoss = (p) => {
+        let loss = 0;
+        for (const i of retentionRows) {
+            const { R } = retentionRow(p, i);
+            const Rc = Math.max(1e-15, Math.min(1 - 1e-15, R));
+            loss += weights[i] * (-y[i] * Math.log(Rc) - (1 - y[i]) * Math.log(1 - Rc));
+        }
+        const d = p[M.LN_C] - targetFor(M.LN_C);
+        loss += 0.5 * precisionFor(M.LN_C) * d * d;
+        return loss;
+    };
+    const retentionGrad = (p) => {
+        let g = 0;
+        for (const i of retentionRows) {
+            const { clamped, u, R } = retentionRow(p, i);
+            if (clamped) continue;
+            g += weights[i] * (R - y[i]) * u / Math.max(1 - R, 1e-9);
+        }
+        return [g + precisionFor(M.LN_C) * (p[M.LN_C] - targetFor(M.LN_C))];
+    };
+    const retentionHess = (p) => {
+        let h = 0;
+        for (const i of retentionRows) {
+            const { clamped, u, R } = retentionRow(p, i);
+            if (clamped) continue;
+            const om = Math.max(1 - R, 1e-9);
+            h += weights[i] * (-u * (R - y[i]) / om + u * u * R * (1 - y[i]) / (om * om));
+        }
+        return [[h + precisionFor(M.LN_C) + RIDGE_GUARD]];
+    };
+
+    const runBlock = (indices, gradFn, hessFn, lossFn) => {
+        let steps = 0, stopReason = 'maxIters';
+        for (let iter = 0; iter < MAX_NEWTON_ITERS; iter++) {
+            const { decrement, accepted } =
+                newtonBlockStep(params, indices, gradFn(params), hessFn(params), () => lossFn(params));
+            if (!accepted) { stopReason = 'stalled'; break; }
+            steps++;
+            if (decrement / 2 < NEWTON_TOL) { stopReason = 'converged'; break; }
+        }
+        return { steps, stopReason };
+    };
+
+    const solveFit = runBlock(LOGIT_IDX, solveGrad, solveHess, solveLoss);
+    const retentionFit = runBlock([M.LN_C], retentionGrad, retentionHess, retentionLoss);
+
+    // SUCCESS_SINCE_FAILURE is a feature slot with no fitted coefficient (growth
+    // is a population constant), so the penalty is the whole of its objective and
+    // its minimizer is the target exactly.
+    params[M.SUCCESS_SINCE_FAILURE] = targetFor(M.SUCCESS_SINCE_FAILURE);
+
+    return { trainedParams: params, solveFit, retentionFit };
 }
 
 export function calculateResultsAndStdErrors(finalParams, trainingData) {
@@ -1091,24 +1115,30 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
     // come from the 3PL Fisher info: I = Σ wᵢ·vᵢ·xᵢ·xᵢᵀ over the LOGIT features
     // (which are linear in the inner logit), with vᵢ = (dP/dinner)²/(P(1−P)) the
     // per-row 3PL information — at floor c=0 this reduces to p(1−p). The retention
-    // features (SUCCESS_SINCE_FAILURE / LN_C) don't enter, so their columns are
-    // zeroed; the +1e-6 ridge keeps the matrix invertible (large unused SE there).
+    // features (SUCCESS_SINCE_FAILURE / LN_C) don't enter, so their rows and
+    // columns stay zero; the ridge guard keeps the matrix invertible (large unused
+    // SE there). This is the same information the correctness block steps on.
+    //
+    // Accumulated straight into the (np × np) array rather than as Dᵀ·W·D through
+    // math.js: W is a DIAGONAL of per-row weights, and materializing it as a dense
+    // n × n matrix made this step — not the fit — the dominant cost of a retrain.
     const logitIdx = [M.INTERCEPT, M.TIME_SOLVING, M.REVIEW_TIME, M.PROBLEM_DIFFICULTY, M.SIZE_IS_13];
-    const D = X.map(xi => {
-        const row = new Array(np).fill(0);
-        for (const j of logitIdx) row[j] = xi[j];
-        return row;
-    });
-    const W = math.diag(X.map((xi, i) => {
+    const info = Array.from({ length: np }, () => new Array(np).fill(0));
+    for (let i = 0; i < n; i++) {
+        const xi = X[i];
         const c = clampFloor(floors[i]), span = clearSpan(c);
         const praw = sigmoid(logitZ(xi, finalParams) + clearKappa(c));
         const P = Math.max(1e-9, Math.min(1 - 1e-9, c + span * praw));
         const dP = span * praw * (1 - praw);   // dP/dinner
-        return weights[i] * dP * dP / (P * (1 - P));
-    }));
-    const Dm = math.matrix(D);
-    const fisherInfo = math.add(math.multiply(math.transpose(Dm), W, Dm), math.diag(Array(np).fill(1e-6)));
-    const varCovarMatrix = math.inv(fisherInfo);
+        const v = weights[i] * dP * dP / (P * (1 - P));
+        for (const a of logitIdx) {
+            const va = v * xi[a];
+            if (va === 0) continue;
+            for (const b of logitIdx) info[a][b] += va * xi[b];
+        }
+    }
+    for (let j = 0; j < np; j++) info[j][j] += RIDGE_GUARD;
+    const varCovarMatrix = math.inv(math.matrix(info));
     const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt).toArray();
 
     const results = [];

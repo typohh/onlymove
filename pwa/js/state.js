@@ -304,6 +304,10 @@ const shared = {
     // while se >= 2x the local floor, personalization (weakness) after.
     rankSe: readJSON('rankSe', null),
     modelParams: readJSON('modelParams', null),
+    // adamState / weaknessAdam are LEGACY blobs: neither fitter carries optimizer
+    // state across retrains any more (both converge from a cold start, so there is
+    // nothing to warm). The slots stay only so the clear/wipe paths keep removing
+    // what older versions persisted; nothing writes them.
     adamState: readJSON('adamState', null),
     weaknessParams: readJSON('weaknessParams', null),
     weaknessAdam: readJSON('weaknessAdam', null),
@@ -853,10 +857,6 @@ export function setStatsResults(results) {
 
 export function setModelParams(params) {
     state.modelParams = params;
-}
-
-export function setAdamState(adamState) {
-    state.adamState = adamState;
 }
 
 // Drop the shared weakness model entirely (params + Adam state + posterior

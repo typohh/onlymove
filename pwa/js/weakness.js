@@ -31,7 +31,7 @@ import * as Sentry from "@sentry/browser";
 import { state, getMergedAnswerHistory, clearWeaknessModel } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { sigmoid } from './math-utils.js';
-import { adamUpdate } from './optimizer.js';
+import { newtonBlockStep } from './optimizer.js';
 // Baked into the bundle at build time; population-constants.js is the validated
 // loader for the rest of this blob. We read only the weakness ridge prior here.
 import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
@@ -67,10 +67,24 @@ const AXIS_CONTRAST_MEAN = POPULATION_CONSTANTS.weakness_contrast_mean;
 // vector; a missing or stale entry skips training rather than substituting zero,
 // because zero is exactly the wrong answer when the true centre is not zero.
 export const AXIS_SUM_MEAN = POPULATION_CONSTANTS.weakness_axis_mean;
-const MAX_EPOCHS = 200;
-const MAX_TRAINING_TIME_MS = 1000;
-const LEARNING_RATE = 0.05;
-const LOSS_CONVERGENCE = 1e-6;
+// Newton iteration budget. The fit converges quadratically from a cold start —
+// measured at 4 iterations to a numerically exact optimum across N = 50..500 —
+// so the cap is a runaway guard, not a budget the fit is expected to spend, and
+// there is deliberately no wall-clock cap beside it: a step costs two passes
+// over the window plus a solve of order (2K+2), which is milliseconds.
+const MAX_NEWTON_ITERS = 50;
+// Convergence on the Newton decrement (twice the loss reduction the quadratic
+// model predicts, in nats over the whole window). This is what replaces a
+// loss-delta threshold: the decrement is curvature-weighted, so it does not go
+// small in the flat contrast direction the scorer reads while the gradient there
+// is still large. Quadratic convergence makes the tolerance nearly free.
+const NEWTON_TOL = 1e-8;
+// Numerical guard on the two unpenalized diagonal entries (intercept and rank).
+// Same value the posterior-covariance step has always used, now shared with the
+// step that produces the parameters it describes: a short all-correct history is
+// separable, and without it the curvature for the intercept vanishes as the fit
+// saturates and the solve has no pivot.
+const RIDGE_GUARD = 1e-6;
 
 let trainingInProgress = false;
 
@@ -129,14 +143,10 @@ export async function trainWeakness() {
         // (β_correct + β_picked) — the model gracefully degrades to a
         // diff-form mean estimate when no picked data exists.
         const numParams = 2 + 2 * K;
-        const existingParams = state.weaknessParams;
-        let params = (Array.isArray(existingParams) && existingParams.length === numParams)
-            ? [...existingParams]
-            : new Array(numParams).fill(0);
-        let adam = { m: new Array(numParams).fill(0), v: new Array(numParams).fill(0), t: 0 };
+        const N = history.length;
 
-        // Precompute the picked vector per row to avoid re-deriving in the
-        // hot training loop.
+        // Precompute the picked vector per row to avoid re-deriving it in the
+        // per-row passes below.
         const pickedFor = history.map(a => {
             if (Array.isArray(a.pickedEmbedding) && a.pickedEmbedding.length === K) {
                 return a.pickedEmbedding;
@@ -144,62 +154,118 @@ export async function trainWeakness() {
             return a.embedding;  // fallback: row only informs β_correct + β_picked
         });
 
-        const N = history.length;
-        const startTime = Date.now();
-        let prevLoss = Infinity;
+        // Design matrix, built once. The gradient, the curvature and the final
+        // posterior covariance all read the same rows, so the covariance
+        // describes exactly the fit that produced the parameters.
+        const X = history.map((a, i) => {
+            const row = new Array(numParams);
+            row[0] = 1;
+            row[1] = a.problemRank;
+            const corr = a.embedding;
+            const pick = pickedFor[i];
+            for (let k = 0; k < K; k++) row[2 + k] = corr[k];
+            for (let k = 0; k < K; k++) row[2 + K + k] = pick[k];
+            return row;
+        });
+        const yObs = history.map(a => (a.correct ? 1 : 0));
 
-        for (let epoch = 0; epoch < MAX_EPOCHS; epoch++) {
-            adam.t++;
-            const grad = new Array(numParams).fill(0);
-            let loss = 0;
+        // Ridge over all β coefficients (correct and picked alike): lambdaForAxis(k)
+        // hits both of axis k's coefficient slots, pulling each toward half the
+        // sum's population centre, so their SUM is pulled toward that centre while
+        // their CONTRAST is still pulled toward zero. The intercept and rank slots
+        // carry only the numerical guard.
+        const lamVec = new Array(numParams).fill(RIDGE_GUARD);
+        const priorMean = new Array(numParams).fill(0);
+        for (let k = 0; k < K; k++) {
+            lamVec[2 + k] = lamVec[2 + K + k] = lambdaForAxis(k);
+            priorMean[2 + k] = priorMean[2 + K + k] = halfMean(k);
+        }
 
+        // Everything below is in RAW SUMS over the window (not per-attempt means),
+        // the scaling the posterior covariance is defined in — H is then the
+        // penalized observed information directly, with no rescaling between the
+        // step and the covariance read off it.
+        const probs = (p) => {
+            const out = new Array(N);
             for (let i = 0; i < N; i++) {
-                const a = history[i];
-                const corr = a.embedding;
-                const pick = pickedFor[i];
-                let z = params[0] + params[1] * a.problemRank;
-                for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
-                for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
-
-                const p = sigmoid(z);
-                const clipped = Math.max(1e-15, Math.min(1 - 1e-15, p));
-                const y = a.correct ? 1 : 0;
-                loss += -y * Math.log(clipped) - (1 - y) * Math.log(1 - clipped);
-                const err = p - y;
-                grad[0] += err;
-                grad[1] += err * a.problemRank;
-                for (let k = 0; k < K; k++) grad[2 + k] += err * corr[k];
-                for (let k = 0; k < K; k++) grad[2 + K + k] += err * pick[k];
+                const row = X[i];
+                let z = 0;
+                for (let j = 0; j < numParams; j++) z += p[j] * row[j];
+                out[i] = sigmoid(z);
             }
-
-            let l2 = 0;
-            // Ridge over all β coefficients (correct and picked alike), not
-            // the intercept or rating. lambdaForAxis(k) hits both of axis k's
-            // coefficient slots — the per-axis empirical-Bayes prior when
-            // shipped, the scalar CV lambda otherwise.
-            for (let k = 0; k < K; k++) {
-                const lam = lambdaForAxis(k);
-                const h = halfMean(k);
-                const dc = params[2 + k] - h;
-                const dp = params[2 + K + k] - h;
-                l2 += lam * (dc * dc + dp * dp);
+            return out;
+        };
+        const lossAt = (p) => {
+            let loss = 0;
+            const pr = probs(p);
+            for (let i = 0; i < N; i++) {
+                const clipped = Math.max(1e-15, Math.min(1 - 1e-15, pr[i]));
+                loss += -yObs[i] * Math.log(clipped) - (1 - yObs[i]) * Math.log(1 - clipped);
             }
-            loss = loss / N + l2 / (2 * N);
-
-            // Finalize the gradient (mean-reduce + ridge on the β block, j ≥ 2),
-            // then apply the shared Adam moment update.
-            for (let j = 0; j < numParams; j++) grad[j] /= N;
-            for (let k = 0; k < K; k++) {
-                const lam = lambdaForAxis(k);
-                const h = halfMean(k);
-                grad[2 + k] += (lam / N) * (params[2 + k] - h);
-                grad[2 + K + k] += (lam / N) * (params[2 + K + k] - h);
+            for (let j = 0; j < numParams; j++) {
+                const d = p[j] - priorMean[j];
+                loss += 0.5 * lamVec[j] * d * d;
             }
-            adamUpdate(params, grad, adam, LEARNING_RATE);
+            return loss;
+        };
+        const gradAt = (p) => {
+            const grad = new Array(numParams).fill(0);
+            const pr = probs(p);
+            for (let i = 0; i < N; i++) {
+                const err = pr[i] - yObs[i];
+                const row = X[i];
+                for (let j = 0; j < numParams; j++) grad[j] += err * row[j];
+            }
+            for (let j = 0; j < numParams; j++) grad[j] += lamVec[j] * (p[j] - priorMean[j]);
+            return grad;
+        };
+        // H = X' diag(p(1-p)) X + diag(lam_vec) — the exact Hessian of the
+        // penalized objective (logistic regression's observed and expected
+        // information coincide), so it is both the Newton curvature and, at the
+        // optimum, the inverse Laplace posterior covariance.
+        const hessAt = (p) => {
+            const H = Array.from({ length: numParams }, () => new Array(numParams).fill(0));
+            const pr = probs(p);
+            for (let i = 0; i < N; i++) {
+                const w = pr[i] * (1 - pr[i]);
+                const row = X[i];
+                for (let a = 0; a < numParams; a++) {
+                    const wa = w * row[a];
+                    if (wa === 0) continue;
+                    for (let b = a; b < numParams; b++) H[a][b] += wa * row[b];
+                }
+            }
+            for (let a = 0; a < numParams; a++) {
+                H[a][a] += lamVec[a];
+                for (let b = a + 1; b < numParams; b++) H[b][a] = H[a][b];
+            }
+            return H;
+        };
 
-            if (Math.abs(prevLoss - loss) < LOSS_CONVERGENCE) break;
-            if (Date.now() - startTime > MAX_TRAINING_TIME_MS) break;
-            prevLoss = loss;
+        // Newton from zero rather than from the stored parameters: the fit
+        // converges in a handful of steps either way, and starting cold makes it
+        // a pure function of the history — the same window gives the same model
+        // on every device, with no path dependence on how the previous fit ended.
+        const allIndices = Array.from({ length: numParams }, (_, j) => j);
+        const params = new Array(numParams).fill(0);
+        let steps = 0;
+        let stopReason = 'maxIters';
+        for (let iter = 0; iter < MAX_NEWTON_ITERS; iter++) {
+            const { decrement, accepted } =
+                newtonBlockStep(params, allIndices, gradAt(params), hessAt(params), () => lossAt(params));
+            if (!accepted) { stopReason = 'stalled'; break; }
+            steps++;
+            if (decrement / 2 < NEWTON_TOL) { stopReason = 'converged'; break; }
+        }
+        if (steps === 0) {
+            // Singular curvature or a step that could not descend — the window
+            // says nothing usable. Leave whatever model is already stored alone
+            // rather than overwriting it with an unfitted one.
+            console.warn(`weakness: no usable Newton step; keeping the existing model`);
+            return;
+        }
+        if (stopReason !== 'converged') {
+            console.warn(`weakness: fit ${stopReason} after ${steps} Newton steps`);
         }
 
         if (!params.every(p => Number.isFinite(p))) {
@@ -208,47 +274,17 @@ export async function trainWeakness() {
             return;
         }
         state.weaknessParams = params;
-        // (adam is NOT persisted: every retrain starts fresh moments at line
-        // ~110, so storing it was a dead localStorage write per attempt. The
-        // clear/wipe paths still remove legacy weaknessAdam blobs.)
 
-        // Laplace-approx posterior cov. H = X' diag(p(1-p)) X + diag(lam_vec);
-        // posterior cov ≈ H^-1. We pull out the per-axis 2x2 block on
-        // (β_correct[k], β_picked[k]) so the stats panel can compute the
-        // posterior of the identified SUM β_correct + β_picked per axis
-        // (var_c + var_p + 2·cov) — the Weaknesses pane's level-1 detection
-        // (stats-weaknesses.js). Storing the full (2 + 2K)x(2 + 2K) matrix
-        // would blow localStorage at K=64; the diagonal (weaknessSe) +
-        // per-axis off-diagonals (weaknessAxisCov) is sufficient for that.
+        // Laplace-approx posterior cov = H^-1 at the optimum — which is where the
+        // fit now actually is, so the SE describes the mode it is quoted for. We
+        // pull out the per-axis 2x2 block on (β_correct[k], β_picked[k]) so the
+        // stats panel can compute the posterior of the identified SUM
+        // β_correct + β_picked per axis (var_c + var_p + 2·cov) — the Weaknesses
+        // pane's level-1 detection (stats-weaknesses.js). Storing the full
+        // (2 + 2K)x(2 + 2K) matrix would blow localStorage at K=64; the diagonal
+        // (weaknessSe) + per-axis off-diagonals (weaknessAxisCov) is enough.
         try {
-            const X = history.map((a, i) => {
-                const row = new Array(numParams);
-                row[0] = 1;
-                row[1] = a.problemRank;
-                const corr = a.embedding;
-                const pick = pickedFor[i];
-                for (let k = 0; k < K; k++) row[2 + k] = corr[k];
-                for (let k = 0; k < K; k++) row[2 + K + k] = pick[k];
-                return row;
-            });
-            const pHat = history.map((a, i) => {
-                const corr = a.embedding;
-                const pick = pickedFor[i];
-                let z = params[0] + params[1] * a.problemRank;
-                for (let k = 0; k < K; k++) z += params[2 + k] * corr[k];
-                for (let k = 0; k < K; k++) z += params[2 + K + k] * pick[k];
-                return sigmoid(z);
-            });
-            const lamVec = new Array(numParams).fill(1e-6);  // tiny guard on intercept/rating
-            for (let k = 0; k < K; k++) {
-                lamVec[2 + k] = lambdaForAxis(k);
-                lamVec[2 + K + k] = lambdaForAxis(k);
-            }
-            const W = math.diag(pHat.map(p => p * (1 - p)));
-            const Xm = math.matrix(X);
-            const fisher = math.multiply(math.transpose(Xm), W, Xm);
-            const H = math.add(fisher, math.diag(lamVec));
-            const cov = math.inv(H);
+            const cov = math.inv(math.matrix(hessAt(params)));
             const diag = math.diag(cov).toArray();
             const se = diag.map(v => Math.sqrt(Math.max(v, 1e-12)));
             if (se.every(s => Number.isFinite(s))) {
