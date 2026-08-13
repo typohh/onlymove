@@ -354,10 +354,20 @@ class JointMIRT:
         g_in_dim = d if self.axis_from_trunk else fdim + self.axis_extra
         self.g_lin = nn.Linear(g_in_dim, k_axes, bias=False).to(device)
         if g_init is not None:
+            if g_init.shape[1] > self.g_lin.weight.shape[1]:
+                raise SystemExit(
+                    f"warm-start directions are {g_init.shape[1]}-dimensional but "
+                    f"the axis map reads {self.g_lin.weight.shape[1]} inputs. "
+                    "These are not the same coordinates and one cannot be "
+                    "truncated into the other: --warm-start eigen builds its "
+                    "directions in the axis FEATURE space, while --axis-from-"
+                    "trunk parameterizes the map over the trunk's output. Use "
+                    "--warm-start burnin, which takes its residuals in whichever "
+                    "space the map actually lives in, or --axis-from-features.")
             with torch.no_grad():
                 # g_init may be narrower than g_lin's input (the eigen form is
                 # built on the feature matrix alone); seed those columns and
-                # leave the rating-output columns at their init.
+                # leave any extra ones at their init.
                 self.g_lin.weight[:g_init.shape[0], :g_init.shape[1]].copy_(
                     torch.tensor(g_init, dtype=torch.float32, device=device))
         self.v = torch.zeros(n_users, k_axes, device=device, requires_grad=True)
