@@ -84,7 +84,24 @@ The fix is `auxiliary/rating_dev/burn_in_warm_start.py`, wired in as `--warm-sta
 
 A second defect of the borrowed form, independent of the leak: `eigen_directions` works in the 216-column axis feature space and the result is truncated by `gi_full[:, :fdim]` to the MIRT's 212 **without renormalising**, so the initialization is a non-unit projection of directions chosen partly along four coordinates this model does not have — including the two-stage model's own rating and slope.
 
-The default stays `eigen` pending the prior question, which is whether a warm start is needed at all: **it has never been ablated in the MIRT.** The 0.973-vs-0.830 figures on record are from `train_axes`, where the 4PL is frozen and the axes are the only thing moving. `--warm-start none` is that ablation. If `burnin` and `none` are indistinguishable, both come out.
+### The ablation — MEASURED 2026-08-13. The warm start stays; the burn-in does not replace it yet.
+
+At the swept optimum `3e-4 / 1e-2`, held-out users, holdout seed 0:
+
+```
+                    rating            axis adds (mnat)
+  eigen  (2 seeds)  0.4930 +/- 0.0003   +0.68 +/- 0.19
+  burnin (2 seeds)  0.4944 +/- 0.0021   +0.22 +/- 1.20
+  none   (3 seeds)  0.4932 +/- 0.0001   -2.64 +/- 0.86
+```
+
+**The warm start earns its place** — `eigen` beats random init by 3.3 mnat on the axis column, with a tight seed spread, and all three `none` seeds put the axes firmly negative. So the leak cannot be resolved by deleting `eigen_directions`. Note the value is entirely axis-side: the rating is the same to within 0.4 mnat whether or not `g` is warm-started, which is what the mechanism predicts, since at `v = 0` the loading gradient vanishes and the warm start is a statement about `g` alone.
+
+**The burn-in at `BURN_IN_EPOCHS = 100` is not a usable replacement.** It is worse than both alternatives on rating and its seed spread is ~7x wider on rating and ~6x wider on axes. The suspected mechanism is that the residuals are taken against a baseline nowhere near converged — the stopping diagnostic puts held-out rating at 0.4980 at epoch 100 against 0.4928 at 300 — so they carry rating error rather than skill structure. Centring removes the direction in which the baseline mispredicts for EVERYONE; an undertrained baseline also mispredicts in user-specific ways correlated with ability, which centring cannot touch, and those seed `g` with directions that duplicate the rating. That fits the symptom: the damage lands on the rating, not only on the axes.
+
+`--burn-in` makes the length a knob so this is testable. If a converged baseline closes the gap the mechanism is sound and 100 was simply wrong; if it does not, the warm start's value depends on having a converged EXTERNAL fit, which is a genuine problem for the single-stage thesis rather than a tuning matter.
+
+Until then the default stays `eigen`, the leak stands, and **no rating figure in this document is a clean measurement.**
 
 ## Results — held-out samples, 2 folds, mean ± sd
 

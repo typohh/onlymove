@@ -496,6 +496,14 @@ def main():
                          "the 4PL saw every user and only the axis stage does "
                          "CV. WITHOUT this there is no held-out-user axis "
                          "measurement and none may be reported.")
+    ap.add_argument("--burn-in", type=int, default=BURN_IN_EPOCHS,
+                    help="epochs with v pinned at zero before --warm-start "
+                         "burnin reads its directions off the model's own "
+                         "residuals. Those residuals are only skill structure to "
+                         "the extent the axis-free baseline has CONVERGED; taken "
+                         "early they are mostly rating error, which centring "
+                         "cannot remove because it is user-specific rather than "
+                         "shared.")
     ap.add_argument("--flat-patience", type=int, default=FLAT_PATIENCE,
                     help="checks without a new best stop-split before stopping. "
                          "Set far above any reachable check count to disable "
@@ -859,8 +867,8 @@ def main():
         # at v = 0 the loading gradient is identically zero, so these epochs are
         # the axis-free baseline the residual scores are defined against, and
         # they are the rating heads' own fit either way.
-        burn = BURN_IN_EPOCHS if (args.k > 0
-                                  and args.warm_start == "burnin") else 0
+        burn = args.burn_in if (args.k > 0
+                                and args.warm_start == "burnin") else 0
         if burn:
             m.v.requires_grad_(False)
         print(f"\n=== joint fit seed {seed} | {args.epochs} epochs | K={args.k} "
