@@ -42,7 +42,9 @@ Reproduce:
 
 ## Results — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
 
-The user holdout is the criterion from here; the problem- and row-holdout tables below are kept as what they are, measurements of different questions. Read the warm-start leak section first — it is one-sided and these numbers carry it.
+The user holdout is the criterion from here; the problem- and row-holdout tables below are kept as what they are, measurements of different questions.
+
+These numbers were measured with the leaky `eigen` warm start, since they predate its fix. The correction is now quantified rather than open: **the rating figures stand unchanged, and the MIRT's axis figures are inflated by about 0.5 mnat.** Applying it widens production's axis lead from ~2.6 to ~3.1 mnat and leaves the combined comparison a tie either way.
 
 Production is `train_rating_staged --production-flags`, which has no phase 2. All three logloss rows are PARTITIONS OF ONE one-step-ahead prequential walk from each held-out user's first attempt — ability from a running grid posterior, axis position `v` learned online from zero — split by whether training saw the problem (81% seen / 19% not). They are not three protocols.
 
@@ -69,14 +71,14 @@ axis adds (mnat)              production            MIRT
 
 **Survey rho is not usable on this holdout.** It is restricted to held-out accounts' declarations — 92 on seed 0, 67 on seed 1, against the 374 that gave the ±0.012 resolution quoted below. Production 0.9108 / 0.8061, MIRT 0.9167 / 0.7766: the fold-to-fold swing of 0.10 dwarfs both model differences, which flip sign between folds. Do not quote it.
 
-## THE WARM-START LEAK — found 2026-08-13, affects every MIRT number in this document
+## THE WARM-START LEAK — found and fixed 2026-08-13
 
 `train_joint_mirt` initializes its axis map from `eigen_directions`, which needs an axis-free 4PL to take residuals against. A single-stage model has none at initialization, so it calls `build_axis_features()` with no `params_dir` — reading the **shipped `ratings/`**, a two-stage fit trained on every user and every problem. Two independent leaks follow, both favouring the MIRT:
 
 - **User holdout.** `--holdout-user-frac` masks rows from the SGD training set only. It never reaches `rbu`, `ax_users` or `tu_ax`, which are filtered by the *axis* fold alone, so held-out accounts warm-start the model directly: **66 of 383 warm-start users (17.2%, 31,931 attempts) on seed 0, and 52 of 383 (13.6%, 20,589) on seed 1.**
 - **Problem holdout.** The shipped per-problem parameters were fitted on all 153,720 problems, the 20,315 held-out ones included, and `rbu` carries attempts on them.
 
-Production's side is clean in both: `fit_axes_userholdout` excludes held-out users and reads the matching per-fold rating fit, and `prod_axis_heldout` excludes held-out problems. So the leak is one-sided, and the corrections run in one direction — **the MIRT's rating advantage is inflated and its axis deficit understated.** The axis conclusions therefore survive as conservative; the rating conclusions do not, and no rating figure here should be quoted as a clean measurement until a leak-free warm start is in place.
+Production's side is clean in both: `fit_axes_userholdout` excludes held-out users and reads the matching per-fold rating fit, and `prod_axis_heldout` excludes held-out problems. So the leak was one-sided, inflating the MIRT. Measured after the fix it is worth **0.51 mnat on the axis column and ~0 on rating** — real, and smaller than the sizes feared while it was open.
 
 The rank curve is a second, smaller leak shared by BOTH models: `build_axis_features` reads the shipped `rating_to_rank.json` for its rank column regardless of `params_dir`.
 
@@ -84,7 +86,27 @@ The fix is `auxiliary/rating_dev/burn_in_warm_start.py`, wired in as `--warm-sta
 
 A second defect of the borrowed form, independent of the leak: `eigen_directions` works in the 216-column axis feature space and the result is truncated by `gi_full[:, :fdim]` to the MIRT's 212 **without renormalising**, so the initialization is a non-unit projection of directions chosen partly along four coordinates this model does not have — including the two-stage model's own rating and slope.
 
-### The ablation — MEASURED 2026-08-13. The warm start stays; the burn-in does not replace it yet.
+### RESOLVED 2026-08-13. The leak was worth ~0.5 mnat; the warm start now reads no external fit.
+
+Two fixes landed. `--holdout-user-frac` now reaches the warm start's own user set — it previously reached only the SGD row mask, which is why held-out accounts were in it — and `--axis-params-dir` lets the `eigen` construction read a per-fold rating fit instead of the shipped one. With both, a clean `eigen` is measurable, and the default moved to `burnin`, which reads no external fit at all.
+
+```
+                       rating              axis adds (mnat)
+  eigen (leaky)     0.4930 +/- 0.0003      +0.68 +/- 0.19
+  eigen (clean)     0.4931 +/- 0.0001      +0.17 +/- 0.30
+  burnin (300)      0.4933 +/- 0.0004      -0.13 +/- 0.23   <-- default
+  none              0.4932 +/- 0.0001      -2.64 +/- 0.86
+```
+
+**The leak was worth 0.51 mnat on the axis column and ~0 on rating** — real, but far smaller than the caveat this section previously carried. Every rating figure in this document stands; the axis figures were inflated by half a mnat.
+
+**`burnin` and a clean `eigen` are indistinguishable.** Paired by seed the difference is +0.67 and −0.07, i.e. 0.30 +/- 0.52 — nothing two seeds can resolve. So `burnin` is chosen on STRUCTURE: no shipped `ratings/`, no shipped rank curve, and the leak class gone by construction rather than by a filter that has to be remembered.
+
+**The warm start itself is firmly vindicated** — ~2.8 mnat over random init even after cleaning. And random init's failure here is NOT the one `train_axes` recorded (sd 0.126, one draw in three collapsing): the rating is seed-stable to 0.0001 and the axes fail *consistently*, at −2.64. Quote that finding with the model it was measured on.
+
+Two design points that came out against expectation, both worth not re-deriving. **A fixed burn-in beats running to convergence** (spread 0.23 vs 1.46): the axis-free fit's convergence epoch is itself seed-dependent — 380 and 550 on the two seeds — and since the outcome is epoch-sensitive the criterion inherits that variance, so a fixed handover removes a variance source rather than papering over a missing criterion. **Do not rewind to the axis-free best at handover** (costs 1.4 mnat, quadruples the spread): the two-stage analogy fails because there the fit ENDS at its best epoch, while here training continues, so restoring parameters while Adam's moments describe a later trajectory resumes the fit with one epoch's weights under another's momentum.
+
+### The ablation that established it — MEASURED 2026-08-13
 
 At the swept optimum `3e-4 / 1e-2`, held-out users, holdout seed 0:
 
@@ -101,7 +123,7 @@ At the swept optimum `3e-4 / 1e-2`, held-out users, holdout seed 0:
 
 `--burn-in` makes the length a knob so this is testable. If a converged baseline closes the gap the mechanism is sound and 100 was simply wrong; if it does not, the warm start's value depends on having a converged EXTERNAL fit, which is a genuine problem for the single-stage thesis rather than a tuning matter.
 
-Until then the default stays `eigen`, the leak stands, and **no rating figure in this document is a clean measurement.**
+This section is superseded by the resolution above: the leak is fixed, `burnin` is the default, and the rating figures stand.
 
 ## Results — held-out samples, 2 folds, mean ± sd
 

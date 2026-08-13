@@ -205,7 +205,24 @@ STOP_ROW_FRAC = 0.03
 # Epochs trained with v pinned at zero before --warm-start burnin reads the axis
 # directions off the model's own residuals. Not free-standing: it is a schedule
 # point inside one fit, not a stage, and the epochs are the rating heads' own.
-BURN_IN_EPOCHS = 100
+#
+# Measured on held-out users, two seeds each (axis mnat, and its seed spread is
+# the point):
+#     100          0.4944 +/- 0.0021   +0.22 +/- 1.20   residuals carry rating ERROR
+#     300          0.4933 +/- 0.0004   -0.13 +/- 0.23   <-- shipped
+#     500          0.4942 +/- 0.0007   -1.15 +/- 0.07   residuals carry rating OVERFIT
+#     converge     0.4954 +/- 0.0020   -0.63 +/- 1.46
+#
+# A FIXED COUNT BEATS RUNNING TO CONVERGENCE, which is not the obvious answer and
+# is worth stating in full. Handing over at the axis-free fit's own patience-rule
+# convergence sounds strictly better — it is what the two-stage pipeline does —
+# but that epoch is itself seed-dependent (380 on one seed, 550 on the other),
+# and the outcome is epoch-sensitive, so the criterion INHERITS that variance:
+# spread 1.46 against a fixed count's 0.23. A fixed handover is therefore not a
+# magic number standing in for a criterion; it removes a variance source the
+# criterion introduces. Both ends still corrupt the residuals as the table shows,
+# so 300 is an interior optimum, not a floor or a ceiling.
+BURN_IN_EPOCHS = 300
 # THE ONLY INCLUSION RULE. It replaces both of the rating trainer's — the 5-of-
 # each user filter (MIN_ATTEMPTS) and the 8-attempt profile floor (MIN_PROFILE) —
 # because those are judgements about how WELL a parameter is estimated, while
@@ -496,6 +513,13 @@ def main():
                          "the 4PL saw every user and only the axis stage does "
                          "CV. WITHOUT this there is no held-out-user axis "
                          "measurement and none may be reported.")
+    ap.add_argument("--axis-params-dir", default=None,
+                    help="read the rating model's outputs for the EIGEN warm "
+                         "start from this ratings/ directory instead of the "
+                         "shipped one. Under a holdout the shipped fit saw the "
+                         "rows being scored, so a clean eigen measurement needs "
+                         "the matching held-out fit here. Irrelevant to "
+                         "--warm-start burnin, which reads no external fit.")
     ap.add_argument("--burn-in", type=int, default=BURN_IN_EPOCHS,
                     help="epochs with v pinned at zero before --warm-start "
                          "burnin reads its directions off the model's own "
@@ -518,17 +542,21 @@ def main():
                          "two criteria are anti-correlated across the learning-"
                          "rate grid, and the stop split cannot see population "
                          "overfitting because it shares the population.")
-    ap.add_argument("--warm-start", choices=("eigen", "burnin", "none"),
-                    default="eigen",
-                    help="how the axis map is initialized. 'burnin' derives it "
-                         "inside the pass from the model's own residuals at "
-                         "v = 0, over TRAINING ROWS ONLY — no shipped ratings/, "
-                         "no rank curve, nothing from a held-out user. 'eigen' "
-                         "borrows the two-stage warm start, which reads the "
-                         "shipped fit and therefore leaks under any holdout "
-                         "(see docs/mirt_benchmark.md). 'none' is the ablation: "
-                         "random init, which the warm start has never been "
-                         "measured against IN THIS MODEL.")
+    ap.add_argument("--warm-start", choices=("burnin", "eigen", "none"),
+                    default="burnin",
+                    help="how the axis map is initialized. DEFAULT 'burnin' "
+                         "derives it inside the pass from the model's own "
+                         "residuals at v = 0, over TRAINING ROWS ONLY — no "
+                         "shipped ratings/, no shipped rank curve, nothing from "
+                         "a held-out user, so the model is self-contained and "
+                         "the leak class is gone by construction. It is chosen "
+                         "on STRUCTURE, not on score: with its own leaks removed "
+                         "'eigen' measures +0.17 +/- 0.30 against burnin's "
+                         "-0.13 +/- 0.23, a difference of 0.30 +/- 0.52 paired, "
+                         "i.e. none that two seeds can resolve. 'eigen' borrows "
+                         "the two-stage warm start and needs --axis-params-dir "
+                         "to be honest under a holdout. 'none' is the ablation, "
+                         "and it costs ~2.8 mnat of axis gain.")
     ap.add_argument("--dump-params", default=None,
                     help="write per-problem (rating, difficulty, slope, floor, "
                          "loading) plus abilities and axis positions to this "
@@ -679,6 +707,7 @@ def main():
     # the evaluator's business, not the trainer's.
     extra_ho = np.zeros(len(prof_df), bool)
     uid_arr = np.array(uids)
+    hu = set()
     if args.holdout_user_frac > 0:
         from auxiliary.rating_dev.holdout_set import held_out_users
         hu_list, hu_hash = held_out_users(args.holdout_seed,
@@ -771,16 +800,29 @@ def main():
 
     # --- axis warm start, from the two-stage machinery (same construction), on
     # the axis trainer's feature matrix restricted to these columns' semantics.
-    feats_ax, rank_ax, params_ax, _ad = build_axis_features()
+    # --axis-params-dir reads the rating model's outputs from a named fit rather
+    # than the shipped ratings/, which was trained on EVERY user and every
+    # problem. Leaving it unset under a holdout means the warm start is derived
+    # from parameters informed by the rows about to be scored.
+    feats_ax, rank_ax, params_ax, _ad = build_axis_features(
+        params_dir=args.axis_params_dir)
     tids_ax = sorted(feats_ax)
     ti_ax = {t: i for i, t in enumerate(tids_ax)}
     Fax = np.stack([feats_ax[t] for t in tids_ax])
     Fax = ((Fax - Fax.mean(0)) / (Fax.std(0) + 1e-9)).astype(np.float32)
+    # HELD-OUT USERS ARE EXCLUDED HERE TOO, and this is a fix rather than an
+    # option. --holdout-user-frac reached only the SGD row mask, so the warm
+    # start was still built from the held-out accounts' own attempts — measured
+    # at 17.2% and 13.6% of its users on the two folds. Protecting the training
+    # rows and not the initialization protects nothing.
     rbu = defaultdict(list)
     for u, p, s in load_axis_attempts():
-        if p in ti_ax:
+        if p in ti_ax and str(u) not in hu:
             rbu[u].append((p, int(bool(s))))
     ax_users = sorted(u for u, a in rbu.items() if len(a) >= MIN_USER_ATTEMPTS)
+    if hu:
+        print(f"  warm-start users: {len(ax_users)} (held-out accounts "
+              f"excluded)", flush=True)
     lapse_c = load_client_lapse(0.0328)
     fold_of = _stratified_folds(ax_users, rbu)
 
@@ -867,27 +909,26 @@ def main():
         # at v = 0 the loading gradient is identically zero, so these epochs are
         # the axis-free baseline the residual scores are defined against, and
         # they are the rating heads' own fit either way.
-        burn = args.burn_in if (args.k > 0
-                                and args.warm_start == "burnin") else 0
-        if burn:
+        #
+        # ITS LENGTH IS A CONVERGENCE CRITERION, NOT A CONSTANT (--burn-in 0).
+        # Both ends of a fixed count corrupt the residuals, in opposite ways and
+        # measurably: too early and they are dominated by rating ERROR, too late
+        # by rating OVERFIT, since the baseline has its own optimum to pass. So
+        # the burn-in runs under the same patience rule as everything else and
+        # hands over at its own best epoch, restored — which is exactly what the
+        # two-stage pipeline does, train_rating converging before build_axes
+        # reads it, and is why the borrowed warm start works at all.
+        burnin_on = (args.k > 0 and args.warm_start == "burnin")
+        burn_fixed = args.burn_in if (burnin_on and args.burn_in > 0) else 0
+        in_burn = burnin_on
+        if in_burn:
             m.v.requires_grad_(False)
         print(f"\n=== joint fit seed {seed} | {args.epochs} epochs | K={args.k} "
               f" | warm start {args.warm_start}"
-              f"{f' after {burn} burn-in epochs' if burn else ''} ===",
-              flush=True)
+              + (f" after {burn_fixed} burn-in epochs" if burn_fixed
+                 else " after a burn-in to convergence" if in_burn else "")
+              + " ===", flush=True)
         for ep in range(args.epochs):
-            if burn and ep == burn:
-                gi_bi, n_seen = burn_in_directions(
-                    m, tfeat, tp, tprof, tu, ty, tr_eff, args.k, len(uids),
-                    batch=BATCH)
-                with torch.no_grad():
-                    m.g_lin.weight.copy_(torch.tensor(gi_bi, device=device))
-                m.v.requires_grad_(True)
-                # The burn-in's own convergence says nothing about the joint
-                # fit's, so its patience is discarded rather than carried in.
-                best, best_state, flat, best_epoch = float("inf"), None, 0, 0
-                print(f"  warm start taken at epoch {burn} from {n_seen} "
-                      f"training users' own residuals; v released", flush=True)
             m.train(True)
             perm = tr_eff[torch.randperm(n, device=device)]
             for i in range(0, n, BATCH):
@@ -897,7 +938,7 @@ def main():
                     pred, ty[bi], reduction="none").sum() / len(bi)
                 # While v is pinned at zero the axis terms are either identically
                 # zero or act on a g that the warm start is about to overwrite.
-                if ep >= burn:
+                if not in_burn:
                     loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
                     loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
                     Mc = gh - gh.mean(dim=0, keepdim=True)
@@ -913,11 +954,7 @@ def main():
                   loss = loss + args.shallow_w * short
                   m.train(True)
                 opt.zero_grad(); loss.backward(); opt.step()
-            # No stop checks during the burn-in: a plateau of the axis-free fit
-            # is not convergence of the joint one, and letting patience fire
-            # there would end the run before the axes have trained at all.
-            if ep >= burn and ((ep + 1) % CHECK_EVERY == 0
-                               or ep == args.epochs - 1):
+            if (ep + 1) % CHECK_EVERY == 0 or ep == args.epochs - 1:
                 m.train(False)
                 with torch.no_grad():
                     pr, _ = m.forward(tprof, tu, tfeat[tp])
@@ -931,9 +968,43 @@ def main():
                     best_epoch = ep + 1
                     best_state = [q.detach().clone() for q in m.params()]
                 flat = 0 if improved else flat + 1
-                print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  stop-split "
-                      f"{bce_st:.4f}  best {best:.4f}@{best_epoch}  "
+                print(f"  {'[burn] ' if in_burn else ''}epoch {ep + 1:4d}  "
+                      f"train {bce_tr:.4f}  stop-split {bce_st:.4f}  "
+                      f"best {best:.4f}@{best_epoch}  "
                       f"stale {flat}/{args.flat_patience}", flush=True)
+                if in_burn:
+                    # The burn-in ends at its fixed count, or — with none given —
+                    # at its OWN convergence under the same patience rule. A
+                    # fixed count rounds up to the next check.
+                    done = ((ep + 1) >= burn_fixed if burn_fixed
+                            else flat >= args.flat_patience)
+                    if done:
+                        # NO REWIND to the axis-free best, though it is tempting
+                        # by analogy with the two-stage pipeline. There the fit
+                        # ENDS at its best epoch, so there is no optimizer left
+                        # to keep consistent; here training continues, and
+                        # restoring params while Adam's moments still describe
+                        # the later trajectory resumes the fit with one epoch's
+                        # weights driven by another's momentum. Measured: the
+                        # rewind costs the axis column 1.4 mnat and quadruples
+                        # its seed spread against handing over in place.
+                        gi_bi, n_seen = burn_in_directions(
+                            m, tfeat, tp, tprof, tu, ty, tr_eff, args.k,
+                            len(uids), batch=BATCH)
+                        with torch.no_grad():
+                            m.g_lin.weight.copy_(
+                                torch.tensor(gi_bi, device=device))
+                        m.v.requires_grad_(True)
+                        print(f"  warm start taken IN PLACE at epoch {ep + 1} "
+                              f"(axis-free fit converged, best {best:.4f}@"
+                              f"{best_epoch}) over {n_seen} training users' own "
+                              f"residuals; v released", flush=True)
+                        # The burn-in's convergence says nothing about the joint
+                        # fit's, so its patience is discarded rather than carried.
+                        best, best_state, flat, best_epoch = \
+                            float("inf"), None, 0, 0
+                        in_burn = False
+                    continue        # never END the run during the burn-in
                 if args.dump_every and args.dump_params and \
                         (ep + 1) % args.dump_every == 0:
                     _write_dump(f"{args.dump_params[:-4]}.ep{ep + 1:05d}.npz")
