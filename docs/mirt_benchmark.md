@@ -27,11 +27,6 @@ Reproduce:
 
 ```bash
 ./.venv/bin/python3 -m auxiliary.rating_dev.holdout_set --seed 0 --frac 0.15
-# the two-stage pair it is compared against, still runnable from auxiliary
-./.venv/bin/python3 -m auxiliary.rating_dev.train_rating_staged \
-    --production-flags --holdout-user-frac 0.15 --seed 0 --out-dir /tmp/prod_uh_s0
-./.venv/bin/python3 -m auxiliary.rating_dev.fit_axes_userholdout \
-    --prod-dir /tmp/prod_uh_s0 --seed 0 --frac 0.15 --k 3 --out /tmp/axes_uh_s0.npz
 # the joint fit, at the shipped configuration
 ./.venv/bin/python3 -m auxiliary.rating_dev.train_joint_mirt \
     --k 3 --seeds 0 --holdout-seed 0 --lr-net 3e-4 --lr-field 1e-2 \
@@ -256,6 +251,43 @@ The names in `axes/labels.json` were fitted against the two-stage axes and do no
 
 `--holdout-problem-frac 0` matters: the dev default is the benchmark's 20% problem holdout, and a problem no fit saw is priced from the feature prior alone, which inflates the apparent instability with variation production does not have.
 
+## CARRYING THE PREVIOUS FIT OVER IS THE REMEDY — MEASURED 2026-08-14
+
+Given that no post-hoc matcher can work (previous section), the remaining option is to stop re-deriving a basis: initialize each refit from the previous fit's model (`--init-from`), so consecutive runs CONTINUE the same axes. The problem-side modules — trunk, rating head, axis map — transfer whole; `theta` and the axis positions scatter by profile/user NAME, so accounts that did not exist yet start at zero, which is what they would have been initialized to anyway. Carrying implies no burn-in: the carried axes ARE the warm start.
+
+Design. A geometric schedule of date cuts, mirroring real growth — early refits add a lot of relative data, later ones little. CHAIN A carries: 50% cut (cold, the origin) -> 25% -> 12.5% -> 6.25% -> full, each continuing the last. CHAIN B is the control, the same cuts fitted INDEPENDENTLY, which is what separates "the data agrees" from "it never left where it was put". Both at the experiment surface's `--flat-patience 5`.
+
+| step (new accounts) | CARRIED, min canonical | COLD, min canonical |
+|---|---|---|
+| 50% -> 25% (26% new) | 0.843 | 0.088 |
+| 25% -> 12.5% (7.6% new) | 0.906 | 0.070 |
+| 12.5% -> 6.25% (3.9% new) | 0.983 | 0.732 |
+| 6.25% -> full (~3% new) | 0.958 | 0.552 |
+| **end to end, origin vs final** | **0.676** | **0.134** |
+
+Fitted independently, the two endpoints share **14 tail problems of 1000** on the best-matched axis against 3.3 by chance — unrelated fits. Carried through four refits, the same span holds **568**, and the axes stay recognizably the same directions.
+
+**Drift does NOT compound with refit count.** Cumulative agreement against the origin runs 0.843 / 0.609 / 0.666 / 0.676 after one, two, three and four steps: it drops once, at the single large perturbation, then stops moving. What the cumulative figure reflects is the SIZE of the largest delta, not how many refits have happened. Steps 3 and 4 are the realistic production case (3.9% and ~3% new accounts) and come in at 0.983 and 0.958, leaving the cumulative flat — at a normal cadence, carry-over effectively freezes the axes.
+
+### It costs nothing — it gains
+
+Best stop-split at the SAME cut, so the two are directly comparable:
+
+| cut | carried | cold | delta |
+|---|---|---|---|
+| 0.25 | 0.4668 @110 | 0.4731 @330 | **-6.3 mnat** |
+| 0.125 | 0.4714 @60 | 0.4760 @450 | **-4.6** |
+| 0.0625 | 0.4835 @20 | 0.4930 @350 | **-9.5** |
+| 0 (full) | 0.4772 @50 | 0.4834 @360 | **-6.2** |
+
+The entrenchment risk — that a carried fit starts near its optimum, stops immediately, and buys stability by never moving — did NOT materialize. It moves to a BETTER place, faster. In hindsight that follows: a refit inheriting a converged model is not handicapped, it is starting from the answer to a strictly easier version of the same problem, which is exactly what a production refit is.
+
+**Treat the margin as an upper bound until the 2x2 lands.** Both arms ran at patience 5, which stops fits early (see the FLAT_PATIENCE row). That cannot make the CARRIED number falsely good — the stop split is honest at whatever epoch it is read — but it can make the COLD number falsely bad, since the cold arm converges at epoch 330-450 and may be stopping short. The stability result stands independently: 0.088 against 0.843 is not a patience artifact.
+
+### What this leaves for the tail bank
+
+Carry-over removes the need to RECOGNIZE a motif, but not the need to notice when one has drifted out from under its name — consecutive pairs sit at 0.96-0.98 while the origin has moved to 0.68, so a consecutive check would never fire. The job the tail bank is actually suited to is a DRIFT MONITOR against the frozen origin: per refit, report how many of a motif's original top/bottom 500 problems it still holds, and flag the name for re-inspection below a bar. That is a monitor on a known quantity, not a matcher against strangers, and it is the one form of the idea the measurements support.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
@@ -297,12 +329,10 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 
 ### D. Open questions that are not knobs
 
-- **Where production's remaining axis advantage lives.** It is concentrated in the never-trained partition (13.57 vs 6.03 mnat on fold 0), which is 19% of attempts; on the 81% majority the two are close. That points at how each model prices unattempted content, not at the axis machinery.
 - **The axis block overfits faster than the rating heads** — measured on the stopping diagnostic, the axes swing +0.8 to −4.1 mnat between epochs 350 and 650 while the rating moves 1.9. A separate stopping signal for the axis path has never been tried.
-- **Whether CARRYING THE PREVIOUS FIT OVER buys axis identity, and what it costs.** The only remedy the measurements above leave standing: initialize a refit from the previous fit's model (`--init-from`) so consecutive runs continue the same axes instead of re-deriving a basis. Two readouts are needed, not one — stability along the chain, AND the held-out loss against a cold fit on the same data, because a carried fit starts near its optimum and may stop almost immediately, which would produce excellent stability that means only that it never moved. If anchoring costs real mnats, that is the price of nameable axes and should be quoted as such.
 - **An LR warmup schedule** (`--lr-warmup-epochs`, linear ramp from zero). The case for it is ENDPOINT CONSISTENCY, and it is stronger than it first looks: because the axis objective is rotation-invariant, nothing pulls two runs together and the endpoint is decided ENTIRELY by the path — so a path less sensitive to perturbation should land two runs closer, even though the degenerate set is the same size either way. "The objective cannot prefer a point" does not imply "the optimizer cannot land consistently". The case against is which perturbation dominates here: warmup damps sensitivity to OPTIMIZER noise (init draw, early large steps, batch order), but the 2% time cut re-rolled the basis at the SAME seed and same init, which is sensitivity to the DATA — and that points at the warm start itself, the top-K eigenvectors of the burn-in residual moment, whose trailing eigenvalues sit within 1.4x of each other (0.00048 vs 0.00034 in the trained `cov(v)`). Eigenvectors of a near-degenerate matrix swing under any perturbation of the matrix, which is closed-form arithmetic and not a gradient path. The two mechanisms are separable and the test is direct: two seeds with warmup against the no-warmup seed pair's 0.409 / 0.792 / 0.959. Note the fit's KNOWN divergence mode is not the shape warmup usually treats — a SHARED rate diverging late (0.460 at epoch 70 to 0.521 at epoch 90), fixed by splitting the rates.
 - **Trunk initialization and input scaling.** Both currently unexamined rather than chosen: no explicit init on the trunk or rating head (PyTorch defaults), and every input block pooled column z-scored with no normalization layer inside the trunk. At 216 -> 128 -> 64 neither is expected to matter, but that is an argument from the architecture and not a measurement.
-- **Fold sensitivity of the axis comparison.** Production's axis lead is +1.77 on fold 0 and +0.32 on fold 1. Two folds cannot resolve that; a third and fourth would.
+- **Fold sensitivity.** Every axis figure here rests on two folds, and the MIRT's own fold-to-fold spread is wide enough that two cannot resolve a small difference. A third and fourth would. (The entry this replaces compared against the two-stage model, which is deleted and cannot be re-run.)
 
 ## SUPERSEDED — held-out USERS, 2 folds, paired per fold — MEASURED 2026-08-12
 

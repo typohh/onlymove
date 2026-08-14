@@ -582,6 +582,18 @@ def main():
                          "what a pure row- or user-holdout run wants. Left at the "
                          "benchmark value by default so existing comparisons are "
                          "unaffected.")
+    ap.add_argument("--init-directions", default=None,
+                    help="FROZEN GAUGE. An npz of per-problem loadings (any "
+                         "--dump-params output) to initialize the axis map "
+                         "toward, instead of this fit's own residual eigen-"
+                         "directions. The bank is stored in PROBLEM space, not "
+                         "trunk space, because the trunk is refitted every run "
+                         "and its coordinates mean nothing across fits; g_lin is "
+                         "recovered by least squares against the new trunk. The "
+                         "likelihood is invariant to rotating the axis space, so "
+                         "fixing the basis this way costs no accuracy by "
+                         "construction — it is a gauge choice, like the "
+                         "difficulty gauge.")
     ap.add_argument("--lr-warmup-epochs", type=int, default=0,
                     help="linearly ramp both learning rates from 0 to their full "
                          "value over this many epochs. The claim under test is "
@@ -1211,18 +1223,53 @@ def main():
                         # weights driven by another's momentum. Measured: the
                         # rewind costs the axis column 1.4 mnat and quadruples
                         # its seed spread against handing over in place.
-                        gi_bi, n_seen = burn_in_directions(
-                            m, tfeat, tp, tprof, tu, ty, tr_eff, args.k,
-                            len(uids), batch=BATCH,
-                            xfeat=m.axis_input(tfeat))
-                        with torch.no_grad():
-                            m.g_lin.weight.copy_(
-                                torch.tensor(gi_bi, device=device))
-                        m.v.requires_grad_(True)
-                        print(f"  warm start taken IN PLACE at epoch {ep + 1} "
-                              f"(axis-free fit converged, best {best:.4f}@"
-                              f"{best_epoch}) over {n_seen} training users' own "
-                              f"residuals; v released", flush=True)
+                        if args.init_directions:
+                            bank = np.load(args.init_directions,
+                                           allow_pickle=False)
+                            brow = {f"{sz}:{t}": i for i, (sz, t) in
+                                    enumerate(zip(bank["size"], bank["tid"]))}
+                            BL = np.asarray(bank["loading"], np.float64)
+                            if BL.shape[1] != args.k:
+                                raise SystemExit(
+                                    f"--init-directions has K={BL.shape[1]}, "
+                                    f"this run K={args.k}")
+                            rows, tgt = [], []
+                            for (sz, t), j in key_idx.items():
+                                i = brow.get(f"{sz}:{t}")
+                                if i is not None:
+                                    rows.append(j); tgt.append(BL[i])
+                            H = m.axis_input(tfeat)[rows].cpu().numpy().astype(
+                                np.float64)
+                            Y = np.asarray(tgt)
+                            # The bank's SCALE is arbitrary — a per-axis rescale
+                            # is absorbed by v — so match direction only.
+                            Y = (Y - Y.mean(0)) / (Y.std(0) + 1e-12)
+                            W, *_ = np.linalg.lstsq(H, Y, rcond=None)
+                            r2 = [1 - ((Y[:, kk] - H @ W[:, kk]) ** 2).sum()
+                                  / (Y[:, kk] ** 2).sum() for kk in range(args.k)]
+                            with torch.no_grad():
+                                m.g_lin.weight.copy_(torch.tensor(
+                                    W.T, dtype=torch.float32, device=device))
+                            m.v.requires_grad_(True)
+                            print(f"  FROZEN GAUGE at epoch {ep + 1}: axis map "
+                                  f"fitted to {len(rows)} banked loadings from "
+                                  f"{os.path.basename(args.init_directions)}, "
+                                  f"per-axis R^2 "
+                                  f"{' '.join(f'{v:.3f}' for v in r2)}; "
+                                  f"v released", flush=True)
+                        else:
+                            gi_bi, n_seen = burn_in_directions(
+                                m, tfeat, tp, tprof, tu, ty, tr_eff, args.k,
+                                len(uids), batch=BATCH,
+                                xfeat=m.axis_input(tfeat))
+                            with torch.no_grad():
+                                m.g_lin.weight.copy_(
+                                    torch.tensor(gi_bi, device=device))
+                            m.v.requires_grad_(True)
+                            print(f"  warm start taken IN PLACE at epoch {ep + 1} "
+                                  f"(axis-free fit converged, best {best:.4f}@"
+                                  f"{best_epoch}) over {n_seen} training users' own "
+                                  f"residuals; v released", flush=True)
                         # The burn-in's convergence says nothing about the joint
                         # fit's, so its patience is discarded rather than carried.
                         best, best_state, flat, best_epoch = \

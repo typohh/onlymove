@@ -298,7 +298,16 @@ def main():
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--frac", type=float, default=0.15)
     ap.add_argument("--label", default="model")
+    ap.add_argument("--prior-ax-sd", type=float, default=None,
+                    help="override PRIOR_AX_SD, the scorer's prior sd on a user's "
+                         "axis contribution IN LOGITS. This is the measuring "
+                         "instrument for every axis number, so it is swept "
+                         "post-hoc against fixed dumps — no retraining, and the "
+                         "arms being compared are unaffected by the choice.")
     args = ap.parse_args()
+    if args.prior_ax_sd is not None:
+        globals()["PRIOR_AX_SD"] = args.prior_ax_sd
+        print(f"PRIOR_AX_SD = {args.prior_ax_sd}")
 
     srcs = [(d, None) for d in args.prod_dirs] + [(None, d) for d in args.dumps]
     if len(srcs) != len(args.seeds):
