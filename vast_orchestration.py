@@ -33,6 +33,7 @@ PIPELINE_STEPS = {
     "tune": "pipeline.tune_engine",
     "generate": "pipeline.generate_tsumegos",
     "benchmark": "pipeline.benchmark_bots",
+    "losing_lines": "auxiliary.add_losing_lines",
     "calibrate19": "auxiliary.calibrate_ranks_19x19",
     "calibrate_handicap": "auxiliary.calibrate_handicap_ranks",
 }
@@ -41,7 +42,7 @@ PIPELINE_STEPS = {
 # forwarded verbatim to the remote `python -m pipeline.<step> <size>`, which
 # selects tsumegos/<size>/, attempts/<size>/, and the engine board dimensions.
 # The calibrate* steps are fixed-board auxiliary diagnostics and take no size.
-SIZE_REQUIRED_STEPS = {"tune", "generate", "benchmark"}
+SIZE_REQUIRED_STEPS = {"tune", "generate", "benchmark", "losing_lines"}
 
 # Files uploaded from the local repo. We ship the CUDA katago build to the
 # remote (vast.ai NVIDIA GPUs); the local repo's bots/katago is OpenCL and is
@@ -89,8 +90,14 @@ REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts",
 # For calibrate_handicap, the rank fit and pair-selection priorities are
 # seeded from the existing SGF corpus; without these, the remote starts cold
 # and wastes games re-learning the kyu / dan gaps.
+# losing_lines is the one step whose input dir IS the corpus it works on. Run it
+# with `--out-dir tsumegos/fixed/<size>` so it writes beside its input instead of
+# over it: the uploaded tsumegos/<size>/ then never changes, which is what makes
+# it safe both to re-upload on a restart and to pull the finished files down
+# repeatedly while the run is still going.
 STEP_INPUT_DIRS = {
     "benchmark": ["attempts"],
+    "losing_lines": ["tsumegos"],
     "calibrate_handicap": ["calibration_handicap_sgf"],
 }
 
@@ -615,8 +622,15 @@ def setup_instance(inst):
         return False
 
     # Minimal python deps for the two remote steps.
+    # Each spec is double-quoted inside the single-quoted `bash -l -c` string:
+    # the inner shell parses that string itself, and there a bare `>=1.21.0`
+    # is a REDIRECTION, not a version bound. Unquoted, pip was handed plain
+    # `numpy` (so the bound was silently dropped) with its whole output
+    # redirected into files named `=1.21.0` — a setup that looks hung because
+    # nothing prints, and installs whatever version it likes.
+    specs = " ".join(f'"{pkg}"' for pkg in REMOTE_PIP_PACKAGES)
     pip_cmd = (f"bash -l -c 'python3 -m pip install --break-system-packages "
-               f"{' '.join(REMOTE_PIP_PACKAGES)}'")
+               f"{specs}'")
     for attempt in range(3):
         res = subprocess.run(base_ssh + [pip_cmd])
         if res.returncode == 0:
@@ -657,31 +671,47 @@ def setup_instance_with_retry(inst, attempts=3):
 
 def cmd_add():
     """Create a new Vast.ai NVIDIA-GPU instance and run setup."""
-    # bots/katago_cuda is built against CUDA 13, so the host's driver must
-    # support it (cuda_max_good>=13.0). Forward compat is unavailable on
-    # consumer GPUs. reliability2>0.99 avoids hosts that drop offline mid-run
-    # (full pipeline takes hours and a reschedule means starting over).
-    base_filter = ("rented=False rentable=True "
-                   "cuda_max_good>=13.0 reliability>0.99")
-    print("Searching for RTX 5090 offers...")
-    offers = run_vast_cmd(["search", "offers",
-                           f"gpu_name=RTX_5090 {base_filter}"])
-    if not offers:
-        print("No RTX 5090 offers; falling back to RTX 4090.")
-        offers = run_vast_cmd(["search", "offers",
-                               f"gpu_name=RTX_4090 {base_filter}"])
+    # No GPU model is named: the steps we remote are throughput-bound on a
+    # single card, so the offer is chosen by compute per dollar and whatever
+    # model wins that is the right one. Hard requirements:
+    #  * num_gpus=1 — every remoted step drives one card (parallelism comes
+    #    from multiple KataGo processes on it, see the auto-tuner above), so a
+    #    multi-GPU offer is paid for and left idle.
+    #  * cuda_max_good>=13.0 — bots/katago_cuda links against CUDA 13, and
+    #    forward compat is unavailable on consumer GPUs.
+    #  * reliability>0.99 — a full run takes hours with no checkpointing, so a
+    #    host that drops offline mid-run costs the whole run.
+    query = ("rented=False rentable=True num_gpus=1 "
+             "cuda_max_good>=13.0 reliability>0.99")
+    print("Searching offers (single GPU, CUDA >= 13.0, reliability > 99%)...")
+    offers = run_vast_cmd(["search", "offers", query])
     if not offers:
         print("No offers found.")
         return
-    offers = [o for o in offers if o.get("dph_total", 0) >= 0.1]
-    if not offers:
-        print("No valid offers (dph_total filter).")
-        return
-    offers.sort(key=lambda x: x.get("dph_total", float("inf")))
 
-    best = offers[0]
+    # Rank by TFLOPS per $/hr, computed here rather than read off the offer's
+    # flops_per_dphtotal so the ranking doesn't depend on an undocumented
+    # field. Offers without a positive price or a positive flops figure have
+    # no defined ratio, so they're dropped rather than ranked.
+    priced = [o for o in offers
+              if o.get("dph_total", 0) > 0 and o.get("total_flops", 0) > 0]
+    if not priced:
+        print(f"No offers with a usable price/TFLOPS pair ({len(offers)} seen).")
+        return
+    priced.sort(key=lambda o: o["total_flops"] / o["dph_total"], reverse=True)
+
+    print(f"{len(priced)} candidate offers; top by TFLOPS/$:")
+    for o in priced[:5]:
+        print(f"  {o.get('gpu_name', '?'):<16} "
+              f"{o['total_flops']:6.1f} TFLOPS  ${o['dph_total']:.3f}/hr  "
+              f"{o['total_flops'] / o['dph_total']:6.1f} TFLOPS/$  "
+              f"{o.get('gpu_ram', 0) / 1024:.0f} GB  "
+              f"{o.get('cpu_cores_effective', 0):.0f} cores")
+
+    best = priced[0]
     print(f"Creating instance ({best.get('gpu_name', '?')}, "
-          f"${best['dph_total']:.2f}/hr)...")
+          f"${best['dph_total']:.3f}/hr, "
+          f"{best['total_flops'] / best['dph_total']:.1f} TFLOPS/$)...")
     res = run_vast_cmd([
         "create", "instance", str(best["id"]),
         "--template_hash", "f779495b2d83b2c5b56e3c03f233f0ad",
@@ -1178,7 +1208,7 @@ COMMANDS = {
         "help": [
             f"Start a pipeline step in tmux. step ∈ {{{', '.join(PIPELINE_STEPS)}}}",
             "Extra args are forwarded to python -m pipeline.<step>",
-            "tune/generate/benchmark need a board size first, e.g. run generate 13",
+            "tune/generate/benchmark/losing_lines need a board size first, e.g. run generate 13",
         ],
         "handler": cmd_run,
     },
