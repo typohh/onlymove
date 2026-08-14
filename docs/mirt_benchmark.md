@@ -380,6 +380,31 @@ A third of the corpus is never attempted and its loadings are unconstrained extr
 
 **Tail overlap cannot be inferred from correlation, and the gap widens where it matters.** Under bivariate normality a correlation of 0.945 predicts 611 shared tail problems of 1000; the observed figure is 375. At 0.964 the prediction is 682 and the observation 219. The bulk of an axis transfers well while the specific problems at its ends keep changing — so the EXTREMES are the least reproducible part, which is unlucky given they are exactly what a human reads to name a motif and what `stats-weaknesses.js` reads to flag one. A drift monitor must therefore measure tails DIRECTLY; scoring correlation would overstate how well names transfer, by a factor that grows precisely in the range where confidence would be highest.
 
+### SHIPPED — teaching is the production trainer's only axis initialization
+
+`pipeline/train_mirt.py` no longer derives directions at all. `burn_in_directions` and the `trunk_out` helper that fed it are deleted; the axis map is pulled onto `axes/axis_bank.npz` by the MSE above, riding `gh` on the attempt stream, `TEACH_WEIGHT` 1.0 decaying linearly to zero over `TEACH_DECAY_EPOCHS` 1500. The bank is a `--dump-params` npz from this dev surface — it may carry more than K columns and **the first `K_AXES` are what ships**, so its column order is the shipping decision and is what `axes/labels.json` indexes. It is TRACKED in git alongside `labels.json`, being the only record of what a name is attached to. A missing bank, a bank with fewer than K columns, or a bank sharing no problems with the corpus each abort the run.
+
+**THE BURN-IN IS GONE ENTIRELY — the loop is uniform.** Pinning `v` at zero for an opening span is the obvious companion to teaching, and it buys nothing; the measurement is the next subsection. What remains is one decaying weight, so there is no `v_pinned` state, no release event and no gating of the axis penalties. The ortho penalty is now on from the first step rather than switching on at full weight partway through, which retires the open concern in section D about abrupt objective changes at the handover.
+
+Two things the shipped step prints, both diagnostics with no flag behind them: how many corpus problems the bank covers, and a per-axis `BANK IDENTITY` report at the end — correlation AND tail overlap against the bank, over attempted problems only. Correlation alone would overstate how well a name transfers, by a margin that grows exactly where confidence would be highest, so the tails are the number that governs a name. `axes/axes.npz` also records the bank's content hash, so a fit can say which directions it was held to.
+
+### THE v-PIN IS REFUTED — MEASURED 2026-08-15, production trainer
+
+Both arms in the shipped code, same bank (a dev dump on the same corpus), same seed, `--flat-patience` 30, differing only in whether `v` is held at zero for an opening 300 epochs.
+
+| | axis 0 | axis 1 | axis 2 | loss |
+|---|---|---|---|---|
+| pin 300 | 0.938 / 512 | 0.955 / 640 | 0.953 / 492 | 0.4978 @1090 |
+| NO pin | 0.938 / 511 | 0.955 / 630 | 0.952 / 492 | **0.4974** @1110 |
+
+(correlation / shared tail problems of 1000, against the bank, attempted problems only.)
+
+**Identical to three decimals on all three axes, tails within ten of a thousand, and the loss a hair better WITHOUT the pin.** This is not a noisy tie — three independent axes agreeing to that precision is the pin having no effect on what it was kept for. The mechanism argued for it (a free `v` at 33x the net learning rate fits positions against a random projection of a random trunk, then unlearns them) is REAL and visible in the trajectory — the pinned arm leads by ~2 mnat through epoch 300 and the gap closes monotonically — but it is a transient, gone by epoch 1000 and slightly reversed after. A cost paid early and repaid before convergence is not a reason to carry machinery.
+
+Caveats: one seed per arm, and the 0.4 mnat loss difference is well inside the 0.85 mnat seed noise, so read this as "the pin does nothing" rather than "removing it helps". The bank here shares a corpus with the fit, so this is a reproduction test rather than a refit test — but the pin's claimed job is purely about the opening epochs, which this exercises fully.
+
+**A schedule interaction worth knowing, found in the same runs.** Both arms reached their best epoch (1090, 1110) well BEFORE the teaching decay ends at 1500, and stopped at 1390/1410 — so the shipped parameters come from a point where the bank is still holding the map at ~27% strength, and the fit never fully releases. `FLAT_PATIENCE` counts staleness against an objective the decay is still changing. The decay length was picked on a fit that converged at 1450, close to full release; a corpus that converges earlier gets a schedule that outlives it. Unresolved, and it flatters the identity figures.
+
 ### Sweeping burn-in against the EIGEN warm start measures nothing
 
 Ranking burn-in lengths by how well two seeds agree measures HOW REPRODUCIBLE AN IRREPRODUCIBLE PROCEDURE IS. The warm start reads the top-K eigenvectors of a residual moment whose trailing eigenvalues sit within 1.4x of each other (0.00048 vs 0.00034 in the trained `cov(v)`), so those directions are unstable by construction and every burn-in length lands somewhere arbitrary. The comparison ranks arbitrary against arbitrary, and even a favourable result yields a MORE REPRODUCIBLY ARBITRARY subspace, which is not what the identity problem needs.
@@ -402,7 +427,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | axis map reading `(b, a, c)` | on | read as no effect; `--axis-blind` is the ablation |
 | `V_RIDGE` | 0.5 | 0.05 swept, read as no effect |
 | warm start | `burnin` | CLOSED for `none` — see the warm-start section below. `eigen` is retired rather than open: it reads an external fit, the leak this trainer was changed to remove. |
-| `BURN_IN_EPOCHS` | 300 | THE SWEEP AS POSED IS INVALID against the eigen warm start — see the burn-in note below. What is measured: loss is FLAT across burn-in length (0.4833/0.4835 at 100 against 0.4829/0.4838 at 300) and it buys epochs instead (990/2140 against 850/580), the same speed-not-accuracy trade the warm start itself makes. Open in the form that has an actionable answer: burn-in length WITH a taught bank, where it controls how long `v` stays pinned while the map is being taught. |
+| the `v` pin | REMOVED | CLOSED — refuted 2026-08-15 in the production trainer, see the v-pin section. Pin 300 against none: bank agreement identical to three decimals on all three axes, and the loss marginally better without. The early ~2 mnat the pin buys is a transient repaid by epoch 1000. Removing it took the `v_pinned` state machine, the release event and the axis-penalty gate with it. |
 
 ### B. NEVER TESTED — structural
 

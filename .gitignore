@@ -91,12 +91,16 @@ activations/
 # from activations/.
 axes/per_cell/
 
-# Skill-axis fit outputs (pipeline/build_axes.py): regenerable from activations/,
-# multi-MB, and churn on every refit. THREE files in here stay TRACKED on purpose
-# — axes.npz (the fitted model plus the content-hash embedding_version packaging
-# ships), labels.json (handcrafted motif labels) and label_anchors.npz (the
-# frozen anchor directions that let those labels survive refits — frozen at
-# each motif's first appearance, so a refit cannot reproduce them).
+# Skill-axis fit outputs: regenerable from activations/, multi-MB, and they churn
+# on every refit. THREE files in here stay TRACKED on purpose, all of them frozen
+# references a refit CANNOT reproduce — axis_bank.npz (the directions
+# pipeline.train_mirt teaches its axes onto, which is the only reason a name
+# outlives a refit; chosen at the dev surface, and the first K_AXES columns are
+# what ships), labels.json (the handcrafted motif names attached to those
+# columns, in that order) and label_anchors.npz. axes.npz is deliberately NOT
+# tracked despite living beside them: every run rewrites it, and it carries the
+# embedding_version packaging stamps, so a committed copy is a stale version
+# waiting to be shipped onto some other fit's embeddings.
 axes/per_problem.csv
 
 # Local snapshot of the REMOTE production D1: a large (~50 MB) dump pulled by

@@ -28,7 +28,32 @@ cannot reach the shipped fit. The measurement behind every constant here:
 `docs/mirt_benchmark.md`.
 
 Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first;
-the move-eval cache is a hard prerequisite.
+the move-eval cache is a hard prerequisite. So is `axes/axis_bank.npz` — see
+below.
+
+THE AXES ARE TAUGHT FROM A FROZEN BANK, which is what lets a name outlive a
+refit. The objective is exactly invariant to rotating the axis space — the
+likelihood reads the loadings and the user positions only through their product,
+and V_RIDGE, V_MEAN_PENALTY and ORTHO_WEIGHT are all rotation-invariant too — so
+the fit has a continuum of equal solutions and no preference among them. Left to
+itself it lands wherever initialization drops it: a 2% data change re-rolls the
+basis as hard as a different seed does, which would silently reattach every name
+in `axes/labels.json` to a direction it was not written for. So the axis map is
+not re-derived. It is pulled toward `axes/axis_bank.npz` by an auxiliary MSE,
+which decays linearly to zero over TEACH_DECAY_EPOCHS while the trunk trains
+normally. Measured across a real refit: without it the new axes share 0.20 min
+canonical correlation with the old ones, with it 0.899, and the loss is if
+anything slightly better.
+
+The bank is a `--dump-params` npz from `auxiliary.rating_dev.train_joint_mirt`
+(it needs `tid`, `size` and `loading`); that surface is where directions are
+explored and chosen, and this one only holds them. It may carry MORE than K
+columns — a wider set of candidates — and THE FIRST K_AXES ARE WHAT SHIPS, so the
+bank's column order is the shipping decision, made where the directions are
+inspected rather than here. That order is also what `axes/labels.json` indexes,
+since `package_for_pwa` reads components positionally. The per-axis SCALE is
+ignored — a rescaling of the loadings is absorbed by v — so only DIRECTION is
+taught.
 
 Writes:
 
@@ -111,11 +136,29 @@ GAUGE_MOM = 0.01
 # bounded structurally by cap = (1 - 2*lambda).
 SHALLOW_TAU = 0.1
 SHALLOW_W = 0.3
-# Epochs with v pinned at zero before the axis warm start reads the model's own
-# residuals. A FIXED count beats running to the axis-free fit's own convergence,
-# which sounds strictly better but is seed-dependent (380 and 550 on two seeds)
-# and the outcome is epoch-sensitive, so the criterion inherits that variance.
-BURN_IN_EPOCHS = 300
+# ONE SCHEDULE, and the loop is uniform because of it. Holding the per-user axis
+# positions at zero for an opening span is the obvious companion to teaching —
+# while they are zero the likelihood's gradient with respect to the loadings is
+# identically zero (the two appear only as a product), so the bank would shape
+# the map with nothing competing, and the axis penalties would stay off a map
+# that is random at epoch 0. It buys nothing. Measured head to head at 300
+# epochs against none, same bank and seed: per-axis agreement with the bank comes
+# back identical to three decimals on all three axes and the tails differ by at
+# most ten problems in a thousand, while the loss is a hair BETTER without it.
+# The pin does cost ~2 mnat through the first few hundred epochs — free positions
+# fitting against a random projection, then unlearning it — but that is a
+# transient, fully repaid by epoch 1000. So there is no pinned span, no release
+# event, and no gating of the axis penalties on one; the ortho penalty in
+# particular is now on from the first step rather than switching on at full
+# weight against a map it has never seen, which removes an abrupt objective
+# change rather than merely tolerating one.
+#
+# The decay length is a pick on a FRONTIER, not an optimum: identity rises with
+# it and saturates around here while the loss cost rises monotonically, and the
+# two never cross. Hold long, then let go — never releasing costs another 1.1
+# mnat for no further identity, and releasing ABRUPTLY does not stick at all.
+TEACH_WEIGHT = 1.0
+TEACH_DECAY_EPOCHS = 1500
 # IDENTIFIABILITY, the only inclusion rule. Under the 4PL an all-correct record's
 # likelihood rises monotonically to (1-lambda)^n as ability grows without bound,
 # and an all-wrong one to (1-c)^n as it falls, so neither has an interior
@@ -126,6 +169,7 @@ MIN_BOTH_OUTCOMES = 1
 STOP_ROW_FRAC = 0.03             # rows held aside purely to detect convergence
 OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 AXES_DIR = os.path.join(PROJECT_ROOT, "axes")
+AXIS_BANK = os.path.join(AXES_DIR, "axis_bank.npz")
 
 
 class JointMIRT:
@@ -255,18 +299,6 @@ class JointMIRT:
         self.g_rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6).detach()
         return b, a, c, g / self.g_rms
 
-    def trunk_out(self, feat):
-        """The axis map's input basis with dropout off — the space the warm
-        start's residual directions must live in, since that is what g_lin is
-        parameterized over."""
-        torch = self.torch
-        was = self.training
-        self.train(False)
-        with torch.no_grad():
-            out = self.trunk(feat)
-        self.train(was)
-        return out
-
     def forward(self, uid, feat):
         torch = self.torch
         b, a, c, g = self.problem_params(feat)
@@ -276,44 +308,81 @@ class JointMIRT:
         return c + (1.0 - c - lam) * torch.sigmoid(z), g
 
 
-def burn_in_directions(m, tfeat, tp, tu, ty, tr, n_users):
-    """Top-k escape directions from the model's OWN axis-free residuals.
+def load_bank(key_idx):
+    """The frozen directions this fit's axes are taught onto, one row per problem
+    of `key_idx` in that order, plus a mask of which rows the bank supplies.
 
-    At v = 0 the loading gradient is identically zero — which is why a warm start
-    is needed at all — so the burn-in trains EXACTLY the axis-free baseline the
-    residual scores are defined against. It is a schedule point inside one fit,
-    not a stage: those epochs are the rating heads' own.
+    Only the FIRST K_AXES columns ship (see the module docstring). Each is
+    z-scored over the problems the bank and this corpus share, because the bank's
+    per-axis scale is arbitrary — rescaling a loading is absorbed by v — so
+    direction is the only part of it that means anything.
 
-        s_u = sum_p (y_up - p_hat_up) * h_p / n_u
-
-    CENTRING across users is load-bearing: the uncentred lead direction is the
-    one in which the baseline mispredicts for EVERYONE, i.e. population residual
-    difficulty, a property of problems rather than people. DIVISION BY n_u is
-    too: s_u is a SUM, so its weight in a second moment grows with n_u squared,
-    and on the raw form a single heavy account supplied a third of every axis.
+    A problem the bank does not carry is left unconstrained rather than taught to
+    zero: absent is not a value.
     """
-    torch = m.torch
-    xf = m.trunk_out(tfeat)
-    S = torch.zeros(n_users, xf.shape[1], dtype=torch.float64, device=xf.device)
-    n = torch.zeros(n_users, dtype=torch.float64, device=xf.device)
-    was = m.training
-    m.train(False)
-    with torch.no_grad():
-        for i in range(0, len(tr), BATCH):
-            bi = tr[i:i + BATCH]
-            pred, _g = m.forward(tu[bi], tfeat[tp[bi]])
-            resid = (ty[bi] - pred).double()
-            S.index_add_(0, tu[bi], resid[:, None] * xf[tp[bi]].double())
-            n.index_add_(0, tu[bi], torch.ones_like(resid))
-    m.train(was)
-    S, n = S.cpu().numpy(), n.cpu().numpy()
-    seen = n > 0
-    S = S[seen] / n[seen, None]
-    S = S - S.mean(axis=0, keepdims=True)
-    _ev, vec = np.linalg.eigh(S.T @ S / S.shape[0])
-    top = vec[:, ::-1][:, :K_AXES].T
-    return (top / (np.linalg.norm(top, axis=1, keepdims=True) + 1e-9)
-            ).astype(np.float32), int(seen.sum())
+    if not os.path.exists(AXIS_BANK):
+        raise SystemExit(
+            f"NO AXIS BANK at {AXIS_BANK}. It holds the frozen directions the "
+            f"axes are taught onto, without which this fit would re-roll the "
+            f"basis and every name in axes/labels.json would land on a direction "
+            f"it was not written for. Produce one with the dev surface — "
+            f"`auxiliary.rating_dev.train_joint_mirt --dump-params <bank>.npz` — "
+            f"inspect the directions there, order its columns so the ones to "
+            f"ship come first, and copy it here.")
+    z = np.load(AXIS_BANK, allow_pickle=False)
+    load = np.asarray(z["loading"], np.float64)
+    if load.ndim != 2 or load.shape[1] < K_AXES:
+        raise SystemExit(
+            f"AXIS BANK HAS {load.shape[1] if load.ndim == 2 else '?'} "
+            f"DIRECTIONS, this fit ships K_AXES={K_AXES}. The bank must carry at "
+            f"least that many; the first {K_AXES} columns are the ones taught.")
+    row = {f"{sz}:{t}": i for i, (sz, t) in enumerate(zip(z["size"], z["tid"]))}
+    tgt = np.zeros((len(key_idx), K_AXES), np.float64)
+    ok = np.zeros(len(key_idx), bool)
+    for (sz, t), j in key_idx.items():
+        i = row.get(f"{sz}:{t}")
+        if i is not None:
+            tgt[j] = load[i, :K_AXES]
+            ok[j] = True
+    if not ok.any():
+        raise SystemExit(
+            f"AXIS BANK SHARES NO PROBLEMS with this corpus ({len(row)} banked "
+            f"against {len(key_idx)} here). Its ids are keyed on size:tsumego_id "
+            f"— a bank from a different corpus generation teaches nothing.")
+    tgt[ok] = (tgt[ok] - tgt[ok].mean(0)) / (tgt[ok].std(0) + 1e-12)
+    return tgt, ok
+
+
+def report_bank_identity(g_np, tgt, ok, prob_idx, n_tail=500):
+    """How far each shipped axis moved off the bank — the check that says whether
+    `axes/labels.json` still describes what it is attached to.
+
+    Scored on ATTEMPTED problems only. A third of the corpus is never attempted;
+    its loadings are unconstrained extrapolation, so their extremes churn freely
+    between fits and would be counted here as a failure to reproduce. They are
+    also ENRICHED in the tails rather than merely present, so including them
+    understates what the model actually holds.
+
+    BOTH numbers are printed because they say different things and the second is
+    the one that governs a name. Correlation describes the bulk; a name is a claim
+    about the EXTREMES, which are the least reproducible part — measured, a 0.945
+    correlation implies ~610 shared tail problems under normality and delivers
+    375. Reading correlation alone would overstate how well a name transfers,
+    by a margin that grows exactly where confidence would be highest.
+    """
+    att = np.zeros(len(g_np), bool)
+    att[np.unique(prob_idx)] = True
+    sel = np.where(att & ok)[0]
+    print(f"  BANK IDENTITY over {len(sel)} attempted+banked problems "
+          f"(tails of {2 * n_tail}):", flush=True)
+    for k in range(K_AXES):
+        x, y = g_np[sel, k], tgt[sel, k]
+        r = float(np.corrcoef(x, y)[0, 1])
+        ox, oy = np.argsort(x), np.argsort(y)
+        shared = len(set(ox[:n_tail]) & set(oy[:n_tail])) + \
+            len(set(ox[-n_tail:]) & set(oy[-n_tail:]))
+        print(f"    axis {k}: corr {r:+.3f} | tails {shared}/{2 * n_tail}",
+              flush=True)
 
 
 def main():
@@ -377,18 +446,25 @@ def main():
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
+    bank_tgt, bank_ok = load_bank(key_idx)
+    t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
+    t_ok = torch.tensor(bank_ok, device=device)
+    print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
+          f"directions, taught with weight {TEACH_WEIGHT} decaying to zero over "
+          f"{TEACH_DECAY_EPOCHS} epochs", flush=True)
+
     m = JointMIRT(fdim, n_users, input_dim, device, SEED)
     opt = torch.optim.Adam(m.param_groups())
     o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
     n = len(tr)
     best, best_state, flat, best_epoch = float("inf"), None, 0, 0
-    in_burn, stopped = True, False
-    m.v.requires_grad_(False)
-    print(f"\n=== joint fit | K={K_AXES} | burn-in {BURN_IN_EPOCHS} ===",
-          flush=True)
+    stopped = False
+    print(f"\n=== joint fit | K={K_AXES} | teach decays over "
+          f"{TEACH_DECAY_EPOCHS} epochs ===", flush=True)
 
     for ep in range(EPOCHS):
         m.train(True)
+        tw = TEACH_WEIGHT * max(0.0, 1.0 - ep / TEACH_DECAY_EPOCHS)
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
@@ -396,16 +472,46 @@ def main():
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
-            if not in_burn:
-                # While v is pinned these are identically zero or act on a g the
-                # warm start is about to overwrite.
-                loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
-                loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
-                Mc = gh - gh.mean(dim=0, keepdim=True)
-                Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
-                Cm = Mn.T @ Mn
-                loss = loss + ORTHO_WEIGHT * (
-                    (Cm - torch.eye(K_AXES, device=device)) ** 2).sum()
+            loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
+            loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
+            Mc = gh - gh.mean(dim=0, keepdim=True)
+            Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
+            Cm = Mn.T @ Mn
+            loss = loss + ORTHO_WEIGHT * (
+                (Cm - torch.eye(K_AXES, device=device)) ** 2).sum()
+            # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
+            # produced — no second forward and no second sampling distribution.
+            #
+            # Both properties are load-bearing. Sampling problems separately
+            # makes the trunk adapt to a MIXTURE, and when the teaching weight
+            # decays that half of its input distribution disappears; the epochs
+            # of attempt-only training that follow overwrite whatever served it,
+            # taking the taught directions along. Riding gh means no second
+            # distribution exists, so the decay moves a scalar and nothing else.
+            # It also matches the population the axes are DEFINED on: loadings
+            # are identified by between-user residuals, which exist only where
+            # somebody attempted the problem. The never-attempted third of the
+            # corpus is left alone deliberately — its banked values are the
+            # previous fit's extrapolation into a region that never carried
+            # signal, so teaching them would spend trunk capacity, in competition
+            # with the rating, reproducing an arbitrary guess.
+            if tw > 0.0:
+                mk = t_ok[tp[bi]]
+                if bool(mk.any()):
+                    # Both sides standardized, because the bank's scale is
+                    # arbitrary and gh carries this fit's own — only direction is
+                    # being compared. The two standardizations are over DIFFERENT
+                    # populations on purpose and should not be reconciled: gh is
+                    # z-scored over the batch, so attempt-weighted and repeating a
+                    # popular problem, while the target was z-scored over the
+                    # shared corpus unweighted. That leaves the MSE a small
+                    # irreducible floor and pulls g toward a slightly shifted
+                    # bank, which costs nothing downstream — problem_params
+                    # divides by g_rms, so any residual scale is removed before
+                    # anything reads a loading, and v absorbs the rest.
+                    gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
+                    loss = loss + tw * (
+                        (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads the corpus, dropout off
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat)).pow(2).mean()
@@ -427,26 +533,13 @@ def main():
                 best, best_epoch = bce_st, ep + 1
                 best_state = [q.detach().clone() for q in m.params()]
             flat = 0 if improved else flat + 1
-            print(f"  {'[burn] ' if in_burn else ''}epoch {ep + 1:4d}  "
-                  f"train {bce_tr:.4f}  stop {bce_st:.4f}  "
-                  f"best {best:.4f}@{best_epoch}  stale {flat}/{FLAT_PATIENCE}",
-                  flush=True)
-            if in_burn:
-                if (ep + 1) >= BURN_IN_EPOCHS:
-                    # Taken IN PLACE, not from the axis-free best: rewinding the
-                    # parameters while Adam's moments describe a later trajectory
-                    # resumes the fit with one epoch's weights under another's
-                    # momentum, which costs 1.4 mnat.
-                    gi, n_seen = burn_in_directions(m, tfeat, tp, tu, ty, tr,
-                                                    n_users)
-                    with torch.no_grad():
-                        m.g_lin.weight.copy_(torch.tensor(gi, device=device))
-                    m.v.requires_grad_(True)
-                    best, best_state, flat, best_epoch = float("inf"), None, 0, 0
-                    in_burn = False
-                    print(f"  warm start from {n_seen} users' own residuals; "
-                          f"v released at epoch {ep + 1}", flush=True)
-                continue            # never END the run during the burn-in
+            print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  "
+                  f"stop {bce_st:.4f}  best {best:.4f}@{best_epoch}  "
+                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}", flush=True)
+            # NOTE the stopping rule runs against an objective the decay is still
+            # changing, so a fit that plateaus before the decay ends stops while
+            # the bank is still partly holding the map. That is the observed case
+            # rather than a hypothetical.
             if flat >= FLAT_PATIENCE:
                 print(f"  stopped at epoch {ep + 1}; restoring best "
                       f"{best:.4f}@{best_epoch}", flush=True)
@@ -481,6 +574,7 @@ def main():
           f"{np.percentile(a_np, [1, 50, 99]).round(3)} | at floor "
           f"{np.mean(a_np <= SLOPE_FLOOR * 1.01):.2%} | rating p[1,50,99] "
           f"{np.percentile(rating, [1, 50, 99]).round(2)}", flush=True)
+    report_bank_identity(g_np, bank_tgt, bank_ok, prob_idx)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     for s in SIZES:
@@ -522,11 +616,17 @@ def main():
     # this must write THERE: a version stamped from one fit onto another fit's
     # embeddings is exactly the mismatch the per_cell retirement above prevents,
     # and it would ship silently.
+    # The bank is recorded, not just used: the axes ARE its directions and the
+    # labels are attached on that basis, so a fit has to be able to say which
+    # bank it was held to. Hashed rather than named — a bank edited in place
+    # keeps its filename.
+    bh = hashlib.sha256(open(AXIS_BANK, "rb").read()).hexdigest()[:16]
     np.savez_compressed(os.path.join(AXES_DIR, "axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),
                         trunk_width=np.array(m.g_lin.weight.shape[1]),
                         g_rms=m.g_rms.cpu().numpy().ravel(),
+                        axis_bank=np.array(bh),
                         embedding_version=np.array(ev))
     # The trunk too: the per-cell fanout has to run it, and unlike the two-stage
     # map this projection does not fold into a matrix (see write_mirt_per_cell).
@@ -536,7 +636,7 @@ def main():
                 "g_rms": m.g_rms.cpu()},
                os.path.join(OUT_DIR, "mirt_model.pt"))
     print(f"  wrote axes/per_problem.csv + axes.npz (K={K_AXES}, "
-          f"embedding_version {ev})", flush=True)
+          f"embedding_version {ev}, bank {bh})", flush=True)
 
     # RETIRE ANY per_cell/ FROM THE PREVIOUS AXIS MAP. package_for_pwa reads the
     # correct-move vectors from per_problem.csv and the picked-move vectors from
