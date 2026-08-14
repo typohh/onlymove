@@ -330,14 +330,49 @@ Two design points, both learned by getting them wrong first.
 
 | arm | identity (min canonical) | tails, of 1000 | loss |
 |---|---|---|---|
-| untaught (the baseline pair) | 0.335 | 116 / 275 / 110 | 0.4838 @580 |
+| untaught (this baseline pair) | 0.335 | 116 / 275 / 110 | 0.4838 @580 |
 | decay 600 | 0.859 | 471 / 455 / 375 | 0.4834 @810 |
+| decay 1000 | 0.876 | 477 / 518 / 435 | 0.4839 @1150 |
 | decay 1500 | **0.917** | 523 / 632 / 500 | 0.4845 @1150 |
 | constant, never released | 0.915 | 515 / 623 / 502 | 0.4856 @510 |
 
-Identity SATURATES by decay 1500 — never releasing adds nothing (0.915 against 0.917, tails within noise) and costs 1.1 mnat more. Cost meanwhile rises monotonically with duration (0.4834 / 0.4845 / 0.4856, a 2.2 mnat spread against 0.9 mnat of baseline seed noise). The two curves cross, so there is an optimum at or before 1500. Hold long, then let go.
+**It is a FRONTIER, not an optimum.** Identity rises monotonically to 1500 and then flattens; cost rises monotonically throughout. Nothing crosses, so there is no interior best — you pick a point. The frontier is cheap: 600 -> 1500 buys +0.058 identity for +1.1 mnat against 0.9 mnat of baseline seed noise, and past 1500 you pay without gaining (constant costs another 1.1 for nothing). Hold long, then let go.
 
 Note this is the HARDER task than the failed first attempt faced: a different seed taught toward a FOREIGN bank, versus that one's own bank, and it scores far higher.
+
+
+### The distribution, isolated
+
+Same seed, same bank, same abrupt cutoff at epoch 300 — only the sampling differs:
+
+| | identity | tails, of 1000 |
+|---|---|---|
+| UNIFORM sample (the failure) | 0.584 | 179 / 158 / 264 |
+| ATTEMPT stream | **0.784** | 345 / 271 / 421 |
+
+A clean single-variable comparison, and the distribution alone is worth +0.200. The schedule term is NOT cleanly measured against it — the decay arms ran a different seed against a foreign bank, an easier-to-harder change that confounds it — so do not subtract these to attribute the remainder.
+
+### It replicates, and it sets the LEVEL rather than adding an increment
+
+| | untaught baseline | taught, decay 1500 | tails | loss |
+|---|---|---|---|---|
+| seed 1 -> seed 0's bank | 0.335 | 0.917 | 523 / 632 / 500 | 0.4845 |
+| seed 2 -> seed 0's bank | 0.549 | 0.900 | 498 / 560 / 454 | 0.4833 |
+
+The two pairs START from very different agreement and land within 0.017 of each other. Teaching sets the level; it does not add a fixed increment to wherever a seed happened to begin. That is the stronger property, since it means the outcome does not depend on a lucky pairing. It also shows the UNTAUGHT baseline is itself highly variable (0.335 against 0.549 on the same protocol), so the size of the jump is a poor summary and the taught LEVEL is the number to quote.
+
+### THE PRODUCTION CONDITION — a refit, not a reseed
+
+Every arm above holds the data fixed and varies the seed. A refit does the opposite, and the time cut established that a 2% data change re-rolls the basis as hard as a seed change — so seed-stability does not establish data-stability, and only the second is what a refit faces. Bank from the 10%-time-cut fit (data as of ~4 weeks earlier); new fit on the full corpus, same seed, taught toward it:
+
+| | identity (min canonical) | tails, of 1000 | loss |
+|---|---|---|---|
+| UNTAUGHT (the ordinary refit) | 0.204 | 31 / 214 / 26 | 0.4829 @850 |
+| TAUGHT, decay 1500 | **0.899** | 462 / 842 / 783 | **0.4820** @1450 |
+
+Two of the three axes preserve ~80% of their extremes across a real refit, and the extremes are exactly what a motif name claims. Three things make this stronger than the reseed arms rather than equivalent: it starts from a WORSE position than either untaught seed pair (0.204 against 0.335 and 0.549) and still ends highest on tails; the loss is the best measured in this document (0.4820 against the ordinary full-data fit's 0.4829), so a taught refit is not merely no worse but slightly ahead; and it is the operation that actually runs.
+
+ONE FIT. Repeat before shipping. But 0.204 -> 0.899 is far outside anything the noise here produces.
 
 ### Tail overlap is scored on ATTEMPTED problems only
 
