@@ -102,7 +102,7 @@ arm                  rating   combined   axis    verdict
 - **`SHALLOW_W = 0` is refuted and the barrier is load-bearing.** Without it slopes collapse (median 0.94, 0.1th percentile 0.097) and derived ratings blow out to a range of [-225, +146], since rating = b + kappa(c)/a diverges as a falls. That is exactly the failure the barrier is written to stop.
 - **The per-problem slope head earns its place** — one global slope costs 1.8 mnat. This REFUTES, in this model, the on-record claim that per-problem slope is largely assignment noise; that finding is from the two-stage production model.
 - **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
-- **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs.
+- **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat here, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs. **See the warm-start section below**: re-measured under the production protocol at patience 30, where the cold arm needs 2670-3200 epochs to stop improving, the rating gap does not survive — 1360 epochs was very likely still descending.
 
 ## AXIS VALUE BY USER HISTORY — the axes need ~500 attempts before they pay
 
@@ -290,6 +290,34 @@ Worth carrying forward from that: patience 5 stopped the FULL-corpus fits short 
 
 Carry-over removes the need to RECOGNIZE a motif, but not the need to notice when one has drifted out from under its name — consecutive pairs sit at 0.96-0.98 while the origin has moved to 0.68, so a consecutive check would never fire. The job the tail bank is actually suited to is a DRIFT MONITOR against the frozen origin: per refit, report how many of a motif's original top/bottom 500 problems it still holds, and flag the name for re-inspection below a bar. That is a monitor on a known quantity, not a matcher against strangers, and it is the one form of the idea the measurements support.
 
+## THE WARM START BUYS SPEED AND A SUBSPACE, NOT ACCURACY — MEASURED 2026-08-14
+
+Two seeds per arm, production protocol (full corpus, no problem holdout), every arm at `--flat-patience 30` so the slow arm is not scored while still descending. Baseline is `pat30_seed{0,1}`.
+
+| | loss | epochs to best |
+|---|---|---|
+| `burnin` (shipped) | 0.4829 / 0.4838 | 850 / 580 |
+| `none` (random init) | 0.4829 / 0.4847 | 3200 / 2670 |
+
+**Loss-equivalent within seed noise.** The arms average 0.4834 and 0.4838 while the BASELINE'S OWN two seeds differ by 0.9 mnat, so the gap is smaller than the noise it would have to clear. What the warm start buys on the rating side is a factor of ~4 in epochs.
+
+This is not the +2.1 mnat in the sweep table above, and the protocols differ — that arm was fold 0 at a single seed against a fold-0 baseline — so this does not overturn it directly. But that arm ran **1360 epochs** where these need 2670-3200 to stop improving, which is the more likely explanation than a real quality gap: a cold arm scored at 1360 epochs is being read mid-descent.
+
+### Same loss, different subspaces
+
+| comparison | canonical correlations |
+|---|---|
+| cold vs warm, seed 0 | 0.029 / 0.302 / 0.434 |
+| cold vs warm, seed 1 | 0.089 / 0.532 / 0.570 |
+| the two COLD seeds against each other | 0.142 / 0.328 / 0.592 |
+| the two WARM seeds against each other | 0.335 / 0.804 / 0.964 |
+
+Seed 0's two fits score IDENTICALLY (0.4829 both) and share almost nothing (min canonical 0.029, 26 tail problems of 1000 against 3.3 by chance). **This is stronger than the rotation degeneracy.** Rotation invariance says the BASIS within a subspace is free; this says the SUBSPACE is underdetermined — several different 3-dimensional slices of the residual space predict equally well. It matches the eigenvalue spectrum (0.00098 / 0.00048 / 0.00034, trailing off): past the leading direction the residual is broad and weakly differentiated, so any three directions drawn from it carry about the same signal.
+
+The warm start does improve reproducibility — warm-started seed pairs reach 0.335 against cold-started 0.142 — but it is buying consistency in a range where the axes are still not reliably identifiable.
+
+**What this means for naming.** The motifs are not discovered facts about Go. They are an arbitrary basis of a weakly-structured space, selected by initialization rather than by the data, and a fit that scores identically finds different ones. Naming them stays defensible as a product device — an unnamed axis ships, steers selection and carries its share of the weakness posterior — but a name should not be read as having identified a real skill dimension. It is a label on a coordinate, and the coordinate is a choice.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
@@ -303,7 +331,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `AXIS_INPUT_DROPOUT` | 0.3 | 0.15 / 0.5 swept, read as flat |
 | axis map reading `(b, a, c)` | on | read as no effect; `--axis-blind` is the ablation |
 | `V_RIDGE` | 0.5 | 0.05 swept, read as no effect |
-| warm start | `burnin` | `eigen` / `burnin` / `none` — the `none` arm's ~2.8 mnat margin is the one most likely to move, since the overshoot penalty scales with axis quality and so punished the worse arm harder |
+| warm start | `burnin` | CLOSED for `none` — see the warm-start section below. `eigen` is retired rather than open: it reads an external fit, the leak this trainer was changed to remove. |
 | `BURN_IN_EPOCHS` | 300 | 100 / 300 / 500 / run-to-convergence |
 
 ### B. NEVER TESTED — structural
