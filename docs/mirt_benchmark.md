@@ -345,6 +345,14 @@ A third of the corpus is never attempted and its loadings are unconstrained extr
 
 **Tail overlap cannot be inferred from correlation, and the gap widens where it matters.** Under bivariate normality a correlation of 0.945 predicts 611 shared tail problems of 1000; the observed figure is 375. At 0.964 the prediction is 682 and the observation 219. The bulk of an axis transfers well while the specific problems at its ends keep changing — so the EXTREMES are the least reproducible part, which is unlucky given they are exactly what a human reads to name a motif and what `stats-weaknesses.js` reads to flag one. A drift monitor must therefore measure tails DIRECTLY; scoring correlation would overstate how well names transfer, by a factor that grows precisely in the range where confidence would be highest.
 
+### Sweeping burn-in against the EIGEN warm start measures nothing
+
+Ranking burn-in lengths by how well two seeds agree measures HOW REPRODUCIBLE AN IRREPRODUCIBLE PROCEDURE IS. The warm start reads the top-K eigenvectors of a residual moment whose trailing eigenvalues sit within 1.4x of each other (0.00048 vs 0.00034 in the trained `cov(v)`), so those directions are unstable by construction and every burn-in length lands somewhere arbitrary. The comparison ranks arbitrary against arbitrary, and even a favourable result yields a MORE REPRODUCIBLY ARBITRARY subspace, which is not what the identity problem needs.
+
+Measured before this was noticed, and worth keeping: burn-in 100 gives WORSE cross-seed agreement than 300 (min canonical 0.121 against 0.335, tails 53/53/244 against 116/275/110). That is consistent with less-converged residuals giving less stable eigenvectors — but it is not a reason to act, for the reason above.
+
+The question that survives supplies a PREVIOUSLY LEARNED direction. Then burn-in length is how long `v` stays pinned while the map is taught: a long one shapes `g` with no pressure from the axis term in the likelihood, a short one releases `v` mid-teaching. That interaction has an actionable answer; the eigen version does not.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.
@@ -359,7 +367,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | axis map reading `(b, a, c)` | on | read as no effect; `--axis-blind` is the ablation |
 | `V_RIDGE` | 0.5 | 0.05 swept, read as no effect |
 | warm start | `burnin` | CLOSED for `none` — see the warm-start section below. `eigen` is retired rather than open: it reads an external fit, the leak this trainer was changed to remove. |
-| `BURN_IN_EPOCHS` | 300 | 100 / 300 / 500 / run-to-convergence |
+| `BURN_IN_EPOCHS` | 300 | THE SWEEP AS POSED IS INVALID against the eigen warm start — see the burn-in note below. What is measured: loss is FLAT across burn-in length (0.4833/0.4835 at 100 against 0.4829/0.4838 at 300) and it buys epochs instead (990/2140 against 850/580), the same speed-not-accuracy trade the warm start itself makes. Open in the form that has an actionable answer: burn-in length WITH a taught bank, where it controls how long `v` stays pinned while the map is being taught. |
 
 ### B. NEVER TESTED — structural
 
