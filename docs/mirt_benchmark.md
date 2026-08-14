@@ -319,7 +319,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `V_MEAN_PENALTY` | 10.0 | strong. It is the only thing stopping an axis carrying population difficulty. |
 | `ORTHO_WEIGHT` | 0.5 | inherited from `residual_axes`. Its mutual half is load-bearing THERE; never checked here. |
 | `SHALLOW_TAU` | 0.1 | the barrier's threshold. Only its WEIGHT was swept (30 epochs, 0/0.3/1/3). |
-| `SHALLOW_W` | 0.3 | swept at 30 epochs on the OLD configuration; `0` specifically has never run. Queued twice. |
+| `SHALLOW_W` | 0.3 | CLOSED — `0` IS refuted, in this document's own sweep section: slopes collapse (median 0.94, 0.1th percentile 0.097) and ratings blow out to [-225, +146], a 22 mnat loss, because rating = b + kappa(c)/a diverges as a falls. What remains open is the VALUE, swept at 30 epochs on a configuration since changed. |
 | `GAUGE_MOM` | 0.01 | EMA rate for the difficulty gauge. |
 | `BATCH` | 65536 | |
 | `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |

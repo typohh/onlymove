@@ -731,6 +731,12 @@ def main():
                          "loading) plus abilities and axis positions to this "
                          ".npz, so downstream questions cost a load rather than "
                          "a re-run")
+    ap.add_argument("--fit-only", action="store_true",
+                    help="stop after --dump-params, skipping the survey rho and "
+                         "axis-criterion evaluations. Those run on CPU and can "
+                         "outlast the fit itself, so a QUEUE of fits spends most "
+                         "of its wall clock with the GPU idle; the dump is "
+                         "written before them and scorers read it separately.")
     ap.add_argument("--no-survey", action="store_true",
                     help="skip the survey-rho evaluation (~1 min); it is the "
                          "only criterion comparable against pipeline.train_rating")
@@ -1412,6 +1418,10 @@ def main():
         if args.dump_params:
             _write_dump(args.dump_params)
             print(f"  wrote per-problem params -> {args.dump_params}", flush=True)
+        if args.fit_only:
+            print(f"  fit-only: skipping post-fit evaluation "
+                  f"(total {time.time() - t0:.0f}s)", flush=True)
+            continue
 
         # --- SURVEY RHO: the ONLY criterion on which this model and
         # pipeline.train_rating can be compared fairly.
