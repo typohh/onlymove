@@ -318,6 +318,33 @@ The warm start does improve reproducibility — warm-started seed pairs reach 0.
 
 **What this means for naming.** The motifs are not discovered facts about Go. They are an arbitrary basis of a weakly-structured space, selected by initialization rather than by the data, and a fit that scores identically finds different ones. Naming them stays defensible as a product device — an unnamed axis ships, steers selection and carries its share of the weakness posterior — but a name should not be read as having identified a real skill dimension. It is a label on a coordinate, and the coordinate is a choice.
 
+## TEACHING THE AXIS MAP A BANK HOLDS IT — MEASURED 2026-08-14
+
+Carry-over (previous section) fixes identity by continuing the whole model. This asks the narrower question: can a refit be held on a FROZEN set of directions, so names attach to an absolute reference that never drifts rather than to a chain that does? `--teach-directions` adds an auxiliary MSE pulling the axis loadings toward a banked set, with the trunk learning normally, and `--teach-decay-epochs` releases it linearly.
+
+Two design points, both learned by getting them wrong first.
+
+**TEACH ON THE ATTEMPT STREAM, reusing the `gh` each batch already produces.** The first version sampled problems UNIFORMLY from the corpus every step — a second stream, disjoint from the attempt stream — and cut it at the burn-in handover. That fit ended **0.584 min canonical from its OWN bank**. The cause is not the loss term vanishing but the DISTRIBUTION changing: the trunk spent 300 epochs adapting to a mixture, half of it disappeared, and ~1850 epochs of attempt-only training overwrote whatever served the vanished half — taking the taught directions with it. Riding `gh` means no second distribution exists, so nothing shifts when the weight decays; only a scalar moves. It also costs nothing (the loadings are already computed) and matches the population the axes are DEFINED on, since loadings are identified by between-user residuals and those exist only where somebody attempted the problem. A third of the corpus never is: its banked values are the previous fit's extrapolation into a region that never carried signal, so teaching them would pin down something arbitrary and spend trunk capacity doing it.
+
+**A SMOOTH release beats an abrupt one, and beats never releasing.** Seed 1 taught toward seed 0's bank, patience 30 throughout:
+
+| arm | identity (min canonical) | tails, of 1000 | loss |
+|---|---|---|---|
+| untaught (the baseline pair) | 0.335 | 116 / 275 / 110 | 0.4838 @580 |
+| decay 600 | 0.859 | 471 / 455 / 375 | 0.4834 @810 |
+| decay 1500 | **0.917** | 523 / 632 / 500 | 0.4845 @1150 |
+| constant, never released | 0.915 | 515 / 623 / 502 | 0.4856 @510 |
+
+Identity SATURATES by decay 1500 — never releasing adds nothing (0.915 against 0.917, tails within noise) and costs 1.1 mnat more. Cost meanwhile rises monotonically with duration (0.4834 / 0.4845 / 0.4856, a 2.2 mnat spread against 0.9 mnat of baseline seed noise). The two curves cross, so there is an optimum at or before 1500. Hold long, then let go.
+
+Note this is the HARDER task than the failed first attempt faced: a different seed taught toward a FOREIGN bank, versus that one's own bank, and it scores far higher.
+
+### Tail overlap is scored on ATTEMPTED problems only
+
+A third of the corpus is never attempted and its loadings are unconstrained extrapolation, so their extremes churn freely between fits and were being counted as failures to reproduce. They are ENRICHED in the tails rather than merely present — 57% of axis 2's extremes against a 32% base rate, and axis 2 is the one axis that reproduces well enough to be worth naming. Restricting to attempted problems raises overlap in 8 of 9 measured cases by 10-20% relative. No qualitative conclusion moves, but every tail figure taken before this correction understates what the model actually reproduces.
+
+**Tail overlap cannot be inferred from correlation, and the gap widens where it matters.** Under bivariate normality a correlation of 0.945 predicts 611 shared tail problems of 1000; the observed figure is 375. At 0.964 the prediction is 682 and the observation 219. The bulk of an axis transfers well while the specific problems at its ends keep changing — so the EXTREMES are the least reproducible part, which is unlucky given they are exactly what a human reads to name a motif and what `stats-weaknesses.js` reads to flag one. A drift monitor must therefore measure tails DIRECTLY; scoring correlation would overstate how well names transfer, by a factor that grows precisely in the range where confidence would be highest.
+
 ## WHAT STILL NEEDS ABLATING OR SWEEPING
 
 Nothing here is a wish list — each entry is a knob or structural choice currently carrying a value that no measurement in this model supports. Grouped by why it is open.

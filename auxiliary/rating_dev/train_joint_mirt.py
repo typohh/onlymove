@@ -613,6 +613,19 @@ def main():
                          "trunk while the axis head is pulled toward the bank.")
     ap.add_argument("--teach-weight", type=float, default=1.0,
                     help="multiplier on the teaching MSE")
+    ap.add_argument("--teach-until", type=int, default=0,
+                    help="hard cutoff: full weight until this epoch, then zero "
+                         "(overrides --teach-decay-epochs). Exists to ISOLATE "
+                         "the distribution effect from the schedule effect. The "
+                         "first teaching attempt sampled problems UNIFORMLY, a "
+                         "second stream disjoint from the attempt stream, and "
+                         "cut it at epoch 300 — after which the trunk trained "
+                         "~1850 epochs on attempts alone and forgot whatever "
+                         "served the vanished half, taking the taught directions "
+                         "with it (0.584 against its own bank). Teaching on the "
+                         "attempt stream changes no distribution at all, so this "
+                         "flag reproduces that exact schedule to see how much of "
+                         "the failure was the cutoff and how much was the shift.")
     ap.add_argument("--teach-decay-epochs", type=int, default=0,
                     help="linearly decay the teaching multiplier to zero over "
                          "this many epochs (0 = constant for the whole run). "
@@ -1268,7 +1281,9 @@ def main():
                     # while competing with the rating, so they are left to
                     # generalize exactly as they do today.
                     tw = args.teach_weight
-                    if args.teach_decay_epochs:
+                    if args.teach_until:
+                        tw *= 1.0 if ep < args.teach_until else 0.0
+                    elif args.teach_decay_epochs:
                         tw *= max(0.0, 1.0 - ep / args.teach_decay_epochs)
                     if tw > 0.0:
                         pid = tp[bi]
