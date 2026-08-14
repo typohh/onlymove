@@ -78,6 +78,9 @@ models/
 # the directory on demand), so there is nothing to version.
 /broken/
 /tsumegos/broken/
+# auxiliary/add_losing_lines --out-dir: repaired copies waiting to be merged
+# back over tsumegos/<size>/. Transient, and regenerable by re-running.
+/tsumegos/fixed/
 
 # Pipeline-extracted activations: per-cell trunk vectors, ~tens of GB at fp16,
 # regenerable via pipeline/extract_activations.py. Not for version control.
