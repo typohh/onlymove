@@ -282,7 +282,9 @@ Best stop-split at the SAME cut, so the two are directly comparable:
 
 The entrenchment risk — that a carried fit starts near its optimum, stops immediately, and buys stability by never moving — did NOT materialize. It moves to a BETTER place, faster. In hindsight that follows: a refit inheriting a converged model is not handicapped, it is starting from the answer to a strictly easier version of the same problem, which is exactly what a production refit is.
 
-**Treat the margin as an upper bound until the 2x2 lands.** Both arms ran at patience 5, which stops fits early (see the FLAT_PATIENCE row). That cannot make the CARRIED number falsely good — the stop split is honest at whatever epoch it is read — but it can make the COLD number falsely bad, since the cold arm converges at epoch 330-450 and may be stopping short. The stability result stands independently: 0.088 against 0.843 is not a patience artifact.
+**The margin is not a patience artifact — CONFIRMED by a 2x2 at cut 0.25.** Both arms were re-run at `--flat-patience 30` and both find the IDENTICAL optimum they found at 5 (cold 0.4731@330 either way, carried 0.4668@110 either way), so neither was being truncated; the stability figures are likewise unchanged, each patience-30 fit having restored the same epoch as its twin.
+
+Worth carrying forward from that: patience 5 stopped the FULL-corpus fits short (optima at 850 and 580) but converges genuinely by epoch 330 at 75% of the data. Premature stopping is not universal — it appears where there is more data and a longer improvement tail — so the ~0.6 mnat that raising `FLAT_PATIENCE` buys should not be expected at every data size.
 
 ### What this leaves for the tail bank
 
