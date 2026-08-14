@@ -641,8 +641,43 @@ function recoverBoardIfNeeded() {
 
 // Recovery from a killed session or bfcache: re-init the board on bfcache
 // restore / tab re-show / manual resume-overlay click; reload if that fails.
+//
+// The overlay is the MANUAL half of that, and it is armed on a delay rather
+// than the instant the tab goes hidden. Android fires visibilitychange when the
+// activity is PAUSED, not when its last frame is composited, so the page keeps
+// painting through the task-switch animation: arming synchronously bakes the
+// overlay into the outgoing frames and into the recents thumbnail, and the user
+// meets it again on the way back. Waiting past the animation leaves it to be
+// painted only by a resume that never delivered a visible event — the case it
+// exists for. A background timer throttled away entirely just leaves it
+// unarmed, which costs nothing, since the automatic path below is what repairs
+// the board whenever the event does arrive.
+const RESUME_OVERLAY_ARM_DELAY_MS = 1000;
+
 function wireLifecycleRecovery() {
     const resumeOverlay = document.getElementById('resume-overlay');
+    let armTimer = null;
+    const hideResumeOverlay = () => {
+        clearTimeout(armTimer);
+        armTimer = null;
+        resumeOverlay.className = 'resume-overlay-hidden';
+    };
+
+    // Rebuild the board once the pending frame has PAINTED. A rAF callback runs
+    // before its own frame's paint, so recovering inside the first one holds
+    // back the very frame that removes the overlay — a full initializeBoard()
+    // (fresh canvases, wood background, redraw) on a still-thawing renderer,
+    // with the overlay on screen for all of it. The inner rAF runs after the
+    // un-hide has been painted; the cost is one frame of the possibly-broken
+    // board before it is replaced.
+    const recoverAfterPaint = (source) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (!recoverBoardIfNeeded()) {
+                Sentry.captureMessage(`Canvas recovery failed on ${source}, reloading...`, 'error');
+                location.reload();
+            }
+        }));
+    };
 
     window.addEventListener('pageshow', (event) => {
         if (event.persisted) {
@@ -655,20 +690,17 @@ function wireLifecycleRecovery() {
 
     window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-            resumeOverlay.className = 'resume-overlay';
+            clearTimeout(armTimer);
+            armTimer = setTimeout(() => {
+                resumeOverlay.className = 'resume-overlay';
+            }, RESUME_OVERLAY_ARM_DELAY_MS);
             // The user is leaving — persist the freshest schedule now (keepalive
             // lets it land through teardown). Skips if unchanged since the last
             // upload; this is the main replacement for the per-attempt upload.
             maybeUploadSchedule();
         } else if (document.visibilityState === 'visible') {
-            resumeOverlay.className = 'resume-overlay-hidden';
-
-            requestAnimationFrame(() => {
-                if (!recoverBoardIfNeeded()) {
-                    Sentry.captureMessage('Canvas recovery failed on visibilitychange, reloading...', 'error');
-                    location.reload();
-                }
-            });
+            hideResumeOverlay();
+            recoverAfterPaint('visibilitychange');
             // First-run onboarding: re-evaluate ambient bubbles on resume (a new
             // session may have crossed the install/notify thresholds while
             // hidden). No-op for existing users.
@@ -679,8 +711,8 @@ function wireLifecycleRecovery() {
     // Resume overlay click triggers full board recreation for manual recovery —
     // same path as the pageshow/visibilitychange handlers.
     resumeOverlay.addEventListener('click', () => {
-        resumeOverlay.className = 'resume-overlay-hidden';
-        if (!recoverBoardIfNeeded()) location.reload();
+        hideResumeOverlay();
+        recoverAfterPaint('resume overlay click');
     });
 }
 
