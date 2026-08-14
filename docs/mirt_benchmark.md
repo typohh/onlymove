@@ -324,7 +324,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `BATCH` | 65536 | |
 | `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |
 | `CHECK_EVERY` / `FLAT_PATIENCE` | 10 / 30 | MEASURED 2026-08-14 and raised from 5. The stop split improves in bursts separated by long flat stretches; the largest gap before the final optimum was 25 checks on one seed and 10 on the other, so anything under 25 halts mid-stretch. At 5 both seeds stopped near epoch 350 against optima at 850 and 580, costing 0.5 and 0.7 mnat of RATING (paired, same seed either side). Buys no axis stability. Runtime ~9 -> ~25 min; the experiment surface keeps 5. Two pairs only — a third seed would firm it up. |
-| `PRIOR_AX_SD` (scorer) | 0.5 | the ONLY constant left in the fixed scorer. Sits slightly below both models' hand-tuned optima, so both are scored a little short of their peak. |
+| `PRIOR_AX_SD` (scorer) | 0.5 | CLOSED — MEASURED 2026-08-14 and it is AT the optimum, not below it as this row previously claimed. Swept post-hoc against a fixed pair of user-holdout dumps (seeds 0/1), axis adds in mnat: 0.25 -> 1.73, 0.35 -> 2.00, **0.5 -> 2.14**, 0.7 -> 2.09, 1.0 -> 1.52, 1.5 -> 0.22. 0.7 ties within seed sd. The rating column is identical to four decimals at every value, which is the check that the constant touches only the axis path. STRONGLY ASYMMETRIC — too loose costs far more than too tight (1.9 mnat at 1.5 against 0.4 at 0.25), because a loose prior lets the online axis estimate overshoot on short prefixes; err low if it is ever revisited. |
 | `DROPOUT`, `INPUT_DROPOUT` | 0.3 | inherited unswept in this model; measured only on the two-stage one. |
 
 ### D. Open questions that are not knobs
