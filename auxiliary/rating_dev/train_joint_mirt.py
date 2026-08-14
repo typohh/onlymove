@@ -532,6 +532,23 @@ class JointMIRT:
         g = g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
         return b, a, c, g
 
+    def axis_values(self, feat):
+        """The axis loadings g for a set of problems, in the CURRENT mode
+        (dropout live while training), gradients intact.
+
+        Deliberately NOT problem_params(...)[3]: that walks the rating heads and
+        updates the difficulty gauge's EMA from whatever batch it is handed,
+        while the teaching loss samples PROBLEMS and the gauge is defined over
+        the attempt stream. Reusing it would let an auxiliary objective quietly
+        move the rating's units."""
+        torch = self.torch
+        if not self.axis_from_trunk:
+            raise RuntimeError("axis_values expects the trunk path")
+        h = self.trunk(self._drop(feat, INPUT_DROPOUT))
+        g_in = h if self.axis_trunk_coupled else h.detach()
+        g = self.g_lin(g_in)
+        return g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
+
     def axis_input(self, feat):
         """The axis map's input basis with dropout off — what the warm start's
         residual scores must be taken against, so its directions live in the
@@ -582,6 +599,30 @@ def main():
                          "what a pure row- or user-holdout run wants. Left at the "
                          "benchmark value by default so existing comparisons are "
                          "unaffected.")
+    ap.add_argument("--teach-directions", default=None,
+                    help="TEACH the axis map the banked per-problem loadings "
+                         "instead of projecting onto them. An auxiliary MSE runs "
+                         "alongside the ordinary objective through the burn-in, "
+                         "with the TRUNK LEARNING NORMALLY — so the "
+                         "representation is reshaped until the banked directions "
+                         "are expressible, rather than being limited to whatever "
+                         "the trunk already spans (which is all --init-directions "
+                         "can reach, since a least-squares fit of a linear head "
+                         "on a FIXED representation is exactly that projection). "
+                         "The rating trains throughout, which is what anchors the "
+                         "trunk while the axis head is pulled toward the bank.")
+    ap.add_argument("--teach-weight", type=float, default=1.0,
+                    help="multiplier on the teaching MSE")
+    ap.add_argument("--teach-decay-epochs", type=int, default=0,
+                    help="linearly decay the teaching multiplier to zero over "
+                         "this many epochs (0 = constant for the whole run). "
+                         "MEASURED 2026-08-14: an ABRUPT handover does not stick "
+                         "— a fit taught toward its OWN loadings for 300 epochs "
+                         "and then released ended 0.584 min canonical from them, "
+                         "because ~1850 epochs of free training follow and the "
+                         "objective has no preference about where the axes sit. "
+                         "A smooth release instead guides them into a basin and "
+                         "hands over once the fit is near convergence.")
     ap.add_argument("--init-directions", default=None,
                     help="FROZEN GAUGE. An npz of per-problem loadings (any "
                          "--dump-params output) to initialize the axis map "
@@ -1081,6 +1122,32 @@ def main():
                   f"trunk/heads/axis map whole, {nth}/{len(profiles.categories)} "
                   f"profiles and {nv}/{len(uids)} users carried, the rest at zero",
                   flush=True)
+        teach_tgt = teach_ok = None
+        if args.teach_directions:
+            _b = np.load(args.teach_directions, allow_pickle=False)
+            _brow = {f"{sz}:{t}": i for i, (sz, t) in
+                     enumerate(zip(_b["size"], _b["tid"]))}
+            _BL = np.asarray(_b["loading"], np.float64)
+            if _BL.shape[1] != args.k:
+                raise SystemExit(f"--teach-directions has K={_BL.shape[1]}, "
+                                 f"this run K={args.k}")
+            _T = np.zeros((len(keys), args.k), np.float64)
+            _ok = np.zeros(len(keys), bool)
+            for (sz, t), j in key_idx.items():
+                i = _brow.get(f"{sz}:{t}")
+                if i is not None:
+                    _T[j] = _BL[i]; _ok[j] = True
+            # The bank's per-axis SCALE is arbitrary — a rescale of the loadings
+            # is absorbed by v — so only DIRECTION is taught.
+            _T[_ok] = (_T[_ok] - _T[_ok].mean(0)) / (_T[_ok].std(0) + 1e-12)
+            teach_tgt = torch.tensor(_T, dtype=torch.float32, device=device)
+            teach_ok = torch.tensor(_ok, device=device)
+            print(f"  TEACHING the axis map from "
+                  f"{os.path.basename(args.teach_directions)} on the ATTEMPT "
+                  f"stream (weight {args.teach_weight}"
+                  + (f", decaying to 0 over {args.teach_decay_epochs} epochs)"
+                     if args.teach_decay_epochs else ", constant)")
+                  + ", trunk learning normally", flush=True)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
@@ -1187,6 +1254,29 @@ def main():
                     Cm = Mn.T @ Mn
                     loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
                         args.k, device=device)) ** 2).sum()
+                if teach_tgt is not None:
+                    # ON THE ATTEMPT STREAM, reusing the gh this batch already
+                    # produced — no second forward, no separate sampling.
+                    #
+                    # This is the population the axes are DEFINED on: the
+                    # loadings are identified by between-user residuals, which
+                    # exist only where somebody attempted the problem. A third of
+                    # the corpus is never attempted, and its banked values are the
+                    # PREVIOUS fit's extrapolation into a region it never had
+                    # signal for — arbitrary to begin with. Teaching those would
+                    # spend trunk capacity reproducing the old model's guesswork
+                    # while competing with the rating, so they are left to
+                    # generalize exactly as they do today.
+                    tw = args.teach_weight
+                    if args.teach_decay_epochs:
+                        tw *= max(0.0, 1.0 - ep / args.teach_decay_epochs)
+                    if tw > 0.0:
+                        pid = tp[bi]
+                        mk = teach_ok[pid]
+                        if bool(mk.any()):
+                            gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
+                            loss = loss + tw * (
+                                (gz[mk] - teach_tgt[pid[mk]]) ** 2).mean()
                 # divergence barrier, over the FULL corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
@@ -1229,7 +1319,11 @@ def main():
                         # weights driven by another's momentum. Measured: the
                         # rewind costs the axis column 1.4 mnat and quadruples
                         # its seed spread against handing over in place.
-                        if args.init_directions:
+                        if args.teach_directions:
+                            m.v.requires_grad_(True)
+                            print(f"  TAUGHT map kept at epoch {ep + 1}; "
+                                  f"v released (no eigen overwrite)", flush=True)
+                        elif args.init_directions:
                             bank = np.load(args.init_directions,
                                            allow_pickle=False)
                             brow = {f"{sz}:{t}": i for i, (sz, t) in
