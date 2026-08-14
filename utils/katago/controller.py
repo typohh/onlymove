@@ -29,6 +29,11 @@ class KatagoController:
         self.running = False
         self.batch_size = None
         self.lock = threading.Lock()
+        # Serializes writes to KataGo's stdin so two threads can't interleave
+        # halves of a JSON line. It is SEPARATE from self.lock on purpose: a
+        # write blocks whenever KataGo stops draining stdin, and the master
+        # reader needs self.lock to drain stdout. See send_query.
+        self.write_lock = threading.Lock()
         self.query_counter = 0
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
@@ -145,8 +150,19 @@ class KatagoController:
                 query_id = str(self.query_counter)
                 query["id"] = query_id
                 self.response_events[query_id] = event
-
                 query_str = json.dumps(query)
+
+            # The write is OUTSIDE self.lock, and that placement is what keeps
+            # both pipes moving. Holding self.lock across it deadlocks the pair:
+            # once enough answers are in flight to fill KataGo's stdout pipe it
+            # blocks in write() and stops reading stdin, so this write blocks
+            # too — and _master_reader, which is the only thing that can drain
+            # stdout and unblock it, needs self.lock to deliver the line it has
+            # already read. Both sides then sit alive at zero throughput until
+            # QUERY_TIMEOUT_SECONDS. It is rate-dependent, so it appears only
+            # when a caller's queries outrun the reader (many worker threads,
+            # cheap per-query Python work), not in a light run.
+            with self.write_lock:
                 self.process.stdin.write(query_str + "\n")
                 self.process.stdin.flush()
 

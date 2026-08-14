@@ -12,6 +12,8 @@ Import it from coords directly.
 
 import sgfmill.sgf
 
+from utils.katago.coords import sgf_to_gtp, sgfmill_point_to_sgf
+
 
 def parse_tsumego_sgf(game: sgfmill.sgf.Sgf_game):
     """
