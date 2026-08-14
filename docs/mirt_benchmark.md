@@ -341,6 +341,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | axis path coupled vs detached | COUPLED (shipped) | measured indistinguishable; coupled chosen because detaching makes the trunk learn for the rating alone and hands the axes the result, which is feature reuse rather than a joint fit. |
 | `--act relu` | swiglu | SwiGLU doubles trunk parameters at a given width, so width and activation are confounded until one is held fixed. |
 | ability granularity | per-user (`--window-months 0`) | measured best on the rating side, but the axes are per-user while ability could be per-window; the mixed-granularity question is dodged rather than answered. |
+| an ANISOTROPIC prior on the axis positions | isotropic (`V_RIDGE` scalar) | THE ONLY IN-OBJECTIVE FIX FOR AXIS IDENTITY, and untried. The rotation degeneracy survives precisely because the v prior is isotropic: rotate the loadings and the positions by the same orthogonal matrix and the likelihood, `V_RIDGE`, `V_MEAN_PENALTY` and `ORTHO_WEIGHT` are all unchanged. DISTINCT per-axis ridge weights break that symmetry inside the objective, so the basis becomes identified rather than gauge-fixed from outside — no carry-over, no frozen bank, no external anchor. Two cautions. It cannot fix the SUBSPACE being underdetermined (see the warm-start section: two fits at identical loss sharing min canonical 0.029), only which basis of a given subspace comes out. And a prior that distinguishes axes by scale imposes an ordering the data may not support, so the arm has to be scored on loss as well as stability. |
 
 ### C. NEVER SWEPT — constants
 
@@ -547,5 +548,9 @@ axis_by_history.py        the same walk, split by attempts PRECEDING the scored 
 compare_heldout_logloss.py  paired logloss, user-CLUSTERED bootstrap
 compare_survey_rho.py     paired survey rho, user bootstrap
 ```
+
+**Queue fits with `--fit-only`.** The survey-rho and axis-criterion evaluations that follow a fit run on CPU and can outlast the fit itself — measured 2026-08-14 at ~40 minutes of evaluation against a ~9 minute fit, with four queued runners blocked behind it and the GPU idle. `--dump-params` is written BEFORE any of it and every scorer here reads dumps independently, so a sweep loses nothing by skipping it and runs roughly five times faster.
+
+**Give every arm the same patience, and enough of it.** Twice now a comparison has been set up where one arm converges and another is truncated, which is the defect that voided the A-list. The `none` warm-start arm needs 2670-3200 epochs against the baseline's 580-850: at `--flat-patience 5` it reads as 25 mnat worse, at 30 it is loss-equivalent. Before quoting any margin, check where each arm's best epoch fell relative to where it stopped.
 
 Both bootstraps are **paired** and cluster by user. Attempts within a user share an ability estimate, so a row-level resample understates the interval — in the direction that makes a difference look real.
