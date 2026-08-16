@@ -8,7 +8,12 @@ For each SGF in tsumegos/<size>/:
     is independent of SGF document order. Downstream maps cells by (x, y) and the
     correct cell by correct_idx, never by row position — so order need only be
     self-consistent with xys/correct_idx, which scan order guarantees.
-  - Run one forward pass through KataGo's b18 net.
+  - Run one forward pass through KataGo's b18 net, under the corpus's own rules
+    and komi (utils.constants RULES/KOMI, the values the generator stamps into
+    every SGF and queries the analysis engine with). Rules reach the net through
+    its global inputs — komi, scoring, ko, suicide and tax — so reading a
+    position under rules it was not evaluated with changes the activations
+    while leaving every array shape intact, i.e. silently.
   - Capture post-skip-add output of all 18 residual blocks (rconv1.out..rconv18.out).
   - Slice each block at every legal cell's (x, y); concatenate blocks
     -> one 6912-float vector per cell.
@@ -51,7 +56,7 @@ from katago.train.load_model import load_model
 from katago.train.model_pytorch import ExtraOutputs
 
 from utils.katago.sgf_parsing import parse_tsumego_sgf
-from utils.constants import ALL_BOARD_SIZES
+from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 
 DEFAULT_CKPT = os.path.join(
@@ -61,8 +66,36 @@ DEFAULT_CKPT = os.path.join(
 )
 
 
+# The vendored net takes rules as a dict, while the rest of the pipeline names
+# them as the analysis engine's strings (utils.constants). Map rather than
+# restate, so the one place RULES/KOMI are set governs extraction too, and fail
+# loud on a name with no preset instead of silently reading the corpus under
+# rules it was never evaluated with.
+_RULES_PRESETS = {
+    "japanese": GameState.RULES_JAPANESE,
+    "chinese": GameState.RULES_CHINESE,
+    "tromp-taylor": GameState.RULES_TT,
+}
+
+
+def katago_rules() -> dict:
+    """`utils.constants` RULES/KOMI in the vendored GameState's dict form."""
+    preset = _RULES_PRESETS.get(RULES)
+    if preset is None:
+        raise ValueError(
+            f"No vendored GameState preset for RULES={RULES!r}; "
+            f"known: {sorted(_RULES_PRESETS)}")
+    return {**preset, "whiteKomi": KOMI}
+
+
 def build_state(setup_moves, size: int) -> GameState:
-    state = GameState(size, GameState.RULES_TT.copy())
+    # Setup stones are REPLAYED AS MOVES, matching how the analysis engine is
+    # handed the same position (utils.katago.queries.query sends them as `moves`
+    # with an empty `initialStones`). Under territory scoring the net's komi
+    # input is offset by the per-colour move counts, so the two agree only
+    # because both sides count these stones the same way — do not switch this to
+    # a stone-placement setup without re-checking that offset.
+    state = GameState(size, katago_rules())
     for color_char, gtp in setup_moves:
         xy = gtp_to_xy(gtp)
         if xy is None:
