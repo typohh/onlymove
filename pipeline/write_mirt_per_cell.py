@@ -58,8 +58,8 @@ if PROJECT_ROOT not in sys.path:
 from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, SEED, SIZES)
 from utils.rating.features import (  # noqa: E402
-    _cache_ids_path, load_joint_activation_basis, load_joint_bot_winrate,
-    load_joint_game_phase, load_joint_move_features)
+    _cache_ids_path, corpus_tids_by_size, joint_feature_tail,
+    load_joint_activation_basis, load_joint_tail_blocks)
 # The size of a tid comes from the SGF CORPUS, never the cache id lists: a stale
 # cache entry for a purged problem would otherwise be projected and shipped.
 from utils.rating.residual_axes import corpus_tid_size  # noqa: E402
@@ -73,12 +73,18 @@ READ_WORKERS = max(4, (os.cpu_count() or 4))   # npz decompression is the bottle
 
 def _load_one(args):
     size, tid, act_dir = args
+    path = os.path.join(act_dir, tid + ".npz")
     try:
-        with np.load(os.path.join(act_dir, tid + ".npz"), allow_pickle=False) as d:
+        with np.load(path, allow_pickle=False) as d:
             return (size, tid, np.asarray(d["candidates"]),
                     np.asarray(d["xys"], dtype=np.int32))
     except FileNotFoundError:
-        return None          # extraction is resumable: the corpus can lead it
+        # MISSING DATA for a live corpus problem, not a skippable gap. Returning
+        # None here shipped a shard whose per_cell/ silently omitted the problem
+        # while per_problem.csv carried it.
+        raise SystemExit(
+            f"size {size}: {path} missing for a tsumego that IS in the corpus. "
+            f"Run pipeline.extract_activations until it covers every SGF, then re-run.")
 
 
 def _reader(tasks, act_dirs, q):
@@ -109,7 +115,7 @@ def main():
     if not os.path.exists(MODEL_PT):
         raise SystemExit(f"no {MODEL_PT} — run pipeline.train_mirt first")
 
-    tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
+    tids_by_size = corpus_tids_by_size(SIZES)
     basis = load_joint_activation_basis(SIZES, tids_by_size, PCA_DIM, SEED)
     m1 = torch.tensor(basis["m1"], dtype=torch.float32, device=device)
     s1 = torch.tensor(basis["s1"], dtype=torch.float32, device=device)
@@ -132,10 +138,12 @@ def main():
             return torch.nn.functional.silu(self.w(x)) * self.v(x)
 
     from utils.rating.model_constants import DIFF_HIDDEN
-    bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
-    mv, nmv = load_joint_move_features(SIZES, tids_by_size)
-    ph, nph = load_joint_game_phase(SIZES, tids_by_size)
-    fdim = PCA_DIM + nb + nmv + nph + 1
+    # Shared tail — same blocks, same order, same fail-loud-on-missing rule the
+    # trunk was fitted with. Only the activation block differs here (per CELL
+    # rather than the correct cell), which is exactly why the rest must not be
+    # restated locally.
+    wide, exempt, n_wide, n_exempt = load_joint_tail_blocks(SIZES, tids_by_size)
+    fdim = PCA_DIM + n_wide + n_exempt
     layers, d = [], fdim
     for h in DIFF_HIDDEN:
         layers += [SwiGLU(d, h), nn.Dropout(0.0)]
@@ -148,11 +156,8 @@ def main():
     g_rms = st["g_rms"].to(device).view(1, -1)
 
     tid_size = corpus_tid_size()
-    zero_mv = np.zeros(nmv, np.float32)
-    zero_ph = np.zeros(nph, np.float32)
     act_dirs = {s: os.path.join(PROJECT_ROOT, "activations", str(s)) for s in SIZES}
-    tasks = [(s, t) for s in SIZES for t in tids_by_size[s]
-             if tid_size.get(t) == s and (s, t) in bw]
+    tasks = [(s, t) for s in SIZES for t in tids_by_size[s] if tid_size.get(t) == s]
     # RESUMABLE by file existence, the same idiom extract_activations uses. Every
     # write goes through a tmp file and os.replace, so a file that exists is
     # complete — an interrupted run loses at most the batch in flight. Worth
@@ -188,11 +193,8 @@ def main():
             x1 = (raw.float() - m1) / s1
             z = (((x1 - pmean).half() @ Ch).float() - m2) / s2       # (n, PCA_DIM)
             tail = torch.from_numpy(np.concatenate([
-                np.tile(np.concatenate([bw[(b[0], b[1])],
-                                        mv.get((b[0], b[1]), zero_mv),
-                                        ph.get((b[0], b[1]), zero_ph),
-                                        [1.0 if b[0] == 13 else 0.0]]
-                                       ).astype(np.float32)[None, :], (n, 1))
+                np.tile(joint_feature_tail((b[0], b[1]), wide, exempt)
+                        .astype(np.float32)[None, :], (n, 1))
                 for b, n in zip(batch, counts)])).to(device)
             g = g_lin(trunk(torch.cat([z, tail], dim=1))) / g_rms
             g = g.cpu().numpy().astype(np.float16)

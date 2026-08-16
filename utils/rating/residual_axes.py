@@ -41,8 +41,8 @@ from collections import defaultdict
 import numpy as np
 
 from utils.rating.features import (
-    _cache_ids_path, load_backend_problem_params, load_joint_activations,
-    load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features,
+    _cache_ids_path, corpus_tids_by_size, joint_feature_tail,
+    load_backend_problem_params, load_joint_activations, load_joint_tail_blocks,
     SQLITE_PATH,
 )
 from utils.rating.fit_rank_curves import interp_extrap
@@ -71,14 +71,14 @@ ORTHO_WEIGHT = 0.5
 # falls below the control on pooled for one seed. K is unchanged at 3 under it
 # (swept 2-5, the peak does not move), so nothing downstream changes length.
 AXIS_INPUT_DROPOUT = 0.3
-# Width of the tail build_axis_features appends after the wide per-problem
-# blocks: [ act | bot | move || phase(2) | size(1) | rating-model(3) | rank(1) ].
-# The dropout masks the wide region only — the tail is smooth and cannot
-# fingerprint a problem, and `rank` must survive because the model reads it
-# structurally as beta_u's regressor. build_axis_features asserts this stays in
-# step, so a change to any tail block fails loudly rather than silently shifting
-# the mask onto the wrong columns.
-EXEMPT_TAIL_COLS = 2 + 1 + 3 + 1
+# Width of the tail build_axis_features appends after the masked per-problem
+# blocks: [ act | bot | move | ownership | phase || size(1) | rating-model(3) | rank(1) ].
+# Every block measured about the problem is masked, phase included; the size flag
+# identifies the board rather than the problem, and `rank` must survive because
+# the model reads it structurally as beta_u's regressor. build_axis_features
+# asserts this stays in step, so a change to any tail block fails loudly rather
+# than silently shifting the mask onto the wrong columns.
+EXEMPT_TAIL_COLS = 1 + 3 + 1
 BATCH = 8192
 MIN_USER_ATTEMPTS = 50
 
@@ -162,17 +162,15 @@ def build_axis_features(params_dir=None):
     fully clean run would refit it too."""
     from utils.rating.model_constants import PCA_DIM, SEED as PCA_SEED, SIZES
 
-    tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
+    tids_by_size = corpus_tids_by_size(SIZES)
     act, act_dim = load_joint_activations(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
-    bw, _nb = load_joint_bot_winrate(SIZES, tids_by_size)
-    mv, nmv = load_joint_move_features(SIZES, tids_by_size)
-    ph, nph = load_joint_game_phase(SIZES, tids_by_size)
-    zero_mv = np.zeros(nmv, dtype=np.float32)
-    zero_ph = np.zeros(nph, dtype=np.float32)
+    # Shared tail, so this cannot drift from what the trunk was fitted with.
+    wide, exempt, _n_wide, n_exempt = load_joint_tail_blocks(SIZES, tids_by_size)
+    bw = dict(wide[0][1])
 
-    assert nph + 1 + 3 + 1 == EXEMPT_TAIL_COLS, (
-        f"feature tail changed ({nph} phase cols): update EXEMPT_TAIL_COLS, "
-        "which the axis-input dropout mask is sized from")
+    assert n_exempt + 3 + 1 == EXEMPT_TAIL_COLS, (
+        f"feature tail changed ({n_exempt} exempt cols incl. the size flag): update "
+        "EXEMPT_TAIL_COLS, which the axis-input dropout mask is sized from")
 
     curve = _load_rank_curve()
     rsf = {t: np.array(v, dtype=np.float32)
@@ -200,8 +198,7 @@ def build_axis_features(params_dir=None):
         # that is constant exactly where the residual head has the most room.
         rk = float(interp_extrap(rsf[t][0], curve[0], curve[1]))
         feats[t] = np.concatenate([
-            act[key], bw[key], mv.get(key, zero_mv), ph.get(key, zero_ph),
-            [1.0 if size == 13 else 0.0],
+            act[key], joint_feature_tail(key, wide, exempt),
             rsf[t], [rk],
         ]).astype(np.float32)
         rank[t] = rk

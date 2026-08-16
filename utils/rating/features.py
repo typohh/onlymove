@@ -13,6 +13,7 @@ them from here. The auxiliary modules that historically defined them now re-expo
 their other callers are unaffected.
 """
 
+import csv
 import json
 import os
 import sqlite3
@@ -25,6 +26,7 @@ import pandas as pd
 
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
+from utils.constants import RETIRED_IDS_PATH, read_retired_ids
 from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT
 
 SQL_PATH = DB_SQL
@@ -768,13 +770,13 @@ def load_game_phase(rebuild=False, sizes=(9, 13)):
     cached tid set EQUALS the corpus, never just "nothing new to add", and BOTH
     directions are load-bearing here:
 
-      a tid the cache LACKS is not a neutral omission. train_mirt keys its
-      problem set on the activation and bot blocks alone and substitutes a zero
-      vector here (`ph.get(key, zero_ph)`), which after the pooled z-score IS
-      the population mean — so the problem is rated, given an axis vector and
-      shipped on an imputed phase block, with nothing anywhere recording it.
-      There is no loud path: one trainer means one behaviour, and it is the
-      silent one.
+      a tid the cache LACKS is not a neutral omission — it is missing data for a
+      live problem, and joint_feature_tail RAISES on it. It used to substitute a
+      zero vector, which after the pooled z-score is exactly the population mean,
+      so the problem was rated, given an axis vector and shipped on an imputed
+      phase block with nothing anywhere recording it. Keeping this cache in step
+      with the corpus is what stops that error being reached; it is no longer
+      what stops it being silent.
 
       a DEPARTED tid left behind is not inert either — phase_ratio_z takes its
       z-scores over this cache's whole population, so a purged problem shifts
@@ -892,6 +894,241 @@ def load_joint_game_phase(sizes, tids_by_size):
     X = np.array(rows, dtype=np.float64)
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, 2
+
+
+# ONE file for both boards, keyed by the `size` column, beside the other
+# feature-block caches. Per-size FILES are the convention for arrays loaded one
+# board at a time (correct_vecs_<size>.npy, move_evals_<size>.npz); a per-problem
+# TABLE follows axes/per_problem.csv instead, which is single-file with a size
+# column — splitting it would duplicate in the filename what the column says.
+OWNERSHIP_CSV = os.path.join(CACHE_DIR, "ownership_swing.csv")
+
+# The swing decomposition auxiliary.extract_ownership_swing writes, minus its
+# roll-up columns: each roll-up is the exact sum of two parts below and
+# stone_swing_abs the sum of all eight, so including them would ship exact linear
+# dependencies into the trunk. empty_swing_abs is kept because it is the one
+# quantity NOT implied by the eight — the territory the move moves rather than the
+# stones, which is what separates a trade from a pure life-and-death problem.
+OWNERSHIP_COLS = (
+    "own_dead_revived", "own_alive_secured", "own_alive_killed", "own_dead_deadened",
+    "opp_alive_killed", "opp_dead_deadened", "opp_dead_revived", "opp_alive_secured",
+    "empty_swing_abs",
+)
+
+
+def load_joint_ownership(sizes, tids_by_size):
+    """Ownership-swing features — how many fractional stones the correct move moves,
+    against the best REFUTATION THAT WAS READ TO SCORING — pooled and z-scored across
+    boards like the other blocks. Returns {(size, tid): vec}, n_cols.
+
+    A row whose `alt_move` is blank (no TE-marked refutation, so the swing is
+    undefined) is NOT emitted, and is therefore missing rather than zero: a zero swing
+    positively asserts the problem has no life-and-death content, which is a different
+    claim from having failed to measure it. joint_feature_tail turns that absence into
+    a hard error for any problem still in the rated set.
+    """
+    if not os.path.exists(OWNERSHIP_CSV):
+        raise FileNotFoundError(
+            f"ownership cache {OWNERSHIP_CSV} missing — run "
+            f"`./.venv/bin/python3 -m auxiliary.extract_ownership_swing` first")
+    have = {}
+    with open(OWNERSHIP_CSV, newline="") as fh:
+        for rec in csv.DictReader(fh):
+            if not rec.get("alt_move"):
+                continue
+            have[rec["tid"]] = [float(rec[c]) for c in OWNERSHIP_COLS]
+    keys, rows = [], []
+    for size in sizes:
+        for t in tids_by_size[size]:
+            v = have.get(t)
+            if v is not None:
+                keys.append((size, t))
+                rows.append(v)
+    X = np.array(rows, dtype=np.float64)
+    X = (X - X.mean(0)) / (X.std(0) + 1e-9)            # pooled column z-score
+    return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, len(OWNERSHIP_COLS)
+
+
+def load_joint_tail_blocks(sizes, tids_by_size):
+    """Every per-problem block AFTER the activation block, loaded once, in THE order
+    the trunk is trained on. Returns (wide, exempt, n_wide, n_exempt).
+
+    EVERY BLOCK IS MASKED — bot winrate, move evals, ownership and game phase all
+    sit inside the INPUT_DROPOUT region. The one exception is the BOARD-SIZE FLAG,
+    which identifies the board rather than the problem.
+
+    This exists so the order is stated ONCE. Three consumers build trunk input — the
+    trainer here, pipeline.write_mirt_per_cell (which substitutes per-CELL activations
+    for the correct-cell block) and utils.rating.residual_axes (which appends columns
+    of its own) — and each used to restate the concatenation. They agreed, but only by
+    convention: a block added to one and not the others lands in a different column
+    than the trunk was fitted with, and both files stay well-formed.
+    """
+    bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
+    mv, nmv = load_joint_move_features(sizes, tids_by_size)
+    ow, now = load_joint_ownership(sizes, tids_by_size)
+    ph, nph = load_joint_game_phase(sizes, tids_by_size)
+    wide = (("bot_winrate", bw), ("move_evals", mv), ("ownership", ow),
+            ("game_phase", ph))
+    return wide, (), nb + nmv + now + nph, 1
+
+
+def corpus_tids_by_size(sizes):
+    """THE problem set: the tids with an SGF in tsumegos/<size>/. The corpus is the
+    only ground truth for what a problem IS — every other id list is an artifact
+    listing that can be stale in either direction.
+
+    Not correct_ids_<size>.json (derived from the activation .npz listing), because
+    that is wrong in both directions and each direction is a silent fault:
+
+      an id it has that the corpus LACKS is a PHANTOM — the SGF was removed while its
+      .npz, bot attempts and ratings row survived, so a problem that no longer exists
+      gets rated, given an axis vector and a floor;
+
+      an id the corpus has that IT lacks is MISSING DATA — a tsumego that was never
+      extracted, silently dropped from the rated set instead of failing. Resolving a
+      gap by omission is no better than resolving it by imputation; both are
+      invisible. Extraction being resumable is why THAT STEP can be re-run, not a
+      licence to train on whatever happens to be on disk.
+
+    A retired id needs no filtering: it has no SGF by construction, because
+    tsumego_id_taken refuses to reissue one. That is an invariant maintained by
+    the generator, so it is CHECKED here rather than assumed — see
+    _assert_ids_unique.
+    """
+    out = {}
+    for size in sizes:
+        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        if not os.path.isdir(d):
+            raise SystemExit(f"corpus dir missing: {d}")
+        out[size] = sorted(f[:-4] for f in os.listdir(d) if f.endswith(".sgf"))
+    _assert_ids_unique(out)
+    return out
+
+
+def _assert_ids_unique(tids_by_size):
+    """The 8-hex id must name at most one problem across the WHOLE namespace —
+    every board size and the retired list together.
+
+    Uniqueness is enforced at generation time (generate_tsumegos.tsumego_id_taken
+    checks all sizes, staging and the retired list) but nothing verifies it
+    afterwards, and the id is a TRUNCATED hash: only 32 bits, so distinct
+    positions collide at a rate growing with the SQUARE of the corpus. The
+    generator discards a colliding candidate; what this catches is the enforcement
+    having been bypassed — a corpus assembled by hand, a restore from a stale
+    backup, a purge that put SGFs back, an id remap applied to one size only.
+
+    Both failures are silent and neither is repairable after the fact, which is
+    why they are worth a hard stop before a fit rather than a warning:
+
+      SAME ID ON BOTH BOARDS — every id-keyed artifact (activations, attempts,
+      ratings, per_cell, the shipped lookup which spans both sizes) would have
+      two problems fighting over one row, and the client's binary search on
+      lookup.txt would resolve to whichever landed there.
+
+      A RETIRED ID BACK IN THE CORPUS — the problem's attempt rows were kept when
+      it left, so the new occupant silently inherits a stranger's history: it is
+      rated on other people's answers, and nothing anywhere records it.
+    """
+    seen = {}
+    clashes = []
+    for size, tids in tids_by_size.items():
+        for t in tids:
+            if t in seen:
+                clashes.append(f"{t}: in tsumegos/{seen[t]}/ AND tsumegos/{size}/")
+            else:
+                seen[t] = size
+    retired = read_retired_ids()
+    for t in sorted(set(seen) & retired):
+        clashes.append(f"{t}: in tsumegos/{seen[t]}/ AND listed in "
+                       f"{os.path.relpath(RETIRED_IDS_PATH, PROJECT_ROOT)}")
+    if clashes:
+        shown = "\n  ".join(clashes[:20])
+        more = f"\n  ... and {len(clashes) - 20} more" if len(clashes) > 20 else ""
+        raise SystemExit(
+            f"TSUMEGO ID COLLISION — {len(clashes)} id(s) name more than one problem:\n"
+            f"  {shown}{more}\n"
+            f"Refusing to build a problem set on an ambiguous namespace. Resolve each "
+            f"before fitting: a cross-board clash needs one side re-hashed or removed "
+            f"(auxiliary/check_corpus_ids.py --emit-map), and a retired id back in the "
+            f"corpus needs the SGF removed unless you intend it to inherit that id's "
+            f"existing attempt rows.")
+
+
+def _missing_block_error(name, key):
+    """Classify a gap before raising, because the two causes need opposite fixes."""
+    size, tid = key
+    corpus = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    if not os.path.exists(os.path.join(corpus, f"{tid}.sgf")):
+        return KeyError(
+            f"{name} has no row for {tid} (size {size}), and NEITHER DOES THE CORPUS — "
+            f"{corpus}/{tid}.sgf is gone, so this is a PHANTOM: the problem was removed "
+            f"but its activations/{size}/{tid}.npz survived and carried it into "
+            f"correct_ids. Delete the orphan .npz (keep a backup — with the SGF gone it "
+            f"is the last trace of that position) and re-run pipeline.cache_rating_features, "
+            f"which asserts activations are a subset of the corpus.")
+    return KeyError(
+        f"{name} has no row for {tid} (size {size}), which IS a live problem in {corpus}. "
+        f"MISSING DATA for a real tsumego — rebuild that block (extract_activations, "
+        f"benchmark_bots, cache_rating_features or extract_ownership_swing, per the block "
+        f"named above) so it covers the whole corpus. It is neither zero-filled nor "
+        f"dropped: a zero row is the population mean after the pooled z-score, and a "
+        f"dropped row removes the problem from the rated set — both silently.")
+
+
+def joint_feature_tail(key, wide, exempt):
+    """The per-problem columns after the activation block, plus the board-size flag.
+
+    A block that lacks `key` RAISES. There is deliberately no default: an absent row
+    is either a phantom or a genuine gap (see _missing_block_error), and both are
+    invisible once imputed.
+    """
+    parts = []
+    for name, block in (*wide, *exempt):
+        try:
+            parts.append(block[key])
+        except KeyError:
+            raise _missing_block_error(name, key) from None
+    parts.append(np.array([1.0 if key[0] == 13 else 0.0], dtype=np.float32))
+    return np.concatenate(parts)
+
+
+def load_joint_mirt_features(sizes, pca_dim, seed):
+    """THE per-problem feature matrix the MIRT trunk sees — activations, bot winrate,
+    move evals, ownership swing, game phase, board size — assembled once here so every
+    consumer sees the same columns in the same order.
+
+    Returns (feat (n_problems, fdim) float32, keys [(size, tid)], key_idx {key: row},
+    input_dim). `input_dim` is the leading block INPUT_DROPOUT masks: the wide
+    per-problem blocks, excluding game phase and the size flag.
+
+    THE PROBLEM SET IS THE CORPUS, and EVERY block must cover it — activations
+    included. A tsumego with no activation vector is missing data exactly like one with
+    no move-eval row, and is raised on rather than quietly left out of the fit. The
+    earlier set (correct_ids ∩ bot winrate) silently resolved both faults by omission:
+    an unextracted problem simply vanished from the rated set, and a removed problem
+    stayed in it.
+
+    Second caller is the motif labeler (auxiliary/labeler), whose whole point is to
+    probe THIS space — a direction it finds in some other feature space need not be one
+    the trunk can represent, so the axis bank it builds would be teaching the fit
+    something unreachable. Copying the assembly there would let the two drift silently,
+    which is the failure this single source exists to prevent.
+    """
+    tids_by_size = corpus_tids_by_size(sizes)
+    act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
+    wide, exempt, n_wide, n_exempt = load_joint_tail_blocks(sizes, tids_by_size)
+    keys = [(s, t) for s in sizes for t in tids_by_size[s]]
+    key_idx = {key: i for i, key in enumerate(keys)}
+    input_dim = k_act + n_wide
+    feat = np.empty((len(keys), input_dim + n_exempt), dtype=np.float32)
+    for key, i in key_idx.items():
+        try:
+            act_vec = act[key]
+        except KeyError:
+            raise _missing_block_error("activations", key) from None
+        feat[i] = np.concatenate([act_vec, joint_feature_tail(key, wide, exempt)])
+    return feat, keys, key_idx, input_dim
 
 
 # --------------------------------------------------------------------------------

@@ -102,8 +102,7 @@ from utils.rating.model_constants import (  # noqa: E402
     DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
     K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
-    _cache_ids_path, load_first_time_attempts, load_joint_activations,
-    load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features)
+    load_first_time_attempts, load_joint_mirt_features)
 
 EPOCHS = 10000                   # runaway failsafe; the patience rule ends the run
 CHECK_EVERY = 10
@@ -391,21 +390,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
-    tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
-    act, k_act = load_joint_activations(SIZES, tids_by_size, PCA_DIM, SEED)
-    bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
-    mv, nmv = load_joint_move_features(SIZES, tids_by_size)
-    ph, nph = load_joint_game_phase(SIZES, tids_by_size)
-    keys = [key for key in act if key in bw]
-    key_idx = {key: i for i, key in enumerate(keys)}
-    zero_mv, zero_ph = np.zeros(nmv, np.float32), np.zeros(nph, np.float32)
-    input_dim = k_act + nb + nmv
-    fdim = input_dim + nph + 1
-    feat = np.empty((len(keys), fdim), dtype=np.float32)
-    for key, i in key_idx.items():
-        feat[i] = np.concatenate([act[key], bw[key], mv.get(key, zero_mv),
-                                  ph.get(key, zero_ph),
-                                  [1.0 if key[0] == 13 else 0.0]])
+    feat, keys, key_idx, input_dim = load_joint_mirt_features(SIZES, PCA_DIM, SEED)
+    fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)
 
