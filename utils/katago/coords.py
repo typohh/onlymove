@@ -100,3 +100,9 @@ def gtp_to_xy(gtp_coord):
     x = gtp_letter_to_col_index(gtp_coord[0])
     y = int(gtp_coord[1:]) - 1               # GTP row 1 -> y=0 (bottom)
     return x, y
+
+
+def xy_to_gtp(x, y):
+    """``(x, y)`` -> GTP string. Inverse of gtp_to_xy, so y counts from the
+    BOTTOM. Size-independent (the caller is responsible for in-range x, y)."""
+    return f"{col_index_to_gtp_letter(x)}{y + 1}"

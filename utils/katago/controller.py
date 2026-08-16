@@ -38,11 +38,20 @@ class KatagoController:
         self.response_events = {}  # Maps query_id -> threading.Event
         self.responses = {}  # Maps query_id -> response_dict
 
-    def start_engine(self, model, board_size, human=False, verbose=False):
+    def start_engine(self, model, board_size, human=False, verbose=False,
+                     extra_overrides=None):
+        # extra_overrides is a comma-separated `key=value` string appended to the
+        # -override-config flag. It is a COMMAND-LINE override, so it does not
+        # touch bots/analysis.cfg and pipeline.tune_engine's hardware tuning of
+        # that file survives — use it for per-caller settings (a bulk NN sweep
+        # wants a far larger nnMaxBatchSize than interactive search does).
+        overrides = f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}"
+        if extra_overrides:
+            overrides += "," + extra_overrides
         command = [
             KATAGO_PATH, "analysis",
             "-config", CONFIG_FILE,
-            "-override-config", f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}",
+            "-override-config", overrides,
         ]
         command.extend(["-model", model])
         if human:
