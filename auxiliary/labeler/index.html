@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tsumego motif labeler</title>
+<style>
+  :root { --acc: #e63946; --ok: #2a9d8f; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f4f5; color: #222; }
+  header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem;
+           background: #fff; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 5; }
+  header .grow { flex: 1; }
+  .pill { font-size: .8rem; padding: .15rem .5rem; border-radius: 999px; background: #eee; }
+  .pill.train { background: #ffe9b0; }
+  .pill.idle { background: #d8f3dc; }
+  main { display: grid; grid-template-columns: minmax(280px, 460px) 1fr; gap: 1.2rem; padding: 1.2rem; align-items: start; }
+  .board-card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+  .board-card svg { width: 100%; height: auto; display: block; }
+  .meta { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .85rem; color: #555; margin-top: .6rem;
+          font-family: ui-monospace, monospace; }
+  .panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; }
+  .labels { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+  label.chk { display: flex; align-items: center; gap: .5rem; padding: .4rem .55rem; border: 1px solid #e3e3e3;
+              border-radius: 6px; cursor: pointer; user-select: none; font-size: .9rem; }
+  label.chk:hover { background: #fafafa; }
+  label.chk.suggested { border-color: var(--acc); background: #fff5f5; }
+  label.chk.on { background: #e7f6f2; border-color: var(--ok); }
+  label.chk input { width: 16px; height: 16px; }
+  .lname { flex: 1; }
+  .prob { font-size: .72rem; font-variant-numeric: tabular-nums; color: #777; font-family: ui-monospace, monospace; }
+  .badge { font-size: .6rem; padding: .05rem .3rem; border-radius: 4px; background: #ddd; color: #444; }
+  .badge.knn { background: #fde2c8; }
+  .badge.log { background: #cfe8ff; }
+  .controls { display: flex; gap: .5rem; margin-top: 1rem; flex-wrap: wrap; }
+  button { font: inherit; padding: .5rem .9rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+  button.primary { background: var(--ok); color: #fff; border-color: var(--ok); }
+  button:hover { filter: brightness(.97); }
+  .addrow { display: flex; gap: .5rem; margin-top: 1rem; }
+  .addrow input { flex: 1; padding: .45rem .6rem; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+  .toggle { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+  .toggle button { border: none; border-radius: 0; padding: .35rem .7rem; }
+  .toggle button.active { background: #222; color: #fff; }
+  .focusbar { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; }
+  #focusBtn { background: #222; color: #fff; border-color: #222; }
+  .focuspanel { border: 1px solid #ddd; border-radius: 6px; padding: .6rem; margin-bottom: .8rem; background: #fafafa; }
+  .focusactions { display: flex; gap: .4rem; margin-bottom: .5rem; }
+  .focusactions button { padding: .25rem .6rem; font-size: .85rem; }
+  .focusgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .25rem; max-height: 260px; overflow: auto; }
+  label.fchk { display: flex; align-items: center; gap: .4rem; font-size: .82rem; padding: .15rem .3rem; cursor: pointer; }
+  .counts { font-size: .78rem; color: #666; margin-top: 1rem; max-height: 220px; overflow: auto; }
+  .counts div { display: flex; justify-content: space-between; padding: .1rem 0; }
+  .counts-head { font-weight: 600; color: #444; border-bottom: 1px solid #ddd; position: sticky; top: 0; background: #fff; }
+  .hint { font-size: .75rem; color: #999; margin-top: .5rem; }
+  .empty { padding: 3rem; text-align: center; color: #888; }
+  .legend { font-size: .75rem; color: #666; margin-top: .6rem; display: flex; align-items: center; gap: .15rem; }
+  .lg { display: inline-block; width: 13px; height: 13px; vertical-align: middle; }
+  .lg-correct { border: 2px solid #e63946; border-radius: 50%; }
+  .lg-last { border: 2px solid #888; border-radius: 50%; }
+  .lg-ko { border: 2px solid #222; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Motif labeler</strong>
+  <div class="toggle" id="mode">
+    <button data-mode="all" class="active">bootstrap</button>
+    <button data-mode="uncertain">uncertain</button>
+  </div>
+  <span class="grow"></span>
+  <a href="/grid" style="color:#2a9d8f;text-decoration:none;font-size:.9rem;margin-right:.4rem">Grid review →</a>
+  <span class="pill" id="stat-annot">0 labeled</span>
+  <span class="pill" id="stat-model">model v0</span>
+  <span class="pill idle" id="stat-train">idle</span>
+</header>
+
+<main>
+  <div class="board-card">
+    <div id="board"><div class="empty">loading…</div></div>
+    <div class="meta" id="meta"></div>
+    <div class="legend">
+      <span class="lg lg-correct"></span> correct move &nbsp;
+      <span class="lg lg-last"></span> last move &nbsp;
+      <span class="lg lg-ko"></span> ko (illegal)
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="focusbar">
+      <button id="focusBtn" onclick="toggleFocusPanel()">Focus: all ▾</button>
+      <span class="hint" id="focusHint">showing all labels</span>
+    </div>
+    <div class="focuspanel" id="focusPanel" style="display:none">
+      <div class="focusactions">
+        <button onclick="focusAll()">All</button>
+        <button onclick="focusNone()">None</button>
+        <button class="primary" onclick="applyFocus()">Apply focus</button>
+      </div>
+      <div class="focusgrid" id="focusGrid"></div>
+    </div>
+    <div class="labels" id="labels"></div>
+    <div class="controls">
+      <button onclick="prev()">&larr; Prev</button>
+      <button onclick="skip()">Skip</button>
+      <button class="primary" onclick="saveNext()">Save &amp; Next &rarr;</button>
+    </div>
+    <div class="hint">Enter = Save &amp; Next · ←/→ = Prev/Skip · pink border = suggested by model</div>
+    <div class="addrow">
+      <input id="newlabel" placeholder="add a new label (free text)…"
+             onkeydown="if(event.key==='Enter'){addLabel();event.stopPropagation();}">
+      <button onclick="addLabel()">Add</button>
+    </div>
+    <div class="counts" id="counts"></div>
+  </div>
+</main>
+
+<script>
+const LOG_THRESH = 0.5, KNN_THRESH = 0.7;
+let mode = "all";
+let cur = null;            // current position payload
+let history = [];          // visited tids
+let hpos = -1;
+let focus = JSON.parse(localStorage.getItem("focusLabels") || "[]");  // [] = all
+let allLabels = [];
+
+async function jget(u){ return (await fetch(u)).json(); }
+async function jpost(u, body){
+  return (await fetch(u, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body)})).json();
+}
+
+function suggested(p){
+  if(p.prob === null) return false;
+  return p.mode === "knn" ? p.prob >= KNN_THRESH : p.prob >= LOG_THRESH;
+}
+
+function render(pos){
+  cur = pos;
+  if(pos.done){
+    // `unavailable` = this exact problem's board is no longer in the shards (the
+    // corpus moved under a tid you already saw); anything else = queue exhausted.
+    document.getElementById("board").innerHTML = pos.unavailable
+      ? `<div class="empty">${pos.unavailable} is no longer in the shipped corpus.` +
+        `<br>Its labels are kept. Press Next.</div>`
+      : '<div class="empty">No more positions in this mode.<br>Switch mode or add labels.</div>';
+    document.getElementById("labels").innerHTML = "";
+    document.getElementById("meta").innerHTML = "";
+    return;
+  }
+  document.getElementById("board").innerHTML = pos.svg;
+  document.getElementById("meta").innerHTML =
+    `<span>${pos.tid}</span><span>${pos.size}×${pos.size}</span>` +
+    `<span><b>${pos.rank}</b></span><span>rating ${pos.rating}</span>` +
+    `<span>${pos.to_move} to play</span>` +
+    (pos.has_ko ? '<span style="color:#b35">⊠ ko</span>' : '') +
+    (pos.annotated ? '<span style="color:var(--ok)">✓ labeled</span>' : '');
+
+  const wrap = document.getElementById("labels");
+  wrap.innerHTML = "";
+  const show = focus.length ? pos.label_set.filter(n => focus.includes(n)) : pos.label_set;
+  for(const name of show){
+    const p = pos.predicted[name] || {prob:null, mode:null};
+    const sug = suggested(p);
+    // If already *considered* for this label, the saved value is authoritative.
+    // Otherwise: focus mode starts unchecked (no default — you decide); full
+    // mode pre-fills from the model suggestion. The suggestion still shows as
+    // a hint (pink border + prob) either way.
+    const considered = pos.known.includes(name);
+    const checked = considered ? pos.current_labels.includes(name)
+                              : (focus.length ? false : sug);
+    const el = document.createElement("label");
+    el.className = "chk" + (sug ? " suggested" : "") + (checked ? " on" : "");
+    const probTxt = p.prob === null ? "" :
+      `<span class="prob">${(p.prob*100).toFixed(0)}%</span>` +
+      `<span class="badge ${p.mode==='knn'?'knn':'log'}">${p.mode==='knn'?'kNN':'L'}</span>`;
+    el.innerHTML = `<input type="checkbox" ${checked?"checked":""}>` +
+                   `<span class="lname">${name}</span>${probTxt}`;
+    const cb = el.querySelector("input");
+    cb.addEventListener("change", () => el.classList.toggle("on", cb.checked));
+    wrap.appendChild(el);
+  }
+  if(show.length === 0)
+    wrap.innerHTML = '<div class="hint">No labels in focus — widen the focus or add one below.</div>';
+}
+
+function checkedLabels(){
+  return [...document.querySelectorAll("#labels .chk")]
+    .filter(el => el.querySelector("input").checked)
+    .map(el => el.querySelector(".lname").textContent);
+}
+
+async function loadNext(){
+  const params = new URLSearchParams({mode});
+  if(cur && cur.tid) params.set("current", cur.tid);
+  if(focus.length) params.set("focus", focus.join(","));
+  const pos = await jget("/api/next?" + params);
+  render(pos);
+  if(!pos.done){ history = history.slice(0, hpos+1); history.push(pos.tid); hpos = history.length-1; }
+}
+async function saveNext(){
+  if(cur && cur.tid){
+    await jpost("/api/label", {tid: cur.tid, labels: checkedLabels(),
+                               focus: focus.length ? focus : undefined});
+  }
+  await loadNext();
+  refreshState();
+}
+async function skip(){ await loadNext(); }
+async function prev(){
+  if(hpos <= 0) return;
+  hpos--;
+  render(await jget("/api/position?tid=" + history[hpos]));
+}
+async function addLabel(){
+  const inp = document.getElementById("newlabel");
+  const name = inp.value.trim();
+  if(!name) return;
+  await jpost("/api/new_label", {name});
+  inp.value = "";
+  if(focus.length){ focus.push(name); localStorage.setItem("focusLabels", JSON.stringify(focus)); updateFocusBtn(); }
+  if(cur && cur.tid) render(await jget("/api/position?tid=" + cur.tid));
+  refreshState();
+}
+
+// ---- focus selector ----
+function updateFocusBtn(){
+  document.getElementById("focusBtn").textContent =
+    focus.length ? `Focus: ${focus.length} labels ▾` : "Focus: all ▾";
+  document.getElementById("focusHint").textContent =
+    focus.length ? focus.join(", ") : "showing all labels";
+}
+function toggleFocusPanel(){
+  const p = document.getElementById("focusPanel");
+  const open = p.style.display === "none";
+  p.style.display = open ? "block" : "none";
+  if(open) buildFocusGrid();
+}
+function buildFocusGrid(){
+  const g = document.getElementById("focusGrid");
+  g.innerHTML = "";
+  for(const name of allLabels){
+    const checked = focus.includes(name);
+    const el = document.createElement("label");
+    el.className = "fchk";
+    el.innerHTML = `<input type="checkbox" ${checked?"checked":""}><span>${name}</span>`;
+    g.appendChild(el);
+  }
+}
+function focusAll(){ document.querySelectorAll("#focusGrid input").forEach(c => c.checked = true); }
+function focusNone(){ document.querySelectorAll("#focusGrid input").forEach(c => c.checked = false); }
+function applyFocus(){
+  const chosen = [...document.querySelectorAll("#focusGrid .fchk")]
+    .filter(el => el.querySelector("input").checked)
+    .map(el => el.querySelector("span").textContent);
+  // Selecting all (or none) means "no focus" — show everything.
+  focus = (chosen.length === 0 || chosen.length === allLabels.length) ? [] : chosen;
+  localStorage.setItem("focusLabels", JSON.stringify(focus));
+  document.getElementById("focusPanel").style.display = "none";
+  updateFocusBtn();
+  history = []; hpos = -1; cur = null;
+  loadNext();
+}
+
+async function refreshState(){
+  const s = await jget("/api/state");
+  allLabels = s.label_set;
+  if(allLabels.length){
+    const pruned = focus.filter(n => allLabels.includes(n));
+    if(pruned.length !== focus.length){ focus = pruned; localStorage.setItem("focusLabels", JSON.stringify(focus)); }
+  }
+  updateFocusBtn();
+  document.getElementById("stat-annot").textContent =
+    `${s.n_annotated} labeled / ${s.n_pool} pool`;
+  document.getElementById("stat-model").textContent = "model v" + s.model_version;
+  const t = document.getElementById("stat-train");
+  t.textContent = s.training ? "training…" : "idle";
+  t.className = "pill " + (s.training ? "train" : "idle");
+  const c = document.getElementById("counts");
+  const lu = s.label_uncertainty || {};
+  const rows = s.label_set.map(n => ({
+    n, m: s.modes[n], cnt: s.pos_counts[n] || 0, u: lu[n],
+  }));
+  rows.sort((a, b) => (b.u ?? -1) - (a.u ?? -1));   // most-uncertain labels first
+  c.innerHTML = '<div class="counts-head"><span>label · positives</span><span>total uncertainty</span></div>' +
+    rows.map(r => {
+      const tag = r.m === "logistic" ? "L" : (r.m === "knn" ? "kNN" : "—");
+      const ustr = (r.u === undefined || r.u === null) ? "—" : r.u.toFixed(1);
+      return `<div><span>${r.n} <span class="badge">${tag}</span> ${r.cnt}+</span>` +
+             `<span>${ustr}</span></div>`;
+    }).join("");
+}
+
+document.querySelectorAll("#mode button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("#mode button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    mode = b.dataset.mode;
+    loadNext();
+  };
+});
+document.addEventListener("keydown", e => {
+  if(e.target.tagName === "INPUT") return;
+  if(e.key === "Enter") saveNext();
+  else if(e.key === "ArrowLeft") prev();
+  else if(e.key === "ArrowRight") skip();
+});
+
+loadNext();
+refreshState();
+setInterval(refreshState, 2000);
+</script>
+</body>
+</html>

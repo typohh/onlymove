@@ -4,7 +4,7 @@ Diagnostics, surgery tools and the rating research package — recurring helpers
 
 **Import direction.** `pipeline/` and `utils/` never import from here. The genuinely shared helpers — the activation-cache builder and contract, the attempt/survey loaders, the profile/feature builders — live in `utils/rating/features.py` and `utils/rating/rank_surveys.py`, so everything in this directory is a leaf: deletable without touching production code. `rating_dev/` imports `utils/` and its own modules; two top-level scripts import a sibling (`map_rating_to_rank_dev` ← `check_mapped_vs_declared_rank`, `eval_rank_endpoint_bias` ← `recreate_rank_graph`).
 
-**What does NOT live here.** One-off scripts are deleted once their job is done rather than kept as dead weight — the 2026-07-21 id surgery drivers, the momentum-vs-window-MLE estimator bake-off, the ICA-era motif labeler and inspector, and the closed single-hypothesis CV harnesses were all removed on 2026-08-02. Where a result matters it is stated in `CLAUDE.md` or `docs/methodology.md`; where the code matters, `git log --diff-filter=D --name-only -- auxiliary/` finds it.
+**What does NOT live here.** One-off scripts are deleted once their job is done rather than kept as dead weight — the 2026-07-21 id surgery drivers, the momentum-vs-window-MLE estimator bake-off, the ICA-era motif inspector, and the closed single-hypothesis CV harnesses were all removed on 2026-08-02. Where a result matters it is stated in `CLAUDE.md` or `docs/methodology.md`; where the code matters, `git log --diff-filter=D --name-only -- auxiliary/` finds it.
 
 **Running.** Absolute imports rooted at the repo, so invoke as modules through the venv:
 
@@ -66,6 +66,16 @@ Faithful offline ports of client code, for debugging one account against the loc
 
 - **`rating_dev/inspect_axes.py`** — renders the extreme-loading problems on each production axis, both tails, straight from `axes/per_problem.csv`. This is the motif-labeling tool: a refit produces an axis, you eyeball its tails here, name them in `axes/labels.json`, re-run `package_for_pwa`. The boards are the whole evidence — naming an axis by what DRIVES it needs the axis to be a linear map on nameable inputs, and the MIRT's trunk means no such decomposition exists. `--per-problem --size --rows --cols --open`.
 - **`eval_score_gap_axis.py`** — between-user predictive power of the best-vs-second-best score-gap axis (`--feature wr_gap` for the winrate comparator).
+- **`labeler/`** — a local active-learning motif labeler, and the route from a human motif name to a column of `axes/axis_bank.npz`. You tick labels on rendered positions; an elastic-net logistic probe (one-vs-rest, per label) retrains after every save, pre-fills its predictions on the next position so you only correct, and re-ranks the queue by prediction uncertainty. `grid.html` is the bulk-review view — a page of one label's confident predictions, correctable in batches.
+
+  It probes **the MIRT's own per-problem features** (`utils.rating.features.load_joint_mirt_features`, single-sourced with `pipeline.train_mirt` so the two cannot drift), which is what makes a label convertible into a bank direction: the probe is a function of exactly what the trunk reads, so a direction it finds is one the trunk can represent and therefore one the bank can teach the fit. Those features carry difficulty, so check a probe is not mostly predicting the rating before promoting it — the MIRT's factor 1 already carries that.
+
+  ```bash
+  ./.venv/bin/python3 -m auxiliary.labeler.precompute_features --pool 5000   # → labeler/cache/ (gitignored)
+  ./.venv/bin/python3 -m auxiliary.labeler.server                            # → http://localhost:8899
+  ```
+
+  `--max-rank` (default `1d`) bounds the pool by difficulty, because a human cannot label a position they cannot read. The annotations live in `labeler/labels.json`, which is TRACKED — it is hand-entered work that nothing regenerates. Re-run `precompute_features` after a corpus top-up or a `cache_rating_features` rebuild; annotations for problems that have left the corpus are kept and ignored.
 
 ---
 

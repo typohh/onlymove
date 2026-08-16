@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grid review — tsumego motifs</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f4f5; color: #222; }
+  header { display: flex; align-items: center; gap: .8rem; padding: .6rem 1rem; background: #fff;
+           border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header .grow { flex: 1; }
+  header a { color: #2a9d8f; text-decoration: none; font-size: .9rem; }
+  select, .toggle button, button { font: inherit; }
+  select { padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 6px; }
+  label.inline { font-size: .85rem; display: inline-flex; align-items: center; gap: .35rem; }
+  .toggle { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+  .toggle button { border: none; padding: .35rem .7rem; background: #fff; cursor: pointer; }
+  .toggle button.active { background: #222; color: #fff; }
+  button.save { background: #e63946; color: #fff; border: 1px solid #e63946; border-radius: 6px;
+                padding: .45rem .9rem; cursor: pointer; }
+  button.save:disabled { background: #ddd; border-color: #ddd; color: #888; cursor: default; }
+  button.confirm { background: #2a9d8f; color: #fff; border: 1px solid #2a9d8f; border-radius: 6px;
+                   padding: .45rem .9rem; cursor: pointer; }
+  .meta { font-size: .8rem; color: #666; padding: .4rem 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: .8rem; padding: 1rem; }
+  .card { background: #fff; border: 2px solid #ddd; border-radius: 8px; padding: .4rem;
+          cursor: pointer; position: relative; transition: border-color .1s; }
+  .card:hover { border-color: #aaa; }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.incorrect { border-color: #e63946; background: #fff2f2; }
+  .card.incorrect::after { content: "✗"; position: absolute; top: 4px; right: 8px;
+          color: #e63946; font-weight: 700; font-size: 1.2rem; }
+  .cardfoot { font-size: .72rem; color: #666; margin-top: .3rem; display: flex;
+              justify-content: space-between; font-family: ui-monospace, monospace; }
+  .badge { font-size: .6rem; padding: .05rem .3rem; border-radius: 4px; background: #ddd; color: #444; }
+  .badge.knn { background: #fde2c8; } .badge.log { background: #cfe8ff; }
+  .saved { font-size: .62rem; padding: .05rem .3rem; border-radius: 4px; }
+  .saved.yes { background: #d8f3dc; color: #2a6; } .saved.no { background: #eee; color: #888; }
+  .empty { padding: 3rem; text-align: center; color: #888; }
+  .markhint { font-size: .78rem; color: #b35; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 1rem;
+           padding: .6rem 1rem 1.4rem; font-size: .9rem; }
+  .pager button { padding: .4rem 1rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+  .pager button:disabled { color: #bbb; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Grid review</strong>
+  <select id="label"></select>
+  <div class="toggle" id="pred">
+    <button data-pred="on" class="active">predicted ON</button>
+    <button data-pred="off">predicted OFF</button>
+  </div>
+  <label class="inline"><input type="checkbox" id="incl"> include labeled</label>
+  <div class="toggle" id="sort">
+    <button data-sort="desc" class="active">most confident</button>
+    <button data-sort="asc">least confident</button>
+  </div>
+  <span class="grow"></span>
+  <span class="markhint" id="markhint"></span>
+  <button class="save" id="saveBtn" disabled onclick="saveAndReload()">Save 0 corrections</button>
+  <button class="confirm" id="confirmBtn" onclick="confirmAllShown()">Confirm all shown ✓</button>
+  <a href="/">← Labeler</a>
+</header>
+
+<div class="meta" id="meta"></div>
+<div class="grid" id="grid"></div>
+<div class="pager" id="pager"></div>
+
+<script>
+let label = null, pred = "on", incl = false, sort = "desc";
+let offset = 0, pageSize = 24, total = 0, modeled = true, loading = false;
+let currentItems = [], isRandom = false;
+let measuredCardH = null;   // real rendered card height, measured after first paint
+const staged = new Set();
+const correctionValue = () => pred === "off";   // off-grid: mark = "it IS the label"
+
+async function jget(u){ return (await fetch(u)).json(); }
+async function jpost(u, b){ return (await fetch(u, {method:"POST",
+  headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)})).json(); }
+
+async function loadLabels(){
+  const s = await jget("/api/state");
+  const sel = document.getElementById("label");
+  const cur = label || s.label_set[0];
+  sel.innerHTML = s.label_set.map(n => `<option ${n===cur?"selected":""}>${n}</option>`).join("");
+  label = sel.value;
+}
+
+// Page size = whatever grid of cards fills the viewport. Columns and gap are
+// read from the actual computed grid layout; card height uses the REAL measured
+// card once painted (the estimate over-counted height and left a blank row).
+function computePageSize(){
+  const grid = document.getElementById("grid");
+  const cs = getComputedStyle(grid);
+  const tracks = cs.gridTemplateColumns.split(/\s+/).filter(Boolean);
+  const cols = Math.max(1, tracks.length);
+  const gap = parseFloat(cs.rowGap) || 13;
+  const trackW = parseFloat(tracks[0]) || 160;
+  const cardH = measuredCardH || (trackW + 38);                // measured when available
+  const avail = window.innerHeight - grid.getBoundingClientRect().top - 56;  // pager reserve
+  const rows = Math.max(1, Math.floor((avail + gap) / (cardH + gap)));
+  return cols * rows;
+}
+
+function updateSaveBtn(){
+  const b = document.getElementById("saveBtn");
+  b.textContent = `Save ${staged.size} correction${staged.size===1?"":"s"}`;
+  b.disabled = staged.size === 0;
+  document.getElementById("markhint").textContent = staged.size
+    ? `marking ${staged.size} as “${correctionValue() ? "IS" : "NOT"} ${label}”` : "";
+}
+
+function card(item){
+  const el = document.createElement("div");
+  el.className = "card" + (staged.has(item.tid) ? " incorrect" : "");
+  const savedBadge = item.considered
+    ? `<span class="saved ${item.current ? "yes":"no"}">saved:${item.current ? "✓":"✗"}</span>` : "";
+  const probHtml = item.prob == null
+    ? `<span class="badge">random</span>`
+    : `${(item.prob*100).toFixed(0)}% <span class="badge ${item.mode==='knn'?'knn':'log'}">` +
+      `${item.mode==='knn'?'kNN':'L'}</span>`;
+  el.innerHTML = item.svg +
+    `<div class="cardfoot"><span>${item.rank}</span>` +
+    `<span>${probHtml} ${savedBadge}</span></div>`;
+  el.onclick = () => {
+    if(staged.has(item.tid)){ staged.delete(item.tid); el.classList.remove("incorrect"); }
+    else { staged.add(item.tid); el.classList.add("incorrect"); }
+    updateSaveBtn();
+  };
+  return el;
+}
+
+async function renderGrid(){
+  const u = `/api/grid?label=${encodeURIComponent(label)}&pred=${pred}` +
+            `&include_labeled=${incl?1:0}&sort=${sort}&offset=${offset}&limit=${pageSize}`;
+  const res = await jget(u);
+  modeled = res.modeled;
+  isRandom = !!res.random;
+  total = res.total || 0;
+  currentItems = res.items || [];
+  // Cold start (no model): random positions, forced to "predicted OFF" so a
+  // mark means "this IS the label" (a positive); Confirm-all then bulk-sets the
+  // rest negative.
+  if(isRandom && pred !== "off"){
+    pred = "off";
+    document.querySelectorAll("#pred button").forEach(x => x.classList.toggle("active", x.dataset.pred === "off"));
+    updateSaveBtn();
+  }
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  if(currentItems.length === 0){
+    grid.innerHTML = `<div class="empty">No positions to show for “${label}”. Try “include labeled”.</div>`;
+  } else {
+    for(const it of currentItems) grid.appendChild(card(it));
+  }
+}
+
+async function loadPage(){
+  if(loading) return;
+  loading = true;
+  pageSize = computePageSize();
+  await renderGrid();
+  // Measure the real card height and refill once if the estimate under-counted
+  // rows (and there are more positions to show).
+  const cards = document.querySelectorAll("#grid .card");
+  if(cards.length){
+    const h = cards[0].offsetHeight;
+    if(h && Math.abs(h - (measuredCardH || 0)) > 1){
+      measuredCardH = h;
+      const fit = computePageSize();
+      if(fit > pageSize && currentItems.length === pageSize && pageSize < total){
+        pageSize = fit;
+        await renderGrid();
+      }
+    }
+  }
+  loading = false;
+  updatePager();
+}
+
+function updatePager(){
+  const meta = document.getElementById("meta");
+  const pager = document.getElementById("pager");
+  if(!modeled && !isRandom){ meta.textContent = ""; pager.innerHTML = ""; return; }
+  const pageNum = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  meta.textContent = isRandom
+    ? `${label}: no model yet — ${total} random positions (mark the ones that ARE ${label})`
+      + (incl ? " (incl. labeled)" : "") + ` · ${pageSize}/page`
+    : `${label}: ${total} predicted ${pred.toUpperCase()}`
+      + (incl ? " (incl. labeled)" : " (unlabeled only)") + ` · ${pageSize}/page`;
+  pager.innerHTML =
+    `<button id="prevB" ${offset<=0?"disabled":""}>← Prev</button>` +
+    `<span>page ${pageNum} of ${totalPages}</span>` +
+    `<button id="nextB" ${offset+pageSize>=total?"disabled":""}>Next →</button>`;
+  document.getElementById("prevB").onclick = () => { offset = Math.max(0, offset - pageSize); staged.clear(); updateSaveBtn(); loadPage(); };
+  document.getElementById("nextB").onclick = () => { offset += pageSize; staged.clear(); updateSaveBtn(); loadPage(); };
+}
+
+async function saveStaged(){
+  if(!staged.size) return;
+  await jpost("/api/correct", {label, tids: [...staged], value: correctionValue()});
+  staged.clear(); updateSaveBtn();
+}
+// Conservative: persist only the marked-incorrect cells, then refresh this page.
+async function saveAndReload(){ await saveStaged(); loadPage(); }
+
+// Confirm the whole page: marked cells flipped, the rest confirmed at their
+// prediction. Splits into positive/negative batches for /api/correct.
+async function confirmAllShown(){
+  if(!currentItems.length) return;
+  const onList = [], offList = [];
+  for(const it of currentItems){
+    const v = staged.has(it.tid) ? correctionValue() : (pred === "on");
+    (v ? onList : offList).push(it.tid);
+  }
+  if(onList.length)  await jpost("/api/correct", {label, tids: onList,  value: true});
+  if(offList.length) await jpost("/api/correct", {label, tids: offList, value: false});
+  staged.clear(); updateSaveBtn();
+  loadPage();   // exclude-labeled: confirmed cells drop out → next batch fills in
+}
+
+async function changeControls(){
+  await saveStaged();          // don't lose marks when switching
+  offset = 0; loadPage();
+}
+
+document.getElementById("label").onchange = e => { label = e.target.value; changeControls(); };
+document.getElementById("incl").onchange = e => { incl = e.target.checked; changeControls(); };
+document.querySelectorAll("#pred button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#pred button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); pred = b.dataset.pred; updateSaveBtn(); changeControls();
+});
+document.querySelectorAll("#sort button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#sort button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); sort = b.dataset.sort; changeControls();
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    measuredCardH = null;   // card width (hence height) changes with column count
+    offset = 0; staged.clear(); updateSaveBtn();
+    loadPage();
+  }, 250);
+});
+
+(async () => { await loadLabels(); updateSaveBtn(); loadPage(); })();
+</script>
+</body>
+</html>
