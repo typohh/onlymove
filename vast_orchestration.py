@@ -83,6 +83,20 @@ MODEL_DOWNLOADS = {
 REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts",
                       "calibration_19x19_sgf", "calibration_handicap_sgf"]
 
+# Freshly generated SGFs land HERE, not in tsumegos/<size>/, so that a generator
+# running on a schedule cannot change the corpus underneath work in progress.
+# Every derived artifact — activations, bot results, ownership, the rated set —
+# is keyed to the corpus, so a directory that grows every 30 minutes means each
+# of them is stale the moment it is built, and a fit halts on rows that appeared
+# after it started. Staging makes adopting new problems an explicit `mv`.
+#
+# The corpus scanners deliberately do NOT look here (utils.rating.features
+# corpus_tids_by_size and residual_axes.corpus_tid_size read tsumegos/<size>/
+# only), which is the whole point. The one scanner that MUST look here is
+# generate_tsumegos.tsumego_id_taken: a staged id is taken, and reissuing it
+# would hand a new problem another problem's history.
+TSUMEGO_STAGING = os.path.join("tsumegos", "new")
+
 # Per-step input dirs pushed TO the remote before launching a step. These are
 # state dirs the step reads to resume incrementally. For benchmark, attempts/
 # holds prior bot results — uploading them lets test_bot skip already-processed
@@ -383,7 +397,10 @@ def upload_input_dirs(host, base_ssh, base_rsync, dirs, size=None):
     needed. rsync won't create missing parent dirs, so mkdir -p the target
     first.
     """
-    excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc"]
+    # `new/` is local staging for SGFs pulled off this very remote — it already
+    # has them in tsumegos/<size>/, so mirroring it back is pure transfer cost.
+    excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc",
+                "--exclude", "new/"]
     for d in dirs:
         local = os.path.join(d, str(size)) if size is not None else d
         if not os.path.isdir(local):
@@ -921,11 +938,34 @@ def cmd_shutdown(target):
     print(f"Instance {inst_id} destroyed.")
 
 
-def cmd_sync(target, sgf_only=False):
+def _report_staged():
+    """Say what is waiting in staging, per size. Silence would make a scheduled
+    sync indistinguishable from one that pulled nothing."""
+    if not os.path.isdir(TSUMEGO_STAGING):
+        return
+    for size in sorted(os.listdir(TSUMEGO_STAGING)):
+        d = os.path.join(TSUMEGO_STAGING, size)
+        if not os.path.isdir(d):
+            continue
+        n = sum(1 for f in os.listdir(d) if f.endswith(".sgf"))
+        if n:
+            print(f"  STAGED: {n} SGFs in {d}/ — adopt with "
+                  f"`mv {d}/*.sgf tsumegos/{size}/` when you want them in the corpus")
+
+
+def cmd_sync(target, sgf_only=False, size=None):
     """rsync tsumegos/ and attempts/ from the remote into the local repo.
 
     With sgf_only=True, only tsumegos/ is pulled (attempts/ can be large and
     isn't needed when you just want fresh SGFs locally).
+
+    `size` SCOPES THE TSUMEGO PULL TO ONE BOARD, and a periodic sync should
+    normally set it. The remote still holds the pre-merge, pre-purge originals of
+    any board it is not currently generating, and every one of those is a file
+    the local corpus is missing on purpose — so an unscoped pull drags thousands
+    of deliberately purged problems into staging. They land there rather than in
+    the corpus, so nothing is silently restored, but there is no reason to
+    transfer and then sift them.
     """
     inst = find_instance(target)
     if not inst:
@@ -941,32 +981,57 @@ def cmd_sync(target, sgf_only=False):
     suffix = " (sgf only)" if sgf_only else ""
     print(f"Syncing outputs from instance {inst_id}{suffix}...")
     for d in dirs:
-        os.makedirs(d, exist_ok=True)
         # Trailing slash on src + dst means "copy contents".
         # Don't pull database.sql back — it's a local-only D1 dump.
         excludes = ["--exclude", "database.sql"]
+        src_sub = d
+        if d == "tsumegos":
+            # Land new SGFs in the staging dir, and use --compare-dest so a file
+            # the corpus ALREADY holds is skipped rather than copied again. The
+            # remote's tsumegos/<size>/ is the uploaded corpus plus whatever it
+            # has generated, so without the compare the first sync would clone
+            # the entire corpus into staging.
+            if size is not None:
+                src_sub = f"{d}/{size}"
+                dest = os.path.join(TSUMEGO_STAGING, str(size)) + os.sep
+                compare = os.path.abspath(os.path.join(d, str(size)))
+            else:
+                dest = TSUMEGO_STAGING + os.sep
+                compare = os.path.abspath(d)
+            excludes += ["--compare-dest", compare,
+                         # staging is local bookkeeping; never mirror it back
+                         "--exclude", "new/"]
+        else:
+            dest = f"{d}/"
+        os.makedirs(dest, exist_ok=True)
         res = subprocess.run(
             base_rsync + excludes + [
-                f"root@{host}:{REMOTE_DIR}/{d}/",
-                f"{d}/",
+                f"root@{host}:{REMOTE_DIR}/{src_sub}/",
+                dest,
             ],
             timeout=600,
         )
         if res.returncode == 0:
-            print(f"  {d}/ synced.")
+            print(f"  {d}/ -> {dest} synced.")
         else:
             print(f"  {d}/ sync had errors (rsync rc={res.returncode}).")
+    _report_staged()
 
 
 def cmd_sync_cli(args):
-    """Parse `[<id>] [--sgf]` and call cmd_sync."""
+    """Parse `[<id>] [--sgf] [--size N]` and call cmd_sync."""
     args = list(args)
     sgf_only = False
     if "--sgf" in args:
         sgf_only = True
         args.remove("--sgf")
+    size = None
+    if "--size" in args:
+        i = args.index("--size")
+        size = int(args[i + 1])
+        del args[i:i + 2]
     target = args[0] if args else None
-    cmd_sync(target, sgf_only=sgf_only)
+    cmd_sync(target, sgf_only=sgf_only, size=size)
 
 
 def cmd_stream(target):

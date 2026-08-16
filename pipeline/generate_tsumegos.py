@@ -20,7 +20,8 @@ from utils.katago.add_variations import (  # noqa: E402
     generate_variations_directly_to_sgf,
     promote_winning_first_move,
 )
-from utils.constants import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug  # noqa: E402
+from utils.constants import (  # noqa: E402
+    ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug, read_retired_ids)
 from utils.katago.add_variations import construct_initial_sgf  # noqa: E402
 from utils.katago.controller import KatagoController  # noqa: E402
 from utils.katago.queries import KatagoQueries  # noqa: E402
@@ -187,28 +188,6 @@ def get_orientation_invariant_hash(board):
         hashes.append(h)
     return min(hashes)
 
-RETIRED_IDS_PATH = os.path.join(PROJECT_ROOT, "tsumegos", "retired_ids.txt")
-
-
-@functools.lru_cache(maxsize=1)
-def _retired_ids():
-    """Ids of removed problems that still carry attempt rows in the DB.
-
-    Read once per process. A missing file yields an empty set: the check is a
-    guard against reuse, and a generator run should not be blocked because the
-    list has not been produced yet."""
-    retired = set()
-    try:
-        with open(RETIRED_IDS_PATH) as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    retired.add(line)
-    except FileNotFoundError:
-        pass
-    return retired
-
-
 def tsumego_id_taken(filename):
     """True if a tsumego with this id already exists on ANY board size, or the
     id has been RETIRED.
@@ -226,13 +205,21 @@ def tsumego_id_taken(filename):
     corpus but its attempt rows were kept, so a new problem under that id would
     inherit other people's history — the one failure mode that produces no
     error anywhere and cannot be untangled afterwards. tsumegos/retired_ids.txt
-    is the list."""
+    is the list.
+
+    STAGING COUNTS AS TAKEN. tsumegos/new/<size>/ holds problems synced off a
+    remote generator but not yet adopted into the corpus (vast_orchestration
+    TSUMEGO_STAGING). They are real generated problems that simply have not been
+    moved yet, so an id sitting there must not be handed out again — the corpus
+    scanners ignore staging on purpose, but the ID NAMESPACE cannot."""
     tid = os.path.splitext(filename)[0]
-    if tid in _retired_ids():
+    if tid in read_retired_ids():
         return True
+    roots = (os.path.join(PROJECT_ROOT, "tsumegos"),
+             os.path.join(PROJECT_ROOT, "tsumegos", "new"))
     return any(
-        os.path.exists(os.path.join(PROJECT_ROOT, "tsumegos", str(s), filename))
-        for s in ALL_BOARD_SIZES)
+        os.path.exists(os.path.join(root, str(s), filename))
+        for root in roots for s in ALL_BOARD_SIZES)
 
 def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_list: list):
     """
