@@ -580,9 +580,13 @@ function retrainAfterMerge(insertedEntries, mode) {
     try { calculateAndStoreStatsResults(); } catch (e) { console.warn('account-sync: recall retrain failed:', e); }
     try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
-        // 'adopt' runs before the first shard is loaded, so this estimate cannot price
-        // the SE floor and reads low; main.js re-anchors once the pool is in, behind
-        // the same splash. What it writes here is still what selects the first shard.
+        // Same call for both modes, because the estimate is a pure function of the
+        // merged history: there is no warm start to seed differently and no loop
+        // state to carry, so an adoption and an ongoing merge are one operation.
+        // 'adopt' runs before the first shard is loaded and that costs it nothing —
+        // the SE floor comes from the shipped corpus curve (seFloorAt), not from the
+        // problems this device happens to hold — and what it writes selects the
+        // first shard. 'reconcile' is excluded: those rows are ancient.
         if (mode === 'adopt' || mode === 'feed') reanchorRank(getMergedAnswerHistory());
     } catch (e) {
         console.warn('account-sync: loop state update failed:', e);

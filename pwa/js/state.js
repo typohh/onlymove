@@ -273,9 +273,11 @@ export async function syncTailExpectedToActual() {
 
 // --- Shared-across-sizes state (single values, not bucketed). ---
 // The single shared rank is the window-MLE estimate (rank-decomposition
-// .estimateWindowRank); the recall (modelParams/adamState) and weakness
-// (weaknessParams/Adam/Se/AxisCov) models train on the union of both sizes'
-// histories. See mergeSharedAcrossSizes_v2.
+// .estimateWindowRank); the recall (modelParams) and weakness (weaknessParams/
+// Se/AxisCov) models train on the union of both sizes' histories. The adamState
+// and weaknessAdam slots beside them are legacy blobs kept only so the wipe
+// lists still clear them — neither fitter carries optimizer state any more. See
+// mergeSharedAcrossSizes_v2.
 const shared = {
     userRank: readJSON('userRank', null),
     // Three ranks, all in the same internal units, all from one posterior
@@ -859,9 +861,9 @@ export function setModelParams(params) {
     state.modelParams = params;
 }
 
-// Drop the shared weakness model entirely (params + Adam state + posterior
-// SE/cov). Used by the trainer on a non-finite blow-up and by the embedding
-// backfill when an embedding refit invalidates the trained axes.
+// Drop the shared weakness model entirely (params + posterior SE/cov, plus the
+// legacy Adam blob). Used by the trainer on a non-finite blow-up and by the
+// embedding backfill when an embedding refit invalidates the trained axes.
 export function clearWeaknessModel() {
     state.weaknessParams = null;
     state.weaknessAdam = null;

@@ -6,8 +6,9 @@
 // models (weakness.js, rank-decomposition.js).
 //
 // calculateAndStoreStatsResults is this module's TRAINER, not a stats helper: it
-// drives prepareTrainingData / MODEL_INDICES / the Adam loop and stores the fit.
-// It reads "stats" because the fitted output lands in state.statsResults.
+// drives prepareTrainingData / MODEL_INDICES / fitUserModel's two Newton blocks
+// and stores the fit. It reads "stats" because the output lands in
+// state.statsResults.
 
 import * as Sentry from "@sentry/browser";
 import { state, setStatsResults, setModelParams, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
