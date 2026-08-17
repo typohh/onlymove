@@ -128,7 +128,7 @@ LR_FIELD = 1e-2
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
 ORTHO_WEIGHT = 0.5
-ORTHO_RATING = 0.5               # keeps the axes off RATING, SLOPE and FLOOR
+ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 GAUGE_MOM = 0.01
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
@@ -329,6 +329,23 @@ class JointMIRT:
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
         return (c + (1.0 - c - lam) * torch.sigmoid(z), g,
                 torch.stack([r, a, c], dim=1).detach())
+
+
+def _tail_w(torch, g, at):
+    """The shared tail weight in torch, differentiable: z-score, then `z` above
+    `at` and `at*exp((z-at)/at)` below. The same function the measurement uses
+    (utils.rating.tail_agreement.tail_weight), so the objective and the report are
+    the same shape.
+
+    The exponent is CLAMPED because torch.where evaluates both branches: a large
+    positive z overflows the exponential branch to inf even though the result is
+    discarded, and the backward pass turns that into NaN through the zero
+    gradient. Clamping leaves the kept branch exactly unchanged — where z >= at
+    the clamped exponent is zero, so exp is 1.
+    """
+    z = (g - g.mean(dim=0, keepdim=True)) / (g.std(dim=0, keepdim=True) + 1e-6)
+    zc = torch.clamp(z, max=at)
+    return torch.where(z >= at, z, at * torch.exp((zc - at) / at))
 
 
 def load_bank(key_idx):
@@ -564,7 +581,21 @@ def main():
             # satisfy itself.
             tz = rsf - rsf.mean(dim=0, keepdim=True)
             tz = tz / (tz.norm(dim=0, keepdim=True) + 1e-9)
-            loss = loss + ORTHO_RATING * (Mn.T @ tz).pow(2).sum()
+            # PER TAIL, not whole-axis. A whole-axis correlation is a LINEAR
+            # statistic and cannot see a symmetric dependence: an axis whose two
+            # tails are both rating-laden in opposite directions averages to zero
+            # and satisfies the penalty completely, while both NAMED tails — the
+            # only part the client reads — are laden. Measured on a free fit whose
+            # whole-axis correlations sat at 0.02-0.09, the tails carried rating at
+            # 0.27-0.31; penalising per tail cuts the worst tail from 0.291 to
+            # 0.105. The whole-axis figure rises slightly under this and that is
+            # expected — it is no longer the statistic being optimised, and it was
+            # never the one that mattered.
+            for _sg in (1.0, -1.0):
+                W = _tail_w(torch, _sg * gh, TAIL_HINGE)
+                W = W - W.mean(dim=0, keepdim=True)
+                W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
+                loss = loss + ORTHO_RATING * (W.T @ tz).pow(2).sum()
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #
