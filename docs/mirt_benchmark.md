@@ -400,6 +400,46 @@ The accepted cost of stopping at `b` is DISPLACEMENT rather than removal — eac
 rating parameter to absorb, and with b closed the largest residual moves into the floor head
 (escape atari -0.035 -> -0.431).
 
+### A bipolar bank under the full penalty — the best never-trained pricing measured
+
+Six motifs on three axes, columns built as `f(z(A)) - f(z(B))` with the shared tail weight, taught
+under the full rating-orthogonality penalty. Its bank is NOT rating-orthogonal — the columns carry
+0.246 / 0.264 / 0.274 against the shipped triple, mostly on slope — so this is the penalty working
+against its own teaching target.
+
+| arm | rating | rating+axis | axis adds | never-trained | survey rho |
+|---|---|---|---|---|---|
+| bipolar, ortho on b, raw subtraction | 0.5074 | 0.5041 | 3.29 | 0.5552 | **0.8294** |
+| bipolar, full ortho, weighted columns | 0.5072 | 0.5030 | **4.21** | **0.5533** | 0.8223 |
+| free, full ortho, no bank | 0.5093 | 0.5056 | 3.73 | 0.5576 | 0.8154 |
+
+Per pole, tail-weighted agreement:
+
+| pole | ortho on b | full ortho |
+|---|---|---|
+| counting | 0.256 | **0.670** |
+| life and death | 0.440 | 0.448 |
+| defend territory | 0.553 | 0.577 |
+| opening | **0.858** | 0.603 |
+| escape atari | 0.172 | **0.738** |
+| ko | **0.973** | 0.931 |
+| mean | 0.542 | **0.661** |
+
+Leakage falls from a worst cell of +0.79 (slope) and +0.49 (floor) to +0.065 and -0.112.
+
+Two readings to keep apart. The retention gain is concentrated in the two WEAKEST poles — counting
+0.26 -> 0.67 and escape atari 0.17 -> 0.74 — while the two strongest give up a little; that is the
+better shape, since a bank is worth what its weakest named tail is worth. But the arm changes TWO
+things against its predecessor, the penalty and the column construction, so the gain is not
+attributable. The pattern points at the construction: the weighted form specifically removes
+"not-A pushes a problem toward B", and it is exactly the weak poles that would suffer most from that.
+
+**It also unsettles the conflict story.** A one-sided bank at 0.357 correlation under this penalty
+left the axes worth 0.16 mnat; a bipolar bank at 0.274 reaches 4.21. Either bipolar pairing gives the
+fit enough freedom to satisfy both objectives, or the construction is doing the work, or 0.357 is past
+a cliff 0.274 sits under. Until that is separated, "the bank must be rating-orthogonal" is not
+supported as a prerequisite.
+
 ### TEACH_DECAY_EPOCHS is an interior optimum at 1000
 
 Swept on converged-axis banks under ortho-b, one seed each, scored on tail-weighted agreement.
