@@ -220,6 +220,27 @@
       "comment": "Joint MIRT, rule-seeded drop_ko arm seed 0 (2026-08-16). Seeded from a rule (earliest 5 percent of game phase). Highly reproducible (cross-fit r +0.83) but DIFFICULTY-LADEN IN EVERY INSTANCE MEASURED (-0.30 to -0.34); this is the least-bad of the three. Teaching from it re-injects difficulty into the axes unless the ortho penalty is on.",
       "positive_i18n": null,
       "negative_i18n": null
+    },
+    "ax_4e23f75b": {
+      "positive": "defend territory",
+      "negative": null,
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty (rating+slope+floor), axis 0 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. RATING-ORTHOGONAL BY CONSTRUCTION (b +0.08, rating +0.07, slope +0.03, floor +0.01), which is what makes it a valid bank seed under that penalty where the b-only motifs are not. SHARES A NAME BUT NOT A DIRECTION with ax_cadba465: tail agreement between the two is -0.018, i.e. unrelated. The same Go concept read off a slice orthogonal to the rating parameters selects different problems; do not treat them as one motif.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_2091d5bf": {
+      "positive": "capture stone to gain liberty",
+      "negative": null,
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 1 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.13, rating +0.09, slope +0.04, floor +0.01). NEW MOTIF: agrees with nothing else in the store above 0.064, so it is not a re-finding of any earlier direction under a different name.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_4cb94a2c": {
+      "positive": null,
+      "negative": "escape atari",
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 2 NEGATIVE tail — the positive tail is unnamed and ships silently. Named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.03, rating -0.02, slope +0.01, floor -0.01). PARTIALLY overlaps ax_df8b6188 of the same name (tail agreement +0.309): related but not the same direction, the b-only version carrying floor -0.22 that this one does not.",
+      "positive_i18n": null,
+      "negative_i18n": null
     }
   },
   "components": [

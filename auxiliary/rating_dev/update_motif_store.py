@@ -56,18 +56,43 @@ LABELS = os.path.join(PROJECT_ROOT, "axes", "labels.json")
 
 
 def axis_id(col):
-    """Content hash of the DIRECTION, sign-canonicalised and scale-free.
+    """Content hash of the ORIENTED direction, scale-free.
 
-    z-scored first so a rescale is the same motif, and the sign is pinned by the
-    skew so a fit that happens to converge to the mirror image lands on the same
-    id — the two are one direction, and a store that gave them two ids would
-    offer the same motif twice under different names."""
+    z-scored first, so a rescale is the same motif. Deliberately NOT
+    sign-canonicalised: the id has to describe the column AS STORED, because the
+    labels name its two tails by sign. Pinning the sign by skew and then storing
+    the column unflipped gives the same id to a column and its mirror image, and
+    whichever is added second keeps the first's labels while carrying opposite
+    values — every name silently attached to the wrong tail, which is the failure
+    the store exists to prevent. Skew is also a poor pivot for a bipolar axis,
+    where it sits near zero and a small data change flips it.
+
+    A mirror image therefore gets its OWN id, and `mirror_of` reports it at add
+    time so a human decides whether it is a duplicate."""
     c = np.asarray(col, np.float64)
     c = c[np.isfinite(c)]
     c = (c - c.mean()) / max(c.std(), 1e-12)
-    if float((c ** 3).mean()) < 0:
-        c = -c
     return "ax_" + hashlib.sha256(np.round(c, 4).tobytes()).hexdigest()[:8]
+
+
+def mirror_of(col, ids, M, bank):
+    """Existing motifs this column is strongly ANTI-correlated with — the same
+    direction found the other way round, whose two tail names would need swapping
+    rather than repeating."""
+    c = np.asarray(col, np.float64)
+    out = []
+    for a, other in zip(ids, M):
+        m = np.isfinite(c) & np.isfinite(other)
+        if m.sum() < 1000:
+            continue
+        x, y = c[m], other[m]
+        if x.std() <= 0 or y.std() <= 0:
+            continue
+        r = float(np.corrcoef(x, y)[0, 1])
+        if r <= -0.7:
+            e = bank.get(a, {})
+            out.append((r, a, e.get("positive"), e.get("negative")))
+    return sorted(out)
 
 
 def corpus_tids():
@@ -140,6 +165,11 @@ def main():
                 col[i] = v
                 n_hit += 1
         aid = axis_id(col)
+        for r, other, op, on in mirror_of(col, ids, M, store["bank"]):
+            print(f"    NOTE: r={r:+.2f} against {other} "
+                  f"(+{op!r} / -{on!r}) — this looks like the SAME direction "
+                  f"found mirrored. Its tails are this column's the other way "
+                  f"round; store it only if you mean to keep both orientations.")
         pos, _, neg = name.partition("/")
         entry = store["bank"].get(aid, {})
         entry.update({
