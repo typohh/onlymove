@@ -400,6 +400,31 @@ The accepted cost of stopping at `b` is DISPLACEMENT rather than removal — eac
 rating parameter to absorb, and with b closed the largest residual moves into the floor head
 (escape atari -0.035 -> -0.431).
 
+### The bank-building workflow: discover, then glue
+
+Two stages, deliberately separate, because a fit asked to both find directions and satisfy a
+prescribed set does neither cleanly.
+
+**Stage one, discover a direction.** Either HANDCRAFTED — a stated rule labels the corpus
+(`auxiliary.labeler.rules`, `export_bank --from-rules`), which is how ko, counting, opening and life
+and death were seeded — or UNINITIALIZED, a fit with no `--teach-directions` let go to land where it
+will, which is how escape atari, defend territory and capture stone to gain liberty were found. A
+rule bootstraps a motif nobody has seen; a free fit finds one nobody thought to write a rule for.
+Neither stage-one fit needs to be shippable. A human reads the extremes and names what is there;
+`update_motif_store` records the direction with its provenance, and the store is the durable
+artifact — a direction found once is never rediscovered.
+
+**Stage two, glue stored directions onto K axes.** `build_bank_from_dumps` composes a bank from store
+entries, one motif per axis or two as a bipolar column. Nothing is re-derived; this stage decides only
+what ships together and in what order. `train_mirt` then refines those directions rather than
+inventing its own.
+
+What the second stage costs and buys, measured: pairing six motifs onto three axes retained every
+pole, improved the two WEAKEST most (counting 0.26 -> 0.67, escape atari 0.17 -> 0.74 against the
+one-sided arm), and gave the best never-trained pricing of any fit run. The cost is that a pole's
+retention tracks its own reproducibility, so a weak motif stays weak — pairing does not rescue a
+direction that was never well determined.
+
 ### A bipolar bank under the full penalty — the best never-trained pricing measured
 
 Six motifs on three axes, columns built as `f(z(A)) - f(z(B))` with the shared tail weight, taught
