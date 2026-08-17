@@ -366,154 +366,83 @@ estimation noise on the forward walk, so solo-axis contribution is systematicall
 useless for ranking instances of a motif. Rank them by the arm-level held-out contribution and by
 leakage against the rating parameters instead.
 
-### The axes are held off difficulty by ORTHO_RATING
+### ORTHO_RATING holds each TAIL off rating, slope and floor
 
-`ORTHO_RATING` 0.5, a squared cosine between each centred unit loading column and the centred unit
-DETACHED `b`, is the only term in the objective that decorrelates an axis from the rating side.
+`ORTHO_RATING` 0.5 is the only term in the objective that decorrelates an axis from the rating side.
 `ORTHO_WEIGHT` is K x K over the loadings alone; `V_MEAN_PENALTY` pins only the population mean of
-`v`, which blocks a global difficulty shift but not per-problem difficulty tracking.
+`v`, which blocks a global difficulty shift but not per-problem tracking. Without it a free fit
+spends an axis on a rating-side property: the free control's third axis correlates -0.638 with SLOPE
+and only +0.182 with difficulty — the leak picks a parameter rather than difficulty specifically —
+and that arm is worst on rating (0.5117) and worst on never-trained problems (0.5612) of every arm
+measured.
 
-Without it a free fit spends an axis on a rating-side property. The free control's third axis
-correlates -0.638 with SLOPE and only +0.182 with difficulty — the leak picks a parameter rather
-than difficulty specifically — and that arm is worst on rating (0.5117) and worst on never-trained
-problems (0.5612) of every arm measured.
+Two properties of the term were each arrived at by getting them wrong first.
+
+**IT TARGETS THE SHIPPED TRIPLE, NOT DIFFICULTY ALONE.** Penalising `b` by itself only DISPLACES the
+leak, because each axis finds a different rating parameter to absorb: closing `b` sent one axis from
+-0.04 to -0.43 on the floor head and left another at +0.62 with slope. Closing rating, slope and floor
+together removes it.
+
+An earlier reading of this document called the three-target form REFUTED, on one arm where it left
+the axes worth 0.16 mnat against 4.41. That arm was TAUGHT from a bank whose own columns were 0.36
+rating-correlated, so it was being pulled toward those directions and pushed off every rating channel
+at once. Given a FREE fit, with nothing prescribing where to go, the same penalty is 6.4 mnat BETTER
+on rating than b-only with the axes still worth 3.7 mnat; and a BIPOLAR bank at 0.274 correlation
+reaches 4.21 mnat. So the failure was the CONFLICT, not the constraint, and how much conflict is
+tolerable is still unresolved — see the bipolar section.
+
+**IT IS SCORED PER TAIL, AND THE WHOLE-AXIS FORM WAS HIDING MOST OF THE LEAK.** A whole-axis
+correlation is a LINEAR statistic and cannot see a symmetric dependence: an axis whose two tails are
+both rating-laden in OPPOSITE directions averages to zero and satisfies the penalty completely, while
+both NAMED tails — the only part the client reads — are laden. Measured, that is what was happening.
+
+| free fit, seed 1 | worst tail correlation per axis | mean |
+|---|---|---|
+| whole-axis penalty | 0.273 / 0.292 / 0.307 | 0.291 |
+| PER-TAIL penalty | 0.117 / 0.094 / 0.103 | **0.105** |
+
+The whole-axis arm reported correlations of 0.02-0.09 and was recorded as rating-orthogonal on that
+basis. Its tails carried 0.27-0.31 — a 3-9x understatement. The b-only arm shows the mechanism
+outright: one axis carries floor -0.245 on its positive tail and +0.567 on its negative, so the
+whole-axis figure is an average of two opposing tail effects, and a symmetric version averages to
+exactly zero. Per-tail cuts the worst tail 2.8x. The whole-axis figure rises slightly under it
+(0.016 -> 0.084 on one axis), which is expected: it is no longer the statistic being optimised and
+was never the one that mattered.
+
+**The walk-forward cost of per-tail is NOT established.** Same seed, free, only the penalty form
+differing: rating 0.5073 against 0.5093, axis adds 1.53 against 3.73, never-trained 0.5511 against
+0.5576, rho 0.8067 against 0.8154. Every one of those is inside the free-fit seed spread measured
+elsewhere in this document (5.3 mnat on rating, 4.4x on adds), so one pair cannot separate them. It
+is adopted on the leakage result, which is a direct property of the fit rather than a held-out
+estimate. On the stop split it ran 1.6 mnat behind its control and took the longest of any arm to
+converge (4280 epochs against 3950), consistent with a tighter constraint being slower to fit.
+
+Implementation note that cost a crash: the torch tail weight must CLAMP its exponent. `torch.where`
+evaluates both branches, so a large positive z overflows the exponential branch to inf even though
+the result is discarded, and the backward pass turns it into NaN through the zero gradient — which
+surfaces as `binary_cross_entropy`'s `[0,1]` device-side assert a step later, pointing at a line
+nowhere near the fault.
+
+### Superseded: the b-only comparison
+
+Kept because the arms below were all run under it and their other columns are still valid.
 
 | arm | rating | rating+axis | axis adds | never-trained | survey rho | mean tail agreement |
 |---|---|---|---|---|---|---|
 | taught, no ortho | 0.5123 | 0.5064 | 5.84 | 0.5725 | 0.8131 | 0.759 |
 | taught, ortho on b | 0.5130 | 0.5086 | 4.41 | 0.5631 | **0.8232** | **0.762** |
-| taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | **0.16** | 0.5639 | 0.8123 | 0.656 |
+| taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | 0.16 | 0.5639 | 0.8123 | 0.656 |
 
-Per axis (escape atari / life and death / ko): 0.874 0.447 0.955 untreated, 0.818 **0.515** 0.952 with
-ortho on b, 0.680 0.453 0.834 with the shipped triple.
+The ortho-b identity margin over untreated is NOT ESTABLISHED: a paired bootstrap over problems puts
+it at +0.003, 95% CI [-0.001, +0.007]. It survives every threshold from z = 1 to 3, but that is
+stability of the METRIC and not of the estimate — the sweep rescores the same single pair of fits.
+Nor is the bootstrap the right error bar: it resamples PROBLEMS, while the dominant variability for
+comparing two fits is ACROSS FITS, and each arm is n = 1. What stands is that ortho-b does not COST
+identity.
 
-**The ortho-b identity margin over untreated is NOT ESTABLISHED.** A paired bootstrap over problems
-puts it at +0.003 with a 95% CI of [-0.001, +0.007]; size-blocked, P(>0) = 91%. It survives every
-threshold from z = 1 to 3, but that is stability of the METRIC and not of the estimate — the sweep
-rescores the same single pair of fits, so it says the measure is not arbitrary, not that the
-difference is real. Nor is the bootstrap the right error bar: it resamples PROBLEMS, while the
-dominant variability for comparing two fits is ACROSS FITS, and each arm here is n = 1. The honest
-statement is that ortho-b does not COST identity; the case for it rests on the difficulty leak it
-removes, on never-trained pricing and on survey rho. The three-target arm's deficit (0.656) is a
-different scale entirely — ~35 bootstrap sd — and is not in question. b alone costs 0.7 mnat of rating — inside seed
-noise — and buys better never-trained pricing, the best survey rho measured, and better identity on
-two of three axes with the third level.
-
-**Penalising the shipped triple is refuted.** It decorrelates thoroughly (every correlation under
-0.32, most under 0.09) and leaves the axes worth 0.16 mnat on held-out users, negative on
-already-seen rows: three constraints on K=3 axes leave room to satisfy the penalty or to carry
-signal, not both. Two traps in reading it. It has the BEST stop split of any arm (0.4963) — that
-signal is computed on TRAINING users whose `v` is fitted, so it moves opposite to held-out axis
-value and must not be used to rank arms. And constraining rating, slope and floor does NOT
-constrain `b`: measured -0.312, because zero correlation with each of three quantities separately
-implies nothing about a nonlinear combination of them.
-
-The accepted cost of stopping at `b` is DISPLACEMENT rather than removal — each axis finds its own
-rating parameter to absorb, and with b closed the largest residual moves into the floor head
-(escape atari -0.035 -> -0.431).
-
-### A FREE fit does not reproduce itself — the seed floor, measured
-
-Two runs of the identical production configuration (free, no bank, full rating-orthogonality),
-differing only in seed:
-
-| | rating | rating+axis | axis adds | never-trained | survey rho |
-|---|---|---|---|---|---|
-| seed 1 | 0.5093 | 0.5056 | **3.73** | 0.5576 | 0.8154 |
-| seed 2 | 0.5146 | 0.5137 | **0.84** | 0.5578 | 0.8185 |
-
-Direction agreement between them, best match per seed-1 axis: **0.56 / 0.25 / 0.20, mean 0.34.**
-
-**This is the EXPECTED baseline, not a defect.** The objective is exactly invariant to rotating the
-axis space, so nothing in a free fit prefers one basis over another and two seeds have no reason to
-agree; 0.34 is that known arbitrariness put on a scale, and it is the arbitrariness the axis bank
-exists to remove. The full penalty widens the space further — forbidding correlation with rating,
-slope and floor leaves a large residual subspace to be arbitrary within.
-
-Two things follow, and the second is a caution about this whole document.
-
-**Directions named off a single free fit are seed-specific.** The store's `ax_4e23f75b` (defend
-territory), `ax_2091d5bf` (capture stone to gain liberty) and `ax_4cb94a2c` (escape atari) come from
-the seed-1 fit and are matched by seed 2 at 0.56 / 0.25 / 0.20. The boards a human read to name them
-are real; the DIRECTION is not stable, so those entries are candidate seeds rather than settled
-motifs. It also dissolves a puzzle: the free `defend territory` disagreeing with the b-only one at
--0.018 was not two different concepts, it was a free fit landing arbitrarily.
-
-**Two free fits are not the same solution, so their spread bounds only FREE-arm comparisons.**
-Rating moves 5.3 mnat and axis contribution 4.4x between two runs of one configuration — but the two
-fits settled on different axis bases, so this is variation between distinct solutions rather than
-measurement noise around one. It applies where both arms are free: the full penalty beating b-only on
-rating by 6.4 mnat is a free-against-free comparison and is inside this spread, so it is unresolved.
-
-IT DOES NOT APPLY TO TAUGHT ARMS, which are pinned by a bank and are not free to land elsewhere —
-the decay sweep, the ortho comparison and the bipolar arms are all taught, and none of them is
-called into question by this. The seed floor for a TAUGHT fit is a different quantity, is not
-measured, and is the one that would calibrate those comparisons.
-
-### The bank-building workflow: discover, then glue
-
-Two stages, deliberately separate, because a fit asked to both find directions and satisfy a
-prescribed set does neither cleanly.
-
-**Stage one, discover a direction.** Either HANDCRAFTED — a stated rule labels the corpus
-(`auxiliary.labeler.rules`, `export_bank --from-rules`), which is how ko, counting, opening and life
-and death were seeded — or UNINITIALIZED, a fit with no `--teach-directions` let go to land where it
-will, which is how escape atari, defend territory and capture stone to gain liberty were found. A
-rule bootstraps a motif nobody has seen; a free fit finds one nobody thought to write a rule for.
-Neither stage-one fit needs to be shippable. A human reads the extremes and names what is there;
-`update_motif_store` records the direction with its provenance, and the store is the durable
-artifact — a direction found once is never rediscovered.
-
-**Stage two, glue stored directions onto K axes.** `build_bank_from_dumps` composes a bank from store
-entries, one motif per axis or two as a bipolar column. Nothing is re-derived; this stage decides only
-what ships together and in what order. `train_mirt` then refines those directions rather than
-inventing its own.
-
-What the second stage costs and buys, measured: pairing six motifs onto three axes retained every
-pole, improved the two WEAKEST most (counting 0.26 -> 0.67, escape atari 0.17 -> 0.74 against the
-one-sided arm), and gave the best never-trained pricing of any fit run. The cost is that a pole's
-retention tracks its own reproducibility, so a weak motif stays weak — pairing does not rescue a
-direction that was never well determined.
-
-### A bipolar bank under the full penalty — the best never-trained pricing measured
-
-Six motifs on three axes, columns built as `f(z(A)) - f(z(B))` with the shared tail weight, taught
-under the full rating-orthogonality penalty. Its bank is NOT rating-orthogonal — the columns carry
-0.246 / 0.264 / 0.274 against the shipped triple, mostly on slope — so this is the penalty working
-against its own teaching target.
-
-| arm | rating | rating+axis | axis adds | never-trained | survey rho |
-|---|---|---|---|---|---|
-| bipolar, ortho on b, raw subtraction | 0.5074 | 0.5041 | 3.29 | 0.5552 | **0.8294** |
-| bipolar, full ortho, weighted columns | 0.5072 | 0.5030 | **4.21** | **0.5533** | 0.8223 |
-| free, full ortho, no bank | 0.5093 | 0.5056 | 3.73 | 0.5576 | 0.8154 |
-
-Per pole, tail-weighted agreement:
-
-| pole | ortho on b | full ortho |
-|---|---|---|
-| counting | 0.256 | **0.670** |
-| life and death | 0.440 | 0.448 |
-| defend territory | 0.553 | 0.577 |
-| opening | **0.858** | 0.603 |
-| escape atari | 0.172 | **0.738** |
-| ko | **0.973** | 0.931 |
-| mean | 0.542 | **0.661** |
-
-Leakage falls from a worst cell of +0.79 (slope) and +0.49 (floor) to +0.065 and -0.112.
-
-Two readings to keep apart. The retention gain is concentrated in the two WEAKEST poles — counting
-0.26 -> 0.67 and escape atari 0.17 -> 0.74 — while the two strongest give up a little; that is the
-better shape, since a bank is worth what its weakest named tail is worth. But the arm changes TWO
-things against its predecessor, the penalty and the column construction, so the gain is not
-attributable. The pattern points at the construction: the weighted form specifically removes
-"not-A pushes a problem toward B", and it is exactly the weak poles that would suffer most from that.
-
-**It also unsettles the conflict story.** A one-sided bank at 0.357 correlation under this penalty
-left the axes worth 0.16 mnat; a bipolar bank at 0.274 reaches 4.21. Either bipolar pairing gives the
-fit enough freedom to satisfy both objectives, or the construction is doing the work, or 0.357 is past
-a cliff 0.274 sits under. Until that is separated, "the bank must be rating-orthogonal" is not
-supported as a prerequisite.
+Note also that constraining rating, slope and floor does NOT constrain `b`: measured -0.312, because
+zero correlation with each of three quantities separately implies nothing about a nonlinear
+combination of them.
 
 ### TEACH_DECAY_EPOCHS is an interior optimum at 1000
 
