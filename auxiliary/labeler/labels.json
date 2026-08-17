@@ -269,7 +269,9 @@
       "ts": 0.0
     },
     "2fafdc29": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -443,7 +445,9 @@
       "ts": 0.0
     },
     "026c9b5a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1031,7 +1035,9 @@
       "ts": 0.0
     },
     "3832144b": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1227,7 +1233,9 @@
       "ts": 0.0
     },
     "14abf8a0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1353,7 +1361,9 @@
       "ts": 0.0
     },
     "439bc310": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1467,7 +1477,9 @@
       "ts": 0.0
     },
     "0e61e613": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1643,7 +1655,9 @@
       "ts": 0.0
     },
     "0abaafa2": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -1741,7 +1755,9 @@
       "ts": 0.0
     },
     "026bc252": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2083,7 +2099,9 @@
       "ts": 0.0
     },
     "0bf42d0d": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2113,7 +2131,9 @@
       "ts": 0.0
     },
     "0448b004": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2323,7 +2343,9 @@
       "ts": 0.0
     },
     "233f55b3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2608,7 +2630,9 @@
       "ts": 0.0
     },
     "04ec8a40": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2638,7 +2662,9 @@
       "ts": 0.0
     },
     "26aa9eb3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -2648,7 +2674,9 @@
       "ts": 0.0
     },
     "1201fed5": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -3092,7 +3120,9 @@
       "ts": 0.0
     },
     "270007fb": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -3428,7 +3458,9 @@
       "ts": 0.0
     },
     "38249ed1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -3819,7 +3851,9 @@
       "ts": 0.0
     },
     "0610743f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -4061,7 +4095,9 @@
       "ts": 0.0
     },
     "03ca9988": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -4173,7 +4209,9 @@
       "ts": 0.0
     },
     "17e4dcb1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -4323,7 +4361,9 @@
       "ts": 0.0
     },
     "01bdfd62": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -4442,6 +4482,7 @@
     },
     "4432a5f5": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -5300,7 +5341,9 @@
       "ts": 0.0
     },
     "170d5afa": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -5524,9 +5567,7 @@
       "ts": 0.0
     },
     "2ed6f8ad": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -5610,7 +5651,9 @@
       "ts": 0.0
     },
     "16b5b237": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -5736,7 +5779,9 @@
       "ts": 0.0
     },
     "2eab2e5e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -5972,7 +6017,9 @@
       "ts": 0.0
     },
     "13cb81b2": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -6003,6 +6050,7 @@
     },
     "03f5b4cd": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -6200,7 +6248,9 @@
       "ts": 0.0
     },
     "0bf06aea": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -6606,7 +6656,9 @@
       "ts": 0.0
     },
     "07d0d263": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -6832,6 +6884,7 @@
     },
     "0ac4fc01": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -6971,7 +7024,9 @@
       "ts": 0.0
     },
     "74f3d243": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -7120,6 +7175,7 @@
     },
     "0f6e6758": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -7314,7 +7370,9 @@
       "ts": 0.0
     },
     "0fe7fa10": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -7324,7 +7382,9 @@
       "ts": 0.0
     },
     "048a833c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -7376,7 +7436,9 @@
       "ts": 0.0
     },
     "35a155d3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -7418,9 +7480,7 @@
       "ts": 0.0
     },
     "1fc20583": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -8273,7 +8333,9 @@
       "ts": 0.0
     },
     "1b98ea07": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -8303,7 +8365,9 @@
       "ts": 0.0
     },
     "1a8fdabd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -8397,7 +8461,9 @@
       "ts": 0.0
     },
     "0bcc9d22": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -8598,7 +8664,9 @@
       "ts": 0.0
     },
     "4167fd11": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -8608,7 +8676,9 @@
       "ts": 0.0
     },
     "19c5524b": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -8812,7 +8882,9 @@
       "ts": 0.0
     },
     "055447e6": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -9165,7 +9237,9 @@
       "ts": 0.0
     },
     "0a06c6ff": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -9284,6 +9358,7 @@
     },
     "220feac4": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -9315,7 +9390,9 @@
       "ts": 0.0
     },
     "105e01ff": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -9325,7 +9402,9 @@
       "ts": 0.0
     },
     "0c9bdbe4": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -9813,7 +9892,9 @@
       "ts": 0.0
     },
     "1a78cf06": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -9935,7 +10016,9 @@
       "ts": 0.0
     },
     "01d810da": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -10957,7 +11040,9 @@
       "ts": 0.0
     },
     "067f7a99": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -11040,6 +11125,7 @@
     },
     "1c3533f4": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -11294,6 +11380,7 @@
     },
     "06bc9fe8": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -11326,6 +11413,7 @@
     },
     "2fab3cb1": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -11382,6 +11470,7 @@
     },
     "0a1e67bf": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -11707,7 +11796,9 @@
       "ts": 0.0
     },
     "2629942e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -12145,6 +12236,7 @@
     },
     "0f5dd4f3": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -12228,7 +12320,9 @@
       "ts": 0.0
     },
     "05bcbbd8": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -12300,7 +12394,9 @@
       "ts": 0.0
     },
     "243ff0ad": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -12485,6 +12581,7 @@
     },
     "5397540f": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -12939,6 +13036,7 @@
     },
     "100c7b8d": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -13301,7 +13399,9 @@
       "ts": 0.0
     },
     "1da0c405": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -13449,7 +13549,9 @@
       "ts": 0.0
     },
     "2339dc39": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -13706,7 +13808,9 @@
       "ts": 0.0
     },
     "1f5316dc": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -13786,7 +13890,9 @@
       "ts": 0.0
     },
     "04404ed1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -13882,7 +13988,9 @@
       "ts": 0.0
     },
     "38f2d7ed": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -14645,7 +14753,9 @@
       "ts": 0.0
     },
     "0a223a33": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -14783,7 +14893,9 @@
       "ts": 0.0
     },
     "2ef444ce": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -15474,6 +15586,7 @@
     },
     "0cdec0ad": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -15876,6 +15989,7 @@
     },
     "05a26e69": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -16098,6 +16212,7 @@
     },
     "1e6f0071": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -16132,6 +16247,7 @@
     },
     "25d75521": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -16381,7 +16497,9 @@
       "ts": 0.0
     },
     "06bdf7a2": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -16421,7 +16539,9 @@
       "ts": 0.0
     },
     "17862b6c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -16908,6 +17028,7 @@
     },
     "04534b88": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -17121,6 +17242,7 @@
     },
     "03cb5fc2": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -17167,7 +17289,6 @@
     },
     "093c8622": {
       "labels": [
-        "counting",
         "ko"
       ],
       "known": [
@@ -17805,7 +17926,9 @@
       "ts": 0.0
     },
     "113f0964": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -17951,7 +18074,9 @@
       "ts": 0.0
     },
     "1d829896": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -17983,9 +18108,7 @@
       "ts": 0.0
     },
     "45883f8a": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -18366,7 +18489,9 @@
       "ts": 0.0
     },
     "4c5c7b7c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -18691,6 +18816,7 @@
     },
     "16bb4de2": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -18919,7 +19045,9 @@
       "ts": 0.0
     },
     "215ff5dd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -19045,7 +19173,9 @@
       "ts": 0.0
     },
     "0e0e9482": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -19291,7 +19421,9 @@
       "ts": 0.0
     },
     "4d92857b": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -19695,7 +19827,9 @@
       "ts": 0.0
     },
     "08ca97a0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -19779,7 +19913,9 @@
       "ts": 0.0
     },
     "0289870a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -19801,7 +19937,9 @@
       "ts": 0.0
     },
     "25e22dc6": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -20151,7 +20289,9 @@
       "ts": 0.0
     },
     "4a0af076": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -20783,7 +20923,9 @@
       "ts": 0.0
     },
     "01d24cc9": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -20803,7 +20945,9 @@
       "ts": 0.0
     },
     "0e360d2b": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -20823,7 +20967,9 @@
       "ts": 0.0
     },
     "3085a261": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -20945,7 +21091,9 @@
       "ts": 0.0
     },
     "0e48c132": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21186,6 +21334,7 @@
     },
     "18a41200": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -21409,7 +21558,9 @@
       "ts": 0.0
     },
     "35bf2a6b": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21473,7 +21624,9 @@
       "ts": 0.0
     },
     "0bf72fb5": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21515,7 +21668,9 @@
       "ts": 0.0
     },
     "2834ddd3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21679,7 +21834,9 @@
       "ts": 0.0
     },
     "18e1fde9": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21793,7 +21950,9 @@
       "ts": 0.0
     },
     "0036fedc": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -21921,7 +22080,9 @@
       "ts": 0.0
     },
     "452061bd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -22027,7 +22188,9 @@
       "ts": 0.0
     },
     "2dfa1469": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -22603,7 +22766,9 @@
       "ts": 0.0
     },
     "0500328d": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -22717,7 +22882,9 @@
       "ts": 0.0
     },
     "2565f5e0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -22852,7 +23019,9 @@
       "ts": 0.0
     },
     "1a1fe811": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -23365,6 +23534,7 @@
     },
     "09e1bfbf": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -23386,7 +23556,9 @@
       "ts": 0.0
     },
     "1ecebe41": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -23708,6 +23880,7 @@
     },
     "065cd7a4": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -23857,7 +24030,9 @@
       "ts": 0.0
     },
     "03d3e535": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -23868,6 +24043,7 @@
     },
     "04ff33a0": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -23943,7 +24119,9 @@
       "ts": 0.0
     },
     "2b724b50": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -23984,6 +24162,7 @@
     },
     "0c7d35a1": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -24309,7 +24488,9 @@
       "ts": 0.0
     },
     "385e0bd0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -24481,7 +24662,9 @@
       "ts": 0.0
     },
     "04a5fbe1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -24573,7 +24756,9 @@
       "ts": 0.0
     },
     "33358538": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -25345,7 +25530,9 @@
       "ts": 0.0
     },
     "3b56529a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -25355,7 +25542,9 @@
       "ts": 0.0
     },
     "2a545533": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26244,7 +26433,9 @@
       "ts": 0.0
     },
     "05d76aa6": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26440,7 +26631,9 @@
       "ts": 0.0
     },
     "06fdcb9e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26504,7 +26697,9 @@
       "ts": 0.0
     },
     "0cc4da53": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26672,7 +26867,9 @@
       "ts": 0.0
     },
     "0948ca72": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26724,7 +26921,9 @@
       "ts": 0.0
     },
     "4bd12e0d": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -26940,7 +27139,9 @@
       "ts": 0.0
     },
     "14740581": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -27126,7 +27327,9 @@
       "ts": 0.0
     },
     "06daa934": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -27963,7 +28166,9 @@
       "ts": 0.0
     },
     "28db8151": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -28801,7 +29006,9 @@
       "ts": 0.0
     },
     "0e16ff72": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -28811,7 +29018,9 @@
       "ts": 0.0
     },
     "23257253": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -29288,6 +29497,7 @@
     },
     "17f13c4b": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -29688,7 +29898,9 @@
       "ts": 0.0
     },
     "0ef91656": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -29742,7 +29954,9 @@
       "ts": 0.0
     },
     "0b477efa": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -29762,7 +29976,9 @@
       "ts": 0.0
     },
     "3c631c30": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -30262,7 +30478,9 @@
       "ts": 0.0
     },
     "5915f64c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -30569,7 +30787,9 @@
       "ts": 0.0
     },
     "217e2c55": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -30613,7 +30833,9 @@
       "ts": 0.0
     },
     "191ec7d4": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -31332,7 +31554,9 @@
       "ts": 0.0
     },
     "0e13b4f8": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -31716,7 +31940,9 @@
       "ts": 0.0
     },
     "07ba8eff": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -31807,6 +32033,7 @@
     },
     "7c3e978d": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -31938,7 +32165,9 @@
       "ts": 0.0
     },
     "6b900fad": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -32541,7 +32770,9 @@
       "ts": 0.0
     },
     "1b362bdb": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -32561,7 +32792,9 @@
       "ts": 0.0
     },
     "3b219367": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -32635,7 +32868,9 @@
       "ts": 0.0
     },
     "18885b46": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -32785,7 +33020,9 @@
       "ts": 0.0
     },
     "1af84b86": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -33091,7 +33328,9 @@
       "ts": 0.0
     },
     "377416b3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -33165,7 +33404,9 @@
       "ts": 0.0
     },
     "1a1a1f95": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -33186,6 +33427,7 @@
     },
     "245328ff": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -33429,7 +33671,9 @@
       "ts": 0.0
     },
     "0ec09b14": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -33543,7 +33787,9 @@
       "ts": 0.0
     },
     "2ba0ab4d": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -33897,7 +34143,9 @@
       "ts": 0.0
     },
     "67d4ae2c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -34105,7 +34353,9 @@
       "ts": 0.0
     },
     "2a14ed41": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -34495,6 +34745,7 @@
     },
     "01508549": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -34516,7 +34767,9 @@
       "ts": 0.0
     },
     "4eb80fc6": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -34546,7 +34799,9 @@
       "ts": 0.0
     },
     "11647ade": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -35291,7 +35546,9 @@
       "ts": 0.0
     },
     "71d682b9": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -35481,7 +35738,9 @@
       "ts": 0.0
     },
     "160138c3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -35534,6 +35793,7 @@
     },
     "0e0fcef5": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -35590,6 +35850,7 @@
     },
     "07ea5f7e": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -35641,7 +35902,9 @@
       "ts": 0.0
     },
     "173854d2": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -35870,7 +36133,9 @@
       "ts": 0.0
     },
     "02388dc9": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -36098,6 +36363,7 @@
     },
     "15b94aee": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -36129,7 +36395,9 @@
       "ts": 0.0
     },
     "2ebdb512": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -36678,6 +36946,7 @@
     },
     "017804f2": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -36709,7 +36978,9 @@
       "ts": 0.0
     },
     "248f2c12": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -36867,7 +37138,8 @@
     },
     "0ded6e61": {
       "labels": [
-        "life and death"
+        "life and death",
+        "counting"
       ],
       "known": [
         "life and death",
@@ -37304,7 +37576,9 @@
       "ts": 0.0
     },
     "1d728f78": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -37698,9 +37972,7 @@
       "ts": 0.0
     },
     "1a30e9bf": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -37720,7 +37992,9 @@
       "ts": 0.0
     },
     "3e22621f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -37842,7 +38116,9 @@
       "ts": 0.0
     },
     "0eec8896": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -38205,7 +38481,9 @@
       "ts": 0.0
     },
     "59a8aa5a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -38295,7 +38573,9 @@
       "ts": 0.0
     },
     "240584d5": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -38557,9 +38837,7 @@
       "ts": 0.0
     },
     "157d13dc": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -38633,7 +38911,9 @@
       "ts": 0.0
     },
     "107d0350": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -38675,7 +38955,9 @@
       "ts": 0.0
     },
     "0012e022": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -38827,7 +39109,9 @@
       "ts": 0.0
     },
     "062ba9af": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -39202,6 +39486,7 @@
     },
     "1661846e": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -39320,6 +39605,7 @@
     },
     "0a27936e": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -39391,7 +39677,9 @@
       "ts": 0.0
     },
     "486c1822": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -39991,7 +40279,9 @@
       "ts": 0.0
     },
     "3d5b1598": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -40013,7 +40303,9 @@
       "ts": 0.0
     },
     "02fa7f43": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -40115,7 +40407,9 @@
       "ts": 0.0
     },
     "181d1d7e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -40280,6 +40574,7 @@
     },
     "048c1909": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -40499,7 +40794,9 @@
       "ts": 0.0
     },
     "03997a4e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -40649,7 +40946,9 @@
       "ts": 0.0
     },
     "0c66f157": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -40756,7 +41055,8 @@
     },
     "0010143b": {
       "labels": [
-        "life and death"
+        "life and death",
+        "counting"
       ],
       "known": [
         "life and death",
@@ -41024,7 +41324,9 @@
       "ts": 0.0
     },
     "1888fab0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -41076,7 +41378,9 @@
       "ts": 0.0
     },
     "3bdfb764": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -41592,7 +41896,9 @@
       "ts": 0.0
     },
     "1c3b3fd3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -41654,7 +41960,9 @@
       "ts": 0.0
     },
     "0df176f3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -42384,7 +42692,9 @@
       "ts": 0.0
     },
     "35c61b0a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -42698,7 +43008,9 @@
       "ts": 0.0
     },
     "1883ca46": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -42852,7 +43164,9 @@
       "ts": 0.0
     },
     "28b09566": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43046,7 +43360,9 @@
       "ts": 0.0
     },
     "20dadf3f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43168,7 +43484,9 @@
       "ts": 0.0
     },
     "02925c49": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43179,6 +43497,7 @@
     },
     "109e1284": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -43388,7 +43707,9 @@
       "ts": 0.0
     },
     "08ff96f1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43472,7 +43793,9 @@
       "ts": 0.0
     },
     "0411d951": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43737,7 +44060,9 @@
       "ts": 0.0
     },
     "3848e370": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -43967,7 +44292,9 @@
       "ts": 0.0
     },
     "3fb20f47": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -44285,7 +44612,9 @@
       "ts": 0.0
     },
     "144cebde": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -44570,7 +44899,9 @@
       "ts": 0.0
     },
     "040d0e64": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -44894,9 +45225,7 @@
       "ts": 0.0
     },
     "1d3b65b6": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -45288,7 +45617,9 @@
       "ts": 0.0
     },
     "085adb2f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -45519,6 +45850,7 @@
     },
     "2cfb3ecb": {
       "labels": [
+        "counting",
         "opening"
       ],
       "known": [
@@ -45796,7 +46128,9 @@
       "ts": 0.0
     },
     "0e9f56f4": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -45928,7 +46262,9 @@
       "ts": 0.0
     },
     "0b94484f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -46448,7 +46784,9 @@
       "ts": 0.0
     },
     "2b3a2afd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -46629,7 +46967,9 @@
       "ts": 0.0
     },
     "07beaef7": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -46751,7 +47091,9 @@
       "ts": 0.0
     },
     "0fb12a0f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -46815,7 +47157,9 @@
       "ts": 0.0
     },
     "02d81f7a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -46845,9 +47189,7 @@
       "ts": 0.0
     },
     "08f91c5d": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -47302,6 +47644,7 @@
     },
     "426b3e7b": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -47433,9 +47776,7 @@
       "ts": 0.0
     },
     "0a73c67b": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -47994,7 +48335,9 @@
       "ts": 0.0
     },
     "0e2e9728": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -48080,7 +48423,9 @@
       "ts": 0.0
     },
     "5d681812": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -48704,7 +49049,9 @@
       "ts": 0.0
     },
     "1288456e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -48904,7 +49251,9 @@
       "ts": 0.0
     },
     "2802a59f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -48915,6 +49264,7 @@
     },
     "3536d5ce": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -49550,7 +49900,9 @@
       "ts": 0.0
     },
     "16c2ce8c": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -49626,7 +49978,9 @@
       "ts": 0.0
     },
     "1a2559fd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -49678,7 +50032,9 @@
       "ts": 0.0
     },
     "1c68801a": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -49710,7 +50066,9 @@
       "ts": 0.0
     },
     "10be78e0": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -49937,6 +50295,7 @@
     },
     "61990e7a": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -50237,7 +50596,9 @@
       "ts": 0.0
     },
     "05bac9ab": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -50287,7 +50648,9 @@
       "ts": 0.0
     },
     "4abbee22": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -50365,6 +50728,7 @@
     "23cc3b5d": {
       "labels": [
         "life and death",
+        "counting",
         "ko"
       ],
       "known": [
@@ -50420,9 +50784,7 @@
       "ts": 0.0
     },
     "2af26227": {
-      "labels": [
-        "counting"
-      ],
+      "labels": [],
       "known": [
         "life and death",
         "counting",
@@ -50612,7 +50974,9 @@
       "ts": 0.0
     },
     "18512d9e": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -50815,7 +51179,9 @@
       "ts": 0.0
     },
     "08efccde": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -50947,7 +51313,9 @@
       "ts": 0.0
     },
     "3a8606b3": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51041,7 +51409,9 @@
       "ts": 0.0
     },
     "087a3092": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51250,6 +51620,7 @@
     },
     "03c611a1": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -51327,7 +51698,9 @@
       "ts": 0.0
     },
     "628443cd": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51349,7 +51722,9 @@
       "ts": 0.0
     },
     "00b5ff2d": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51401,7 +51776,9 @@
       "ts": 0.0
     },
     "0e0dbcc5": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51840,6 +52217,7 @@
     },
     "0ac4ff4a": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -51933,7 +52311,9 @@
       "ts": 0.0
     },
     "149bfdc6": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -51973,7 +52353,9 @@
       "ts": 0.0
     },
     "14b01e56": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -52005,7 +52387,9 @@
       "ts": 0.0
     },
     "089a83d1": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",
@@ -52124,6 +52508,7 @@
     },
     "3179e642": {
       "labels": [
+        "counting",
         "ko"
       ],
       "known": [
@@ -52628,7 +53013,9 @@
       "ts": 0.0
     },
     "1affd23f": {
-      "labels": [],
+      "labels": [
+        "counting"
+      ],
       "known": [
         "life and death",
         "counting",

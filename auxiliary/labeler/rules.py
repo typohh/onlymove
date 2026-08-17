@@ -58,6 +58,7 @@ if PROJECT_ROOT not in sys.path:
 import sgfmill.sgf  # noqa: E402
 
 from utils.katago.add_variations import parse_eval_comment  # noqa: E402
+from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.katago.board_render import parse_sgf, simulate  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 
@@ -83,8 +84,12 @@ LD_TRADE_RATIO = 0.20  # every OTHER directional part, as a fraction of the winn
 # counting: the top two first moves finish within a hair of each other on score
 # while the win probability separates hard — the position turns on a margin you
 # have to count rather than on a status you can see.
-COUNT_SCORE_MAX = 1.0   # points between best and second best
-COUNT_WR_MIN = 50.0     # percentage points of winrate between the same two
+# The winrate bar has to be HIGH to select anything. Admission requires exactly
+# one winning reply, played out, so the corpus has almost no ambiguous-outcome
+# positions: 99.5% of problems clear a 50-point winrate gap and the clause passes
+# everything. At 90 it admits 55%, which is a filter.
+COUNT_SCORE_MAX = 5.0   # points between best and second best
+COUNT_WR_MIN = 90.0     # percentage points of winrate between the same two
 
 # ko: replay each resolved line this many plies and ask whether a ko shape stands.
 # Depth 0 is the root position itself.
@@ -363,13 +368,35 @@ def main():
                     help="also score each rule's separability in feature space")
     ap.add_argument("--no-train", action="store_true",
                     help="skip fitting/caching the probes (the server will fit on boot)")
+    ap.add_argument("--corpus", default=None, metavar="OUT.json",
+                    help="label the WHOLE corpus instead of the pool and write "
+                         "there. This is ground truth for scoring a fitted axis's "
+                         "tail — the rules are pure functions of corpus "
+                         "artifacts, so they answer for problems no labeller ever "
+                         "saw. Deliberately NOT labels.json: precompute_features "
+                         "pins every annotated problem into the pool, so writing "
+                         "160k annotations there would pin the entire corpus and "
+                         "the pool could never be resampled.")
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--out", default=LABELS_PATH)
     args = ap.parse_args()
 
-    with open(os.path.join(CACHE_DIR, "pool.json")) as fh:
-        pool = json.load(fh)
-    print(f"pool: {len(pool['tids'])} problems, "
+    if args.corpus:
+        # The corpus stands in for the pool: same rules, same code path, every
+        # problem instead of a sample. The opening cutoff is still a per-size
+        # percentile, now over the whole board rather than over the sample.
+        tids, sizes = [], []
+        for size in sorted(SIZES):
+            d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+            for f in sorted(os.listdir(d)):
+                if f.endswith(".sgf"):
+                    tids.append(f[:-4])
+                    sizes.append(size)
+        pool = {"tids": tids, "sizes": sizes}
+    else:
+        with open(os.path.join(CACHE_DIR, "pool.json")) as fh:
+            pool = json.load(fh)
+    print(f"{'corpus' if args.corpus else 'pool'}: {len(pool['tids'])} problems, "
           f"{dict(Counter(pool['sizes']))}")
 
     ownership = load_ownership()
@@ -384,13 +411,17 @@ def main():
     overlap = Counter(len(r["labels"]) for r in ann.values())
     print(f"  labels per problem: {dict(sorted(overlap.items()))}")
 
-    with open(args.out, "w") as fh:
+    out = args.corpus or args.out
+    with open(out, "w") as fh:
         json.dump({"label_set": LABEL_SET, "annotations": ann}, fh, indent=2)
-    print(f"\n-> {args.out}")
+    print(f"\n-> {out}")
 
+    # Both of these read the POOL's feature cache, which a corpus run has no
+    # counterpart for and does not need: it produces ground truth, not a probe.
+    if args.corpus:
+        return
     if args.report:
         report(ann, pool)
-
     if not args.no_train:
         fit_and_cache()
 
