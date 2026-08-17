@@ -424,10 +424,11 @@ differing only in seed:
 
 Direction agreement between them, best match per seed-1 axis: **0.56 / 0.25 / 0.20, mean 0.34.**
 
-**A free fit under the full penalty lands somewhere different every time.** Forbidding correlation
-with rating, slope and floor leaves a large residual subspace with no preference among its
-directions, so the fit has nothing to pick with. This is the arbitrariness the axis bank exists to
-remove, stated as a number.
+**This is the EXPECTED baseline, not a defect.** The objective is exactly invariant to rotating the
+axis space, so nothing in a free fit prefers one basis over another and two seeds have no reason to
+agree; 0.34 is that known arbitrariness put on a scale, and it is the arbitrariness the axis bank
+exists to remove. The full penalty widens the space further — forbidding correlation with rating,
+slope and floor leaves a large residual subspace to be arbitrary within.
 
 Two things follow, and the second is a caution about this whole document.
 
@@ -438,15 +439,16 @@ are real; the DIRECTION is not stable, so those entries are candidate seeds rath
 motifs. It also dissolves a puzzle: the free `defend territory` disagreeing with the b-only one at
 -0.018 was not two different concepts, it was a free fit landing arbitrarily.
 
-**Single-seed differences of a few mnat are not readable for free fits.** Rating moves 5.3 mnat and
-axis contribution 4.4x between two runs of one configuration. Comparisons in this document that rest
-on differences of that size — the full penalty beating b-only on rating by 6.4 mnat, the decay
-sweep's 8.4 mnat rating spread — are within this floor and should be treated as unresolved until
-replicated.
+**Two free fits are not the same solution, so their spread bounds only FREE-arm comparisons.**
+Rating moves 5.3 mnat and axis contribution 4.4x between two runs of one configuration — but the two
+fits settled on different axis bases, so this is variation between distinct solutions rather than
+measurement noise around one. It applies where both arms are free: the full penalty beating b-only on
+rating by 6.4 mnat is a free-against-free comparison and is inside this spread, so it is unresolved.
 
-THIS FLOOR IS FOR FREE FITS AND MUST NOT BE APPLIED TO TAUGHT ONES. A taught fit is pinned by its
-bank, which is the whole point of teaching, so its seed variation should be far smaller. That number
-is not yet measured, and it is the one that calibrates every taught-arm comparison here.
+IT DOES NOT APPLY TO TAUGHT ARMS, which are pinned by a bank and are not free to land elsewhere —
+the decay sweep, the ortho comparison and the bipolar arms are all taught, and none of them is
+called into question by this. The seed floor for a TAUGHT fit is a different quantity, is not
+measured, and is the one that would calibrate those comparisons.
 
 ### The bank-building workflow: discover, then glue
 
