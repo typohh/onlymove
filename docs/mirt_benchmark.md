@@ -412,6 +412,42 @@ The accepted cost of stopping at `b` is DISPLACEMENT rather than removal — eac
 rating parameter to absorb, and with b closed the largest residual moves into the floor head
 (escape atari -0.035 -> -0.431).
 
+### A FREE fit does not reproduce itself — the seed floor, measured
+
+Two runs of the identical production configuration (free, no bank, full rating-orthogonality),
+differing only in seed:
+
+| | rating | rating+axis | axis adds | never-trained | survey rho |
+|---|---|---|---|---|---|
+| seed 1 | 0.5093 | 0.5056 | **3.73** | 0.5576 | 0.8154 |
+| seed 2 | 0.5146 | 0.5137 | **0.84** | 0.5578 | 0.8185 |
+
+Direction agreement between them, best match per seed-1 axis: **0.56 / 0.25 / 0.20, mean 0.34.**
+
+**A free fit under the full penalty lands somewhere different every time.** Forbidding correlation
+with rating, slope and floor leaves a large residual subspace with no preference among its
+directions, so the fit has nothing to pick with. This is the arbitrariness the axis bank exists to
+remove, stated as a number.
+
+Two things follow, and the second is a caution about this whole document.
+
+**Directions named off a single free fit are seed-specific.** The store's `ax_4e23f75b` (defend
+territory), `ax_2091d5bf` (capture stone to gain liberty) and `ax_4cb94a2c` (escape atari) come from
+the seed-1 fit and are matched by seed 2 at 0.56 / 0.25 / 0.20. The boards a human read to name them
+are real; the DIRECTION is not stable, so those entries are candidate seeds rather than settled
+motifs. It also dissolves a puzzle: the free `defend territory` disagreeing with the b-only one at
+-0.018 was not two different concepts, it was a free fit landing arbitrarily.
+
+**Single-seed differences of a few mnat are not readable for free fits.** Rating moves 5.3 mnat and
+axis contribution 4.4x between two runs of one configuration. Comparisons in this document that rest
+on differences of that size — the full penalty beating b-only on rating by 6.4 mnat, the decay
+sweep's 8.4 mnat rating spread — are within this floor and should be treated as unresolved until
+replicated.
+
+THIS FLOOR IS FOR FREE FITS AND MUST NOT BE APPLIED TO TAUGHT ONES. A taught fit is pinned by its
+bank, which is the whole point of teaching, so its seed variation should be far smaller. That number
+is not yet measured, and it is the one that calibrates every taught-arm comparison here.
+
 ### The bank-building workflow: discover, then glue
 
 Two stages, deliberately separate, because a fit asked to both find directions and satisfy a

@@ -73,7 +73,12 @@ def pair_stats(fa, fb):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ids", default=None, help="comma-separated motif ids")
+    ap.add_argument("--ids", default=None,
+                    help="comma-separated motif ids. A trailing '-' takes the "
+                         "NEGATIVE pole of a bipolar entry ('ax_1234-'), which is "
+                         "a different object from its positive one — the tail "
+                         "weight is applied after the flip, so both cancellation "
+                         "and balance change with the sign.")
     ap.add_argument("--all-named", action="store_true",
                     help="every store motif with a named positive tail")
     ap.add_argument("--hinge", type=float, default=TAIL_HINGE)
@@ -88,10 +93,14 @@ def main():
 
     if args.ids:
         want = [x.strip() for x in args.ids.split(",") if x.strip()]
+        signs = [-1.0 if w.endswith("-") else 1.0 for w in want]
+        want = [w[:-1] if w.endswith("-") else w for w in want]
     elif args.all_named:
         want = [a for a in ids if bank.get(a, {}).get("positive")]
+        signs = [1.0] * len(want)
     else:
         want = [str(x) for x in meta.get("components", [])]
+        signs = [1.0] * len(want)
     missing = [a for a in want if a not in ids]
     if missing:
         raise SystemExit(f"not in the store: {missing}")
@@ -99,12 +108,14 @@ def main():
         raise SystemExit(f"{len(want)} motifs — pairing needs an even number")
 
     M = np.asarray(z["M"], np.float64)[[ids.index(a) for a in want]]
+    M = M * np.asarray(signs)[:, None]
     tids = z["tids"].astype(str)
     if not args.all_problems:
         att = set(load_first_time_attempts()["problem"].astype(str))
         keep = np.array([t in att for t in tids])
         M = M[:, keep]
-    names = [bank[a].get("positive") or a for a in want]
+    names = [((bank[a].get("positive") if sg > 0 else bank[a].get("negative"))
+              or f"{a}{'+' if sg > 0 else '-'}") for a, sg in zip(want, signs)]
     F = [tail_weight(M[j], args.hinge) for j in range(len(want))]
 
     print(f"pairing diagnostics on the GLUED column, {len(want)} motifs, "

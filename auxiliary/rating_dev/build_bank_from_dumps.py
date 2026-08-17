@@ -60,15 +60,24 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rating.tail_agreement import TAIL_HINGE, tail_weight  # noqa: E402
 
+ANCHORS = os.path.join(PROJECT_ROOT, "axes", "label_anchors.npz")
+
 
 def _parse_source(tok):
-    """'arm#axis' or '-arm#axis' -> (arm, axis, sign)."""
+    """'arm#axis', '-arm#axis', or a bare store id 'ax_xxxxxxxx' / '-ax_...'.
+
+    A store id addresses a direction the motif store holds, which is the only
+    place legacy directions exist — they predate every dump. The leading '-'
+    takes the column's other pole, which is how one end of a stored BIPOLAR entry
+    is used on its own."""
     tok = tok.strip()
     sign = 1.0
     if tok.startswith("-"):
         sign, tok = -1.0, tok[1:].strip()
+    if tok.startswith("ax_") and "#" not in tok:
+        return ("__store__", tok, sign)
     if "#" not in tok:
-        raise SystemExit(f"source {tok!r} is not 'arm#axis'")
+        raise SystemExit(f"source {tok!r} is not 'arm#axis' or a store id 'ax_...'")
     arm, _, axis = tok.rpartition("#")
     try:
         axis = int(axis)
@@ -119,9 +128,35 @@ def main():
             cache[arm] = np.load(path, allow_pickle=True)
         return cache[arm]
 
+    store = {"z": None}
+
     def column(tok):
         nonlocal ref
         arm, axis, sign = _parse_source(tok)
+        if arm == "__store__":
+            if store["z"] is None:
+                if not os.path.exists(ANCHORS):
+                    raise SystemExit(f"no motif store at {ANCHORS}")
+                store["z"] = np.load(ANCHORS, allow_pickle=False)
+            z = store["z"]
+            sids = [str(x) for x in z["ids"]]
+            if axis not in sids:
+                raise SystemExit(f"{axis} is not in the motif store")
+            c = np.asarray(z["M"][sids.index(axis)], np.float64) * sign
+            key = np.stack([z["sizes"].astype(str), z["tids"].astype(str)], axis=1)
+            if ref is None:
+                ref = (key, z["sizes"], z["tids"])
+            elif not np.array_equal(key, ref[0]):
+                raise SystemExit(
+                    f"{axis}: the store's problem set differs from the first "
+                    f"source. Mixing store and dump sources needs them aligned; "
+                    f"regenerate the store against this corpus first.")
+            fin = np.isfinite(c)
+            if fin.sum() < 2:
+                raise SystemExit(f"{axis}: no finite values")
+            out = np.full(len(c), np.nan)
+            out[fin] = (c[fin] - c[fin].mean()) / max(c[fin].std(), 1e-9)
+            return out
         d = load(arm)
         load_arr = d["loading"]
         if not 0 <= axis < load_arr.shape[1]:
@@ -156,6 +191,19 @@ def main():
 
     loading = np.stack(cols, axis=1)
     size, tid = ref[1], ref[2]
+
+    # A bank row must be CARRIED, not merely present. Legacy directions are NaN
+    # outside their own corpus generation, and a NaN reaching the trainer poisons
+    # the per-column z-scoring for every problem at once. Emitting only complete
+    # rows says the same thing the loader's mask does — absent is not a value —
+    # and says it once, here, where the incompleteness is known.
+    full = np.isfinite(loading).all(axis=1)
+    if not full.any():
+        raise SystemExit("no problem is covered by every column")
+    if not full.all():
+        print(f"  {int((~full).sum())} of {len(full)} problems dropped — not "
+              f"covered by every column (legacy directions predate the corpus)")
+    loading, size, tid = loading[full], size[full], tid[full]
 
     np.savez_compressed(args.out, loading=loading.astype(np.float32),
                         size=size, tid=tid, labels=np.array(labels),

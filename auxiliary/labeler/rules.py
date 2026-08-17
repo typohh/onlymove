@@ -98,7 +98,13 @@ KO_DEPTH = 3
 # opening: few moves led to the position, per board size.
 OPENING_PERCENTILE = 5.0
 
-LABEL_SET = ["life and death", "counting", "ko", "opening"]
+# TERRITORY — the points at stake exceed what changing hands can account for.
+# A stone that flips ownership is worth TWO points, the prisoner and the point it
+# stood on, so the swing an ownership change explains is 2 * stones. Whatever the
+# score moves BEYOND that came from territory rather than from capture.
+TERR_MIN_POINTS = 20.0   # points of swing left over after the stones are paid for
+
+LABEL_SET = ["life and death", "counting", "ko", "opening", "territory"]
 
 
 # ---------------------------------------------------------------- helpers
@@ -163,6 +169,33 @@ def rule_life_and_death(own, min_stones=None, trade_ratio=None):
         return False
     bar = trade_ratio * parts[top]
     return all(v <= bar for k, v in parts.items() if k != top)
+
+
+def rule_territory(own, min_points=None):
+    """Score swings by more than the stones changing hands can pay for.
+
+        (score_correct - score_alt) - 2 * stone_swing_abs  >  min_points
+
+    A stone flipping ownership is worth TWO points — the prisoner and the point it
+    occupied — so `2 * stones` is the swing that capture explains. What is left is
+    territory, and requiring a large remainder is what separates a position decided
+    by territory from one decided by a group living or dying.
+
+    `stone_swing_abs` is the ABSOLUTE swing summed over occupied points, so a TRADE
+    does not cancel. That is deliberate: stones dying on both sides is a trade
+    whatever the net comes to, and a trade is not a territory problem. Netting them
+    would let a big two-sided capture pass as territory because the sides happened
+    to balance.
+
+    Empty-point swings are NOT subtracted — they are the territory itself, and
+    charging for them would leave nothing to detect.
+
+    `own` is the raw ownership row, in stones (see rule_life_and_death on why a
+    threshold in stones needs the pre-standardization values).
+    """
+    min_points = TERR_MIN_POINTS if min_points is None else min_points
+    swing = float(own["score_correct"]) - float(own["score_alt"])
+    return swing - 2.0 * float(own["stone_swing_abs"]) > min_points
 
 
 def rule_counting(evals):
@@ -268,6 +301,8 @@ def build(pool, ownership, phase, workers):
             hits.append("life and death")
         if rule_counting(evals):
             hits.append("counting")
+        if rule_territory(own):
+            hits.append("territory")
         if has_ko:
             hits.append("ko")
         if rule_opening(ph[1], cutoff[size]):
