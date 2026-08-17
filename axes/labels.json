@@ -241,6 +241,41 @@
       "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 2 NEGATIVE tail — the positive tail is unnamed and ships silently. Named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.03, rating -0.02, slope +0.01, floor -0.01). PARTIALLY overlaps ax_df8b6188 of the same name (tail agreement +0.309): related but not the same direction, the b-only version carrying floor -0.22 that this one does not.",
       "positive_i18n": null,
       "negative_i18n": null
+    },
+    "ax_2e83929b": {
+      "positive": "counting",
+      "negative": "life and death",
+      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17) under the full rating-orthogonality penalty (rating+slope+floor), axis 0. BOTH TAILS NAMED and both retained — counting +0.670, life and death +0.448 against the poles it was taught from. Rating-orthogonal by construction (worst correlation 0.065). Taught from a bank whose own columns were 0.25 rating-correlated, so this is a REFINED version of those directions rather than a copy: the fit kept the motifs and dropped the rating component.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_3fc78d04": {
+      "positive": "defend territory",
+      "negative": "opening",
+      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 1. Both tails retained — defend territory +0.577, opening +0.603. Rating-orthogonal (worst correlation 0.036). Note this pairing is well balanced (0.850) which is why neither pole dominates; see auxiliary.rating_dev.pair_motifs for why that predicts even retention.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_acfc81dc": {
+      "positive": "escape atari",
+      "negative": "ko",
+      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 2. Both tails retained — escape atari +0.738, ko +0.931. Rating-orthogonal (worst correlation 0.112). This pair is POORLY BALANCED (0.595) and under the earlier raw-subtraction construction it collapsed to 0.172 / 0.973; the tail-weighted column largely rescued it, which is evidence the reshape matters more than the pairing choice — untested, since that arm changed the penalty too.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_65ff2e48": {
+      "positive": "escape atari",
+      "negative": null,
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 1 positive tail. Named by eyeballing the extremes capped at 1d. FIRST GENERATION WHOSE TAIL IS CLEAN, not just its axis: the named tail carries rating -0.094, slope -0.013, floor +0.091, where the earlier whole-axis penalty left tails at 0.27-0.31 while reporting 0.02-0.09. Agrees +0.49 with capture stone to gain liberty <2091> and only +0.15 with the b-only escape atari <df8b> — the concepts are adjacent and this direction sits between them, so treat the three as candidates for one averaged motif rather than as settled separate ones.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_4c04be02": {
+      "positive": "block or cut",
+      "negative": null,
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 2 positive tail. Named by eyeballing the extremes capped at 1d. The CLEANEST direction in the store on every rating parameter measured at the tail: rating -0.017, slope +0.008, floor -0.000, difficulty -0.036. NEW MOTIF — nothing stored agrees with it above +0.14, so it is not a re-finding of an existing direction under another name.",
+      "positive_i18n": null,
+      "negative_i18n": null
     }
   },
   "components": [
