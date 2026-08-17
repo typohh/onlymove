@@ -204,14 +204,11 @@ def _match_html(vals, sign, bank_tails, hinge_at, min_r):
 
 
 def _pick_extremes(vals, rows, cols):
-    """Return the `rows*cols` most extreme problems for one tail, strongest
-    first, chunked into `rows` groups of `cols`.
+    """The `rows*cols` strongest problems on one tail, strongest first.
 
-    Operates on the POSITIVE direction of `vals` (negate the input for the
-    negative tail; scores are displayed from the original values by the
-    caller). Each returned tuple is (rank_of_first_item, index_array) with
-    rank 1 = the tail extreme, so the page reads as a straight leaderboard of
-    the strongest signal rather than a walk from extreme toward baseline.
+    Kept for --by-signal. The default is rank-bucketed (below), because a tail's
+    strongest problems cluster at one end of the difficulty range and reading only
+    those tells you what the motif looks like THERE, not what it is.
     """
     n = len(vals)
     take = min(rows * cols, n)
@@ -222,10 +219,50 @@ def _pick_extremes(vals, rows, cols):
     return [(k + 1, idx[k:k + cols]) for k in range(0, take, cols)]
 
 
-def _render_tail_html(tids, vals, sign, rows, cols, lookup, ranks=None):
-    """One tail's most extreme problems. sign=+1 renders the positive tail, -1
-    the negative (card scores are shown in ORIGINAL units either way)."""
-    groups = _pick_extremes(sign * vals, rows, cols)
+def _pick_rank_buckets(vals, rank_of, rows, cols):
+    """The strongest problem from each of `rows*cols` EQUAL-COUNT rank buckets,
+    in rank order.
+
+    An axis's loading is not independent of difficulty even after the
+    orthogonality penalty, so the top of a tail is drawn from a narrow slice of
+    the ladder — read that alone and a motif looks like whatever it looks like at
+    one strength. One problem per rank bucket shows the same motif across the
+    whole range, which is what a name has to hold over.
+
+    EQUAL COUNT rather than equal width, so every bucket is backed by the same
+    number of problems: rank density is far from uniform, and equal-width buckets
+    would put a handful of problems in the tails of the ladder beside thousands in
+    the middle, then present the winner of each as equally representative.
+    """
+    take = rows * cols
+    order = np.argsort(rank_of)
+    picks = []
+    for b in np.array_split(order, take):
+        if len(b):
+            picks.append(int(b[np.argmax(vals[b])]))
+    return picks
+
+
+def _render_tail_html(tids, vals, sign, rows, cols, lookup, ranks=None,
+                     by_signal=False):
+    """One tail's problems. sign=+1 renders the positive tail, -1 the negative
+    (card scores are shown in ORIGINAL units either way)."""
+    v = sign * vals
+    rank_of = None
+    if ranks is not None and not by_signal:
+        rank_of = np.array([ranks.get(t, np.nan) for t in tids])
+        if not np.isfinite(rank_of).all():
+            rank_of = None      # a partial rank map cannot bucket; fall back
+    if rank_of is None:
+        groups = _pick_extremes(v, rows, cols)
+        band = lambda lo, idx: f"#{lo}–{lo + len(idx) - 1}"
+    else:
+        picks = _pick_rank_buckets(v, rank_of, rows, cols)
+        groups = [(k + 1, np.array(picks[k:k + cols]))
+                  for k in range(0, len(picks), cols)]
+        def band(lo, idx):
+            r = rank_of[idx]
+            return f"{value_to_rank(r.min())} – {value_to_rank(r.max())}"
     if not groups:
         return '<div class="band"><div class="card missing">no problems on this tail</div></div>'
     out = []
@@ -236,13 +273,11 @@ def _render_tail_html(tids, vals, sign, rows, cols, lookup, ranks=None):
             for i in idx)
         out.append(
             f'<div class="band">'
-            f'<div class="band-label">#{lo}–{lo + len(idx) - 1}</div>'
+            f'<div class="band-label">{band(lo, idx)}</div>'
             f'<div class="grid">{cards}</div>'
             f'</div>'
         )
     return "".join(out)
-
-
 
 
 def _style_block(cols):
@@ -363,6 +398,13 @@ def main():
     parser.add_argument("--match-min-r", type=float, default=0.10,
                         help="minimum hinged correlation for a bank motif to be "
                              "listed (default 0.10; 0 = independent)")
+    parser.add_argument("--by-signal", action="store_true",
+                        help="show the strongest problems outright instead of the "
+                             "strongest from each rank bucket. The bucketed "
+                             "default exists because a tail's extremes cluster at "
+                             "one end of the ladder, so reading them alone shows "
+                             "the motif at one strength rather than across the "
+                             "range a name has to hold over.")
     parser.add_argument("--rank-max", type=float, default=None, metavar="RANK",
                         help="show only problems at or below this internal rank "
                              "(0 = the 1k/1d boundary, so 0 caps at 1d). DISPLAY "
@@ -464,7 +506,7 @@ def main():
                 options.append(f'<option value="{tail_key}"{sel}>'
                                f'{html.escape(tail_title)}</option>')
                 body = _render_tail_html(tids, vals, sign, args.rows, args.cols,
-                                         lookup, ranks)
+                                         lookup, ranks, args.by_signal)
                 matches = _match_html(vals, sign, bank_tails,
                                       args.match_hinge, args.match_min_r)
                 sections.append(
