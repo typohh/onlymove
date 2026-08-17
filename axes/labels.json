@@ -276,6 +276,27 @@
       "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 2 positive tail. Named by eyeballing the extremes capped at 1d. The CLEANEST direction in the store on every rating parameter measured at the tail: rating -0.017, slope +0.008, floor -0.000, difficulty -0.036. NEW MOTIF — nothing stored agrees with it above +0.14, so it is not a re-finding of an existing direction under another name.",
       "positive_i18n": null,
       "negative_i18n": null
+    },
+    "ax_cc62e376": {
+      "positive": "judgement",
+      "negative": "killing",
+      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy residual_axes_v1 directions. The legacy motifs REFIT into the current model: judgement returns at +0.64 on the positive tail and killing at +0.43 on the negative, against the poles they were taught from. This is the first time judgement exists as a direction in the current model rather than only as a legacy anchor. Pairing chosen on the glued-column criterion — uniquely among twelve candidate partners these two REINFORCE (cancellation -0.254) rather than compete. Per-tail leakage 0.076/0.073.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_2bb787fc": {
+      "positive": "attack",
+      "negative": "defence",
+      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy residual_axes_v1 direction of the same name, whose own pairing this keeps. Both poles retained — attack +0.66, defence +0.73. The cleanest axis in the store on rating, slope and floor at the tail: 0.011 / 0.032.",
+      "positive_i18n": null,
+      "negative_i18n": null
+    },
+    "ax_4f61fe52": {
+      "positive": "endgame",
+      "negative": "ko threat",
+      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from two legacy poles paired here for the first time (endgame from opening/endgame, ko threat from ko/ko threat). Both retained — endgame +0.73, ko threat +0.66. Per-tail leakage 0.074/0.078. Note ko threat is a distinct SUB-MOTIF of the ko family rather than a variant name for ko; the legacy fit placed the two as opposing poles.",
+      "positive_i18n": null,
+      "negative_i18n": null
     }
   },
   "components": [
