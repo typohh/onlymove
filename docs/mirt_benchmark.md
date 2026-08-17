@@ -355,8 +355,22 @@ returns NaN rather than 0.
 | drop_ko (L&D, counting, opening) | 0.324 | 0.414 | 0.444 |
 
 Every rule-seeded arm lands well below what a CONVERGED bank returns (0.875 / 0.463 / 0.966 for the
-same three motifs under ortho-b), which is the quantitative form of "rules bootstrap a motif, a
-converged direction carries it".
+same three motifs under ortho-b).
+
+**That gap does NOT say a converged direction is the better thing to teach from, and production teaches
+from the rules.** Two findings landed after this table and both cut against reading it as identity.
+The measure is calibrated against human inspection at ONE point and the numbers overstate what they
+certify: six legacy poles taught back at 0.43-0.73, read as retention, and a human reading the boards
+found four of six mutated or unnameable. And the round trip earns nothing for that risk — a stored
+direction is itself only an approximation of whatever it was taught from, so chaining through it holds
+an axis no better than teaching from the fixed reference does directly.
+
+What the table DOES measure is how far a fit's axis lands from the rule it was seeded with, and that is
+the quantity production reports every run. Read low agreement here as the model expressing the criterion
+poorly, not as a motif having drifted: the criterion is still written down in `utils/rating/motif_rules.py`
+and can be re-read, which is the whole asymmetry between a rule and a fitted column. Note also that these
+arms were seeded from ONE-SIDED binary columns; the shipped form pairs two rules per axis and glues them
+with the hinged tail weight, so it is not the same target.
 
 ### What a single axis is worth cannot be measured by ablating the others
 
@@ -482,7 +496,38 @@ the decay sweep, the ortho comparison and the bipolar arms are all taught, and n
 called into question by this. The seed floor for a TAUGHT fit is a different quantity, is not
 measured, and is the one that would calibrate those comparisons.
 
-### The bank-building workflow: discover, then glue
+### The shipped rule set
+
+Six rules, `utils/rating/motif_rules.py`, labelled over the whole corpus by
+`pipeline.build_motif_proxies` (160489 problems, 9x9 and 13x13 together):
+
+| rule | problems | share | criterion in one line |
+|---|---|---|---|
+| life and death | 5962 | 3.71% | one directional part of the ownership swing dominates, no trade beside it |
+| counting | 11456 | 7.14% | top two first moves within a few points on score while winrate separates hard |
+| ko | 25074 | 15.62% | a ko shape stands at the root, or within KO_DEPTH plies of a resolved line |
+| opening | 9014 | 5.62% | setup prefix at or under an absolute per-board length |
+| territory | 51288 | 31.96% | score swing beats a base plus a per-flipped-stone allowance |
+| shape | 11194 | 6.97% | best two RESOLVED first moves within a small winrate gap — an uncertain outcome |
+
+Labels per problem: 67977 carry none, 72087 one, 19375 two, 1049 three, 1 four.
+
+Two properties are load-bearing rather than incidental. **Every threshold is on the problem's OWN
+numbers**, which is what makes the incremental labelling sound — a stored row can never be made wrong
+by a problem added later. `opening` is the worked example of getting that wrong: as a corpus
+PERCENTILE it moved as the corpus grew, silently re-labelling problems that had not changed, and it
+is an absolute prefix length per board for exactly that reason. **And every rule is evaluated both
+ways on every problem**, which is what hand labelling cannot supply cheaply and what lets a column be
+fitted at all — without negatives there is nothing to separate from.
+
+Shipped pairing, `components` in `axes/labels.json`, chosen on tail directionality alone (worst
+cancellation -0.081): `life and death/territory`, `counting/shape`, `ko/opening`. Note axis 0 is
+LOPSIDED in the taught column — life and death reaches +4.33 against territory's -0.87, roughly 3x
+the variance, because territory is 32% of the corpus against 5-7% for the others. Balance was
+deliberately not a selection criterion, having proved unreliable, but it is the thing to look at if
+the territory pole comes back weak.
+
+### The bank-building workflow: discover, then glue (DEV — production teaches from rules)
 
 Two stages, deliberately separate, because a fit asked to both find directions and satisfy a
 prescribed set does neither cleanly.
@@ -498,8 +543,12 @@ artifact — a direction found once is never rediscovered.
 
 **Stage two, glue stored directions onto K axes.** `build_bank_from_dumps` composes a bank from store
 entries, one motif per axis or two as a bipolar column. Nothing is re-derived; this stage decides only
-what ships together and in what order. `train_mirt` then refines those directions rather than
-inventing its own.
+what goes together and in what order. Production's analogue is `components` in `axes/labels.json`,
+which does the same over RULE names and is what `pipeline.train_mirt` reads; `build_bank_from_dumps`
+is for exploring a composition before it is written as rules.
+
+The measured payoff of pairing carries over to the shipped form, since it is a property of the glue
+rather than of what is glued: both use the same hinged tail weight, `f(A) - f(B)`.
 
 What the second stage costs and buys, measured: pairing six motifs onto three axes retained every
 pole, improved the two WEAKEST most (counting 0.26 -> 0.67, escape atari 0.17 -> 0.74 against the
