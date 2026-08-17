@@ -266,7 +266,7 @@
     "ax_65ff2e48": {
       "positive": "escape atari",
       "negative": null,
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 1 positive tail. Named by eyeballing the extremes capped at 1d. FIRST GENERATION WHOSE TAIL IS CLEAN, not just its axis: the named tail carries rating -0.094, slope -0.013, floor +0.091, where the earlier whole-axis penalty left tails at 0.27-0.31 while reporting 0.02-0.09. Agrees +0.49 with capture stone to gain liberty <2091> and only +0.15 with the b-only escape atari <df8b> — the concepts are adjacent and this direction sits between them, so treat the three as candidates for one averaged motif rather than as settled separate ones.",
+      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 1 positive tail. Named by eyeballing the extremes capped at 1d. FIRST GENERATION WHOSE TAIL IS CLEAN, not just its axis: the named tail carries rating -0.094, slope -0.013, floor +0.091, where the earlier whole-axis penalty left tails at 0.27-0.31 while reporting 0.02-0.09. NOT an amalgamation of the earlier two despite agreeing +0.49 with capture stone to gain liberty <2091> and +0.15 with the b-only escape atari <df8b>: regressing its tail on both gives R2 0.254, of which the b-only direction contributes 0.018, and the two supposed components are independent of each other (+0.03) so there is no line between them to sit on. 75% of it is explained by nothing in the store and that residual matches no stored motif above 0.10 — it shares a quarter of its variance with capture stone and is otherwise its own direction.",
       "positive_i18n": null,
       "negative_i18n": null
     },
