@@ -233,9 +233,127 @@ allowing the best linear COMBINATION of the other fit's axes — i.e. what a gau
 
 **Axis 2 is the one direction worth naming.** It leads on all six comparisons including the halves, and axis 1 trails on all six. The single-axis to combination gap is the free rotation; what remains after it is genuine subspace movement, which no alignment recovers.
 
-### The 16 motifs in the bank are gone
+### The legacy motifs transfer at the TAILS, not in the bulk
 
-The names in `axes/labels.json` were fitted against the two-stage axes and do not transfer. Current MIRT axes against all 16 frozen anchors in `label_anchors.npz`, over 152,346 shared problems: best single-anchor correlation **0.41**, R² on the full 16-anchor span 0.16 / 0.21 / 0.28, canonical correlations against the three motifs the previous fit shipped **0.009 / 0.411 / 0.582**. `ax_0860ca04` "killing / defending territory", which sits in `components[0]`, shares 10, 8 and 3 tail problems of 1000 with the three new axes. `train_mirt` writes no `motif_ids` and `package_for_pwa` reads `components` positionally, so shipping today would attach that name to an axis correlating 0.10 with it.
+Measured against the 16 frozen legacy directions in `label_anchors.npz`, over shared attempted
+problems. By correlation they look lost: best single-anchor correlation **0.41**, R² on the full
+16-anchor span 0.16 / 0.21 / 0.28, canonical correlations against the three motifs the two-stage
+fit shipped 0.009 / 0.411 / 0.582.
+
+By tail overlap two of them plainly survive, and the control is what makes that readable. Across
+the 93 CROSS-ERA pairs of differently-named tails the overlap distribution is median 0.6%, p90
+3.6%, p99 15.0%, max 16.7%. Against that background:
+
+| same-name cross-era pair | tail overlap | lift | vs different-name pairs |
+|---|---|---|---|
+| `opening+` / `opening+` | **33.7%** | 35x | above all 93 |
+| `counting+` / `counting+` | **22.5%** | 23x | above all 93 |
+| `ko+` / `ko+` | 6.8% | 7x | above 98% |
+
+Opening and counting sit at twice the largest different-name overlap, so they reproduce across two
+entirely different model generations — support no within-generation measurement can establish. ko
+matches only weakly, and the remaining legacy names not at all; those are candidate seeds only.
+
+The control is not optional here. WITHIN the legacy fit, tails are mutually entangled at rates that
+look identical to the same-name matches — `shape-`/`ko threats-` 35.4%, `reading+`/`killing+`
+35.4%, `complexity+`/`attack+` 24.4% — because that fit carried 16 motifs with no orthogonality
+pressure between them. Compared against THAT background a 33.7% match is unremarkable; compared
+against the cross-era background it is off the scale. Overlap figures mean nothing without the
+population they are being judged against.
+
+The disagreement between the two instruments is the point, and it generalises — see "Identity is a
+tail measure" below. A name is a claim about one end of an axis, so a direction can be
+substantially reproduced where it is named while sharing little of the corpus ordering elsewhere.
+
+### Identity is a tail measure
+
+**Bulk correlation and tail overlap disagree in both directions, and the tail is what governs a
+name.** An axis is a trunk output, not a linear map on nameable inputs, so its extremes and its
+ordering of the middle are free to diverge. Three measured consequences:
+
+- A fit whose bulk correlation with its bank FELL held MORE tail than the arm it was compared
+  against, reversing which of the two looked better on identity.
+- A bipolar arm read by correlation appears to collapse onto one pole per column (0.27 against an
+  expected 0.74); read on tails every pole is retained at 10x-90x chance and none is lost.
+- Correlation overstates transfer exactly where confidence is highest: 0.945 implies ~610 shared
+  tail problems under normality and delivers 375.
+
+**Overlap measures CO-SELECTION and cannot say which of its two causes produced it** — one
+direction under two names, or two distinct motifs whose situations co-occur. `escape atari` and
+`opening` share 32.8% / 36.4% of their two tails and are nevertheless distinct: conditioning on
+opening-ness, escape atari's spread RISES from 0.887 corpus-wide to 1.93 within the top 2% of
+opening, so it discriminates hard among opening positions rather than restating them. The
+conditional check is what separates the cases; overlap alone only nominates a pair for one.
+
+Tools: `auxiliary/rating_dev/bank_identity.py` (paired, and `--cross` for the axes x poles matrix a
+bipolar bank needs), `auxiliary/rating_dev/tail_overlap.py` (stored motifs against each other,
+named tails only by default — an unnamed pole makes no claim to collide with).
+
+### What a single axis is worth cannot be measured by ablating the others
+
+Zeroing K-1 loadings and re-walking gives a NEGATIVE contribution for an axis that is worth
++4.41 mnat alongside its neighbours (ko alone: -0.91). One axis cannot pay for its own user-position
+estimation noise on the forward walk, so solo-axis contribution is systematically negative and
+useless for ranking instances of a motif. Rank them by the arm-level held-out contribution and by
+leakage against the rating parameters instead.
+
+### The axes are held off difficulty by ORTHO_RATING
+
+`ORTHO_RATING` 0.5, a squared cosine between each centred unit loading column and the centred unit
+DETACHED `b`, is the only term in the objective that decorrelates an axis from the rating side.
+`ORTHO_WEIGHT` is K x K over the loadings alone; `V_MEAN_PENALTY` pins only the population mean of
+`v`, which blocks a global difficulty shift but not per-problem difficulty tracking.
+
+Without it a free fit spends an axis on a rating-side property. The free control's third axis
+correlates -0.638 with SLOPE and only +0.182 with difficulty — the leak picks a parameter rather
+than difficulty specifically — and that arm is worst on rating (0.5117) and worst on never-trained
+problems (0.5612) of every arm measured.
+
+| arm | rating | rating+axis | axis adds | never-trained | survey rho | tail held /3000 |
+|---|---|---|---|---|---|---|
+| taught, no ortho | 0.5123 | 0.5064 | 5.84 | 0.5725 | 0.8131 | 975 |
+| taught, ortho on b | 0.5130 | 0.5086 | 4.41 | 0.5631 | **0.8232** | **1126** |
+| taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | **0.16** | 0.5639 | 0.8123 | 715 |
+
+b alone costs 0.7 mnat of rating — inside seed noise — and buys better never-trained pricing, the
+best survey rho measured, and more tail on all three axes.
+
+**Penalising the shipped triple is refuted.** It decorrelates thoroughly (every correlation under
+0.32, most under 0.09) and leaves the axes worth 0.16 mnat on held-out users, negative on
+already-seen rows: three constraints on K=3 axes leave room to satisfy the penalty or to carry
+signal, not both. Two traps in reading it. It has the BEST stop split of any arm (0.4963) — that
+signal is computed on TRAINING users whose `v` is fitted, so it moves opposite to held-out axis
+value and must not be used to rank arms. And constraining rating, slope and floor does NOT
+constrain `b`: measured -0.312, because zero correlation with each of three quantities separately
+implies nothing about a nonlinear combination of them.
+
+The accepted cost of stopping at `b` is DISPLACEMENT rather than removal — each axis finds its own
+rating parameter to absorb, and with b closed the largest residual moves into the floor head
+(escape atari -0.035 -> -0.431).
+
+### TEACH_DECAY_EPOCHS is an interior optimum at 1000
+
+Swept on converged-axis banks under ortho-b, one seed each, scored on tail overlap out of 1000.
+
+| decay | escape atari | life and death | ko | total tail | rating | axis adds |
+|---|---|---|---|---|---|---|
+| 250 | 272 | 32 | 384 | 688 | 0.5112 | 3.19 |
+| 500 | 433 | 54 | 438 | 925 | 0.5079 | 4.09 |
+| **1000** | **500** | **169** | **457** | **1126** | 0.5130 | **4.41** |
+| 2000 | 340 | 126 | 427 | 893 | 0.5163 | -1.58 |
+
+1000 holds the most tail on every axis and carries the highest held-out axis contribution, which
+falls away on both sides. At 2000 the axes are worth NEGATIVE mnat: past some point the teaching
+stops stabilising a direction and starts pinning it to the source fit's idiosyncrasy.
+
+A sweep point must stop well AFTER its own decay ends or it measures nothing. At decay 3000 the
+patience rule fires at epoch 1740 with the teaching weight still at 0.52; the axes are never
+released, their identity is trivially near-perfect (595/465/617), and the survey rho is the worst
+on the board (0.7728). That arm is not a measurement of decay 3000.
+
+Read on correlation instead, 500 and 1000 look near-equivalent on two of three axes and the choice
+appears to rest on life and death alone. On tails 1000 dominates 500 everywhere, and the trade is
+explicit: 500 buys 5.1 mnat of rating, 1000 buys materially more tail identity on every axis.
 
 ### Reproduction
 
@@ -382,7 +500,7 @@ A third of the corpus is never attempted and its loadings are unconstrained extr
 
 ### SHIPPED — teaching is the production trainer's only axis initialization
 
-`pipeline/train_mirt.py` no longer derives directions at all. `burn_in_directions` and the `trunk_out` helper that fed it are deleted; the axis map is pulled onto `axes/axis_bank.npz` by the MSE above, riding `gh` on the attempt stream, `TEACH_WEIGHT` 1.0 decaying linearly to zero over `TEACH_DECAY_EPOCHS` 1500. The bank is a `--dump-params` npz from this dev surface — it may carry more than K columns and **the first `K_AXES` are what ships**, so its column order is the shipping decision and is what `axes/labels.json` indexes. It is TRACKED in git alongside `labels.json`, being the only record of what a name is attached to. A missing bank, a bank with fewer than K columns, or a bank sharing no problems with the corpus each abort the run.
+`pipeline/train_mirt.py` no longer derives directions at all. `burn_in_directions` and the `trunk_out` helper that fed it are deleted; the axis map is pulled onto the motif store by the MSE above, riding `gh` on the attempt stream, `TEACH_WEIGHT` 1.0 decaying linearly to zero over `TEACH_DECAY_EPOCHS` 1000. The store is `axes/label_anchors.npz` — every direction ever kept, keyed by an `ax_<hex>` content hash — and `axes/labels.json`'s `components` lists which ids this fit ships, in axis order; the first `K_AXES` are taught, so that list is the shipping decision. Both are TRACKED in git, being the only record of what a name is attached to. Directions enter the store from a `--dump-params` npz via `auxiliary.rating_dev.update_motif_store`. A missing store, a `components` list shorter than K, an id with no direction behind it, or a store sharing no problems with the corpus each abort the run.
 
 **THE BURN-IN IS GONE ENTIRELY — the loop is uniform.** Pinning `v` at zero for an opening span is the obvious companion to teaching, and it buys nothing; the measurement is the next subsection. What remains is one decaying weight, so there is no `v_pinned` state, no release event and no gating of the axis penalties. The ortho penalty is now on from the first step rather than switching on at full weight partway through, which retires the open concern in section D about abrupt objective changes at the handover.
 
@@ -403,7 +521,7 @@ Both arms in the shipped code, same bank (a dev dump on the same corpus), same s
 
 Caveats: one seed per arm, and the 0.4 mnat loss difference is well inside the 0.85 mnat seed noise, so read this as "the pin does nothing" rather than "removing it helps". The bank here shares a corpus with the fit, so this is a reproduction test rather than a refit test — but the pin's claimed job is purely about the opening epochs, which this exercises fully.
 
-**A schedule interaction worth knowing, found in the same runs.** Both arms reached their best epoch (1090, 1110) well BEFORE the teaching decay ends at 1500, and stopped at 1390/1410 — so the shipped parameters come from a point where the bank is still holding the map at ~27% strength, and the fit never fully releases. `FLAT_PATIENCE` counts staleness against an objective the decay is still changing. The decay length was picked on a fit that converged at 1450, close to full release; a corpus that converges earlier gets a schedule that outlives it. Unresolved, and it flatters the identity figures.
+**THE DECAY MUST END BEFORE THE FIT DOES, and that is a second constraint on its length beyond the frontier above.** `FLAT_PATIENCE` counts staleness against the objective, and while the decay is still running that objective is still changing — so a schedule outlasting convergence stops the run with the bank still holding the map, and the axes are scored before they were ever released, which flatters every identity figure. The margin is not generous: arms measured at a decay of 1500 reached their best epoch at 1090 and 1110 and stopped at 1390 and 1410, with the bank still at roughly a quarter strength throughout. A length picked on a corpus that converges late does not transfer to one that converges early, so this is a value to re-check whenever convergence moves, not a constant to inherit. The frontier is flat enough around here that shortening costs little identity — which is what makes the schedule constraint the binding one.
 
 ### Sweeping burn-in against the EIGEN warm start measures nothing
 
