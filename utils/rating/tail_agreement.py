@@ -17,8 +17,9 @@ discards magnitude so a problem 5 sd into the tail is the same evidence as one
 boundary — measured, an axis whose only real match is ko also showed two motifs
 at "4%" that vanish entirely under a weighted measure.
 
-HINGED CORRELATION is what this module implements: z-score each direction, floor
-it at `TAIL_HINGE` (`max(z, at)`), correlate over the problems both cover. It has no N,
+TAIL-WEIGHTED CORRELATION is what this module implements: z-score each direction,
+weight it linearly in the tail and exponentially decayed below (see `tail_weight`),
+correlate over the problems both cover. It has no N,
 weights linearly by depth into the tail, and is EXACTLY ZERO under independence —
 hinging two independent variables leaves them independent — so there is no chance
 baseline to quote and the number reads directly.
@@ -32,25 +33,50 @@ a real question, and the reason rule-seeded arms can be scored at all.
 
 import numpy as np
 
-# THE TAIL THRESHOLD, in z units, shared by every tool so their numbers are
-# comparable. 1.0 keeps ~8% of the corpus — a real tail, and still thousands of
-# problems rather than an arbitrary few hundred.
+# WHERE THE TAIL STARTS, in z units, shared by every tool so their numbers are
+# comparable. 1.0 puts ~8% of the corpus in the linear region.
 #
-# It is NOT a free parameter to leave at the mean. Hinging at 0 keeps the whole
-# upper half and reproduces bulk correlation almost exactly (measured 0.867 bulk
-# against 0.879 hinged), so it inherits the defect the hinge exists to remove.
-# The choice is load-bearing: measured across arms, agreement on two motifs
-# CROSSES OVER between 0.5 and 1.0 — one arm leads at the mean and the other in
-# the tail — and it is the tail that a name is a claim about. Above 1.0 the
-# ranking is stable through 2.0, so the value sits inside a plateau rather than
-# on a knife edge.
+# Under the SMOOTH weight this is deliberately not a decisive knob, and that is
+# the reason for the smooth weight. With a hard floor the threshold decided the
+# answer: two arms swapped places between 0.5 and 1.0, so any conclusion came
+# with an argument about where to cut. Sweeping the smooth form from 1.0 to 3.0
+# moves the numbers by ~0.01 and never changes an ordering, because the weight
+# below the threshold decays rather than flattening, so nothing is discarded at
+# the cut. Do not tune it to move a result.
 TAIL_HINGE = 1.0
 
 
-def hinge_z(v, at=TAIL_HINGE):
-    """z-score then floor at `at`. NaN in, NaN out — legacy directions do not
-    cover the whole corpus and must not be imputed to the mean, which would read
-    as "average on this motif" for a problem the motif never saw."""
+def tail_weight(v, at=TAIL_HINGE):
+    """z-score, then LINEAR in the tail and exponentially decayed below it:
+
+        f(z) = z                        z >= at
+        f(z) = at * exp((z - at) / at)  z <  at
+
+    The two pieces meet in VALUE and in SLOPE at `at` (both equal `at` and 1), so
+    the weight is C1 — there is no kink for a squared error to chase and no
+    threshold effect at the join.
+
+    This is what a tail weight has to do, and a hard floor `max(z, at)` gets two
+    of the three right. Above the threshold both are the identity, which is what
+    keeps ONE confident problem from dominating a mean squared error — the reason
+    a plain exp() is unusable here. Below it, the floor collapses everything to a
+    single plateau, so a problem just short of the tail and one far from it are
+    declared identical; the exponential keeps their ORDER while decaying it toward
+    zero, which is the honest statement — barely-out is not the same as far-out,
+    and neither is evidence for the opposite pole.
+
+    Decaying toward ZERO rather than to a floor also makes the bipolar difference
+    f(A) - f(B) mean what it should: a problem in neither tail contributes nothing
+    instead of cancelling two equal plateaus, and one just outside A's tail leans
+    slightly toward A rather than not at all.
+
+    NaN in, NaN out — legacy directions do not cover the whole corpus and must not
+    be imputed, which would read as "average on this motif" for a problem the
+    motif never saw.
+    """
+    if at <= 0:
+        raise ValueError("tail threshold must be positive; the exponential branch "
+                         "is scaled by it")
     v = np.asarray(v, dtype=np.float64)
     m = np.isfinite(v)
     out = np.full(v.shape, np.nan)
@@ -59,8 +85,13 @@ def hinge_z(v, at=TAIL_HINGE):
     s = v[m].std()
     if s <= 0:
         return out
-    out[m] = np.maximum((v[m] - v[m].mean()) / s, at)
+    z = (v[m] - v[m].mean()) / s
+    out[m] = np.where(z >= at, z, at * np.exp((z - at) / at))
     return out
+
+
+# The former name; the hard floor it described is retired.
+hinge_z = tail_weight
 
 
 def hinged_r(a, b, at=TAIL_HINGE, min_n=100, pre_hinged=False):
@@ -70,8 +101,8 @@ def hinged_r(a, b, at=TAIL_HINGE, min_n=100, pre_hinged=False):
     constant — a direction whose tail is empty on this population makes no claim
     and must not be scored 0, which would read as "measured, independent".
     """
-    a = np.asarray(a, np.float64) if pre_hinged else hinge_z(a, at)
-    b = np.asarray(b, np.float64) if pre_hinged else hinge_z(b, at)
+    a = np.asarray(a, np.float64) if pre_hinged else tail_weight(a, at)
+    b = np.asarray(b, np.float64) if pre_hinged else tail_weight(b, at)
     m = np.isfinite(a) & np.isfinite(b)
     if m.sum() < min_n:
         return float("nan")

@@ -126,7 +126,7 @@ def main():
     if len(tails) < 2:
         raise SystemExit("fewer than two named tails selected — nothing to compare")
 
-    print(f"hinged tail agreement (z >= {args.hinge}, 0 = independent) over "
+    print(f"tail-weighted agreement (z >= {args.hinge}, 0 = independent) over "
           f"{n_prob} {'' if args.all_problems else 'attempted '}problems shared "
           f"by all {len(want)} motifs\n")
     # Columns are NUMBERED, not headed by truncated names: 'escape atari+' and

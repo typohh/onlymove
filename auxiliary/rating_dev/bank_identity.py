@@ -87,7 +87,7 @@ def main():
         # reported a collapse the tails show did not happen. Both of a fitted
         # axis's ends are scored, since which end a motif landed on is the
         # question.
-        print(f"  hinged tail agreement over {len(sel)} {pop} "
+        print(f"  tail-weighted agreement over {len(sel)} {pop} "
               f"(0 = independent)")
         print(f"  rows = a fitted axis's own tails, cols = each bank column's "
               f"POSITIVE tail\n")
@@ -102,7 +102,7 @@ def main():
         return
 
     print(f"  BANK IDENTITY over {len(sel)} {pop}  "
-          f"(agree = hinged tail correlation, 0 = independent)")
+          f"(agree = tail-weighted correlation, 0 = independent)")
     for k in range(K):
         x, y = g[sel, k], tgt[sel, k]
         # BOTH ends, separately: an axis can hold the end its name is on and lose

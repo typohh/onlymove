@@ -428,7 +428,7 @@ def report_bank_identity(g_np, tgt, ok, prob_idx):
     att[np.unique(prob_idx)] = True
     sel = np.where(att & ok)[0]
     print(f"  BANK IDENTITY over {len(sel)} attempted+banked problems "
-          f"(hinged tail agreement at z >= {TAIL_HINGE}, 0 = independent):",
+          f"(tail-weighted agreement at z >= {TAIL_HINGE}, 0 = independent):",
           flush=True)
     for k in range(K_AXES):
         x, y = g_np[sel, k], tgt[sel, k]
