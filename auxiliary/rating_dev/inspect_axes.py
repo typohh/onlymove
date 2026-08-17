@@ -30,6 +30,7 @@ Usage:
 
 import argparse
 import html
+import json
 import os
 import sys
 from functools import lru_cache
@@ -41,6 +42,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.katago.board_render import load_lookup, render_problem  # noqa: E402
+from utils.rating.rank_surveys import value_to_rank  # noqa: E402
+from utils.rating.se_floor import interp_extrap  # noqa: E402
+from utils.rating.tail_agreement import TAIL_HINGE, hinge_z, hinged_r  # noqa: E402
 
 
 # ---- artifact loading ---------------------------------------------------
@@ -113,7 +117,7 @@ def _cached_render(tid, zip_id, size):
     return render_problem(tid, zip_id, size)
 
 
-def _build_card(tid, score, lookup):
+def _build_card(tid, score, lookup, rank=None):
     info = lookup.get(tid)
     if not info:
         return f'<div class="card missing">missing in lookup: {tid}</div>'
@@ -122,16 +126,81 @@ def _build_card(tid, score, lookup):
         rp = _cached_render(tid, zip_id, size)
     except (FileNotFoundError, KeyError) as e:
         return f'<div class="card missing">load failed: {tid} ({e})</div>'
+    rank_html = "" if rank is None else f'<span class="rank">{value_to_rank(rank)}</span>'
     return (
         '<div class="card">'
         f'{rp["svg"]}'
         f'<div class="meta">'
         f'<span class="score">{score:+.3f}</span>'
         f'<span class="tid">{tid}</span>'
-        f'<span class="turn turn-{rp["to_move"][0]}">{rp["to_move"]} to play</span>'
+        f'{rank_html}'
         '</div>'
         '</div>'
     )
+
+
+def load_named_bank_tails(tids, hinge_at=TAIL_HINGE):
+    """Every NAMED tail in the motif store as a hinged weight vector over `tids`.
+
+    Restricted to the problems this page is showing, so a match is quoted on the
+    same population the boards come from — a rank-capped or size-filtered page
+    would otherwise report agreement against a corpus the reader cannot see.
+
+    Unnamed poles are skipped: they make no claim to match, being where
+    everything not at the named end accumulates.
+    """
+    anchors = os.path.join(PROJECT_ROOT, "axes", "label_anchors.npz")
+    labels_path = os.path.join(PROJECT_ROOT, "axes", "labels.json")
+    if not (os.path.exists(anchors) and os.path.exists(labels_path)):
+        return []
+    z = np.load(anchors, allow_pickle=False)
+    bank = json.load(open(labels_path)).get("bank", {})
+    pos = {t: i for i, t in enumerate(tids)}
+    idx = np.array([pos.get(str(t), -1) for t in z["tids"]])
+    keep = idx >= 0
+    out = []
+    for j, aid in enumerate(z["ids"]):
+        e = bank.get(str(aid), {})
+        col = np.full(len(tids), np.nan)
+        col[idx[keep]] = np.asarray(z["M"][j], np.float64)[keep]
+        for sign, lab in ((+1, e.get("positive")), (-1, e.get("negative"))):
+            if lab:
+                out.append((f"{lab}{'+' if sign > 0 else '-'}",
+                            hinge_z(sign * col, hinge_at)))
+    return out
+
+
+def _match_html(vals, sign, bank_tails, hinge_at, min_r):
+    """Which named stored motifs agree with this tail, by hinged correlation.
+
+    Both sides are z-scored and floored at the mean, then correlated over the
+    problems they share. Independence gives exactly 0 — hinging two independent
+    variables leaves them independent — so there is no chance baseline to quote
+    and no N to choose, and the score is driven by how far into each tail a
+    problem sits rather than by whether it cleared a cutoff.
+
+    Agreement is CO-SELECTION and has two causes it cannot separate — one
+    direction under two names, or two motifs whose Go situations co-occur — so
+    this is a list of leads, not identifications. It sits above the boards
+    because the boards are what decide between the two.
+    """
+    if not bank_tails:
+        return ""
+    mine = hinge_z(sign * np.asarray(vals, np.float64), hinge_at)
+    hits = []
+    for lab, other in bank_tails:
+        r = hinged_r(mine, other, pre_hinged=True)
+        if np.isfinite(r) and r >= min_r:
+            hits.append((r, lab))
+    if not hits:
+        return ('<div class="matches none">no named motif in the bank agrees '
+                f'with this tail above r = {min_r:g}</div>')
+    body = " · ".join(
+        f'<span class="match"><b>{html.escape(lab)}</b> '
+        f'<span class="lift">{r:.2f}</span></span>'
+        for r, lab in sorted(hits, reverse=True))
+    return (f'<div class="matches">bank agreement (hinged r, 0 = independent): '
+            f'{body}</div>')
 
 
 def _pick_extremes(vals, rows, cols):
@@ -153,7 +222,7 @@ def _pick_extremes(vals, rows, cols):
     return [(k + 1, idx[k:k + cols]) for k in range(0, take, cols)]
 
 
-def _render_tail_html(tids, vals, sign, rows, cols, lookup):
+def _render_tail_html(tids, vals, sign, rows, cols, lookup, ranks=None):
     """One tail's most extreme problems. sign=+1 renders the positive tail, -1
     the negative (card scores are shown in ORIGINAL units either way)."""
     groups = _pick_extremes(sign * vals, rows, cols)
@@ -162,7 +231,9 @@ def _render_tail_html(tids, vals, sign, rows, cols, lookup):
     out = []
     for lo, idx in groups:
         cards = "".join(
-            _build_card(tids[i], float(vals[i]), lookup) for i in idx)
+            _build_card(tids[i], float(vals[i]), lookup,
+                        None if ranks is None else ranks.get(tids[i]))
+            for i in idx)
         out.append(
             f'<div class="band">'
             f'<div class="band-label">#{lo}–{lo + len(idx) - 1}</div>'
@@ -188,11 +259,16 @@ def _style_block(cols):
   }}
   .card {{ background: white; border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem; text-align: center; }}
   .card svg {{ width: 100%; height: auto; display: block; }}
-  .meta {{ font-size: 0.8rem; margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.1rem; }}
+  .meta {{ font-size: 0.8rem; margin-top: 0.4rem; display: flex;
+           justify-content: space-between; align-items: baseline; gap: 0.4rem; }}
   .score {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
   .tid {{ font-family: ui-monospace, monospace; color: #555; }}
-  .turn-B {{ color: #111; }}
-  .turn-W {{ color: #888; }}
+  .rank {{ color: #2a6; font-weight: 600; }}
+  .matches {{ font-size: 0.9rem; background:#eef4ff; border:1px solid #cfe0ff;
+              border-radius:6px; padding:0.5rem 0.7rem; margin:0.5rem 0 1rem; }}
+  .matches.none {{ background:#f4f4f4; border-color:#ddd; color:#777; }}
+  .match {{ white-space: nowrap; }}
+  .lift {{ color:#777; }}
   .missing {{ color: #c33; padding: 1rem; }}
   .legend {{ font-size: 0.85rem; color: #555; margin-bottom: 1rem; }}
   .legend .marker {{
@@ -280,6 +356,21 @@ def main():
     parser.add_argument("--rows", type=int, default=8,
                         help="rows of extremes per tail; rows x cols problems shown, strongest first (default 8)")
     parser.add_argument("--cols", type=int, default=6, help="HTML grid columns (default 6)")
+    parser.add_argument("--match-hinge", type=float, default=TAIL_HINGE, metavar="Z",
+                        help="z threshold the tail weight is floored at for the "
+                             "bank-agreement summary (default 0.0 = the mean). "
+                             "Raise it to score agreement on a narrower tail.")
+    parser.add_argument("--match-min-r", type=float, default=0.10,
+                        help="minimum hinged correlation for a bank motif to be "
+                             "listed (default 0.10; 0 = independent)")
+    parser.add_argument("--rank-max", type=float, default=None, metavar="RANK",
+                        help="show only problems at or below this internal rank "
+                             "(0 = the 1k/1d boundary, so 0 caps at 1d). DISPLAY "
+                             "ONLY — an axis is unbounded and its true extremes "
+                             "run past 9d into problems no human can name a motif "
+                             "from. Never apply it when building a bank: it would "
+                             "delete the region the axis is most confident about. "
+                             "Needs --dump (for the rating array).")
     parser.add_argument("--out", default=None,
                         help="Output HTML path (defaults to /tmp/axis_extremes.html)")
     parser.add_argument("--open", dest="open_browser", action="store_true",
@@ -308,6 +399,42 @@ def main():
         raise SystemExit(f"missing {lookup_path}; run pipeline.package_for_pwa first")
     lookup = load_lookup(lookup_path)
 
+    # RANK CAP — for the eyes only, never for a bank. An axis is unbounded and
+    # its true extremes run past 9d into problems no human is meant to read, so a
+    # tail rendered honestly is mostly unjudgeable. Capping shows the strongest
+    # problems a human can actually name a motif from. It must never be applied
+    # to a stored direction: the cap would delete the region the axis is most
+    # confident about and teach a truncated motif.
+    ranks = None
+    if args.dump:
+        z = np.load(args.dump, allow_pickle=False)
+        if "rating" in z.files:
+            curve = json.load(open(os.path.join(PROJECT_ROOT, "ratings",
+                                                "rating_to_rank.json")))
+            # Vectorised PER SIZE: interp_extrap takes an array, and each board
+            # has its own curve.
+            ranks = {}
+            dtid = np.array([str(t) for t in z["tid"]])
+            dsize = np.asarray(z["size"]).astype(int)
+            drating = np.asarray(z["rating"], dtype=np.float64)
+            for sz in np.unique(dsize):
+                c = curve[str(int(sz))]
+                m = dsize == sz
+                rv = interp_extrap(drating[m], np.asarray(c["ratings"]),
+                                   np.asarray(c["ranks"]))
+                ranks.update(zip(dtid[m], np.asarray(rv, dtype=float).tolist()))
+    if args.rank_max is not None:
+        if ranks is None:
+            raise SystemExit("--rank-max needs a --dump carrying a `rating` "
+                             "array; a per_problem.csv holds embeddings only.")
+        keep = np.array([ranks[t] <= args.rank_max for t in tids])
+        if not keep.any():
+            raise SystemExit(f"no problems at or below rank {args.rank_max}")
+        print(f"  rank cap {args.rank_max}: {keep.sum()}/{len(tids)} problems "
+              f"kept (display only)", flush=True)
+        tids = [t for t, k in zip(tids, keep) if k]
+        components = [(key, title, vals[keep]) for key, title, vals in components]
+
     # Size filter via lookup (per_problem.csv spans both boards, tid-aligned).
     if args.size != "all":
         want = int(args.size)
@@ -319,21 +446,34 @@ def main():
 
     if args.html:
         scope = f"{source}, size {args.size}"
+        # ONE SECTION PER TAIL, not per axis. A name is a claim about one end, so
+        # the tail is the unit a reader is actually judging; pairing both ends
+        # under one selection makes them scroll past the other half to compare
+        # two candidates for the same name.
+        bank_tails = load_named_bank_tails(tids, args.match_hinge)
+        print(f"  bank: {len(bank_tails)} named tails to match against", flush=True)
         options, sections = [], []
+        n_tails = 2 * len(components)
         for i, (key, title, vals) in enumerate(components):
-            selected = " selected" if i == 0 else ""
-            options.append(
-                f'<option value="{key}"{selected}>{html.escape(title)}</option>')
             print(f"  rendering {title} ({i + 1}/{len(components)})...", flush=True)
-            pos_html = _render_tail_html(tids, vals, +1, args.rows, args.cols, lookup)
-            neg_html = _render_tail_html(tids, vals, -1, args.rows, args.cols, lookup)
-            active = " active" if i == 0 else ""
-            sections.append(
-                f'<section class="comp-section{active}" data-comp="{key}">'
-                f'<h2><span class="comp-label">{html.escape(title)}</span></h2>'
-                f'<h3>positive tail</h3>{pos_html}'
-                f'<h3>negative tail</h3>{neg_html}'
-                f'</section>')
+            for sign, suffix, word in ((+1, "p", "positive"), (-1, "n", "negative")):
+                ti = 2 * i + (0 if sign > 0 else 1)
+                tail_key = f"{key}{suffix}"
+                tail_title = f"{title} · {word} tail"
+                sel = " selected" if ti == 0 else ""
+                options.append(f'<option value="{tail_key}"{sel}>'
+                               f'{html.escape(tail_title)}</option>')
+                body = _render_tail_html(tids, vals, sign, args.rows, args.cols,
+                                         lookup, ranks)
+                matches = _match_html(vals, sign, bank_tails,
+                                      args.match_hinge, args.match_min_r)
+                sections.append(
+                    f'<section class="comp-section{" active" if ti == 0 else ""}" '
+                    f'data-comp="{tail_key}">'
+                    f'<h2><span class="comp-label">{html.escape(tail_title)}</span></h2>'
+                    f'{matches}{body}'
+                    f'</section>')
+        print(f"  {n_tails} tails", flush=True)
         page = _build_page(scope, "".join(options), "".join(sections), args.cols)
         out_path = args.out or os.path.join("/tmp", "axis_extremes.html")
         with open(out_path, "w") as f:

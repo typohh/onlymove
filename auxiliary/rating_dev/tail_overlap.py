@@ -39,6 +39,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.features import load_first_time_attempts  # noqa: E402
+from utils.rating.tail_agreement import (  # noqa: E402
+    TAIL_HINGE, hinge_z, hinged_r)
 
 ANCHORS = os.path.join(PROJECT_ROOT, "axes", "label_anchors.npz")
 LABELS = os.path.join(PROJECT_ROOT, "axes", "labels.json")
@@ -47,7 +49,8 @@ LABELS = os.path.join(PROJECT_ROOT, "axes", "labels.json")
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--n", type=int, default=1000, help="tail size per end")
+    ap.add_argument("--hinge", type=float, default=TAIL_HINGE, metavar="Z",
+                    help="z threshold each tail weight is floored at")
     ap.add_argument("--all-named", action="store_true",
                     help="every motif in the store with at least one named tail, "
                          "not just the shipped `components`")
@@ -55,8 +58,9 @@ def main():
                     help="comma-separated motif ids, overriding the two above")
     ap.add_argument("--all-problems", action="store_true",
                     help="include never-attempted problems (see the docstring)")
-    ap.add_argument("--min-lift", type=float, default=3.0,
-                    help="only list pairs at or above this lift over chance")
+    ap.add_argument("--min-r", type=float, default=0.10,
+                    help="only list pairs at or above this agreement "
+                         "(0 = independent)")
     ap.add_argument("--top", type=int, default=10,
                     help="how many of the strongest pairs to list (0 = all "
                          "above --min-lift)")
@@ -100,9 +104,6 @@ def main():
     fin = np.isfinite(M).all(axis=0)
     M, tids = M[:, fin], tids[fin]
     n_prob = M.shape[1]
-    if n_prob < 4 * args.n:
-        raise SystemExit(f"only {n_prob} problems shared by all {len(want)} "
-                         f"motifs — tails of {args.n} would not be tails")
 
     # UNNAMED TAILS ARE DROPPED by default. The question this answers is whether
     # two NAMES describe the same problems, and an unnamed pole makes no claim to
@@ -112,12 +113,10 @@ def main():
     for j, a in enumerate(want):
         e = bank.get(a, {})
         axis = e.get("positive") or e.get("negative") or a
-        order = np.argsort(M[j])
-        for sign, idx, lab in ((+1, order[-args.n:], e.get("positive")),
-                               (-1, order[:args.n], e.get("negative"))):
+        for sign, lab in ((+1, e.get("positive")), (-1, e.get("negative"))):
             if lab is None and not args.include_unnamed:
                 continue
-            tails.append(set(idx.tolist()))
+            tails.append(hinge_z(sign * M[j], args.hinge))
             names.append(f"{lab or (axis + '?')}{'+' if sign > 0 else '-'}")
             owner.append(a)
     # The store holds several fits' takes on one motif, so a bare name is not
@@ -127,10 +126,9 @@ def main():
     if len(tails) < 2:
         raise SystemExit("fewer than two named tails selected — nothing to compare")
 
-    chance = args.n / n_prob
-    print(f"tail overlap over {n_prob} {'' if args.all_problems else 'attempted '}"
-          f"problems shared by all {len(want)} motifs, tails of {args.n} "
-          f"(chance {chance:.1%})\n")
+    print(f"hinged tail agreement (z >= {args.hinge}, 0 = independent) over "
+          f"{n_prob} {'' if args.all_problems else 'attempted '}problems shared "
+          f"by all {len(want)} motifs\n")
     # Columns are NUMBERED, not headed by truncated names: 'escape atari+' and
     # 'escape atari?-' both clip to 'escape a', so a truncated header silently
     # labels two different tails identically.
@@ -143,23 +141,23 @@ def main():
                 if i == j:
                     cells.append(f"{'—':>7}")
                 else:
-                    share = len(tails[i] & tails[j]) / args.n
-                    cells.append(f"{share:>6.1%} " if share else f"{'·':>7}")
+                    r = hinged_r(tails[i], tails[j], pre_hinged=True)
+                    cells.append(f"{r:>+7.2f}" if np.isfinite(r) else f"{'·':>7}")
             print(f"{('[' + str(i) + '] ' + ni):<{w}}" + "".join(cells))
         print()
 
     hits = []
     for i, j in itertools.combinations(range(len(names)), 2):
-        share = len(tails[i] & tails[j]) / args.n
-        if share >= args.min_lift * chance:
-            hits.append((share, names[i], names[j]))
+        r = hinged_r(tails[i], tails[j], pre_hinged=True)
+        if np.isfinite(r) and r >= args.min_r:
+            hits.append((r, names[i], names[j]))
     hits.sort(reverse=True)
     shown = hits[:args.top] if args.top else hits
-    print(f"strongest {len(shown)} of {len(hits)} pairs at lift >= "
-          f"{args.min_lift:g}x chance, over {len(names)} named tails:")
+    print(f"strongest {len(shown)} of {len(hits)} pairs at agreement >= "
+          f"{args.min_r:g}, over {len(names)} named tails:")
     wn = max((len(a) for _, a, _ in shown), default=10)
-    for share, a, b in shown:
-        print(f"  {a:<{wn}}  {b:<{wn}}  {share:>7.1%}  ({share / chance:>5.1f}x)")
+    for r, a, b in shown:
+        print(f"  {a:<{wn}}  {b:<{wn}}  {r:>+8.2f}")
     if not hits:
         print("  none — every named tail selects a distinct set of problems")
 

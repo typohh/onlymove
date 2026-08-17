@@ -2,9 +2,10 @@
 
 THE STORE IS THE ONLY THING THAT OUTLIVES A REFIT. A fit's axis space is defined
 only up to rotation, so a motif's name survives a refit exactly as long as the
-direction it was named for is kept somewhere and taught back. `axes/axis_bank.npz`
-is one fit's teaching target; this store is the accumulated set every future bank
-is drawn FROM, so a motif discovered once need never be rediscovered.
+direction it was named for is kept somewhere and taught back. A fit's teaching
+target is a SELECTION from this store rather than a file of its own; the store is
+the accumulated set every future selection is drawn FROM, so a motif discovered
+once need never be rediscovered.
 
 Two files, one entry per motif, joined by an `ax_<8hex>` id:
   label_anchors.npz  ids, tids, sizes, M (n_axes, n_problems)  — the DIRECTIONS

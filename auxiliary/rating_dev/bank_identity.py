@@ -26,6 +26,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.features import load_first_time_attempts  # noqa: E402
+from utils.rating.tail_agreement import (  # noqa: E402
+    TAIL_HINGE, hinge_z, hinged_r)
 
 
 def main():
@@ -33,8 +35,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dump", required=True, help="dumped fit (.npz with loading)")
     ap.add_argument("--bank", required=True, help="the bank it was taught from")
-    ap.add_argument("--n-tail", type=int, default=500,
-                    help="tail size per end (production uses 500)")
+    ap.add_argument("--hinge", type=float, default=TAIL_HINGE, metavar="Z",
+                    help="z threshold each tail weight is floored at (default "
+                         "0.0 = the mean). Raise it to score a narrower tail.")
     ap.add_argument("--all-problems", action="store_true",
                     help="include never-attempted problems — their loadings are "
                          "unconstrained extrapolation and are ENRICHED in the "
@@ -42,10 +45,10 @@ def main():
     ap.add_argument("--cross", action="store_true",
                     help="drop the axis-k-vs-column-k pairing and print the full "
                          "axes x columns matrix. This is what a BIPOLAR arm needs: "
-                         "a column taught as z(A) - z(B) is one target but two "
-                         "claims, and the paired number cannot say whether the fit "
-                         "kept both poles or collapsed onto whichever one carried "
-                         "more signal. Point it at a bank of the individual poles.")
+                         "a column taught as one bipolar target is two claims, and "
+                         "the paired number cannot say whether the fit kept both "
+                         "poles or collapsed onto whichever carried more signal. "
+                         "Point it at a bank of the individual poles.")
     args = ap.parse_args()
 
     d = np.load(args.dump, allow_pickle=True)
@@ -77,42 +80,38 @@ def main():
         pop = "attempted+banked problems"
 
     print(f"{os.path.basename(args.dump)} vs {os.path.basename(args.bank)}")
-    n = args.n_tail
 
     if args.cross:
-        # TAIL OVERLAP, not correlation. This mode exists to catch a bipolar
-        # column keeping one pole and dropping the other, and correlation cannot
-        # see that: an axis whose extremes are a motif's extremes can still have
-        # middling bulk correlation with it, because the axis is a trunk output
-        # rather than a linear map and the two need not agree away from the ends.
-        # Measured on the bipolar arm, correlation reported a collapse that the
-        # tails show did not happen — every pole was retained at 10x chance or
-        # better. Both of a fitted axis's ends are shown, since which end a motif
-        # landed on is the question.
-        chance = n / len(sel)
-        print(f"  tail overlap over {len(sel)} {pop}, tails of {n} "
-              f"(chance {chance:.1%})")
+        # This mode exists to catch a bipolar column keeping one pole and
+        # dropping the other. Bulk correlation cannot see that — measured, it
+        # reported a collapse the tails show did not happen. Both of a fitted
+        # axis's ends are scored, since which end a motif landed on is the
+        # question.
+        print(f"  hinged tail agreement over {len(sel)} {pop} "
+              f"(0 = independent)")
         print(f"  rows = a fitted axis's own tails, cols = each bank column's "
               f"POSITIVE tail\n")
         print("        " + "".join(f"{lab[:11]:>13}" for lab in labels))
-        col_tail = [set(np.argsort(tgt[sel, j])[-n:].tolist()) for j in range(K)]
+        colh = [hinge_z(tgt[sel, j], args.hinge) for j in range(K)]
         for k in range(g.shape[1]):
-            order = np.argsort(g[sel, k])
-            for sign, t in (("+", set(order[-n:].tolist())),
-                            ("-", set(order[:n].tolist()))):
+            for sign, sg in (("+", +1.0), ("-", -1.0)):
+                mine = hinge_z(sg * g[sel, k], args.hinge)
                 print(f"  ax{k} {sign}  " + "".join(
-                    f"{len(t & col_tail[j]) / n:>12.1%} " for j in range(K)))
+                    f"{hinged_r(mine, colh[j], pre_hinged=True):>+12.3f} "
+                    for j in range(K)))
         return
 
-    print(f"  BANK IDENTITY over {len(sel)} {pop} (tails of {2 * args.n_tail}):")
+    print(f"  BANK IDENTITY over {len(sel)} {pop}  "
+          f"(agree = hinged tail correlation, 0 = independent)")
     for k in range(K):
         x, y = g[sel, k], tgt[sel, k]
-        r = float(np.corrcoef(x, y)[0, 1])
-        ox, oy = np.argsort(x), np.argsort(y)
-        lo = len(set(ox[:n]) & set(oy[:n]))
-        hi = len(set(ox[-n:]) & set(oy[-n:]))
-        print(f"    axis {k} {labels[k]:<22} corr {r:+.3f} | "
-              f"tails {lo + hi}/{2 * n}  (- {lo}, + {hi})")
+        # BOTH ends, separately: an axis can hold the end its name is on and lose
+        # the other, and one number averaging the two hides exactly that.
+        ap = hinged_r(x, y, args.hinge)
+        an = hinged_r(-x, -y, args.hinge)
+        bulk = float(np.corrcoef(x, y)[0, 1])
+        print(f"    axis {k} {labels[k]:<22} +tail {ap:6.3f}  -tail {an:6.3f}"
+              f"   (bulk r {bulk:+.3f})")
 
 
 if __name__ == "__main__":

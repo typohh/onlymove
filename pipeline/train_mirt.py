@@ -28,8 +28,8 @@ cannot reach the shipped fit. The measurement behind every constant here:
 `docs/mirt_benchmark.md`.
 
 Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first;
-the move-eval cache is a hard prerequisite. So is `axes/axis_bank.npz` — see
-below.
+the move-eval cache is a hard prerequisite. So is the motif store,
+`axes/{label_anchors.npz,labels.json}` — see below.
 
 THE AXES ARE TAUGHT FROM A FROZEN BANK, which is what lets a name outlive a
 refit. The objective is exactly invariant to rotating the axis space — the
@@ -39,21 +39,22 @@ the fit has a continuum of equal solutions and no preference among them. Left to
 itself it lands wherever initialization drops it: a 2% data change re-rolls the
 basis as hard as a different seed does, which would silently reattach every name
 in `axes/labels.json` to a direction it was not written for. So the axis map is
-not re-derived. It is pulled toward `axes/axis_bank.npz` by an auxiliary MSE,
+not re-derived. It is pulled toward the motif store by an auxiliary MSE,
 which decays linearly to zero over TEACH_DECAY_EPOCHS while the trunk trains
 normally. Measured across a real refit: without it the new axes share 0.20 min
 canonical correlation with the old ones, with it 0.899, and the loss is if
 anything slightly better.
 
-The bank is a `--dump-params` npz from `auxiliary.rating_dev.train_joint_mirt`
-(it needs `tid`, `size` and `loading`); that surface is where directions are
-explored and chosen, and this one only holds them. It may carry MORE than K
-columns — a wider set of candidates — and THE FIRST K_AXES ARE WHAT SHIPS, so the
-bank's column order is the shipping decision, made where the directions are
-inspected rather than here. That order is also what `axes/labels.json` indexes,
-since `package_for_pwa` reads components positionally. The per-axis SCALE is
-ignored — a rescaling of the loadings is absorbed by v — so only DIRECTION is
-taught.
+THE BANK IS THE MOTIF STORE, SELECTED BY NAME. `axes/label_anchors.npz` holds
+every direction ever kept, keyed by an `ax_<hex>` content hash, and
+`axes/labels.json`'s `components` lists which ids this fit ships, in axis order;
+the first K_AXES are taught, so that list is the shipping decision. Binding by id
+rather than by column position is the point — a bank file orders its directions
+implicitly while labels.json is indexed against that order, so reordering it
+renames every motif onto a direction it was not written for. Directions enter the
+store from a `--dump-params` npz via `auxiliary.rating_dev.update_motif_store`.
+The per-axis SCALE is ignored — a rescaling of the loadings is absorbed by v — so
+only DIRECTION is taught.
 
 Writes:
 
@@ -399,36 +400,43 @@ def load_bank(key_idx):
     return tgt, ok, want
 
 
-def report_bank_identity(g_np, tgt, ok, prob_idx, n_tail=500):
+def report_bank_identity(g_np, tgt, ok, prob_idx):
     """How far each shipped axis moved off the bank — the check that says whether
     `axes/labels.json` still describes what it is attached to.
+
+    HINGED TAIL AGREEMENT, not correlation. A name is a claim about one END of an
+    axis, and the axis is a trunk output rather than a linear map, so its extremes
+    and its ordering of the middle are free to diverge — measured, correlation
+    reverses which of two fits held identity better and reports a bipolar column
+    collapsing when its poles are both intact. Each direction is z-scored and
+    floored at TAIL_HINGE, then correlated; the result is exactly zero under
+    independence, so there is no chance baseline to quote. Bulk correlation is
+    printed alongside as context, never as the verdict.
+
+    BOTH ENDS are scored separately: an axis can hold the end its name is on and
+    lose the other, and one number averaging the two hides exactly that. A tail
+    that is constant after hinging scores NaN rather than 0 — an empty tail makes
+    no claim and must not read as "measured, independent".
 
     Scored on ATTEMPTED problems only. A third of the corpus is never attempted;
     its loadings are unconstrained extrapolation, so their extremes churn freely
     between fits and would be counted here as a failure to reproduce. They are
     also ENRICHED in the tails rather than merely present, so including them
     understates what the model actually holds.
-
-    BOTH numbers are printed because they say different things and the second is
-    the one that governs a name. Correlation describes the bulk; a name is a claim
-    about the EXTREMES, which are the least reproducible part — measured, a 0.945
-    correlation implies ~610 shared tail problems under normality and delivers
-    375. Reading correlation alone would overstate how well a name transfers,
-    by a margin that grows exactly where confidence would be highest.
     """
     att = np.zeros(len(g_np), bool)
     att[np.unique(prob_idx)] = True
     sel = np.where(att & ok)[0]
     print(f"  BANK IDENTITY over {len(sel)} attempted+banked problems "
-          f"(tails of {2 * n_tail}):", flush=True)
+          f"(hinged tail agreement at z >= {TAIL_HINGE}, 0 = independent):",
+          flush=True)
     for k in range(K_AXES):
         x, y = g_np[sel, k], tgt[sel, k]
-        r = float(np.corrcoef(x, y)[0, 1])
-        ox, oy = np.argsort(x), np.argsort(y)
-        shared = len(set(ox[:n_tail]) & set(oy[:n_tail])) + \
-            len(set(ox[-n_tail:]) & set(oy[-n_tail:]))
-        print(f"    axis {k}: corr {r:+.3f} | tails {shared}/{2 * n_tail}",
-              flush=True)
+        pos = hinged_r(x, y)
+        neg = hinged_r(-x, -y)
+        bulk = float(np.corrcoef(x, y)[0, 1])
+        print(f"    axis {k}: +tail {pos:6.3f}  -tail {neg:6.3f}"
+              f"   (bulk r {bulk:+.3f})", flush=True)
 
 
 def main():

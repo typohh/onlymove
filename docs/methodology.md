@@ -629,7 +629,7 @@ pipeline.benchmark_bots <size>         → attempts/<size>/*.txt
 pipeline.extract_activations           → activations/<size>/<id>.npz
 pipeline.cache_rating_features           → activations/_signal_cache/move_evals_<size>.npz
 pipeline.fetch_database                → db/d1.{sqlite,sql}   (attempt log + surveys)
-pipeline.train_mirt                    → ratings/ + axes/   (also reads axes/axis_bank.npz)
+pipeline.train_mirt                    → ratings/ + axes/   (also reads the motif store)
 pipeline.map_rating_to_rank            → ratings/rating_to_rank.json, ratings/rank_map.json
 pipeline.write_mirt_per_cell           → axes/per_cell/
 pipeline.fit_population_constants      → ratings/population_constants.json
@@ -641,7 +641,7 @@ pipeline.package_for_pwa               → pwa/tsumegos/          (single writer
 - `map_rating_to_rank` consumes `ratings/` and must therefore follow the fit that writes them.
 - `fit_population_constants` consumes `axes/per_problem.csv` — it fits one prior entry per axis, so it cannot run before the axis count is known. It also reads the time-adjustment coefficients through from `rating_to_rank.json`, putting it after `map_rating_to_rank` as well.
 
-**`train_mirt` additionally requires `axes/axis_bank.npz`**, the frozen directions of section 1.14 that its axes are taught onto, and aborts without it — it derives no directions of its own. That file is not produced by any step in this list: it is chosen at the experiment surface and committed, which is why it is one of the few tracked files under `axes/` rather than a regenerable artifact. The run prints a per-axis identity report against it — correlation and tail overlap over attempted problems — which is the check that says whether the names in `axes/labels.json` still describe what they are attached to.
+**`train_mirt` additionally requires the motif store**, `axes/label_anchors.npz` together with `axes/labels.json`, and aborts without it — it derives no directions of its own. The store holds every direction ever kept, keyed by a content hash of the direction; `labels.json`'s `components` lists which of those ids this fit ships, in axis order, and the first `K_AXES` are the ones taught. Neither file is produced by any step in this list: directions are chosen at the experiment surface and committed, which is why they are the tracked files under `axes/` rather than regenerable artifacts. The run prints a per-axis identity report against the selected directions — hinged tail agreement for both ends, over attempted problems — which is the check that says whether the names in `axes/labels.json` still describe what they are attached to.
 
 `pipeline.fetch_database` supplies the human attempt log and the survey rows, so it precedes everything that fits against them — the rating trainer, the rank map and the axes alike. It takes no board size, pulls incrementally by row id, and is the one step in the block that reads the production database rather than the artifact tree.
 
@@ -711,7 +711,8 @@ ratings/rank_map.json                       per-server coupling knots
 ratings/population_constants.json           retention, time bias, rank_prior, and the three
                                             length-K weakness vectors: weakness_axis_lambda,
                                             weakness_contrast_mean, weakness_axis_mean
-axes/axis_bank.npz              INPUT, tracked: the frozen directions the axes are taught onto
+axes/label_anchors.npz          INPUT, tracked: every motif direction ever kept, by content-hash id
+axes/labels.json                INPUT, tracked: names + provenance per id, and `components` = the ids this fit ships
 axes/labels.json                tracked: two-tailed labels, indexed by the bank's column order
 axes/per_problem.csv            per-problem axis loadings
 axes/per_cell/<size>/<tid>.npz  per-cell loadings

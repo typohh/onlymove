@@ -191,7 +191,7 @@ The question is whether a refit's axes can be matched to the previously NAMED mo
 
 **The objective is exactly invariant to rotating the axis space.** The likelihood reads the loadings and the user positions only through their product, so rotating both by the same orthogonal matrix leaves it unchanged. `V_RIDGE` is isotropic, `V_MEAN_PENALTY` acts on the mean vector, and `ORTHO_WEIGHT` targets the loading correlation being the identity — a condition every rotation preserves. The fit therefore has a continuum of exactly-equal solutions and no preference among them; which one comes out is decided entirely by where the warm start drops it, and the warm start is read off the burn-in residuals, hence off the data.
 
-Similarity is measured three ways on the problem side, over the problems two fits share, after per-axis z-scoring: **pairwise** correlation under an optimal 1-1 assignment (`scipy.optimize.linear_sum_assignment` on `-|corr|`, so a permutation costs nothing and a sign flip means swapping a motif's two tail labels, not losing it); **canonical correlations** between the two K-dim spans, which bound what any linear alignment can achieve; and **tail overlap**, the shared problems among each axis's top and bottom 500, restricted to the shared problem set so corpus growth cannot deflate it. Tail overlap is the one that speaks to naming, since a name is a claim about the extremes and the client only ever reads a flagged tail.
+Similarity is measured three ways on the problem side, over the problems two fits share, after per-axis z-scoring: **pairwise** correlation under an optimal 1-1 assignment (`scipy.optimize.linear_sum_assignment` on `-|corr|`, so a permutation costs nothing and a sign flip means swapping a motif's two tail labels, not losing it); **canonical correlations** between the two K-dim spans, which bound what any linear alignment can achieve; and **hinged tail agreement**, each direction z-scored and floored at `TAIL_HINGE` then correlated, restricted to the shared problem set so corpus growth cannot deflate it. Tail agreement is the one that speaks to naming, since a name is a claim about the extremes and the client only ever reads a flagged tail.
 
 | comparison | canonical correlations | best axis's tails, of 1000 |
 |---|---|---|
@@ -240,54 +240,100 @@ problems. By correlation they look lost: best single-anchor correlation **0.41**
 16-anchor span 0.16 / 0.21 / 0.28, canonical correlations against the three motifs the two-stage
 fit shipped 0.009 / 0.411 / 0.582.
 
-By tail overlap two of them plainly survive, and the control is what makes that readable. Across
-the 93 CROSS-ERA pairs of differently-named tails the overlap distribution is median 0.6%, p90
-3.6%, p99 15.0%, max 16.7%. Against that background:
+By hinged tail agreement two of them plainly survive, and the control is what makes that readable.
+Across the 93 CROSS-ERA pairs of differently-named tails the agreement distribution is median -0.004,
+p90 +0.082, p99 +0.238, max +0.258. Against that background:
 
-| same-name cross-era pair | tail overlap | lift | vs different-name pairs |
-|---|---|---|---|
-| `opening+` / `opening+` | **33.7%** | 35x | above all 93 |
-| `counting+` / `counting+` | **22.5%** | 23x | above all 93 |
-| `ko+` / `ko+` | 6.8% | 7x | above 98% |
+| same-name cross-era pair | tail agreement | vs different-name pairs |
+|---|---|---|
+| `opening+` / `opening+` | **+0.503** | above all 93 |
+| `counting+` / `counting+` | **+0.411** | above all 93 |
+| `ko+` / `ko+` | +0.095 | above 91% |
 
-Opening and counting sit at twice the largest different-name overlap, so they reproduce across two
-entirely different model generations — support no within-generation measurement can establish. ko
-matches only weakly, and the remaining legacy names not at all; those are candidate seeds only.
+Opening and counting sit at roughly twice the largest different-name agreement, so they reproduce
+across two entirely different model generations — support no within-generation measurement can
+establish. ko matches only weakly, and the remaining legacy names not at all; those are candidate
+seeds only.
 
-The control is not optional here. WITHIN the legacy fit, tails are mutually entangled at rates that
-look identical to the same-name matches — `shape-`/`ko threats-` 35.4%, `reading+`/`killing+`
-35.4%, `complexity+`/`attack+` 24.4% — because that fit carried 16 motifs with no orthogonality
-pressure between them. Compared against THAT background a 33.7% match is unremarkable; compared
-against the cross-era background it is off the scale. Overlap figures mean nothing without the
-population they are being judged against.
+The control is not optional here. WITHIN the legacy fit, tails agree at rates that look identical to
+the same-name matches — `shape-`/`ko threats-` +0.63, `reading+`/`killing+` +0.63,
+`complexity+`/`attack+` +0.39 — because that fit carried 16 motifs with no orthogonality pressure
+between them. Compared against THAT background a +0.50 match is unremarkable; compared against the
+cross-era background it is off the scale. An agreement figure means nothing without the population it
+is being judged against.
 
 The disagreement between the two instruments is the point, and it generalises — see "Identity is a
 tail measure" below. A name is a claim about one end of an axis, so a direction can be
 substantially reproduced where it is named while sharing little of the corpus ordering elsewhere.
 
-### Identity is a tail measure
+### Identity is a hinged TAIL measure, and the threshold is load-bearing
 
-**Bulk correlation and tail overlap disagree in both directions, and the tail is what governs a
-name.** An axis is a trunk output, not a linear map on nameable inputs, so its extremes and its
-ordering of the middle are free to diverge. Three measured consequences:
+**A name is a claim about one END of an axis**, and an axis is a trunk output rather than a linear map
+on nameable inputs, so its extremes and its ordering of the middle are free to diverge. Three
+instruments were tried; only the third survives.
 
-- A fit whose bulk correlation with its bank FELL held MORE tail than the arm it was compared
-  against, reversing which of the two looked better on identity.
-- A bipolar arm read by correlation appears to collapse onto one pole per column (0.27 against an
-  expected 0.74); read on tails every pole is retained at 10x-90x chance and none is lost.
-- Correlation overstates transfer exactly where confidence is highest: 0.945 implies ~610 shared
-  tail problems under normality and delivers 375.
+**Bulk correlation** gets answers backwards. A fit whose bulk correlation with its bank FELL held MORE
+tail than the arm it was compared against, reversing which looked better. A bipolar arm read by
+correlation appears to collapse onto one pole per column (0.27 against an expected 0.74) when on tails
+every pole is retained. And it overstates transfer exactly where confidence is highest: 0.945 implies
+~610 shared tail problems under normality and delivers 375.
 
-**Overlap measures CO-SELECTION and cannot say which of its two causes produced it** — one
-direction under two names, or two distinct motifs whose situations co-occur. `escape atari` and
-`opening` share 32.8% / 36.4% of their two tails and are nevertheless distinct: conditioning on
-opening-ness, escape atari's spread RISES from 0.887 corpus-wide to 1.93 within the top 2% of
-opening, so it discriminates hard among opening positions rather than restating them. The
-conditional check is what separates the cases; overlap alone only nominates a pair for one.
+**Top-N overlap** fails three ways at once: N is arbitrary, the cutoff is hard so problem N and N+1
+are total agreement and total disagreement, and membership discards magnitude, so a problem 5 sd into
+the tail is the same evidence as one 0.4 sd in. It manufactures matches from problems that merely
+landed inside the boundary — an axis whose only real match is ko also showed two motifs at "4%" that
+vanish entirely under a weighted measure. It also cannot score a BINARY rule bank at all, because
+~100k tied zeros make `argsort` pick an arbitrary tail.
 
-Tools: `auxiliary/rating_dev/bank_identity.py` (paired, and `--cross` for the axes x poles matrix a
-bipolar bank needs), `auxiliary/rating_dev/tail_overlap.py` (stored motifs against each other,
-named tails only by default — an unnamed pole makes no claim to collide with).
+**Hinged correlation** is the measure: z-score each direction, floor at `TAIL_HINGE`, correlate over
+the problems both cover. No N, linear weighting by depth into the tail, and exactly zero under
+independence — hinging two independent variables leaves them independent — so no chance baseline is
+needed. A tail that is constant after hinging returns NaN rather than 0: an empty tail makes no claim
+and must not read as "measured, independent".
+
+**The threshold must not be left at the mean.** Hinging at 0 keeps the whole upper half and reproduces
+bulk correlation almost exactly, inheriting the defect the hinge exists to remove. Swept on the ortho
+arms (+tail agreement, escape atari / life and death / ko):
+
+| hinge z | kept | no ortho | ortho on b | ortho on rating+slope+floor |
+|---|---|---|---|---|
+| 0.0 | 20.7% | 0.879 0.455 0.944 | 0.790 0.508 0.942 | 0.690 0.449 0.824 |
+| 0.5 | 10.9% | 0.867 0.390 0.962 | 0.846 0.480 0.959 | 0.674 0.432 0.854 |
+| **1.0** | **7.6%** | 0.853 0.334 0.970 | **0.875 0.463 0.966** | 0.651 0.412 0.854 |
+| 1.5 | 5.6% | 0.839 0.288 0.971 | 0.882 0.449 0.966 | 0.629 0.389 0.846 |
+| 2.0 | 4.3% | 0.825 0.252 0.968 | 0.876 0.432 0.964 | 0.608 0.363 0.837 |
+
+The arms CROSS OVER between 0.5 and 1.0 on escape atari — no-ortho leads at the mean, ortho-b leads in
+the tail — so the threshold decides the conclusion. 1.0 is inside a plateau that holds through 2.0.
+
+**Agreement measures CO-SELECTION and cannot say which of its two causes produced it** — one direction
+under two names, or two distinct motifs whose situations co-occur. `escape atari` and `opening` agree
+at +0.52 and are nevertheless distinct: conditioning on opening-ness, escape atari's spread RISES from
+0.887 corpus-wide to 1.93 within the top 2% of opening, so it discriminates hard among opening
+positions rather than restating them. The conditional check separates the cases; agreement alone only
+nominates a pair for one.
+
+Single-sourced in `auxiliary/rating_dev/tail_agreement.py`, used by `bank_identity.py` (paired, and
+`--cross` for the axes x poles matrix a bipolar bank needs) and `tail_overlap.py`.
+
+### The rule-seeded arms, now scoreable
+
+Top-N could not score these at all: their banks are BINARY, and ~100k tied zeros make `argsort` pick
+an arbitrary tail, so their identity was unmeasured. Hinged agreement handles them — hinging a binary
+column leaves the positives at one value, so the correlation asks whether the fitted tail's weight
+concentrates on the rule's positives. The negative side is constant after hinging and correctly
+returns NaN rather than 0.
+
+| arm | axis 0 | axis 1 | axis 2 |
+|---|---|---|---|
+| drop_opening (ko, L&D, counting) | 0.355 | 0.369 | 0.406 |
+| drop_counting (ko, L&D, opening) | 0.562 | 0.635 | 0.656 |
+| drop_lad (ko, counting, opening) | 0.345 | 0.440 | 0.520 |
+| drop_ko (L&D, counting, opening) | 0.324 | 0.414 | 0.444 |
+
+Every rule-seeded arm lands well below what a CONVERGED bank returns (0.875 / 0.463 / 0.966 for the
+same three motifs under ortho-b), which is the quantitative form of "rules bootstrap a motif, a
+converged direction carries it".
 
 ### What a single axis is worth cannot be measured by ablating the others
 
@@ -309,14 +355,16 @@ correlates -0.638 with SLOPE and only +0.182 with difficulty — the leak picks 
 than difficulty specifically — and that arm is worst on rating (0.5117) and worst on never-trained
 problems (0.5612) of every arm measured.
 
-| arm | rating | rating+axis | axis adds | never-trained | survey rho | tail held /3000 |
+| arm | rating | rating+axis | axis adds | never-trained | survey rho | mean tail agreement |
 |---|---|---|---|---|---|---|
-| taught, no ortho | 0.5123 | 0.5064 | 5.84 | 0.5725 | 0.8131 | 975 |
-| taught, ortho on b | 0.5130 | 0.5086 | 4.41 | 0.5631 | **0.8232** | **1126** |
-| taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | **0.16** | 0.5639 | 0.8123 | 715 |
+| taught, no ortho | 0.5123 | 0.5064 | 5.84 | 0.5725 | 0.8131 | 0.719 |
+| taught, ortho on b | 0.5130 | 0.5086 | 4.41 | 0.5631 | **0.8232** | **0.768** |
+| taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | **0.16** | 0.5639 | 0.8123 | 0.639 |
 
-b alone costs 0.7 mnat of rating — inside seed noise — and buys better never-trained pricing, the
-best survey rho measured, and more tail on all three axes.
+Per axis (escape atari / life and death / ko): 0.853 0.334 0.970 untreated, **0.875 0.463 0.966** with
+ortho on b, 0.651 0.412 0.854 with the shipped triple. b alone costs 0.7 mnat of rating — inside seed
+noise — and buys better never-trained pricing, the best survey rho measured, and better identity on
+two of three axes with the third level.
 
 **Penalising the shipped triple is refuted.** It decorrelates thoroughly (every correlation under
 0.32, most under 0.09) and leaves the axes worth 0.16 mnat on held-out users, negative on
@@ -333,27 +381,27 @@ rating parameter to absorb, and with b closed the largest residual moves into th
 
 ### TEACH_DECAY_EPOCHS is an interior optimum at 1000
 
-Swept on converged-axis banks under ortho-b, one seed each, scored on tail overlap out of 1000.
+Swept on converged-axis banks under ortho-b, one seed each, scored on hinged tail agreement.
 
-| decay | escape atari | life and death | ko | total tail | rating | axis adds |
+| decay | escape atari | life and death | ko | mean | rating | axis adds |
 |---|---|---|---|---|---|---|
-| 250 | 272 | 32 | 384 | 688 | 0.5112 | 3.19 |
-| 500 | 433 | 54 | 438 | 925 | 0.5079 | 4.09 |
-| **1000** | **500** | **169** | **457** | **1126** | 0.5130 | **4.41** |
-| 2000 | 340 | 126 | 427 | 893 | 0.5163 | -1.58 |
+| 250 | 0.766 | 0.089 | 0.905 | 0.587 | 0.5112 | 3.19 |
+| 500 | 0.836 | 0.188 | 0.958 | 0.661 | 0.5079 | 4.09 |
+| **1000** | **0.875** | 0.463 | **0.966** | **0.768** | 0.5130 | **4.41** |
+| 2000 | 0.702 | **0.477** | 0.958 | 0.713 | 0.5163 | -1.58 |
 
-1000 holds the most tail on every axis and carries the highest held-out axis contribution, which
-falls away on both sides. At 2000 the axes are worth NEGATIVE mnat: past some point the teaching
+1000 leads on mean agreement and on two of three axes, and carries the highest held-out axis
+contribution, which falls away on both sides. 2000 edges it on life and death alone. At 2000 the axes are worth NEGATIVE mnat: past some point the teaching
 stops stabilising a direction and starts pinning it to the source fit's idiosyncrasy.
 
 A sweep point must stop well AFTER its own decay ends or it measures nothing. At decay 3000 the
 patience rule fires at epoch 1740 with the teaching weight still at 0.52; the axes are never
-released, their identity is trivially near-perfect (595/465/617), and the survey rho is the worst
-on the board (0.7728). That arm is not a measurement of decay 3000.
+released, their identity is trivially near-perfect (0.950 / 0.934 / 0.987, mean 0.957), and the
+survey rho is the worst on the board (0.7728). That arm is not a measurement of decay 3000.
 
-Read on correlation instead, 500 and 1000 look near-equivalent on two of three axes and the choice
-appears to rest on life and death alone. On tails 1000 dominates 500 everywhere, and the trade is
-explicit: 500 buys 5.1 mnat of rating, 1000 buys materially more tail identity on every axis.
+Read on bulk correlation instead, 500 and 1000 look near-equivalent on two of three axes and the
+choice appears to rest on life and death alone. On tail agreement 1000 leads 500 on all three, and the
+trade is explicit: 500 buys 5.1 mnat of rating, 1000 buys materially more tail identity everywhere.
 
 ### Reproduction
 
@@ -504,7 +552,7 @@ A third of the corpus is never attempted and its loadings are unconstrained extr
 
 **THE BURN-IN IS GONE ENTIRELY — the loop is uniform.** Pinning `v` at zero for an opening span is the obvious companion to teaching, and it buys nothing; the measurement is the next subsection. What remains is one decaying weight, so there is no `v_pinned` state, no release event and no gating of the axis penalties. The ortho penalty is now on from the first step rather than switching on at full weight partway through, which retires the open concern in section D about abrupt objective changes at the handover.
 
-Two things the shipped step prints, both diagnostics with no flag behind them: how many corpus problems the bank covers, and a per-axis `BANK IDENTITY` report at the end — correlation AND tail overlap against the bank, over attempted problems only. Correlation alone would overstate how well a name transfers, by a margin that grows exactly where confidence would be highest, so the tails are the number that governs a name. `axes/axes.npz` also records the bank's content hash, so a fit can say which directions it was held to.
+Two things the shipped step prints, both diagnostics with no flag behind them: how many corpus problems the bank covers, and a per-axis `BANK IDENTITY` report at the end — hinged tail agreement for both ends against the bank, over attempted problems only, with bulk correlation printed alongside as context. Correlation alone gets the ranking backwards, so the tail figures are what governs a name. `axes/axes.npz` also records a hash of the SELECTED motif ids, so a fit can say which directions it was held to without moving when an unrelated motif is added to the store.
 
 ### THE v-PIN IS REFUTED — MEASURED 2026-08-15, production trainer
 
