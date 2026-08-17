@@ -96,13 +96,12 @@ if PROJECT_ROOT not in sys.path:
 from datetime import datetime  # noqa: E402
 
 from utils.rating.model_constants import (  # noqa: E402
-    DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
+    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
     LAPSE_CAP, LAPSE_INIT,
     PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec,
 )
 from utils.rating.features import (  # noqa: E402
-    _cache_ids_path, load_first_time_attempts, load_joint_activations,
-    load_joint_bot_winrate, load_joint_game_phase, load_joint_move_features,
+    _cache_ids_path, load_first_time_attempts, load_joint_mirt_features,
 )
 from utils.rating.residual_axes import (  # noqa: E402
     AXIS_INPUT_DROPOUT, MIN_USER_ATTEMPTS, ORTHO_WEIGHT, _stratified_folds,
@@ -575,7 +574,24 @@ class JointMIRT:
         th = self.theta(prof).squeeze(-1)
         lam = self.lapse()
         z = (a * (th - b) + (g * self.v[uid]).sum(-1)).clamp(-35, 35)
-        return (c + (1.0 - c - lam) * torch.sigmoid(z)).clamp(EPS, 1 - EPS), g
+        # The SHIPPED per-problem triple, returned DETACHED for the rating-
+        # orthogonality penalty: rating, slope, floor — exactly what packaging
+        # writes and the client's rank path reads, and exactly what an axis
+        # correlated with it would be duplicating through a channel the client
+        # cannot use. b is carried alongside so the penalty can target the
+        # difficulty head directly instead; rating is a function of all three
+        # heads, so {b,a,c} and {rating,a,c} span the same information and
+        # constraining either constrains the other, but only approximately —
+        # zero correlation with b is not zero correlation with rating.
+        #
+        # Recomputing problem_params to get these would run the trunk twice and,
+        # worse, tick the difficulty gauge's EMA twice per batch — the gauge is
+        # defined over the attempt stream and an extra update would quietly move
+        # the rating's units.
+        q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
+        r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
+        rsf = torch.stack([r, a, c, b], dim=1).detach()
+        return (c + (1.0 - c - lam) * torch.sigmoid(z)).clamp(EPS, 1 - EPS), g, rsf
 
 
 def main():
@@ -599,6 +615,38 @@ def main():
                          "what a pure row- or user-holdout run wants. Left at the "
                          "benchmark value by default so existing comparisons are "
                          "unaffected.")
+    ap.add_argument("--production", action="store_true",
+                    help="run the SHIPPED configuration: the defaults here are "
+                         "experiment defaults and four of them differ from "
+                         "pipeline.train_mirt (patience 5 vs 30, a 15%% problem "
+                         "holdout production does not take, a 300-epoch burn-in "
+                         "production deleted, and no teaching decay against "
+                         "production's 1500). Each is a real model difference, so "
+                         "an arm meant to speak about production must set all "
+                         "four; this sets them together and prints what it set. "
+                         "Explicit flags still win, so a sweep can vary one.")
+    ap.add_argument("--ortho-rating", type=float, default=0.0,
+                    help="penalty weight on the squared cosine between each axis "
+                         "loading and each --ortho-targets column. 0 = off "
+                         "(today's behaviour). Nothing else in the objective "
+                         "decorrelates an axis from the rating side, which is how "
+                         "a free fit ends up spending one on a rating parameter.")
+    ap.add_argument("--ortho-targets", default="b",
+                    help="comma-separated targets for --ortho-rating, from "
+                         "{rating, slope, floor, b}. Default 'b' is the difficulty "
+                         "head alone. 'rating,slope,floor' is the SHIPPED triple — "
+                         "what packaging writes and the client's rank path reads, "
+                         "so an axis correlated with any of them duplicates "
+                         "information the client already has through a channel it "
+                         "can use. Adding b on top of those is redundant: rating "
+                         "is a function of b, slope and floor.")
+    ap.add_argument("--teach-axes", default=None,
+                    help="comma-separated axis indices the teaching MSE acts on "
+                         "(default: all K). Omitted axes are left FREE — the "
+                         "bank must still supply a column for them, but it is "
+                         "multiplied by zero. This is what makes 'seed two axes "
+                         "and let the third find its own direction' expressible; "
+                         "the bank's own mask is per-problem and cannot say it.")
     ap.add_argument("--teach-directions", default=None,
                     help="TEACH the axis map the banked per-problem loadings "
                          "instead of projecting onto them. An auxiliary MSE runs "
@@ -835,6 +883,37 @@ def main():
                          "fitting noise and the model gets simpler.")
     args = ap.parse_args()
 
+    if args.production:
+        # Every value here is read off pipeline/train_mirt.py. Applied only where
+        # the caller did NOT pass the flag, so a sweep can hold production
+        # everywhere and vary the one thing it is asking about — which is the
+        # only way an arm's result attaches to the shipped model rather than to
+        # a configuration that merely resembles it.
+        # READ from the production module, never restated here. A copied constant
+        # is the same defect as the copied feature assembly this surface carried
+        # until recently: it agrees on the day it is written and drifts silently
+        # afterwards, and a flag whose whole purpose is "match production" is the
+        # worst possible place for that. Only settings with no production
+        # counterpart are literals.
+        from pipeline import train_mirt as _prod
+        given = {a.split("=")[0].lstrip("-").replace("-", "_") for a in sys.argv[1:]}
+        prod = {"flat_patience": _prod.FLAT_PATIENCE,          # dev default 5
+                "teach_decay_epochs": _prod.TEACH_DECAY_EPOCHS,  # dev default 0
+                "lr_net": _prod.LR_NET, "lr_field": _prod.LR_FIELD,
+                "v_ridge": _prod.V_RIDGE, "v_mean_penalty": _prod.V_MEAN_PENALTY,
+                "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
+                "holdout_problem_frac": 0.0,  # production fits the whole corpus
+                "warm_start": "none"}         # production deleted BOTH warm starts
+        applied, kept = [], []
+        for k, v in prod.items():
+            if k in given:
+                kept.append(f"{k}={getattr(args, k)} (yours)")
+            else:
+                setattr(args, k, v)
+                applied.append(f"{k}={v}")
+        print("PRODUCTION CONFIG: " + ", ".join(applied)
+              + (("; OVERRIDDEN " + ", ".join(kept)) if kept else ""), flush=True)
+
     import torch
     import pandas as pd
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -842,21 +921,17 @@ def main():
 
     # --- features: the RATING trainer's set. The axis trainer's set additionally
     # carries the rating model's own outputs, which would be circular here.
-    tids_by_size = {s: json.load(open(_cache_ids_path(s))) for s in SIZES}
-    act, k_act = load_joint_activations(SIZES, tids_by_size, PCA_DIM, SEED)
-    bw, nb = load_joint_bot_winrate(SIZES, tids_by_size)
-    mv, nmv = load_joint_move_features(SIZES, tids_by_size)
-    ph, nph = load_joint_game_phase(SIZES, tids_by_size)
-    keys = [key for key in act if key in bw]
-    key_idx = {key: i for i, key in enumerate(keys)}
-    zero_mv, zero_ph = np.zeros(nmv, np.float32), np.zeros(nph, np.float32)
-    input_dim = k_act + nb + nmv
-    fdim = input_dim + nph + 1
-    feat = np.empty((len(keys), fdim), dtype=np.float32)
-    for key, i in key_idx.items():
-        feat[i] = np.concatenate([act[key], bw[key], mv.get(key, zero_mv),
-                                  ph.get(key, zero_ph),
-                                  [1.0 if key[0] == 13 else 0.0]])
+    # THE SINGLE SOURCE, the same call pipeline.train_mirt makes. This module
+    # used to concatenate the blocks itself, and drifted exactly as
+    # load_joint_mirt_features' docstring warns a copy would: production gained
+    # the ownership block and moved game phase inside the dropout region, and
+    # this surface kept assembling the older 212-wide row with a 209 region. An
+    # arm measured there is a statement about a model that is not shipped, and
+    # nothing in the output says so. The problem set moves with it — the copy
+    # used activations ∩ bot winrate, which resolves a missing block by dropping
+    # the problem, while the corpus set raises.
+    feat, keys, key_idx, input_dim = load_joint_mirt_features(SIZES, PCA_DIM, SEED)
+    fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, feat "
           f"{fdim} (dropout region {input_dim})", flush=True)
 
@@ -1135,7 +1210,18 @@ def main():
                   f"trunk/heads/axis map whole, {nth}/{len(profiles.categories)} "
                   f"profiles and {nv}/{len(uids)} users carried, the rest at zero",
                   flush=True)
-        teach_tgt = teach_ok = None
+        # Column order matches forward()'s stacked rsf.
+        _OT = {"rating": 0, "slope": 1, "floor": 2, "b": 3}
+        _want = [x.strip() for x in args.ortho_targets.split(",") if x.strip()]
+        if any(x not in _OT for x in _want):
+            raise SystemExit(f"--ortho-targets {args.ortho_targets!r}: pick from "
+                             f"{sorted(_OT)}")
+        ortho_cols = [_OT[x] for x in _want]
+        if args.ortho_rating > 0.0:
+            print(f"  ORTHO-RATING {args.ortho_rating} against {_want} "
+                  f"(squared cosine per axis x target)", flush=True)
+
+        teach_tgt = teach_ok = teach_w = None
         if args.teach_directions:
             _b = np.load(args.teach_directions, allow_pickle=False)
             _brow = {f"{sz}:{t}": i for i, (sz, t) in
@@ -1155,6 +1241,22 @@ def main():
             _T[_ok] = (_T[_ok] - _T[_ok].mean(0)) / (_T[_ok].std(0) + 1e-12)
             teach_tgt = torch.tensor(_T, dtype=torch.float32, device=device)
             teach_ok = torch.tensor(_ok, device=device)
+            # Which COLUMNS the MSE acts on. An axis left out is unconstrained —
+            # the bank still has to supply a column for it (the target array is
+            # K-wide) but that column is multiplied by zero and never read, so a
+            # placeholder there is inert rather than a taught direction.
+            _tax = (list(range(args.k)) if not args.teach_axes else
+                    [int(x) for x in args.teach_axes.split(",") if x != ""])
+            if any(not 0 <= x < args.k for x in _tax):
+                raise SystemExit(f"--teach-axes {args.teach_axes} out of range "
+                                 f"for K={args.k}")
+            _W = np.zeros(args.k, np.float64)
+            _W[_tax] = 1.0
+            teach_w = torch.tensor(_W, dtype=torch.float32, device=device)
+            if len(_tax) < args.k:
+                print(f"  TEACHING ONLY AXES {sorted(_tax)} of {args.k} — "
+                      f"{sorted(set(range(args.k)) - set(_tax))} left free",
+                      flush=True)
             print(f"  TEACHING the axis map from "
                   f"{os.path.basename(args.teach_directions)} on the ATTEMPT "
                   f"stream (weight {args.teach_weight}"
@@ -1254,7 +1356,7 @@ def main():
             perm = tr_eff[torch.randperm(n, device=device)]
             for i in range(0, n, BATCH):
                 bi = perm[i:i + BATCH]
-                pred, gh = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
+                pred, gh, rsf = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
                 loss = torch.nn.functional.binary_cross_entropy(
                     pred, ty[bi], reduction="none").sum() / len(bi)
                 # While v is pinned at zero the axis terms are either identically
@@ -1267,6 +1369,39 @@ def main():
                     Cm = Mn.T @ Mn
                     loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
                         args.k, device=device)) ** 2).sum()
+                    if args.ortho_rating > 0.0:
+                        # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else in the
+                        # objective does: ORTHO_WEIGHT is K x K over the loadings
+                        # alone, and V_MEAN_PENALTY only pins the population mean of
+                        # v, which blocks an axis acting as a global difficulty shift
+                        # but not one tracking difficulty per problem. A free fit will
+                        # therefore spend an axis on difficulty — measured, and it is
+                        # unnameable when it does.
+                        #
+                        # b is DETACHED, so this can only push the axes off difficulty
+                        # and can never degrade the rating to satisfy itself. That
+                        # direction matters: the client's rank path reads rating,
+                        # slope and floor and never an axis, so difficulty living in
+                        # an axis is signal the product cannot reach.
+                        #
+                        # The cost is real rather than free: it also forbids
+                        # difficulty SENSITIVITY, which is a genuine between-user
+                        # trait (a flatter personal slope), not merely leakage.
+                        #
+                        # WHICH targets matters, because the leak is one per
+                        # parameter rather than all on difficulty: measured on a
+                        # converged-axis fit, one axis went to b, one to slope and
+                        # one to floor. Penalising b alone reaches a third of it.
+                        # Each column is centred and normalised, so the term is a
+                        # sum of squared cosines and the targets need no common
+                        # scale — floor lives on (0, FLOOR_CAP) and b on the rating
+                        # scale, and an unnormalised penalty would be dominated by
+                        # whichever happens to be widest.
+                        tz = rsf[:, ortho_cols]
+                        tz = tz - tz.mean(dim=0, keepdim=True)
+                        tz = tz / (tz.norm(dim=0, keepdim=True) + 1e-9)
+                        loss = loss + args.ortho_rating * (Mn.T @ tz).pow(2).sum()
+
                 if teach_tgt is not None:
                     # ON THE ATTEMPT STREAM, reusing the gh this batch already
                     # produced — no second forward, no separate sampling.
@@ -1290,8 +1425,16 @@ def main():
                         mk = teach_ok[pid]
                         if bool(mk.any()):
                             gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
-                            loss = loss + tw * (
-                                (gz[mk] - teach_tgt[pid[mk]]) ** 2).mean()
+                            # PER-AXIS weights, so an axis can be left entirely
+                            # free while its neighbours are taught. The bank's
+                            # `ok` mask is per PROBLEM and cannot express this:
+                            # it decides whether a row is taught at all, not
+                            # which of its K columns. A free axis is what says
+                            # whether a seeded axis is worth its constraint —
+                            # without one, every arm gives up the same freedom
+                            # and the comparison cannot see the cost.
+                            se = (gz[mk] - teach_tgt[pid[mk]]) ** 2
+                            loss = loss + tw * (se * teach_w).mean()
                 # divergence barrier, over the FULL corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
@@ -1303,7 +1446,7 @@ def main():
             if (ep + 1) % CHECK_EVERY == 0 or ep == args.epochs - 1:
                 m.train(False)
                 with torch.no_grad():
-                    pr, _ = m.forward(tprof, tu, tfeat[tp])
+                    pr, _, _ = m.forward(tprof, tu, tfeat[tp])
                     bce_tr = float(torch.nn.functional.binary_cross_entropy(
                         pr[tr], ty[tr]))
                     bce_st = float(torch.nn.functional.binary_cross_entropy(
@@ -1439,7 +1582,7 @@ def main():
         # the stopping rule never saw
         m.train(False)
         with torch.no_grad():
-            pr, _ = m.forward(tprof, tu, tfeat[tp])
+            pr, _, _ = m.forward(tprof, tu, tfeat[tp])
             bce_rep = float(torch.nn.functional.binary_cross_entropy(
                 pr[i_rep], ty[i_rep]))
         # The axes' own contribution ON HELD-OUT PROBLEMS: the same rows scored
@@ -1454,7 +1597,7 @@ def main():
         with torch.no_grad():
             v_keep = m.v.detach().clone()
             m.v.zero_()
-            pr0, _ = m.forward(tprof, tu, tfeat[tp])
+            pr0, _, _ = m.forward(tprof, tu, tfeat[tp])
             bce_rep0 = float(torch.nn.functional.binary_cross_entropy(
                 pr0[i_rep], ty[i_rep]))
             m.v.copy_(v_keep)
