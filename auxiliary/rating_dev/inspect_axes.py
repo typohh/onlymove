@@ -45,6 +45,46 @@ from utils.katago.board_render import load_lookup, render_problem  # noqa: E402
 
 # ---- artifact loading ---------------------------------------------------
 
+def load_dump_npz(path, bank_path=None):
+    """Components straight from a training dump's `loading` array.
+
+    Identical content to a per_problem.csv — the shipped CSV is that same array
+    rounded — so both paths feed the renderer the same thing and an arm's axes
+    are read exactly as the shipped ones are. The axis INDEX is not meaningful
+    across fits: nothing pins axis k of one run to axis k of another unless both
+    were taught from the same bank column order, so two dumps are compared by
+    looking at the boards, never by index.
+    """
+    z = np.load(path, allow_pickle=False)
+    for need in ("tid", "loading"):
+        if need not in z.files:
+            raise SystemExit(f"{path} has no {need!r} array — is it a "
+                             f"--dump-params output? (has: {', '.join(z.files)})")
+    M = np.asarray(z["loading"], dtype=np.float64)
+    tids = [str(t) for t in z["tid"]]
+    labels = [None] * M.shape[1]
+    if "labels" in z.files:
+        labels = [str(x) for x in z["labels"]]
+    elif bank_path:
+        b = np.load(bank_path, allow_pickle=False)
+        if "labels" not in b.files:
+            raise SystemExit(f"{bank_path} carries no 'labels' array")
+        bl = [str(x) for x in b["labels"]]
+        if len(bl) < M.shape[1]:
+            raise SystemExit(
+                f"bank names {len(bl)} axes, the dump has {M.shape[1]} — these "
+                f"are not the same run, and titling axis k from a different "
+                f"bank's column k would attach every name to the wrong tail.")
+        labels = bl[:M.shape[1]]
+    components = []
+    for k in range(M.shape[1]):
+        name = labels[k] if k < len(labels) and labels[k] else None
+        components.append((f"ax{k}",
+                           f"axis {k}" + (f" — taught from {name!r}" if name else ""),
+                           M[:, k]))
+    return tids, components
+
+
 def load_per_problem_csv(path):
     """Production-axes mode: components straight from pipeline.build_axes'
     axes/per_problem.csv (one fit, canonical orientation — the
@@ -212,6 +252,22 @@ def main():
                         default="axes/per_problem.csv",
                         help="path to the shipped per_problem.csv (default: "
                              "axes/per_problem.csv)")
+    parser.add_argument("--dump", default=None,
+                        help="inspect a --dump-params npz from "
+                             "auxiliary.rating_dev.train_joint_mirt instead of a "
+                             "per_problem.csv. An experiment arm never writes "
+                             "axes/, so without this its axes can only be looked "
+                             "at by first overwriting the shipped fit's output — "
+                             "which is the one thing a dev surface must not make "
+                             "anyone do to see its own result.")
+    parser.add_argument("--bank", default=None,
+                        help="the axis bank the run was taught from, so each axis "
+                             "is titled by the motif it was seeded with. A dump "
+                             "carries no names — the bank holds them, and column "
+                             "k of the bank is axis k of the fit — so without "
+                             "this the page shows a taught axis and an untaught "
+                             "one identically, which is the one distinction the "
+                             "page exists to let you judge.")
     parser.add_argument("--n", type=int, default=10,
                         help="N top problems per tail in --no-html mode (default 10)")
     parser.add_argument("--host", default="http://localhost:8787",
@@ -233,13 +289,19 @@ def main():
     if args.html and args.size == "all":
         args.size = "9"
 
-    src_path = args.per_problem
-    if not os.path.isabs(src_path):
-        src_path = os.path.join(PROJECT_ROOT, src_path)
-    if not os.path.exists(src_path):
-        raise SystemExit(f"missing {src_path}; run pipeline.train_mirt first")
-    tids, components = load_per_problem_csv(src_path)
-    source = os.path.basename(src_path)
+    if args.dump:
+        tids, components = load_dump_npz(args.dump, args.bank)
+        source = os.path.basename(args.dump)
+        if args.bank:
+            source += f" taught from {os.path.basename(args.bank)}"
+    else:
+        src_path = args.per_problem
+        if not os.path.isabs(src_path):
+            src_path = os.path.join(PROJECT_ROOT, src_path)
+        if not os.path.exists(src_path):
+            raise SystemExit(f"missing {src_path}; run pipeline.train_mirt first")
+        tids, components = load_per_problem_csv(src_path)
+        source = os.path.basename(src_path)
 
     lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
     if not os.path.exists(lookup_path):
