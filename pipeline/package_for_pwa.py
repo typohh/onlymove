@@ -599,9 +599,21 @@ def load_embeddings(board_size, meta_only=False):
     # sentence for a tail it has no name for (stats-weaknesses.js skips such an
     # axis, motif-bubble.js skips such a tail). Naming it in axes/labels.json is
     # what turns it into a readable finding, so report which axes are waiting.
-    comps = (labels or {}).get("components", [])
+    # `components` is a list of MOTIF IDS into the store's `bank` — the same list
+    # pipeline.train_mirt teaches from, so the axis a name ships on is the axis
+    # that name was taught onto, by construction. Resolve them to the flat
+    # {positive, negative, i18n} records the client expects (backfill.js reads
+    # meta.labels.components and nothing else), and ship ONLY those: `bank`
+    # carries every motif ever kept plus its provenance comments, none of which
+    # the client reads, and embedding_meta.json is INLINED into the JS bundle.
+    bank = (labels or {}).get("bank", {})
+    comps = []
+    for aid in (labels or {}).get("components", []):
+        e = bank.get(str(aid), {})
+        comps.append({k: e.get(k) for k in
+                      ("positive", "positive_i18n", "negative", "negative_i18n")})
     unlabeled = [i for i, c in enumerate(comps)
-                 if not ((c or {}).get("positive") or (c or {}).get("negative"))]
+                 if not (c.get("positive") or c.get("negative"))]
     if len(comps) != K or unlabeled:
         print(f"  NOTE: axis labels incomplete ({len(comps)} components for "
               f"K={K}; unlabeled axes {unlabeled}) — those axes ship and work, "
@@ -610,7 +622,7 @@ def load_embeddings(board_size, meta_only=False):
     embedding_meta = {
         "K": K,
         "embedding_version": shipped_embedding_version(embed_dir),
-        "labels": labels,
+        "labels": {"components": comps},
     }
     return embedding_map, embedding_meta
 

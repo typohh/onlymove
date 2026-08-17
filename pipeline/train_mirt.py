@@ -127,6 +127,7 @@ LR_FIELD = 1e-2
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
 ORTHO_WEIGHT = 0.5
+ORTHO_RATING = 0.5               # keeps the axes off DIFFICULTY (see the loop)
 GAUGE_MOM = 0.01
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
@@ -156,8 +157,16 @@ SHALLOW_W = 0.3
 # it and saturates around here while the loss cost rises monotonically, and the
 # two never cross. Hold long, then let go — never releasing costs another 1.1
 # mnat for no further identity, and releasing ABRUPTLY does not stick at all.
+#
+# IT MUST ALSO END BEFORE THE FIT DOES, which is what sets it here rather than
+# the frontier alone. FLAT_PATIENCE counts staleness against the objective, and
+# while the decay is still running that objective is still changing — so a
+# schedule outlasting convergence stops the run with the bank still holding the
+# map, and the axes are then scored before they were ever released. A length
+# chosen on a corpus that converged late does not transfer to one that converges
+# early; this value leaves room on the corpus as it stands.
 TEACH_WEIGHT = 1.0
-TEACH_DECAY_EPOCHS = 1500
+TEACH_DECAY_EPOCHS = 1000
 # IDENTIFIABILITY, the only inclusion rule. Under the 4PL an all-correct record's
 # likelihood rises monotonically to (1-lambda)^n as ability grows without bound,
 # and an all-wrong one to (1-c)^n as it falls, so neither has an interior
@@ -168,7 +177,8 @@ MIN_BOTH_OUTCOMES = 1
 STOP_ROW_FRAC = 0.03             # rows held aside purely to detect convergence
 OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 AXES_DIR = os.path.join(PROJECT_ROOT, "axes")
-AXIS_BANK = os.path.join(AXES_DIR, "axis_bank.npz")
+MOTIF_STORE = os.path.join(AXES_DIR, "label_anchors.npz")
+LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
 class JointMIRT:
@@ -304,52 +314,89 @@ class JointMIRT:
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
         z = (a * (th - b) + (g * self.v[uid]).sum(-1)).clamp(-35, 35)
-        return c + (1.0 - c - lam) * torch.sigmoid(z), g
+        # b is returned DETACHED for the difficulty-orthogonality penalty.
+        # Recomputing problem_params to get it would run the trunk twice and,
+        # worse, tick the difficulty gauge's EMA twice per batch — the gauge is
+        # defined over the attempt stream and an extra update would quietly move
+        # the rating's units.
+        return c + (1.0 - c - lam) * torch.sigmoid(z), g, b.detach()
 
 
 def load_bank(key_idx):
     """The frozen directions this fit's axes are taught onto, one row per problem
     of `key_idx` in that order, plus a mask of which rows the bank supplies.
 
-    Only the FIRST K_AXES columns ship (see the module docstring). Each is
-    z-scored over the problems the bank and this corpus share, because the bank's
-    per-axis scale is arbitrary — rescaling a loading is absorbed by v — so
-    direction is the only part of it that means anything.
+    THE BANK IS THE MOTIF STORE, SELECTED BY NAME. `axes/label_anchors.npz` holds
+    every direction ever kept, keyed by an `ax_<hex>` content hash, and
+    `axes/labels.json`'s `components` list names which of them this fit ships, in
+    axis order. Binding by id rather than by column position is what makes the
+    labels safe: a bank file carrying the directions in an implicit order that
+    labels.json is indexed against can be reordered, and every motif silently
+    renames onto a direction it was not written for.
+
+    Each column is z-scored over the problems the store and this corpus share,
+    because the stored per-axis scale is arbitrary — rescaling a loading is
+    absorbed by v — so direction is the only part of it that means anything.
 
     A problem the bank does not carry is left unconstrained rather than taught to
-    zero: absent is not a value.
+    zero: absent is not a value. Legacy directions predate the current corpus and
+    are NaN outside their own coverage, so a row is taught only where EVERY
+    selected column is finite — a partially-known target would teach one axis
+    from data and its neighbour from nothing, on the same problem.
+
+    Returns (tgt, ok, ids) — the ids so the caller can stamp exactly what was
+    taught rather than the whole store, which changes whenever an unrelated
+    motif is added.
     """
-    if not os.path.exists(AXIS_BANK):
+    for path in (MOTIF_STORE, LABELS):
+        if not os.path.exists(path):
+            raise SystemExit(
+                f"NO MOTIF STORE at {path}. It holds the frozen directions the "
+                f"axes are taught onto, without which this fit would re-roll the "
+                f"basis and every name in axes/labels.json would land on a "
+                f"direction it was not written for. Add directions to it with "
+                f"`auxiliary.rating_dev.update_motif_store`, and list the ones "
+                f"to ship under `components` in axes/labels.json.")
+    meta = json.load(open(LABELS))
+    want = [str(x) for x in meta.get("components", [])]
+    if len(want) < K_AXES:
         raise SystemExit(
-            f"NO AXIS BANK at {AXIS_BANK}. It holds the frozen directions the "
-            f"axes are taught onto, without which this fit would re-roll the "
-            f"basis and every name in axes/labels.json would land on a direction "
-            f"it was not written for. Produce one with the dev surface — "
-            f"`auxiliary.rating_dev.train_joint_mirt --dump-params <bank>.npz` — "
-            f"inspect the directions there, order its columns so the ones to "
-            f"ship come first, and copy it here.")
-    z = np.load(AXIS_BANK, allow_pickle=False)
-    load = np.asarray(z["loading"], np.float64)
-    if load.ndim != 2 or load.shape[1] < K_AXES:
+            f"axes/labels.json lists {len(want)} components, this fit ships "
+            f"K_AXES={K_AXES}. `components` is the shipping decision: an ordered "
+            f"list of motif ids from the store's `bank`, longest-lived first. "
+            f"Pick them by inspecting the directions with "
+            f"`auxiliary.rating_dev.inspect_axes`.")
+    want = want[:K_AXES]
+
+    z = np.load(MOTIF_STORE, allow_pickle=False)
+    ids = [str(x) for x in z["ids"]]
+    missing = [a for a in want if a not in ids]
+    if missing:
         raise SystemExit(
-            f"AXIS BANK HAS {load.shape[1] if load.ndim == 2 else '?'} "
-            f"DIRECTIONS, this fit ships K_AXES={K_AXES}. The bank must carry at "
-            f"least that many; the first {K_AXES} columns are the ones taught.")
-    row = {f"{sz}:{t}": i for i, (sz, t) in enumerate(zip(z["size"], z["tid"]))}
+            f"axes/labels.json names components not in the store: {missing}. "
+            f"The store has {len(ids)} directions; a name with no direction "
+            f"behind it cannot be taught.")
+    M = np.asarray(z["M"], np.float64)[[ids.index(a) for a in want]]
+
+    row = {f"{sz}:{t}": i for i, (sz, t) in
+           enumerate(zip(z["sizes"], z["tids"]))}
     tgt = np.zeros((len(key_idx), K_AXES), np.float64)
     ok = np.zeros(len(key_idx), bool)
     for (sz, t), j in key_idx.items():
         i = row.get(f"{sz}:{t}")
-        if i is not None:
-            tgt[j] = load[i, :K_AXES]
+        if i is not None and np.isfinite(M[:, i]).all():
+            tgt[j] = M[:, i]
             ok[j] = True
     if not ok.any():
         raise SystemExit(
-            f"AXIS BANK SHARES NO PROBLEMS with this corpus ({len(row)} banked "
-            f"against {len(key_idx)} here). Its ids are keyed on size:tsumego_id "
-            f"— a bank from a different corpus generation teaches nothing.")
+            f"MOTIF STORE SHARES NO PROBLEMS with this corpus ({len(row)} stored "
+            f"against {len(key_idx)} here). Its keys are size:tsumego_id — a "
+            f"store from a different corpus generation teaches nothing.")
     tgt[ok] = (tgt[ok] - tgt[ok].mean(0)) / (tgt[ok].std(0) + 1e-12)
-    return tgt, ok
+    names = [meta["bank"].get(a, {}).get("positive") or "(unnamed)" for a in want]
+    print(f"  BANK from the motif store: {', '.join(names)} "
+          f"({ok.sum()}/{len(key_idx)} problems taught)", flush=True)
+    return tgt, ok, want
 
 
 def report_bank_identity(g_np, tgt, ok, prob_idx, n_tail=500):
@@ -432,7 +479,7 @@ def main():
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
-    bank_tgt, bank_ok = load_bank(key_idx)
+    bank_tgt, bank_ok, bank_ids = load_bank(key_idx)
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
@@ -454,7 +501,7 @@ def main():
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
-            pred, gh = m.forward(tu[bi], tfeat[tp[bi]])
+            pred, gh, bh = m.forward(tu[bi], tfeat[tp[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
@@ -465,6 +512,28 @@ def main():
             Cm = Mn.T @ Mn
             loss = loss + ORTHO_WEIGHT * (
                 (Cm - torch.eye(K_AXES, device=device)) ** 2).sum()
+            # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does:
+            # ORTHO_WEIGHT is K x K over the loadings alone, and V_MEAN_PENALTY
+            # pins only the POPULATION mean of v, which blocks an axis acting as
+            # a global difficulty shift but not one tracking difficulty per
+            # problem. Left free, a fit spends an axis on a rating-side property
+            # and that axis is unnameable when it does.
+            #
+            # b is DETACHED, so this can only push the axes off difficulty and
+            # never degrade the rating to satisfy itself. The direction matters:
+            # the client's rank path reads rating, slope and floor and never an
+            # axis, so difficulty living in an axis is signal the product cannot
+            # reach.
+            #
+            # DIFFICULTY ALONE, not the shipped triple. Penalising rating, slope
+            # and floor together does decorrelate — and leaves the axes worth
+            # 0.16 mnat on held-out users against 4.41 here, because three
+            # constraints on K=3 axes leave room to satisfy the penalty or to
+            # carry signal, not both. The cost of stopping at b is that the leak
+            # displaces rather than vanishes, most of it into the floor head.
+            bz = bh - bh.mean()
+            bz = bz / (bz.norm() + 1e-9)
+            loss = loss + ORTHO_RATING * (Mn.T @ bz).pow(2).sum()
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #
@@ -508,7 +577,7 @@ def main():
         if (ep + 1) % CHECK_EVERY == 0:
             m.train(False)
             with torch.no_grad():
-                pr, _ = m.forward(tu, tfeat[tp])
+                pr, _, _ = m.forward(tu, tfeat[tp])
                 pr = pr.clamp(EPS, 1 - EPS)
                 bce_tr = float(torch.nn.functional.binary_cross_entropy(
                     pr[tr], ty[tr]))
@@ -604,9 +673,11 @@ def main():
     # and it would ship silently.
     # The bank is recorded, not just used: the axes ARE its directions and the
     # labels are attached on that basis, so a fit has to be able to say which
-    # bank it was held to. Hashed rather than named — a bank edited in place
-    # keeps its filename.
-    bh = hashlib.sha256(open(AXIS_BANK, "rb").read()).hexdigest()[:16]
+    # bank it was held to. The SELECTED ids are what is stamped, not the store
+    # file — the store accumulates motifs this fit never saw, so hashing it whole
+    # would move the stamp on an addition that changed nothing about this fit,
+    # and identity is exactly what the stamp exists to pin.
+    bh = hashlib.sha256("\n".join(bank_ids).encode()).hexdigest()[:16]
     np.savez_compressed(os.path.join(AXES_DIR, "axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),
