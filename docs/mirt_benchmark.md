@@ -373,9 +373,17 @@ problems (0.5612) of every arm measured.
 | taught, ortho on rating+slope+floor | 0.5148 | 0.5146 | **0.16** | 0.5639 | 0.8123 | 0.656 |
 
 Per axis (escape atari / life and death / ko): 0.874 0.447 0.955 untreated, 0.818 **0.515** 0.952 with
-ortho on b, 0.680 0.453 0.834 with the shipped triple. The identity margin over untreated is SMALL
-(0.762 against 0.759) and comes entirely from life and death; it holds at every threshold from z = 1
-to 3, so it is a real if modest gain rather than the 0.05 a hard floor reported. b alone costs 0.7 mnat of rating — inside seed
+ortho on b, 0.680 0.453 0.834 with the shipped triple.
+
+**The ortho-b identity margin over untreated is NOT ESTABLISHED.** A paired bootstrap over problems
+puts it at +0.003 with a 95% CI of [-0.001, +0.007]; size-blocked, P(>0) = 91%. It survives every
+threshold from z = 1 to 3, but that is stability of the METRIC and not of the estimate — the sweep
+rescores the same single pair of fits, so it says the measure is not arbitrary, not that the
+difference is real. Nor is the bootstrap the right error bar: it resamples PROBLEMS, while the
+dominant variability for comparing two fits is ACROSS FITS, and each arm here is n = 1. The honest
+statement is that ortho-b does not COST identity; the case for it rests on the difficulty leak it
+removes, on never-trained pricing and on survey rho. The three-target arm's deficit (0.656) is a
+different scale entirely — ~35 bootstrap sd — and is not in question. b alone costs 0.7 mnat of rating — inside seed
 noise — and buys better never-trained pricing, the best survey rho measured, and better identity on
 two of three axes with the third level.
 
