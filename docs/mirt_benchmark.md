@@ -444,6 +444,182 @@ Note also that constraining rating, slope and floor does NOT constrain `b`: meas
 zero correlation with each of three quantities separately implies nothing about a nonlinear
 combination of them.
 
+### A FREE fit does not reproduce itself — the seed floor, measured
+
+Two runs of the identical production configuration (free, no bank, full rating-orthogonality),
+differing only in seed:
+
+| | rating | rating+axis | axis adds | never-trained | survey rho |
+|---|---|---|---|---|---|
+| seed 1 | 0.5093 | 0.5056 | **3.73** | 0.5576 | 0.8154 |
+| seed 2 | 0.5146 | 0.5137 | **0.84** | 0.5578 | 0.8185 |
+
+Direction agreement between them, best match per seed-1 axis: **0.56 / 0.25 / 0.20, mean 0.34.**
+
+**This is the EXPECTED baseline, not a defect.** The objective is exactly invariant to rotating the
+axis space, so nothing in a free fit prefers one basis over another and two seeds have no reason to
+agree; 0.34 is that known arbitrariness put on a scale, and it is the arbitrariness the axis bank
+exists to remove. The full penalty widens the space further — forbidding correlation with rating,
+slope and floor leaves a large residual subspace to be arbitrary within.
+
+Two things follow, and the second is a caution about this whole document.
+
+**Directions named off a single free fit are seed-specific.** The store's `ax_4e23f75b` (defend
+territory), `ax_2091d5bf` (capture stone to gain liberty) and `ax_4cb94a2c` (escape atari) come from
+the seed-1 fit and are matched by seed 2 at 0.56 / 0.25 / 0.20. The boards a human read to name them
+are real; the DIRECTION is not stable, so those entries are candidate seeds rather than settled
+motifs. It also dissolves a puzzle: the free `defend territory` disagreeing with the b-only one at
+-0.018 was not two different concepts, it was a free fit landing arbitrarily.
+
+**Two free fits are not the same solution, so their spread bounds only FREE-arm comparisons.**
+Rating moves 5.3 mnat and axis contribution 4.4x between two runs of one configuration — but the two
+fits settled on different axis bases, so this is variation between distinct solutions rather than
+measurement noise around one. It applies where both arms are free: the full penalty beating b-only on
+rating by 6.4 mnat is a free-against-free comparison and is inside this spread, so it is unresolved.
+
+IT DOES NOT APPLY TO TAUGHT ARMS, which are pinned by a bank and are not free to land elsewhere —
+the decay sweep, the ortho comparison and the bipolar arms are all taught, and none of them is
+called into question by this. The seed floor for a TAUGHT fit is a different quantity, is not
+measured, and is the one that would calibrate those comparisons.
+
+### The bank-building workflow: discover, then glue
+
+Two stages, deliberately separate, because a fit asked to both find directions and satisfy a
+prescribed set does neither cleanly.
+
+**Stage one, discover a direction.** Either HANDCRAFTED — a stated rule labels the corpus
+(`auxiliary.labeler.rules`, `export_bank --from-rules`), which is how ko, counting, opening and life
+and death were seeded — or UNINITIALIZED, a fit with no `--teach-directions` let go to land where it
+will, which is how escape atari, defend territory and capture stone to gain liberty were found. A
+rule bootstraps a motif nobody has seen; a free fit finds one nobody thought to write a rule for.
+Neither stage-one fit needs to be shippable. A human reads the extremes and names what is there;
+`update_motif_store` records the direction with its provenance, and the store is the durable
+artifact — a direction found once is never rediscovered.
+
+**Stage two, glue stored directions onto K axes.** `build_bank_from_dumps` composes a bank from store
+entries, one motif per axis or two as a bipolar column. Nothing is re-derived; this stage decides only
+what ships together and in what order. `train_mirt` then refines those directions rather than
+inventing its own.
+
+What the second stage costs and buys, measured: pairing six motifs onto three axes retained every
+pole, improved the two WEAKEST most (counting 0.26 -> 0.67, escape atari 0.17 -> 0.74 against the
+one-sided arm), and gave the best never-trained pricing of any fit run. The cost is that a pole's
+retention tracks its own reproducibility, so a weak motif stays weak — pairing does not rescue a
+direction that was never well determined.
+
+### A bipolar bank under the full penalty — the best never-trained pricing measured
+
+Six motifs on three axes, columns built as `f(z(A)) - f(z(B))` with the shared tail weight, taught
+under the full rating-orthogonality penalty. Its bank is NOT rating-orthogonal — the columns carry
+0.246 / 0.264 / 0.274 against the shipped triple, mostly on slope — so this is the penalty working
+against its own teaching target.
+
+| arm | rating | rating+axis | axis adds | never-trained | survey rho |
+|---|---|---|---|---|---|
+| bipolar, ortho on b, raw subtraction | 0.5074 | 0.5041 | 3.29 | 0.5552 | **0.8294** |
+| bipolar, full ortho, weighted columns | 0.5072 | 0.5030 | **4.21** | **0.5533** | 0.8223 |
+| free, full ortho, no bank | 0.5093 | 0.5056 | 3.73 | 0.5576 | 0.8154 |
+
+Per pole, tail-weighted agreement:
+
+| pole | ortho on b | full ortho |
+|---|---|---|
+| counting | 0.256 | **0.670** |
+| life and death | 0.440 | 0.448 |
+| defend territory | 0.553 | 0.577 |
+| opening | **0.858** | 0.603 |
+| escape atari | 0.172 | **0.738** |
+| ko | **0.973** | 0.931 |
+| mean | 0.542 | **0.661** |
+
+Leakage falls from a worst cell of +0.79 (slope) and +0.49 (floor) to +0.065 and -0.112.
+
+Two readings to keep apart. The retention gain is concentrated in the two WEAKEST poles — counting
+0.26 -> 0.67 and escape atari 0.17 -> 0.74 — while the two strongest give up a little; that is the
+better shape, since a bank is worth what its weakest named tail is worth. But the arm changes TWO
+things against its predecessor, the penalty and the column construction, so the gain is not
+attributable. The pattern points at the construction: the weighted form specifically removes
+"not-A pushes a problem toward B", and it is exactly the weak poles that would suffer most from that.
+
+**It also unsettles the conflict story.** A one-sided bank at 0.357 correlation under this penalty
+left the axes worth 0.16 mnat; a bipolar bank at 0.274 reaches 4.21. Either bipolar pairing gives the
+fit enough freedom to satisfy both objectives, or the construction is doing the work, or 0.357 is past
+a cliff 0.274 sits under. Until that is separated, "the bank must be rating-orthogonal" is not
+supported as a prerequisite.
+
+### Choosing a bipolar pairing: cancellation and dominance
+
+Which two motifs share an axis is decided on the GLUED column `c = f(z(A)) - f(z(B))`, not on the raw
+directions — the reshape decides both failure modes, so a criterion computed before `f` cannot see
+either. `auxiliary/rating_dev/pair_motifs.py`.
+
+CANCELLATION. Where both tails are active the difference subtracts and those problems leave the
+column. `Var(f_A - f_B) = V_A + V_B - 2Cov`, so the mean squared difference between the reshaped
+poles IS the surviving signal; reported as `2Cov/(V_A+V_B)`, zero for independent poles and 1 for
+identical ones.
+
+DOMINANCE. A column can have ample variance and still carry one motif, if one pole's reshaped spread
+swamps the other's. Reported as `min(V)/max(V)`.
+
+**Cancellation is almost never what binds.** Over the six b-only motifs it is ~0 or negative for 13
+of 15 pairs — these motifs do not co-occupy tails. The single exception is `opening`/`escape atari` at
++0.502, which destroys half the summed variance and is the co-occurrence pair; it must never share an
+axis. Balance instead ranges 0.47 to 0.98.
+
+**Balance predicts retention measured before the criterion existed.** In the first bipolar arm the
+pair at balance 0.595 returned poles at 0.172 and 0.973 (ratio 0.18), while pairs at 0.816 and 0.850
+returned 0.58 and 0.64. The pairing shipped in that arm was chosen on most-negative BULK correlation
+and ranks 3rd of 15 under this criterion.
+
+Rank candidate pairings by the WORST pair, not the mean: an axis is only as good as its weakest named
+tail.
+
+### Averaging several instances of one motif — when it works
+
+The store holds multiple fits' takes on the same motif. Averaging them denoises toward the shared
+direction, but only when they ARE one direction, and the diagnostic is whether the consensus agrees
+with every member better than the members agree with each other.
+
+| concept | n | pairwise agreement | consensus vs each member | verdict |
+|---|---|---|---|---|
+| counting | 3 | 0.45 / 0.50 / 0.54 | 0.74 – 0.84 | average |
+| opening | 3 | 0.38 / 0.44 / 0.49 | 0.70 – 0.86 | average |
+| life and death | 2 | 0.45 | 0.82 – 0.86 | average |
+| ko (modern only) | 2 | 0.93 | 0.98 | same direction; average or take either |
+| ko + legacy ko | 3 | 0.06 – 0.93 | 0.12 – 0.95 | do NOT — legacy ko is unrelated to the two modern ones |
+| defend territory | 3 | -0.10 – 0.58 | 0.48 – 0.83 | do NOT — the instances disagree |
+
+Read by pairwise agreement: **>=0.8** same direction, average or pick either; **0.3-0.6 with the
+consensus clearly higher** noisy views of one direction, average — this is the real win; **<0.15**
+not the same direction, pick one, averaging is meaningless.
+
+Averaging the TAIL WEIGHTS (a union, since they are non-negative and nothing cancels) and averaging
+the raw z-scores (a consensus) came out nearly identical everywhere — 0.74-0.84 against 0.76-0.84 on
+counting — so the distinction does not matter empirically. Average the raw z-scores.
+
+Two cautions. `ko`, `ko threat` and `ko threats` are distinct SUB-MOTIFS of one family, not one motif
+found three times, so averaging across them blurs rather than denoises. And a pairwise figure of
++0.49 against one instance and +0.15 against another does NOT mean a direction sits between them:
+regressing the new `escape atari` on both gives R2 0.254 of which the second contributes 0.018, the
+two are independent of each other, and 75% of it is explained by nothing in the store.
+
+### A fifth rule: territory
+
+`(score_correct - score_alt) - 2 * stone_swing_abs > 20` points. A stone flipping ownership is worth
+TWO points — the prisoner and the point it stood on — so `2 * stones` is the swing that capture
+explains, and the remainder came from territory. The swing is ABSOLUTE so a trade does not cancel:
+stones dying on both sides is a trade whatever the net comes to, and a trade is not a territory
+problem. Empty-point swings are NOT charged, being the territory itself.
+
+10652 positives, 6.6% of the corpus, splitting 7593 / 3059 across boards — almost exactly the corpus
+proportion. A ratio form (share of the swing not explained by stones) was rejected: at a matched
+count it skews 85% to 9x9.
+
+Overlap with the existing rules, as a share of territory's own positives: life and death 8.2%,
+counting 0.3%, ko 25.0%, opening 0.4%. Essentially disjoint from counting — the other score-based
+rule, and the one it could most easily have duplicated — and the 25% with ko is barely above ko's
+19.3% base rate.
+
 ### TEACH_DECAY_EPOCHS is an interior optimum at 1000
 
 Swept on converged-axis banks under ortho-b, one seed each, scored on tail-weighted agreement.
