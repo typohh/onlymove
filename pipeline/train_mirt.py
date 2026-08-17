@@ -100,7 +100,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import (  # noqa: E402
-    DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
+    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
     K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
     load_first_time_attempts, load_joint_mirt_features)
@@ -128,7 +128,7 @@ LR_FIELD = 1e-2
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
 ORTHO_WEIGHT = 0.5
-ORTHO_RATING = 0.5               # keeps the axes off DIFFICULTY (see the loop)
+ORTHO_RATING = 0.5               # keeps the axes off RATING, SLOPE and FLOOR
 GAUGE_MOM = 0.01
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
@@ -315,12 +315,20 @@ class JointMIRT:
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
         z = (a * (th - b) + (g * self.v[uid]).sum(-1)).clamp(-35, 35)
-        # b is returned DETACHED for the difficulty-orthogonality penalty.
-        # Recomputing problem_params to get it would run the trunk twice and,
+        # The SHIPPED per-problem triple, returned DETACHED for the rating-
+        # orthogonality penalty: rating, slope, floor — exactly what packaging
+        # writes and the client's rank path reads, and exactly what an axis
+        # correlated with them would be duplicating through a channel the client
+        # cannot use.
+        #
+        # Recomputing problem_params to get these would run the trunk twice and,
         # worse, tick the difficulty gauge's EMA twice per batch — the gauge is
         # defined over the attempt stream and an extra update would quietly move
         # the rating's units.
-        return c + (1.0 - c - lam) * torch.sigmoid(z), g, b.detach()
+        q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
+        r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
+        return (c + (1.0 - c - lam) * torch.sigmoid(z), g,
+                torch.stack([r, a, c], dim=1).detach())
 
 
 def load_bank(key_idx):
@@ -509,7 +517,7 @@ def main():
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
-            pred, gh, bh = m.forward(tu[bi], tfeat[tp[bi]])
+            pred, gh, rsf = m.forward(tu[bi], tfeat[tp[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
@@ -533,15 +541,30 @@ def main():
             # axis, so difficulty living in an axis is signal the product cannot
             # reach.
             #
-            # DIFFICULTY ALONE, not the shipped triple. Penalising rating, slope
-            # and floor together does decorrelate — and leaves the axes worth
-            # 0.16 mnat on held-out users against 4.41 here, because three
-            # constraints on K=3 axes leave room to satisfy the penalty or to
-            # carry signal, not both. The cost of stopping at b is that the leak
-            # displaces rather than vanishes, most of it into the floor head.
-            bz = bh - bh.mean()
-            bz = bz / (bz.norm() + 1e-9)
-            loss = loss + ORTHO_RATING * (Mn.T @ bz).pow(2).sum()
+            # THE SHIPPED TRIPLE, not difficulty alone. Stopping at b only
+            # DISPLACES the leak: measured, closing b sent one axis from -0.04 to
+            # -0.43 on the floor head and left another at +0.62 with slope, since
+            # each axis simply finds a different rating parameter to absorb.
+            # Closing all three removes it — every correlation under 0.13, slope
+            # and floor under 0.04 — and on a FREE fit costs nothing: 6.4 mnat
+            # BETTER on rating than b-only, with the axes still worth 3.7 mnat.
+            #
+            # THE BANK MUST BE RATING-ORTHOGONAL FOR THIS TO WORK. Teaching
+            # directions that are themselves rating-correlated while pushing the
+            # axes off every rating channel is over-determined, and the axes lose
+            # to the conflict rather than to the constraint — measured at 0.16
+            # mnat against 4.41. Directions taken from a fit under this same
+            # penalty carry no such conflict.
+            #
+            # Each column is centred and normalised, so the term is a sum of
+            # squared cosines: floor lives on (0, FLOOR_CAP) and rating on its own
+            # scale, and an unnormalised penalty would be dominated by whichever
+            # happens to be widest. The targets are DETACHED, so this can only
+            # push the axes off the rating side and never degrade the rating to
+            # satisfy itself.
+            tz = rsf - rsf.mean(dim=0, keepdim=True)
+            tz = tz / (tz.norm(dim=0, keepdim=True) + 1e-9)
+            loss = loss + ORTHO_RATING * (Mn.T @ tz).pow(2).sum()
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #
