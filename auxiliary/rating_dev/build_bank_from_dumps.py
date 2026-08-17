@@ -12,19 +12,24 @@ so for a one-sided column this changes nothing; it matters for the BIPOLAR form
 `A/B`, where two motifs are put on one axis as `z(A) - z(B)` and the two poles have
 to arrive on a common scale or the wider one simply owns the axis.
 
-A BIPOLAR column HINGES each pole at zero before subtracting:
-`max(z(A), 0) - max(z(B), 0)`. Each source axis is itself two-sided, and its
-negative end is a THIRD region rather than the absence of anything — measured,
-the negative end of the life-and-death axis is substantively "defend territory",
-overlapping that motif's own tail at 22x chance. Subtracting raw z-scores would
-therefore place a strongly-not-A problem at the B end for no reason but its
-lacking A, importing a motif nobody asked for into the pole. The hinge sends both
-"not A" and "not B" to the same single value, which is what they have in common.
+A BIPOLAR column subtracts two TAIL-WEIGHTED poles: `f(z(A)) - f(z(B))` with `f`
+from utils.rating.tail_agreement — the identity above `TAIL_HINGE`, decaying
+exponentially to zero below it, the two branches meeting in value and slope.
 
-exp() reaches the same floor and is worse for the same reason it is rejected for
-rule columns: it makes the positive tail exponentially heavy, so one confident
-problem can outweigh the rest of the column in the teaching MSE. The hinge is
-flat below the threshold and linear above it.
+Weighting rather than subtracting raw z-scores is the load-bearing part. Each
+source axis is itself two-sided, and its negative end is a THIRD region rather
+than the absence of anything — measured, the negative end of the life-and-death
+axis is substantively "defend territory", agreeing with that motif's own tail at
++0.44. Raw subtraction would place a strongly-not-A problem at the B pole for no
+reason but its lacking A, importing a motif nobody asked for.
+
+The DECAY, rather than a hard floor `max(z, at)`, is what makes a problem near
+neither pole contribute nothing instead of cancelling two equal plateaus, and
+keeps a problem just short of A's tail leaning slightly toward A rather than not
+at all. A plain exp() would reach the same floor and is rejected for the reason
+it is rejected for rule columns: an exponentially heavy POSITIVE tail lets one
+confident problem outweigh the rest of the column in the teaching MSE. This form
+is linear up there and exponential only below.
 
 Pairing does NOT require anti-correlated motifs. Measured pairs sit near r = -0.06
 and every pole survives; what a pair needs is that both motifs are individually
@@ -52,6 +57,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
+
+from utils.rating.tail_agreement import TAIL_HINGE, tail_weight  # noqa: E402
 
 
 def _parse_source(tok):
@@ -84,16 +91,17 @@ def main():
                     help="comma-separated names in the same order, 'A/B' for a "
                          "bipolar column. Names the POSITIVE tail first.")
     ap.add_argument("--out", required=True, help="output .npz")
-    ap.add_argument("--combine", choices=("hinge", "linear"), default="hinge",
-                    help="how a bipolar column joins its poles. 'hinge' (default) "
-                         "is max(z(A),0) - max(z(B),0), so a problem at neither "
-                         "pole sits at one shared value. 'linear' is z(A) - z(B), "
-                         "which places a strongly-not-A problem at the B end and "
-                         "so imports A's opposite region into B's pole; kept only "
-                         "to reproduce a bank built before the hinge.")
-    ap.add_argument("--hinge-at", type=float, default=0.0,
-                    help="z threshold the hinge floors at (default 0.0 = the "
-                         "z-score mean)")
+    ap.add_argument("--combine", choices=("weighted", "hinge", "linear"),
+                    default="weighted",
+                    help="how a bipolar column joins its poles. 'weighted' "
+                         "(default) is f(z(A)) - f(z(B)) with the shared tail "
+                         "weight. 'hinge' is the hard floor max(z,at) it "
+                         "replaces, which flattens every sub-threshold problem to "
+                         "one value. 'linear' is z(A) - z(B), which places a "
+                         "strongly-not-A problem at the B pole; both are kept only "
+                         "to reproduce older banks.")
+    ap.add_argument("--hinge-at", type=float, default=TAIL_HINGE,
+                    help="z threshold where the tail begins")
     args = ap.parse_args()
 
     specs = [s for s in args.columns.split(",") if s.strip()]
@@ -136,7 +144,10 @@ def main():
             cols.append(column(poles[0]))
         elif len(poles) == 2:
             a, b = column(poles[0]), column(poles[1])
-            if args.combine == "hinge":
+            if args.combine == "weighted":
+                a = tail_weight(a, args.hinge_at)
+                b = tail_weight(b, args.hinge_at)
+            elif args.combine == "hinge":
                 a = np.maximum(a, args.hinge_at) - args.hinge_at
                 b = np.maximum(b, args.hinge_at) - args.hinge_at
             cols.append(a - b)
