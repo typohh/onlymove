@@ -547,6 +547,31 @@ fit enough freedom to satisfy both objectives, or the construction is doing the 
 a cliff 0.274 sits under. Until that is separated, "the bank must be rating-orthogonal" is not
 supported as a prerequisite.
 
+### CALIBRATION — what tail agreement means, checked against a human once
+
+Every agreement figure in this document is ordinal. The one place the scale has been checked against
+a person reading boards is the legacy refit, and it does not sit where the numbers suggest.
+
+| pole | taught-from agreement | what inspection found |
+|---|---|---|
+| `killing` | +0.43 | became SEMEAI — related, distinct, renamed |
+| `judgement` | +0.64 | drifted too far to carry the name — now UNNAMED |
+| `attack` | +0.66 | unidentifiable — now UNNAMED |
+| `ko threat` | +0.66 | narrowed to FIND KO THREAT AND ANSWER FORCING MOVE |
+| `defence` | +0.73 | became ESCAPE ATARI AND KO — renamed |
+| `endgame` | +0.73 | holds |
+
+For contrast `ko` reproduces at 0.91-0.97 between fits and keeps its name unchanged.
+
+**Four of six poles at 0.43-0.73 mutated, and those are among the highest retention figures measured
+anywhere in this document.** Retention is not identity. Anything under about 0.75 has to be
+re-inspected and probably re-named before it ships; a figure in that range means a real direction was
+held, not that the name still describes it.
+
+This is the single calibration point the measure has. It bounds what every comparison here can claim:
+arms can be ranked by agreement, but no threshold in this document except ~0.9+ has been shown to
+correspond to a motif a person would still call by the same name.
+
 ### Choosing a bipolar pairing: cancellation and dominance
 
 Which two motifs share an axis is decided on the GLUED column `c = f(z(A)) - f(z(B))`, not on the raw
