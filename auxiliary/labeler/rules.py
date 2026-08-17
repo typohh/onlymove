@@ -71,180 +71,16 @@ OWNERSHIP_CSV = os.path.join(SIGNAL_CACHE, "ownership_swing.csv")
 # life and death: ONE outcome, no trade. The four DIRECTIONAL parts are the ones
 # that change a group's status; the other four ("secured", "deadened") describe
 # stones that end the same way either side of the choice and are ignored here.
-LD_FOCUS = ("own_dead_revived", "opp_alive_killed")   # fail-to-live, fail-to-kill
-LD_OTHER = ("own_alive_killed", "opp_dead_revived")   # sacrifice, let-out
-LD_MIN_STONES = 5.0    # the winning part must move at least this many stones
-# Trades are judged RELATIVE to the outcome, not against a fixed stone count. A
-# 30-stone group living or dying is not a trade because a quarter-stone drifted
-# somewhere else, and an absolute cap says it is — it gets stricter the larger
-# the problem, which is backwards. What "no trade" means is that nothing else
-# comes close to the thing being decided.
-LD_TRADE_RATIO = 0.20  # every OTHER directional part, as a fraction of the winner
-
-# counting: the top two first moves finish within a hair of each other on score
-# while the win probability separates hard — the position turns on a margin you
-# have to count rather than on a status you can see.
-# The winrate bar has to be HIGH to select anything. Admission requires exactly
-# one winning reply, played out, so the corpus has almost no ambiguous-outcome
-# positions: 99.5% of problems clear a 50-point winrate gap and the clause passes
-# everything. At 90 it admits 55%, which is a filter.
-COUNT_SCORE_MAX = 5.0   # points between best and second best
-COUNT_WR_MIN = 90.0     # percentage points of winrate between the same two
-
-# ko: replay each resolved line this many plies and ask whether a ko shape stands.
-# Depth 0 is the root position itself.
-KO_DEPTH = 3
-
-# opening: few moves led to the position, per board size.
-OPENING_PERCENTILE = 5.0
-
-# TERRITORY — the points at stake exceed what changing hands can account for.
-# A stone that flips ownership is worth TWO points, the prisoner and the point it
-# stood on, so the swing an ownership change explains is 2 * stones. Whatever the
-# score moves BEYOND that came from territory rather than from capture.
-TERR_MIN_POINTS = 20.0   # points of swing left over after the stones are paid for
-
-LABEL_SET = ["life and death", "counting", "ko", "opening", "territory"]
-
-
-# ---------------------------------------------------------------- helpers
-
-def _subtree_has_te(node):
-    stack = [node]
-    while stack:
-        n = stack.pop()
-        if n.has_property("TE"):
-            return True
-        stack.extend(list(n))
-    return False
-
-
-def _mover_eval(node):
-    """(winrate, score) in the MOVER's frame, or None. Comments are stored from
-    BLACK's perspective, so a white mover flips both."""
-    colour, _ = node.get_raw_move()
-    if colour is None:
-        return None
-    c = node.get("C") if node.has_property("C") else None
-    parsed = parse_eval_comment(c)
-    if parsed is None:
-        return None
-    wr_black, score_black = parsed
-    return ((wr_black, score_black) if colour == "b"
-            else (100.0 - wr_black, -score_black))
-
-
-def _line_moves(node, depth):
-    """The first `depth` plies at and under `node`, as (COLOR, sgf_coord) pairs in
-    board_render's setup format. Follows the first child at each step — the
-    generator writes the line it read, so the principal continuation is the line."""
-    out = []
-    cur = node
-    while cur is not None and len(out) < depth:
-        colour, raw = cur.get_raw_move()
-        if colour is not None and raw and raw != b"tt":
-            out.append((colour.upper(), raw.decode("utf-8")))
-        cur = cur[0] if len(cur) else None
-    return out
-
-
-# ---------------------------------------------------------------- the rules
-
-def rule_life_and_death(own, min_stones=None, trade_ratio=None):
-    """ONE status change, big enough to be the point of the problem, and nothing
-    else close to it.
-
-    `own` is the raw ownership row (stone counts, NOT the z-scored feature
-    columns — a threshold in stones is only a threshold in stones before the
-    pooled standardization). The dominant directional part must be a fail-to-live
-    or a fail-to-kill; the other three are judged as a FRACTION of it, so a
-    problem where you save one group by giving up another is excluded while
-    incidental drift beside a large group is not.
-    """
-    min_stones = LD_MIN_STONES if min_stones is None else min_stones
-    trade_ratio = LD_TRADE_RATIO if trade_ratio is None else trade_ratio
-    parts = {k: abs(float(own[k])) for k in (*LD_FOCUS, *LD_OTHER)}
-    top = max(parts, key=parts.get)
-    if top not in LD_FOCUS or parts[top] < min_stones:
-        return False
-    bar = trade_ratio * parts[top]
-    return all(v <= bar for k, v in parts.items() if k != top)
-
-
-def rule_territory(own, min_points=None):
-    """Score swings by more than the stones changing hands can pay for.
-
-        (score_correct - score_alt) - 2 * stone_swing_abs  >  min_points
-
-    A stone flipping ownership is worth TWO points — the prisoner and the point it
-    occupied — so `2 * stones` is the swing that capture explains. What is left is
-    territory, and requiring a large remainder is what separates a position decided
-    by territory from one decided by a group living or dying.
-
-    `stone_swing_abs` is the ABSOLUTE swing summed over occupied points, so a TRADE
-    does not cancel. That is deliberate: stones dying on both sides is a trade
-    whatever the net comes to, and a trade is not a territory problem. Netting them
-    would let a big two-sided capture pass as territory because the sides happened
-    to balance.
-
-    Empty-point swings are NOT subtracted — they are the territory itself, and
-    charging for them would leave nothing to detect.
-
-    `own` is the raw ownership row, in stones (see rule_life_and_death on why a
-    threshold in stones needs the pre-standardization values).
-    """
-    min_points = TERR_MIN_POINTS if min_points is None else min_points
-    swing = float(own["score_correct"]) - float(own["score_alt"])
-    return swing - 2.0 * float(own["stone_swing_abs"]) > min_points
-
-
-def rule_counting(evals):
-    """Score says the two best first moves are equivalent; winrate says they are
-    not. That gap is the signature of a position decided by a margin.
-
-    `evals` is [(winrate, score)] over the root variations, mover-framed. Ranked
-    by WINRATE, because that is what names the answer (findBestMoveFromChildren),
-    so "best and second best" is the answer and its closest rival."""
-    if len(evals) < 2:
-        return False
-    top = sorted(evals, key=lambda t: (t[0], t[1]), reverse=True)[:2]
-    (w1, s1), (w2, s2) = top
-    return (s1 - s2) <= COUNT_SCORE_MAX and (w1 - w2) >= COUNT_WR_MIN
-
-
-def rule_ko(base, variation_nodes, size):
-    """A ko shape stands within KO_DEPTH plies of a line the generator resolved.
-
-    Checked at the ROOT first, then along each TE-marked root variation — the
-    root case is the position that already sits in a ko, the line case is the
-    position that becomes one once the fight starts. Only resolved branches are
-    walked, for the same reason the ownership baseline only uses them: an
-    abandoned stub is a line nobody played out.
-
-    `base` is the setup in SGF COORDINATES ("pd"), which is what `simulate`
-    parses — NOT the GTP form ("D4") that `parse_tsumego_sgf` hands back. Feeding
-    it GTP fails silently and completely: every stone misses the range check, the
-    board stays empty, and no position ever holds a ko."""
-    if simulate(base, size)[2] is not None:
-        return True
-    if KO_DEPTH <= 0:
-        return False
-    for node in variation_nodes:
-        if not _subtree_has_te(node):
-            continue
-        moves = _line_moves(node, KO_DEPTH)
-        for i in range(1, len(moves) + 1):
-            if simulate(base + moves[:i], size)[2] is not None:
-                return True
-    return False
-
-
-def rule_opening(prefix, cutoff):
-    """Few moves led to the contested position."""
-    return prefix <= cutoff
-
-
-# ---------------------------------------------------------------- driver
+# The rule logic itself lives in utils/rating/motif_rules.py, imported here so the
+# pipeline step, this labelling CLI and the dev inspection tools cannot drift onto
+# different thresholds. Only the CLI and its pool/report plumbing stay in this file.
+from utils.rating.motif_rules import (  # noqa: E402,F401
+    LABEL_SET, LD_FOCUS, LD_OTHER, LD_MIN_STONES, LD_TRADE_RATIO,
+    COUNT_SCORE_MAX, COUNT_WR_MIN, KO_DEPTH, OPENING_MAX_PREFIX,
+    SHAPE_WR_GAP, TERR_BASE, TERR_PER_STONE, OWNERSHIP_CSV, SIGNAL_CACHE,
+    _subtree_has_te, _mover_eval, _line_moves,
+    rule_life_and_death, rule_territory, rule_shape, rule_counting,
+    rule_ko, rule_opening)
 
 def _sgf_facts(args):
     """Everything the SGF-side rules need, from ONE read of the file.
@@ -268,16 +104,6 @@ def build(pool, ownership, phase, workers):
 
     tids = pool["tids"]
     sizes = pool["sizes"]
-
-    # opening cutoff per board size, over the POOL (the population the labels
-    # describe), so "bottom 5%" means bottom 5% of what a labeller will be shown.
-    cutoff = {}
-    for size in sorted(set(sizes)):
-        pref = [phase[t][1] for t, s in zip(tids, sizes)
-                if s == size and t in phase]
-        cutoff[size] = float(np.percentile(pref, OPENING_PERCENTILE))
-        print(f"  opening cutoff, size {size}: prefix <= {cutoff[size]:.0f} moves "
-              f"({OPENING_PERCENTILE}th pct of {len(pref)} pool problems)")
 
     jobs = list(zip(sizes, tids))
     facts = {}
@@ -303,9 +129,11 @@ def build(pool, ownership, phase, workers):
             hits.append("counting")
         if rule_territory(own):
             hits.append("territory")
+        if rule_shape(evals):
+            hits.append("shape")
         if has_ko:
             hits.append("ko")
-        if rule_opening(ph[1], cutoff[size]):
+        if rule_opening(ph[1], size):
             hits.append("opening")
         for h in hits:
             counts[h] += 1

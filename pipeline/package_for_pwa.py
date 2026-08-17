@@ -23,6 +23,7 @@ from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
 from utils.rating import se_floor  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf
+from utils.rating.motif_rules import LABEL_SET, RULE_LABELS
 
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the
@@ -599,18 +600,32 @@ def load_embeddings(board_size, meta_only=False):
     # sentence for a tail it has no name for (stats-weaknesses.js skips such an
     # axis, motif-bubble.js skips such a tail). Naming it in axes/labels.json is
     # what turns it into a readable finding, so report which axes are waiting.
-    # `components` is a list of MOTIF IDS into the store's `bank` — the same list
-    # pipeline.train_mirt teaches from, so the axis a name ships on is the axis
-    # that name was taught onto, by construction. Resolve them to the flat
+    # `components` is a list of PROXY RULE names — the same list
+    # pipeline.train_mirt teaches from, `"A/B"` putting rule A at an axis's
+    # positive tail and rule B at its negative — so the axis a name ships on is
+    # the axis that name was taught onto, by construction. The names resolve
+    # through utils.rating.motif_rules, which owns both the criteria and the
+    # display text, and NEVER through labels.json's `bank`: that is the dev motif
+    # store, and it holds several directions under each of these names, so a name
+    # lookup there is ambiguous in both the direction and its sign. Flatten to the
     # {positive, negative, i18n} records the client expects (backfill.js reads
-    # meta.labels.components and nothing else), and ship ONLY those: `bank`
-    # carries every motif ever kept plus its provenance comments, none of which
-    # the client reads, and embedding_meta.json is INLINED into the JS bundle.
-    bank = (labels or {}).get("bank", {})
+    # meta.labels.components and nothing else); embedding_meta.json is INLINED
+    # into the JS bundle, so ship the text and nothing else.
     comps = []
-    for aid in (labels or {}).get("components", []):
-        e = bank.get(str(aid), {})
-        comps.append({k: e.get(k) for k in
+    for spec in (labels or {}).get("components", []):
+        poles = [p.strip() for p in str(spec).split("/")]
+        unknown = [p for p in poles if p not in LABEL_SET]
+        if unknown:
+            raise SystemExit(
+                f"axes/labels.json component {spec!r} names rules that do not "
+                f"exist: {unknown}. Known rules: {LABEL_SET}. A component is the "
+                f"shipping decision and must name what train_mirt actually "
+                f"taught, so a typo here is a mislabeled axis, not a missing one.")
+        rec = {}
+        for side, pole in zip(("positive", "negative"), poles):
+            rec[side] = pole
+            rec[side + "_i18n"] = RULE_LABELS.get(pole)
+        comps.append({k: rec.get(k) for k in
                       ("positive", "positive_i18n", "negative", "negative_i18n")})
     unlabeled = [i for i, c in enumerate(comps)
                  if not (c.get("positive") or c.get("negative"))]

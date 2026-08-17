@@ -1,307 +1,307 @@
 {
-  "version": 4,
-  "space": "joint_mirt_v1 (legacy entries: residual_axes_v1)",
-  "_doc": "Motif store AND axis bank. `bank` holds every direction ever kept, keyed by the ax_<hex> content hash of that direction in label_anchors.npz: positive/negative name either tail's motif (null = unnamed; an unnamed axis is shipped and used, the client just says nothing about it), and `comment` records where it came from and what is known to be wrong with it. `components` IS THE AXIS BANK: an ordered list of those ids, the first K_AXES of which pipeline.train_mirt teaches its axes onto, in axis order. Binding by id rather than by column position is the point — a separate bank file orders directions implicitly and this file is indexed against that order, so reordering it renames every motif onto a direction it was not written for. Edit names and components here; add directions with auxiliary.rating_dev.update_motif_store, never by hand.",
-  "bank": {
-    "ax_50def44d": {
-      "positive": "judgement",
-      "positive_i18n": {
-        "zh": "形势判断",
-        "ja": "形勢判断",
-        "ko": "형세판단"
-      },
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_a268d22a": {
-      "positive": "counting",
-      "positive_i18n": {
-        "zh": "数目",
-        "ja": "目算",
-        "ko": "계가"
-      },
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_07955482": {
-      "positive": "opening",
-      "positive_i18n": {
-        "zh": "布局",
-        "ja": "序盤",
-        "ko": "포석"
-      },
-      "negative": "endgame",
-      "negative_i18n": {
-        "zh": "官子",
-        "ja": "ヨセ",
-        "ko": "끝내기"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_b758482e": {
-      "positive": "reading",
-      "positive_i18n": {
-        "zh": "计算力",
-        "ja": "読み",
-        "ko": "수읽기"
-      },
-      "negative": "shape",
-      "negative_i18n": {
-        "zh": "棋形",
-        "ja": "形",
-        "ko": "모양"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_1ad88138": {
-      "positive": "complexity",
-      "positive_i18n": {
-        "zh": "复杂局面",
-        "ja": "複雑な局面",
-        "ko": "복잡한 국면"
-      },
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_7a80436f": {
-      "positive": "attack",
-      "positive_i18n": {
-        "zh": "攻击",
-        "ja": "攻め",
-        "ko": "공격"
-      },
-      "negative": "defence",
-      "negative_i18n": {
-        "zh": "防守",
-        "ja": "守り",
-        "ko": "수비"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_33445e3b": {
-      "positive": "killing",
-      "positive_i18n": {
-        "zh": "杀棋",
-        "ja": "殺し",
-        "ko": "잡기"
-      },
-      "negative": "ko threats",
-      "negative_i18n": {
-        "zh": "劫材",
-        "ja": "コウ材",
-        "ko": "팻감"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_577132ed": {
-      "positive": "ko",
-      "positive_i18n": {
-        "zh": "打劫",
-        "ja": "コウ",
-        "ko": "패"
-      },
-      "negative": "ko threat",
-      "negative_i18n": {
-        "zh": "劫材",
-        "ja": "コウ材",
-        "ko": "팻감"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_31ba9d90": {
-      "positive": "shape",
-      "positive_i18n": {
-        "zh": "棋形",
-        "ja": "形",
-        "ko": "모양"
-      },
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_1296d682": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_6dde2f3b": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_43f48879": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_bbab00d6": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_0860ca04": {
-      "positive": "killing",
-      "positive_i18n": {
-        "zh": "杀棋",
-        "ja": "殺し",
-        "ko": "잡기"
-      },
-      "negative": "defending territory",
-      "negative_i18n": {
-        "zh": "守地",
-        "ja": "地を守る",
-        "ko": "집 지키기"
-      },
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_6f7067cc": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_82b31f93": {
-      "positive": null,
-      "positive_i18n": null,
-      "negative": null,
-      "negative_i18n": null,
-      "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
-    },
-    "ax_df8b6188": {
-      "positive": "escape atari",
-      "negative": null,
-      "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17), taught from a rule-free control axis and re-fitted under the difficulty-orthogonality penalty. Discovered by the FREE control fit (no bank), then carried. Clean on difficulty (+0.02) but displaced onto the floor head (-0.43) by the b-only penalty; the residual leak of the adopted configuration.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_b3b25f28": {
-      "positive": "life and death",
-      "negative": null,
-      "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17). Seeded from a hand-written rule (>=5 stones changing life status, no comparable counter-trade). SUSPECT NAME: least reproducible motif measured (cross-fit r +0.45 against +0.84 for ko), and slope-entangled in every arm (-0.56 here, -0.68 at decay 500, +0.79 in the bipolar arm). It drains toward the discrimination head whenever teaching is released early, which is what a direction that is not really a motif does. Verify the extremes before shipping this name.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_030cdf1c": {
-      "positive": "ko",
-      "negative": null,
-      "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17). Seeded from a rule (ko detected on the board after the solution). The most reproducible motif measured: cross-fit r +0.84, retention +0.91 across a seed change, and clean on every rating parameter except a mild floor correlation (-0.28).",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_cadba465": {
-      "positive": "defend territory",
-      "negative": null,
-      "comment": "Joint MIRT, FREE control fit seed 0 (2026-08-16), axis 1 — discovered rather than seeded, named by eyeballing its extremes. The only instance in existence, so it is unvalidated by reproduction: no second fit has been asked to find it. Clean on difficulty (+0.05).",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_87738d52": {
-      "positive": "counting",
-      "negative": null,
-      "comment": "Joint MIRT, rule-seeded drop_ko arm seed 0 (2026-08-16). Seeded from a rule (score gap under 5 points with winrate over 90 percent). Cleanest of its three instances on difficulty (+0.03); moderate reproducibility (cross-fit r +0.59).",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_e619efa1": {
-      "positive": "opening",
-      "negative": null,
-      "comment": "Joint MIRT, rule-seeded drop_ko arm seed 0 (2026-08-16). Seeded from a rule (earliest 5 percent of game phase). Highly reproducible (cross-fit r +0.83) but DIFFICULTY-LADEN IN EVERY INSTANCE MEASURED (-0.30 to -0.34); this is the least-bad of the three. Teaching from it re-injects difficulty into the axes unless the ortho penalty is on.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_4e23f75b": {
-      "positive": "defend territory",
-      "negative": null,
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty (rating+slope+floor), axis 0 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. RATING-ORTHOGONAL BY CONSTRUCTION (b +0.08, rating +0.07, slope +0.03, floor +0.01), which is what makes it a valid bank seed under that penalty where the b-only motifs are not. SHARES A NAME BUT NOT A DIRECTION with ax_cadba465: tail agreement between the two is -0.018, i.e. unrelated. The same Go concept read off a slice orthogonal to the rating parameters selects different problems; do not treat them as one motif.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_2091d5bf": {
-      "positive": "capture stone to gain liberty",
-      "negative": null,
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 1 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.13, rating +0.09, slope +0.04, floor +0.01). NEW MOTIF: agrees with nothing else in the store above 0.064, so it is not a re-finding of any earlier direction under a different name.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_4cb94a2c": {
-      "positive": null,
-      "negative": "escape atari",
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 2 NEGATIVE tail — the positive tail is unnamed and ships silently. Named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.03, rating -0.02, slope +0.01, floor -0.01). PARTIALLY overlaps ax_df8b6188 of the same name (tail agreement +0.309): related but not the same direction, the b-only version carrying floor -0.22 that this one does not.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_2e83929b": {
-      "positive": "counting",
-      "negative": "life and death",
-      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17) under the full rating-orthogonality penalty (rating+slope+floor), axis 0. BOTH TAILS NAMED and both retained — counting +0.670, life and death +0.448 against the poles it was taught from. Rating-orthogonal by construction (worst correlation 0.065). Taught from a bank whose own columns were 0.25 rating-correlated, so this is a REFINED version of those directions rather than a copy: the fit kept the motifs and dropped the rating component.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_3fc78d04": {
-      "positive": "defend territory",
-      "negative": "opening",
-      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 1. Both tails retained — defend territory +0.577, opening +0.603. Rating-orthogonal (worst correlation 0.036). Note this pairing is well balanced (0.850) which is why neither pole dominates; see auxiliary.rating_dev.pair_motifs for why that predicts even retention.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_acfc81dc": {
-      "positive": "escape atari",
-      "negative": "ko",
-      "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 2. Both tails retained — escape atari +0.738, ko +0.931. Rating-orthogonal (worst correlation 0.112). This pair is POORLY BALANCED (0.595) and under the earlier raw-subtraction construction it collapsed to 0.172 / 0.973; the tail-weighted column largely rescued it, which is evidence the reshape matters more than the pairing choice — untested, since that arm changed the penalty too.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_65ff2e48": {
-      "positive": "escape atari",
-      "negative": null,
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 1 positive tail. Named by eyeballing the extremes capped at 1d. FIRST GENERATION WHOSE TAIL IS CLEAN, not just its axis: the named tail carries rating -0.094, slope -0.013, floor +0.091, where the earlier whole-axis penalty left tails at 0.27-0.31 while reporting 0.02-0.09. NOT an amalgamation of the earlier two despite agreeing +0.49 with capture stone to gain liberty <2091> and +0.15 with the b-only escape atari <df8b>: regressing its tail on both gives R2 0.254, of which the b-only direction contributes 0.018, and the two supposed components are independent of each other (+0.03) so there is no line between them to sit on. 75% of it is explained by nothing in the store and that residual matches no stored motif above 0.10 — it shares a quarter of its variance with capture stone and is otherwise its own direction.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_4c04be02": {
-      "positive": "block or cut",
-      "negative": null,
-      "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 2 positive tail. Named by eyeballing the extremes capped at 1d. The CLEANEST direction in the store on every rating parameter measured at the tail: rating -0.017, slope +0.008, floor -0.000, difficulty -0.036. NEW MOTIF — nothing stored agrees with it above +0.14, so it is not a re-finding of an existing direction under another name.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_cc62e376": {
-      "positive": null,
-      "negative": "semeai",
-      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy judgement/killing poles. THE MOTIFS MUTATED THROUGH TEACHING despite measuring as retained. The negative pole was taught from legacy `killing` at +0.43 agreement and reads as SEMEAI, a related but distinct concept — renamed accordingly. The positive pole was taught from legacy `judgement` at +0.64 and drifted too far to carry that name, so it is UNNAMED: it ships and steers selection, the client just stays silent about it. Judgement therefore still does not exist as a usable direction in the current model. Per-tail leakage 0.076/0.073.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_2bb787fc": {
-      "positive": null,
-      "negative": "escape atari and ko",
-      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy attack/defence pair. BOTH POLES MUTATED. The negative was taught from `defence` at +0.73 and reads as ESCAPE ATARI AND KO — renamed. The positive was taught from `attack` at +0.66 and is UNIDENTIFIABLE by inspection, so it is unnamed. Note both numbers are among the HIGHEST retention figures measured, which is the evidence that tail agreement below ~0.75 does not preserve a name. The cleanest axis in the store on the rating side: per-tail leakage 0.011/0.032.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    },
-    "ax_4f61fe52": {
-      "positive": "endgame",
-      "negative": "find ko threat and answer forcing move",
-      "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from two legacy poles paired here for the first time. The positive was taught from `endgame` at +0.73 and keeps that name. The negative was taught from legacy `ko threat` at +0.66 and mutated into something more specific — FIND KO THREAT AND ANSWER FORCING MOVE — renamed to what it is. A distinct sub-motif of the ko family, not a variant name for ko. Per-tail leakage 0.074/0.078.",
-      "positive_i18n": null,
-      "negative_i18n": null
-    }
+ "version": 4,
+ "space": "joint_mirt_v1 (legacy entries: residual_axes_v1)",
+ "_doc": "Motif names and the shipping decision. `components` is one entry per axis, each a PROXY RULE name from utils.rating.motif_rules, or \"A/B\" to put two rules on one axis's two tails — A at the positive end, B at the negative. That is what pipeline.train_mirt teaches its axes onto: production seeds from RULES, which state what a direction is, rather than from previously-fitted directions, which measure as retained at 0.43-0.73 and were found on inspection to have mutated at exactly those figures. THE NAMES LIVE WITH THE RULES, in motif_rules.RULE_LABELS, which is what package_for_pwa resolves a shipped tail through. `bank` is the DEV motif store — every direction a fit has been observed to find, keyed by the ax_<hex> content hash of the direction in label_anchors.npz, with provenance in `comment`. Nothing in production reads it, and it could not be read by name if it tried: it holds three directions called `counting`, three called `opening`, and a `ko` that is one entry's positive tail and another's negative. It is where auxiliary/rating_dev explores what a fit lands on.",
+ "bank": {
+  "ax_50def44d": {
+   "positive": "judgement",
+   "positive_i18n": {
+    "zh": "形势判断",
+    "ja": "形勢判断",
+    "ko": "형세판단"
+   },
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
   },
-  "components": [
-    "ax_030cdf1c",
-    "ax_df8b6188",
-    "ax_b3b25f28"
-  ]
+  "ax_a268d22a": {
+   "positive": "counting",
+   "positive_i18n": {
+    "zh": "数目",
+    "ja": "目算",
+    "ko": "계가"
+   },
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_07955482": {
+   "positive": "opening",
+   "positive_i18n": {
+    "zh": "布局",
+    "ja": "序盤",
+    "ko": "포석"
+   },
+   "negative": "endgame",
+   "negative_i18n": {
+    "zh": "官子",
+    "ja": "ヨセ",
+    "ko": "끝내기"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_b758482e": {
+   "positive": "reading",
+   "positive_i18n": {
+    "zh": "计算力",
+    "ja": "読み",
+    "ko": "수읽기"
+   },
+   "negative": "shape",
+   "negative_i18n": {
+    "zh": "棋形",
+    "ja": "形",
+    "ko": "모양"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_1ad88138": {
+   "positive": "complexity",
+   "positive_i18n": {
+    "zh": "复杂局面",
+    "ja": "複雑な局面",
+    "ko": "복잡한 국면"
+   },
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_7a80436f": {
+   "positive": "attack",
+   "positive_i18n": {
+    "zh": "攻击",
+    "ja": "攻め",
+    "ko": "공격"
+   },
+   "negative": "defence",
+   "negative_i18n": {
+    "zh": "防守",
+    "ja": "守り",
+    "ko": "수비"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_33445e3b": {
+   "positive": "killing",
+   "positive_i18n": {
+    "zh": "杀棋",
+    "ja": "殺し",
+    "ko": "잡기"
+   },
+   "negative": "ko threats",
+   "negative_i18n": {
+    "zh": "劫材",
+    "ja": "コウ材",
+    "ko": "팻감"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_577132ed": {
+   "positive": "ko",
+   "positive_i18n": {
+    "zh": "打劫",
+    "ja": "コウ",
+    "ko": "패"
+   },
+   "negative": "ko threat",
+   "negative_i18n": {
+    "zh": "劫材",
+    "ja": "コウ材",
+    "ko": "팻감"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_31ba9d90": {
+   "positive": "shape",
+   "positive_i18n": {
+    "zh": "棋形",
+    "ja": "形",
+    "ko": "모양"
+   },
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_1296d682": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_6dde2f3b": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_43f48879": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_bbab00d6": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_0860ca04": {
+   "positive": "killing",
+   "positive_i18n": {
+    "zh": "杀棋",
+    "ja": "殺し",
+    "ko": "잡기"
+   },
+   "negative": "defending territory",
+   "negative_i18n": {
+    "zh": "守地",
+    "ja": "地を守る",
+    "ko": "집 지키기"
+   },
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_6f7067cc": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_82b31f93": {
+   "positive": null,
+   "positive_i18n": null,
+   "negative": null,
+   "negative_i18n": null,
+   "comment": "Legacy residual_axes_v1 direction (the two-stage fit that preceded the joint MIRT), frozen in label_anchors.npz and remapped onto the current corpus. NEVER CONVERGED UNDER THE CURRENT train_mirt, so it is a candidate seed rather than a measured motif — the two-stage axes were fitted against a frozen 4PL and their directions are not comparable with a joint fit's without a refit. Covers 149508 of 160489 problems; the remainder postdate it and are NaN."
+  },
+  "ax_df8b6188": {
+   "positive": "escape atari",
+   "negative": null,
+   "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17), taught from a rule-free control axis and re-fitted under the difficulty-orthogonality penalty. Discovered by the FREE control fit (no bank), then carried. Clean on difficulty (+0.02) but displaced onto the floor head (-0.43) by the b-only penalty; the residual leak of the adopted configuration.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_b3b25f28": {
+   "positive": "life and death",
+   "negative": null,
+   "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17). Seeded from a hand-written rule (>=5 stones changing life status, no comparable counter-trade). SUSPECT NAME: least reproducible motif measured (cross-fit r +0.45 against +0.84 for ko), and slope-entangled in every arm (-0.56 here, -0.68 at decay 500, +0.79 in the bipolar arm). It drains toward the discrimination head whenever teaching is released early, which is what a direction that is not really a motif does. Verify the extremes before shipping this name.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_030cdf1c": {
+   "positive": "ko",
+   "negative": null,
+   "comment": "Joint MIRT, ortho-b seed 1 (2026-08-17). Seeded from a rule (ko detected on the board after the solution). The most reproducible motif measured: cross-fit r +0.84, retention +0.91 across a seed change, and clean on every rating parameter except a mild floor correlation (-0.28).",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_cadba465": {
+   "positive": "defend territory",
+   "negative": null,
+   "comment": "Joint MIRT, FREE control fit seed 0 (2026-08-16), axis 1 — discovered rather than seeded, named by eyeballing its extremes. The only instance in existence, so it is unvalidated by reproduction: no second fit has been asked to find it. Clean on difficulty (+0.05).",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_87738d52": {
+   "positive": "counting",
+   "negative": null,
+   "comment": "Joint MIRT, rule-seeded drop_ko arm seed 0 (2026-08-16). Seeded from a rule (score gap under 5 points with winrate over 90 percent). Cleanest of its three instances on difficulty (+0.03); moderate reproducibility (cross-fit r +0.59).",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_e619efa1": {
+   "positive": "opening",
+   "negative": null,
+   "comment": "Joint MIRT, rule-seeded drop_ko arm seed 0 (2026-08-16). Seeded from a rule (earliest 5 percent of game phase). Highly reproducible (cross-fit r +0.83) but DIFFICULTY-LADEN IN EVERY INSTANCE MEASURED (-0.30 to -0.34); this is the least-bad of the three. Teaching from it re-injects difficulty into the axes unless the ortho penalty is on.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_4e23f75b": {
+   "positive": "defend territory",
+   "negative": null,
+   "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty (rating+slope+floor), axis 0 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. RATING-ORTHOGONAL BY CONSTRUCTION (b +0.08, rating +0.07, slope +0.03, floor +0.01), which is what makes it a valid bank seed under that penalty where the b-only motifs are not. SHARES A NAME BUT NOT A DIRECTION with ax_cadba465: tail agreement between the two is -0.018, i.e. unrelated. The same Go concept read off a slice orthogonal to the rating parameters selects different problems; do not treat them as one motif.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_2091d5bf": {
+   "positive": "capture stone to gain liberty",
+   "negative": null,
+   "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 1 positive tail. Discovered rather than seeded, named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.13, rating +0.09, slope +0.04, floor +0.01). NEW MOTIF: agrees with nothing else in the store above 0.064, so it is not a re-finding of any earlier direction under a different name.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_4cb94a2c": {
+   "positive": null,
+   "negative": "escape atari",
+   "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the FULL rating-orthogonality penalty, axis 2 NEGATIVE tail — the positive tail is unnamed and ships silently. Named by eyeballing the extremes capped at 1d. Rating-orthogonal by construction (b +0.03, rating -0.02, slope +0.01, floor -0.01). PARTIALLY overlaps ax_df8b6188 of the same name (tail agreement +0.309): related but not the same direction, the b-only version carrying floor -0.22 that this one does not.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_2e83929b": {
+   "positive": "counting",
+   "negative": "life and death",
+   "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17) under the full rating-orthogonality penalty (rating+slope+floor), axis 0. BOTH TAILS NAMED and both retained — counting +0.670, life and death +0.448 against the poles it was taught from. Rating-orthogonal by construction (worst correlation 0.065). Taught from a bank whose own columns were 0.25 rating-correlated, so this is a REFINED version of those directions rather than a copy: the fit kept the motifs and dropped the rating component.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_3fc78d04": {
+   "positive": "defend territory",
+   "negative": "opening",
+   "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 1. Both tails retained — defend territory +0.577, opening +0.603. Rating-orthogonal (worst correlation 0.036). Note this pairing is well balanced (0.850) which is why neither pole dominates; see auxiliary.rating_dev.pair_motifs for why that predicts even retention.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_acfc81dc": {
+   "positive": "escape atari",
+   "negative": "ko",
+   "comment": "Joint MIRT, BIPOLAR bank seed 1 (2026-08-17), full rating-orthogonality penalty, axis 2. Both tails retained — escape atari +0.738, ko +0.931. Rating-orthogonal (worst correlation 0.112). This pair is POORLY BALANCED (0.595) and under the earlier raw-subtraction construction it collapsed to 0.172 / 0.973; the tail-weighted column largely rescued it, which is evidence the reshape matters more than the pairing choice — untested, since that arm changed the penalty too.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_65ff2e48": {
+   "positive": "escape atari",
+   "negative": null,
+   "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 1 positive tail. Named by eyeballing the extremes capped at 1d. FIRST GENERATION WHOSE TAIL IS CLEAN, not just its axis: the named tail carries rating -0.094, slope -0.013, floor +0.091, where the earlier whole-axis penalty left tails at 0.27-0.31 while reporting 0.02-0.09. NOT an amalgamation of the earlier two despite agreeing +0.49 with capture stone to gain liberty <2091> and +0.15 with the b-only escape atari <df8b>: regressing its tail on both gives R2 0.254, of which the b-only direction contributes 0.018, and the two supposed components are independent of each other (+0.03) so there is no line between them to sit on. 75% of it is explained by nothing in the store and that residual matches no stored motif above 0.10 — it shares a quarter of its variance with capture stone and is otherwise its own direction.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_4c04be02": {
+   "positive": "block or cut",
+   "negative": null,
+   "comment": "Joint MIRT, FREE fit seed 1 (2026-08-17) under the PER-TAIL rating-orthogonality penalty, axis 2 positive tail. Named by eyeballing the extremes capped at 1d. The CLEANEST direction in the store on every rating parameter measured at the tail: rating -0.017, slope +0.008, floor -0.000, difficulty -0.036. NEW MOTIF — nothing stored agrees with it above +0.14, so it is not a re-finding of an existing direction under another name.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_cc62e376": {
+   "positive": null,
+   "negative": "semeai",
+   "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy judgement/killing poles. THE MOTIFS MUTATED THROUGH TEACHING despite measuring as retained. The negative pole was taught from legacy `killing` at +0.43 agreement and reads as SEMEAI, a related but distinct concept — renamed accordingly. The positive pole was taught from legacy `judgement` at +0.64 and drifted too far to carry that name, so it is UNNAMED: it ships and steers selection, the client just stays silent about it. Judgement therefore still does not exist as a usable direction in the current model. Per-tail leakage 0.076/0.073.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_2bb787fc": {
+   "positive": null,
+   "negative": "escape atari and ko",
+   "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from the legacy attack/defence pair. BOTH POLES MUTATED. The negative was taught from `defence` at +0.73 and reads as ESCAPE ATARI AND KO — renamed. The positive was taught from `attack` at +0.66 and is UNIDENTIFIABLE by inspection, so it is unnamed. Note both numbers are among the HIGHEST retention figures measured, which is the evidence that tail agreement below ~0.75 does not preserve a name. The cleanest axis in the store on the rating side: per-tail leakage 0.011/0.032.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  },
+  "ax_4f61fe52": {
+   "positive": "endgame",
+   "negative": "forcing moves",
+   "comment": "Joint MIRT, seed 1 (2026-08-17), full PER-TAIL rating-orthogonality, taught from two legacy poles paired here for the first time. The positive was taught from `endgame` at +0.73 and keeps that name. The negative was taught from legacy `ko threat` at +0.66 and mutated into something more specific — FORCING MOVES — renamed to what it is. A distinct sub-motif of the ko family, not a variant name for ko. Per-tail leakage 0.074/0.078.",
+   "positive_i18n": null,
+   "negative_i18n": null
+  }
+ },
+ "components": [
+  "life and death/territory",
+  "counting/shape",
+  "ko/opening"
+ ]
 }

@@ -28,31 +28,41 @@ cannot reach the shipped fit. The measurement behind every constant here:
 `docs/mirt_benchmark.md`.
 
 Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first;
-the move-eval cache is a hard prerequisite. So is the motif store,
-`axes/{label_anchors.npz,labels.json}` — see below.
+the move-eval cache is a hard prerequisite. So are the motif proxies,
+`axes/motif_proxies.npz` from `pipeline.build_motif_proxies` — see below.
 
-THE AXES ARE TAUGHT FROM A FROZEN BANK, which is what lets a name outlive a
-refit. The objective is exactly invariant to rotating the axis space — the
+THE AXES ARE TAUGHT ONTO FIXED DIRECTIONS, which is what gives a name a chance to
+outlive a refit. The objective is exactly invariant to rotating the axis space — the
 likelihood reads the loadings and the user positions only through their product,
 and V_RIDGE, V_MEAN_PENALTY and ORTHO_WEIGHT are all rotation-invariant too — so
 the fit has a continuum of equal solutions and no preference among them. Left to
 itself it lands wherever initialization drops it: a 2% data change re-rolls the
 basis as hard as a different seed does, which would silently reattach every name
 in `axes/labels.json` to a direction it was not written for. So the axis map is
-not re-derived. It is pulled toward the motif store by an auxiliary MSE,
-which decays linearly to zero over TEACH_DECAY_EPOCHS while the trunk trains
-normally. Measured across a real refit: without it the new axes share 0.20 min
-canonical correlation with the old ones, with it 0.899, and the loss is if
-anything slightly better.
+not re-derived. It is pulled toward the target by an auxiliary MSE which decays
+linearly to zero over TEACH_DECAY_EPOCHS while the trunk trains normally.
 
-THE BANK IS THE MOTIF STORE, SELECTED BY NAME. `axes/label_anchors.npz` holds
-every direction ever kept, keyed by an `ax_<hex>` content hash, and
-`axes/labels.json`'s `components` lists which ids this fit ships, in axis order;
-the first K_AXES are taught, so that list is the shipping decision. Binding by id
-rather than by column position is the point — a bank file orders its directions
-implicitly while labels.json is indexed against that order, so reordering it
-renames every motif onto a direction it was not written for. Directions enter the
-store from a `--dump-params` npz via `auxiliary.rating_dev.update_motif_store`.
+THE TARGET IS A PROXY RULE, NOT A PREVIOUSLY-FITTED DIRECTION.
+`pipeline.build_motif_proxies` labels every problem against the hand-written
+criteria in `utils.rating.motif_rules`, and `axes/labels.json`'s `components`
+pairs those rules onto axes in axis order, `"A/B"` putting rule A at an axis's
+positive tail and rule B at its negative; the first K_AXES entries are taught, so
+that list is the shipping decision. Teaching from previously FITTED directions is
+the alternative and it only half worked: they return at 0.43-0.73 agreement, and
+inspection of axes at exactly those figures found four of six poles mutated or
+unnameable — a name held numerically and lost its meaning. What settles it is that
+the round trip buys no stability either: a stored direction is itself only an
+approximation of the rule it was taught from, and chaining through it holds an axis
+no better than teaching from that rule directly, so it adds a reference that moves
+for nothing. A rule is a fixed STARTING POINT, not a guarantee — the axis is what the
+model lands on once the pull is released, and report_bank_identity below is what
+measures how close that landed.
+
+Binding by rule NAME is safe here in a way it is not for the dev motif store
+(`axes/label_anchors.npz`, keyed by an `ax_<hex>` content hash): a rule name is
+unique by construction, checked in motif_rules, while the store holds several
+directions under each of these names. Nothing in production reads that store.
+
 The per-axis SCALE is ignored — a rescaling of the loadings is absorbed by v — so
 only DIRECTION is taught.
 
@@ -104,6 +114,11 @@ from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
     load_first_time_attempts, load_joint_mirt_features)
+# The shared tail weight, in numpy. `_tail_w` below is the same function in torch;
+# the objective, the teaching target and the identity report are all this shape, so
+# they cannot drift apart.
+from utils.rating.tail_agreement import (  # noqa: E402
+    TAIL_HINGE, hinged_r, tail_weight as tail_weight_np)
 
 EPOCHS = 10000                   # runaway failsafe; the patience rule ends the run
 CHECK_EVERY = 10
@@ -178,7 +193,7 @@ MIN_BOTH_OUTCOMES = 1
 STOP_ROW_FRAC = 0.03             # rows held aside purely to detect convergence
 OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 AXES_DIR = os.path.join(PROJECT_ROOT, "axes")
-MOTIF_STORE = os.path.join(AXES_DIR, "label_anchors.npz")
+MOTIF_PROXIES = os.path.join(AXES_DIR, "motif_proxies.npz")
 LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
@@ -349,80 +364,84 @@ def _tail_w(torch, g, at):
 
 
 def load_bank(key_idx):
-    """The frozen directions this fit's axes are taught onto, one row per problem
-    of `key_idx` in that order, plus a mask of which rows the bank supplies.
+    """The proxy directions this fit's axes are taught onto, one row per problem of
+    `key_idx` in that order, plus a mask of which rows are supplied.
 
-    THE BANK IS THE MOTIF STORE, SELECTED BY NAME. `axes/label_anchors.npz` holds
-    every direction ever kept, keyed by an `ax_<hex>` content hash, and
-    `axes/labels.json`'s `components` list names which of them this fit ships, in
-    axis order. Binding by id rather than by column position is what makes the
-    labels safe: a bank file carrying the directions in an implicit order that
-    labels.json is indexed against can be reordered, and every motif silently
-    renames onto a direction it was not written for.
+    THE SEED IS A RULE, NOT A PREVIOUSLY-FITTED DIRECTION. `pipeline.build_motif_proxies`
+    labels every problem against hand-written criteria; `axes/labels.json`'s
+    `components` pairs those rules onto axes, `"A/B"` putting rule A at an axis's
+    positive tail and rule B at its negative.
 
-    Each column is z-scored over the problems the store and this corpus share,
-    because the stored per-axis scale is arbitrary — rescaling a loading is
-    absorbed by v — so direction is the only part of it that means anything.
+    That choice is measured, not stylistic. The objective is invariant to rotating
+    the axis space, so a free fit lands on a different basis every seed — 0.34
+    agreement between two seeds of one configuration. Teaching from previously
+    FITTED directions was the answer to that and only half worked: they return at
+    0.43-0.73 agreement, and inspection of axes at exactly those figures found four
+    of six poles mutated or unnameable. A rule cannot drift, because it states what
+    the direction IS rather than recording where a fit once landed.
 
-    A problem the bank does not carry is left unconstrained rather than taught to
-    zero: absent is not a value. Legacy directions predate the current corpus and
-    are NaN outside their own coverage, so a row is taught only where EVERY
-    selected column is finite — a partially-known target would teach one axis
-    from data and its neighbour from nothing, on the same problem.
+    Columns are built as `f(A) - f(B)` with the shared tail weight, so a problem at
+    neither pole contributes ~0 rather than cancelling two plateaus. A one-sided
+    `"A"` is allowed and simply has no negative pole. The column is z-scored because
+    scale is arbitrary — rescaling a loading is absorbed by v — so direction is the
+    only part that means anything.
 
-    Returns (tgt, ok, ids) — the ids so the caller can stamp exactly what was
-    taught rather than the whole store, which changes whenever an unrelated
-    motif is added.
+    Returns (tgt, ok, spec) — the spec so the caller can stamp exactly what was
+    taught.
     """
-    for path in (MOTIF_STORE, LABELS):
+    for path in (MOTIF_PROXIES, LABELS):
         if not os.path.exists(path):
             raise SystemExit(
-                f"NO MOTIF STORE at {path}. It holds the frozen directions the "
-                f"axes are taught onto, without which this fit would re-roll the "
-                f"basis and every name in axes/labels.json would land on a "
-                f"direction it was not written for. Add directions to it with "
-                f"`auxiliary.rating_dev.update_motif_store`, and list the ones "
-                f"to ship under `components` in axes/labels.json.")
+                f"NO MOTIF PROXIES at {path}. They are the directions the axes are "
+                f"taught onto, without which this fit would re-roll the basis and "
+                f"every name in axes/labels.json would land on a direction it was "
+                f"not written for. Build them with "
+                f"`python -m pipeline.build_motif_proxies`.")
     meta = json.load(open(LABELS))
-    want = [str(x) for x in meta.get("components", [])]
-    if len(want) < K_AXES:
+    spec = [str(x) for x in meta.get("components", [])]
+    if len(spec) < K_AXES:
         raise SystemExit(
-            f"axes/labels.json lists {len(want)} components, this fit ships "
-            f"K_AXES={K_AXES}. `components` is the shipping decision: an ordered "
-            f"list of motif ids from the store's `bank`, longest-lived first. "
-            f"Pick them by inspecting the directions with "
-            f"`auxiliary.rating_dev.inspect_axes`.")
-    want = want[:K_AXES]
+            f"axes/labels.json lists {len(spec)} components, this fit ships "
+            f"K_AXES={K_AXES}. `components` is the shipping decision: one entry "
+            f"per axis, each a rule name or `\"A/B\"` to put two rules on one "
+            f"axis's two tails.")
+    spec = spec[:K_AXES]
 
-    z = np.load(MOTIF_STORE, allow_pickle=False)
-    ids = [str(x) for x in z["ids"]]
-    missing = [a for a in want if a not in ids]
+    z = np.load(MOTIF_PROXIES, allow_pickle=False)
+    rules = [str(x) for x in z["rules"]]
+    lab = np.asarray(z["labels"], bool)
+    row = {f"{sz}:{t}": i for i, (sz, t) in
+           enumerate(zip(z["size"], z["tids"] if "tids" in z.files else z["tid"]))}
+    wanted = {r for col in spec for r in col.split("/")}
+    missing = sorted(wanted - set(rules))
     if missing:
         raise SystemExit(
-            f"axes/labels.json names components not in the store: {missing}. "
-            f"The store has {len(ids)} directions; a name with no direction "
-            f"behind it cannot be taught.")
-    M = np.asarray(z["M"], np.float64)[[ids.index(a) for a in want]]
+            f"axes/labels.json names rules the proxies do not carry: {missing}. "
+            f"Available: {rules}. Rebuild with pipeline.build_motif_proxies, or "
+            f"correct `components`.")
 
-    row = {f"{sz}:{t}": i for i, (sz, t) in
-           enumerate(zip(z["sizes"], z["tids"]))}
     tgt = np.zeros((len(key_idx), K_AXES), np.float64)
     ok = np.zeros(len(key_idx), bool)
+    src = np.full((len(key_idx), len(rules)), np.nan)
     for (sz, t), j in key_idx.items():
         i = row.get(f"{sz}:{t}")
-        if i is not None and np.isfinite(M[:, i]).all():
-            tgt[j] = M[:, i]
+        if i is not None:
+            src[j] = lab[i]
             ok[j] = True
     if not ok.any():
         raise SystemExit(
-            f"MOTIF STORE SHARES NO PROBLEMS with this corpus ({len(row)} stored "
-            f"against {len(key_idx)} here). Its keys are size:tsumego_id — a "
-            f"store from a different corpus generation teaches nothing.")
-    tgt[ok] = (tgt[ok] - tgt[ok].mean(0)) / (tgt[ok].std(0) + 1e-12)
-    names = [meta["bank"].get(a, {}).get("positive") or "(unnamed)" for a in want]
-    print(f"  BANK from the motif store: {', '.join(names)} "
+            f"MOTIF PROXIES SHARE NO PROBLEMS with this corpus ({len(row)} labelled "
+            f"against {len(key_idx)} here) — rebuild them against this corpus.")
+
+    for k, col in enumerate(spec):
+        poles = col.split("/")
+        w = tail_weight_np(src[ok, rules.index(poles[0])])
+        if len(poles) == 2:
+            w = w - tail_weight_np(src[ok, rules.index(poles[1])])
+        tgt[ok, k] = (w - w.mean()) / (w.std() + 1e-12)
+    print(f"  BANK from the motif proxies: {', '.join(spec)} "
           f"({ok.sum()}/{len(key_idx)} problems taught)", flush=True)
-    return tgt, ok, want
+    return tgt, ok, spec
 
 
 def report_bank_identity(g_np, tgt, ok, prob_idx):
@@ -512,7 +531,7 @@ def main():
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
-    bank_tgt, bank_ok, bank_ids = load_bank(key_idx)
+    bank_tgt, bank_ok, bank_spec = load_bank(key_idx)
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
@@ -739,7 +758,7 @@ def main():
     # file — the store accumulates motifs this fit never saw, so hashing it whole
     # would move the stamp on an addition that changed nothing about this fit,
     # and identity is exactly what the stamp exists to pin.
-    bh = hashlib.sha256("\n".join(bank_ids).encode()).hexdigest()[:16]
+    bh = hashlib.sha256("\n".join(bank_spec).encode()).hexdigest()[:16]
     np.savez_compressed(os.path.join(AXES_DIR, "axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),

@@ -92,16 +92,24 @@ activations/
 axes/per_cell/
 
 # Skill-axis fit outputs: regenerable from activations/, multi-MB, and they churn
-# on every refit. THREE files in here stay TRACKED on purpose, all of them frozen
-# references a refit CANNOT reproduce — axis_bank.npz (the directions
-# pipeline.train_mirt teaches its axes onto, which is the only reason a name
-# outlives a refit; chosen at the dev surface, and the first K_AXES columns are
-# what ships), labels.json (the handcrafted motif names attached to those
-# columns, in that order) and label_anchors.npz. axes.npz is deliberately NOT
-# tracked despite living beside them: every run rewrites it, and it carries the
-# embedding_version packaging stamps, so a committed copy is a stale version
-# waiting to be shipped onto some other fit's embeddings.
+# on every refit. TWO files in here stay TRACKED on purpose, both of them things a
+# refit CANNOT reproduce — labels.json (the shipping decision in `components`, plus
+# the dev motif store's names and provenance) and label_anchors.npz (that store's
+# directions). Everything else regenerates:
+#
+#   motif_proxies.npz  the directions pipeline.train_mirt teaches its axes onto.
+#                      Untracked because it IS reproducible — the rules live in
+#                      utils/rating/motif_rules.py and the labelling is a pure
+#                      function of them and the corpus, so the committed rule is
+#                      the durable artifact and the npz is a cache of it. It also
+#                      changes shape with the corpus, which is why a direction here
+#                      cannot be content-hashed the way a stored one is.
+#   axes.npz           every run rewrites it, and it carries the embedding_version
+#                      packaging stamps, so a committed copy is a stale version
+#                      waiting to be shipped onto some other fit's embeddings.
 axes/per_problem.csv
+axes/motif_proxies.npz
+axes/axes.npz
 
 # Local snapshot of the REMOTE production D1: a large (~50 MB) dump pulled by
 # pipeline.fetch_database. Regenerable on demand and changes constantly, so it is
