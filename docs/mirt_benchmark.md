@@ -252,8 +252,20 @@ p90 +0.123, p99 +0.248, max +0.255. Against that background:
 
 Opening and counting sit at roughly twice the largest different-name agreement, so they reproduce
 across two entirely different model generations — support no within-generation measurement can
-establish. ko matches only weakly, and the remaining legacy names not at all; those are candidate
-seeds only.
+establish.
+
+**THE TEST RUNS ONE WAY ONLY.** High agreement establishes that two directions name the same thing;
+LOW agreement establishes nothing at all, and must not be read as a motif failing to transfer. Two
+reasons, and the second is structural. A motif can be present in a fit and expressed along a
+different direction, since nothing forces two model generations to place it in the same coordinates.
+And the current fit carries K=3 axes against a 16-motif legacy bank, so it CANNOT span them however
+real they are — most legacy directions scoring near zero is a statement about there being three
+slots, not about the motifs. The way to find out whether a legacy motif survives is to teach it and
+measure retention, not to look for it in a fit that was never asked to hold it.
+
+Note also that `ko`, `ko threat` and `ko threats` are not one motif found three times. Ko has many
+sub-variations and a fit settles on a specific one rather than the general concept, so their mutual
+agreement of ~0.43 is what distinct sub-motifs of one family look like, not degeneracy.
 
 The control is not optional here. WITHIN the legacy fit, tails agree at rates that look identical to
 the same-name matches — `shape-`/`ko threats-` +0.63, `reading+`/`killing+` +0.63,
