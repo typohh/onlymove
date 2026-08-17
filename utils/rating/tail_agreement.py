@@ -86,7 +86,12 @@ def tail_weight(v, at=TAIL_HINGE):
     if s <= 0:
         return out
     z = (v[m] - v[m].mean()) / s
-    out[m] = np.where(z >= at, z, at * np.exp((z - at) / at))
+    # Exponent clamped: np.where evaluates both branches, so a large positive z
+    # overflows the discarded one. Harmless numerically here (the value is thrown
+    # away) but it warns, and the torch twin in the trainer must clamp for a real
+    # reason — the overflow becomes NaN in the backward pass — so both keep the
+    # same shape.
+    out[m] = np.where(z >= at, z, at * np.exp((np.minimum(z, at) - at) / at))
     return out
 
 

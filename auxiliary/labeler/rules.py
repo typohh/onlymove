@@ -319,7 +319,9 @@ def build(pool, ownership, phase, workers):
 
 def load_ownership():
     keep = ("own_dead_revived", "own_alive_killed",
-            "opp_alive_killed", "opp_dead_revived", "empty_swing_abs")
+            "opp_alive_killed", "opp_dead_revived", "empty_swing_abs",
+            # the territory rule's inputs
+            "score_correct", "score_alt", "stone_swing_abs")
     out = {}
     with open(OWNERSHIP_CSV, newline="") as fh:
         for rec in csv.DictReader(fh):

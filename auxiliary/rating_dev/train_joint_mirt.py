@@ -594,6 +594,24 @@ class JointMIRT:
         return (c + (1.0 - c - lam) * torch.sigmoid(z)).clamp(EPS, 1 - EPS), g, rsf
 
 
+
+def _tail_w(torch, g, at):
+    """The shared tail weight, in torch and differentiable: z-score, then `z`
+    above `at` and `at*exp((z-at)/at)` below. Same function the measurement uses
+    (utils.rating.tail_agreement.tail_weight), so the objective and the score are
+    the same shape — a penalty on one statistic and a report on another is how a
+    fit ends up satisfying neither."""
+    z = (g - g.mean(dim=0, keepdim=True)) / (g.std(dim=0, keepdim=True) + 1e-6)
+    # The exponent is CLAMPED before exp. torch.where evaluates both branches, so
+    # a large positive z overflows the exponential branch to inf even though the
+    # result is discarded — and the backward pass turns that inf into NaN through
+    # the zero gradient, poisoning the weights and tripping BCE's [0,1] assert on
+    # the next step. Clamping leaves the kept branch untouched: where z >= at the
+    # clamped exponent is exactly zero, so exp is 1 and finite.
+    zc = torch.clamp(z, max=at)
+    return torch.where(z >= at, z, at * torch.exp((zc - at) / at))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=3)
@@ -631,6 +649,16 @@ def main():
                          "(today's behaviour). Nothing else in the objective "
                          "decorrelates an axis from the rating side, which is how "
                          "a free fit ends up spending one on a rating parameter.")
+    ap.add_argument("--ortho-per-tail", action="store_true",
+                    help="penalise each TAIL's correlation with the targets "
+                         "separately instead of the whole axis's. A whole-axis "
+                         "correlation is linear and blind to a symmetric "
+                         "dependence — an axis whose two tails are both laden in "
+                         "opposite directions scores zero — and the tails are what "
+                         "get named and what the client reads.")
+    ap.add_argument("--ortho-hinge", type=float, default=1.0, metavar="Z",
+                    help="where the tail begins for --ortho-per-tail, matching "
+                         "utils.rating.tail_agreement.TAIL_HINGE")
     ap.add_argument("--ortho-targets", default="b",
                     help="comma-separated targets for --ortho-rating, from "
                          "{rating, slope, floor, b}. Default 'b' is the difficulty "
@@ -1219,7 +1247,8 @@ def main():
         ortho_cols = [_OT[x] for x in _want]
         if args.ortho_rating > 0.0:
             print(f"  ORTHO-RATING {args.ortho_rating} against {_want} "
-                  f"(squared cosine per axis x target)", flush=True)
+                  f"({'PER TAIL at z>=' + str(args.ortho_hinge) if args.ortho_per_tail else 'whole axis'})",
+                  flush=True)
 
         teach_tgt = teach_ok = teach_w = None
         if args.teach_directions:
@@ -1400,7 +1429,25 @@ def main():
                         tz = rsf[:, ortho_cols]
                         tz = tz - tz.mean(dim=0, keepdim=True)
                         tz = tz / (tz.norm(dim=0, keepdim=True) + 1e-9)
-                        loss = loss + args.ortho_rating * (Mn.T @ tz).pow(2).sum()
+                        if args.ortho_per_tail:
+                            # PER TAIL, because a whole-axis correlation is a
+                            # LINEAR statistic and cannot see a symmetric
+                            # dependence: an axis whose two tails are both
+                            # difficulty-laden in opposite directions averages to
+                            # zero and satisfies the penalty completely. Measured,
+                            # that is not hypothetical — a fit whose whole-axis
+                            # correlations sat at 0.02-0.09 carried tails at 0.27-
+                            # 0.31, and a b-only arm carried floor -0.245 on one
+                            # tail and +0.567 on the other. The tails are what get
+                            # named and what the client reads, so they are what
+                            # must be clean.
+                            for sg in (1.0, -1.0):
+                                W = _tail_w(torch, sg * gh, args.ortho_hinge)
+                                W = W - W.mean(dim=0, keepdim=True)
+                                W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
+                                loss = loss + args.ortho_rating * (W.T @ tz).pow(2).sum()
+                        else:
+                            loss = loss + args.ortho_rating * (Mn.T @ tz).pow(2).sum()
 
                 if teach_tgt is not None:
                     # ON THE ATTEMPT STREAM, reusing the gh this batch already
