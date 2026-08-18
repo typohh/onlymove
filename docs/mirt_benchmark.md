@@ -718,6 +718,106 @@ Read on bulk correlation instead, 500 and 1000 look near-equivalent on two of th
 choice appears to rest on life and death alone. On tail agreement 1000 leads 500 on all three, and the
 trade is explicit: 500 buys 5.1 mnat of rating, 1000 buys materially more tail identity everywhere.
 
+### THE DECAY MUST NOT REACH ZERO — TEACH_FLOOR_EPOCH 750, MEASURED 2026-08-19
+
+Released completely, a rule-taught fit does not keep the direction it was taught. On a full
+production run the axes ended at 0.091 / 0.111 / 0.056 against the columns they were taught from,
+which is indistinguishable from independent — the teaching had bought nothing that survived to the
+artifact. `TEACH_FLOOR_EPOCH` stops the decay CLOCK rather than clamping the weight, so past it the
+pull is simply constant at `TEACH_WEIGHT*(1 - TEACH_FLOOR_EPOCH/TEACH_DECAY_EPOCHS)`.
+
+Four arms, seed 0, 15% held-out users (hash `55885a30ea72c090`), everything else at production.
+Retention is the hinged tail agreement per pole against the taught column, on attempted+banked
+problems; held-out is the full held-out-user row set with the axes on.
+
+| floor | residual | life&death/territory | counting/shape | ko/opening | mean | held-out | axis mnat | stop | rating range |
+|---|---|---|---|---|---|---|---|---|---|
+| none (1000) | 0.00 | 0.390 / 0.235 | 0.610 / 0.410 | 0.405 / 0.511 | 0.427 | 0.7930 | 0.044 | 2770 | [-43.2, 11.5] |
+| 950 | 0.05 | 0.779 / 0.650 | 0.763 / 0.530 | 0.834 / 0.837 | 0.732 | 0.9175 | 0.306 | 4750 | [-103.0, 14.8] |
+| **750** | **0.25** | **0.828 / 0.694** | **0.783 / 0.544** | **0.860 / 0.856** | **0.761** | **0.7147** | **0.171** | 3240 | **[-6.5, 9.4]** |
+
+**750 is better than no floor on identity AND on both cost measures at once, which is the part worth
+stating plainly.** Retention 0.761 against 0.427; held-out logloss 0.7147 against 0.7930; axis
+contribution 0.171 mnat against 0.044. A residual pull is not a trade of accuracy for identity here —
+the released arm is worse at everything, because an axis that has wandered off its taught direction
+is not thereby a better-fitting axis, it is one that spent the run's freedom on nothing in
+particular. The rating range says the same: [-6.5, 9.4] against [-43.2, 11.5], and across all four
+arms the range orders EXACTLY as held-out logloss does.
+
+**A human read the boards and the motifs were still there.** That is the check that matters and the
+only one that can settle it — the calibration note below records six poles at 0.43-0.73 reading as
+retention while four of six had mutated, so a number in this range does not by itself preserve a
+name. Two of 750's six poles sit under the 0.75 bar (0.694 and 0.544) and the inspection passed
+anyway; read that as one data point extending the calibration under a floor, not as lowering the bar.
+The 950 page was inspected too and drifted visibly, consistent with its lower figures.
+
+**Held-out is NOT monotone in the residual, so the axis needs filling in rather than extrapolating.**
+0.05 is worse than both 0.00 and 0.25 (0.9175 against 0.7930 and 0.7147), and its rating range is the
+widest measured. Do not read the sweep as "more pull is better" in either direction.
+
+#### The multiplier is not the lever — MEASURED 2026-08-19
+
+Retention does not exceed ~0.77 against the rule columns even while the pull is at full weight, which
+invites tripling `TEACH_WEIGHT`. Measured, it does nothing. An arm at weight 3.0 with the floor at 917
+— so the RESIDUAL is 0.249, matching the 750 arm's 0.250, with 3x the pull during teaching — lands on
+the same place:
+
+| arm | weight | residual | mean retention | held-out | axis mnat | stop |
+|---|---|---|---|---|---|---|
+| floor 750 | 1.0 | 0.250 | 0.761 | 0.7147 | 0.171 | 3240 |
+| floor 917 | 3.0 | 0.249 | 0.760 | 0.7384 | 0.109 | 3240 |
+
+Per-pole they are within 0.033 everywhere, and both stopped at epoch 3240 from a best at 2940. The
+residual sets where the fit ends up; the peak weight does not reach it. The stronger pull is also
+slightly WORSE on both cost measures, so it is not a free knob either.
+
+The retention TRAJECTORY (probed every `PROBE_EVERY` epochs on the live parameters) is what shows why:
+
+```
+ep   50  w 2.85  0.497     ep  600  w 1.20  0.766  <- peak
+ep  300  w 2.10  0.738     ep  700  w 0.90  0.764
+ep  500  w 1.50  0.760     ep  950  w 0.25  0.725  <- residual holds
+                           ep 3050  w 0.25  0.760  <- re-tightens
+```
+
+Retention is FLAT at 0.74-0.77 while the pull falls from 2.10 to 0.90 — a 2.3x range in weight with
+no response. That is saturation, not a weak pull. It also shows the floor's drift is 0.006 (peak
+0.766, final 0.760), against 0.427 for the released arm: with a floor the post-release drift problem
+is simply gone, and what is left is a ceiling the pull never touches.
+
+#### The ceiling is the bipolar pairing, not the model
+
+Three candidates, two eliminated:
+
+- **Not feature capacity.** The best linear map on the trunk's own input features reaches 0.402/0.557,
+  0.590/0.464, 0.785/0.734 out-of-sample (`dev_runs/rule_predictability.py`). The fitted axes already
+  beat that everywhere, so the MLP has headroom left.
+- **Not the ortho penalty.** Every per-tail correlation between a rule column and rating, slope or
+  floor is within ±0.16 (`dev_runs/rule_vs_rating.py`). There is no conflict for the penalty to
+  create — unlike the rating-correlated banks recorded above.
+- **The pairing.** The six rule poles are mutually near-independent, every pairwise hinged agreement
+  between -0.104 and +0.084. An axis asked to be rule A at its positive tail and rule B at its
+  negative can only do both to the extent A and B are opposite ends of one dimension, and the
+  strongest pairing available is -0.10. They are not opposites, they are unrelated — and they can
+  co-occur (12,982 attempted problems carry two rule labels, 716 carry three), so this is measured
+  rather than a definitional artifact of the labelling. On top of it **41% of attempted problems carry
+  no rule label at all**, so the target is silent about them and the likelihood is free to put them in
+  the fitted axis's tails.
+
+Retention tracks pairing quality across the three axes, in order:
+
+| axis | pair | pair agreement | retention mean |
+|---|---|---|---|
+| ko / opening | most anti-correlated | -0.101 | 0.858 |
+| life and death / territory | | -0.089 | 0.761 |
+| counting / shape | least | -0.075 | 0.664 |
+
+Three points, but monotone, and the worst pole in the whole set (`shape`, 0.544) sits on the
+worst-paired axis. This is the reason a CONVERGED direction retains better than a rule column: a
+stored direction is continuous, covers every problem, and its two ends are opposite by construction.
+That is a statement about the TARGET's shape, and it does not license shipping one — see the
+calibration note and the demotion argument in CLAUDE.md.
+
 ### Reproduction
 
 ```bash

@@ -39,8 +39,9 @@ the fit has a continuum of equal solutions and no preference among them. Left to
 itself it lands wherever initialization drops it: a 2% data change re-rolls the
 basis as hard as a different seed does, which would silently reattach every name
 in `axes/labels.json` to a direction it was not written for. So the axis map is
-not re-derived. It is pulled toward the target by an auxiliary MSE which decays
-linearly to zero over TEACH_DECAY_EPOCHS while the trunk trains normally.
+not re-derived. It is pulled toward the target by an auxiliary MSE whose weight
+decays linearly on the TEACH_DECAY_EPOCHS schedule while the trunk trains
+normally, and holds at a residual once the clock stops at TEACH_FLOOR_EPOCH.
 
 THE TARGET IS A PROXY RULE, NOT A PREVIOUSLY-FITTED DIRECTION.
 `pipeline.build_motif_proxies` labels every problem against the hand-written
@@ -183,6 +184,31 @@ SHALLOW_W = 0.3
 # early; this value leaves room on the corpus as it stands.
 TEACH_WEIGHT = 1.0
 TEACH_DECAY_EPOCHS = 1000
+# THE DECAY CLOCK STOPS HERE, so the pull never reaches zero — it holds at the
+# weight it had reached, TEACH_WEIGHT*(1 - TEACH_FLOOR_EPOCH/TEACH_DECAY_EPOCHS).
+# Released completely, the axes wander far off the directions they were taught:
+# measured on a full production run, retention against the taught columns ended
+# at 0.09/0.11/0.06 on the tails, which is indistinguishable from independent.
+# Set equal to TEACH_DECAY_EPOCHS for no floor at all (the pull ends), which is
+# the arm this is measured against.
+#
+# THE FLOOR IS NOT A TRADE OF FREEDOM FOR IDENTITY, which is what makes it worth
+# having: the released arm is worse on identity AND on held-out logloss AND on
+# axis contribution AND on rating range, all at once. An axis that has wandered
+# off its taught direction is not thereby a better-fitting axis; it is one that
+# spent the run's freedom on nothing in particular.
+#
+# NOR IS THE EFFECT MONOTONE IN THE RESIDUAL, so this value cannot be reasoned to
+# from the direction of the last change — a floor near the end of the decay, whose
+# residual is a fraction of this one's, is worse on held-out than BOTH this and no
+# floor at all. Move it only by re-running the paired sweep.
+#
+# The multiplier is not a second route to the same place. Retention against the
+# rule columns SATURATES — it does not respond to the pull over a wide range of
+# weights — so raising TEACH_WEIGHT at a matched residual reproduces this arm and
+# costs a little on both criteria. What binds is the shape of the TARGET, not the
+# strength of the pull; see docs/mirt_benchmark.md.
+TEACH_FLOOR_EPOCH = 750
 # IDENTIFIABILITY, the only inclusion rule. Under the 4PL an all-correct record's
 # likelihood rises monotonically to (1-lambda)^n as ability grows without bound,
 # and an all-wrong one to (1-c)^n as it falls, so neither has an interior
@@ -549,7 +575,10 @@ def main():
 
     for ep in range(EPOCHS):
         m.train(True)
-        tw = TEACH_WEIGHT * max(0.0, 1.0 - ep / TEACH_DECAY_EPOCHS)
+        # Freezing the CLOCK, not clamping the weight: past the floor epoch the
+        # schedule simply stops advancing, so the weight is constant thereafter.
+        tw = TEACH_WEIGHT * max(0.0, 1.0 - min(ep, TEACH_FLOOR_EPOCH)
+                                / TEACH_DECAY_EPOCHS)
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
@@ -668,14 +697,40 @@ def main():
             if improved:
                 best, best_epoch = bce_st, ep + 1
                 best_state = [q.detach().clone() for q in m.params()]
-            flat = 0 if improved else flat + 1
+            # THE PATIENCE COUNTER IS HELD WHILE THE TEACHING WEIGHT IS ALIVE.
+            # The stop split measures the likelihood alone, but the objective
+            # being optimized also carries the teaching MSE, so through the decay
+            # the split sits nearly flat by construction — the fit is spending
+            # capacity on a term the split cannot see. Counting staleness there
+            # judges convergence of a metric a schedule is deliberately holding
+            # back, and the run dies mid-teaching with the axes never released.
+            #
+            # That is measured, not hypothetical, and it is a LOTTERY rather than
+            # a bias: on one corpus two fits differing only in seed hit the same
+            # plateau, one escaping at 10 checks of 30 and the other never
+            # escaping — it stopped at epoch 390 with the weight still at 0.61
+            # and shipped a fit 36 mnat worse than its sibling, undertrained
+            # rather than merely differently converged. Bounding the decay to end
+            # "well before the fit does" does not fix it, because what fails is
+            # the START of the run, not the end.
+            #
+            # `best` keeps updating throughout, so an early checkpoint is never
+            # lost; only the countdown waits. The cost is that a genuinely stuck
+            # fit cannot stop before the decay ends, bounded by EPOCHS.
+            # HELD WHILE THE SCHEDULE IS STILL MOVING — not while the weight is
+            # merely non-zero. With a floor the pull never reaches zero, so a
+            # `tw <= 0` test would hold the counter forever and every run would
+            # die on the epoch cap. What makes staleness meaningful is that the
+            # objective has stopped CHANGING, which happens when the decay ends.
+            teaching_moving = ep < TEACH_FLOOR_EPOCH
+            if improved:
+                flat = 0
+            elif not teaching_moving:
+                flat += 1
             print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  "
                   f"stop {bce_st:.4f}  best {best:.4f}@{best_epoch}  "
-                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}", flush=True)
-            # NOTE the stopping rule runs against an objective the decay is still
-            # changing, so a fit that plateaus before the decay ends stops while
-            # the bank is still partly holding the map. That is the observed case
-            # rather than a hypothetical.
+                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}"
+                  + ("  (held: teaching)" if teaching_moving else ""), flush=True)
             if flat >= FLAT_PATIENCE:
                 print(f"  stopped at epoch {ep + 1}; restoring best "
                       f"{best:.4f}@{best_epoch}", flush=True)
