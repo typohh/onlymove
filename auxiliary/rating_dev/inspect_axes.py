@@ -83,9 +83,13 @@ def load_dump_npz(path, bank_path=None):
     components = []
     for k in range(M.shape[1]):
         name = labels[k] if k < len(labels) and labels[k] else None
+        # The RAW label rides along as a fourth field. It is "A/B" for a bipolar
+        # column, and each tail is named by its own half — folding it into the
+        # title alone would leave the positive tail of "life and death/territory"
+        # captioned with the territory name too.
         components.append((f"ax{k}",
                            f"axis {k}" + (f" — taught from {name!r}" if name else ""),
-                           M[:, k]))
+                           M[:, k], name))
     return tids, components
 
 
@@ -103,8 +107,21 @@ def load_per_problem_csv(path):
             tids.append(row[0])
             rows.append([float(row[i]) for i in cols])
     M = np.array(rows, dtype=np.float64)
-    components = [(f"ax{k}", f"axis {k} (production)", M[:, k])
-                  for k in range(M.shape[1])]
+    # Names come from axes/labels.json's `components`, which is the shipping
+    # decision this CSV was produced under — so the standard no-argument run
+    # captions each tail with the motif it was taught, exactly as a --bank run
+    # does. Absent or short, the axes stay unnamed rather than mislabelled.
+    labels = []
+    lp = os.path.join(PROJECT_ROOT, "axes", "labels.json")
+    if os.path.exists(lp):
+        labels = [str(x) for x in json.load(open(lp)).get("components", [])]
+    components = []
+    for k in range(M.shape[1]):
+        name = labels[k] if k < len(labels) and labels[k] else None
+        components.append((f"ax{k}",
+                           f"axis {k} (production)"
+                           + (f" — taught from {name!r}" if name else ""),
+                           M[:, k], name))
     return tids, components
 
 
@@ -447,35 +464,68 @@ def main():
     # problems a human can actually name a motif from. It must never be applied
     # to a stored direction: the cap would delete the region the axis is most
     # confident about and teach a truncated motif.
+    # Ranks come from whichever artifact this page is reading. A dump carries its
+    # OWN ratings, which is the only correct source for an experiment arm — its
+    # ratings are not the shipped ones. A per_problem.csv holds embeddings only,
+    # so the shipped ratings/ CSVs supply them; those were written by the same
+    # run that wrote the CSV, so they belong to these axes.
+    def _ranks_from(tid_arr, size_arr, rating_arr):
+        curve = json.load(open(os.path.join(PROJECT_ROOT, "ratings",
+                                            "rating_to_rank.json")))
+        # Vectorised PER SIZE: interp_extrap takes an array, and each board
+        # has its own curve.
+        out = {}
+        for sz in np.unique(size_arr):
+            c = curve[str(int(sz))]
+            m = size_arr == sz
+            rv = interp_extrap(rating_arr[m], np.asarray(c["ratings"]),
+                               np.asarray(c["ranks"]))
+            out.update(zip(tid_arr[m], np.asarray(rv, dtype=float).tolist()))
+        return out
+
     ranks = None
     if args.dump:
         z = np.load(args.dump, allow_pickle=False)
         if "rating" in z.files:
-            curve = json.load(open(os.path.join(PROJECT_ROOT, "ratings",
-                                                "rating_to_rank.json")))
-            # Vectorised PER SIZE: interp_extrap takes an array, and each board
-            # has its own curve.
-            ranks = {}
-            dtid = np.array([str(t) for t in z["tid"]])
-            dsize = np.asarray(z["size"]).astype(int)
-            drating = np.asarray(z["rating"], dtype=np.float64)
-            for sz in np.unique(dsize):
-                c = curve[str(int(sz))]
-                m = dsize == sz
-                rv = interp_extrap(drating[m], np.asarray(c["ratings"]),
-                                   np.asarray(c["ranks"]))
-                ranks.update(zip(dtid[m], np.asarray(rv, dtype=float).tolist()))
+            ranks = _ranks_from(np.array([str(t) for t in z["tid"]]),
+                                np.asarray(z["size"]).astype(int),
+                                np.asarray(z["rating"], dtype=np.float64))
+    else:
+        from utils.constants import ALL_BOARD_SIZES
+        from utils.rating.ratings_io import RATINGS_CSV, load_value_map
+        rd = os.path.join(PROJECT_ROOT, "ratings")
+        rt, rs = [], []
+        want = set(tids)
+        for sz in ALL_BOARD_SIZES:
+            mp = load_value_map(os.path.join(rd, str(sz), RATINGS_CSV), "rating",
+                                keep=want, missing_ok=True)
+            rt += [(t, v) for t, v in mp.items()]
+            rs += [sz] * len(mp)
+        if rt:
+            ranks = _ranks_from(np.array([t for t, _ in rt]),
+                                np.asarray(rs, dtype=int),
+                                np.asarray([v for _, v in rt], dtype=np.float64))
     if args.rank_max is not None:
         if ranks is None:
-            raise SystemExit("--rank-max needs a --dump carrying a `rating` "
-                             "array; a per_problem.csv holds embeddings only.")
-        keep = np.array([ranks[t] <= args.rank_max for t in tids])
+            raise SystemExit("--rank-max found no ratings: a --dump needs a "
+                             "`rating` array, and a per_problem.csv needs the "
+                             "ratings/<size>/tsumego_ratings.csv beside it.")
+        # A problem with no rating is DROPPED by the cap rather than kept: the
+        # cap exists to keep the page readable, and an unrateable problem cannot
+        # be shown to be inside it. Reported, because silently thinning the pool
+        # would read as the cap being stricter than it is.
+        missing = sum(1 for t in tids if t not in ranks)
+        keep = np.array([ranks.get(t, float("inf")) <= args.rank_max
+                         for t in tids])
         if not keep.any():
             raise SystemExit(f"no problems at or below rank {args.rank_max}")
         print(f"  rank cap {args.rank_max}: {keep.sum()}/{len(tids)} problems "
-              f"kept (display only)", flush=True)
+              f"kept (display only)"
+              + (f"; {missing} had no rating and were dropped" if missing else ""),
+              flush=True)
         tids = [t for t, k in zip(tids, keep) if k]
-        components = [(key, title, vals[keep]) for key, title, vals in components]
+        components = [(key, title, vals[keep], nm)
+                      for key, title, vals, nm in components]
 
     # Size filter via lookup (per_problem.csv spans both boards, tid-aligned).
     if args.size != "all":
@@ -484,7 +534,8 @@ def main():
         if not keep.any():
             raise SystemExit(f"no problems of size {args.size} in {src_path}")
         tids = [t for t, k in zip(tids, keep) if k]
-        components = [(key, title, vals[keep]) for key, title, vals in components]
+        components = [(key, title, vals[keep], nm)
+                      for key, title, vals, nm in components]
 
     if args.html:
         scope = f"{source}, size {args.size}"
@@ -496,12 +547,21 @@ def main():
         print(f"  bank: {len(bank_tails)} named tails to match against", flush=True)
         options, sections = [], []
         n_tails = 2 * len(components)
-        for i, (key, title, vals) in enumerate(components):
+        for i, (key, title, vals, name) in enumerate(components):
             print(f"  rendering {title} ({i + 1}/{len(components)})...", flush=True)
+            # A bipolar label names each END separately: "A/B" puts A at the
+            # positive tail and B at the negative. A one-sided "A" names only the
+            # positive; the opposite end is where everything not-A accumulates and
+            # makes no claim, so it is captioned as unnamed rather than borrowing
+            # its partner's name.
+            halves = [h.strip() for h in name.split("/")] if name else []
             for sign, suffix, word in ((+1, "p", "positive"), (-1, "n", "negative")):
                 ti = 2 * i + (0 if sign > 0 else 1)
                 tail_key = f"{key}{suffix}"
-                tail_title = f"{title} · {word} tail"
+                h = 0 if sign > 0 else 1
+                tail_name = halves[h] if h < len(halves) and halves[h] else None
+                tail_title = (f"axis {i} {'+' if sign > 0 else '−'}  "
+                              + (tail_name or "(unnamed)"))
                 sel = " selected" if ti == 0 else ""
                 options.append(f'<option value="{tail_key}"{sel}>'
                                f'{html.escape(tail_title)}</option>')
@@ -527,7 +587,7 @@ def main():
         return
 
     base = f"{args.host}/?id="
-    for key, title, vals in components:
+    for key, title, vals, _nm in components:
         order = np.argsort(vals)
         print(f"\n{title} (source: {source}, scope: {args.size})")
         print(f"  top {args.n} positive tail:")
