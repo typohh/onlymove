@@ -108,6 +108,9 @@ from utils.rating.residual_axes import (  # noqa: E402
     axes_ll_gain, build_axis_features, eigen_directions, load_axis_attempts,
 )
 from utils.rating.slope_calibration import load_client_lapse  # noqa: E402
+from utils.rating.tail_agreement import (  # noqa: E402
+    hinged_r, tail_weight as tail_weight_np,
+)
 
 from auxiliary.rating_dev.burn_in_warm_start import (  # noqa: E402
     burn_in_directions,
@@ -123,6 +126,12 @@ from auxiliary.rating_dev.burn_in_warm_start import (  # noqa: E402
 # indistinguishable from tuning the stop.
 EPOCHS = 10000
 CHECK_EVERY = 10
+# How often the taught-retention probe runs, in EPOCHS. Coarser than
+# CHECK_EVERY because it costs a forward pass over the whole corpus
+# rather than over the attempt stream, and because the quantity it
+# tracks moves on the scale of the teaching decay (hundreds of epochs),
+# not of a patience check.
+PROBE_EVERY = 50
 # NO-NEW-BEST patience, not a relative-improvement threshold. The stop split
 # holds ~27k rows, so its BCE carries roughly +/-0.004 of sampling noise; a
 # threshold small enough to mean "converged" sits far below that and fires on
@@ -636,10 +645,11 @@ def main():
     ap.add_argument("--production", action="store_true",
                     help="run the SHIPPED configuration: the defaults here are "
                          "experiment defaults and four of them differ from "
-                         "pipeline.train_mirt (patience 5 vs 30, a 15%% problem "
-                         "holdout production does not take, a 300-epoch burn-in "
-                         "production deleted, and no teaching decay against "
-                         "production's 1500). Each is a real model difference, so "
+                         "pipeline.train_mirt — patience, a problem holdout "
+                         "production does not take, the rating-orthogonality "
+                         "penalty (OFF here, and aimed at difficulty alone rather "
+                         "than at rating/slope/floor per tail), and the teaching "
+                         "decay. Each is a real model difference, so "
                          "an arm meant to speak about production must set all "
                          "four; this sets them together and prints what it set. "
                          "Explicit flags still win, so a sweep can vary one.")
@@ -712,6 +722,21 @@ def main():
                          "objective has no preference about where the axes sit. "
                          "A smooth release instead guides them into a basin and "
                          "hands over once the fit is near convergence.")
+    ap.add_argument("--teach-floor-epoch", type=int, default=-1, metavar="EPOCH",
+                    help="STOP THE DECAY CLOCK at this epoch, so the teaching "
+                         "pull never reaches zero — it holds at the weight it had "
+                         "there, teach_weight*(1 - EPOCH/teach_decay_epochs). "
+                         "Released completely the axes wander off what they were "
+                         "taught (measured: 0.09/0.11/0.06 tail retention at the "
+                         "end of a full production run, indistinguishable from "
+                         "independent); a residual pull is meant to stop the drift "
+                         "while leaving the fit nearly all its freedom. -1 takes "
+                         "the production constant under --production; pass "
+                         "--teach-floor-epoch equal to the decay length for NO "
+                         "floor, which is the arm to measure against. NOTE the "
+                         "patience counter keys on the decay having ENDED, not on "
+                         "the weight being zero, so a floor does not stall the "
+                         "stopping rule.")
     ap.add_argument("--init-directions", default=None,
                     help="FROZEN GAUGE. An npz of per-problem loadings (any "
                          "--dump-params output) to initialize the axis map "
@@ -930,6 +955,18 @@ def main():
                 "lr_net": _prod.LR_NET, "lr_field": _prod.LR_FIELD,
                 "v_ridge": _prod.V_RIDGE, "v_mean_penalty": _prod.V_MEAN_PENALTY,
                 "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
+                # The rating-orthogonality penalty. Dev defaults leave it OFF and
+                # aimed at difficulty alone, so an arm that forgets these three is
+                # not a production arm at all — it is the free control, whose axes
+                # measurably park on slope and floor. Production has no switch for
+                # the target set or the per-tail form (both are structural in the
+                # training loop), so those two are literals here; the weight and
+                # the hinge are read.
+                "ortho_rating": _prod.ORTHO_RATING,   # dev default 0.0
+                "ortho_targets": "rating,slope,floor",  # dev default "b"
+                "ortho_per_tail": True,                 # dev default whole-axis
+                "ortho_hinge": _prod.TAIL_HINGE,
+                "teach_floor_epoch": _prod.TEACH_FLOOR_EPOCH,  # dev default -1
                 "holdout_problem_frac": 0.0,  # production fits the whole corpus
                 "warm_start": "none"}         # production deleted BOTH warm starts
         applied, kept = [], []
@@ -1251,6 +1288,7 @@ def main():
                   flush=True)
 
         teach_tgt = teach_ok = teach_w = None
+        probe_rows = probe_pos = probe_neg = probe_rows_t = None
         if args.teach_directions:
             _b = np.load(args.teach_directions, allow_pickle=False)
             _brow = {f"{sz}:{t}": i for i, (sz, t) in
@@ -1289,9 +1327,44 @@ def main():
             print(f"  TEACHING the axis map from "
                   f"{os.path.basename(args.teach_directions)} on the ATTEMPT "
                   f"stream (weight {args.teach_weight}"
-                  + (f", decaying to 0 over {args.teach_decay_epochs} epochs)"
+                  + (((f", decaying over {args.teach_decay_epochs} epochs, "
+                       f"clock FROZEN at {args.teach_floor_epoch} so the pull "
+                       f"holds at "
+                       f"{args.teach_weight * (1 - args.teach_floor_epoch / args.teach_decay_epochs):.3f})")
+                      if 0 <= args.teach_floor_epoch < args.teach_decay_epochs
+                      else f", decaying to 0 over {args.teach_decay_epochs} epochs)")
                      if args.teach_decay_epochs else ", constant)")
                   + ", trunk learning normally", flush=True)
+
+            # RETENTION PROBE — the taught agreement AS IT MOVES, on the live
+            # parameters, so a schedule can be judged on the trajectory rather
+            # than only on where it happened to stop. It answers the question a
+            # final number cannot: whether the pull ever got the axis onto the
+            # rule in the first place (the CEILING) as against whether it held it
+            # there afterwards (the DRIFT). A weight that never lifts the peak is
+            # not made better by holding longer, and the two are indistinguishable
+            # from the end of the run.
+            #
+            # READ-ONLY and RNG-FREE: eval mode, no_grad, no dropout sample, so a
+            # probed run is bit-identical to an unprobed one and arms measured
+            # with and without it stay comparable.
+            #
+            # Same population and same statistic as bank_identity's paired mode —
+            # attempted AND banked problems, hinged tail correlation per end —
+            # with ONE difference to keep in mind: this reads the CURRENT state
+            # while the end-of-run report reads the RESTORED BEST one, so the last
+            # probe line and the final report need not agree.
+            _att_p = np.zeros(len(keys), bool)
+            _att_p[np.unique(prob_idx)] = True
+            probe_rows = np.where(_ok & _att_p)[0]
+            _tg_p = _T[probe_rows]
+            probe_pos = np.stack([tail_weight_np(_tg_p[:, j])
+                                  for j in range(args.k)], 1)
+            probe_neg = np.stack([tail_weight_np(-_tg_p[:, j])
+                                  for j in range(args.k)], 1)
+            probe_rows_t = torch.tensor(probe_rows, device=device)
+            print(f"  retention probe every {PROBE_EVERY} epochs over "
+                  f"{len(probe_rows)} attempted+banked problems", flush=True)
         tr_eff = tr
         if ax_fold in (0, 1):
             # HOLDING A USER OUT MEANS HOLDING THEM OUT. An earlier version also
@@ -1466,7 +1539,11 @@ def main():
                     if args.teach_until:
                         tw *= 1.0 if ep < args.teach_until else 0.0
                     elif args.teach_decay_epochs:
-                        tw *= max(0.0, 1.0 - ep / args.teach_decay_epochs)
+                        # Freeze the CLOCK at the floor epoch rather than clamping
+                        # the weight, so past it the pull is simply constant.
+                        _e = (min(ep, args.teach_floor_epoch)
+                              if args.teach_floor_epoch >= 0 else ep)
+                        tw *= max(0.0, 1.0 - _e / args.teach_decay_epochs)
                     if tw > 0.0:
                         pid = tp[bi]
                         mk = teach_ok[pid]
@@ -1503,11 +1580,71 @@ def main():
                     best = bce_st
                     best_epoch = ep + 1
                     best_state = [q.detach().clone() for q in m.params()]
-                flat = 0 if improved else flat + 1
+                # The epoch's teaching weight, recomputed here because `tw` is
+                # scoped to the batch loop. Zero whenever nothing is being taught,
+                # so an untaught arm behaves exactly as before. Reported beside
+                # the probe so the trajectory can be read against the pull that
+                # produced it.
+                _tw_now = 0.0
+                if args.teach_directions:
+                    _tw_now = args.teach_weight
+                    if args.teach_until:
+                        _tw_now *= 1.0 if ep < args.teach_until else 0.0
+                    elif args.teach_decay_epochs:
+                        _e_now = (min(ep, args.teach_floor_epoch)
+                                  if args.teach_floor_epoch >= 0 else ep)
+                        _tw_now *= max(0.0, 1.0 - _e_now / args.teach_decay_epochs)
+                # Is the SCHEDULE still moving? Not "is the weight non-zero" —
+                # with a floor the pull never reaches zero, and keying on that
+                # would hold the counter forever and kill every run on the epoch
+                # cap. Staleness becomes meaningful once the objective stops
+                # CHANGING, which is when the decay ends.
+                if not args.teach_directions:
+                    _moving = False
+                elif args.teach_until:
+                    _moving = ep < args.teach_until
+                elif args.teach_decay_epochs:
+                    _end = (args.teach_floor_epoch if args.teach_floor_epoch >= 0
+                            else args.teach_decay_epochs)
+                    _moving = ep < min(_end, args.teach_decay_epochs)
+                else:
+                    _moving = False   # constant weight: never changing
+                # HOLD the patience counter while the teaching weight is alive —
+                # see the long note in pipeline/train_mirt.py. The stop split
+                # scores the likelihood alone while the objective also carries the
+                # teaching MSE, so through the decay the split is flat by
+                # construction and the countdown is judging a metric a schedule is
+                # holding back. Measured: two arms differing only in seed hit one
+                # plateau, one escaping at 10 checks of 30, the other stopping at
+                # epoch 390 with the weight still at 0.61, undertrained by 36 mnat.
+                # NOT applied inside a burn-in, which ENDS on this same counter and
+                # would otherwise run to the epoch cap.
+                if improved:
+                    flat = 0
+                elif not _moving or in_burn:
+                    flat += 1
                 print(f"  {'[burn] ' if in_burn else ''}epoch {ep + 1:4d}  "
                       f"train {bce_tr:.4f}  stop-split {bce_st:.4f}  "
                       f"best {best:.4f}@{best_epoch}  "
-                      f"stale {flat}/{args.flat_patience}", flush=True)
+                      f"stale {flat}/{args.flat_patience}"
+                      + ("  (held: teaching)" if _moving and not in_burn else ""),
+                      flush=True)
+                if probe_rows is not None and (
+                        (ep + 1) % PROBE_EVERY == 0 or ep == args.epochs - 1):
+                    m.train(False)
+                    with torch.no_grad():
+                        _gp = m.problem_params(tfeat)[3][probe_rows_t]
+                    _gp = _gp.cpu().numpy().astype(np.float64)
+                    _cells = []
+                    for _k in range(args.k):
+                        _p = hinged_r(tail_weight_np(_gp[:, _k]),
+                                      probe_pos[:, _k], pre_hinged=True)
+                        _n = hinged_r(tail_weight_np(-_gp[:, _k]),
+                                      probe_neg[:, _k], pre_hinged=True)
+                        _cells.append(f"{_p:+.3f}/{_n:+.3f}")
+                    print(f"    retention @{ep + 1:5d} (weight {_tw_now:.3f}): "
+                          + "  ".join(_cells), flush=True)
+                    m.train(True)
                 if in_burn:
                     # The burn-in ends at its fixed count, or — with none given —
                     # at its OWN convergence under the same patience rule. A

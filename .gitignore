@@ -199,3 +199,8 @@ auxiliary/time_benefit_users.csv
 # data/reference/, and the audit outputs) is version-controlled.
 /data/user_dumps/
 /data/test/
+
+# Dev experiment outputs: parameter dumps, per-run logs and the inspection HTML
+# from auxiliary/rating_dev arms. Multi-hundred-MB, reproducible from the
+# committed code plus a seed, and superseded as soon as the next arm runs.
+dev_runs/
