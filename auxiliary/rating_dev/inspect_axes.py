@@ -90,7 +90,11 @@ def load_dump_npz(path, bank_path=None):
         components.append((f"ax{k}",
                            f"axis {k}" + (f" — taught from {name!r}" if name else ""),
                            M[:, k], name))
-    return tids, components
+    # A dump carries `size` when the fit wrote one; absent, the caller falls back
+    # to pwa/lookup.txt purely to learn which board each problem is on.
+    sizes = ({str(t): int(v) for t, v in zip(z["tid"], z["size"])}
+             if "size" in z.files else {})
+    return tids, components, sizes
 
 
 def load_per_problem_csv(path):
@@ -98,14 +102,19 @@ def load_per_problem_csv(path):
     axes/per_problem.csv (one fit, canonical orientation — the
     shipped loadings, exactly what labels.json names)."""
     import csv as _csv
-    tids, rows = [], []
+    tids, rows, sizes = [], [], {}
     with open(path, newline="") as f:
         reader = _csv.reader(f)
         header = next(reader)
         cols = [i for i, c in enumerate(header) if c.startswith("embed_")]
+        # The CSV states each problem's board, so the board never has to be looked
+        # up in packaging output. See the lookup note in main().
+        size_col = header.index("size") if "size" in header else None
         for row in reader:
             tids.append(row[0])
             rows.append([float(row[i]) for i in cols])
+            if size_col is not None:
+                sizes[row[0]] = int(row[size_col])
     M = np.array(rows, dtype=np.float64)
     # Names come from axes/labels.json's `components`, which is the shipping
     # decision this CSV was produced under — so the standard no-argument run
@@ -122,7 +131,7 @@ def load_per_problem_csv(path):
                            f"axis {k} (production)"
                            + (f" — taught from {name!r}" if name else ""),
                            M[:, k], name))
-    return tids, components
+    return tids, components, sizes
 
 
 # ---- HTML page generation ----------------------------------------------
@@ -440,7 +449,7 @@ def main():
         args.size = "9"
 
     if args.dump:
-        tids, components = load_dump_npz(args.dump, args.bank)
+        tids, components, sizes = load_dump_npz(args.dump, args.bank)
         source = os.path.basename(args.dump)
         if args.bank:
             source += f" taught from {os.path.basename(args.bank)}"
@@ -450,13 +459,28 @@ def main():
             src_path = os.path.join(PROJECT_ROOT, src_path)
         if not os.path.exists(src_path):
             raise SystemExit(f"missing {src_path}; run pipeline.train_mirt first")
-        tids, components = load_per_problem_csv(src_path)
+        tids, components, sizes = load_per_problem_csv(src_path)
         source = os.path.basename(src_path)
 
-    lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
-    if not os.path.exists(lookup_path):
-        raise SystemExit(f"missing {lookup_path}; run pipeline.package_for_pwa first")
-    lookup = load_lookup(lookup_path)
+    # BOARDS COME FROM THE CORPUS, so this page does not depend on packaging at
+    # all. That ordering is the point: the labelling workflow is refit → eyeball
+    # the extremes here → name the axes in labels.json → package. Requiring
+    # pwa/lookup.txt made the tool that GATES packaging refuse to run until
+    # packaging had happened, and reading the shards on top of that raced a
+    # rebuild — shard ids are content-derived, so a run in flight replaces the
+    # files lookup.txt names and every board fails at once.
+    #
+    # per_problem.csv carries its own `size` column, written by the same fit whose
+    # axes this page renders, so it is both sufficient and in step. lookup.txt is
+    # a fallback for a dump that predates the column.
+    lookup = {t: (None, s) for t, s in (sizes or {}).items()}
+    if not lookup:
+        lookup_path = os.path.join(PROJECT_ROOT, "pwa", "lookup.txt")
+        if not os.path.exists(lookup_path):
+            raise SystemExit(
+                f"{source} carries no `size` column and {lookup_path} is absent — "
+                f"no way to tell which board a problem is on.")
+        lookup = load_lookup(lookup_path)
 
     # RANK CAP — for the eyes only, never for a bank. An axis is unbounded and
     # its true extremes run past 9d into problems no human is meant to read, so a

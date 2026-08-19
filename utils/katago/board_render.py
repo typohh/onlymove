@@ -18,7 +18,6 @@ the captured point — the opponent may not immediately recapture.
 
 import os
 import re
-import zipfile
 
 from utils.paths import PROJECT_ROOT
 
@@ -281,20 +280,36 @@ def load_lookup(path=None):
     return out
 
 
-def fetch_sgf(tsumego_id, zip_id, size):
-    zip_path = os.path.join(
-        PROJECT_ROOT, "pwa", "tsumegos", str(size), f"{zip_id}.zip"
-    )
-    with zipfile.ZipFile(zip_path) as z:
-        with z.open(f"{tsumego_id}.sgf") as f:
-            return f.read().decode("utf-8")
+def fetch_sgf(tsumego_id, zip_id=None, size=None):
+    """The problem's SGF, read from the CORPUS — tsumegos/<size>/<tid>.sgf.
+
+    NOT from pwa/tsumegos/<size>/<zip_id>.zip, which is what this used to do and
+    which was backwards in two ways. The corpus is the ground truth every stage
+    reads; the shards are one consumer's packaging of it, written by a step that
+    runs LAST. Every caller here is an inspection tool, and the labelling workflow
+    puts inspection BEFORE packaging — refit, eyeball the extremes, name the axes
+    in labels.json, then package — so sourcing boards from the packager's output
+    meant the tool that gates packaging could not run until packaging had already
+    happened. Worse, it raced: shard ids are content-derived, so a rebuild in
+    flight replaces the very files lookup.txt names and every board fails at once.
+
+    Nothing is lost by reading the corpus: packaging copies these bytes verbatim
+    into the zip (_zip_writestr with the file's own contents), so the two are
+    identical for every purpose, and the corpus additionally covers problems that
+    have not been packaged yet.
+
+    `zip_id` is accepted and ignored, so existing callers need no change.
+    """
+    path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tsumego_id}.sgf")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 
 
 def render_problem(tid, zip_id, size):
     """Fetch + parse + simulate + render a single problem.
 
     Returns {svg, to_move ("Black"/"White"/"?"), board, correct, last_move,
-    ko, has_ko}. Raises FileNotFoundError/KeyError if the zip/SGF is missing.
+    ko, has_ko}. Raises FileNotFoundError if the corpus SGF is missing.
     """
     sgf = fetch_sgf(tid, zip_id, size)
     sz, setup, correct = parse_sgf(sgf)
