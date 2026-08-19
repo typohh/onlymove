@@ -575,8 +575,11 @@ def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath):
 def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
     """Bot winrate in a shared column layout across boards (the bots are the same;
     a bot's logit pass-rate means the same thing on either board). Common file set =
-    intersection across boards; clip→logit→pooled mean-impute→drop pooled-zero-var→
-    pooled z-score. Returns {(size, tid): vec}, n_cols."""
+    intersection across boards; clip→logit→drop pooled-zero-var→pooled z-score.
+    Returns {(size, tid): vec}, n_cols.
+
+    PARTIAL COVERAGE RAISES rather than being filled — see the check below for why
+    the column mean is the one filler that cannot be allowed here."""
     import glob
     filesets = []
     for size in sizes:
@@ -611,9 +614,37 @@ def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
             keys.append((size, t))
             mat.append([cols[j].get(t, np.nan) for j in range(len(common))])
     X = np.array(mat, dtype=np.float64)
-    colmean = np.nanmean(X, axis=0)
-    nan = np.where(np.isnan(X))
-    X[nan] = np.take(colmean, nan[1])
+    # A BLANK CELL RAISES; IT IS NEVER FILLED. Every other block in this module
+    # already refuses a gap (see _missing_block_error) and this was the one that
+    # did not: it substituted the column mean, which is the worst available
+    # filler precisely because it is the most plausible one. After the pooled
+    # z-score the column mean IS the population's value, so a problem no bot was
+    # asked about enters the fit asserting that the bot found it exactly average
+    # — and nothing downstream can tell that apart from a measurement. The tid
+    # keeps its rating, its slope, its floor and its axis vector, priced in part
+    # on a number that was invented here.
+    #
+    # Note the two gap shapes are caught in different places and both are loud:
+    # a problem NO bot attempted never reaches this matrix (`usable` drops it)
+    # and joint_feature_tail raises on it; a problem SOME bots attempted lands
+    # here as a hole in an otherwise real row, which is this check.
+    if np.isnan(X).any():
+        rows, colsi = np.where(np.isnan(X))
+        per_bot = {common[c]: int((colsi == c).sum())
+                   for c in sorted(set(colsi.tolist()))}
+        examples = [f"{keys[r][0]}/{keys[r][1]}" for r in rows[:5].tolist()]
+        raise ValueError(
+            f"bot_winrate has {len(rows)} MISSING CELLS across "
+            f"{len(per_bot)} bot(s) — partial coverage, which this block refuses "
+            f"to impute. Per bot (missing attempt rows): {per_bot}. Example "
+            f"problems: {examples}. Fix the DATA, not the reader: either run "
+            f"`./.venv/bin/python3 -m pipeline.benchmark_bots <size>` so the "
+            f"bot covers the whole corpus (it is incremental — each bot only "
+            f"solves the tids missing from its own attempt file), or, if the bot "
+            f"is RETIRED and nothing regenerates it, delete its attempts/<size>/ "
+            f"file on BOTH boards so its column leaves the pooled layout "
+            f"entirely. A retired bot's partial file is not a cheap extra "
+            f"feature; it is a column that is mostly invented.")
     keep = np.nanstd(X, axis=0) > 1e-9
     X = X[:, keep]
     X = (X - X.mean(0)) / X.std(0)
