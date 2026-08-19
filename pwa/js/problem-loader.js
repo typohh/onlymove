@@ -75,67 +75,54 @@ async function selectRecallCandidate() {
 // recently-answered problems and any blacklisted by the session's load-failure
 // retry loop.
 //
-// What we want is the 50 problems CLOSEST to the serve rank in the corpus, not
-// the 50 closest among whatever happens to be loaded — and those differ whenever
-// an unloaded shard sits nearer than a candidate we are holding. `allowOffRank`
-// decides which of the two we settle for. Default FALSE: a pool that isn't the
-// corpus's own 50 closest reads as "no candidate", the same as an empty one, so
-// the caller loads the nearer shards first (see expandPoolForCandidate). Only
-// expandPoolForCandidate passes true — it has already tried those shards and
-// knows whether they were reachable, so it owns the decision to serve off-rank
-// and the toast that says so.
+// Candidates come from the UNBROKEN RUN of loaded shards around the serve rank,
+// never from `state.allProblems` at large. Because the run is contiguous and
+// contains the band the serve rank falls in, its nearest 50 are the nearest 50
+// full stop, up to the run's own edges — no unloaded shard hides between the
+// serve rank and a candidate. That is what makes a PARTIAL run safe to serve
+// from: fewer than 50, or 50 drawn from one band, is still a genuine
+// neighbourhood of the user's level, so the error is bounded by a band's width
+// and never by how far away some unrelated shard happens to be.
 //
-// Without this the pool a DEEP LINK loaded becomes the candidate set: opening a
+// The pool at large is not safe, and a DEEP LINK is how it goes wrong: opening a
 // shared problem loads that problem's shard and nothing else (the linked path
-// never assigns a challenge), so a reassignment during that session drew the
-// standing challenge from one off-rank shard — and setChallengeProblem persists
-// it, so the off-rank pick outlived the session.
-function selectChallengeCandidate({ allowOffRank = false } = {}) {
-    const recentAnswers = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
-    const excluded = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
-    const available = state.allProblems.filter(p =>
-        !excluded.has(p.filename) &&
-        !state.unavailableProblemIds.has(tsumegoIdOf(p.filename)));
-
-    if (available.length === 0) return null;
-
+// never assigns a challenge), so with `state.allProblems` as the candidate set a
+// reassignment during that session drew the standing challenge from one arbitrary
+// off-rank shard — and setChallengeProblem persists, so the pick outlived the
+// session. The run test rejects that shard for the only reason that matters: it
+// is not the band the user's rank falls in.
+//
+// Returns null when the run is EMPTY (the covering band isn't loaded) or holds
+// nothing servable — the caller then loads bands and asks again, and only if that
+// fails does it come back with `anchorToLoaded` for the degraded serve.
+function selectChallengeCandidate({ anchorToLoaded = false } = {}) {
     // Serve near the SERVE rank (estimate + the uncertainty-scaled UCB bonus), not
     // the displayed rank: while the rank estimate is still loose this pushes
     // problems slightly harder (faster, more informative onboarding), collapsing to
     // at-level once the posterior tightens. Display/scoring still read userRank.
     const serveRank = state.serveRank;
+    const run = loadedShardRun(serveRank, anchorToLoaded);
+    if (!run) return null;
+
+    const recentAnswers = state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH);
+    const excluded = new Set(recentAnswers.map(a => `${a.problemId}.sgf`));
+    // The recently-answered exclusion applies on EVERY path, the degraded one
+    // included: serving away from the user's rank is a compromise we tell them
+    // about, re-serving a problem they just answered is not one we make at all.
+    const available = state.allProblems.filter(p =>
+        run.has(p.zipFilename) &&
+        !excluded.has(p.filename) &&
+        !state.unavailableProblemIds.has(tsumegoIdOf(p.filename)));
+
+    if (available.length === 0) return null;
+
     available.sort((a, b) => Math.abs(a.rank - serveRank) - Math.abs(b.rank - serveRank));
     const candidateProblems = available.slice(0, 50);
 
-    // Is this the corpus's 50 closest, or only the loaded pool's? An unloaded
-    // shard nearer than our farthest candidate would displace that candidate, so
-    // the set we are about to choose from is not the one selection is defined
-    // over. Same verdict when the pool can't even fill 50 and anything is left
-    // unloaded. No tolerance band: "nearer" is the comparison, because a margin
-    // would be a threshold on how wrong the pool may be, and there is no rank gap
-    // at which serving from the wrong shard becomes correct.
-    const closestZip = findClosestUnloadedZip();
-    const closestZipDiff = closestZip
-        ? Math.min(Math.abs(serveRank - closestZip.minRank), Math.abs(serveRank - closestZip.maxRank))
-        : Infinity;
-    const farthestDiff = candidateProblems.length < 50
-        ? Infinity
-        : Math.abs(candidateProblems[49].rank - serveRank);
-
-    if (closestZipDiff < farthestDiff) {
-        // Refuse, so assignNewChallenge awaits the nearer shards rather than
-        // committing what we hold. The background load stays for the allowOffRank
-        // path, which returns a candidate now and wants the better pool next time.
-        if (!allowOffRank) return null;
-        backgroundLoadCloserZip();
-    } else {
-        // The pool holds the corpus's 50 closest. Keep the neighbouring bands warm
-        // so the NEXT serve still does, once the rank has drifted — without this
-        // every band crossing is an awaited download in the middle of the
-        // answer-result overlay, since the refusal above is the only thing left to
-        // notice the pool has fallen behind.
-        warmNeighbourZips(serveRank);
-    }
+    warmBeyondCandidateSpan(candidateProblems);
+    // The covering band is loaded, so we are no longer serving away from the
+    // user's rank — whatever put us in that mode has resolved.
+    if (!anchorToLoaded) exitOffRankServing();
 
     // TWO REGIMES, each taking the BEST candidate in its own criterion. While the
     // rank estimate is still converging, serve for INFORMATION: quality = the 4PL
@@ -212,10 +199,12 @@ async function loadZipMetadata() {
             z.minRank = rankForSize(z.min_rating, state.boardSize);
             z.maxRank = rankForSize(z.max_rating, state.boardSize);
         }
-        // Sorted by band, so ADJACENCY is index ±1 (warmNeighbourZips). The
-        // shipped file already arrives in this order; sorting says so rather than
-        // depending on it. Every other reader looks a shard up by filename or
-        // re-sorts by its own distance, so the order is free to be this one.
+        // Sorted by band, so ADJACENCY is index ±1 — which is what lets
+        // loadedShardRun walk a contiguous run and warmBeyondCandidateSpan step
+        // just outside it. The shipped file already arrives in this order; sorting
+        // says so rather than depending on it. Every other reader looks a shard up
+        // by filename or re-sorts by its own distance, so the order is free to be
+        // this one.
         zips.sort((a, b) => a.min_rating - b.min_rating);
         state.zipMetadata = zips;
     }
@@ -402,28 +391,21 @@ async function isZipCached(zipFilename) {
 const EXPAND_NETWORK_ATTEMPTS = 3;
 const EXPAND_ZIP_LOADS = 8;
 
-// Unusable-pool fallback: the loaded pool yields no candidate selection would
-// accept — it is exhausted, or it is not the corpus's 50 closest to the serve
-// rank (see selectChallengeCandidate) — so walk the unloaded shards
-// nearest-first until one yields a candidate. Service-worker-cached shards work
-// offline, so probing the cache lets an offline user keep playing from whatever
-// is on the device instead of dead-ending into the stale re-serve. Returns null
-// only when nothing anywhere yields a candidate (the caller then falls through
-// to the stale re-serve terminal path). Also drives the off-rank mode
-// transitions: a candidate that needed skipping a FAILED nearer shard enters it;
-// a candidate found with no failures means the nearest shards are reachable
-// again — exit.
+// Empty-run fallback: the loaded run around the serve rank holds nothing servable
+// (usually because the covering band isn't downloaded — see
+// selectChallengeCandidate), so walk the unloaded shards nearest-first until one
+// gives the run something. Service-worker-cached shards are probed BEFORE a
+// network attempt is spent, so an offline device keeps playing from the bands it
+// already holds instead of dead-ending into the stale re-serve. Returns null only
+// when nothing anywhere yields a candidate (the caller then falls through to the
+// stale re-serve terminal path).
 //
-// The walk probes with allowOffRank so it stops at the FIRST shard that loads.
-// It cannot re-apply the near-rank test on each pass: a shard that failed to
-// load stays unloaded, so the test would keep failing against a shard we already
-// know is unreachable and the walk would never return. Walking nearest-first is
-// what makes stopping there right — everything skipped was nearer and failed,
-// which is exactly the `failures` signal below.
+// The walk cannot loop on a shard it failed to load: the run test asks whether
+// the covering band is loaded, not whether some nearer shard is missing, so a
+// failed shard simply leaves the run empty and the walk moves outward.
 async function expandPoolForCandidate() {
     let loads = 0;
     let networkAttempts = 0;
-    let failures = 0;
     for (const zip of unloadedZipsByDistance()) {
         if (loads >= EXPAND_ZIP_LOADS) break;
         if (!(await isZipCached(zip.filename))) {
@@ -434,26 +416,20 @@ async function expandPoolForCandidate() {
             await loadZipProblems(zip.filename);
         } catch (error) {
             console.error(`expandPoolForCandidate: zip load failed for ${zip.filename}:`, error);
-            failures++;
             continue;
         }
         loads++;
-        // A loaded shard can still yield nothing (all its problems recently
-        // answered) — that's legitimate exhaustion, not a failure; keep
-        // walking outward.
-        const raw = selectChallengeCandidate({ allowOffRank: true });
-        if (raw) {
-            if (failures > 0) enterOffRankServing();
-            else exitOffRankServing();
-            return raw;
-        }
+        // A loaded shard can still leave the run empty — it wasn't the covering
+        // band, or everything in it was recently answered. Keep walking outward.
+        const raw = selectChallengeCandidate();
+        if (raw) return raw; // selection exits off-rank mode: the band is loaded
     }
-    // Nothing loadable. Serve the best the loaded pool has after all — a
-    // far-from-rank problem still teaches something, where the stale re-serve of
-    // an already-answered one does not. This is the ONLY path that commits an
-    // off-rank challenge, and it says so: the user is told we are serving away
-    // from their rank rather than left to infer it from the problems.
-    const offRank = selectChallengeCandidate({ allowOffRank: true });
+    // The covering band is unreachable. Serve from the nearest run we DO hold —
+    // still a contiguous neighbourhood, just not the user's own — because a
+    // far-from-rank problem teaches something where re-serving an answered one
+    // does not. This is the ONLY path that commits an off-rank challenge, and it
+    // says so: the user is told rather than left to infer it from the problems.
+    const offRank = selectChallengeCandidate({ anchorToLoaded: true });
     if (offRank) {
         enterOffRankServing();
         return offRank;
@@ -461,29 +437,73 @@ async function expandPoolForCandidate() {
     return null;
 }
 
-// Keeps the two shards ADJACENT to the one covering the serve rank loaded, so a
-// rank that drifts across a band edge finds the next band already in the pool
-// instead of stalling the serve on a download. Fire-and-forget, and bounded to
-// ±1 band: it follows the rank rather than growing outward, so it cannot walk
-// the pool across the corpus the way "nearest unloaded shard, every serve" would.
+// The unbroken run of LOADED shards containing the band nearest the serve rank,
+// as a Set of filenames — or null when that band isn't loaded, which is the
+// "nothing in the run" case the caller expands on. Contiguity is the whole point:
+// a run that reaches the serve rank's own band has no unloaded shard between the
+// rank and any of its problems, so the nearest 50 within it are the nearest 50
+// available at all.
 //
-// This is the whole answer to "prefetch where the user will land". Predicting the
-// post-answer rank for a correct and an incorrect outcome and loading those two
-// bands measures WORSE: an answer moves the rank by far less than a band is wide,
-// so both outcomes are already inside this bracket, and where the rank does move
-// fast the two point estimates straddle a gap that a contiguous bracket covers and
-// they do not. Don't add the prediction.
-function warmNeighbourZips(serveRank) {
+// `anchorToLoaded` is the DEGRADED anchor: take the nearest band that IS loaded
+// rather than the nearest band that exists. Used only after loading has been
+// tried and failed, so the user gets a coherent neighbourhood of whatever is on
+// the device instead of the single closest orphan — and gets told (see
+// expandPoolForCandidate).
+function loadedShardRun(serveRank, anchorToLoaded = false) {
     const zips = state.zipMetadata;
-    if (zips.length === 0) return;
+    if (zips.length === 0) return null;
     const dist = z => Math.min(Math.abs(serveRank - z.minRank), Math.abs(serveRank - z.maxRank));
-    let home = 0;
-    for (let i = 1; i < zips.length; i++) if (dist(zips[i]) < dist(zips[home])) home = i;
-    for (const i of [home - 1, home + 1]) {
+    let home = -1;
+    for (let i = 0; i < zips.length; i++) {
+        if (anchorToLoaded && !state.loadedZips[zips[i].filename]) continue;
+        if (home < 0 || dist(zips[i]) < dist(zips[home])) home = i;
+    }
+    if (home < 0 || !state.loadedZips[zips[home].filename]) return null;
+
+    let lo = home, hi = home;
+    while (lo > 0 && state.loadedZips[zips[lo - 1].filename]) lo--;
+    while (hi < zips.length - 1 && state.loadedZips[zips[hi + 1].filename]) hi++;
+    const run = new Set();
+    for (let i = lo; i <= hi; i++) run.add(zips[i].filename);
+    return run;
+}
+
+// Loads the shards immediately OUTSIDE the bands the current candidates occupy,
+// so the run always extends past the candidate window and the next serve — after
+// the rank has drifted — still fills its 50 from the run's interior. Without it
+// the run only ever grows when a serve has already found it too small, which puts
+// a download in the middle of the answer-result overlay.
+//
+// SELF-LIMITING, no cap needed: bands are contiguous in rating and M is monotone,
+// so once the band beyond an edge is loaded, everything in it is farther from the
+// serve rank than the edge band's own problems — the 50 cannot reach past it, the
+// span stops moving, and the prefetch stops finding anything unloaded. Anchoring
+// on the CANDIDATES rather than on the serve rank's band is what gives that: the
+// window is what has to be fillable, so the window is what we widen around.
+//
+// This is also the whole answer to "prefetch where the rank will land". Predicting
+// the post-answer rank for a correct and an incorrect outcome and fetching those
+// two bands measures WORSE: an answer moves the rank by far less than a band is
+// wide, so both outcomes are already inside this span, and where the rank does
+// move fast the two point estimates straddle a gap a contiguous span covers and
+// they do not. Don't add the prediction.
+function warmBeyondCandidateSpan(candidateProblems) {
+    const zips = state.zipMetadata;
+    if (zips.length === 0 || candidateProblems.length === 0) return;
+    const indexOf = filename => zips.findIndex(z => z.filename === filename);
+    let lo = Infinity, hi = -Infinity;
+    for (const p of candidateProblems) {
+        const i = indexOf(p.zipFilename);
+        if (i < 0) continue;
+        if (i < lo) lo = i;
+        if (i > hi) hi = i;
+    }
+    if (lo === Infinity) return;
+    for (const i of [lo - 1, hi + 1]) {
         const z = zips[i];
         if (!z || state.loadedZips[z.filename]) continue;
         loadZipProblems(z.filename).catch(error =>
-            console.error(`Failed to warm neighbour zip ${z.filename}:`, error));
+            console.error(`Failed to warm adjacent zip ${z.filename}:`, error));
     }
 }
 
