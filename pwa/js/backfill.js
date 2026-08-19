@@ -65,22 +65,56 @@ const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 // from it is gone for good; we strip its model fields (the entry stays for
 // activity/time/count).
 const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
-// Fields stripped from a removed-problem entry: everything the rank chart,
-// weakness model, and recall trainer key on. date/timeTaken/size/problemId/
-// correct stay, so the attempt still counts toward activity/time/solved stats.
-const PRUNE_STRIP_FIELDS = [
-    'problemRating', 'problemRawRating', 'problemRank', 'problemSlope',
-    'problemQuality', 'problemFloor', 'embedding', 'pickedEmbedding', 'pickedCellIndex',
-];
+
+// The per-attempt fields that are DERIVED from a pipeline artifact, declared once
+// here and cleared only through these lists. Three passes below remove them for
+// three different reasons (a refit invalidates them, they age out of the keep
+// window, or their problem left the corpus), and each used to spell its own list
+// out by hand — which is how the refit wipe came to clear `embedding` and leave
+// `pickedEmbedding` behind. A survivor is unreachable after that: every fill is
+// fill-if-MISSING, so a stale vector is never refetched, and it is a well-formed
+// K-array that nothing downstream can tell from a current one. Naming the fields
+// in one place is what stops the next derived field being wired into the fills
+// and missed by one of the clears.
 
 // The rating fields the cold-tail re-derive writes (present problems) or strips
 // (problems that left the corpus — never leave a stale rating on a removed problem;
-// flattenAttempts then drops the rating-less attempt from the chart). Subset of
-// PRUNE_STRIP_FIELDS without the embedding fields, which the tail never carries.
+// flattenAttempts then drops the rating-less attempt from the chart). The tail
+// never carries embeddings, which is why this list stands alone.
 const RATING_FIELDS = [
     'problemRating', 'problemRawRating', 'problemRank',
     'problemSlope', 'problemQuality', 'problemFloor',
 ];
+
+// The FIT-DERIVED vectors: an embedding refit invalidates exactly these, so this
+// is the list the refit wipe clears.
+const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding'];
+
+// The vectors plus `pickedCellIndex`. The index is NOT fit-derived — it addresses
+// the SGF's root variations, so a refit cannot move it, and it is the key the
+// picked refill is looked up by. So the refit wipe keeps it (dropping it would
+// make the wiped vector unrecoverable) while the two passes that are NOT going to
+// refill — the keep-window strip and the removed-problem prune — drop it too.
+const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex'];
+
+// Fields stripped from a removed-problem entry: everything the rank chart,
+// weakness model, and recall trainer key on. date/timeTaken/size/problemId/
+// correct stay, so the attempt still counts toward activity/time/solved stats.
+const PRUNE_STRIP_FIELDS = [...RATING_FIELDS, ...EMBEDDING_ALL_FIELDS];
+
+// Delete `fields` from one entry; true iff any of them were present. The single
+// removal primitive the three passes share, so "which fields" is always a list
+// argument and never something a caller spells out.
+function deleteFields(a, fields) {
+    let touched = false;
+    for (const f of fields) {
+        if (a[f] !== undefined) {
+            delete a[f];
+            touched = true;
+        }
+    }
+    return touched;
+}
 // Legacy per-version flag keys, cleared on each embedding refit so they don't
 // linger in users' localStorage.
 const STALE_FLAG_KEYS = (size) => [
@@ -278,9 +312,7 @@ async function pruneRemovedProblems(embeddingVersion, ratingsVersion) {
             && PRUNE_STRIP_FIELDS.some(k => a[k] !== undefined));
         if (removed.length === 0) continue;
 
-        for (const a of removed) {
-            for (const k of PRUNE_STRIP_FIELDS) delete a[k];
-        }
+        for (const a of removed) deleteFields(a, PRUNE_STRIP_FIELDS);
         persistAnswerHistory(size, history);
         prunedAny = true;
         console.log(`prune[${size}]: stripped removed-problem fields from ${removed.length} entries`);
@@ -620,13 +652,18 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
 
 // Embedding wipe — only when embedding_version changed. Rating-only
 // refreshes keep the trained model intact.
+//
+// Clears EMBEDDING_VECTOR_FIELDS, so `pickedCellIndex` survives to address the
+// refill — see the field lists at the top for why that one is not fit-derived.
+// What makes a survivor here worse than a missed refill: the fills are
+// fill-if-MISSING, so a vector this pass leaves behind is never refetched, and it
+// reaches the weakness fit through beta_picked — which the pane reads as part of
+// the SUM and selection reads as the CONTRAST, so one stale field moves both the
+// reported weakness and the problems served for it.
 function wipeStaleEmbeddings(size, history, serverEmbeddingVersion) {
     let cleared = 0;
     for (const a of history) {
-        if (a.embedding) {
-            delete a.embedding;
-            cleared++;
-        }
+        if (deleteFields(a, EMBEDDING_VECTOR_FIELDS)) cleared++;
     }
     if (cleared > 0) {
         // Wipe the single shared weakness model — it was trained on this
@@ -740,11 +777,7 @@ function stripOldEmbeddingFields(size, history, startIdx) {
     for (let i = 0; i < startIdx; i++) {
         const a = history[i];
         if (!a) continue;
-        let touched = false;
-        if (a.embedding !== undefined) { delete a.embedding; touched = true; }
-        if (a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; touched = true; }
-        if (a.pickedCellIndex !== undefined) { delete a.pickedCellIndex; touched = true; }
-        if (touched) strippedOld++;
+        if (deleteFields(a, EMBEDDING_ALL_FIELDS)) strippedOld++;
     }
     if (strippedOld > 0) {
         persistAnswerHistory(size, history);
