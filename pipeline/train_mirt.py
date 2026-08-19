@@ -561,8 +561,10 @@ def main():
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
-          f"directions, taught with weight {TEACH_WEIGHT} decaying to zero over "
-          f"{TEACH_DECAY_EPOCHS} epochs", flush=True)
+          f"directions, taught with weight {TEACH_WEIGHT} decaying over "
+          f"{TEACH_DECAY_EPOCHS} epochs and holding at "
+          f"{TEACH_WEIGHT * (1.0 - TEACH_FLOOR_EPOCH / TEACH_DECAY_EPOCHS):.2f} "
+          f"from epoch {TEACH_FLOOR_EPOCH}", flush=True)
 
     m = JointMIRT(fdim, n_users, input_dim, device, SEED)
     opt = torch.optim.Adam(m.param_groups())
@@ -571,7 +573,8 @@ def main():
     best, best_state, flat, best_epoch = float("inf"), None, 0, 0
     stopped = False
     print(f"\n=== joint fit | K={K_AXES} | teach decays over "
-          f"{TEACH_DECAY_EPOCHS} epochs ===", flush=True)
+          f"{TEACH_DECAY_EPOCHS} epochs, floored at epoch "
+          f"{TEACH_FLOOR_EPOCH} ===", flush=True)
 
     for ep in range(EPOCHS):
         m.train(True)
