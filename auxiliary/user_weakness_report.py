@@ -8,11 +8,17 @@ re-run ahead of the last package_for_pwa" caveat). The ported surfaces are:
 
   - pwa/js/weakness.js          — trainWeakness(): the 2K+2 logistic regression
                                   (α + γ·rank + Σ β_correct·correct_emb
-                                   + Σ β_picked·picked_emb), per-axis ridge prior,
-                                  Adam, and the Laplace posterior (SE + per-axis
-                                  2×2 cov on (β_correct[k], β_picked[k])).
+                                   + Σ β_picked·picked_emb), per-axis ridge prior
+                                  centred on half the shipped sum mean, and the
+                                  Laplace posterior (SE + per-axis 2×2 cov on
+                                  (β_correct[k], β_picked[k])).
+  - pwa/js/optimizer.js         — newtonBlockStep(): the damped-Newton step the fit
+                                  takes, its Armijo backtrack and the Newton
+                                  decrement it stops on.
   - pwa/js/stats-weaknesses.js  — buildLikelyIssuesElement(): level-1 flagging on
-                                  the identified SUM posterior + level-2 direction.
+                                  the identified SUM posterior against the shipped
+                                  population centre, the false-flag error budget,
+                                  and the level-2 direction.
   - pwa/js/stats-compute.js     — computeAxisDirections()/betaProbAboveHalf(): the
                                   paired picked−correct sign test.
 
@@ -71,14 +77,15 @@ POP_CONSTANTS = os.path.join(PROJECT_ROOT, "pwa", "tsumegos", "population_consta
 # --- Constants (verbatim from the JS sources) ------------------------------
 MIN_TRAINING_ATTEMPTS = 20         # weakness.js
 MODEL_INPUT_HISTORY_LENGTH = 500   # constants.js
-MAX_EPOCHS = 200                   # weakness.js
-LEARNING_RATE = 0.05               # weakness.js
-LOSS_CONVERGENCE = 1e-6            # weakness.js
-ADAM_BETA1, ADAM_BETA2, ADAM_EPS = 0.9, 0.999, 1e-8  # optimizer.js ADAM_DEFAULTS
-LAPLACE_GUARD_LAMBDA = 1e-6        # weakness.js lamVec guard on intercept/rating
+MAX_NEWTON_ITERS = 50              # weakness.js (runaway guard, not a budget)
+NEWTON_TOL = 1e-8                  # weakness.js, on decrement/2
+ARMIJO_C = 1e-4                    # optimizer.js
+MAX_BACKTRACKS = 30                # optimizer.js
+RIDGE_GUARD = 1e-6                 # weakness.js lamVec guard on intercept/rating
 
 # Level-1 / level-2 detection thresholds (stats-weaknesses.js).
 WEAK_PROB_THRESHOLD = 0.80
+WEAK_FALSE_FLAG_BUDGET = 0.5       # expected spurious issues the pane will show
 DIRECTION_PROB_THRESHOLD = 0.85
 MIN_DIRECTION_N = 3
 
@@ -130,17 +137,6 @@ def beta_prob_above_half(pos, neg):  # stats-compute.js
     return min(1.0, max(0.0, total))
 
 
-def adam_update(params, grad, st, lr):  # optimizer.js
-    bc1 = 1.0 - ADAM_BETA1 ** st["t"]
-    bc2 = 1.0 - ADAM_BETA2 ** st["t"]
-    m, v = st["m"], st["v"]
-    for j in range(len(params)):
-        m[j] = ADAM_BETA1 * m[j] + (1 - ADAM_BETA1) * grad[j]
-        v[j] = ADAM_BETA2 * v[j] + (1 - ADAM_BETA2) * grad[j] * grad[j]
-        mh = m[j] / bc1
-        vh = v[j] / bc2
-        params[j] -= lr * mh / (math.sqrt(vh) + ADAM_EPS)
-
 
 # ---------------------------------------------------------------------------
 # Data loading.
@@ -189,7 +185,8 @@ def load_labels_and_prior():
     with open(POP_CONSTANTS) as f:
         pop = json.load(f)
     axis_lambda = pop["weakness_axis_lambda"]
-    return labels, K, axis_lambda
+    axis_sum_mean = pop["weakness_axis_mean"]
+    return labels, K, axis_lambda, axis_sum_mean
 
 
 class PickedCellLoader:
@@ -272,9 +269,47 @@ def build_history(con, user_id, correct_emb, ratings, curves, picked_loader):
 # ---------------------------------------------------------------------------
 # Model: trainWeakness() + Laplace posterior (weakness.js).
 # ---------------------------------------------------------------------------
-def train_weakness(history, K, axis_lambda):
+def solve_linear(A, b):
+    """optimizer.js solveLinear: Gauss-Jordan with partial pivoting; None on a
+    singular pivot or a non-finite solution."""
+    try:
+        x = np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        return None
+    return x if np.all(np.isfinite(x)) else None
+
+
+def newton_block_step(params, grad, hess, loss_fn):
+    """optimizer.js newtonBlockStep over the whole parameter block.
+
+    Returns (decrement, accepted); `params` holds the accepted point, or the
+    starting point when nothing was accepted."""
+    step = solve_linear(hess, grad)
+    if step is None:
+        return 0.0, False
+    decrement = float(grad @ step)
+    if not decrement > 0:          # curvature not PD in this direction
+        return 0.0, False
+    loss0 = loss_fn(params)
+    start = params.copy()
+    t = 1.0
+    for _ in range(MAX_BACKTRACKS):
+        params[:] = start - t * step
+        loss = loss_fn(params)
+        if np.isfinite(loss) and loss <= loss0 - ARMIJO_C * t * decrement:
+            return decrement, True
+        t /= 2.0
+    params[:] = start
+    return decrement, False
+
+
+def train_weakness(history, K, axis_lambda, axis_sum_mean):
     """Returns (params, se, axis_cov) or None when there isn't enough signal —
-    faithful to weakness.js trainWeakness()."""
+    faithful to weakness.js trainWeakness(): a damped-Newton fit of the penalized
+    logistic in RAW SUMS over the window (the scaling the posterior covariance is
+    defined in), with the per-axis ridge pulling each of an axis's two slots
+    toward HALF the shipped population sum centre — so the SUM is pulled to that
+    centre while the CONTRAST is still pulled to zero."""
     hist = history[-MODEL_INPUT_HISTORY_LENGTH:]
     if len(hist) < MIN_TRAINING_ATTEMPTS:
         return None
@@ -283,10 +318,12 @@ def train_weakness(history, K, axis_lambda):
     if not (isinstance(axis_lambda, list) and len(axis_lambda) == K
             and all(np.isfinite(v) and v > 0 for v in axis_lambda)):
         return None
+    if not (isinstance(axis_sum_mean, list) and len(axis_sum_mean) == K
+            and all(np.isfinite(v) for v in axis_sum_mean)):
+        return None
 
     num_params = 2 + 2 * K
-    params = [0.0] * num_params
-    adam = {"m": [0.0] * num_params, "v": [0.0] * num_params, "t": 0}
+    N = len(hist)
 
     # Picked vector per row: sidecar pick for wrong attempts, else the correct
     # embedding (fallback row informs only β_correct + β_picked).
@@ -296,97 +333,78 @@ def train_weakness(history, K, axis_lambda):
         else a["embedding"]
         for a in hist
     ]
-    N = len(hist)
-    prev_loss = float("inf")
 
-    for _ in range(MAX_EPOCHS):
-        adam["t"] += 1
-        grad = [0.0] * num_params
-        loss = 0.0
-        for i in range(N):
-            a = hist[i]
-            corr = a["embedding"]
-            pick = picked_for[i]
-            z = params[0] + params[1] * a["problemRank"]
-            for k in range(K):
-                z += params[2 + k] * corr[k]
-            for k in range(K):
-                z += params[2 + K + k] * pick[k]
-            p = sigmoid(z)
-            clipped = max(1e-15, min(1 - 1e-15, p))
-            y = 1.0 if a["correct"] else 0.0
-            loss += -y * math.log(clipped) - (1 - y) * math.log(1 - clipped)
-            err = p - y
-            grad[0] += err
-            grad[1] += err * a["problemRank"]
-            for k in range(K):
-                grad[2 + k] += err * corr[k]
-            for k in range(K):
-                grad[2 + K + k] += err * pick[k]
-
-        l2 = 0.0
-        for k in range(K):
-            lam = axis_lambda[k]
-            l2 += lam * (params[2 + k] ** 2 + params[2 + K + k] ** 2)
-        loss = loss / N + l2 / (2 * N)
-
-        for j in range(num_params):
-            grad[j] /= N
-        for k in range(K):
-            lam = axis_lambda[k]
-            grad[2 + k] += (lam / N) * params[2 + k]
-            grad[2 + K + k] += (lam / N) * params[2 + K + k]
-        adam_update(params, grad, adam, LEARNING_RATE)
-
-        if abs(prev_loss - loss) < LOSS_CONVERGENCE:
-            break
-        prev_loss = loss
-
-    if not all(np.isfinite(p) for p in params):
-        return None
-
-    # Laplace posterior: H = X' diag(p(1-p)) X + diag(lamVec); cov = H^-1.
+    # Design matrix: [1, problemRank, correct_emb, picked_emb].
     X = np.empty((N, num_params))
-    for i in range(N):
-        a = hist[i]
+    for i, a in enumerate(hist):
         X[i, 0] = 1.0
         X[i, 1] = a["problemRank"]
-        corr = a["embedding"]
-        pick = picked_for[i]
-        for k in range(K):
-            X[i, 2 + k] = corr[k]
-            X[i, 2 + K + k] = pick[k]
-    z = X @ np.array(params)
-    p_hat = 1.0 / (1.0 + np.exp(-z))
-    lam_vec = np.full(num_params, LAPLACE_GUARD_LAMBDA)
+        X[i, 2:2 + K] = a["embedding"]
+        X[i, 2 + K:] = picked_for[i]
+    y = np.array([1.0 if a["correct"] else 0.0 for a in hist])
+
+    lam_vec = np.full(num_params, RIDGE_GUARD)
+    prior_mean = np.zeros(num_params)
     for k in range(K):
-        lam_vec[2 + k] = axis_lambda[k]
-        lam_vec[2 + K + k] = axis_lambda[k]
-    W = p_hat * (1.0 - p_hat)
-    fisher = X.T @ (W[:, None] * X)
-    H = fisher + np.diag(lam_vec)
+        lam_vec[2 + k] = lam_vec[2 + K + k] = axis_lambda[k]
+        prior_mean[2 + k] = prior_mean[2 + K + k] = axis_sum_mean[k] / 2.0
+
+    def probs(par):
+        return 1.0 / (1.0 + np.exp(-(X @ par)))
+
+    def loss_at(par):
+        pr = np.clip(probs(par), 1e-15, 1 - 1e-15)
+        d = par - prior_mean
+        return float(-(y * np.log(pr) + (1 - y) * np.log(1 - pr)).sum()
+                     + 0.5 * (lam_vec * d * d).sum())
+
+    def grad_at(par):
+        return X.T @ (probs(par) - y) + lam_vec * (par - prior_mean)
+
+    def hess_at(par):
+        pr = probs(par)
+        w = pr * (1.0 - pr)
+        return X.T @ (w[:, None] * X) + np.diag(lam_vec)
+
+    params = np.zeros(num_params)
+    steps = 0
+    for _ in range(MAX_NEWTON_ITERS):
+        decrement, accepted = newton_block_step(
+            params, grad_at(params), hess_at(params), loss_at)
+        if not accepted:
+            break
+        steps += 1
+        if decrement / 2 < NEWTON_TOL:
+            break
+    if steps == 0:
+        return None
+    if not np.all(np.isfinite(params)):
+        return None
+
+    # Laplace posterior: H at the optimum, cov = H^-1.
+    H = hess_at(params)
     try:
         cov = np.linalg.inv(H)
     except np.linalg.LinAlgError:
         return None
-    diag = np.diag(cov)
-    se = np.sqrt(np.maximum(diag, 1e-12))
+    se = np.sqrt(np.maximum(np.diag(cov), 1e-12))
     if not np.all(np.isfinite(se)):
         return None
     axis_cov = [float(cov[2 + k, 2 + K + k]) for k in range(K)]
-    return params, se.tolist(), axis_cov
+    return params.tolist(), se.tolist(), axis_cov
 
 
 # ---------------------------------------------------------------------------
 # Two-level detection (stats-weaknesses.js + stats-compute.js).
 # ---------------------------------------------------------------------------
 def label_for(labels, k, side):
+    """The motif name at one tail, or None when that tail is unnamed. Symmetric
+    on purpose (stats-weaknesses.js labelFor): an unnamed tail is skipped rather
+    than given a placeholder — "style #2" is not a finding a user can act on."""
     entry = labels[k] if k < len(labels) else None
-    if entry:
-        text = entry.get("negative") if side == "negative" else entry.get("positive")
-        if text:
-            return text
-    return None if side == "negative" else f"style #{k}"
+    if not entry:
+        return None
+    return entry.get("negative") if side == "negative" else entry.get("positive")
 
 
 def compute_axis_directions(history, flagged_ks, K):
@@ -425,11 +443,13 @@ def compute_axis_directions(history, flagged_ks, K):
     return out
 
 
-def detect_issues(history, params, se, axis_cov, labels, K):
+def detect_issues(history, params, se, axis_cov, labels, K, axis_sum_mean):
     """Returns the sorted list of {k, side, quadrant, p, sentence} — the exact
     rows the Weaknesses pane renders (buildLikelyIssuesElement)."""
-    # Level 1: flag axes whose identified SUM coefficient is credibly non-zero.
-    flagged = []
+    # Level 1: flag axes whose identified SUM coefficient sits credibly away from
+    # the shipped POPULATION CENTRE (not from zero — measuring against zero would
+    # report the population's own position as this user's finding).
+    candidates = []
     for k in range(K):
         mu_c, mu_p = params[2 + k], params[2 + K + k]
         var_c = se[2 + k] ** 2
@@ -440,11 +460,28 @@ def detect_issues(history, params, se, axis_cov, labels, K):
         var_sum = var_c + var_p + 2 * cov
         if not (var_sum > 0):
             continue
-        p_weak_pos = norm_cdf(-(mu_c + mu_p) / math.sqrt(var_sum))
+        centre = axis_sum_mean[k]
+        if not np.isfinite(centre):
+            continue
+        p_weak_pos = norm_cdf(-(mu_c + mu_p - centre) / math.sqrt(var_sum))
         if p_weak_pos >= WEAK_PROB_THRESHOLD:
-            flagged.append({"k": k, "p": p_weak_pos, "side": "positive"})
+            if label_for(labels, k, "positive"):
+                candidates.append({"k": k, "p": p_weak_pos, "side": "positive"})
         elif (1 - p_weak_pos) >= WEAK_PROB_THRESHOLD and label_for(labels, k, "negative"):
-            flagged.append({"k": k, "p": 1 - p_weak_pos, "side": "negative"})
+            candidates.append({"k": k, "p": 1 - p_weak_pos, "side": "negative"})
+
+    # MULTIPLICITY: strongest first, admit while the running sum of (1 − p) —
+    # the expected number of spurious issues in the list — stays within the
+    # budget. Sorted descending, so a rejected issue is never followed by a
+    # cheaper one; stop rather than skip.
+    candidates.sort(key=lambda c: c["p"], reverse=True)
+    flagged = []
+    spent = 0.0
+    for c in candidates:
+        if spent + (1 - c["p"]) > WEAK_FALSE_FLAG_BUDGET:
+            break
+        spent += 1 - c["p"]
+        flagged.append(c)
 
     # Level 2: qualify each flagged axis's direction from the paired sign test.
     directions = compute_axis_directions(history, [f["k"] for f in flagged], K)
@@ -465,7 +502,8 @@ def detect_issues(history, params, se, axis_cov, labels, K):
             "motif": motif,
             "sentence": PHRASES[quadrant].format(motif=motif),
         })
-    issues.sort(key=lambda i: i["p"], reverse=True)
+    # Already strongest-first — the budget loop consumed `candidates` in that
+    # order and preserved it.
     return issues
 
 
@@ -489,7 +527,8 @@ def served_rank_label(history):
 # Report assembly.
 # ---------------------------------------------------------------------------
 def report_for_user(con, user_id, ctx):
-    correct_emb, ratings, curves, labels, K, axis_lambda, picked_loader = ctx
+    (correct_emb, ratings, curves, labels, K, axis_lambda, axis_sum_mean,
+     picked_loader) = ctx
     history = build_history(con, user_id, correct_emb, ratings, curves, picked_loader)
     used = min(len(history), MODEL_INPUT_HISTORY_LENGTH)
     result = {
@@ -503,12 +542,12 @@ def report_for_user(con, user_id, ctx):
     if len(history) < MIN_TRAINING_ATTEMPTS:
         result["status"] = "not_enough_data"
         return result
-    trained = train_weakness(history, K, axis_lambda)
+    trained = train_weakness(history, K, axis_lambda, axis_sum_mean)
     if trained is None:
         result["status"] = "model_unavailable"
         return result
     params, se, axis_cov = trained
-    issues = detect_issues(history, params, se, axis_cov, labels, K)
+    issues = detect_issues(history, params, se, axis_cov, labels, K, axis_sum_mean)
     result["status"] = "ok"
     result["issues"] = issues
     return result
@@ -571,11 +610,12 @@ def main():
     correct_emb, K_csv = load_correct_embeddings()
     ratings = load_ratings()
     curves = load_curve()
-    labels, K, axis_lambda = load_labels_and_prior()
+    labels, K, axis_lambda, axis_sum_mean = load_labels_and_prior()
     if K_csv != K:
         print(f"WARNING: per_problem.csv K={K_csv} != embedding_meta K={K}; "
               f"backend/artifacts out of sync", file=sys.stderr)
-    ctx = (correct_emb, ratings, curves, labels, K, axis_lambda, PickedCellLoader())
+    ctx = (correct_emb, ratings, curves, labels, K, axis_lambda, axis_sum_mean,
+           PickedCellLoader())
 
     con = sqlite3.connect(args.db)
     con.row_factory = sqlite3.Row
