@@ -160,10 +160,27 @@ PRIOR_BANDWIDTH = 1.0                  # KDE width, in stones
 # coordinate is bounded, so too tight pins an off-scale user, while too wide hands
 # package_for_pwa a knot with no measurement behind it and the run aborts.
 PRIOR_GRID_SD = 4.0
-# The grid must always contain the labelled ladder, or a legitimately ranked user
-# cannot be represented at all. Not a clamp on the rank scale (which is unbounded
-# by design) — a floor under how far the derivation may narrow.
-PRIOR_GRID_MUST_CONTAIN = (-30.0, 9.0)       # 30k .. 9d, clampRankBand's range
+# A floor under how far the derivation may narrow — not a clamp on the rank scale,
+# which is unbounded by design.
+#
+# THIS IS M'S OWN FITTED RANGE, which is what makes it the right bound rather than
+# a chosen one. rating_to_rank.json carries knots over exactly this span; past
+# either end applyM/interpExtrap is extrapolating off the end interval's slope. So
+# requiring the corpus to price a floor beyond it would demand a MEASUREMENT in a
+# region where the curve itself has none, and the two failures compound — an
+# extrapolated rank fed to a kernel read of an empty corpus.
+#
+# The retired value asked for the labelled ladder (clampRankBand's 30k..9d) on the
+# reasoning that a legitimately ranked user must be representable. Two things are
+# wrong with it. Representability does not need it: an OUTERMOST knot absorbs
+# everything past it and seFloorAt clamps to the range, so a user beyond the edge
+# is served the edge knot rather than falling off. And the rung it demanded is not
+# a real one — a rating IS the 80%-clear point, so a problem priced at 30k is the
+# claim that a 30-kyu player finds the single correct move four times in five,
+# which the corpus does not contain and plausibly cannot. The old bound was
+# satisfiable only while the fit emitted a pathological rating tail; a better-
+# behaved fit narrows that tail and fails it, which is the wrong way round.
+PRIOR_GRID_MUST_CONTAIN = (-20.0, 9.0)       # 20k .. 10d, M's own knot range
 
 # --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
 # The per-axis L2 precision on the client's weakness betas is fit by empirical
