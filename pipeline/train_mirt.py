@@ -34,14 +34,13 @@ the move-eval cache is a hard prerequisite. So are the motif proxies,
 THE AXES ARE TAUGHT ONTO FIXED DIRECTIONS, which is what gives a name a chance to
 outlive a refit. The objective is exactly invariant to rotating the axis space — the
 likelihood reads the loadings and the user positions only through their product,
-and V_RIDGE, V_MEAN_PENALTY and ORTHO_WEIGHT are all rotation-invariant too — so
+and V_RIDGE and V_MEAN_PENALTY are both rotation-invariant too — so
 the fit has a continuum of equal solutions and no preference among them. Left to
 itself it lands wherever initialization drops it: a 2% data change re-rolls the
 basis as hard as a different seed does, which would silently reattach every name
 in `axes/labels.json` to a direction it was not written for. So the axis map is
-not re-derived. It is pulled toward the target by an auxiliary MSE whose weight
-decays linearly on the TEACH_DECAY_EPOCHS schedule while the trunk trains
-normally, and holds at a residual once the clock stops at TEACH_FLOOR_EPOCH.
+not re-derived. It is pulled toward the target by an auxiliary MSE at a constant
+TEACH_WEIGHT for the whole run, while the trunk trains normally.
 
 THE TARGET IS A PROXY RULE, NOT A PREVIOUSLY-FITTED DIRECTION.
 `pipeline.build_motif_proxies` labels every problem against the hand-written
@@ -143,7 +142,6 @@ LR_NET = 3e-4
 LR_FIELD = 1e-2
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
-ORTHO_WEIGHT = 0.5
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 GAUGE_MOM = 0.01
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -170,45 +168,18 @@ SHALLOW_W = 0.3
 # weight against a map it has never seen, which removes an abrupt objective
 # change rather than merely tolerating one.
 #
-# The decay length is a pick on a FRONTIER, not an optimum: identity rises with
-# it and saturates around here while the loss cost rises monotonically, and the
-# two never cross. Hold long, then let go — never releasing costs another 1.1
-# mnat for no further identity, and releasing ABRUPTLY does not stick at all.
+# The pull is CONSTANT for the whole run, and it is what fixes the basis. The
+# likelihood reads the loadings and the user positions only through their
+# product, so rotating the axis space leaves the objective exactly unchanged and
+# nothing else in it prefers one basis to another. Without a standing pull the
+# axes drift off the directions they were taught, and the names in
+# axes/labels.json stop describing what they are attached to.
 #
-# IT MUST ALSO END BEFORE THE FIT DOES, which is what sets it here rather than
-# the frontier alone. FLAT_PATIENCE counts staleness against the objective, and
-# while the decay is still running that objective is still changing — so a
-# schedule outlasting convergence stops the run with the bank still holding the
-# map, and the axes are then scored before they were ever released. A length
-# chosen on a corpus that converged late does not transfer to one that converges
-# early; this value leaves room on the corpus as it stands.
-TEACH_WEIGHT = 1.0
-TEACH_DECAY_EPOCHS = 1000
-# THE DECAY CLOCK STOPS HERE, so the pull never reaches zero — it holds at the
-# weight it had reached, TEACH_WEIGHT*(1 - TEACH_FLOOR_EPOCH/TEACH_DECAY_EPOCHS).
-# Released completely, the axes wander far off the directions they were taught:
-# measured on a full production run, retention against the taught columns ended
-# at 0.09/0.11/0.06 on the tails, which is indistinguishable from independent.
-# Set equal to TEACH_DECAY_EPOCHS for no floor at all (the pull ends), which is
-# the arm this is measured against.
-#
-# THE FLOOR IS NOT A TRADE OF FREEDOM FOR IDENTITY, which is what makes it worth
-# having: the released arm is worse on identity AND on held-out logloss AND on
-# axis contribution AND on rating range, all at once. An axis that has wandered
-# off its taught direction is not thereby a better-fitting axis; it is one that
-# spent the run's freedom on nothing in particular.
-#
-# NOR IS THE EFFECT MONOTONE IN THE RESIDUAL, so this value cannot be reasoned to
-# from the direction of the last change — a floor near the end of the decay, whose
-# residual is a fraction of this one's, is worse on held-out than BOTH this and no
-# floor at all. Move it only by re-running the paired sweep.
-#
-# The multiplier is not a second route to the same place. Retention against the
-# rule columns SATURATES — it does not respond to the pull over a wide range of
-# weights — so raising TEACH_WEIGHT at a matched residual reproduces this arm and
-# costs a little on both criteria. What binds is the shape of the TARGET, not the
-# strength of the pull; see docs/mirt_benchmark.md.
-TEACH_FLOOR_EPOCH = 750
+# The magnitude is not a second lever on identity. Retention against the rule
+# columns SATURATES — it does not respond to the pull across a wide range of
+# weights — so what binds is the shape of the TARGET, not the strength of the
+# pull; see docs/mirt_benchmark.md.
+TEACH_WEIGHT = 0.25
 # IDENTIFIABILITY, the only inclusion rule. Under the 4PL an all-correct record's
 # likelihood rises monotonically to (1-lambda)^n as ability grows without bound,
 # and an all-wrong one to (1-c)^n as it falls, so neither has an interior
@@ -561,10 +532,8 @@ def main():
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
-          f"directions, taught with weight {TEACH_WEIGHT} decaying over "
-          f"{TEACH_DECAY_EPOCHS} epochs and holding at "
-          f"{TEACH_WEIGHT * (1.0 - TEACH_FLOOR_EPOCH / TEACH_DECAY_EPOCHS):.2f} "
-          f"from epoch {TEACH_FLOOR_EPOCH}", flush=True)
+          f"directions, taught at a constant weight of {TEACH_WEIGHT}",
+          flush=True)
 
     m = JointMIRT(fdim, n_users, input_dim, device, SEED)
     opt = torch.optim.Adam(m.param_groups())
@@ -572,16 +541,12 @@ def main():
     n = len(tr)
     best, best_state, flat, best_epoch = float("inf"), None, 0, 0
     stopped = False
-    print(f"\n=== joint fit | K={K_AXES} | teach decays over "
-          f"{TEACH_DECAY_EPOCHS} epochs, floored at epoch "
-          f"{TEACH_FLOOR_EPOCH} ===", flush=True)
+    print(f"\n=== joint fit | K={K_AXES} | teach weight {TEACH_WEIGHT} "
+          f"(constant) ===", flush=True)
 
     for ep in range(EPOCHS):
         m.train(True)
-        # Freezing the CLOCK, not clamping the weight: past the floor epoch the
-        # schedule simply stops advancing, so the weight is constant thereafter.
-        tw = TEACH_WEIGHT * max(0.0, 1.0 - min(ep, TEACH_FLOOR_EPOCH)
-                                / TEACH_DECAY_EPOCHS)
+        tw = TEACH_WEIGHT
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
@@ -591,16 +556,10 @@ def main():
                 pred, ty[bi], reduction="none").sum() / len(bi)
             loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
             loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
-            Mc = gh - gh.mean(dim=0, keepdim=True)
-            Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
-            Cm = Mn.T @ Mn
-            loss = loss + ORTHO_WEIGHT * (
-                (Cm - torch.eye(K_AXES, device=device)) ** 2).sum()
             # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does:
-            # ORTHO_WEIGHT is K x K over the loadings alone, and V_MEAN_PENALTY
-            # pins only the POPULATION mean of v, which blocks an axis acting as
-            # a global difficulty shift but not one tracking difficulty per
-            # problem. Left free, a fit spends an axis on a rating-side property
+            # V_MEAN_PENALTY pins only the POPULATION mean of v, which blocks an
+            # axis acting as a global difficulty shift but not one tracking
+            # difficulty per problem. Left free, a fit spends an axis on a rating-side property
             # and that axis is unnameable when it does.
             #
             # b is DETACHED, so this can only push the axes off difficulty and
@@ -720,20 +679,15 @@ def main():
             # `best` keeps updating throughout, so an early checkpoint is never
             # lost; only the countdown waits. The cost is that a genuinely stuck
             # fit cannot stop before the decay ends, bounded by EPOCHS.
-            # HELD WHILE THE SCHEDULE IS STILL MOVING — not while the weight is
-            # merely non-zero. With a floor the pull never reaches zero, so a
-            # `tw <= 0` test would hold the counter forever and every run would
-            # die on the epoch cap. What makes staleness meaningful is that the
-            # objective has stopped CHANGING, which happens when the decay ends.
-            teaching_moving = ep < TEACH_FLOOR_EPOCH
+            # The teaching weight is constant, so the objective is not moving on
+            # a schedule and staleness is meaningful from the first check.
             if improved:
                 flat = 0
-            elif not teaching_moving:
+            else:
                 flat += 1
             print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  "
                   f"stop {bce_st:.4f}  best {best:.4f}@{best_epoch}  "
-                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}"
-                  + ("  (held: teaching)" if teaching_moving else ""), flush=True)
+                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}", flush=True)
             if flat >= FLAT_PATIENCE:
                 print(f"  stopped at epoch {ep + 1}; restoring best "
                       f"{best:.4f}@{best_epoch}", flush=True)

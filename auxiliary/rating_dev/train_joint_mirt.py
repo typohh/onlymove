@@ -666,6 +666,17 @@ def main():
                          "dependence — an axis whose two tails are both laden in "
                          "opposite directions scores zero — and the tails are what "
                          "get named and what the client reads.")
+    ap.add_argument("--ortho-weight", type=float, default=ORTHO_WEIGHT,
+                    help="penalty weight driving the K x K correlation matrix of "
+                         "the axis LOADINGS toward the identity — what keeps the "
+                         "axes from spanning fewer than K directions. Distinct "
+                         "from --ortho-rating, which pushes each TAIL off the "
+                         "rating side and is the only thing that does. 0 disables "
+                         "it, which is the arm to run once a taught bank pins the "
+                         "basis on its own: the term is K(K-1) squared "
+                         "off-diagonals, so its magnitude grows quadratically in "
+                         "K while --ortho-rating's grows linearly, and a single "
+                         "weight cannot hold both fixed.")
     ap.add_argument("--ortho-hinge", type=float, default=1.0, metavar="Z",
                     help="where the tail begins for --ortho-per-tail, matching "
                          "utils.rating.tail_agreement.TAIL_HINGE")
@@ -951,7 +962,9 @@ def main():
         from pipeline import train_mirt as _prod
         given = {a.split("=")[0].lstrip("-").replace("-", "_") for a in sys.argv[1:]}
         prod = {"flat_patience": _prod.FLAT_PATIENCE,          # dev default 5
-                "teach_decay_epochs": _prod.TEACH_DECAY_EPOCHS,  # dev default 0
+                # Production teaches at a CONSTANT weight; 0 is this surface's
+                # encoding of "no decay", which production has no constant for.
+                "teach_decay_epochs": 0,
                 "lr_net": _prod.LR_NET, "lr_field": _prod.LR_FIELD,
                 "v_ridge": _prod.V_RIDGE, "v_mean_penalty": _prod.V_MEAN_PENALTY,
                 "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
@@ -966,7 +979,10 @@ def main():
                 "ortho_targets": "rating,slope,floor",  # dev default "b"
                 "ortho_per_tail": True,                 # dev default whole-axis
                 "ortho_hinge": _prod.TAIL_HINGE,
-                "teach_floor_epoch": _prod.TEACH_FLOOR_EPOCH,  # dev default -1
+                # Production carries NO axis-axis decorrelation term at all, so
+                # there is no constant to read — 0 is a literal here, as with
+                # teach_decay_epochs above.
+                "ortho_weight": 0.0,                    # dev default 0.5
                 "holdout_problem_frac": 0.0,  # production fits the whole corpus
                 "warm_start": "none"}         # production deleted BOTH warm starts
         applied, kept = [], []
@@ -1185,33 +1201,55 @@ def main():
     # number and this one only when putting it beside production.
     i_ho = torch.tensor(np.where(ho_rows)[0], device=device)
 
-    # --- axis warm start, from the two-stage machinery (same construction), on
-    # the axis trainer's feature matrix restricted to these columns' semantics.
-    # --axis-params-dir reads the rating model's outputs from a named fit rather
+    # --- THE TWO-STAGE AXIS REFERENCE, BUILT ON FIRST USE. It carries the
+    # feature matrix the EIGEN warm start is derived from, the tid index the
+    # end-of-run reference criterion is scored on, and that criterion's external
+    # 4PL. Three consumers and not one of them certain to run: the eigen warm
+    # start is off under --production, the fold mask appears only under
+    # --axis-holdout-fold, and --fit-only or --k 0 returns before the report.
+    # Built up front it charged EVERY run a second joint-activation load and a
+    # read of a rating fit outside this one, runs that never look at the result
+    # included.
+    #
+    # --axis-params-dir reads that outside fit from a named directory rather
     # than the shipped ratings/, which was trained on EVERY user and every
-    # problem. Leaving it unset under a holdout means the warm start is derived
+    # problem. Leaving it unset under a holdout means the reference is derived
     # from parameters informed by the rows about to be scored.
-    feats_ax, rank_ax, params_ax, _ad = build_axis_features(
-        params_dir=args.axis_params_dir)
-    tids_ax = sorted(feats_ax)
-    ti_ax = {t: i for i, t in enumerate(tids_ax)}
-    Fax = np.stack([feats_ax[t] for t in tids_ax])
-    Fax = ((Fax - Fax.mean(0)) / (Fax.std(0) + 1e-9)).astype(np.float32)
-    # HELD-OUT USERS ARE EXCLUDED HERE TOO, and this is a fix rather than an
-    # option. --holdout-user-frac reached only the SGD row mask, so the warm
-    # start was still built from the held-out accounts' own attempts — measured
-    # at 17.2% and 13.6% of its users on the two folds. Protecting the training
-    # rows and not the initialization protects nothing.
-    rbu = defaultdict(list)
-    for u, p, s in load_axis_attempts():
-        if p in ti_ax and str(u) not in hu:
-            rbu[u].append((p, int(bool(s))))
-    ax_users = sorted(u for u, a in rbu.items() if len(a) >= MIN_USER_ATTEMPTS)
-    if hu:
-        print(f"  warm-start users: {len(ax_users)} (held-out accounts "
-              f"excluded)", flush=True)
     lapse_c = load_client_lapse(0.0328)
-    fold_of = _stratified_folds(ax_users, rbu)
+    _axis_ref = {}
+
+    def axis_ref():
+        if _axis_ref:
+            return _axis_ref
+        feats, rank, params, _ad = build_axis_features(
+            params_dir=args.axis_params_dir)
+        tids = sorted(feats)
+        ti = {t: i for i, t in enumerate(tids)}
+        # The matrix is the one large piece and the warm start is its only
+        # reader; the report wants the index and the parameters alone.
+        F = None
+        if args.warm_start == "eigen":
+            F = np.stack([feats[t] for t in tids])
+            F = ((F - F.mean(0)) / (F.std(0) + 1e-9)).astype(np.float32)
+        del feats
+        # HELD-OUT USERS ARE EXCLUDED HERE TOO, and this is a fix rather than an
+        # option. --holdout-user-frac reached only the SGD row mask, so the warm
+        # start was still built from the held-out accounts' own attempts —
+        # measured at 17.2% and 13.6% of its users on the two folds. Protecting
+        # the training rows and not the initialization protects nothing.
+        rbu_ = defaultdict(list)
+        for u, pid, ok in load_axis_attempts():
+            if pid in ti and str(u) not in hu:
+                rbu_[u].append((pid, int(bool(ok))))
+        users = sorted(u for u, a in rbu_.items()
+                       if len(a) >= MIN_USER_ATTEMPTS)
+        if hu:
+            print(f"  axis-reference users: {len(users)} (held-out accounts "
+                  f"excluded)", flush=True)
+        _axis_ref.update(tids=tids, ti=ti, F=F, rank=rank, params=params,
+                         rbu=rbu_, users=users,
+                         fold_of=_stratified_folds(users, rbu_))
+        return _axis_ref
 
     for seed in args.seeds:
         # the warm start is built on TRAIN-fold users only, as production does
@@ -1220,14 +1258,15 @@ def main():
         # long: protecting the INITIALISATION does nothing about the fit.
         ax_fold = args.axis_holdout_fold
         held_fold = ax_fold if ax_fold in (0, 1) else 0
-        tu_ax = [u for u in ax_users if fold_of[u] != held_fold]
         # K=0 is the ABLATION: no axis block at all, i.e. the joint fit reduced
         # to its rating heads. It answers whether the axes cost the rating, which
         # no amount of staring at the axis-on/axis-off difference can, since that
         # difference is measured with the axes already having shaped the fit.
         if args.k > 0 and args.warm_start == "eigen":
-            gi_full = eigen_directions(rbu, tu_ax, Fax, ti_ax, rank_ax,
-                                       params_ax, lapse_c, args.k)
+            R = axis_ref()
+            tu_ax = [u for u in R["users"] if R["fold_of"][u] != held_fold]
+            gi_full = eigen_directions(R["rbu"], tu_ax, R["F"], R["ti"],
+                                       R["rank"], R["params"], lapse_c, args.k)
             gi = gi_full[:, :fdim] if gi_full.shape[1] >= fdim else None
         else:
             gi = None
@@ -1376,6 +1415,7 @@ def main():
             # the two-stage pipeline structurally cannot have. It is removed
             # rather than defaulted off — a leaky protocol available behind a
             # flag is one forgotten flag away from a wrong number that looks fine.
+            fold_of = axis_ref()["fold_of"]
             mask = np.array([0.0 if fold_of.get(u, -1) == ax_fold else 1.0
                              for u in uids], dtype=np.float32)
             keep = mask[user_idx] > 0
@@ -1469,7 +1509,7 @@ def main():
                     Mc = gh - gh.mean(dim=0, keepdim=True)
                     Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)
                     Cm = Mn.T @ Mn
-                    loss = loss + ORTHO_WEIGHT * ((Cm - torch.eye(
+                    loss = loss + args.ortho_weight * ((Cm - torch.eye(
                         args.k, device=device)) ** 2).sum()
                     if args.ortho_rating > 0.0:
                         # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else in the
@@ -1910,6 +1950,13 @@ def main():
         gmap = {}
         for (sz, t), i in key_idx.items():
             gmap[t] = g_np[i]
+        # Built HERE rather than before the fit: with the eigen warm start off
+        # this report is the reference's only reader, and --fit-only returns
+        # above without reaching it.
+        R = axis_ref()
+        tids_ax, ti_ax = R["tids"], R["ti"]
+        rank_ax, params_ax = R["rank"], R["params"]
+        rbu, ax_users, fold_of = R["rbu"], R["users"], R["fold_of"]
         garr = np.zeros((len(tids_ax), args.k), dtype=np.float32)
         hit = 0
         for t, i in ti_ax.items():
