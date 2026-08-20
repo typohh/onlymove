@@ -308,7 +308,7 @@ class JointMIRT:
                  seed, g_init=None, global_slope=False, act="swiglu",
                  hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
                  axis_reads_rating=True, axis_from_trunk=True,
-                 axis_trunk_coupled=True):
+                 axis_trunk_coupled=True, center_v=False):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
@@ -364,6 +364,7 @@ class JointMIRT:
                 self.g_lin.weight[:g_init.shape[0], :g_init.shape[1]].copy_(
                     torch.tensor(g_init, dtype=torch.float32, device=device))
         self.v = torch.zeros(n_users, k_axes, device=device, requires_grad=True)
+        self.center_v = bool(center_v)
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = torch.tensor(float(np.log(li / (1.0 - li))),
                                       device=device, requires_grad=True)
@@ -569,7 +570,8 @@ class JointMIRT:
         b, a, c, g = self.problem_params(feat)
         th = self.theta(prof).squeeze(-1)
         lam = self.lapse()
-        z = (a * (th - b) + (g * self.v[uid]).sum(-1)).clamp(-35, 35)
+        v = (self.v - self.v.mean(dim=0, keepdim=True)) if self.center_v else self.v
+        z = (a * (th - b) + (g * v[uid]).sum(-1)).clamp(-35, 35)
         # The SHIPPED per-problem triple, returned DETACHED for the rating-
         # orthogonality penalty: rating, slope, floor — exactly what packaging
         # writes and the client's rank path reads, and exactly what an axis
@@ -799,7 +801,15 @@ def main():
                     help="penalty on mean_u(v_k). Stops an axis carrying "
                          "POPULATION difficulty, which would load every user the "
                          "same sign; it does not stop one carrying individual "
-                         "ability, since a centred copy satisfies it exactly.")
+                         "ability, since a centred copy satisfies it exactly. "
+                         "The soft form of --center-v; production ships the hard "
+                         "one, so an arm setting both is double-counting.")
+    ap.add_argument("--center-v", action="store_true",
+                    help="subtract the population mean from v before it enters "
+                         "the likelihood, which is what PRODUCTION does. Exact "
+                         "where --v-mean-penalty is approximate, and it leaves "
+                         "the parameter redundant by one direction, which the "
+                         "ridge decays to zero.")
     ap.add_argument("--axis-from-features", action="store_true",
                     help="read the raw features instead of the trunk, which is "
                          "what this model did before 2026-08-13. ONE trunk now "
@@ -948,12 +958,21 @@ def main():
         # counterpart are literals.
         from pipeline import train_mirt as _prod
         given = {a.split("=")[0].lstrip("-").replace("-", "_") for a in sys.argv[1:]}
-        prod = {"flat_patience": _prod.FLAT_PATIENCE,          # dev default 5
+        # Production runs a FIXED budget with no early stopping at all, so the
+        # patience rule is disabled here rather than matched — there is no
+        # production constant for it. Reaching the cap is the intended endpoint.
+        prod = {"flat_patience": 10 ** 9,                      # dev default 5
+                "epochs": _prod.EPOCHS,                        # dev default varies
                 # Production teaches at a CONSTANT weight; 0 is this surface's
                 # encoding of "no decay", which production has no constant for.
                 "teach_decay_epochs": 0,
                 "lr_net": _prod.LR_NET, "lr_field": _prod.LR_FIELD,
-                "v_ridge": _prod.V_RIDGE, "v_mean_penalty": _prod.V_MEAN_PENALTY,
+                "v_ridge": _prod.V_RIDGE,
+                # Production removes the population mean of v BY CONSTRUCTION,
+                # so there is no penalty weight to read — the soft form is off
+                # and the hard one is on.
+                "v_mean_penalty": 0.0,                  # dev default 10.0
+                "center_v": True,                       # dev default off
                 "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
                 # The rating-orthogonality penalty. Dev defaults leave it OFF and
                 # aimed at difficulty alone, so an arm that forgets these three is
@@ -1264,7 +1283,8 @@ def main():
                       axis_dropout=args.axis_dropout,
                       axis_reads_rating=not args.axis_blind,
                       axis_from_trunk=not args.axis_from_features,
-                      axis_trunk_coupled=not args.axis_trunk_detached)
+                      axis_trunk_coupled=not args.axis_trunk_detached,
+                      center_v=args.center_v)
         if args.init_from:
             # CONTINUE the previous fit rather than rediscovering a basis. The
             # axis objective is invariant to rotating the K-dim latent space, so
@@ -1501,8 +1521,8 @@ def main():
                     if args.ortho_rating > 0.0:
                         # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else in the
                         # objective does: ORTHO_WEIGHT is K x K over the loadings
-                        # alone, and V_MEAN_PENALTY only pins the population mean of
-                        # v, which blocks an axis acting as a global difficulty shift
+                        # alone, and centring v (or V_MEAN_PENALTY) only removes the
+                        # population mean, which blocks an axis acting as a global shift
                         # but not one tracking difficulty per problem. A free fit will
                         # therefore spend an axis on difficulty — measured, and it is
                         # unnameable when it does.
@@ -1763,13 +1783,20 @@ def main():
                       f"(diagnostic mode); best stop-split {best:.4f} at epoch "
                       f"{best_epoch}", flush=True)
             else:
-                raise SystemExit(
-                    f"EPOCH CAP HIT: ran the full {args.epochs} epochs without "
-                    f"the patience rule firing (best stop-split {best:.4f} at "
-                    f"epoch {best_epoch}). The fit never plateaued, so this is "
-                    f"not a converged solution and its numbers are not "
-                    f"comparable with anything in docs/mirt_benchmark.md. "
-                    f"Raise --epochs and re-run.")
+                if args.flat_patience > args.epochs:
+                    # Stopping was deliberately disabled, so the cap is the
+                    # budget the caller asked for rather than a fit that never
+                    # plateaued. This is what --production does.
+                    print(f"  ran the full {args.epochs} epochs (early stopping "
+                          f"disabled)", flush=True)
+                else:
+                    raise SystemExit(
+                        f"EPOCH CAP HIT: ran the full {args.epochs} epochs "
+                        f"without the patience rule firing (best stop-split "
+                        f"{best:.4f} at epoch {best_epoch}). The fit never "
+                        f"plateaued, so this is not a converged solution and "
+                        f"its numbers are not comparable with anything in "
+                        f"docs/mirt_benchmark.md. Raise --epochs and re-run.")
         if best_state is not None:
             with torch.no_grad():
                 for q, b in zip(m.params(), best_state):

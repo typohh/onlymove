@@ -34,7 +34,7 @@ the move-eval cache is a hard prerequisite. So are the motif proxies,
 THE AXES ARE TAUGHT ONTO FIXED DIRECTIONS, which is what gives a name a chance to
 outlive a refit. The objective is exactly invariant to rotating the axis space — the
 likelihood reads the loadings and the user positions only through their product,
-and V_RIDGE and V_MEAN_PENALTY are both rotation-invariant too — so
+and V_RIDGE is rotation-invariant too, as is centring v — so
 the fit has a continuum of equal solutions and no preference among them. Left to
 itself it lands wherever initialization drops it: a 2% data change re-rolls the
 basis as hard as a different seed does, which would silently reattach every name
@@ -148,7 +148,6 @@ LR_FIELD = 1e-2
 # added and forgotten lands on the safe side.
 FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
-V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
@@ -263,6 +262,21 @@ class JointMIRT(nn.Module):
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
+    def user_axis(self, uid):
+        """Per-user axis positions, CENTRED over the population.
+
+        An axis multiplied by a non-zero population mean is a global difficulty
+        shift wearing an axis's clothes, and difficulty belongs in the rating,
+        which is the channel the client's rank path actually reads. Removing the
+        mean by construction makes that impossible where a penalty only made it
+        expensive, and it costs nothing to do: the penalty read every user's
+        position each step for its mean, which is exactly what centring reads.
+
+        It leaves the parameter redundant by one direction — adding a fixed row
+        to every user changes no prediction — and V_RIDGE is what lands on that,
+        so it decays to zero rather than drifting."""
+        return (self.v - self.v.mean(dim=0, keepdim=True))[uid]
+
     def _drop(self, feat):
         """COLUMN dropout over the wide input region as ONE mask — activations,
         bot winrate, move evals, ownership and game phase together, every block
@@ -318,7 +332,7 @@ class JointMIRT(nn.Module):
         b, a, c, g = self.problem_params(feat)
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
-        z = (a * (th - b) + (g * self.v[uid]).sum(-1)).clamp(-35, 35)
+        z = (a * (th - b) + (g * self.user_axis(uid)).sum(-1)).clamp(-35, 35)
         # The SHIPPED per-problem triple, returned DETACHED for the rating-
         # orthogonality penalty: rating, slope, floor — exactly what packaging
         # writes and the client's rank path reads, and exactly what an axis
@@ -543,9 +557,8 @@ def main():
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
             loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
-            loss = loss + V_MEAN_PENALTY * (m.v.mean(dim=0) ** 2).sum()
-            # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does:
-            # V_MEAN_PENALTY pins only the POPULATION mean of v, which blocks an
+            # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does: centring
+            # v (user_axis) removes only the POPULATION mean, which blocks an
             # axis acting as a global difficulty shift but not one tracking
             # difficulty per problem. Left free, a fit spends an axis on a rating-side property
             # and that axis is unnameable when it does.
