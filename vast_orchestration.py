@@ -732,7 +732,7 @@ def cmd_add():
     res = run_vast_cmd([
         "create", "instance", str(best["id"]),
         "--template_hash", "f779495b2d83b2c5b56e3c03f233f0ad",
-        "--disk", "32", "--ssh",
+        "--disk", "64", "--ssh",
     ])
     if not isinstance(res, dict) or "new_contract" not in res:
         # run_vast_cmd returns None on empty CLI output; guard so we abort
@@ -986,21 +986,24 @@ def cmd_sync(target, sgf_only=False, size=None):
         excludes = ["--exclude", "database.sql"]
         src_sub = d
         if d == "tsumegos":
-            # Land new SGFs in the staging dir, and use --compare-dest so a file
-            # the corpus ALREADY holds is skipped rather than copied again. The
-            # remote's tsumegos/<size>/ is the uploaded corpus plus whatever it
-            # has generated, so without the compare the first sync would clone
-            # the entire corpus into staging.
+            # PULL FROM THE REMOTE'S STAGING DIR. generate_tsumegos writes into
+            # tsumegos/new/<size>/, so the remote separates generated problems
+            # from the uploaded corpus exactly as the local tree does and this
+            # sync is a staging-to-staging mirror.
+            #
+            # --compare-dest still points at the local CORPUS so a problem that
+            # has already been adopted is skipped rather than re-staged. That
+            # matters after an adoption: the remote keeps its copy in staging,
+            # and without the compare every later sync would hand it back.
             if size is not None:
-                src_sub = f"{d}/{size}"
+                src_sub = f"{d}/new/{size}"
                 dest = os.path.join(TSUMEGO_STAGING, str(size)) + os.sep
                 compare = os.path.abspath(os.path.join(d, str(size)))
             else:
+                src_sub = f"{d}/new"
                 dest = TSUMEGO_STAGING + os.sep
                 compare = os.path.abspath(d)
-            excludes += ["--compare-dest", compare,
-                         # staging is local bookkeeping; never mirror it back
-                         "--exclude", "new/"]
+            excludes += ["--compare-dest", compare]
         else:
             dest = f"{d}/"
         os.makedirs(dest, exist_ok=True)

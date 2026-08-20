@@ -359,7 +359,7 @@ def main():
 
     global max_problems, OUTPUT_DIR
     max_problems = args.max_problems
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", "new", str(args.size))
 
     # Treat SIGHUP / SIGTERM as KeyboardInterrupt so the main try/finally runs
     # and KataGo gets stop_engine'd. tmux kill-session sends SIGHUP; without
