@@ -42,7 +42,6 @@ clever.
 Run after `pipeline.train_mirt`, which writes the model this reads.
 """
 
-import json
 import os
 import queue
 import sys
@@ -58,11 +57,12 @@ if PROJECT_ROOT not in sys.path:
 from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, SEED, SIZES)
 from utils.rating.features import (  # noqa: E402
-    _cache_ids_path, corpus_tids_by_size, joint_feature_tail,
+    SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
     load_joint_activation_basis, load_joint_tail_blocks)
-# The size of a tid comes from the SGF CORPUS, never the cache id lists: a stale
-# cache entry for a purged problem would otherwise be projected and shipped.
-from utils.rating.residual_axes import corpus_tid_size  # noqa: E402
+# The trunk's layer stack, stated once — it has to be rebuilt here EXACTLY as it
+# was fitted, and a stack that matches by shape while differing in its activation
+# loads cleanly and projects every cell through the wrong function.
+from utils.rating.mirt_net import build_trunk  # noqa: E402
 
 OUT_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
 MODEL_PT = os.path.join(PROJECT_ROOT, "ratings", "mirt_model.pt")
@@ -128,36 +128,29 @@ def main():
     st = torch.load(MODEL_PT, map_location=device)
     import torch.nn as nn
 
-    class SwiGLU(nn.Module):
-        def __init__(self, d_in, d_out):
-            super().__init__()
-            self.w = nn.Linear(d_in, d_out)
-            self.v = nn.Linear(d_in, d_out)
-
-        def forward(self, x):
-            return torch.nn.functional.silu(self.w(x)) * self.v(x)
-
-    from utils.rating.model_constants import DIFF_HIDDEN
     # Shared tail — same blocks, same order, same fail-loud-on-missing rule the
     # trunk was fitted with. Only the activation block differs here (per CELL
     # rather than the correct cell), which is exactly why the rest must not be
     # restated locally.
-    wide, exempt, n_wide, n_exempt = load_joint_tail_blocks(SIZES, tids_by_size)
-    fdim = PCA_DIM + n_wide + n_exempt
-    layers, d = [], fdim
-    for h in DIFF_HIDDEN:
-        layers += [SwiGLU(d, h), nn.Dropout(0.0)]
-        d = h
-    trunk = nn.Sequential(*layers).to(device)
+    wide, n_wide = load_joint_tail_blocks(SIZES, tids_by_size)
+    fdim = PCA_DIM + n_wide + SIZE_FLAG_COLS
+    # Dropout is not in the state_dict, so 0.0 here still loads weights fitted
+    # at DROPOUT; this pass is eval-only anyway.
+    trunk, d = build_trunk(fdim, dropout=0.0)
+    trunk = trunk.to(device)
     trunk.load_state_dict(st["trunk"])
     trunk.eval()
     g_lin = nn.Linear(d, K_AXES, bias=False).to(device)
     g_lin.load_state_dict(st["g_lin"])
     g_rms = st["g_rms"].to(device).view(1, -1)
 
-    tid_size = corpus_tid_size()
     act_dirs = {s: os.path.join(PROJECT_ROOT, "activations", str(s)) for s in SIZES}
-    tasks = [(s, t) for s in SIZES for t in tids_by_size[s] if tid_size.get(t) == s]
+    # tids_by_size IS the corpus listing, and corpus_tids_by_size asserts an id
+    # names at most one problem across every board, so there is nothing to filter
+    # against: a per-tid size map built from the same listdir agrees by
+    # construction. (The rule it enforced still holds — size membership comes
+    # from the SGF corpus, never from a cache id list that can be stale.)
+    tasks = [(s, t) for s in SIZES for t in tids_by_size[s]]
     # RESUMABLE by file existence, the same idiom extract_activations uses. Every
     # write goes through a tmp file and os.replace, so a file that exists is
     # complete — an interrupted run loses at most the batch in flight. Worth
@@ -193,7 +186,7 @@ def main():
             x1 = (raw.float() - m1) / s1
             z = (((x1 - pmean).half() @ Ch).float() - m2) / s2       # (n, PCA_DIM)
             tail = torch.from_numpy(np.concatenate([
-                np.tile(joint_feature_tail((b[0], b[1]), wide, exempt)
+                np.tile(joint_feature_tail((b[0], b[1]), wide)
                         .astype(np.float32)[None, :], (n, 1))
                 for b, n in zip(batch, counts)])).to(device)
             g = g_lin(trunk(torch.cat([z, tail], dim=1))) / g_rms

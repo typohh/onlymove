@@ -96,10 +96,11 @@ if PROJECT_ROOT not in sys.path:
 from datetime import datetime  # noqa: E402
 
 from utils.rating.model_constants import (  # noqa: E402
-    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT,
+    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, GAUGE_MOM, INPUT_DROPOUT,
     LAPSE_CAP, LAPSE_INIT,
     PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec,
 )
+from utils.rating.mirt_net import build_trunk  # noqa: E402
 from utils.rating.features import (  # noqa: E402
     _cache_ids_path, load_first_time_attempts, load_joint_mirt_features,
 )
@@ -159,7 +160,6 @@ LR_NET = 3e-4
 LR_FIELD = 1e-2
 V_RIDGE = 0.5
 V_MEAN_PENALTY = 10.0
-GAUGE_MOM = 0.01
 # ONE-SIDED shallow-slope barrier, replacing the rating trainer's mean(1/a^2).
 # That form is unbounded below in a, so its gradient runs as -2/a^3 — at a slope
 # of 0.01 that is -2e6, and at the shipped weight it still contributes -200 per
@@ -327,26 +327,11 @@ class JointMIRT:
         # matching the rating trainer.
         self.theta = nn.Embedding(n_profiles, 1).to(device)
         nn.init.normal_(self.theta.weight, std=1.0)
-        class SwiGLU(nn.Module):
-            """silu(xW) * xV, replacing [Linear, ReLU]. Carries twice the
-            parameters at the same width, since the gate is its own
-            projection — so a same-width swap is also a capacity increase."""
-
-            def __init__(self, d_in, d_out):
-                super().__init__()
-                self.w = nn.Linear(d_in, d_out)
-                self.v = nn.Linear(d_in, d_out)
-
-            def forward(self, x):
-                return torch.nn.functional.silu(self.w(x)) * self.v(x)
-
-        layers, d = [], fdim
-        for h in hidden:
-            layers += ([SwiGLU(d, h)] if act == "swiglu"
-                       else [nn.Linear(d, h), nn.ReLU()])
-            layers += [nn.Dropout(DROPOUT)]
-            d = h
-        self.trunk = nn.Sequential(*layers).to(device)
+        # Same layer stack production fits, from the one definition of it —
+        # an arm that differs from production only in a flag must not also
+        # differ in its trunk by accident.
+        trunk, d = build_trunk(fdim, dropout=DROPOUT, hidden=hidden, act=act)
+        self.trunk = trunk.to(device)
         self.head = nn.Linear(d, 3).to(device)          # (intercept, slope, floor)
         self.global_slope = bool(global_slope)
         # One corpus-wide slope, learned. Not a constant: the scale still has to
@@ -494,7 +479,9 @@ class JointMIRT:
                  else o[:, 1])
         a = nn.functional.softplus(a_src).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
-        cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=FLOOR_CAP)
+        # lambda is LAPSE_CAP*sigmoid, so this sits in (1-2*LAPSE_CAP, 1) and
+        # needs no clamp of its own.
+        cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
         # THE AXIS MAP READS THE RATING HEAD'S OUTPUTS. A residual only has a
         # meaning relative to a baseline: the same miss carries different
@@ -1536,7 +1523,7 @@ def main():
                         # one to floor. Penalising b alone reaches a third of it.
                         # Each column is centred and normalised, so the term is a
                         # sum of squared cosines and the targets need no common
-                        # scale — floor lives on (0, FLOOR_CAP) and b on the rating
+                        # scale — floor lives on (0, 1-2*lambda) and b on the rating
                         # scale, and an unnormalised penalty would be dominated by
                         # whichever happens to be widest.
                         tz = rsf[:, ortho_cols]

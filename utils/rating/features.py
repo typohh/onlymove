@@ -980,13 +980,19 @@ def load_joint_ownership(sizes, tids_by_size):
     return {k: X[i].astype(np.float32) for i, k in enumerate(keys)}, len(OWNERSHIP_COLS)
 
 
+# The board-size indicator joint_feature_tail appends after every wide block. It is
+# the ONE column INPUT_DROPOUT does not mask, since it identifies the board rather
+# than the problem, so callers size the trunk as `k_act + n_wide + SIZE_FLAG_COLS`.
+SIZE_FLAG_COLS = 1
+
+
 def load_joint_tail_blocks(sizes, tids_by_size):
     """Every per-problem block AFTER the activation block, loaded once, in THE order
-    the trunk is trained on. Returns (wide, exempt, n_wide, n_exempt).
+    the trunk is trained on. Returns (wide, n_wide).
 
     EVERY BLOCK IS MASKED — bot winrate, move evals, ownership and game phase all
-    sit inside the INPUT_DROPOUT region. The one exception is the BOARD-SIZE FLAG,
-    which identifies the board rather than the problem.
+    sit inside the INPUT_DROPOUT region; the board-size flag past them is the one
+    exception and is SIZE_FLAG_COLS above, not a block.
 
     This exists so the order is stated ONCE. Three consumers build trunk input — the
     trainer here, pipeline.write_mirt_per_cell (which substitutes per-CELL activations
@@ -1001,7 +1007,7 @@ def load_joint_tail_blocks(sizes, tids_by_size):
     ph, nph = load_joint_game_phase(sizes, tids_by_size)
     wide = (("bot_winrate", bw), ("move_evals", mv), ("ownership", ow),
             ("game_phase", ph))
-    return wide, (), nb + nmv + now + nph, 1
+    return wide, nb + nmv + now + nph
 
 
 def corpus_tids_by_size(sizes):
@@ -1107,7 +1113,7 @@ def _missing_block_error(name, key):
         f"dropped row removes the problem from the rated set — both silently.")
 
 
-def joint_feature_tail(key, wide, exempt):
+def joint_feature_tail(key, wide):
     """The per-problem columns after the activation block, plus the board-size flag.
 
     A block that lacks `key` RAISES. There is deliberately no default: an absent row
@@ -1115,7 +1121,7 @@ def joint_feature_tail(key, wide, exempt):
     invisible once imputed.
     """
     parts = []
-    for name, block in (*wide, *exempt):
+    for name, block in wide:
         try:
             parts.append(block[key])
         except KeyError:
@@ -1148,17 +1154,17 @@ def load_joint_mirt_features(sizes, pca_dim, seed):
     """
     tids_by_size = corpus_tids_by_size(sizes)
     act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
-    wide, exempt, n_wide, n_exempt = load_joint_tail_blocks(sizes, tids_by_size)
+    wide, n_wide = load_joint_tail_blocks(sizes, tids_by_size)
     keys = [(s, t) for s in sizes for t in tids_by_size[s]]
     key_idx = {key: i for i, key in enumerate(keys)}
     input_dim = k_act + n_wide
-    feat = np.empty((len(keys), input_dim + n_exempt), dtype=np.float32)
+    feat = np.empty((len(keys), input_dim + SIZE_FLAG_COLS), dtype=np.float32)
     for key, i in key_idx.items():
         try:
             act_vec = act[key]
         except KeyError:
             raise _missing_block_error("activations", key) from None
-        feat[i] = np.concatenate([act_vec, joint_feature_tail(key, wide, exempt)])
+        feat[i] = np.concatenate([act_vec, joint_feature_tail(key, wide)])
     return feat, keys, key_idx, input_dim
 
 

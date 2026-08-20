@@ -41,7 +41,7 @@ from collections import defaultdict
 import numpy as np
 
 from utils.rating.features import (
-    _cache_ids_path, corpus_tids_by_size, joint_feature_tail,
+    SIZE_FLAG_COLS, _cache_ids_path, corpus_tids_by_size, joint_feature_tail,
     load_backend_problem_params, load_joint_activations, load_joint_tail_blocks,
     SQLITE_PATH,
 )
@@ -167,12 +167,12 @@ def build_axis_features(params_dir=None):
     tids_by_size = corpus_tids_by_size(SIZES)
     act, act_dim = load_joint_activations(SIZES, tids_by_size, PCA_DIM, PCA_SEED)
     # Shared tail, so this cannot drift from what the trunk was fitted with.
-    wide, exempt, _n_wide, n_exempt = load_joint_tail_blocks(SIZES, tids_by_size)
+    wide, _n_wide = load_joint_tail_blocks(SIZES, tids_by_size)
     bw = dict(wide[0][1])
 
-    assert n_exempt + 3 + 1 == EXEMPT_TAIL_COLS, (
-        f"feature tail changed ({n_exempt} exempt cols incl. the size flag): update "
-        "EXEMPT_TAIL_COLS, which the axis-input dropout mask is sized from")
+    assert SIZE_FLAG_COLS + 3 + 1 == EXEMPT_TAIL_COLS, (
+        f"feature tail changed ({SIZE_FLAG_COLS} exempt cols incl. the size flag): "
+        "update EXEMPT_TAIL_COLS, which the axis-input dropout mask is sized from")
 
     curve = _load_rank_curve(params_dir)
     rsf = {t: np.array(v, dtype=np.float32)
@@ -200,7 +200,7 @@ def build_axis_features(params_dir=None):
         # that is constant exactly where the residual head has the most room.
         rk = float(interp_extrap(rsf[t][0], curve[0], curve[1]))
         feats[t] = np.concatenate([
-            act[key], joint_feature_tail(key, wide, exempt),
+            act[key], joint_feature_tail(key, wide),
             rsf[t], [rk],
         ]).astype(np.float32)
         rank[t] = rk

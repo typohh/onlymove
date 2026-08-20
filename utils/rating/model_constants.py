@@ -27,9 +27,7 @@ INPUT_DROPOUT = 0.3              # COLUMN dropout over the wide input region
 SLOPE_FLOOR = 0.01               # lower clamp on the per-problem slope a_p
 LAPSE_CAP = 0.05                 # upper bound on the global ceiling slip lambda
 LAPSE_INIT = 0.02                # lambda init (lambda is learned)
-FLOOR_CAP = 1.0                  # hard upper bound on the guessing floor c_p
 GAUGE_MOM = 0.01                 # EMA momentum of the gauge's whitening buffers
-CLIENT_FLOOR_MAX = 0.78          # pwa/js/irt.js floor clamp
 
 
 def clear_logit_vec(c, lapse=0.0):

@@ -781,7 +781,7 @@ Each shard's `metadata.json` entry is `{filename, rating, slope, floor, embeddin
 | `CALIBRATION_P` | 0.8 | `irt.js`, `fit_rank_curves.py`, `train_mirt.py` |
 | `FLOOR_MAX` | 0.78 | `irt.js`, `fit_rank_curves.py` (`CLIENT_FLOOR_MAX` in the trainer) |
 | lapse (`fat_finger_rate`) | learned, capped at 0.05 | `train_mirt.py` → `rating_constants.json`, read through to `population_constants.json` |
-| `SLOPE_FLOOR` / `FLOOR_CAP` | 0.01 / 1.0 | `model_constants.py` |
+| `SLOPE_FLOOR` | 0.01, a lower clamp on the per-problem slope. The guessing floor needs no constant beside it: it is `(1 − 2·lambda)·sigmoid(...)`, so lambda's own cap bounds it structurally | `model_constants.py` |
 | `SHALLOW_TAU` / `SHALLOW_W` | 0.1 / 0.3 — the one divergence barrier, one-sided on the pre-softplus slope; the rating is `b + kappa(c)/a`, so a slope collapsing toward its floor sends it to infinity. There is no floor barrier, the floor being bounded structurally by `1 - 2*lambda` | `train_mirt.py` |
 | `PCA_DIM` | 128 — the activation block's width, measured-optimal (section 1.3) | `model_constants.py` |
 | `DROPOUT`, `INPUT_DROPOUT` | 0.3; column granularity, one mask over the wide feature region | `model_constants.py` |

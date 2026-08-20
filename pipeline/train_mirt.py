@@ -54,9 +54,9 @@ unnameable — a name held numerically and lost its meaning. What settles it is 
 the round trip buys no stability either: a stored direction is itself only an
 approximation of the rule it was taught from, and chaining through it holds an axis
 no better than teaching from that rule directly, so it adds a reference that moves
-for nothing. A rule is a fixed STARTING POINT, not a guarantee — the axis is what the
-model lands on once the pull is released, and report_bank_identity below is what
-measures how close that landed.
+for nothing. A rule is a fixed STARTING POINT, not a guarantee — the axis is what
+the model lands on while held toward the rule, and report_bank_identity below is
+what measures how close that landed.
 
 Binding by rule NAME is safe here in a way it is not for the dev motif store
 (`axes/label_anchors.npz`, keyed by an `ax_<hex>` content hash): a rule name is
@@ -104,16 +104,22 @@ import sys
 import time
 
 import numpy as np
+import torch
+import torch.nn as nn
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import (  # noqa: E402
-    CALIBRATION_P, DIFF_HIDDEN, DROPOUT, EPS, FLOOR_CAP, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
+    CALIBRATION_P, EPS, GAUGE_MOM, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
     K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
     load_first_time_attempts, load_joint_mirt_features)
+# The trunk's layer stack, stated once — pipeline.write_mirt_per_cell rebuilds it
+# to project every legal cell, and a stack that matches by shape while differing
+# in its activation loads cleanly and projects through the wrong function.
+from utils.rating.mirt_net import build_trunk  # noqa: E402
 # The shared tail weight, in numpy. `_tail_w` below is the same function in torch;
 # the objective, the teaching target and the identity report are all this shape, so
 # they cannot drift apart.
@@ -140,10 +146,14 @@ BATCH = 65536
 # 3e-4 tie, and 3e-4 converges in half the epochs.
 LR_NET = 3e-4
 LR_FIELD = 1e-2
+# The free per-user fields, BY PARAMETER NAME. Named rather than assembled by
+# hand so the split cannot fall out of step with the module's own parameters:
+# anything not listed here is "the net" and gets the slow rate, so a parameter
+# added and forgotten lands on the safe side.
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 V_MEAN_PENALTY = 10.0            # stops an axis carrying POPULATION difficulty
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
-GAUGE_MOM = 0.01
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
 # infinity. Without this, slopes fall to a 0.94 median and ratings blow out to a
@@ -194,7 +204,7 @@ MOTIF_PROXIES = os.path.join(AXES_DIR, "motif_proxies.npz")
 LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
-class JointMIRT:
+class JointMIRT(nn.Module):
     """Compensatory M4PL with per-problem parameters from a shared trunk.
 
     The one unavoidable departure from textbook MIRT is that a_p, b_p, c_p and
@@ -202,53 +212,32 @@ class JointMIRT:
     corpus has no attempts at all, so free per-item parameters cannot price it.
     """
 
-    def __init__(self, fdim, n_users, input_dim, device, seed):
-        import torch
-        import torch.nn as nn
+    def __init__(self, fdim, n_users, input_dim, seed):
+        super().__init__()
         torch.manual_seed(seed)
-        self.torch, self.nn = torch, nn
         self.input_dim = int(input_dim)
 
-        # theta before the trunk so the RNG draw order is fixed.
-        self.theta = nn.Embedding(n_users, 1).to(device)
-        nn.init.normal_(self.theta.weight, std=1.0)
-
-        class SwiGLU(nn.Module):
-            """silu(xW) * xV, replacing [Linear, ReLU]."""
-
-            def __init__(self, d_in, d_out):
-                super().__init__()
-                self.w = nn.Linear(d_in, d_out)
-                self.v = nn.Linear(d_in, d_out)
-
-            def forward(self, x):
-                return torch.nn.functional.silu(self.w(x)) * self.v(x)
-
-        layers, d = [], fdim
-        for h in DIFF_HIDDEN:            # 128x64, an interior optimum both ways
-            layers += [SwiGLU(d, h), nn.Dropout(DROPOUT)]
-            d = h
-        self.trunk = nn.Sequential(*layers).to(device)
-        self.head = nn.Linear(d, 3).to(device)          # difficulty, slope, floor
+        # theta before the trunk so the RNG draw order is fixed. nn.Embedding
+        # initializes to N(0, 1) itself, so there is nothing to re-draw.
+        self.theta = nn.Embedding(n_users, 1)
+        self.trunk, d = build_trunk(fdim)
+        self.head = nn.Linear(d, 3)                     # difficulty, slope, floor
         # The axis map, on the TRUNK's representation. Same linear map, different
         # input: it adds no capacity (fewer parameters than reading the 212
         # features) and the axis objective reaches the trunk, so the trunk learns
         # what the AXES need and not only what the rating needs. Detaching would
         # make this feature reuse rather than a joint fit.
-        self.g_lin = nn.Linear(d, K_AXES, bias=False).to(device)
-        self.v = torch.zeros(n_users, K_AXES, device=device, requires_grad=True)
+        self.g_lin = nn.Linear(d, K_AXES, bias=False)
+        self.v = nn.Parameter(torch.zeros(n_users, K_AXES))
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
-        self.lapse_raw = torch.tensor(float(np.log(li / (1.0 - li))),
-                                      device=device, requires_grad=True)
-        # Rating-gauge EMA, on DIFFICULTY — see problem_params.
-        self.b_mu = torch.zeros((), device=device)
-        self.b_sd = torch.ones((), device=device)
-        self.training = True
-
-    def params(self):
-        return (list(self.trunk.parameters()) + list(self.head.parameters())
-                + list(self.g_lin.parameters()) + list(self.theta.parameters())
-                + [self.v, self.lapse_raw])
+        self.lapse_raw = nn.Parameter(
+            torch.tensor(float(np.log(li / (1.0 - li)))))
+        # Rating-gauge EMA, on DIFFICULTY — see problem_params. BUFFERS, so the
+        # checkpoint carries them: restoring the best epoch's weights beside a
+        # later epoch's gauge whitens b by statistics belonging to a different
+        # network, and the whole rating scale rides on that whitening.
+        self.register_buffer("b_mu", torch.zeros(()))
+        self.register_buffer("b_sd", torch.ones(()))
 
     def param_groups(self):
         """SPLIT RATES. The network must train an order of magnitude slower than
@@ -256,25 +245,21 @@ class JointMIRT:
         in eval mode, in every arrangement tried. The rating trainer gets away
         with a single rate because its only per-user parameter is one ability
         embedding; this model has that plus a K-dimensional axis position."""
-        net = (list(self.trunk.parameters()) + list(self.head.parameters())
-               + list(self.g_lin.parameters()))
-        field = list(self.theta.parameters()) + [self.v, self.lapse_raw]
+        net, field = [], []
+        for name, prm in self.named_parameters():
+            (field if name in FIELD_PARAMS else net).append(prm)
         return [{"params": net, "lr": LR_NET},
                 {"params": field, "lr": LR_FIELD}]
 
-    def train(self, on):
-        self.training = on
-        self.trunk.train(on)
-
     def lapse(self):
-        return LAPSE_CAP * self.torch.sigmoid(self.lapse_raw)
+        return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
     def _drop(self, feat):
         """COLUMN dropout over the wide input region as ONE mask — activations,
-        bot winrate and move evals together. The two game-phase columns and the
-        size indicator sit past that region and are deliberately exempt, so a new
+        bot winrate, move evals, ownership and game phase together, every block
+        measured about the PROBLEM. Only the board-size indicator sits past that
+        region, since it identifies the board rather than the problem, so a new
         wide block belongs INSIDE input_dim and is then masked automatically."""
-        torch = self.torch
         if not self.training or INPUT_DROPOUT <= 0.0 or self.input_dim <= 0:
             return feat
         keep = (torch.rand(len(feat), self.input_dim, device=feat.device)
@@ -297,7 +282,6 @@ class JointMIRT:
         objects, while difficulty is MULTIPLIED by the slope and must rescale
         with it. The shipped rating is an ability, so under the unblocked
         rescaling every rating scales and the whole axis floats."""
-        torch, nn = self.torch, self.nn
         h = self.trunk(self._drop(feat))
         o = self.head(h)
         b = o[:, 0]
@@ -311,7 +295,7 @@ class JointMIRT:
         b = (b - mu) / sd
         a = nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
-        cap = (1.0 - 2.0 * lam).clamp(min=EPS, max=FLOOR_CAP)
+        cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
         g = self.g_lin(h)
         # Per-axis RMS over the batch. When called on the whole corpus this is a
@@ -322,7 +306,6 @@ class JointMIRT:
         return b, a, c, g / self.g_rms
 
     def forward(self, uid, feat):
-        torch = self.torch
         b, a, c, g = self.problem_params(feat)
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
@@ -482,7 +465,6 @@ def report_bank_identity(g_np, tgt, ok, prob_idx):
 
 def main():
     import pandas as pd
-    import torch
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
@@ -535,7 +517,7 @@ def main():
           f"directions, taught at a constant weight of {TEACH_WEIGHT}",
           flush=True)
 
-    m = JointMIRT(fdim, n_users, input_dim, device, SEED)
+    m = JointMIRT(fdim, n_users, input_dim, SEED).to(device)
     opt = torch.optim.Adam(m.param_groups())
     o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
     n = len(tr)
@@ -546,11 +528,10 @@ def main():
 
     for ep in range(EPOCHS):
         m.train(True)
-        tw = TEACH_WEIGHT
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, BATCH):
             bi = perm[i:i + BATCH]
-            pred, gh, rsf = m.forward(tu[bi], tfeat[tp[bi]])
+            pred, gh, rsf = m(tu[bi], tfeat[tp[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
@@ -584,7 +565,7 @@ def main():
             # penalty carry no such conflict.
             #
             # Each column is centred and normalised, so the term is a sum of
-            # squared cosines: floor lives on (0, FLOOR_CAP) and rating on its own
+            # squared cosines: floor lives on (0, 1-2*lambda) and rating on its own
             # scale, and an unnormalised penalty would be dominated by whichever
             # happens to be widest. The targets are DETACHED, so this can only
             # push the axes off the rating side and never degrade the rating to
@@ -610,11 +591,9 @@ def main():
             # produced — no second forward and no second sampling distribution.
             #
             # Both properties are load-bearing. Sampling problems separately
-            # makes the trunk adapt to a MIXTURE, and when the teaching weight
-            # decays that half of its input distribution disappears; the epochs
-            # of attempt-only training that follow overwrite whatever served it,
-            # taking the taught directions along. Riding gh means no second
-            # distribution exists, so the decay moves a scalar and nothing else.
+            # makes the trunk adapt to a MIXTURE of two input distributions
+            # rather than to the one the rest of the objective sees; riding gh
+            # means no second distribution exists at all.
             # It also matches the population the axes are DEFINED on: loadings
             # are identified by between-user residuals, which exist only where
             # somebody attempted the problem. The never-attempted third of the
@@ -622,23 +601,22 @@ def main():
             # previous fit's extrapolation into a region that never carried
             # signal, so teaching them would spend trunk capacity, in competition
             # with the rating, reproducing an arbitrary guess.
-            if tw > 0.0:
-                mk = t_ok[tp[bi]]
-                if bool(mk.any()):
-                    # Both sides standardized, because the bank's scale is
-                    # arbitrary and gh carries this fit's own — only direction is
-                    # being compared. The two standardizations are over DIFFERENT
-                    # populations on purpose and should not be reconciled: gh is
-                    # z-scored over the batch, so attempt-weighted and repeating a
-                    # popular problem, while the target was z-scored over the
-                    # shared corpus unweighted. That leaves the MSE a small
-                    # irreducible floor and pulls g toward a slightly shifted
-                    # bank, which costs nothing downstream — problem_params
-                    # divides by g_rms, so any residual scale is removed before
-                    # anything reads a loading, and v absorbs the rest.
-                    gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
-                    loss = loss + tw * (
-                        (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
+            mk = t_ok[tp[bi]]
+            if bool(mk.any()):
+                # Both sides standardized, because the bank's scale is
+                # arbitrary and gh carries this fit's own — only direction is
+                # being compared. The two standardizations are over DIFFERENT
+                # populations on purpose and should not be reconciled: gh is
+                # z-scored over the batch, so attempt-weighted and repeating a
+                # popular problem, while the target was z-scored over the
+                # shared corpus unweighted. That leaves the MSE a small
+                # irreducible floor and pulls g toward a slightly shifted
+                # bank, which costs nothing downstream — problem_params
+                # divides by g_rms, so any residual scale is removed before
+                # anything reads a loading, and v absorbs the rest.
+                gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
+                loss = loss + TEACH_WEIGHT * (
+                    (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads the corpus, dropout off
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat)).pow(2).mean()
@@ -649,7 +627,7 @@ def main():
         if (ep + 1) % CHECK_EVERY == 0:
             m.train(False)
             with torch.no_grad():
-                pr, _, _ = m.forward(tu, tfeat[tp])
+                pr, _, _ = m(tu, tfeat[tp])
                 pr = pr.clamp(EPS, 1 - EPS)
                 bce_tr = float(torch.nn.functional.binary_cross_entropy(
                     pr[tr], ty[tr]))
@@ -658,36 +636,20 @@ def main():
             improved = bce_st < best - 1e-6
             if improved:
                 best, best_epoch = bce_st, ep + 1
-                best_state = [q.detach().clone() for q in m.params()]
-            # THE PATIENCE COUNTER IS HELD WHILE THE TEACHING WEIGHT IS ALIVE.
-            # The stop split measures the likelihood alone, but the objective
-            # being optimized also carries the teaching MSE, so through the decay
-            # the split sits nearly flat by construction — the fit is spending
-            # capacity on a term the split cannot see. Counting staleness there
-            # judges convergence of a metric a schedule is deliberately holding
-            # back, and the run dies mid-teaching with the axes never released.
-            #
-            # That is measured, not hypothetical, and it is a LOTTERY rather than
-            # a bias: on one corpus two fits differing only in seed hit the same
-            # plateau, one escaping at 10 checks of 30 and the other never
-            # escaping — it stopped at epoch 390 with the weight still at 0.61
-            # and shipped a fit 36 mnat worse than its sibling, undertrained
-            # rather than merely differently converged. Bounding the decay to end
-            # "well before the fit does" does not fix it, because what fails is
-            # the START of the run, not the end.
-            #
-            # `best` keeps updating throughout, so an early checkpoint is never
-            # lost; only the countdown waits. The cost is that a genuinely stuck
-            # fit cannot stop before the decay ends, bounded by EPOCHS.
-            # The teaching weight is constant, so the objective is not moving on
-            # a schedule and staleness is meaningful from the first check.
+                best_state = {k: v.detach().clone()
+                              for k, v in m.state_dict().items()}
+            # The objective is not moving on a schedule of its own — the
+            # teaching weight is constant — so staleness against the stop split
+            # is meaningful from the first check and the counter never has to be
+            # held. `best` keeps updating throughout, so the checkpoint is the
+            # best epoch seen and the trailing stale checks cost only runtime.
             if improved:
                 flat = 0
             else:
                 flat += 1
             print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  "
                   f"stop {bce_st:.4f}  best {best:.4f}@{best_epoch}  "
-                  f"teach {tw:.2f}  stale {flat}/{FLAT_PATIENCE}", flush=True)
+                  f"stale {flat}/{FLAT_PATIENCE}", flush=True)
             if flat >= FLAT_PATIENCE:
                 print(f"  stopped at epoch {ep + 1}; restoring best "
                       f"{best:.4f}@{best_epoch}", flush=True)
@@ -699,9 +661,7 @@ def main():
             f"EPOCH CAP HIT: ran {EPOCHS} epochs without the patience rule "
             f"firing. The fit never plateaued, so this is not a converged "
             f"solution and its numbers are not comparable with anything.")
-    with torch.no_grad():
-        for q, b_ in zip(m.params(), best_state):
-            q.copy_(b_)
+    m.load_state_dict(best_state)
 
     # --- outputs
     m.train(False)
@@ -754,11 +714,21 @@ def main():
     pd.DataFrame(rows).to_csv(os.path.join(AXES_DIR, "per_problem.csv"),
                               index=False)
     # The content hash the PWA's embedding-invalidation gate rides: it must move
-    # when and only when the projection would give different vectors.
+    # when and only when the projection would give different vectors. So it is
+    # taken over EXACTLY what the projection reads — the trunk, the axis map and
+    # the RMS the loadings are divided by (write_mirt_per_cell reruns all three
+    # per cell) — and over nothing else. `head` is not in that path at all, and
+    # the trunk was missing from it: two fits sharing a g_lin and differing in
+    # the trunk give different vectors under one version, which no client check
+    # can catch. Keys are sorted so the digest does not ride dict order.
     h = hashlib.sha256()
-    for arr in (m.g_lin.weight.detach().cpu().numpy(),
-                m.head.weight.detach().cpu().numpy()):
-        h.update(np.ascontiguousarray(arr, dtype=np.float32).tobytes())
+    proj = dict(m.trunk.state_dict())
+    proj["g_lin.weight"] = m.g_lin.weight
+    proj["g_rms"] = m.g_rms
+    for key in sorted(proj):
+        h.update(key.encode())
+        h.update(np.ascontiguousarray(
+            proj[key].detach().cpu().numpy(), dtype=np.float32).tobytes())
     ev = h.hexdigest()[:16]
     # axes/axes.npz is where packaging reads the shipped embedding_version, so
     # this must write THERE: a version stamped from one fit onto another fit's
