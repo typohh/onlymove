@@ -240,12 +240,14 @@ class JointMIRT(nn.Module):
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
-        # Rating-gauge EMA, on DIFFICULTY — see problem_params. BUFFERS, so the
-        # checkpoint carries them: restoring the best epoch's weights beside a
-        # later epoch's gauge whitens b by statistics belonging to a different
-        # network, and the whole rating scale rides on that whitening.
+        # THE TWO GAUGES, both the same shape: batch statistics while training,
+        # an EMA of them at eval. BUFFERS, so the checkpoint carries them — the
+        # rating scale rides on b's whitening and every shipped axis vector on
+        # g's divisor, so restoring the best epoch's weights beside a later
+        # epoch's gauge prices both by statistics from a different network.
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
+        self.register_buffer("g_rms", torch.ones(1, K_AXES))
 
     def param_groups(self):
         """SPLIT RATES. The network must train an order of magnitude slower than
@@ -321,12 +323,19 @@ class JointMIRT(nn.Module):
         cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
         g = self.g_lin(h)
-        # Per-axis RMS over the batch. When called on the whole corpus this is a
-        # corpus constant, and the per-cell fanout MUST reuse it: a cell scaled
-        # by its own batch's RMS would not be comparable with the correct-move
-        # vector in per_problem.csv, and nothing downstream could tell.
-        self.g_rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6).detach()
-        return b, a, c, g / self.g_rms
+        # The axis gauge, run exactly like the difficulty one above: the batch's
+        # own per-axis RMS while training, its EMA at eval. Eval is what makes it
+        # a gauge rather than a side effect — the divisor stops depending on what
+        # was passed last, and the per-cell fanout reads the same number out of
+        # the checkpoint, so a cell and the correct-move vector in
+        # per_problem.csv cannot end up on different scales.
+        if self.training:
+            rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS).detach()
+            with torch.no_grad():
+                self.g_rms.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * rms)
+        else:
+            rms = self.g_rms
+        return b, a, c, g / rms
 
     def forward(self, uid, feat):
         b, a, c, g = self.problem_params(feat)
@@ -660,6 +669,16 @@ def main():
     # --- outputs
     m.train(False)
     with torch.no_grad():
+        # PIN THE AXIS GAUGE TO THE CORPUS before anything is written. Its EMA
+        # tracks the attempt stream, which over-weights whatever is popular,
+        # while the vectors being shipped — per_problem.csv here and every legal
+        # cell in write_mirt_per_cell — cover the corpus. That is the population
+        # their scale should be defined on, and writing it into the buffer is
+        # what carries the same divisor to the fanout. The scale itself is
+        # arbitrary (v absorbs it), so what matters is that both ends agree and
+        # that the number is stated rather than left over from the last call.
+        raw_g = m.g_lin(m.trunk(tfeat))
+        m.g_rms.copy_(raw_g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS)
         b_all, a_all, c_all, g_all = m.problem_params(tfeat)
         lam = float(m.lapse())
     b_np, a_np = b_all.cpu().numpy(), a_all.cpu().numpy()
