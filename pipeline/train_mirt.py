@@ -126,19 +126,15 @@ from utils.rating.mirt_net import build_trunk  # noqa: E402
 from utils.rating.tail_agreement import (  # noqa: E402
     TAIL_HINGE, hinged_r, tail_weight as tail_weight_np)
 
-EPOCHS = 10000                   # runaway failsafe; the patience rule ends the run
+# The fit runs a FIXED budget. The stop split is flat well before the end — it
+# settles into a band a thousandth wide and then wanders inside it — so a
+# patience rule reading it selects an epoch out of that noise rather than out of
+# the fit, and the epoch it lands on moves by thousands of epochs between runs
+# that are otherwise identical. A fixed budget removes that source of variance
+# entirely; the split is still measured and printed, as the record of where the
+# fit got to, but nothing is selected on it.
+EPOCHS = 3000
 CHECK_EVERY = 10
-# Checks without a new best before stopping. SIZED FROM THE GAPS BETWEEN
-# IMPROVEMENTS, not chosen: the stop split keeps improving in bursts separated
-# by long flat stretches, and the largest gap before the final optimum measured
-# 25 checks on one seed and 10 on the other. Anything under that stops in a
-# stretch rather than at the end — at 5 both seeds halted around epoch 350 while
-# their true optima sat at 850 and 580, costing 0.5 and 0.7 mnat of RATING (a
-# paired comparison, same seed either side, so it is not the across-seed noise).
-# The axes are indifferent to this: 490 extra epochs move them 0.86 canonical,
-# far less than a seed change does, so raising it buys rating accuracy and NOT
-# axis stability. The cost is runtime, ~9 minutes to ~25.
-FLAT_PATIENCE = 30
 BATCH = 65536
 # SPLIT RATES, and the split is mandatory. What the grid measures is the RATIO
 # lr_field/lr_net, monotone and saturating near 30x: below 10x the fit loses
@@ -161,6 +157,19 @@ ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # bounded structurally by cap = (1 - 2*lambda).
 SHALLOW_TAU = 0.1
 SHALLOW_W = 0.3
+# The barrier reads the CORPUS rather than the batch, and has to: a problem
+# nobody attempted has no likelihood term, so its slope is held off the floor by
+# this and nothing else. It does not have to read ALL of it every step. A uniform
+# sample with replacement is an UNBIASED estimate of the same corpus mean, and a
+# run takes tens of thousands of steps, so every problem is drawn thousands of
+# times over the fit — what the sample costs is variance in one step's gradient,
+# not coverage.
+#
+# Reading all of it dominates the step, because the corpus is several times a
+# batch and a step's cost is a trunk pass over whatever it is handed. So this
+# sits well under BATCH, and moving it trades one number against the other in
+# the obvious direction: more samples, steadier barrier gradient, slower epoch.
+SHALLOW_SAMPLES = 20000
 # ONE SCHEDULE, and the loop is uniform because of it. Holding the per-user axis
 # positions at zero for an opening span is the obvious companion to teaching —
 # while they are zero the likelihood's gradient with respect to the loadings is
@@ -521,8 +530,6 @@ def main():
     opt = torch.optim.Adam(m.param_groups())
     o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
     n = len(tr)
-    best, best_state, flat, best_epoch = float("inf"), None, 0, 0
-    stopped = False
     print(f"\n=== joint fit | K={K_AXES} | teach weight {TEACH_WEIGHT} "
           f"(constant) ===", flush=True)
 
@@ -617,9 +624,10 @@ def main():
                 gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
                 loss = loss + TEACH_WEIGHT * (
                     (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
-            m.train(False)          # the barrier reads the corpus, dropout off
+            m.train(False)          # the barrier reads corpus rows, dropout off
+            si = torch.randint(len(tfeat), (SHALLOW_SAMPLES,), device=device)
             short = torch.nn.functional.softplus(
-                o_tau - m.slope_logit(tfeat)).pow(2).mean()
+                o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
             loss = loss + SHALLOW_W * short
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
@@ -633,35 +641,8 @@ def main():
                     pr[tr], ty[tr]))
                 bce_st = float(torch.nn.functional.binary_cross_entropy(
                     pr[i_stop], ty[i_stop]))
-            improved = bce_st < best - 1e-6
-            if improved:
-                best, best_epoch = bce_st, ep + 1
-                best_state = {k: v.detach().clone()
-                              for k, v in m.state_dict().items()}
-            # The objective is not moving on a schedule of its own — the
-            # teaching weight is constant — so staleness against the stop split
-            # is meaningful from the first check and the counter never has to be
-            # held. `best` keeps updating throughout, so the checkpoint is the
-            # best epoch seen and the trailing stale checks cost only runtime.
-            if improved:
-                flat = 0
-            else:
-                flat += 1
-            print(f"  epoch {ep + 1:4d}  train {bce_tr:.4f}  "
-                  f"stop {bce_st:.4f}  best {best:.4f}@{best_epoch}  "
-                  f"stale {flat}/{FLAT_PATIENCE}", flush=True)
-            if flat >= FLAT_PATIENCE:
-                print(f"  stopped at epoch {ep + 1}; restoring best "
-                      f"{best:.4f}@{best_epoch}", flush=True)
-                stopped = True
-                break
-
-    if not stopped:
-        raise SystemExit(
-            f"EPOCH CAP HIT: ran {EPOCHS} epochs without the patience rule "
-            f"firing. The fit never plateaued, so this is not a converged "
-            f"solution and its numbers are not comparable with anything.")
-    m.load_state_dict(best_state)
+            print(f"  epoch {ep + 1:4d}/{EPOCHS}  train {bce_tr:.4f}  "
+                  f"stop {bce_st:.4f}", flush=True)
 
     # --- outputs
     m.train(False)
