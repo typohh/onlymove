@@ -308,7 +308,7 @@ class JointMIRT:
                  seed, g_init=None, global_slope=False, act="swiglu",
                  hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
                  axis_reads_rating=True, axis_from_trunk=True,
-                 axis_trunk_coupled=True, center_v=False):
+                 axis_trunk_coupled=True, center_v=False, g_gauge=False):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
@@ -365,6 +365,12 @@ class JointMIRT:
                     torch.tensor(g_init, dtype=torch.float32, device=device))
         self.v = torch.zeros(n_users, k_axes, device=device, requires_grad=True)
         self.center_v = bool(center_v)
+        self.g_gauge = bool(g_gauge)
+        # The axis gauge, the same shape as the difficulty one below: the batch's
+        # own per-axis RMS while training, its EMA at eval. Off, the divisor is
+        # whatever batch is in hand at every call, so an eval-mode loading depends
+        # on what it was passed alongside.
+        self.g_rms = torch.ones(1, k_axes, device=device)
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = torch.tensor(float(np.log(li / (1.0 - li))),
                                       device=device, requires_grad=True)
@@ -379,6 +385,41 @@ class JointMIRT:
         return (list(self.trunk.parameters()) + list(self.head.parameters())
                 + list(self.g_lin.parameters()) + list(self.theta.parameters())
                 + [self.v, self.lapse_raw, self.a_raw])
+
+    def state_tensors(self):
+        """params() plus the GAUGE BUFFERS — what a checkpoint has to carry to
+        describe the model rather than only its parameters.
+
+        The gauges are not parameters and are not trained, but the rating scale
+        rides on b's whitening and every axis loading on g's divisor, so weights
+        restored beside a gauge from a different epoch are priced by statistics
+        belonging to a different network. It is --restore-gauge rather than the
+        default because the parameters-only form is what every earlier
+        measurement here was taken under. Production has no restore at all — it
+        runs a fixed budget and keeps the last epoch, which is --keep-last."""
+        return self.params() + [self.b_mu, self.b_sd, self.g_rms]
+
+    def _g_norm(self, g, pin=False):
+        """Divide the loadings by their per-axis RMS.
+
+        Without --axis-gauge that is the CALLER'S batch, every time. With it, the
+        batch's RMS while training (so the gradient path is unchanged) and the
+        EMA at eval, so an eval-mode loading no longer moves with the batch it
+        was passed in. `pin` overwrites the gauge with this batch's RMS first and
+        is for the corpus-wide extraction: the EMA follows the attempt stream,
+        while the loadings being written cover the corpus."""
+        if not self.g_gauge:
+            return g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
+        rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS).detach()
+        if pin:
+            with self.torch.no_grad():
+                self.g_rms.copy_(rms)
+        elif self.training:
+            with self.torch.no_grad():
+                self.g_rms.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * rms)
+        else:
+            rms = self.g_rms
+        return g / rms
 
     def param_groups(self, lr_net, lr_field):
         """SPLIT RATES. The network must train an order of magnitude slower than
@@ -441,7 +482,7 @@ class JointMIRT:
         structurally instead, by `cap` in problem_params."""
         return self.head(self.trunk(feat))[:, 2]
 
-    def problem_params(self, feat):
+    def problem_params(self, feat, pin_gauge=False):
         """(difficulty b, discrimination a, floor c, axis loadings g).
 
         b carries the GAUGE, whitened to mean 0 / sd 1 on batch statistics while
@@ -524,9 +565,7 @@ class JointMIRT:
             if self.axis_reads_rating:
                 g_in = torch.cat([g_in, b.detach()[:, None], a.detach()[:, None],
                                   c.detach()[:, None]], dim=1)
-        g = self.g_lin(g_in)
-        g = g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
-        return b, a, c, g
+        return b, a, c, self._g_norm(self.g_lin(g_in), pin=pin_gauge)
 
     def axis_values(self, feat):
         """The axis loadings g for a set of problems, in the CURRENT mode
@@ -543,6 +582,10 @@ class JointMIRT:
         h = self.trunk(self._drop(feat, INPUT_DROPOUT))
         g_in = h if self.axis_trunk_coupled else h.detach()
         g = self.g_lin(g_in)
+        # Its own batch's RMS, and it never touches the gauge, for the reason in
+        # the docstring above: this path samples PROBLEMS while the gauge is
+        # defined over the attempt stream, so letting the teaching loss move it
+        # would put an auxiliary objective in charge of the axes' units.
         return g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6)
 
     def axis_input(self, feat):
@@ -804,6 +847,43 @@ def main():
                          "ability, since a centred copy satisfies it exactly. "
                          "The soft form of --center-v; production ships the hard "
                          "one, so an arm setting both is double-counting.")
+    ap.add_argument("--axis-gauge", action="store_true",
+                    help="run the axis RMS as a GAUGE — the batch's own while "
+                         "training, its EMA at eval — which is what PRODUCTION "
+                         "does. Off, every call divides by whatever batch it was "
+                         "handed, so an eval-mode loading depends on what it was "
+                         "passed alongside and nothing carries the divisor to a "
+                         "reader. Training gradients are the same either way; "
+                         "what moves is eval, hence the stop split. The corpus "
+                         "extraction pins the gauge to the corpus first, so the "
+                         "dumps are on the same scale under both settings.")
+    ap.add_argument("--restore-gauge", action="store_true",
+                    help="carry the gauge buffers (b_mu, b_sd, g_rms) in the "
+                         "best-epoch checkpoint. Off, only parameters are "
+                         "restored, so the final extraction whitens b and scales "
+                         "g by statistics the LAST epoch left behind — up to "
+                         "flat_patience*CHECK_EVERY epochs past the weights "
+                         "being restored. Only bites when a restore happens, so "
+                         "it does nothing under --keep-last.")
+    ap.add_argument("--keep-last", action="store_true",
+                    help="keep the FINAL epoch rather than restoring the best "
+                         "stop-split one, which is what PRODUCTION does: it runs "
+                         "a fixed budget and selects nothing. The stop split is "
+                         "flat well before the end and then wanders inside a "
+                         "band, so choosing an epoch on it selects out of that "
+                         "noise — the chosen epoch moves by thousands between "
+                         "otherwise identical runs. The split is still measured "
+                         "and printed either way.")
+    ap.add_argument("--shallow-samples", type=int, default=0,
+                    help="evaluate the shallow-slope barrier on this many "
+                         "problems drawn uniformly WITH REPLACEMENT each step "
+                         "instead of the whole corpus (0). An unbiased estimate "
+                         "of the same corpus mean, and the corpus is several "
+                         "times a batch, so the full form is most of a step's "
+                         "trunk work. It still has to read the CORPUS and not "
+                         "the batch: an unattempted problem has no likelihood "
+                         "term, so this is the only thing holding its slope off "
+                         "the floor.")
     ap.add_argument("--center-v", action="store_true",
                     help="subtract the population mean from v before it enters "
                          "the likelihood, which is what PRODUCTION does. Exact "
@@ -974,6 +1054,16 @@ def main():
                 "v_mean_penalty": 0.0,                  # dev default 10.0
                 "center_v": True,                       # dev default off
                 "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
+                "shallow_samples": _prod.SHALLOW_SAMPLES,   # dev default 0 = all
+                # Production has no switch for either — both are structural in
+                # its model — so True is a literal here, as with ortho_per_tail.
+                "axis_gauge": True,                     # dev default off
+                # Production selects no epoch, so nothing is restored and
+                # restore_gauge is unobservable under parity; it is set anyway so
+                # that an arm which re-enables selection restores a coherent
+                # model rather than a mixed one.
+                "keep_last": True,                      # dev default off
+                "restore_gauge": True,                  # dev default off
                 # The rating-orthogonality penalty. Dev defaults leave it OFF and
                 # aimed at difficulty alone, so an arm that forgets these three is
                 # not a production arm at all — it is the free control, whose axes
@@ -1284,7 +1374,7 @@ def main():
                       axis_reads_rating=not args.axis_blind,
                       axis_from_trunk=not args.axis_from_features,
                       axis_trunk_coupled=not args.axis_trunk_detached,
-                      center_v=args.center_v)
+                      center_v=args.center_v, g_gauge=args.axis_gauge)
         if args.init_from:
             # CONTINUE the previous fit rather than rediscovering a basis. The
             # axis objective is invariant to rotating the K-dim latent space, so
@@ -1305,6 +1395,8 @@ def main():
                 m.a_raw.copy_(st["a_raw"].to(device))
                 m.b_mu.copy_(st["b_mu"].to(device))
                 m.b_sd.copy_(st["b_sd"].to(device))
+                if "g_rms" in st:       # absent from checkpoints predating it
+                    m.g_rms.copy_(st["g_rms"].to(device))
                 pidx = {str(x): i for i, x in enumerate(st["profiles"])}
                 th, nth = st["theta"].to(device), 0
                 for j, pr_ in enumerate(profiles.categories):
@@ -1437,13 +1529,26 @@ def main():
         opt = torch.optim.Adam(m.param_groups(args.lr_net, args.lr_field))
         base_lrs = [gp["lr"] for gp in opt.param_groups]
 
+        # What the best-epoch checkpoint carries. Under --restore-gauge that
+        # includes the gauge buffers, so the restored weights are priced by the
+        # statistics they were checkpointed with; both the clone and the restore
+        # read it, so the two cannot disagree about the list.
+        def _ckpt_tensors():
+            return m.state_tensors() if args.restore_gauge else m.params()
+
         def _extract():
             """Per-problem parameters as of NOW, always in eval mode — the gauge
-            reads its EMA there, and a dropout sample is not the model."""
+            reads its EMA there, and a dropout sample is not the model.
+
+            The axis gauge is PINNED to the corpus here, as production does
+            before it writes: the EMA follows the attempt stream, which
+            over-weights whatever is popular, while these loadings cover the
+            corpus. It is a no-op without --axis-gauge, where the divisor is this
+            call's batch — the corpus — already."""
             was = m.training
             m.train(False)
             with torch.no_grad():
-                b_a, a_a, c_a, g_a = m.problem_params(tfeat)
+                b_a, a_a, c_a, g_a = m.problem_params(tfeat, pin_gauge=True)
                 lm = float(m.lapse())
             m.train(was)
             b_, a_ = b_a.cpu().numpy(), a_a.cpu().numpy()
@@ -1606,11 +1711,15 @@ def main():
                             # and the comparison cannot see the cost.
                             se = (gz[mk] - teach_tgt[pid[mk]]) ** 2
                             loss = loss + tw * (se * teach_w).mean()
-                # divergence barrier, over the FULL corpus with dropout off
+                # divergence barrier, over the corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
+                  bfeat = tfeat
+                  if args.shallow_samples:
+                      bfeat = tfeat[torch.randint(
+                          len(tfeat), (args.shallow_samples,), device=device)]
                   short = torch.nn.functional.softplus(
-                      o_tau - m.slope_logit(tfeat)).pow(2).mean()
+                      o_tau - m.slope_logit(bfeat)).pow(2).mean()
                   loss = loss + args.shallow_w * short
                   m.train(True)
                 opt.zero_grad(); loss.backward(); opt.step()
@@ -1626,7 +1735,7 @@ def main():
                 if improved:
                     best = bce_st
                     best_epoch = ep + 1
-                    best_state = [q.detach().clone() for q in m.params()]
+                    best_state = [q.detach().clone() for q in _ckpt_tensors()]
                 # The epoch's teaching weight, recomputed here because `tw` is
                 # scoped to the batch loop. Zero whenever nothing is being taught,
                 # so an untaught arm behaves exactly as before. Reported beside
@@ -1797,10 +1906,13 @@ def main():
                         f"plateaued, so this is not a converged solution and "
                         f"its numbers are not comparable with anything in "
                         f"docs/mirt_benchmark.md. Raise --epochs and re-run.")
-        if best_state is not None:
+        if best_state is not None and not args.keep_last:
             with torch.no_grad():
-                for q, b in zip(m.params(), best_state):
+                for q, b in zip(_ckpt_tensors(), best_state):
                     q.copy_(b)
+        elif args.keep_last:
+            print(f"  --keep-last: keeping epoch {ep + 1} rather than the best "
+                  f"stop-split epoch ({best_epoch}, {best:.4f})", flush=True)
 
         if args.save_model:
             torch.save({"trunk": m.trunk.state_dict(),
@@ -1813,6 +1925,7 @@ def main():
                         "lapse_raw": m.lapse_raw.detach().cpu(),
                         "a_raw": m.a_raw.detach().cpu(),
                         "b_mu": m.b_mu.cpu(), "b_sd": m.b_sd.cpu(),
+                        "g_rms": m.g_rms.cpu(),
                         "k": args.k}, args.save_model)
             print(f"  wrote model -> {args.save_model}", flush=True)
 

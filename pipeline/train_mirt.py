@@ -241,10 +241,12 @@ class JointMIRT(nn.Module):
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
         # THE TWO GAUGES, both the same shape: batch statistics while training,
-        # an EMA of them at eval. BUFFERS, so the checkpoint carries them — the
-        # rating scale rides on b's whitening and every shipped axis vector on
-        # g's divisor, so restoring the best epoch's weights beside a later
-        # epoch's gauge prices both by statistics from a different network.
+        # an EMA of them at eval. BUFFERS, so they travel with the weights
+        # wherever the weights go — mirt_model.pt, which write_mirt_per_cell
+        # reads, and any state_dict a caller saves or restores. The rating scale
+        # rides on b's whitening and every shipped axis vector on g's divisor, so
+        # weights beside a gauge from a different epoch price both by statistics
+        # belonging to a different network.
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
         self.register_buffer("g_rms", torch.ones(1, K_AXES))
@@ -297,7 +299,7 @@ class JointMIRT(nn.Module):
         penalty falls away properly for healthy slopes."""
         return self.head(self.trunk(feat))[:, 1]
 
-    def problem_params(self, feat):
+    def problem_params(self, feat, pin_gauge=False):
         """(difficulty b, discrimination a, floor c, axis loadings g).
 
         THE GAUGE MUST SIT ON DIFFICULTY, NOT ON AN INTERCEPT. Two freedoms have
@@ -329,8 +331,14 @@ class JointMIRT(nn.Module):
         # was passed last, and the per-cell fanout reads the same number out of
         # the checkpoint, so a cell and the correct-move vector in
         # per_problem.csv cannot end up on different scales.
-        if self.training:
-            rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS).detach()
+        #
+        # `pin_gauge` overwrites it with THIS batch's RMS, for the corpus-wide
+        # pass that writes the outputs — see the call in main().
+        rms = (g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS).detach()
+        if pin_gauge:
+            with torch.no_grad():
+                self.g_rms.copy_(rms)
+        elif self.training:
             with torch.no_grad():
                 self.g_rms.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * rms)
         else:
@@ -677,9 +685,7 @@ def main():
         # what carries the same divisor to the fanout. The scale itself is
         # arbitrary (v absorbs it), so what matters is that both ends agree and
         # that the number is stated rather than left over from the last call.
-        raw_g = m.g_lin(m.trunk(tfeat))
-        m.g_rms.copy_(raw_g.pow(2).mean(dim=0, keepdim=True).sqrt() + EPS)
-        b_all, a_all, c_all, g_all = m.problem_params(tfeat)
+        b_all, a_all, c_all, g_all = m.problem_params(tfeat, pin_gauge=True)
         lam = float(m.lapse())
     b_np, a_np = b_all.cpu().numpy(), a_all.cpu().numpy()
     c_np, g_np = c_all.cpu().numpy(), g_all.cpu().numpy()
