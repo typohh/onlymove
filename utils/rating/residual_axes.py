@@ -156,10 +156,12 @@ def build_axis_features(params_dir=None):
     of the feature columns AND the 4PL baseline the axis gain is measured
     against, so scoring a held-out problem set against the shipped fit would
     feed the axes parameters derived from attempts on the very problems being
-    scored. NOTE the rank curve is still the shipped one: it is a global
-    monotone rating->rank map fitted on survey declarations rather than on
-    held-out outcomes, so its leak is second-order — but it is not zero, and a
-    fully clean run would refit it too."""
+    scored. THE RANK CURVE COMES FROM THE SAME DIRECTORY, and has to: it is a
+    fifth feature column, produced by mapping that fit's own ratings through it,
+    so a curve fitted against a DIFFERENT fit's ratings prices the column on a
+    scale its ratings are not on. Reading the curve from the shipped ratings/
+    while the parameters came from a named fit is the leak this argument exists
+    to close, reopened one column later."""
     from utils.rating.model_constants import PCA_DIM, SEED as PCA_SEED, SIZES
 
     tids_by_size = corpus_tids_by_size(SIZES)
@@ -172,7 +174,7 @@ def build_axis_features(params_dir=None):
         f"feature tail changed ({n_exempt} exempt cols incl. the size flag): update "
         "EXEMPT_TAIL_COLS, which the axis-input dropout mask is sized from")
 
-    curve = _load_rank_curve()
+    curve = _load_rank_curve(params_dir)
     rsf = {t: np.array(v, dtype=np.float32)
            for t, v in load_backend_problem_params(
                ratings_dir=params_dir).items()}
@@ -206,9 +208,23 @@ def build_axis_features(params_dir=None):
     return feats, rank, params, int(act_dim)
 
 
-def _load_rank_curve():
+def _load_rank_curve(ratings_dir=None):
+    """M from <ratings_dir>/rating_to_rank.json, defaulting to the shipped
+    ratings/. It tracks `params_dir` rather than being pinned to the shipped
+    curve because the rating column and the rank column have to describe ONE
+    fit — see build_axis_features. A named directory with no curve in it is an
+    ABORT, not a silent fall back to the shipped one: that fall back is exactly
+    the mixture the caller asked not to have, and it leaves no trace."""
     import json as _json
-    path = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
+    root = ratings_dir or os.path.join(PROJECT_ROOT, "ratings")
+    path = os.path.join(root, "rating_to_rank.json")
+    if not os.path.exists(path):
+        hint = ("run pipeline.map_rating_to_rank first" if ratings_dir is None
+                else "the curve must come from the SAME fit as the 4PL "
+                     "parameters — run pipeline.map_rating_to_rank against this "
+                     "directory, or pass no params_dir to read the shipped "
+                     "ratings/ throughout")
+        raise FileNotFoundError(f"{path} missing — {hint}")
     m = _json.load(open(path))
     c = m["9"] if "9" in m else next(iter(m.values()))
     return np.array(c["ratings"]), np.array(c["ranks"])
