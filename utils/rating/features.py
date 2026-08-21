@@ -934,7 +934,7 @@ def load_joint_game_phase(sizes, tids_by_size):
 # column — splitting it would duplicate in the filename what the column says.
 OWNERSHIP_CSV = os.path.join(CACHE_DIR, "ownership_swing.csv")
 
-# The swing decomposition auxiliary.extract_ownership_swing writes, minus its
+# The swing decomposition pipeline.extract_ownership_swing writes, minus its
 # roll-up columns: each roll-up is the exact sum of two parts below and
 # stone_swing_abs the sum of all eight, so including them would ship exact linear
 # dependencies into the trunk. empty_swing_abs is kept because it is the one
@@ -961,7 +961,7 @@ def load_joint_ownership(sizes, tids_by_size):
     if not os.path.exists(OWNERSHIP_CSV):
         raise FileNotFoundError(
             f"ownership cache {OWNERSHIP_CSV} missing — run "
-            f"`./.venv/bin/python3 -m auxiliary.extract_ownership_swing` first")
+            f"`./.venv/bin/python3 -m pipeline.extract_ownership_swing` first")
     have = {}
     with open(OWNERSHIP_CSV, newline="") as fh:
         for rec in csv.DictReader(fh):

@@ -84,26 +84,18 @@ opponent's to wholly ours, so every swing column is HALVED to read as stones.
 `opp_stones_won` = 1.0 means the correct move kills exactly one opponent stone
 that the best refutation leaves alive.
 
-TWO BACKENDS, same output schema, so either can check the other:
-  - `engine` (default): the KataGo analysis binary, one maxVisits=1 query per
-    child, issued concurrently. Faster end to end because it builds the input
-    features in C++ — the gap widens with the candidate count, so most of it is
-    on the larger board.
-  - `torch`: the vendored PyTorch net, all children in one batched forward pass.
+EVALUATION IS THE KATAGO ANALYSIS BINARY, one maxVisits=1 query per child issued
+concurrently. It builds its input features in C++, which is what makes it roughly
+twice as fast end to end as driving the vendored PyTorch net directly, and the
+gap widens with the candidate count so most of the saving is on the larger board.
 
-Their conventions DIFFER and each was verified rather than assumed — get one
-wrong and the sign silently inverts:
-  - Torch ownership is positive for the PLAYER TO MOVE, and a child's player to
-    move is the solver's OPPONENT, so the map is negated once. Its value head is
-    likewise mover-framed, so the solver's winrate is softmax(value)[1].
-  - Engine ownership and `rootInfo.winrate` are BLACK-absolute regardless of who
-    is to move, so both are flipped by the SOLVER'S COLOUR instead. The engine's
-    array is row-major from the TOP-left while this module indexes y from the
-    bottom (the gtp_to_xy convention), so it is also flipped vertically.
-Verified equal on real problems: ownership correlation 0.999+ per child, and the
-same choice of best alternative. Neither backend supplies the RANKING any more —
-that comes from the SGF — so a backend now only has to agree about the map it is
-asked for, and the two cannot disagree about which map that is.
+ITS TWO FRAME CONVENTIONS ARE VERIFIED, NOT ASSUMED — get either wrong and the
+sign silently inverts. Engine ownership and `rootInfo.winrate` are BLACK-absolute
+regardless of who is to move, so both are flipped by the SOLVER'S COLOUR; and the
+engine's array is row-major from the TOP-left while this module indexes y from
+the bottom (the `gtp_to_xy` convention), so it is also flipped vertically. The
+RANKING comes from the SGF's own recorded score rather than from any evaluation
+here, so what an evaluator has to get right is only the map it was asked for.
 
 RULES ARE JAPANESE AT KOMI 6.5 (utils.constants RULES/KOMI, GameState.RULES_JAPANESE)
 — the conditions the corpus was generated and evaluated under, so a winrate here
@@ -130,16 +122,10 @@ cannot solve at one ply.
 
 Output: ONE csv for both boards beside the other feature-block caches
 (activations/_signal_cache/ownership_swing.csv), keyed by its `size` column the
-way axes/per_problem.csv is. Appended and fsynced every --flush-every rows, so a
+way axes/per_problem.csv is. Appended and fsynced every FLUSH_EVERY rows, so a
 killed run loses at most that many. RESUMABLE by the tid column — ids are unique
 across the whole namespace, so a tid already present is done whatever board it
 came from. A partial trailing line from a kill mid-write is truncated on restart.
-
-Measured-rejected, do not re-add: a multiprocessing pool for the torch backend's
-child-feature build. It is about half that backend's wall time, so parallelising
-it looks free, but shipping the input tensors back through a pipe costs more
-than the cores save — measured SLOWER on both boards. Moving that work into the
-engine is what actually removes it.
 
 `n_te_alts` = 0 marks a problem with no resolved refutation of ANY kind — every
 refuted first move, the pass included, was abandoned at the generator's playout
@@ -152,11 +138,10 @@ count there tracks whatever it happened to resolve.
 
 Launch it detached or it dies with the shell:
 
-    setsid nohup ./.venv/bin/python3 -u -m auxiliary.extract_ownership_swing \\
+    setsid nohup ./.venv/bin/python3 -u -m pipeline.extract_ownership_swing \\
         > /tmp/ownership_swing.log 2>&1 < /dev/null &
 """
 
-import argparse
 import csv
 import logging
 import os
@@ -183,23 +168,26 @@ from utils.katago.coords import gtp_to_xy, sgf_to_gtp, xy_to_gtp
 from utils.katago.models import get_model
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 
-DEFAULT_CKPT = os.path.join(
-    PROJECT_ROOT, "models",
-    "kata1-b18c384nbt-s9996604416-d4316597426",
-    "model.ckpt",
-)
-
 # Beside the other per-problem feature caches the rating loaders read, not in a
 # directory of its own at the repo root.
-DEFAULT_OUT = os.path.join(PROJECT_ROOT, "activations", "_signal_cache",
-                           "ownership_swing.csv")
+OUT_PATH = os.path.join(PROJECT_ROOT, "activations", "_signal_cache",
+                        "ownership_swing.csv")
 
-# The torch-side mirror of utils.constants RULES/KOMI. Asserted rather than
-# assumed: the two describe the same ruleset through different interfaces, and a
-# silent disagreement would price the two backends differently.
-TORCH_RULES = GameState.RULES_JAPANESE
-assert RULES == "japanese" and TORCH_RULES["scoringRule"] == "SCORING_TERRITORY", RULES
-assert TORCH_RULES["whiteKomi"] == KOMI, (TORCH_RULES["whiteKomi"], KOMI)
+# Concurrent queries, and the batch the net is fed. The cfg's tuned nnMaxBatchSize
+# is sized for interactive search and throttles a bulk sweep, so it is overridden
+# here rather than in the cfg, which pipeline.tune_engine owns.
+ENGINE_THREADS = 64
+NN_BATCH = 64
+FLUSH_EVERY = 200      # rows between fsyncs; a kill costs at most this many
+PROGRESS_EVERY = 200   # problems between progress lines
+
+# The vendored net's mirror of utils.constants RULES/KOMI. Asserted rather than
+# assumed: the two describe the same ruleset through different interfaces, and
+# the positions are built through one while the engine is queried under the
+# other, so a silent disagreement would score them differently.
+VENDOR_RULES = GameState.RULES_JAPANESE
+assert RULES == "japanese" and VENDOR_RULES["scoringRule"] == "SCORING_TERRITORY", RULES
+assert VENDOR_RULES["whiteKomi"] == KOMI, (VENDOR_RULES["whiteKomi"], KOMI)
 
 FIELDS = [
     "tid", "size", "solver", "n_root_vars", "n_te_alts",
@@ -243,7 +231,7 @@ def build_state(setup_moves, size):
     """Replay the SGF's setup into the position the solver faces. The replay is
     move by move, not a stone placement, so the prisoner count territory scoring
     needs is present — see the rules note in the module docstring."""
-    state = GameState(size, TORCH_RULES.copy())
+    state = GameState(size, VENDOR_RULES.copy())
     for color_char, gtp in setup_moves:
         xy = gtp_to_xy(gtp)
         if xy is None:
@@ -371,22 +359,22 @@ def setup_move_sequence(setup_moves):
     return [[color.upper(), gtp] for color, gtp in setup_moves]
 
 
-# ---------------------------------------------------------------- backends
-# Both expose evaluate_children(state, pla, cands) -> (ownership, winrate)
-# with ownership (n, size, size) indexed [y][x] from the BOTTOM and positive for
-# the SOLVER, and winrate (n,) the solver's.
+# ---------------------------------------------------------------- engine
+# evaluate_children(state, pla, cands, setup_moves) -> (ownership, winrate) with
+# ownership (n, size, size) indexed [y][x] from the BOTTOM and positive for the
+# SOLVER, and winrate (n,) the solver's.
 
 class EngineBackend:
     """KataGo analysis binary: one maxVisits=1 query per child, concurrently."""
 
-    def __init__(self, size, nn_batch, threads):
+    def __init__(self, size):
         self.size = size
-        self.threads = threads
         self.controller = KatagoController()
         self.controller.start_engine(
             get_model(DEFAULT_MODEL), size,
-            extra_overrides=f"nnMaxBatchSize={nn_batch},numAnalysisThreads={threads}")
-        self.pool = ThreadPoolExecutor(max_workers=threads)
+            extra_overrides=f"nnMaxBatchSize={NN_BATCH},"
+                            f"numAnalysisThreads={ENGINE_THREADS}")
+        self.pool = ThreadPoolExecutor(max_workers=ENGINE_THREADS)
 
     def evaluate_children(self, state, pla, cands, setup_moves):
         size = self.size
@@ -419,58 +407,6 @@ class EngineBackend:
     def close(self):
         self.pool.shutdown(wait=False)
         self.controller.stop_engine()
-
-
-class TorchBackend:
-    """Vendored PyTorch net: every child in one batched forward pass."""
-
-    def __init__(self, size, ckpt, device, max_batch):
-        import torch
-        from katago.game.features import Features
-        from katago.train.load_model import load_model
-        self.torch = torch
-        self.size = size
-        self.max_batch = max_batch
-        self.model, _, _ = load_model(ckpt, use_swa=False, device=device,
-                                      pos_len=size, verbose=False)
-        self.model.eval()
-        self.features = Features(self.model.config, self.model.pos_len)
-
-    def _child_features(self, state, pla, cands):
-        """play/undo keeps the move history correct (the net reads recent moves),
-        which replaying the setup per candidate would too, at ~50x the cost."""
-        bins, globs = [], []
-        for cand in cands:
-            loc = (Board.PASS_LOC if cand is PASS
-                   else state.board.loc(cand[0], cand[1]))
-            state.play(pla, loc)
-            b, g = state.get_input_features(self.features)
-            state.undo()
-            bins.append(b)
-            globs.append(g)
-        return np.concatenate(bins, axis=0), np.concatenate(globs, axis=0)
-
-    def evaluate_children(self, state, pla, cands, setup_moves):
-        # setup_moves is unused: the state already carries the replayed history.
-        torch = self.torch
-        bin_in, glob_in = self._child_features(state, pla, cands)
-        owns, wrs = [], []
-        for i in range(0, bin_in.shape[0], self.max_batch):
-            b = torch.tensor(bin_in[i:i + self.max_batch], dtype=torch.float32,
-                             device=self.model.device)
-            g = torch.tensor(glob_in[i:i + self.max_batch], dtype=torch.float32,
-                             device=self.model.device)
-            with torch.no_grad():
-                out = self.model.postprocess_output(self.model(b, g, input_meta=None))[0]
-                # Mover-framed: the child's mover is the solver's opponent.
-                own = -torch.tanh(out[4])[:, 0]
-                wr = torch.softmax(out[1], dim=1)[:, 1]   # opponent's loss = solver's win
-            owns.append(own.cpu().numpy())
-            wrs.append(wr.cpu().numpy())
-        return np.concatenate(owns, axis=0), np.concatenate(wrs, axis=0)
-
-    def close(self):
-        pass
 
 
 # ---------------------------------------------------------------- per problem
@@ -620,116 +556,65 @@ def load_done(path):
 
 # ---------------------------------------------------------------- driver
 
-def make_backend(size, args):
-    if args.backend == "engine":
-        return EngineBackend(size, args.nn_batch, args.engine_threads)
-    import torch
-    device = torch.device(args.device) if args.device else torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu")
-    return TorchBackend(size, args.ckpt, device, args.max_batch)
-
-
-def run_size(size, args):
+def run_size(size):
     in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
     if not os.path.isdir(in_dir):
         print(f"\n[size {size}] no tsumegos dir at {in_dir}; skipping", flush=True)
         return
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    out_path = args.out
-    err_path = args.out + ".errors.log"
+    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
 
-    repair_trailing_line(out_path)
-    done = load_done(out_path)
+    repair_trailing_line(OUT_PATH)
+    done = load_done(OUT_PATH)
 
     sgf_files = sorted(f for f in os.listdir(in_dir) if f.endswith(".sgf"))
-    if args.limit is not None:
-        sgf_files = sgf_files[: args.limit]
     todo = [f for f in sgf_files if f[:-4] not in done]
     print(f"\n[size {size}] {len(sgf_files)} SGFs, {len(done)} already done, "
-          f"{len(todo)} to do -> {out_path}", flush=True)
+          f"{len(todo)} to do -> {OUT_PATH}", flush=True)
     if not todo:
         return
 
-    print(f"[size {size}] starting {args.backend} backend", flush=True)
-    backend = make_backend(size, args)
+    backend = EngineBackend(size)
 
-    new_file = not os.path.exists(out_path) or os.path.getsize(out_path) == 0
-    n_done = n_fail = 0
+    new_file = not os.path.exists(OUT_PATH) or os.path.getsize(OUT_PATH) == 0
+    n_done = 0
     t0 = time.time()
     try:
-        with open(out_path, "a", newline="") as fh:
+        with open(OUT_PATH, "a", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=FIELDS, extrasaction="raise")
             if new_file:
                 writer.writeheader()
             for i, fname in enumerate(todo, 1):
-                try:
-                    row = process_one_sgf(os.path.join(in_dir, fname), backend)
-                except Exception as e:  # noqa: BLE001
-                    # A diagnostic sweep, not a pipeline artifact: nothing
-                    # downstream is keyed to completeness, so one bad SGF must not
-                    # cost the run. Recorded and counted, never silently dropped.
-                    if args.strict:
-                        raise RuntimeError(f"[size {size}] failed on {fname}") from e
-                    n_fail += 1
-                    with open(err_path, "a") as ef:
-                        ef.write(f"{fname}\t{type(e).__name__}: {e}\n")
-                    continue
+                # AN UNREADABLE PROBLEM ABORTS THE RUN. This file is a feature
+                # block the rating loaders read, and joint_feature_tail raises on
+                # a live tsumego with no row, so a problem skipped here does not
+                # degrade the fit — it stops it, thousands of problems and one
+                # step later, pointing at the wrong place. Failing on the SGF
+                # that caused it is the cheap version of the same halt. Resume
+                # picks up from the last flushed row.
+                row = process_one_sgf(os.path.join(in_dir, fname), backend)
                 writer.writerow({k: row.get(k, "") for k in FIELDS})
                 n_done += 1
-                if n_done % args.flush_every == 0:
+                if n_done % FLUSH_EVERY == 0:
                     fh.flush()
                     os.fsync(fh.fileno())
-                if i % args.progress_every == 0 or i == len(todo):
+                if i % PROGRESS_EVERY == 0 or i == len(todo):
                     rate = i / (time.time() - t0)
                     print(f"[size {size}] {i}/{len(todo)}  {rate:.2f} probs/s  "
-                          f"ETA {(len(todo) - i) / rate / 3600:.2f} h  failures {n_fail}",
-                          flush=True)
+                          f"ETA {(len(todo) - i) / rate / 3600:.2f} h", flush=True)
             fh.flush()
             os.fsync(fh.fileno())
     finally:
         backend.close()
 
-    print(f"[size {size}] wrote {n_done} rows in {(time.time()-t0)/3600:.2f} h", flush=True)
-    if n_fail:
-        print(f"[size {size}] *** {n_fail} FAILURES — see {err_path}", flush=True)
+    print(f"[size {size}] wrote {n_done} rows in {(time.time()-t0)/3600:.2f} h",
+          flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", choices=("engine", "torch"), default="engine",
-                        help="engine = KataGo analysis binary (default, ~2x faster); "
-                             "torch = vendored PyTorch net.")
-    parser.add_argument("--size", type=int, choices=list(ALL_BOARD_SIZES), default=None,
-                        help="Board size (default: every size in ALL_BOARD_SIZES).")
-    parser.add_argument("--out", default=DEFAULT_OUT,
-                        help=f"Output CSV (default: {os.path.relpath(DEFAULT_OUT, PROJECT_ROOT)}).")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Process only the first N SGFs per size (debugging).")
-    parser.add_argument("--engine-threads", type=int, default=64,
-                        help="engine: concurrent queries / numAnalysisThreads (default: 64).")
-    parser.add_argument("--nn-batch", type=int, default=64,
-                        help="engine: nnMaxBatchSize override. The cfg's tuned value is "
-                             "sized for interactive search and throttles a bulk sweep.")
-    parser.add_argument("--max-batch", type=int, default=96,
-                        help="torch: cap on child positions per forward pass (default: 96).")
-    parser.add_argument("--flush-every", type=int, default=200,
-                        help="fsync the CSV every N rows (default: 200).")
-    parser.add_argument("--progress-every", type=int, default=200,
-                        help="Print a progress line every N problems (default: 200).")
-    parser.add_argument("--strict", action="store_true",
-                        help="Abort on the first failed problem instead of logging it.")
-    parser.add_argument("--device", default=None,
-                        help="torch: cuda or cpu (default: cuda if available).")
-    parser.add_argument("--ckpt", default=DEFAULT_CKPT, help="torch: PyTorch checkpoint.")
-    args = parser.parse_args()
-
     logging.disable(logging.CRITICAL)  # silence KataGo's config dump
-
-    sizes = [args.size] if args.size else list(ALL_BOARD_SIZES)
-    print(f"Ownership swing extraction, {args.backend} backend; sizes {sizes}", flush=True)
-    for size in sizes:
-        run_size(size, args)
+    print(f"Ownership swing extraction; sizes {list(ALL_BOARD_SIZES)}", flush=True)
+    for size in ALL_BOARD_SIZES:
+        run_size(size)
 
 
 if __name__ == "__main__":
