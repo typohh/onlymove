@@ -16,7 +16,9 @@ import numpy as np
 from utils.constants import ALL_BOARD_SIZES
 from utils.rating.fit_rank_curves import CALIBRATION_P
 
-K_AXES = 3                       # skill axes fitted alongside the rating
+K_AXES = 5                       # skill axes fitted alongside the rating; MUST equal
+                                 # the number of `components` in axes/labels.json,
+                                 # which is the shipping decision K follows
 EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
 SEED = 0

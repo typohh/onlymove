@@ -1,7 +1,7 @@
 {
  "version": 4,
  "space": "joint_mirt_v1 (legacy entries: residual_axes_v1)",
- "_doc": "Motif names and the shipping decision. `components` is one entry per axis, each a PROXY RULE name from utils.rating.motif_rules, or \"A/B\" to put two rules on one axis's two tails — A at the positive end, B at the negative. That is what pipeline.train_mirt teaches its axes onto: production seeds from RULES, which state what a direction is, rather than from previously-fitted directions, which measure as retained at 0.43-0.73 and were found on inspection to have mutated at exactly those figures. THE NAMES LIVE WITH THE RULES, in motif_rules.RULE_LABELS, which is what package_for_pwa resolves a shipped tail through. `bank` is the DEV motif store — every direction a fit has been observed to find, keyed by the ax_<hex> content hash of the direction in label_anchors.npz, with provenance in `comment`. Nothing in production reads it, and it could not be read by name if it tried: it holds three directions called `counting`, three called `opening`, and a `ko` that is one entry's positive tail and another's negative. It is where auxiliary/rating_dev explores what a fit lands on.",
+ "_doc": "Motif names and the shipping decision. `components` is one entry per axis, each a PROXY RULE name from utils.rating.motif_rules, or \"A/B\" to put two rules on one axis's two tails — A at the positive end, B at the negative. That is what pipeline.train_mirt teaches its axes onto: production seeds from RULES, which state what a direction is, rather than from previously-fitted directions, which measure as retained at 0.43-0.73 and were found on inspection to have mutated at exactly those figures. A rule earns a slot on how quickly a user's position on the axis it seeds becomes identifiable — split-half reliability against history length — and NOT on the combined likelihood, which at this resolution is inside the holdout-draw spread and adjudicates nothing. The shipped set is one rule per axis. THE NAMES LIVE WITH THE RULES, in motif_rules.RULE_LABELS, which is what package_for_pwa resolves a shipped tail through. `bank` is the DEV motif store — every direction a fit has been observed to find, keyed by the ax_<hex> content hash of the direction in label_anchors.npz, with provenance in `comment`. Nothing in production reads it, and it could not be read by name if it tried: it holds three directions called `counting`, three called `opening`, and a `ko` that is one entry's positive tail and another's negative. It is where auxiliary/rating_dev explores what a fit lands on.",
  "bank": {
   "ax_50def44d": {
    "positive": "judgement",
@@ -300,8 +300,10 @@
   }
  },
  "components": [
-  "life and death/territory",
-  "counting/shape",
-  "ko/opening"
+  "ko",
+  "counting",
+  "tenuki",
+  "life and death",
+  "territory"
  ]
 }

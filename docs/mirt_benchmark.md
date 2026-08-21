@@ -221,6 +221,70 @@ does not climb over an 8x increase in data says tau^2 is ~0 and the N50 is a
 curve-fit artifact rather than a trait sharpening with evidence. Its mass lift is
 also the lowest of the eight, so the fitted axis is not much "about" the rule.
 
+### RESIDUALIZING THE RULE COLUMNS AGAINST THE RATING IS REFUTED
+
+The idea is reasonable and the observation behind it is real: a rule can be
+rating-dependent without being collinear with it, and `tenuki` is the clear case —
+it fires on 3.6% of the corpus at the weak end of the rating range and 33% at the
+strong end (point-biserial +0.236), because weaker players answer the last move.
+`ORTHO_RATING` pushes the fitted AXES off rating, slope and floor, but nothing
+constrains the TARGET, so a rating-laden target and the penalty are pulling against
+each other. Residualizing every rule column against rating, slope and floor before
+teaching removes that conflict at the source.
+
+Arms `iso_ar0..3` (K=8, all eight columns residualized) against `iso_p8s0..3` (the
+same bank raw), the SAME four draws, so every ratio below is paired.
+Residualization did what it says — every target's rating/slope/floor correlation
+goes to 0.000 — and the axes got WORSE where it matters:
+
+```
+  motif              raw   resid   ratio      p   per-seed ratio
+  counting           348     399    1.18  0.148   1.17 1.28 0.93 1.38
+  tenuki             493     578    1.17  0.312   0.80 1.48 1.22 1.31
+  ko                 518     787    1.55  0.074   2.51 1.23 1.32 1.43
+  life and death     751     824    1.12  0.595   1.50 1.06 1.49 0.66
+  territory          787     700    0.85  0.363   1.16 0.76 0.60 1.01
+  opening          3,607   5,941    1.59  0.336   0.87 5.13 1.04 1.37
+  sente            3,510   1,460    0.49  0.079   0.27 0.35 0.72 0.83
+  shape            8,220   2,482    0.32  0.133   0.13 0.63 0.39  (3/4 draws)
+
+  combined logloss: resid WORSE by 0.68 mnat, p 0.230, per seed 0.1 -1.8 -1.0 0.0
+```
+
+**It splits exactly along the working/broken tier line, in the wrong direction**:
+four of the five working rules degrade and only the two worst improve. `ko` — the
+rule the model otherwise adopts most faithfully — degrades most, and it carries the
+second-largest floor correlation, so what residualization removed there was signal
+rather than nuisance. `tenuki`'s curve does not merely fail to climb, it inverts:
+0.43/0.44/0.45/0.38 residualized against 0.37/0.40/0.51/0.49 raw.
+
+Nothing here clears p<0.05 and with eight motifs nothing survives correction, so
+the DIRECTION is the finding and the margins are not. But the direction is
+consistent across the tier split and the combined column agrees, which is enough to
+stop pursuing it: a rule's own rating dependence is not the thing to remove.
+
+### THE PRODUCTION RULE SET IS THE FIVE FROM THE WORKING TIER
+
+`axes/labels.json` ships `ko`, `counting`, `tenuki`, `life and death`, `territory`,
+one rule per axis, unidirectional, so `K_AXES` = 5. **The criterion is reliability,
+not likelihood**, and that is a decision about what the axes are FOR: the axes exist
+to report a user's weaknesses and tilt selection, which needs a user's position on
+an axis to be identifiable from a plausible history. Combined logloss cannot
+adjudicate at this resolution anyway — paired, K=4 -> 6 -> 8 moves it by less than
+the draw-to-draw spread — while N50 separates the two tiers several-fold at every K
+tried, and no K rescues a second-tier rule.
+
+**`tenuki` ships against its own evidence, deliberately, and is the axis to watch.**
+Its N50 qualifies but its reliability curve is FLAT across three banks and twelve
+seeds, which says the between-user variance is ~0 and the N50 is a curve-fit
+artifact. If that is what it is, `fit_population_constants` is where it shows up:
+`WEAKNESS_AXIS_MIN_VAR_RATIO` tests between-user variance against the mean per-user
+estimation variance and halts on exactly this case. That gate is measuring a
+different estimator on different data — the client's augmented EB design over all
+users, not a parity split of the MIRT's own axis — so it is a genuine second
+reading rather than a restatement, and it is the check that decides whether the
+axis is real.
+
 ## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
 
 Every axis-adds figure in this document, the one below included, comes from one or
@@ -453,7 +517,7 @@ establish.
 LOW agreement establishes nothing at all, and must not be read as a motif failing to transfer. Two
 reasons, and the second is structural. A motif can be present in a fit and expressed along a
 different direction, since nothing forces two model generations to place it in the same coordinates.
-And the current fit carries K=3 axes against a 16-motif legacy bank, so it CANNOT span them however
+And the fit carries far fewer axes than the 16-motif legacy bank has motifs, so it CANNOT span them however
 real they are — most legacy directions scoring near zero is a statement about there being three
 slots, not about the motifs. The way to find out whether a legacy motif survives is to teach it and
 measure retention, not to look for it in a fit that was never asked to hold it.
@@ -1408,7 +1472,7 @@ All evaluations here use `load_first_time_attempts`, which filters `is_repeat = 
 
 ## K is hardcoded in the MIRT
 
-K is fixed at 3, and measured as an interior optimum rather than inherited — see the K section above. There is no incremental search: K is baked into the shared head, so each value is a full training run.
+K equals the number of `components` in `axes/labels.json` — one axis per taught rule, so the count follows the shipping decision rather than a loss curve (see the production-rule-set section above). There is no incremental search either way: K is baked into the shared head, so each value is a full training run.
 
 ## The framework
 
