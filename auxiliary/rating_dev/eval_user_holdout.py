@@ -14,6 +14,13 @@ training runs whose numbers cannot be combined.
     per problem    the subset on problems NO training user attempted, so the
                    parameters come from the feature prior alone
     survey rho     their rank declarations, per-server Spearman, n-weighted
+    split-half     whether a user's position on each AXIS is identifiable at
+                   all, by parity-splitting their attempts and correlating the
+                   halves. Needs a --dumps fit (it reads the per-user arrays a
+                   --prod-dirs run does not carry) and is scored on the fit's
+                   OWN users, not the held-out ones -- there are too few deep
+                   held-out accounts to bucket. So it is in-sample for the
+                   loadings and mildly optimistic, unlike every row above it.
 
 The per-sample / per-problem split is a PROPERTY of the held-out users' history,
 not a second holdout: measured at roughly 79% seen / 21% unseen and stable across
@@ -298,6 +305,11 @@ def main():
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--frac", type=float, default=0.15)
     ap.add_argument("--label", default="model")
+    ap.add_argument("--axis-labels", nargs="*", default=[],
+                    help="names for the axes, in order, used by the split-half "
+                         "table; unnamed axes print as 'axis k'")
+    ap.add_argument("--no-split-half", action="store_true",
+                    help="skip the split-half tables (they add ~1min per dump)")
     ap.add_argument("--prior-ax-sd", type=float, default=None,
                     help="override PRIOR_AX_SD, the scorer's prior sd on a user's "
                          "axis contribution IN LOGITS. This is the measuring "
@@ -334,6 +346,17 @@ def main():
     print(f"  {'survey rho':30}{_fmt([r['rho'] for r in res])}"
           f"{'—':^13}{'axes do not enter':^19}")
     print("\n  logloss: lower better. axis adds: mnat/attempt, higher better.")
+
+    if not args.no_split_half:
+        from auxiliary.rating_dev.split_half import split_half_report
+        for (pd_, dp), sd in zip(srcs, args.seeds):
+            if dp is None:
+                continue
+            print(f"\n  seed {sd}:", end="")
+            try:
+                split_half_report(dp, args.axis_labels)
+            except Exception as exc:      # never let a diagnostic kill the eval
+                print(f"  split-half unavailable: {exc}")
 
 
 if __name__ == "__main__":
