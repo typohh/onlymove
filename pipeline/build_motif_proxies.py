@@ -68,8 +68,9 @@ from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import (  # noqa: E402
     LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_has_te,
-    rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_shape,
-    rule_territory)
+    answer_opponent_distance, answer_reply_distance,
+    rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_sente,
+    rule_shape, rule_tenuki, rule_territory)
 
 OUT = os.path.join(PROJECT_ROOT, "axes", "motif_proxies.npz")
 # The ownership columns the rules read. A projection, not the whole row — the CSV
@@ -101,9 +102,28 @@ def label_one(args):
         raw = open(path, "rb").read()
         game = sgfmill.sgf.Sgf_game.from_bytes(raw)
         _, variation_nodes = parse_tsumego_sgf(game)
-        _, setup_sgf, _ = parse_sgf(raw.decode("utf-8", "replace"))
+        _, setup_sgf, correct = parse_sgf(raw.decode("utf-8", "replace"))
     except Exception:
         return None
+    # The answer NODE, matched by coordinate to the winrate-chosen correct move
+    # rather than taken as variation_nodes[0]. The two agree by construction
+    # (promote_winning_first_move enforces it) but matching costs nothing and
+    # does not depend on that invariant holding for every file.
+    answer_node = None
+    if correct:
+        for _n in variation_nodes:
+            _c, _raw = _n.get_raw_move()
+            if _raw and _raw.decode("utf-8") == correct[1]:
+                answer_node = _n
+                break
+    # Both distances ride THIS parse -- the geometry rules need no board replay
+    # and no second pass over the corpus.
+    opp_dist = answer_opponent_distance(setup_sgf, correct)
+    reply_dist = answer_reply_distance(answer_node, correct)
+    # Whether a ko stands in the ROOT position, computed once: rule_ko needs it
+    # as its first test and rule_tenuki needs it as a disqualifier.
+    from utils.katago.board_render import simulate
+    root_ko = simulate(setup_sgf, size)[2] is not None
     evals = [e for e in (_mover_eval(n) for n in variation_nodes) if e is not None]
     # `shape` ranks only RESOLVED alternatives: an abandoned line is not a rival,
     # it is a line nobody played out.
@@ -112,10 +132,12 @@ def label_one(args):
     hit = {
         "life and death": rule_life_and_death(own),
         "counting": rule_counting(evals),
-        "ko": rule_ko(setup_sgf, variation_nodes, size),
+        "ko": True if root_ko else rule_ko(setup_sgf, variation_nodes, size),
         "opening": rule_opening(ph[1], size),
         "territory": rule_territory(own),
         "shape": rule_shape(resolved),
+        "tenuki": rule_tenuki(opp_dist, root_ko),
+        "sente": rule_sente(reply_dist),
     }
     return tid, size, [bool(hit[k]) for k in LABEL_SET]
 

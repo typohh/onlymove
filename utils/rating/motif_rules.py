@@ -77,6 +77,23 @@ KO_DEPTH = 2   # covers the relevant scenarios; depth 3 adds 3.5 points of corpu
 # floating again.
 OPENING_MAX_PREFIX = {9: 12, 13: 28}
 
+# TENUKI / SENTE — Chebyshev distance bars, set by SAMPLING 4k problems per board
+# for the ~20% share every rule is aimed at.
+#
+# NOT per board size, unlike OPENING_MAX_PREFIX, and that is measured rather than
+# assumed: both distance distributions come out nearly identical on the two boards
+# (median 1, p75 3, p85 4, p90 5 on each), because a tsumego is a local position
+# whose geometry does not scale with the board it sits on. A per-board bar would
+# be fitting the sampling noise, and worse, it would make one name mean two
+# different criteria — the 20%-closest bars are 4 on 9x9 and 3 on 13x13, i.e. the
+# BIGGER board would demand LESS distance to count as playing away.
+#
+# The share lands at 17.2%/15.3% rather than 20% because the distance is a whole
+# number of lines: >=3 gives 25.9%/23.4% and >=4 gives 17.2%/15.3%, so 4 is the
+# integer nearest the target. Sente at <=1 gives 22.4%/17.5%, averaging 20%.
+TENUKI_MIN_DIST = 4    # lines between the answer and the opponent's last move
+SENTE_MAX_DIST = 1     # the reply lands on one of the answer's eight neighbours
+
 # SHAPE — the two best resolved first moves are CLOSE in winrate, so the position
 # does not announce which is right and the choice rests on judging the shape.
 # Sampled, the gap has median 91.2 and only its low tail is uncertain at all: p5
@@ -97,7 +114,7 @@ TERR_PER_STONE = 4.0 # points of swing each flipped stone must be beaten by
 # not have: it holds several directions called `ko` from different fits, which is
 # why that path is keyed by an `ax_<hex>` content hash instead of by name.)
 LABEL_SET = ["life and death", "counting", "ko", "opening", "territory",
-             "shape"]
+             "shape", "tenuki", "sente"]
 if len(set(LABEL_SET)) != len(LABEL_SET):
     raise ValueError(f"duplicate rule name in LABEL_SET: {LABEL_SET}")
 
@@ -120,6 +137,8 @@ RULE_LABELS = {
     "opening":        {"zh": "布局", "ja": "序盤", "ko": "포석"},
     "territory":      {"zh": "实地", "ja": "地",   "ko": "실리"},
     "shape":          {"zh": "棋形", "ja": "形",   "ko": "모양"},
+    "tenuki":         {"zh": "脱先", "ja": "手抜き", "ko": "손빼기"},
+    "sente":          {"zh": "先手", "ja": "先手", "ko": "선수"},
 }
 _unknown = sorted(set(RULE_LABELS) - set(LABEL_SET))
 if _unknown:
@@ -304,6 +323,82 @@ def rule_ko(base, variation_nodes, size):
             if simulate(base + moves[:i], size)[2] is not None:
                 return True
     return False
+
+
+def _xy(sgf_coord):
+    return ord(sgf_coord[0]) - 97, ord(sgf_coord[1]) - 97
+
+
+def _dist(a, b):
+    """Chebyshev (king-move) distance between two SGF coordinates.
+
+    "Two lines away" in Go is a statement about either axis, not about their sum,
+    and not about a norm that penalises the diagonal — a move one right and one
+    up is adjacent, not 1.41 away."""
+    (ax, ay), (bx, by) = _xy(a), _xy(b)
+    return max(abs(ax - bx), abs(ay - by))
+
+
+def answer_opponent_distance(setup, correct):
+    """Distance from the ANSWER to the opponent's last move, or None.
+
+    `setup` is parse_sgf's ordered move chain, so the opponent's move is simply
+    the last entry of the other colour. Constructed positions with no preceding
+    move of that colour return None and the rule declines to fire, rather than
+    guessing at a move that was never played."""
+    if not correct:
+        return None
+    acol, amove = correct
+    for col, mv in reversed(setup):
+        if col.upper() != acol.upper():
+            return _dist(amove, mv)
+    return None
+
+
+def answer_reply_distance(answer_node, correct):
+    """Distance from the ANSWER to the opponent's mainline reply to it, or None.
+
+    The reply is taken along the TE-marked line (see _line_moves): TE is what
+    says the generator drove a branch to a conclusion, so it names the line that
+    was actually read, where the first child is merely the first one written."""
+    if answer_node is None or not correct:
+        return None
+    acol, amove = correct
+    mv = _line_moves(answer_node, 2)
+    if len(mv) != 2 or mv[1][0].upper() == acol.upper():
+        return None
+    return _dist(amove, mv[1][1])
+
+
+def rule_tenuki(opp_distance, root_ko, min_dist=None):
+    """The answer is played AWAY from what the opponent just did.
+
+    A KO STANDING ON THE BOARD DISQUALIFIES THE PROBLEM OUTRIGHT, whatever the
+    distance. Taking a ko, or answering one, is a forced local exchange that
+    happens to be recorded far from the opponent's last move — the geometry says
+    tenuki and the go does not. Excluding those is the difference between a rule
+    about playing elsewhere and a rule about ko notation.
+
+    The bar is per board size: a fixed number of lines is a different fraction of
+    a 9x9 board than of a 13x13 one, so a shared threshold would fire on a
+    different concept for each — the same reason OPENING_MAX_PREFIX is per
+    board."""
+    if opp_distance is None or root_ko:
+        return False
+    return opp_distance >= (TENUKI_MIN_DIST if min_dist is None else min_dist)
+
+
+def rule_sente(reply_distance, max_dist=None):
+    """The opponent answers the correct move LOCALLY — the move is sente.
+
+    A MAXIMUM distance: the reply landing next to the move is what says the move
+    demanded an answer there. A reply played far away means the opponent judged
+    the move ignorable and took the bigger point, which is the opposite reading.
+
+    Board-independent, for the reason given on rule_tenuki."""
+    if reply_distance is None:
+        return False
+    return reply_distance <= (SENTE_MAX_DIST if max_dist is None else max_dist)
 
 
 def rule_opening(prefix, size):
