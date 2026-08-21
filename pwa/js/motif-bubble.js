@@ -20,7 +20,7 @@ import { getTerm, localizedMotif } from './i18n.js';
 import { APP_MODES } from './constants.js';
 import { appMetrics, layoutMode } from './viewport.js';
 
-const MIN_Z = 3.0;        // include a motif only if its component score >= 3 std
+const MIN_Z = 1.0;        // include a motif only if its component score >= 1 std
 const MAX_MOTIFS = 3;
 
 // Recomputed per problem in populateMotifBubble(); gates visibility in
