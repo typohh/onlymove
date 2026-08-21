@@ -98,22 +98,34 @@ SENTE_MAX_DIST = 1     # the reply lands on one of the answer's eight neighbours
 
 # SHAPE — the two best resolved first moves are CLOSE in winrate, so the position
 # does not announce which is right and the choice rests on judging the shape.
-# Sampled at 2.5k per board the gap has median 90.8 and p20 78.4, so a ceiling of
-# 82 takes 21.7%. A ceiling of 67 (the old value, ~5%) sat at the p5 tail and left
-# the rule too narrow to constrain a direction. Note ~20% of problems have fewer
-# than two RESOLVED first moves and can never fire whatever the ceiling, so the
-# reachable share tops out around 80%.
-SHAPE_WR_GAP = 82.0   # MAXIMUM gap; a wide gap means the answer is obvious
+# 67, NOT the 82 that a ~20% share target implies. Widening it was measured and
+# it broke the rule: N50 went 1982 -> 6692 over four seeds and the fitted column
+# came back ANTI-correlated between halves at short histories (r@125 of -0.72 on
+# every seed). The reason is that the threshold carries the meaning here — at a
+# ceiling of 82 the two best moves are no longer close, so the criterion stops
+# denoting what its name says. Contrast `opening`, where widening a prefix cutoff
+# keeps the concept ("an early position") and merely admits more of it.
+#
+# So a share target does not apply to this rule. Sampled at 2.5k per board the gap
+# has median 90.8 and p5 64.6; 67 takes ~5%. Note ~20% of problems have fewer than
+# two RESOLVED first moves and can never fire whatever the ceiling.
+SHAPE_WR_GAP = 67.0   # MAXIMUM gap; a wide gap means the answer is obvious
 
 # TERRITORY — the score swing outruns what the stones changing hands can account
 # for, by a wide MULTIPLE rather than a fixed margin.
 TERR_BASE = 0.5      # points of swing required when no stone changes hands at all
-# 5.0, not 4.0: at 4 the rule fired on 30.4% of the corpus, the broad end of the
-# same failure the narrow rules had — a direction seeded from a third of the
-# problems says little about the ones it selects. 5 takes 21.5%. A flipped stone
-# is worth two points, so the swing must still beat well over twice what capture
-# explains.
-TERR_PER_STONE = 5.0 # points of swing each flipped stone must be beaten by
+# 8.0, taking ~9% of the corpus. Swept: 4 -> 30.4%, 5 -> 21.5%, 6 -> 15.8%,
+# 8 -> 9.4%, 10 -> 6.2%.
+#
+# Narrowed rather than widened, against the share target, because of what the
+# fitted axes do with a rule of each width: the fit SPREADS a narrow rule (mass
+# participation ratio 1.5-1.85x its share) and leaves a ~20% rule essentially
+# as-stated (1.03-1.20x). So a narrow rule only needs its CORE to be right and the
+# model elaborates outward, while a wide rule has to already BE the concept. At
+# 21.5% territory was the broadest rule, carried the lowest mass lift of the eight
+# (3.2x), and reached N50 `inf` on two seeds — the signature of a rule too vague
+# to pin a direction, which more coverage cannot fix.
+TERR_PER_STONE = 8.0 # points of swing each flipped stone must be beaten by
 
 # The rule set, and its ORDER is the column order of axes/motif_proxies.npz. Names
 # are the key: `components` in axes/labels.json names rules, and readers look them
