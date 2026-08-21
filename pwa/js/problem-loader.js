@@ -15,6 +15,12 @@ import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposit
 import { DATA_VERSION } from './data-version.js';
 import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
+// TEMPORARY: false disables the personalization regime outright, so selection stays
+// on the information criterion at every rank precision. The weakness model itself is
+// untouched — it still trains and the stats panel still reads it; only the serve tilt
+// is off. Set back to true to restore the two-regime behaviour described below.
+const WEAKNESS_TILT_ENABLED = false;
+
 // The best candidate by `scoreFn`, ties going to the earliest — which, because the
 // pool arrives sorted by distance from the serve rank, means the closest-to-rank of
 // equally good problems. Both selection regimes take the MAXIMUM rather than sampling
@@ -138,7 +144,7 @@ function selectChallengeCandidate({ anchorToLoaded = false } = {}) {
     // applied to the same pool. Falls back to the information regime while the
     // weakness model is untrained (flat zero scores would otherwise pick whichever
     // candidate happened to sort first).
-    if (rankConverged() && weaknessModelReady()) {
+    if (WEAKNESS_TILT_ENABLED && rankConverged() && weaknessModelReady()) {
         return selectBest(candidateProblems, weaknessScore);
     }
     return selectBest(candidateProblems, p => Math.max(0, p.quality || 0));
