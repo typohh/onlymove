@@ -104,6 +104,123 @@ arm                  rating   combined   axis    verdict
 - **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
 - **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat here, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs. **See the warm-start section below**: re-measured under the production protocol at patience 30, where the cold arm needs 2670-3200 epochs to stop improving, the rating gap does not survive — 1360 epochs was very likely still descending.
 
+## THE K PANEL AND THE RULE WIDTHS — MEASURED 2026-08-21
+
+Nested rule banks at K = 4, 6, 8 — K=4 a subset of K=6 a subset of K=8 — four
+seeds each, training seed and holdout seed moving together. Nested on purpose: an
+arm that changes K *and* swaps rules measures both at once, so the banks differ
+only in how many of the SAME ordered rules are taught. Ordered by measured N50:
+counting, tenuki, ko, life and death | territory, opening | sente, shape. DB
+f04c0848a6e1e6e1 (see the section below for the provenance rule).
+
+N50 = attempts at which split-half reliability reaches 0.5
+(`auxiliary/rating_dev/split_half.py`), mean over the four draws.
+
+```
+  motif              K=4     K=6     K=8       share
+  counting           239     380     348        6.8%
+  tenuki             542     411     493       16.4%
+  ko                 812     745     518       15.4%
+  life and death   1,020   1,241     751        3.9%
+  territory            —     717     787        9.4%
+  opening              —   2,628   3,607       19.2%
+  sente                —       —   3,510       20.2%
+  shape                —       —   8,220        5.0%
+  CTRL (ability)      12      16      16
+
+  rating         0.4987  0.4975  0.4975
+  COMBINED       0.4989  0.4970  0.4965   <-- the column to read
+  axis adds       -0.23   +0.58   +1.00   mnat (a trap, see below)
+```
+
+READ THE COMBINED COLUMN, and read it PAIRED. Every arm here runs the same four
+holdout draws, so arm-vs-arm at the same draw cancels the draw noise that swamps
+any single level — the standing rule that comparing arms wants the draw pinned
+while estimating a magnitude wants it moving. Paired combined deltas, lower
+being better:
+
+```
+  K=4 -> K=6   +1.90 +/- 1.43 mnat    per seed  1.6  4.0  1.1  0.9   ALL FOUR
+  K=6 -> K=8   +0.45 +/- 0.44         per seed  0.3  0.9  0.7 -0.1
+  K=4 -> K=8   +2.35 +/- 1.77         per seed  1.9  4.9  1.8  0.8   ALL FOUR
+```
+
+**K=6 beats K=4 on every draw. K=8 does not clearly beat K=6** — three of four
+draws, and +0.45 against its own +/-0.44. So six taught rules is the supported
+choice here and the eighth axis is unpaid for.
+
+**Axis adds says K=8 is best and that is the trap this document warns about
+elsewhere**: it rises monotonically with K (-0.23, +0.58, +1.00) because more axes
+mechanically absorb more residual whether or not the model predicts better. On the
+combined column the gain flattens after K=6.
+
+Three of the four shared motifs are nonetheless best identified at K=8.
+This REFUTES the over-teaching reading taken from an earlier K=5 arm, where extra
+taught axes appeared to crowd each other: on the nested design, up to K=6, they do
+not. What looked like crowding was two miscalibrated columns (`opening`, `shape`),
+not the axis count. `counting` is the one motif that prefers a sparse bank, posting its
+best figure anywhere at K=4.
+
+**The rules split into two tiers that hold at every K** — working: counting,
+tenuki, ko, life and death, territory (239-1,241); broken: opening, sente, shape
+(2,628-8,220). No K rescues a rule from the second tier.
+
+### WIDTH IS PER RULE. A SHARE TARGET IS NOT A DESIGN PRINCIPLE.
+
+The module's stated aim of putting every rule in a comparable share of the corpus
+does not survive measurement. Aiming all of them at ~20% helped one rule, broke
+another, and left the two narrowest — never touched — as among the best.
+
+```
+  rule       width change          N50 effect
+  opening    5.7% -> 19.2%         3,708 -> 2,628 (K=6)   mild help
+  shape      5.0% -> 20.1%         1,982 -> 6,692         BROKE IT
+  territory  21.5% -> 9.4%         1,364 ->   717         narrowing FIXED it
+  counting   6.8%, never moved       239-404              best motif measured
+```
+
+**The test before moving a threshold is whether moving it changes what the rule
+MEANS.** `opening` at prefix <=12 versus <=18 is the same concept, an early
+position, with more of it admitted — safe. `shape` at winrate gap <=67 versus <=82
+is NOT: at 82 the two best moves are no longer close, so the criterion stops
+denoting its own name, and the fitted column came back anti-correlated between
+halves at short histories (r@125 of -0.72 on every seed).
+
+**The mechanism is how much the fit reshapes a rule, and it depends on the rule's
+width.** Measuring the participation ratio of the fitted loading's positive tail,
+`PR = (sum g+)^2 / (n * sum (g+)^2)`, which equals the share exactly for a uniform
+indicator, so PR/share says whether the fit spread or concentrated:
+
+```
+  rule            share    PR/share   mass on rule   lift
+  life and death   3.9%    1.56-1.75      59-65%    15.3-16.7x
+  counting         6.8%    1.50-1.85      55-64%     8.1-9.5x
+  ko              15.4%    0.89-1.32      74-92%     4.8-6.0x
+  tenuki          16.4%    1.17-1.41      53-68%     3.2-4.2x
+  opening         19.2%    1.03-1.13      82-89%     4.3-4.6x
+  territory       21.5%    1.14-1.20      69-72%     3.2-3.4x
+```
+
+The fit SPREADS a narrow rule (1.5-1.85x its share) and leaves a ~20% rule
+essentially as stated (1.03-1.20x). So a narrow rule is a CORE the model
+elaborates outward and only needs its centre right; a wide rule is taken as
+written and must already BE the concept. That is why `counting` works at 6.8% and
+why `territory` had to be narrowed rather than widened. Compare lift only within a
+similar share — `on_rule` is bounded below by the share, so lift mechanically
+favours narrow rules, and the fair pairing is ko against tenuki at 15.4% vs 16.4%,
+which ko wins decisively.
+
+**`ko` is the rule the model adopts most faithfully** — the only one it
+concentrates rather than spreads, and the highest mass-on-rule at 74-92%. It is
+also the motif that reproduces across every arm, seed and ridge tested.
+
+**`tenuki` should not ship as a skill axis on this evidence, whatever its N50.**
+Its reliability curve is FLAT — 0.37/0.40/0.51/0.49 at K=8, and flat across three
+banks and twelve seeds. Reliability is tau^2/(tau^2 + sigma^2/n), so a curve that
+does not climb over an 8x increase in data says tau^2 is ~0 and the N50 is a
+curve-fit artifact rather than a trait sharpening with evidence. Its mass lift is
+also the lowest of the eight, so the fitted axis is not much "about" the rule.
+
 ## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
 
 Every axis-adds figure in this document, the one below included, comes from one or
