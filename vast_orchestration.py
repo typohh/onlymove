@@ -995,6 +995,12 @@ def cmd_sync(target, sgf_only=False, size=None):
             # has already been adopted is skipped rather than re-staged. That
             # matters after an adoption: the remote keeps its copy in staging,
             # and without the compare every later sync would hand it back.
+            #
+            # SGFs ONLY. The whole-staging form below mirrors a DIRECTORY, so
+            # anything else the remote leaves there is copied verbatim -- which
+            # is how a stale tsumegos/new/retired_ids.txt appeared locally, a
+            # second copy of the id list at a path nothing reads, shadowing the
+            # canonical one for any human who found it first.
             if size is not None:
                 src_sub = f"{d}/new/{size}"
                 dest = os.path.join(TSUMEGO_STAGING, str(size)) + os.sep
@@ -1003,7 +1009,8 @@ def cmd_sync(target, sgf_only=False, size=None):
                 src_sub = f"{d}/new"
                 dest = TSUMEGO_STAGING + os.sep
                 compare = os.path.abspath(d)
-            excludes += ["--compare-dest", compare]
+            excludes += ["--include", "*/", "--include", "*.sgf",
+                         "--exclude", "*", "--compare-dest", compare]
         else:
             dest = f"{d}/"
         os.makedirs(dest, exist_ok=True)
