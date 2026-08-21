@@ -70,12 +70,14 @@ KO_DEPTH = 2   # covers the relevant scenarios; depth 3 adds 3.5 points of corpu
 # A percentile is population-dependent: the cutoff moves when the corpus grows and
 # flips the label on problems that have not changed, which makes an incremental
 # labelling quietly wrong and every stored column a different question from the
-# last one. These values ARE the percentile as measured — sampled at 10k, the 5th
-# percentile of game-phase prefix sits at 12 moves on 9x9 (5.39% of problems) and
-# 28 on 13x13 (5.33%) — frozen so they stay put. Re-measure and re-set them
-# deliberately if the corpus ever shifts enough to matter; do not make them
-# floating again.
-OPENING_MAX_PREFIX = {9: 12, 13: 28}
+# last one. So these are frozen numbers, re-set DELIBERATELY when there is a
+# reason — which is what the caps below are: aimed at the ~20% share the rule set
+# targets, measured over the whole phase table (18 -> 18.8% on 9x9, 46 -> 19.8% on
+# 13x13). They previously sat at the 5th percentile (12 and 28), which put the rule
+# on ~5% of the corpus and left it seeding a direction almost nothing constrains.
+# Per board because game length scales with the board, unlike the tenuki and sente
+# distances below.
+OPENING_MAX_PREFIX = {9: 18, 13: 46}
 
 # TENUKI / SENTE — Chebyshev distance bars, set by SAMPLING 4k problems per board
 # for the ~20% share every rule is aimed at.
@@ -96,14 +98,22 @@ SENTE_MAX_DIST = 1     # the reply lands on one of the answer's eight neighbours
 
 # SHAPE — the two best resolved first moves are CLOSE in winrate, so the position
 # does not announce which is right and the choice rests on judging the shape.
-# Sampled, the gap has median 91.2 and only its low tail is uncertain at all: p5
-# is 64.1, so a ceiling at 67 takes roughly the bottom 7%.
-SHAPE_WR_GAP = 67.0   # MAXIMUM gap; a wide gap means the answer is obvious
+# Sampled at 2.5k per board the gap has median 90.8 and p20 78.4, so a ceiling of
+# 82 takes 21.7%. A ceiling of 67 (the old value, ~5%) sat at the p5 tail and left
+# the rule too narrow to constrain a direction. Note ~20% of problems have fewer
+# than two RESOLVED first moves and can never fire whatever the ceiling, so the
+# reachable share tops out around 80%.
+SHAPE_WR_GAP = 82.0   # MAXIMUM gap; a wide gap means the answer is obvious
 
 # TERRITORY — the score swing outruns what the stones changing hands can account
 # for, by a wide MULTIPLE rather than a fixed margin.
 TERR_BASE = 0.5      # points of swing required when no stone changes hands at all
-TERR_PER_STONE = 4.0 # points of swing each flipped stone must be beaten by
+# 5.0, not 4.0: at 4 the rule fired on 30.4% of the corpus, the broad end of the
+# same failure the narrow rules had — a direction seeded from a third of the
+# problems says little about the ones it selects. 5 takes 21.5%. A flipped stone
+# is worth two points, so the swing must still beat well over twice what capture
+# explains.
+TERR_PER_STONE = 5.0 # points of swing each flipped stone must be beaten by
 
 # The rule set, and its ORDER is the column order of axes/motif_proxies.npz. Names
 # are the key: `components` in axes/labels.json names rules, and readers look them
