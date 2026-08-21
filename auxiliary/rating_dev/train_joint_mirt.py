@@ -884,6 +884,33 @@ def main():
                          "the batch: an unattempted problem has no likelihood "
                          "term, so this is the only thing holding its slope off "
                          "the floor.")
+    ap.add_argument("--v-ridge-centred", action="store_true",
+                    help="apply --v-ridge to the CENTRED positions the "
+                         "likelihood reads, rather than to raw v. Only "
+                         "meaningful with centring on, where the two differ by "
+                         "the population mean — a direction no prediction "
+                         "depends on and which the raw form is therefore the "
+                         "only thing shrinking.")
+    ap.add_argument("--no-v-ridge-centred", action="store_true",
+                    help="force the ridge back onto RAW v even under "
+                         "--production, which shrinks the centred positions. "
+                         "Same shape and reason as --no-center-v: the parity "
+                         "switch is a plain on-switch, so the raw-ridge arm is "
+                         "otherwise unreachable and cannot be re-measured.")
+    ap.add_argument("--no-axis-gauge", action="store_true",
+                    help="force the axis RMS gauge OFF even under --production, "
+                         "which switches it on. Same shape and same reason as "
+                         "--no-center-v: --axis-gauge is a plain on-switch, so "
+                         "an off state is unreachable under parity and the "
+                         "gauge cannot be isolated without this.")
+    ap.add_argument("--no-center-v", action="store_true",
+                    help="force the exact mean removal OFF even under "
+                         "--production, which switches it on. Applied AFTER the "
+                         "production defaults precisely so it is not undone by "
+                         "them: the production dict keys on argv names, and "
+                         "`--no-center-v` does not read as `center_v` there. "
+                         "This is the only way to isolate what centring does, "
+                         "since --center-v is a plain on-switch.")
     ap.add_argument("--center-v", action="store_true",
                     help="subtract the population mean from v before it enters "
                          "the likelihood, which is what PRODUCTION does. Exact "
@@ -1053,6 +1080,10 @@ def main():
                 # and the hard one is on.
                 "v_mean_penalty": 0.0,                  # dev default 10.0
                 "center_v": True,                       # dev default off
+                # Production shrinks the CENTRED positions, not the raw
+                # parameter, so parity has to set this or an arm claiming to
+                # speak about the shipped model is shrinking a different vector.
+                "v_ridge_centred": True,                # dev default off
                 "shallow_w": _prod.SHALLOW_W, "teach_weight": _prod.TEACH_WEIGHT,
                 "shallow_samples": _prod.SHALLOW_SAMPLES,   # dev default 0 = all
                 # Production has no switch for either — both are structural in
@@ -1090,6 +1121,17 @@ def main():
                 applied.append(f"{k}={v}")
         print("PRODUCTION CONFIG: " + ", ".join(applied)
               + (("; OVERRIDDEN " + ", ".join(kept)) if kept else ""), flush=True)
+
+    # AFTER the production defaults, so it survives them. See --no-center-v.
+    if args.no_center_v and args.center_v:
+        args.center_v = False
+        print("  --no-center-v: exact mean removal FORCED OFF", flush=True)
+    if args.no_axis_gauge and args.axis_gauge:
+        args.axis_gauge = False
+        print("  --no-axis-gauge: axis RMS gauge FORCED OFF", flush=True)
+    if args.no_v_ridge_centred and args.v_ridge_centred:
+        args.v_ridge_centred = False
+        print("  --no-v-ridge-centred: ridge FORCED back onto raw v", flush=True)
 
     import torch
     import pandas as pd
@@ -1616,7 +1658,16 @@ def main():
                 # While v is pinned at zero the axis terms are either identically
                 # zero or act on a g that the warm start is about to overwrite.
                 if not in_burn:
-                    loss = loss + args.v_ridge * (m.v[tu[bi]] ** 2).sum() / len(bi)
+                    # The ridge reads RAW v while the likelihood reads the
+                    # CENTRED positions, and under --center-v those are not the
+                    # same vector: the population mean is a direction no
+                    # prediction depends on, so the ridge is the only thing
+                    # acting on it. --v-ridge-centred puts the ridge on exactly
+                    # what the likelihood reads instead, which is the form that
+                    # shrinks the positions the model actually uses.
+                    _vr = ((m.v - m.v.mean(dim=0, keepdim=True))
+                           if (args.v_ridge_centred and m.center_v) else m.v)
+                    loss = loss + args.v_ridge * (_vr[tu[bi]] ** 2).sum() / len(bi)
                     loss = loss + args.v_mean_penalty * (m.v.mean(dim=0) ** 2).sum()
                     Mc = gh - gh.mean(dim=0, keepdim=True)
                     Mn = Mc / (Mc.norm(dim=0, keepdim=True) + 1e-9)

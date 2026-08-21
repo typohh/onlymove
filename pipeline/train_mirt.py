@@ -277,8 +277,11 @@ class JointMIRT(nn.Module):
         position each step for its mean, which is exactly what centring reads.
 
         It leaves the parameter redundant by one direction — adding a fixed row
-        to every user changes no prediction — and V_RIDGE is what lands on that,
-        so it decays to zero rather than drifting."""
+        to every user changes no prediction. Nothing acts on that direction:
+        V_RIDGE shrinks these centred positions rather than the raw parameter,
+        precisely so it is spent on what the likelihood reads. The redundancy is
+        harmless because the gradient along it is analytically zero, and it is
+        measured to stay near zero over a full run."""
         return (self.v - self.v.mean(dim=0, keepdim=True))[uid]
 
     def _drop(self, feat):
@@ -573,7 +576,21 @@ def main():
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, ty[bi], reduction="none").sum() / len(bi)
-            loss = loss + V_RIDGE * (m.v[tu[bi]] ** 2).sum() / len(bi)
+            # SHRINK WHAT THE LIKELIHOOD READS. user_axis, not the raw
+            # parameter: the two differ by the population mean, which is a
+            # direction no prediction depends on, so a ridge on raw v spends
+            # itself on a gauge instead of on the positions the model uses.
+            # Measured, that is not a nicety — under the raw form the fitted
+            # positions come out collinear across users and some axes are
+            # starved to zero spread, while shrinking the centred positions
+            # leaves the axes distinct, the spread uniform across all of them,
+            # and retention and never-trained pricing both better.
+            #
+            # The mean is then unconstrained by anything, and does not need to
+            # be: the gradient along it is analytically zero, and it stays at
+            # ~0.002-0.009 over a full run against a per-axis spread an order of
+            # magnitude larger.
+            loss = loss + V_RIDGE * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
             # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does: centring
             # v (user_axis) removes only the POPULATION mean, which blocks an
             # axis acting as a global difficulty shift but not one tracking
