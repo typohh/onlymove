@@ -312,10 +312,10 @@ function onReposition() {
     if (_bubbleEl && _repositionArgs) position(_bubbleEl, _repositionArgs.def);
 }
 
-// A fullscreen transition/loading/resume overlay is up — hold the bubble back
+// A fullscreen transition/loading overlay is up — hold the bubble back
 // (the menu overlay is deliberately NOT blocking: menu bubbles need it open).
 const overlayBlocking = () =>
-    !!document.querySelector('.app-blocking-overlay, .loading-overlay, .resume-overlay');
+    !!document.querySelector('.app-blocking-overlay, .loading-overlay');
 
 function scheduleShow(id, def) {
     _pending = true;

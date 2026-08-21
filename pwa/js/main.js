@@ -228,7 +228,6 @@ function wireMenu() {
     // ships English defaults; everything else the app sets goes through getTerm.
     menuToggle.setAttribute('aria-label', getTerm('menu'));
     menuToggleH.textContent = getTerm('menu');
-    document.getElementById('resume-text').textContent = getTerm('resumeText');
     menuOverlay.addEventListener('click', (e) => {
         if (e.target === menuOverlay) closeMenu();
     });
@@ -640,38 +639,43 @@ function recoverBoardIfNeeded() {
 }
 
 // Recovery from a killed session or bfcache: re-init the board on bfcache
-// restore / tab re-show / manual resume-overlay click; reload if that fails.
+// restore, on tab re-show, and on a resume that delivers no visible event at
+// all — the Android task-switch case this handler exists for.
 //
-// The overlay is the MANUAL half of that, and it is armed on a delay rather
-// than the instant the tab goes hidden. Android fires visibilitychange when the
-// activity is PAUSED, not when its last frame is composited, so the page keeps
-// painting through the task-switch animation: arming synchronously bakes the
-// overlay into the outgoing frames and into the recents thumbnail, and the user
-// meets it again on the way back. Waiting past the animation leaves it to be
-// painted only by a resume that never delivered a visible event — the case it
-// exists for. A background timer throttled away entirely just leaves it
-// unarmed, which costs nothing, since the automatic path below is what repairs
-// the board whenever the event does arrive.
-const RESUME_OVERLAY_ARM_DELAY_MS = 1000;
-
+// THE NO-EVENT RESUME IS DETECTED BY A FRAME, AND NOTHING IS PUT ON SCREEN ON
+// THE WAY OUT. rAF callbacks do not run for a page that is not being painted,
+// so one requested while hidden fires exactly when the app is composited again
+// — no dependence on the visibility IPC arriving, and none on when Android
+// decided to pause the activity. The rejected alternative is arming a
+// full-screen "Click to continue" overlay while hidden, immediately or behind a
+// delay: either way it sits in the committed layer tree for the whole
+// background period, so the resume is free to paint it, while removing it again
+// is JS racing the first composited frame of a thawing renderer. A frozen
+// process loses that race by construction — the arm timer it could not run in
+// the background runs at thaw instead — which is why the delay did not help and
+// the overlay met the user on nearly every task switch. The frame probe repairs
+// the board directly, so there is nothing to tap and nothing to race.
 function wireLifecycleRecovery() {
-    const resumeOverlay = document.getElementById('resume-overlay');
-    let armTimer = null;
-    const hideResumeOverlay = () => {
-        clearTimeout(armTimer);
-        armTimer = null;
-        resumeOverlay.className = 'resume-overlay-hidden';
-    };
-
     // Rebuild the board once the pending frame has PAINTED. A rAF callback runs
     // before its own frame's paint, so recovering inside the first one holds
-    // back the very frame that removes the overlay — a full initializeBoard()
-    // (fresh canvases, wood background, redraw) on a still-thawing renderer,
-    // with the overlay on screen for all of it. The inner rAF runs after the
-    // un-hide has been painted; the cost is one frame of the possibly-broken
-    // board before it is replaced.
-    const recoverAfterPaint = (source) => {
+    // back the very frame the resume is waiting on — a full initializeBoard()
+    // (fresh canvases, wood background, redraw) on a still-thawing renderer.
+    // The inner rAF runs after that frame has been painted; the cost is one
+    // frame of the possibly-broken board before it is replaced.
+    //
+    // One rebuild per background round, whichever signal gets there first: an
+    // ordinary resume delivers both the visibility event and the frame, and the
+    // second rebuild would only redo what the first just did. The guard sits on
+    // the REBUILD rather than on entry, so a caller whose frames never arrive
+    // cannot claim the round and leave the board unrepaired — both paths queue
+    // against the same frames, so whichever one a frame reaches first does the
+    // work and the other finds it done.
+    let recoveredThisResume = false;
+    let sawVisibleEvent = false;
+    const recoverOnce = (source) => {
         requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (recoveredThisResume) return;
+            recoveredThisResume = true;
             if (!recoverBoardIfNeeded()) {
                 Sentry.captureMessage(`Canvas recovery failed on ${source}, reloading...`, 'error');
                 location.reload();
@@ -690,29 +694,29 @@ function wireLifecycleRecovery() {
 
     window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-            clearTimeout(armTimer);
-            armTimer = setTimeout(() => {
-                resumeOverlay.className = 'resume-overlay';
-            }, RESUME_OVERLAY_ARM_DELAY_MS);
+            recoveredThisResume = false;
+            sawVisibleEvent = false;
+            // Frames stop for a hidden page, so this callback IS the resume —
+            // the one signal that survives a resume carrying no visibilitychange.
+            requestAnimationFrame(() => {
+                // Logged for the on-device debug viewer: a line here is the
+                // record that this resume was carried by a frame, with the
+                // visibility event either late or absent.
+                if (!sawVisibleEvent) console.log('Resume: frame ahead of visibilitychange');
+                recoverOnce(sawVisibleEvent ? 'resume frame' : 'frame without a visible event');
+            });
             // The user is leaving — persist the freshest schedule now (keepalive
             // lets it land through teardown). Skips if unchanged since the last
             // upload; this is the main replacement for the per-attempt upload.
             maybeUploadSchedule();
         } else if (document.visibilityState === 'visible') {
-            hideResumeOverlay();
-            recoverAfterPaint('visibilitychange');
+            sawVisibleEvent = true;
+            recoverOnce('visibilitychange');
             // First-run onboarding: re-evaluate ambient bubbles on resume (a new
             // session may have crossed the install/notify thresholds while
             // hidden). No-op for existing users.
             onboardingResume();
         }
-    });
-
-    // Resume overlay click triggers full board recreation for manual recovery —
-    // same path as the pageshow/visibilitychange handlers.
-    resumeOverlay.addEventListener('click', () => {
-        hideResumeOverlay();
-        recoverAfterPaint('resume overlay click');
     });
 }
 
