@@ -176,23 +176,37 @@ def _halves(P, ipx, y, uidx, ridge):
 def _n50_and_trend(caps, rs):
     """(N50, trend) from the reliability curve.
 
-    N50 fits (1/r - 1) = rho/n through the origin over the caps where r is in
-    (0, 1), rho being sigma^2/tau^2 in attempt units -- so rho IS the attempts at
-    which reliability reaches 0.5. Through the origin because the intercept is
-    pinned at 1 by the model rather than free.
+    N50 is the rho minimising squared error against r = n / (n + rho), rho being
+    sigma^2/tau^2 in attempt units -- so rho IS the attempts at which reliability
+    reaches 0.5.
+
+    FITTED IN r-SPACE, not by linearising to (1/r - 1) = rho/n. The linear form
+    is algebraically identical and numerically useless: 1/r explodes as r nears
+    zero, so a single near-zero cap dominates the regression completely and drags
+    N50 to absurdity (a real curve climbing 0.00 -> 0.68 reported 244,745). Error
+    in r is roughly homoscedastic across caps, so least squares there is well
+    posed, and a near-zero point merely pushes rho up instead of hijacking it.
+
+    Coarse-to-fine on a LOG grid because rho spans orders of magnitude and the
+    objective is smooth and unimodal in log rho.
 
     trend is Spearman on (n, r). With four caps it is coarse by construction, so
     it is a direction, not an effect size."""
     from scipy.stats import spearmanr
-    ok = [(n, r) for n, r in zip(caps, rs) if np.isfinite(r) and 0 < r < 1]
+    ok = [(n, r) for n, r in zip(caps, rs) if np.isfinite(r)]
     n50 = float("inf")
-    if len(ok) >= 2:
-        x = np.array([1.0 / n for n, _ in ok])
-        y = np.array([1.0 / r - 1.0 for _, r in ok])
-        denom = float((x * x).sum())
-        if denom > 0:
-            rho = float((x * y).sum() / denom)
-            n50 = rho if rho > 0 else float("inf")
+    if len(ok) >= 2 and max(r for _, r in ok) > 0:
+        nn = np.array([n for n, _ in ok], float)
+        rr = np.array([min(r, 0.999) for _, r in ok], float)
+        lo, hi = 0.0, 7.0                      # rho in 1 .. 1e7 attempts
+        for _ in range(6):
+            g = np.logspace(lo, hi, 200)
+            err = ((rr[None, :] - nn[None, :] / (nn[None, :] + g[:, None])) ** 2).sum(1)
+            j = int(err.argmin())
+            step = (hi - lo) / 199
+            lo, hi = np.log10(g[j]) - step, np.log10(g[j]) + step
+        rho = float(10 ** ((lo + hi) / 2))
+        n50 = rho if rho < 9e6 else float("inf")
     fin = [(n, r) for n, r in zip(caps, rs) if np.isfinite(r)]
     trend = (spearmanr([n for n, _ in fin], [r for _, r in fin]).statistic
              if len(fin) >= 3 else float("nan"))
