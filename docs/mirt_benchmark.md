@@ -104,10 +104,88 @@ arm                  rating   combined   axis    verdict
 - **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
 - **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat here, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs. **See the warm-start section below**: re-measured under the production protocol at patience 30, where the cold arm needs 2670-3200 epochs to stop improving, the rating gap does not survive — 1360 epochs was very likely still descending.
 
+## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
+
+Every axis-adds figure in this document, the one below included, comes from one or
+two holdout draws. Across FOUR draws the number is not stable, and it is not even
+reliably positive.
+
+Provenance — a LATER DB than the baseline at the top of this file, so these numbers
+sit beside the rest rather than replacing them:
+
+```
+attempts DB      sha256[:16] f04c0848a6e1e6e1
+  rows           409,043 tsumego_reports   max id 427,402
+  window         2025-08-20T23:04:55.761Z .. 2026-08-20T10:02:25.774Z
+  rank_surveys   693 rows
+arms             iso_k6s0..s3 — K=6, store bank (bank_k6_unipolar), centred v ridge
+                 --seeds s --holdout-seed s, s = 0..3, holdout-user-frac 0.15
+```
+
+The training seed and the holdout seed MOVE TOGETHER, so each arm is an independent
+replicate: different initialisation, different batch order, and a different 85% of
+users to train on.
+
+```
+                      seed0    seed1    seed2    seed3        mean ± sd
+  axis adds            3.59     2.81    -1.40    -1.44     +0.89 ± 2.69  mnat
+  never-trained       13.50    10.12    -0.30    -2.60     +5.18 ± 7.83  mnat
+  rating logloss     0.5105   0.5110   0.4841   0.4919    0.4994 ± 0.0135
+  survey rho         0.8118   0.8913   0.7361   0.6715    0.7777 ± 0.0950
+```
+
+**Two of four draws give a NEGATIVE axis contribution.** Averaged, the axes are
+worth +0.89 ± 2.69 mnat — indistinguishable from zero, where a single draw reads
++3.59 and looks like a solid effect. The never-trained partition is worse still:
++5.18 ± 7.83, a sd half again the mean.
+
+**Pinning the holdout seed is what hid this.** With one draw shared across arms,
+every replicate scores the SAME held-out users, so the spread between them measures
+initialisation and batch order only — the smaller of the two sources, and not the
+one a claim about magnitude depends on. The seed count then reads as replication it
+is not delivering.
+
+**The right protocol depends on the question, and the two are opposite.** Comparing
+ARMS wants the draw PINNED: same rows, paired, so the difference is the arm and not
+the sample. Estimating the MAGNITUDE of an effect wants the draw MOVING, or the
+interval is conditional on one sample of users and the quoted number carries no
+statement about the next one. A figure produced under the first protocol must not
+be quoted as though it came from the second.
+
+**Identifiability and predictive value are separate properties, and only the first
+is stable here.** The same four arms give split-half N50 (attempts to reliability
+0.5, `auxiliary/rating_dev/split_half.py`) that reproduces tightly across the same
+draws that swing the prediction:
+
+```
+  motif             N50 mean    N50 range over the 4 draws
+  counting             398        [309, 493]
+  ko                   580        [363, 831]
+  life and death       871        [786, 982]
+  territory            910        [523, 1,732]
+  opening            1,958        [1,368, 2,574]
+  shape              2,062        [1,185, 3,578]
+  CTRL (ability)        13        [10, 15]
+```
+
+So a user's position on an axis is measurable, and measurably so at a consistent
+cost in attempts, while whether knowing that position improves a held-out
+prediction depends on which users are held out. Do not treat a stable reliability
+as evidence for a predictive claim, or the reverse.
+
+The scale worth carrying: ability reaches reliability 0.5 in ~13 attempts, the best
+motif in ~400. Axis positions are roughly 30x more expensive to identify than
+ability, which bounds what per-user axis personalisation can do for a user who has
+not played hundreds of problems.
+
 ## AXIS VALUE BY USER HISTORY — the axes need ~500 attempts before they pay
 
 Held-out-user walk binned by how many attempts PRECEDE each scored one, both
-folds pooled (`auxiliary/rating_dev/axis_by_history.py`). This is the USER-side
+folds pooled (`auxiliary/rating_dev/axis_by_history.py`). **Two folds only, so
+every figure here inherits the draw-dependence measured in the section above —
+the +4.95 is one sample's value, not an estimate with an interval.** What the
+binning shows about SHAPE (the payoff concentrated in long histories) is the part
+to carry; the levels are not repeatable to the precision printed. This is the USER-side
 partition; seen/never-trained describes the PROBLEM and is blind to it.
 
 ```
