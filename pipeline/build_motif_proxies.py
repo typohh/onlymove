@@ -152,8 +152,18 @@ def load_ownership():
 
 
 def load_phase(sizes):
-    from auxiliary.labeler.rules import load_phase as _lp
-    return _lp(sizes)
+    """The game-phase table, through the loader that OWNS and heals that cache.
+
+    `utils.rating.features.load_game_phase` is incremental in both directions —
+    it parses the corpus tids the cache lacks and prunes departed ones — whereas
+    a plain read of game_phase_<size>.json returns whatever was last written. A
+    plain read is what silently costs a corpus top-up its labels: the new
+    problems have no phase row, `label_one` returns None for every one of them,
+    and the proxies ship covering only the problems that happened to be in the
+    corpus at some earlier run. Reading through the healer is what makes "the
+    stored tid set EQUALS the corpus" true rather than aspirational."""
+    from utils.rating.features import load_game_phase
+    return load_game_phase(sizes=sizes)
 
 
 def corpus():
@@ -214,8 +224,24 @@ def main():
                 if (i + 1) % 20000 == 0:
                     print(f"    {i+1}/{len(todo)}", flush=True)
         if skipped:
-            print(f"  {skipped} skipped for missing inputs "
-                  f"(no ownership row or unreadable SGF)", flush=True)
+            # ABORT rather than write a short file. These labels are the
+            # directions train_mirt teaches its axes onto, and a problem with no
+            # row is simply never taught -- which does not fail anywhere, it just
+            # quietly shrinks the taught set and leaves the axes shaped by
+            # whatever subset happened to have inputs. Every live problem is
+            # supposed to have an ownership row (the sweep emits one even when
+            # n_te_alts = 0) and a parseable SGF, so a skip means an upstream
+            # block is behind the corpus, and naming it here is far cheaper than
+            # inferring it later from an axis that came out wrong.
+            raise SystemExit(
+                f"\n{skipped} of {len(todo)} problems have MISSING INPUTS and "
+                f"were not labelled. The proxies are only correct when the "
+                f"stored tid set EQUALS the corpus, so this run wrote nothing. "
+                f"Ownership rows: {len(own)}, phase rows: {len(phase)}, corpus: "
+                f"{len(todo)}. Bring the short one up to date "
+                f"(`pipeline.extract_ownership_swing` for ownership; phase heals "
+                f"itself through utils.rating.features.load_game_phase) and "
+                f"re-run.")
 
     tid = np.array(sorted(rows))
     size = np.array([rows[t][0] for t in tid], np.int16)
