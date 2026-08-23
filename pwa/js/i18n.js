@@ -573,7 +573,7 @@ const localization = {
     recallMode: 'Recall mode',
     reviewMode: 'Review mode',
     motifTitle: 'What this tests',
-    trainingFocusTitle: 'weaknesses',
+    trainingFocusTitle: 'Weaknesses',
     trainingFocusTooMuch: '{motif} (too much)',
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',

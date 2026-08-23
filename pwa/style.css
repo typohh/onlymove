@@ -578,7 +578,10 @@ body {
     gap: 0.6667em;
     padding: 0.3333em 0.6667em;
     font-family: inherit;
-    font-size: inherit;
+    /* The tab reads as a button (same ground as .btn), so it sits on the
+       shell type scale the buttons use; the bubble CONTENT stays on the
+       smaller --type-motif scale set on .motif-bubble. */
+    font-size: var(--type-shell);
 }
 
 .motif-bubble-tab:hover {
