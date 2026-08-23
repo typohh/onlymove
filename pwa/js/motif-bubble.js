@@ -110,9 +110,14 @@ function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
     if (!labels) return [];
     const scored = [];
-    for (const { k, sign, z } of weaknessServeCategories()) {
-        const text = localizedMotif(labels[String(k)], sign > 0 ? 'positive' : 'negative');
-        if (text) scored.push({ z, text });
+    for (const { k, tail, overplay, z } of weaknessServeCategories()) {
+        // `tail` is the NAMED tail describing the category, which for an
+        // overplay is the opposite of its serve direction — an overplay of a
+        // one-sided motif serves anti-motif problems but is described through
+        // the motif's own name, with a "too much" qualifier.
+        const name = localizedMotif(labels[String(k)], tail);
+        if (!name) continue;
+        scored.push({ z, text: overplay ? getTerm('trainingFocusTooMuch', { motif: name }) : name });
     }
     scored.sort((a, b) => b.z - a.z);
     return scored.slice(0, MAX_MOTIFS).map((m) => m.text);

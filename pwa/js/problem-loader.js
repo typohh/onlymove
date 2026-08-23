@@ -161,9 +161,13 @@ function selectChallengeCandidate({ anchorToLoaded = false } = {}) {
     // criteria almost never coincide, and one criterion's winner is no better than
     // a random pool draw on any other), so a blended score has no joint value to
     // harvest and picking one criterion forfeits nothing. The motif criterion is
-    // HINGED at zero (only the named tail is a target); a pool with no
-    // positive-loading candidate on the drawn axis scores everyone 0 and selectBest
-    // degrades to the closest-to-rank problem — the same neutral serve.
+    // HINGED at zero in the category's serve direction: a DEFICIT category
+    // argmaxes the named tail's loadings, an OVERPLAY category (weakness.js —
+    // contrast credibly positive, strength vetoed on the sum) argmaxes the
+    // opposite direction, problems whose answer is NOT the motif, where the
+    // motif is stochastically tempting and wrong. A pool with nothing past the
+    // hinge on the drawn direction scores everyone 0 and selectBest degrades
+    // to the closest-to-rank problem — the same neutral serve.
     //
     // The category pick is DETERMINISTIC — hashed, not Math.random() — for the
     // same reason as the recall gate: refreshShownProblemAfterSync re-derives serve

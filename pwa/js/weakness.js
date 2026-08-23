@@ -402,15 +402,46 @@ export function weaknessServeCategories() {
         const varContrast = varC + varP - 2 * axisCov[k];
         if (!Number.isFinite(betaEff) || !(varContrast > 0)) continue;
         const seContrast = Math.sqrt(varContrast);
-        // Deficit along +emb[k] ⇔ a positive contrast score there ⇔ betaEff < 0.
-        // z rides along for display ordering (training-focus list, strongest
-        // first); selection itself reads only {k, sign}.
+        // Category fields: `sign` is the SERVE direction (which loadings the
+        // selector argmaxes, hinged at zero), `tail` the NAMED tail that
+        // describes the category — they coincide for a deficit and are
+        // opposite for an overplay. z rides along for display ordering
+        // (training-focus list, strongest first); selection reads only
+        // {k, sign}, the bubble reads {tail, overplay}.
         const zPos = -betaEff / seContrast;
+        // Deficit along +emb[k] ⇔ a positive contrast score there ⇔ betaEff < 0.
         if (comp.positive && zPos > WEAKNESS_SERVE_Z) {
-            categories.push({ k, sign: 1, z: zPos });
+            categories.push({ k, sign: 1, tail: 'positive', z: zPos });
         }
         if (comp.negative && -zPos > WEAKNESS_SERVE_Z) {
-            categories.push({ k, sign: -1, z: -zPos });
+            categories.push({ k, sign: -1, tail: 'negative', z: -zPos });
+        }
+        // OVERPLAY of a one-sided motif: a credibly POSITIVE contrast puts the
+        // predicted deficit at NEGATIVE loadings — problems whose answer is
+        // not the motif, which under the generic-wrong-move ≈ −correct_emb
+        // reading are exactly where the motif is stochastically tempting and
+        // wrong. That prediction is interpolation, not extrapolation: for an
+        // overplayer β_picked is identified from their own motif-flavored
+        // wrong picks, which occur on precisely such problems. The category is
+        // named through the POSITIVE tail ("«motif» — too much"), so it exists
+        // only where the negative tail is unnamed — a bipolar axis already
+        // serves that direction as the negative motif's own deficit above.
+        // GATED ON THE SUM: a plain strength (better on motif problems, no
+        // motif-flavored errors) also puts the contrast positive, and would
+        // make the training-focus list claim "too much" of a motif the user is
+        // merely good at — a credibly positive sum is that strength signature,
+        // so it vetoes the flag (NaN, e.g. a stale AXIS_SUM_MEAN, vetoes too:
+        // the new category fails closed).
+        const sumRel = params[2 + k] + params[2 + K + k] - AXIS_SUM_MEAN[k];
+        const varSum = varC + varP + 2 * axisCov[k];
+        const sumZ = varSum > 0 ? sumRel / Math.sqrt(varSum) : NaN;
+        if (comp.positive && !comp.negative && -zPos > WEAKNESS_SERVE_Z &&
+            Number.isFinite(sumZ) && sumZ <= WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: -1, tail: 'positive', overplay: true, z: -zPos });
+        }
+        if (comp.negative && !comp.positive && zPos > WEAKNESS_SERVE_Z &&
+            Number.isFinite(sumZ) && sumZ >= -WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: 1, tail: 'negative', overplay: true, z: zPos });
         }
     }
     return categories;
