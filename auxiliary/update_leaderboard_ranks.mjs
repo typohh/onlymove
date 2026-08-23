@@ -597,18 +597,63 @@ async function main() {
     return 0;
 }
 
-// The thaw has to survive every exit path, or a crash mid-run leaves production
-// refusing writes indefinitely. process.exit() skips finally blocks, so nothing
-// below main() may call it before releaseFreeze() has run.
-let interrupted = false;
-for (const sig of ['SIGINT', 'SIGTERM']) {
-    process.on(sig, async () => {
-        if (interrupted) process.exit(130);   // a second ^C gives up and leaves it frozen
-        interrupted = true;
-        console.error(`\n${sig} — releasing the write freeze before exiting...`);
-        process.exit(await releaseFreeze() ? 130 : 1);
-    });
+// --- exit paths ---------------------------------------------------------------------
+// The thaw has to survive EVERY exit path, or a crash mid-run leaves production
+// refusing writes indefinitely. THREE of them do not reach the try/finally below,
+// and the first is not hypothetical — it is how this was found:
+//
+//   - A CLOSED STDOUT. Piping into `head` makes the next console.log raise EPIPE,
+//     which unwinds past main() without settling it, so the finally never runs and
+//     the freeze stays on. Swallowed here instead: a run that owns a production
+//     freeze must not die because its READER went away. It finishes the work and
+//     thaws with its output discarded.
+//   - An uncaught exception or rejection, for the same unwinding reason.
+//   - A signal, which delivers no exception at all.
+//
+// process.exit() skips finally blocks, so nothing below may call it before
+// releaseFreeze() has run.
+for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
 }
+
+// SYNCHRONOUS, and that is the whole design of it. An async handler yields at its
+// first await, which RESUMES THE SUSPENDED MAIN FLOW — measured: a SIGINT during the
+// freeze-confirmation poll thawed production while the run carried on and applied its
+// snapshot-relative writes with writes OPEN, the exact race the freeze exists to
+// prevent (the postflight caught it, which is why the postflight exists). Pushing the
+// secret is already a blocking spawnSync, so the handler can complete the thaw and
+// exit before yielding at all, and main never gets another turn.
+//
+// What that costs is the CONFIRMATION poll — it needs an await, so this path pushes
+// the thaw and tells the operator to verify rather than verifying itself. A push that
+// wrangler reports as failed still throws here, so the loud case is still covered;
+// only the propagation check is deferred. The ordinary exit paths below keep the
+// confirmed thaw.
+let exiting = false;
+function bailOut(label, code) {
+    if (exiting) process.exit(code);   // a second signal gives up and leaves it frozen
+    exiting = true;
+    console.error(`\n${label} — releasing the write freeze before exiting...`);
+    if (!heldFreeze) process.exit(code);
+    heldFreeze = null;
+    try {
+        setFreezeSecret(false);
+        console.error(`  thaw pushed (${FREEZE_SECRET}=0) but NOT confirmed — verify:\n`
+            + '    node auxiliary/check_live_status.mjs --expect-unfrozen');
+        process.exit(code);
+    } catch (err) {
+        console.error('\n*** PRODUCTION MAY STILL BE FROZEN — EVERY WRITE IS BEING REFUSED ***\n'
+            + `  ${err.message}\n`
+            + '  Lift it by hand, now:\n'
+            + `    cd pwa && printf 0 | npx wrangler secret put ${FREEZE_SECRET}\n`
+            + '    node auxiliary/check_live_status.mjs --expect-unfrozen');
+        process.exit(1);
+    }
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => bailOut(sig, 130));
+process.on('uncaughtException', (err) => bailOut(`uncaught exception: ${err?.stack || err}`, 1));
+process.on('unhandledRejection', (err) => bailOut(`unhandled rejection: ${err?.stack || err}`, 1));
+
 
 let exitCode = 0;
 try {
