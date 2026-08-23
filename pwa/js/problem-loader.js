@@ -24,6 +24,38 @@ import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboar
 // problem almost not at all. Variety comes from the pool turning over instead — every
 // answered problem is excluded for the next RECALL_CANDIDATE_HISTORY_LENGTH attempts,
 // so the maximum is a different problem each time.
+// Fraction of the pool the information criterion draws from, by score. A plain
+// argmax is an EXTREME-VALUE pick: the single highest-scoring problem of fifty is
+// atypical on every axis at once, not just the one being scored, so it lands on
+// motif-extreme problems far more often than the pool contains them — the
+// criterion ends up choosing the user's motifs as a side effect of choosing their
+// difficulty. Drawing uniformly from the top slice removes that: within the slice
+// nothing prefers one motif over another, so the served motif distribution comes
+// back close to the pool's own. The slice is wide enough to break the
+// extreme-value pick and narrow enough to keep most of the information, which the
+// flat top of the pool's quality curve is what makes possible.
+//
+// A residual tilt survives on any motif whose loading genuinely correlates with
+// discrimination; randomising cannot remove a real correlation, only the
+// extreme-value part. Residualising the score against the pool's own loadings
+// removes that too, and is deliberately NOT done — it costs information and adds a
+// per-pool fit for a second-order effect.
+const INFO_TOP_FRACTION = 0.2;
+
+// Uniform draw from the highest-scoring INFO_TOP_FRACTION of `items`, keyed by
+// `seed` so the pick is DETERMINISTIC — the same reason the recall gate and the
+// category draw are hashed rather than rolled: a tab resumed mid-decision has to
+// re-derive the same problem instead of taking a fresh chance at a different one.
+function selectFromTopFraction(items, scoreFn, seed) {
+    const scored = items
+        .map(item => ({ item, score: scoreFn(item) }))
+        .filter(e => Number.isFinite(e.score));
+    if (scored.length === 0) return items[0];
+    scored.sort((a, b) => b.score - a.score);
+    const n = Math.max(1, Math.ceil(scored.length * INFO_TOP_FRACTION));
+    return scored[Math.min(Math.floor(hashToUnit(seed) * n), n - 1)].item;
+}
+
 function selectBest(items, scoreFn) {
     let best = items[0];
     let bestScore = -Infinity;
@@ -214,7 +246,12 @@ function selectChallengeCandidate({ anchorToLoaded = false } = {}) {
                 ? Math.max(sign * p.embedding[k], 0) : 0);
     }
     if (withInfo && pick === categories.length) {
-        return selectBest(candidateProblems, p => Math.max(0, p.quality || 0));
+        // Drawn from the top slice rather than argmaxed — see INFO_TOP_FRACTION.
+        // Seeded off the same lastDate as the slot draw, so the whole serve
+        // decision re-derives identically on a resumed tab.
+        return selectFromTopFraction(candidateProblems,
+                                     p => Math.max(0, p.quality || 0),
+                                     `info-pick|${lastDate}`);
     }
     return candidateProblems[0];   // NEUTRAL: the pool's nearest-to-rank head
 }
