@@ -47,8 +47,14 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // P(β_correct + β_picked < 0) needed to flag an axis as a weakness. This is
     // a one-sided posterior probability on a single identified quantity (a
     // 50% bar would flag half the axes under a flat posterior), unlike the old
-    // 0.50 bar on four-way quadrant mass.
-    const WEAK_PROB_THRESHOLD = 0.80;
+    // 0.50 bar on four-way quadrant mass. The two bars are the 1-SD and 2-SD
+    // posterior gates (Φ(1) and Φ(2)): past the first the pane SUSPECTS the
+    // weakness (hedged phrasing), past the second it declares it. The tier is
+    // cosmetic — phrasing only; admission, the budget below, and serving
+    // (which gates on its own contrast statistic in weakness.js) all treat
+    // every flagged axis the same.
+    const WEAK_PROB_THRESHOLD = 0.8413;
+    const DECLARED_PROB_THRESHOLD = 0.9772;
     // Multiplicity control: the expected number of spurious issues the pane is
     // willing to show a user, summed over the whole list (see the admission
     // loop below). Must stay >= 1 - WEAK_PROB_THRESHOLD, else even the
@@ -202,8 +208,13 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
             if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
             else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
         }
-        return { k, side, quadrant, p,
-                 sentence: PHRASES[quadrant](labelFor(k, side)) };
+        const base = PHRASES[quadrant](labelFor(k, side));
+        // Below the declared bar the finding is real enough to act on (it
+        // already cleared admission and the budget) but is phrased as a
+        // suspicion rather than a statement.
+        const sentence = p >= DECLARED_PROB_THRESHOLD
+            ? base : getTerm('statsIssueSuspected', { sentence: base });
+        return { k, side, quadrant, p, sentence };
     });
     // Already strongest-first: the budget loop consumed `candidates` in that
     // order and preserved it.

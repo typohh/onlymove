@@ -31,11 +31,11 @@ export function loadPopulationConstants() {
     if (_loaded) return _loaded;
     const c = POPULATION_CONSTANTS;
     applyRetentionConstants(c.retention);   // throws on a bad/missing field
-    // The weakness centre selection subtracts before scoring (weakness.js). Asserted
-    // here, at boot, because that is the only place it CAN be wrong: package_for_pwa
-    // refuses to ship a vector whose length doesn't match the axis count, and
-    // weaknessScore's embedding-length guard establishes the trained model's K is that
-    // same shipped K, so the scorer indexes it unguarded. What remains is a malformed
+    // The weakness centre the serve-category flag test subtracts (weakness.js).
+    // Asserted here, at boot, because that is the only place it CAN be wrong:
+    // package_for_pwa refuses to ship a vector whose length doesn't match the axis
+    // count, and a trained model whose K disagrees yields non-finite flag
+    // statistics the category loop skips. What remains is a malformed
     // packaged blob, which is a build fault and should stop the app rather than
     // quietly serve an uncentred contrast — the one failure that looks like working
     // personalization while tilting every user identically.

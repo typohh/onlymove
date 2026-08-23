@@ -16,16 +16,17 @@
 // picked-move embedding from the sidecar (or backfilled later) let the
 // model disambiguate the two.
 //
-// Recommendation scoring of a candidate problem uses the CONTRAST
-// β_correct − β_picked applied to the candidate's correct-move embedding
-// (see weaknessScore for the full rationale). That contrast is the identified
-// over/under weakness direction — the same thing the Weaknesses pane's level-2
-// sign test estimates — so a correct-move-only score becomes direction-aware:
-// it up-weights motifs the user underplays / is bad at and down-weights motifs
-// the user overplays, with no thresholds.
+// Serving reads the CONTRAST β_correct − β_picked per axis (see
+// weaknessServeCategories for the full rationale): a flagged weakness is a
+// named axis tail on which the centred contrast's posterior clears the serve
+// gate, and it becomes one serve category the selector can draw. The contrast
+// is the identified over/under weakness direction — the same thing the
+// Weaknesses pane's level-2 sign test estimates — so the flags are
+// direction-aware: they fire on motifs the user underplays / is bad at, never
+// on motifs the user overplays.
 //
 // Model ridge-regularized: β shrunk toward 0, so before there's enough
-// signal the scorer returns 0 (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
+// signal nothing flags (cold-start, ≤ MIN_TRAINING_ATTEMPTS).
 
 import * as Sentry from "@sentry/browser";
 import { state, getMergedAnswerHistory, clearWeaknessModel } from './state.js';
@@ -51,10 +52,12 @@ const MIN_TRAINING_ATTEMPTS = 20;
 // fabricate a prior.
 const AXIS_LAMBDA = POPULATION_CONSTANTS.weakness_axis_lambda;
 // Population mean of the CONTRAST β_correct − β_picked, per axis, from the same
-// empirical-Bayes pass as AXIS_LAMBDA (pipeline.fit_population_constants). Scoring
-// subtracts it; see weaknessScore for why the contrast — unlike the sum — is centred
-// on a shipped mean rather than on zero. Validated at boot by
-// population-constants.js, which is what lets weaknessScore index it unguarded.
+// empirical-Bayes pass as AXIS_LAMBDA (pipeline.fit_population_constants). The
+// flag test subtracts it; see weaknessServeCategories for why the contrast —
+// unlike the sum — is centred on a shipped mean rather than on zero. Validated
+// at boot by population-constants.js; a trained model whose K outruns the
+// shipped vector produces non-finite flag statistics, which the category loop
+// skips.
 const AXIS_CONTRAST_MEAN = POPULATION_CONSTANTS.weakness_contrast_mean;
 // Population centre of the identified SUM (beta_correct[k] + beta_picked[k]).
 // The prior is centred HERE rather than at zero: an axis may legitimately carry
@@ -316,69 +319,96 @@ export async function trainWeakness() {
     }
 }
 
-// Returns alignment with user's weakness directions for a candidate problem.
-// Positive = mine for this; negative = user is strong here. 0 if no model.
-//
-// Scores the CONTRAST β_correct − β_picked against the candidate's correct-move
-// embedding. β_correct is the position-difficulty coefficient (effect of the
-// correct move's motif) and β_picked is the move-SELECTION coefficient (effect
-// of the move the user actually picked). Their contrast is the model-identified
-// over/under direction of the weakness — the continuous analogue of the
-// Weaknesses pane's level-2 picked−correct sign test — and it sets the tilt on
-// a candidate whose correct move loads on motif k:
+// Selection reads the CONTRAST β_correct − β_picked, per axis. β_correct is the
+// position-difficulty coefficient (effect of the correct move's motif) and
+// β_picked is the move-SELECTION coefficient (effect of the move the user
+// actually picked). Their contrast is the model-identified over/under direction
+// of the weakness — the continuous analogue of the Weaknesses pane's level-2
+// picked−correct sign test:
 //   - underplay / bad-at a motif → β_correct < 0, β_picked ≥ 0 → contrast < 0
-//     → up-weight (drill finding / handling the motif);
+//     → flag (drill finding / handling the motif);
 //   - overplay a motif → β_correct > 0, β_picked < 0 → contrast > 0
-//     → down-weight (stop rewarding the instinct).
+//     → the user needs LESS of the motif, not more — no flag on that tail.
 //
 // Equivalently this treats the "generic wrong move" as −correct_emb (to first
 // order the user, when wrong, plays away from the correct move along the weak
-// axis), which is candidate-varying and so — unlike a fixed generic move —
-// actually informs selection. β_picked must enter with THIS sign: the old sum
-// β_correct + β_picked applied β_picked to the correct move directly, a category
-// error that inverts the overplay case (it up-weights the very motif-k-correct
-// problems an overplayer should see LESS of). The per-axis empirical-Bayes prior
-// shrinks β_picked toward 0 with no picking signal, so the contrast degrades
-// gracefully to β_correct alone when there's no direction to read.
+// axis). β_picked must enter with THIS sign: the old sum β_correct + β_picked
+// applied β_picked to the correct move directly, a category error that inverts
+// the overplay case (it flags the very motif-k-correct problems an overplayer
+// should see LESS of). The per-axis empirical-Bayes prior shrinks β_picked
+// toward 0 with no picking signal, so the contrast degrades gracefully to
+// β_correct alone when there's no direction to read.
 //
-// The contrast is CENTRED on a shipped population mean before it is scored, and that
-// is what makes it personal. A wrong pick differs from the answer by a systematic
-// corpus offset — a description of what wrong moves look like, not of who played
-// them — and the likelihood routes that offset into β_picked, so every user's raw
-// contrast carries the same component. Scoring it uncentred ranks candidates by a
-// fixed corpus preference and serves everyone the same corner of the pool in the
-// shape of personalization; subtracting the mean leaves the part that actually
-// differs between users. Note this is the opposite treatment from the SUM, which is
-// centred on zero and whose population displacement HALTS the offline fit: a shared
-// sum coefficient is residual difficulty belonging upstream in the axis fit, so
-// centring it would hide a defect, while a shared contrast is measured geometry and
-// centring it removes a known nuisance.
+// The contrast is CENTRED on a shipped population mean before it is read, and
+// that is what makes it personal. A wrong pick differs from the answer by a
+// systematic corpus offset — a description of what wrong moves look like, not of
+// who played them — and the likelihood routes that offset into β_picked, so
+// every user's raw contrast carries the same component; uncentred, every user
+// would flag the same corpus-preferred motifs in the shape of personalization.
+// Subtracting the mean leaves the part that actually differs between users.
+// Note this is the opposite treatment from the SUM, which is centred on zero and
+// whose population displacement HALTS the offline fit: a shared sum coefficient
+// is residual difficulty belonging upstream in the axis fit, so centring it
+// would hide a defect, while a shared contrast is measured geometry and centring
+// it removes a known nuisance.
+//
+// The posterior z-score gate for a motif to become a SERVE CATEGORY. This is the
+// serving gate, deliberately looser than anything the stats pane would print: a
+// false-positive serve is cheap and self-correcting (the extra serves on that
+// axis are exactly what sharpens its posterior), while a false-positive REPORT
+// costs trust — reporting keeps its own budgeted thresholds in
+// stats-weaknesses.js and the two must not be unified.
+const WEAKNESS_SERVE_Z = 1;
 
-// Whether the shared weakness model has trained parameters at all — the
-// two-regime selector falls back to the information (slope²) regime when this
-// is false, rather than sampling uniformly over flat zero scores.
-export function weaknessModelReady() {
-    return Array.isArray(state.weaknessParams) && state.weaknessParams.length >= 4;
-}
-
-export function weaknessScore(problem) {
-    const params = state.weaknessParams;  // shared across sizes
-    if (!params || params.length < 4) return 0;
+// The flagged serve categories: one {k, sign} per (axis, NAMED tail) whose
+// centred-contrast posterior puts this user's deficit in that tail's direction
+// more than WEAKNESS_SERVE_Z posterior SEs past the population centre.
+// sign = +1 targets the positive tail (criterion max(emb[k], 0)), −1 the
+// negative (max(−emb[k], 0)).
+//
+// Only a NAMED tail can be a target — the same contract the stats pane applies
+// to findings (an unnamed tail is untaught residual: the one-sided rules teach
+// the positive tail only, so the negative side is whatever direction the trunk
+// happened to anticorrelate with the rule, and the linear model's deficit
+// prediction there is an extrapolation from data identified elsewhere; acting
+// on it would target a campaign the report tab is structurally unable to
+// describe). The test is on the label EXISTING, not on its localization, so
+// selection is locale-independent.
+//
+// The contrast variance needs the cross term: var_c + var_p − 2·cov. Under the
+// picked = correct collinearity cov is strongly negative, so dropping it
+// OVERSTATES the SE and silently raises the gate — same reason the stats
+// pane's sum test refuses a zero default for the covariance.
+export function weaknessServeCategories() {
+    const params = state.weaknessParams;
+    const se = state.weaknessSe;
+    const axisCov = state.weaknessAxisCov;
+    const labels = state.embeddingLabels;
+    if (!Array.isArray(params) || params.length < 4) return [];
     const K = (params.length - 2) / 2;
-    if (!Number.isInteger(K) || K <= 0) return 0;
-    // Also what makes AXIS_CONTRAST_MEAN[k] safe to index below: it is length K for the
-    // axis set package_for_pwa shipped (check_axis_prior refuses otherwise), and this
-    // line establishes that the trained model's K is that same shipped K.
-    if (!problem.embedding || problem.embedding.length !== K) return 0;
-    let score = 0;
+    if (!Number.isInteger(K) || K <= 0) return [];
+    // A missing or length-mismatched posterior means the arrays are stale
+    // against the current K — no categories, selection degrades to quality.
+    if (!Array.isArray(se) || se.length !== params.length) return [];
+    if (!Array.isArray(axisCov) || axisCov.length !== K) return [];
+    const categories = [];
     for (let k = 0; k < K; k++) {
-        // (β_correct[k] − β_picked[k]) − population mean: the identified over/under
-        // weakness direction (see the note above on why β_picked enters with a MINUS,
-        // not the inverted + of the old sum), with the offset every user shares
-        // removed so what's left is this user's own deviation.
+        const comp = labels && labels[k];
+        if (!comp) continue;
         const betaEff = params[2 + k] - params[2 + K + k] - AXIS_CONTRAST_MEAN[k];
-        score += -betaEff * problem.embedding[k];
+        const varC = se[2 + k] * se[2 + k];
+        const varP = se[2 + K + k] * se[2 + K + k];
+        const varContrast = varC + varP - 2 * axisCov[k];
+        if (!Number.isFinite(betaEff) || !(varContrast > 0)) continue;
+        const seContrast = Math.sqrt(varContrast);
+        // Deficit along +emb[k] ⇔ weaknessScore positive there ⇔ betaEff < 0.
+        if (comp.positive && -betaEff / seContrast > WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: 1 });
+        }
+        if (comp.negative && betaEff / seContrast > WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: -1 });
+        }
     }
-    return score;
+    return categories;
 }
 
