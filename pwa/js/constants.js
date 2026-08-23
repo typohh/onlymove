@@ -39,6 +39,20 @@ export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
 // so the working set is a superset of every synchronous read.
 export const ANSWER_HISTORY_WORKING_SET = 3000;
 
+// The answer-history fields that carry an embedding fit's output. Split in two
+// because the passes that drop them want different halves:
+//   VECTOR  — what a refit invalidates and a refill can restore.
+//   ALL     — the vectors plus `pickedCellIndex`, which is NOT fit-derived (it
+//             addresses the SGF's root variations, so a refit cannot move it)
+//             and is the key the picked refill is looked up BY. A pass that
+//             intends to refill therefore keeps it, while a pass whose rows are
+//             never coming back into model range — the keep-window strip, the
+//             removed-problem prune, the cold-tail eviction — drops it too.
+// Lives here rather than beside any one of those passes because state.js and
+// backfill.js both apply it and neither may import the other.
+export const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding'];
+export const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex'];
+
 // The shared one-standard-deviation motif gate, deliberately ONE constant for
 // three readings that must not drift apart: a problem's motif is DISPLAYED when
 // its loading clears this many corpus standard deviations (motif-bubble.js); a

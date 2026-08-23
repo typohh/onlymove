@@ -32,16 +32,17 @@ import {
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
+    getPersistedProblemsForSize, persistProblemObjects,
 } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
 import { detectRatingsCorrection } from './corrections-notice.js';
 import { quantizeEmbedding } from './math-utils.js';
-import { getTail, updateTail } from './history-store.js';
-import { boardNotationToXy } from './sgf.js';
+import { getTail, updateTail, dropStoredEmbeddings } from './history-store.js';
+import { boardNotationToXy, tsumegoIdOf } from './sgf.js';
 
 // Only the last N answerHistory entries need embeddings — that's all the
 // trainer ever uses. Anything older eats localStorage for no benefit.
@@ -54,6 +55,12 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
 const RATINGS_VERSION_KEY = 'ratingsVersion';
 const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
+// Set once the stored correct-move vectors have been re-read from the shipped
+// sidecar (reseedCorrectEmbeddings), and once the legacy cold-tail sweep beside
+// it has run. NOT versions: an absent flag is what makes either pass run, on
+// any boot. Both are TEMPORARY — see reseedCorrectEmbeddings for when they go.
+const TAIL_EMBEDDINGS_DROPPED_KEY = 'historyTailEmbeddingsDropped_v1';
+const CORRECT_EMBEDDINGS_RESEEDED_KEY = 'correctEmbeddingsReseeded_v1';
 
 // Removed-problem prune. Problems get dropped from the corpus on regeneration.
 // Their answerHistory entries keep the rating/rank stored at attempt time — the
@@ -78,22 +85,12 @@ const PRUNE_SIGNATURE_KEY = 'prunedCorpusSignature';
 // The rating fields the cold-tail re-derive writes (present problems) or strips
 // (problems that left the corpus — never leave a stale rating on a removed problem;
 // flattenAttempts then drops the rating-less attempt from the chart). The tail
-// never carries embeddings, which is why this list stands alone.
+// carries no embeddings (history-store drops them on write), which is why this
+// list stands alone.
 const RATING_FIELDS = [
     'problemRating', 'problemRawRating', 'problemRank',
     'problemSlope', 'problemQuality', 'problemFloor',
 ];
-
-// The FIT-DERIVED vectors: an embedding refit invalidates exactly these, so this
-// is the list the refit wipe clears.
-const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding'];
-
-// The vectors plus `pickedCellIndex`. The index is NOT fit-derived — it addresses
-// the SGF's root variations, so a refit cannot move it, and it is the key the
-// picked refill is looked up by. So the refit wipe keeps it (dropping it would
-// make the wiped vector unrecoverable) while the two passes that are NOT going to
-// refill — the keep-window strip and the removed-problem prune — drop it too.
-const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex'];
 
 // Fields stripped from a removed-problem entry: everything the rank chart,
 // weakness model, and recall trainer key on. date/timeTaken/size/problemId/
@@ -229,6 +226,11 @@ export async function backfillMissingEmbeddings() {
     const pruned = await pruneRemovedProblems(serverEmbeddingVersion, RATINGS_VERSION);
 
     const sizesFilled = [];
+    // Whether the gated run below refilled every in-window vector from the
+    // sidecar, and whether its cold-tail sweep completed — each makes the
+    // matching one-time repair at the end redundant.
+    let refitRefilledEmbeddings = false;
+    let tailSwept = false;
     if (embeddingsChanged || ratingsChanged || curveChanged) {
         // Bracket the whole run: a "triggered" line (which axes moved + the new
         // ratings version) and a "complete" line (elapsed + which sizes were rewritten).
@@ -256,6 +258,19 @@ export async function backfillMissingEmbeddings() {
         // failure would freeze stale per-attempt rating/slope/floor under a matching
         // version (and, on an embedding refit, lock in wiped-but-never-refilled
         // embeddings, since the wipe runs before the fills can fail).
+        // The cold tail is outside everything above: it is ONE store across both
+        // boards, so it is not part of the per-size rewrite, and the wipe walks
+        // the working set only. Sweeping it on every embedding refit is
+        // redundant while history-store drops the block on write — deliberately
+        // so, because it gives that invariant a REPAIR and not only an
+        // assertion: a tail that acquires vectors by any later route is cleaned
+        // by the next refit. Deliberately NOT folded into allOk — no reader
+        // touches those vectors, so a failed sweep costs dead IndexedDB bytes
+        // until the next refit, and re-running an entire refit to reclaim them
+        // would be the expensive half paying for the cheap one.
+        if (embeddingsChanged) tailSwept = await sweepTailEmbeddings();
+
+        refitRefilledEmbeddings = embeddingsChanged && allOk;
         if (allOk) {
             if (embeddingsChanged) localStorage.setItem(EMBEDDING_VERSION_KEY, serverEmbeddingVersion);
             if (ratingsChanged) localStorage.setItem(RATINGS_VERSION_KEY, RATINGS_VERSION);
@@ -264,10 +279,148 @@ export async function backfillMissingEmbeddings() {
         console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'}${allOk ? '' : '; INCOMPLETE — versions left un-stamped, retrying next load'})`);
     }
 
+    // Two one-time repairs of damage stored BEFORE the permanent paths above
+    // existed. WHEN THEY RUN and WHEN THEY GO are unrelated:
+    //   runs   — on the first boot of any device carrying neither flag. Nothing
+    //            here is gated on a version, so shipping the bundle is the
+    //            whole trigger; the gated block above may have done nothing.
+    //   goes   — delete this block, reseedCorrectEmbeddings,
+    //            reseedProblemObjects, dropLegacyTailEmbeddings and the two
+    //            flags at the next embedding or ratings ship. From that ship
+    //            onward the ordinary gate repairs whoever never ran them: the
+    //            wipe+refill re-reads every in-window vector, and
+    //            sweepTailEmbeddings clears the tail.
+    if (refitRefilledEmbeddings) {
+        try { localStorage.setItem(CORRECT_EMBEDDINGS_RESEEDED_KEY, '1'); } catch {}
+    } else {
+        await reseedCorrectEmbeddings();
+    }
+    // A sweep that could not run leaves the flag unset, so the legacy pass
+    // retries on the next load rather than being recorded as done.
+    if (tailSwept) {
+        try { localStorage.setItem(TAIL_EMBEDDINGS_DROPPED_KEY, '1'); } catch {}
+    } else {
+        await dropLegacyTailEmbeddings();
+    }
+
     // No model to retrain: the motif readings (motif-stats.js) are a pure
     // function of the answer history, recomputed by their readers, so a refreshed
     // or pruned history is picked up on the next read with nothing to keep in
     // sync and nothing to heal after an interrupted refit.
+}
+
+// Clear the embedding block from every cold-tail row, on an embedding refit.
+// Permanent (see the call site for why a redundant sweep is worth its cursor
+// walk); silent in the steady state, where it writes nothing. Returns whether
+// the walk completed.
+async function sweepTailEmbeddings() {
+    const { cleared, ok } = await dropStoredEmbeddings();
+    if (cleared > 0) console.log(`backfill: cleared embeddings from ${cleared} cold-tail rows`);
+    else if (!ok) console.warn('backfill: cold-tail embedding sweep unavailable (retries on the next refit)');
+    return ok;
+}
+
+// TEMPORARY, retired with the block that calls it. The legacy half of the sweep
+// above: tails written before history-store dropped the block on write, on a
+// device that has not seen a refit since. Flag-gated on success only, so an
+// unavailable IndexedDB retries on the next load.
+async function dropLegacyTailEmbeddings() {
+    if (localStorage.getItem(TAIL_EMBEDDINGS_DROPPED_KEY)) return;
+    const { cleared, ok } = await dropStoredEmbeddings();
+    if (!ok) return;
+    try { localStorage.setItem(TAIL_EMBEDDINGS_DROPPED_KEY, '1'); } catch {}
+    if (cleared > 0) console.log(`backfill: dropped stale embeddings from ${cleared} cold-tail rows`);
+}
+
+// TEMPORARY, retired with its only caller (see reseedCorrectEmbeddings).
+// Re-read the persisted problem objects' correct-move vectors from the sidecar,
+// overwriting in place (the on-screen problem is the same object, so a standing
+// challenge already painted this session is corrected too). Same
+// overwrite-never-clear rule as its caller.
+async function reseedProblemObjects(size) {
+    const problems = getPersistedProblemsForSize(size);
+    if (problems.length === 0) return;
+    const shims = problems.map((p) => ({ problemId: tsumegoIdOf(p.filename) }));
+    await fillCorrectEmbeddingsViaSidecar(shims);
+    let n = 0;
+    shims.forEach((shim, i) => {
+        if (Array.isArray(shim.embedding)) { problems[i].embedding = shim.embedding; n++; }
+    });
+    if (n > 0) {
+        persistProblemObjects();
+        console.log(`backfill[${size}]: re-read ${n} persisted problem embedding(s)`);
+    }
+}
+
+// TEMPORARY — DELETE AT THE NEXT EMBEDDING OR RATINGS SHIP, with
+// reseedProblemObjects, CORRECT_EMBEDDINGS_RESEEDED_KEY and the call block in
+// backfillMissingEmbeddings. That is its retirement condition, NOT its trigger:
+// it runs off the absent flag on the next boot, whether or not any version
+// moved. It is deletable then because a refit's own wipe+refill re-reads every
+// in-window vector from this same sidecar, so from that ship onward the
+// ordinary gate repairs any device that never ran this pass. What is NOT
+// temporary is refreshPersistedProblems — that is the defect fix, and without
+// it every future refit re-creates this damage.
+//
+// One-time re-read of the stored correct-move vectors from the shipped sidecar.
+//
+// Until the persisted problem objects came under the version gate
+// (refreshPersistedProblems), a standing challenge kept its embedding across a
+// refit and the recorder stamped that superseded vector onto the next attempt
+// of it — one row from the previous fit inside a window from this one. Such a
+// row cannot be identified after the fact: a refit can keep K and move every
+// axis under it, so a stale vector has the right length and simply means
+// something else. So this does not go looking for them — it re-reads EVERY
+// in-window vector from the source of truth, which is cheap enough to be
+// unconditional (one memoized fetch per distinct problem, and the sidecar is
+// one file).
+//
+// OVERWRITE IN PLACE, never clear-then-refill: a device that cannot reach the
+// sidecar keeps exactly what it has instead of losing its weakness readings
+// until it is next online. `pickedEmbedding` is left alone — it is fetched at
+// click time from the shard the problem was served from, so it never rode a
+// persisted object, and refilling those means shard zips.
+async function reseedCorrectEmbeddings() {
+    if (localStorage.getItem(CORRECT_EMBEDDINGS_RESEEDED_KEY)) return;
+    let attempted = 0;
+    let reseeded = 0;
+    for (const size of SUPPORTED_BOARD_SIZES) {
+        try {
+            const history = getAnswerHistoryForSize(size);
+            if (!history || history.length === 0) continue;
+            const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
+            const rows = history.slice(startIdx)
+                .filter((a) => a && a.problemId && Array.isArray(a.embedding));
+            // The persisted problem objects are re-read in the SAME pass: the
+            // standing challenge is where a superseded vector came from, so a
+            // repair that fixed only the history it already poisoned would let
+            // it poison the next attempt too.
+            await reseedProblemObjects(size);
+            if (rows.length === 0) continue;
+            attempted += rows.length;
+            // Shims rather than the rows themselves: the fill is fill-if-MISSING
+            // by contract, and here every row already has a vector.
+            const shims = rows.map((a) => ({ problemId: a.problemId }));
+            await fillCorrectEmbeddingsViaSidecar(shims);
+            let n = 0;
+            shims.forEach((shim, i) => {
+                if (Array.isArray(shim.embedding)) { rows[i].embedding = shim.embedding; n++; }
+            });
+            if (n > 0) {
+                persistAnswerHistory(size, history);
+                reseeded += n;
+            }
+        } catch (err) {
+            console.warn(`reseed[${size}] failed:`, err);
+            try { Sentry.captureException(err); } catch (_) {}
+            return;  // leave un-stamped; the next load retries
+        }
+    }
+    // Nothing came back while rows were waiting = the sidecar was unreachable.
+    // Retry on the next load rather than recording a repair that did nothing.
+    if (attempted > 0 && reseeded === 0) return;
+    try { localStorage.setItem(CORRECT_EMBEDDINGS_RESEEDED_KEY, '1'); } catch {}
+    if (reseeded > 0) console.log(`backfill: re-read ${reseeded} stored embeddings from the sidecar`);
 }
 
 // Strip model fields from answerHistory entries whose problem is no longer in
@@ -632,6 +785,19 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
 
+        // The standing challenge and the last-completed problem are persisted
+        // problem objects carrying the SAME fit-derived fields the history
+        // rewrite above refreshes, and no gate reached them: a refit left a
+        // superseded embedding sitting in localStorage, and the recorder
+        // stamped it onto the NEXT attempt of that problem — one row from the
+        // previous fit inside a window from this one. Refreshed here rather
+        // than screened later because nothing downstream can spot it: a refit
+        // can keep K and move every axis under it, so a stale vector is the
+        // right shape and simply means something else.
+        await refreshPersistedProblems(size, {
+            embeddingsChanged, ratingsChanged, curveChanged, problemParams,
+        });
+
         if (tailNeedsRederive && problemParams) {
             await rederiveTailRatings(size, problemParams);
         }
@@ -640,6 +806,62 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         console.error(`backfill[${size}] failed`, err);
         try { Sentry.captureException(err); } catch (_) {}
         return { count: 0, ok: false };
+    }
+}
+
+// Re-derive the persisted problem objects' fit-derived fields under the same
+// three version gates the history rewrite runs under. Mutates in place (the
+// on-screen problem is the same object) and persists once if anything moved.
+//
+// The embedding refill reads the same lookup sidecar the history fill reads, so
+// the two can never end up holding different vectors for one problem. A refill
+// that cannot resolve leaves the field ABSENT rather than stale — every
+// consumer already treats a missing embedding as "no embedding", while a
+// superseded one is indistinguishable from a current one.
+async function refreshPersistedProblems(size, { embeddingsChanged, ratingsChanged, curveChanged, problemParams }) {
+    const problems = getPersistedProblemsForSize(size);
+    if (problems.length === 0) return;
+    let touched = false;
+
+    for (const p of problems) {
+        if (ratingsChanged && problemParams) {
+            const item = problemParams.get(tsumegoIdOf(p.filename));
+            if (item && typeof item.rating === 'number') {
+                p.rating = item.rating;
+                const rank = rankForSize(item.rating, size);
+                if (rank !== null && rank !== undefined) p.rank = rank;
+                if (typeof item.slope === 'number') {
+                    p.slope = item.slope;
+                    p.quality = problemInfoWeight(item.slope, item.floor);
+                }
+                if (typeof item.floor === 'number') p.floor = item.floor;
+                touched = true;
+            }
+        } else if (curveChanged && typeof p.rating === 'number') {
+            // Curve-only: the raw rating stands, its rank moves.
+            const rank = rankForSize(p.rating, size);
+            if (rank !== null && rank !== undefined) { p.rank = rank; touched = true; }
+        }
+        if (embeddingsChanged && p.embedding !== undefined) {
+            delete p.embedding;
+            touched = true;
+        }
+    }
+
+    if (embeddingsChanged) {
+        const shims = problems.map((p) => ({ problemId: tsumegoIdOf(p.filename) }));
+        const filled = await fillCorrectEmbeddingsViaSidecar(shims);
+        if (filled > 0) {
+            shims.forEach((shim, i) => {
+                if (Array.isArray(shim.embedding)) problems[i].embedding = shim.embedding;
+            });
+            touched = true;
+        }
+    }
+
+    if (touched) {
+        persistProblemObjects();
+        console.log(`backfill[${size}]: refreshed ${problems.length} persisted problem object(s)`);
     }
 }
 

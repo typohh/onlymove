@@ -1,5 +1,5 @@
 // js/state.js
-import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { APP_MODES, ANSWER_HISTORY_WORKING_SET, MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS } from './constants.js';
 import { appendTail, getTail, countTail, requestPersist, clearTail } from './history-store.js';
 import { isQuotaError, readJSON, readJSONObject, writeJSON } from './persist.js';
 import { runStateEpochGate } from './state-epoch.js';
@@ -90,8 +90,12 @@ function persistUnifiedHistory() {
     const cutoff = Math.max(0, unifiedHistory.length - ANSWER_HISTORY_EMBEDDING_KEEP_LAST);
     for (let i = 0; i < cutoff; i++) {
         const a = unifiedHistory[i];
-        if (a && a.embedding !== undefined) { delete a.embedding; stripped++; }
-        if (a && a.pickedEmbedding !== undefined) { delete a.pickedEmbedding; stripped++; }
+        if (!a) continue;
+        // Vectors only: `pickedCellIndex` is what a later refill is looked up
+        // by, and a working-set row is still in refill range.
+        for (const f of EMBEDDING_VECTOR_FIELDS) {
+            if (a[f] !== undefined) { delete a[f]; stripped++; }
+        }
     }
     try {
         localStorage.setItem('answerHistory', JSON.stringify(unifiedHistory));
@@ -730,6 +734,23 @@ export function updateDisplayRank(rank) {
 
 export function updateRankSe(se) {
     state.rankSe = (typeof se === 'number' && Number.isFinite(se)) ? se : null;
+}
+
+// The persisted problem objects for `size`: the standing challenge and the
+// last-completed problem, either possibly absent. Returned LIVE — the same
+// objects state hands to the board — so a caller refreshes them by mutating in
+// place and calling persistProblemObjects(). That the on-screen problem is the
+// SAME reference is the point: a refresh landing mid-session reaches a
+// challenge already painted, not just the copy in localStorage.
+export function getPersistedProblemsForSize(size) {
+    return [perSize.challengeProblem[size], perSize.previousProblem[size]]
+        .filter(p => p && typeof p === 'object');
+}
+
+// Write both per-size buckets back after such an in-place refresh.
+export function persistProblemObjects() {
+    writeJSON('challengeProblem', perSize.challengeProblem);
+    writeJSON('previousProblem', perSize.previousProblem);
 }
 
 export function setChallengeProblem(problem) {

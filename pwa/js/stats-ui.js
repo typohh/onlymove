@@ -12,7 +12,7 @@
 // recall-model.js never reaches back into the UI.
 
 import * as Sentry from "@sentry/browser";
-import { state, setStatsResults, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
+import { state, setStatsResults, getMergedAnswerHistory, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';
 import { computeRankDecomposition, flattenAttempts } from './rank-decomposition.js';
@@ -189,13 +189,21 @@ export async function showDetailedStats() {
         const ignoredProblemCount = merged.filter(p => p.ignored).length;
         resultText += getTerm('statsIgnoredProblems', { count_ignored: ignoredProblemCount, count_slipped: slippedProblemCount }) + '\n';
 
-        // Two-level weakness detection (stats-weaknesses.js): the augmented
-        // model's posterior on the identified sum β_correct[k] + β_picked[k]
-        // flags weak axes, and a paired picked-vs-correct sign test qualifies
-        // the direction. Rendered as a DOM block (instead of inlined into
-        // resultText) so each issue can carry an interactive `examples` toggle
+        // Per-motif readings (stats-weaknesses.js): a 3PL-residual slope on each
+        // motif loading and a sign test on the user's own wrong picks, both
+        // over their own attempts. Rendered as a DOM block (instead of inlined
+        // into resultText) so a row can carry an interactive `examples` toggle
         // to past mistakes.
-        const issuesElement = buildLikelyIssuesElement(merged);
+        //
+        // The WORKING SET, not `merged`: this is the one block that reads
+        // embedding vectors, and a vector is only trustworthy where the
+        // embedding_version gate can reach it. That gate (backfill's refit
+        // wipe) rewrites the working set alone, so a working-set vector is
+        // always from the shipped fit, while the cold tail is outside it — and
+        // a superseded fit's vector is not detectably wrong, since a refit can
+        // keep K and move every axis under it. Nothing is lost: the readings
+        // slice to MODEL_INPUT_HISTORY_LENGTH, six times inside this window.
+        const issuesElement = buildLikelyIssuesElement(getMergedAnswerHistory());
 
         // Activity pane: the problems-per-day chart above the review-queue
         // summary text.

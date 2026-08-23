@@ -10,7 +10,17 @@
 // Design notes:
 //   - Single object store with OUT-OF-LINE autoincrement keys, so stored
 //     records are the answer-history entries verbatim (each carries its `size`)
-//     — no synthetic key field leaks back into the history array.
+//     — no synthetic key field leaks back into the history array. The one
+//     exception is the embedding block, dropped on write (see stripEmbeddings).
+//   - THE TAIL HOLDS NO EMBEDDING VECTORS, enforced here at the write boundary
+//     rather than assumed by the callers. A tail row is by definition older
+//     than the working set, hence far outside MODEL_INPUT_HISTORY_LENGTH, so
+//     no model or fill will ever read or refill its vectors — they are dead
+//     weight in IndexedDB, and worse, they are frozen at the embedding_version
+//     of the day they were evicted, while the only pass that clears stale
+//     vectors (backfill's refit wipe) can reach the working set alone. Left in,
+//     they outlive every refit and reappear as wrong-K rows in any consumer
+//     that reads the full career.
 //   - Insertion order == eviction order == date order (state.evictColdTail
 //     always appends the OLDEST overflow first), so getTail() returns the tail
 //     oldest→newest with no index needed.
@@ -21,12 +31,24 @@
 //     set only" rather than losing attempts.
 
 import { rowHash } from '../shared/sync-digest.js';
+import { EMBEDDING_ALL_FIELDS } from './constants.js';
 
 const DB_NAME = 'onlymove';
 const DB_VERSION = 1;
 const STORE = 'answerHistoryTail';
 
 let dbPromise = null;
+
+// A copy of `row` without the embedding block, or `row` itself when it carries
+// none (the steady state — nothing to copy). Never mutates the caller's object:
+// appendTail's contract is that a FAILED write leaves the working set intact,
+// and evictColdTail keeps those rows on a false.
+function stripEmbeddings(row) {
+    if (!row || !EMBEDDING_ALL_FIELDS.some((f) => row[f] !== undefined)) return row;
+    const out = { ...row };
+    for (const f of EMBEDDING_ALL_FIELDS) delete out[f];
+    return out;
+}
 
 function idbAvailable() {
     try {
@@ -82,7 +104,7 @@ export async function appendTail(rows) {
         }
         const store = tx.objectStore(STORE);
         for (const r of rows) {
-            try { store.add(r); } catch {}
+            try { store.add(stripEmbeddings(r)); } catch {}
         }
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
@@ -272,6 +294,23 @@ export async function updateTail(transform) {
     });
 }
 
+// Clear the embedding block from rows already stored. Two callers, both in
+// backfill.js: the refit sweep (every embedding_version change, so the
+// no-vectors invariant has a REPAIR and not only the assertion above) and the
+// one-time legacy repair for tails written before that assertion existed.
+// Resolves { cleared, ok }; ok=false (IDB unavailable, walk failed) means the
+// caller must not record a repair as done.
+export async function dropStoredEmbeddings() {
+    let cleared = 0;
+    const ok = await updateTail((entry) => {
+        const stripped = stripEmbeddings(entry);
+        if (stripped === entry) return null;   // carried none — leave untouched
+        cleared++;
+        return stripped;
+    });
+    return { cleared, ok: !!ok };
+}
+
 // Drop the whole tail (account switch). Resolves true on success.
 export async function clearTail() {
     invalidateTailDigest();
@@ -307,7 +346,7 @@ export async function replaceTail(rows) {
             const store = tx.objectStore(STORE);
             store.clear();
             for (const r of (rows || [])) {
-                try { store.add(r); } catch {}
+                try { store.add(stripEmbeddings(r)); } catch {}
             }
         } catch {
             resolve(false);
