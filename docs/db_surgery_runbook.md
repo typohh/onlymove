@@ -25,7 +25,7 @@ cd pwa && printf 1 | npx wrangler secret put MAINTENANCE_MODE   # freeze
 cd pwa && printf 0 | npx wrangler secret put MAINTENANCE_MODE   # thaw
 ```
 
-`secret put` pushes a new Worker version reusing the deployed code bundle, so it propagates exactly like a deploy — which is the point: a version rollout replaces every colo, so a single probe confirming the state stands for all of them. It takes a few seconds, so confirm rather than assume (`node auxiliary/check_live_status.mjs --expect-frozen`, which retries). Two consequences worth holding onto: **the freeze no longer ships anything**, so it is fully orthogonal to what happens to be sitting in `pwa/dist`; and a secret's value cannot be read back, so "are we frozen?" is answered by probing, never by reading the repo.
+`secret put` pushes a new Worker version reusing the deployed code bundle, so it propagates exactly like a deploy — which is the point: a rollout replaces the deployed code everywhere, rather than leaving a per-colo cached value that never converges. It takes a few seconds and **lands unevenly**, so confirm rather than assume (`node auxiliary/check_live_status.mjs --expect-frozen`, which retries), and treat a single probe inside that window as one edge's answer rather than the fleet's — measured, consecutive probes disagree while a rollout is in flight. Two consequences worth holding onto: **the freeze no longer ships anything**, so it is fully orthogonal to what happens to be sitting in `pwa/dist`; and a secret's value cannot be read back, so "are we frozen?" is answered by probing, never by reading the repo.
 
 Coverage:
 

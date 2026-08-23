@@ -74,9 +74,10 @@
 // MAINTENANCE_MODE is a wrangler SECRET rather than a [vars] entry precisely so
 // this script can flip it: `secret put` pushes a new Worker version reusing the
 // existing code bundle, so there is no build, no commit and no clean-tree gate,
-// while propagation stays a real version rollout — which is what lets a single
-// probe stand for every colo. It is a rollout, not an edge write, so it takes a
-// few seconds; waitForFreezeState polls rather than assuming the next read sees it.
+// while propagation stays a real version rollout rather than an edge write. That
+// rollout takes seconds and lands UNEVENLY, so awaitStableFreezeState requires the
+// same answer on several consecutive probes before believing it — a single probe
+// during propagation can be answered by a colo on either version.
 //
 // THE THAW RUNS ON EVERY EXIT PATH — a throw, a refusal, SIGINT — because the
 // failure mode of this script owning the freeze is leaving production frozen. If
@@ -122,9 +123,11 @@ const VENV_PY = path.join(REPO, '.venv', 'bin', 'python3');
 // The freeze flag is a wrangler secret (see pwa/wrangler.toml) so it can be flipped
 // without a build or a deploy. "1" = frozen; anything else, including unset, = open.
 const FREEZE_SECRET = 'MAINTENANCE_MODE';
-// A secret push is a version rollout, so it propagates over seconds like a deploy.
+// A secret push is a version rollout, so it propagates over seconds like a deploy —
+// and unevenly, so a state counts as read only once it repeats (awaitStableFreezeState).
 const FREEZE_PROBE_RETRIES = 15;
 const FREEZE_PROBE_DELAY_MS = 2000;
+const FREEZE_STABLE_PROBES = 3;
 // `wrangler dev`'s port. fetch_database overwrites the miniflare D1 file, and doing
 // that under a live workerd corrupts its view — so the in-window refresh refuses.
 const DEV_PORT = 8787;
@@ -283,20 +286,34 @@ function setFreezeSecret(on) {
     }
 }
 
-// Poll until production actually reports the state we asked for. Fails CLOSED: an
-// 'unknown' probe keeps retrying and then throws, because "could not confirm" and
-// "confirmed" must not be the same outcome in either direction.
-async function waitForFreezeState(origin, want, label) {
-    let last = '';
+// Poll until production reports a state STABLY — the same answer on
+// FREEZE_STABLE_PROBES consecutive probes. One probe is not enough and that is
+// measured, not defensive: a version rollout does not flip every colo at the same
+// instant, and inside that propagation window consecutive probes disagree. A run
+// that read a single 503 from a straggler concluded it was inside an outer surgery
+// window; probes seconds later were unanimously OPEN. A single reading therefore
+// says what one edge answered, not what the fleet is doing.
+//
+// This narrows the window rather than abolishing it — the authoritative check that
+// nothing slipped through stays the MAX(id) comparison in postflightRemote.
+//
+// Fails CLOSED in both directions: 'unknown' never satisfies a `want`, and with
+// want=null (reading the state we START in) an unstable fleet throws instead of
+// picking one of the answers.
+async function awaitStableFreezeState(origin, want, label) {
+    let run = 0, prev = null, last = '';
     for (let attempt = 1; attempt <= FREEZE_PROBE_RETRIES; attempt++) {
         const { state, detail } = await probeProductionFreeze(origin);
         last = detail;
-        if (state === want) return detail;
+        run = state === prev ? run + 1 : 1;
+        prev = state;
+        const satisfied = want === null ? state !== 'unknown' : state === want;
+        if (run >= FREEZE_STABLE_PROBES && satisfied) return { state, detail };
         if (attempt < FREEZE_PROBE_RETRIES) await sleep(FREEZE_PROBE_DELAY_MS);
     }
     const waited = Math.round(FREEZE_PROBE_RETRIES * FREEZE_PROBE_DELAY_MS / 1000);
-    throw new Error(`${label}: production never reported writes ${want.toUpperCase()} `
-        + `after ${waited}s — last probe: ${last}`);
+    throw new Error(`${label}: production never held ${want ? `writes ${want.toUpperCase()}` : 'one state'} `
+        + `across ${FREEZE_STABLE_PROBES} consecutive probes in ${waited}s — last: ${last}`);
 }
 
 // --- the write freeze this run owns -------------------------------------------------
@@ -312,7 +329,7 @@ async function releaseFreeze() {
     console.log(`\nthawing writes (${FREEZE_SECRET}=0)...`);
     try {
         setFreezeSecret(false);
-        console.log(`  freeze    OFF — ${await waitForFreezeState(origin, 'open', 'thaw')}`);
+        console.log(`  freeze    OFF — ${(await awaitStableFreezeState(origin, 'open', 'thaw')).detail}`);
         return true;
     } catch (err) {
         console.error(`\n*** PRODUCTION MAY STILL BE FROZEN — EVERY WRITE IS BEING REFUSED ***\n`
@@ -361,12 +378,8 @@ async function openWindow() {
     const origin = productionOrigin();
     console.log(`preflight: ${origin}`);
 
-    const before = await probeProductionFreeze(origin);
+    const before = await awaitStableFreezeState(origin, null, 'initial freeze read');
     console.log(`  freeze    ${before.state.toUpperCase()} — ${before.detail}`);
-    if (before.state === 'unknown') {
-        throw new Error('could not determine whether production is frozen — refusing to write.\n'
-            + `  ${before.detail}`);
-    }
 
     const wasAlreadyFrozen = before.state === 'frozen';
     if (wasAlreadyFrozen) {
@@ -377,7 +390,7 @@ async function openWindow() {
         console.log(`  freezing writes (${FREEZE_SECRET}=1)...`);
         heldFreeze = { origin };
         setFreezeSecret(true);
-        console.log(`  freeze    ON — ${await waitForFreezeState(origin, 'frozen', 'freeze')}`);
+        console.log(`  freeze    ON — ${(await awaitStableFreezeState(origin, 'frozen', 'freeze')).detail}`);
         await refreshLocalMirror();
     }
 
