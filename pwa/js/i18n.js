@@ -29,6 +29,7 @@ const localization = {
     recallMode: '回忆模式',
     reviewMode: '复习模式',
     motifTitle: '此题考点',
+    trainingFocusTitle: '训练重点',
     viewMode: '查看模式',
     rushingMessage: '您只用了{seconds}秒就回答了。您过去的结果表明，这样仓促行事有{confidence}%的概率导致更多错误。',
     insufficientReviewMessage: '重复错误！您只花了{seconds}秒复习这个问题。您过去的结果表明，花更多时间复习有{confidence}%的概率让您下次更好地记住它。',
@@ -81,6 +82,7 @@ const localization = {
     statsIssueNotEnough: '您对「{motif}」信任不足。',
     statsIssueBadAt: '「{motif}」是您的弱项。',
     statsIssueSuspected: '疑似：{sentence}',
+    statsIssueStrong: '「{motif}」是您的强项。',
     statsCommunityHeader: '社区 · 最近 {days} 天（更新于 {ago}）',
     statsAgoJustNow: '刚刚',
     statsAgoMinutes: '{n} 分钟前',
@@ -178,7 +180,8 @@ const localization = {
     onbShare: '点击「分享」，即可把这道题以链接或图片的形式发给他人尝试。',
     onbStats: '打开「菜单」并点击「统计」，即可查看你的弱点、解题速度和进步情况。',
     onbAccount: '打开「菜单」并点击「账户」——你的进度会保存为一个代码，在其他设备上输入即可同步。',
-    onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。'
+    onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。',
+    onbTrainingFocus: '应用现在会针对您的弱项出题。此列表是您当前的训练重点：这些技能的题目会更多地出现。详情请见菜单统计中的弱点页。'
   },
   ja: {
     kyu: '級',
@@ -206,6 +209,7 @@ const localization = {
     recallMode: 'リコールモード',
     reviewMode: '復習モード',
     motifTitle: '問われる力',
+    trainingFocusTitle: '強化ポイント',
     viewMode: '閲覧モード',
     rushingMessage: 'あなたはわずか{seconds}秒で回答しました。過去の結果から、このように急ぐと{confidence}%の確率でミスが増えることが示唆されます。',
     insufficientReviewMessage: '繰り返しのミス！この問題の復習に{seconds}秒しか費やしていません。過去の結果から、復習にもっと時間をかけることで、{confidence}%の確率でより良く記憶できることが示唆されます。',
@@ -258,6 +262,7 @@ const localization = {
     statsIssueNotEnough: '「{motif}」を十分に信頼できていません。',
     statsIssueBadAt: '「{motif}」が苦手です。',
     statsIssueSuspected: '疑い：{sentence}',
+    statsIssueStrong: '「{motif}」が得意です。',
     statsCommunityHeader: 'コミュニティ · 直近 {days} 日間（更新 {ago}）',
     statsAgoJustNow: 'たった今',
     statsAgoMinutes: '{n} 分前',
@@ -355,7 +360,8 @@ const localization = {
     onbShare: '「共有」をタップすると、この問題をリンクや画像で誰かに送って挑戦してもらえます。',
     onbStats: '「メニュー」を開いて「統計」をタップすると、弱点や解答スピード、上達具合を確認できます。',
     onbAccount: '「メニュー」を開いて「アカウント」をタップ——進捗はコードとして保存され、他の端末で入力すれば同期できます。',
-    onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。'
+    onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。',
+    onbTrainingFocus: 'アプリはあなたの弱点に合わせて問題を出すようになりました。このリストは現在の強化ポイントで、これらのスキルの問題が多めに出題されます。詳しくはメニューの統計の弱点タブへ。'
   },
   ko: {
     kyu: '급',
@@ -383,6 +389,7 @@ const localization = {
     recallMode: '리콜 모드',
     reviewMode: '복습 모드',
     motifTitle: '요구되는 능력',
+    trainingFocusTitle: '강화 포인트',
     viewMode: '보기 모드',
     rushingMessage: '단 {seconds}초 만에 답변하셨습니다. 과거 결과에 따르면, 이렇게 서두르면 {confidence}%의 확률로 더 많은 실수로 이어질 수 있습니다.',
     insufficientReviewMessage: '반복된 실수입니다! 이 문제를 복습하는 데 {seconds}초만 사용하셨습니다. 과거 결과에 따르면, 복습에 더 많은 시간을 투자하면 {confidence}%의 확률로 더 잘 기억할 수 있습니다.',
@@ -435,6 +442,7 @@ const localization = {
     statsIssueNotEnough: '「{motif}」을(를) 충분히 신뢰하지 않습니다.',
     statsIssueBadAt: '「{motif}」이(가) 약합니다.',
     statsIssueSuspected: '의심: {sentence}',
+    statsIssueStrong: '「{motif}」이(가) 강점입니다.',
     statsCommunityHeader: '커뮤니티 · 최근 {days}일 (업데이트 {ago})',
     statsAgoJustNow: '방금 전',
     statsAgoMinutes: '{n}분 전',
@@ -532,7 +540,8 @@ const localization = {
     onbShare: '「공유」를 탭하면 이 문제를 링크나 이미지로 보내 다른 사람이 풀어보게 할 수 있습니다.',
     onbStats: '「메뉴」를 열고 「통계」를 탭하면 약점과 풀이 속도, 진척도를 확인할 수 있습니다.',
     onbAccount: '「메뉴」를 열고 「계정」을 탭하세요——진행 상황이 코드로 저장되어, 다른 기기에서 입력하면 동기화됩니다.',
-    onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.'
+    onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.',
+    onbTrainingFocus: '앱이 이제 약점에 맞춰 문제를 냅니다. 이 목록은 현재 강화 포인트로, 해당 기술의 문제가 더 자주 출제됩니다. 자세한 내용은 메뉴 통계의 약점 탭에서 확인하세요.'
   },
   en: {
     kyu: 'kyu',
@@ -561,6 +570,7 @@ const localization = {
     recallMode: 'Recall mode',
     reviewMode: 'Review mode',
     motifTitle: 'What this tests',
+    trainingFocusTitle: 'Training focus',
     viewMode: 'View mode',
     rushingMessage: 'You answered after only {seconds} seconds. Your past results suggest there is {confidence}% probability that rushing like this leads to more mistakes.',
     insufficientReviewMessage: 'Repeat mistake! You have spent only {seconds} seconds reviewing this problem. Your past results suggest there is a {confidence}% probability you will remember it better with more time spent reviewing.',
@@ -612,6 +622,7 @@ const localization = {
     onbStats: 'Open the menu and tap Stats for your weaknesses, solving speed and progress.',
     onbAccount: 'Open the menu and tap Account — your progress saves to a code you can enter on another device to sync.',
     onbBoardSize: 'Open the menu to switch between 9×9 and 13×13.',
+    onbTrainingFocus: 'The app now aims some problems at your weak points. This list is your current training focus: the skills you are being served extra problems for. Details are under Weaknesses in the menu\'s stats.',
 
     statsFailed: 'No stats available right now, try completing another problem.',
     statsConstructing: 'Loading your stats…',
@@ -642,6 +653,7 @@ const localization = {
     statsIssueNotEnough: "You don't trust «{motif}» enough.",
     statsIssueBadAt: 'You are weak at «{motif}».',
     statsIssueSuspected: 'We suspect: {sentence}',
+    statsIssueStrong: 'You are strong at «{motif}».',
     statsCommunityHeader: 'Community · last {days} days (updated {ago})',
     statsAgoJustNow: 'just now',
     statsAgoMinutes: '{n}m ago',

@@ -7,6 +7,7 @@
 // probit threshold live in stats-compute.js.
 
 import { state, setAcceptClicks } from './state.js';
+import { MOTIF_Z } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
@@ -48,13 +49,15 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // a one-sided posterior probability on a single identified quantity (a
     // 50% bar would flag half the axes under a flat posterior), unlike the old
     // 0.50 bar on four-way quadrant mass. The two bars are the 1-SD and 2-SD
-    // posterior gates (Φ(1) and Φ(2)): past the first the pane SUSPECTS the
-    // weakness (hedged phrasing), past the second it declares it. The tier is
+    // posterior gates: past the first the pane SUSPECTS the finding (hedged
+    // phrasing), past the second it declares it. The admission bar is the
+    // shared MOTIF_Z in probability form, so the pane, the serve gate and the
+    // problem-motif display move together (see constants.js). The tier is
     // cosmetic — phrasing only; admission, the budget below, and serving
     // (which gates on its own contrast statistic in weakness.js) all treat
     // every flagged axis the same.
-    const WEAK_PROB_THRESHOLD = 0.8413;
-    const DECLARED_PROB_THRESHOLD = 0.9772;
+    const WEAK_PROB_THRESHOLD = normCdf(MOTIF_Z);
+    const DECLARED_PROB_THRESHOLD = normCdf(2);
     // Multiplicity control: the expected number of spurious issues the pane is
     // willing to show a user, summed over the whole list (see the admission
     // loop below). Must stay >= 1 - WEAK_PROB_THRESHOLD, else even the
@@ -124,11 +127,16 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // Level 1: flag axes whose identified sum coefficient is credibly non-zero
     // in EITHER direction — the axes are BIPOLAR (residual skill axes,
     // 2026-07-18): a credibly NEGATIVE sum = weak at the positive-tail motif,
-    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. Either side
-    // surfaces only when that tail is named in labels.json — an unnamed tail
-    // has nothing actionable to say. The naming test sits HERE rather than at
-    // render time so an unshowable axis doesn't consume the error budget below
-    // and truncate the list ahead of an issue the user could have read.
+    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. The weakness
+    // tail's own name is preferred; when it is unnamed and the OPPOSITE tail is
+    // named — the usual case, the shipped components being one-sided — the same
+    // evidence is reported as a STRENGTH of the named motif instead of being
+    // dropped (the sum is read symmetrically by the linear model, so the two
+    // statements are the same finding worded from the describable end). An axis
+    // named on neither tail still says nothing. The naming test sits HERE
+    // rather than at render time so an unshowable axis doesn't consume the
+    // error budget below and truncate the list ahead of an issue the user
+    // could have read.
     const candidates = [];
     for (let k = 0; k < K; k++) {
         const mu_c = weaknessParams[2 + k];
@@ -149,13 +157,28 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         if (!Number.isFinite(centre)) continue;
         const sumRel = mu_c + mu_p - centre;
         const pWeakPos = normCdf(-sumRel / Math.sqrt(varSum));
+        // One rule, applied to whichever direction is credible: the weakness
+        // tail's own name is preferred, and when only the OPPOSITE tail is
+        // named — the usual case, all shipped components being one-sided — the
+        // same evidence is reported as a STRENGTH of that named motif instead
+        // of being dropped. The linear model reads the sum symmetrically, so
+        // "credibly better on positive-loading problems" is exactly a strength
+        // at the positive-tail motif; strengths compete for the same budget
+        // and carry the same suspected/declared tiers as weaknesses.
         if (pWeakPos >= WEAK_PROB_THRESHOLD) {
+            // Credibly WORSE on positive-loading problems.
             if (labelFor(k, 'positive')) {
                 candidates.push({ k, p: pWeakPos, side: 'positive' });
+            } else if (labelFor(k, 'negative')) {
+                candidates.push({ k, p: pWeakPos, side: 'negative', strength: true });
             }
-        } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD
-                   && labelFor(k, 'negative')) {
-            candidates.push({ k, p: 1 - pWeakPos, side: 'negative' });
+        } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD) {
+            // Credibly BETTER on positive-loading problems.
+            if (labelFor(k, 'negative')) {
+                candidates.push({ k, p: 1 - pWeakPos, side: 'negative' });
+            } else if (labelFor(k, 'positive')) {
+                candidates.push({ k, p: 1 - pWeakPos, side: 'positive', strength: true });
+            }
         }
     }
 
@@ -199,22 +222,30 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
     // pOver is P(picked loads HIGHER than correct on axis k) — overshoot
     // toward the POSITIVE tail. For a negative-side weakness the named motif
     // is the negative pole, so over/under invert.
-    const directions = computeAxisDirections(history, flagged.map(f => f.k));
-    const issues = flagged.map(({ k, p, side }) => {
+    const directions = computeAxisDirections(
+        history, flagged.filter(f => !f.strength).map(f => f.k));
+    const issues = flagged.map(({ k, p, side, strength }) => {
+        // Strengths get one plain sentence: the over/under direction phrasing
+        // qualifies a deficit, and mistake examples don't illustrate a
+        // strength, so level 2 doesn't run on them.
         let quadrant = 'badAt';
-        const dir = directions.get(k);
-        if (dir && dir.nPos + dir.nNeg >= MIN_DIRECTION_N) {
-            const pOver = side === 'negative' ? 1 - dir.pOver : dir.pOver;
-            if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
-            else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
+        if (!strength) {
+            const dir = directions.get(k);
+            if (dir && dir.nPos + dir.nNeg >= MIN_DIRECTION_N) {
+                const pOver = side === 'negative' ? 1 - dir.pOver : dir.pOver;
+                if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
+                else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
+            }
         }
-        const base = PHRASES[quadrant](labelFor(k, side));
+        const base = strength
+            ? getTerm('statsIssueStrong', { motif: labelFor(k, side) })
+            : PHRASES[quadrant](labelFor(k, side));
         // Below the declared bar the finding is real enough to act on (it
         // already cleared admission and the budget) but is phrased as a
         // suspicion rather than a statement.
         const sentence = p >= DECLARED_PROB_THRESHOLD
             ? base : getTerm('statsIssueSuspected', { sentence: base });
-        return { k, side, quadrant, p, sentence };
+        return { k, side, quadrant, p, sentence, strength: !!strength };
     });
     // Already strongest-first: the budget loop consumed `candidates` in that
     // order and preserved it.
@@ -254,13 +285,18 @@ function buildIssueRow(issue, recallSet, history = state.answerHistory) {
     text.className = 'stats-issue-text';
     text.textContent = issue.sentence;
 
+    head.append(prob, text);
+    row.appendChild(head);
+
+    // Strength rows carry no examples: the example finder surfaces past
+    // MISTAKES matching an issue, which is not what a strength is evidence of.
+    if (issue.strength) return row;
+
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'stats-issue-examples-toggle';
     toggle.textContent = getTerm('statsExamples');
-
-    head.append(prob, text, toggle);
-    row.appendChild(head);
+    head.appendChild(toggle);
 
     const list = document.createElement('div');
     list.className = 'stats-issue-examples-list';

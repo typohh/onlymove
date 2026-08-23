@@ -30,7 +30,7 @@
 
 import * as Sentry from "@sentry/browser";
 import { state, getMergedAnswerHistory, clearWeaknessModel } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, MOTIF_Z } from './constants.js';
 import { sigmoid } from './math-utils.js';
 import { newtonBlockStep } from './optimizer.js';
 // Baked into the bundle at build time; population-constants.js is the validated
@@ -352,13 +352,14 @@ export async function trainWeakness() {
 // would hide a defect, while a shared contrast is measured geometry and centring
 // it removes a known nuisance.
 //
-// The posterior z-score gate for a motif to become a SERVE CATEGORY. This is the
-// serving gate, deliberately looser than anything the stats pane would print: a
+// The posterior z-score gate for a motif to become a SERVE CATEGORY — the
+// shared MOTIF_Z, so the serve gate, the training-focus list, the stats pane's
+// admission bar and the problem-motif display move together (see constants.js).
+// The stats pane still keeps its own budget and tiering on top; a
 // false-positive serve is cheap and self-correcting (the extra serves on that
 // axis are exactly what sharpens its posterior), while a false-positive REPORT
-// costs trust — reporting keeps its own budgeted thresholds in
-// stats-weaknesses.js and the two must not be unified.
-const WEAKNESS_SERVE_Z = 1;
+// costs trust.
+const WEAKNESS_SERVE_Z = MOTIF_Z;
 
 // The flagged serve categories: one {k, sign} per (axis, NAMED tail) whose
 // centred-contrast posterior puts this user's deficit in that tail's direction
@@ -401,12 +402,15 @@ export function weaknessServeCategories() {
         const varContrast = varC + varP - 2 * axisCov[k];
         if (!Number.isFinite(betaEff) || !(varContrast > 0)) continue;
         const seContrast = Math.sqrt(varContrast);
-        // Deficit along +emb[k] ⇔ weaknessScore positive there ⇔ betaEff < 0.
-        if (comp.positive && -betaEff / seContrast > WEAKNESS_SERVE_Z) {
-            categories.push({ k, sign: 1 });
+        // Deficit along +emb[k] ⇔ a positive contrast score there ⇔ betaEff < 0.
+        // z rides along for display ordering (training-focus list, strongest
+        // first); selection itself reads only {k, sign}.
+        const zPos = -betaEff / seContrast;
+        if (comp.positive && zPos > WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: 1, z: zPos });
         }
-        if (comp.negative && betaEff / seContrast > WEAKNESS_SERVE_Z) {
-            categories.push({ k, sign: -1 });
+        if (comp.negative && -zPos > WEAKNESS_SERVE_Z) {
+            categories.push({ k, sign: -1, z: -zPos });
         }
     }
     return categories;

@@ -38,3 +38,15 @@ export const RECALL_CANDIDATE_HISTORY_LENGTH = 3000;
 // the *merged* history (the recall/weakness models warm over the last 3000),
 // so the working set is a superset of every synchronous read.
 export const ANSWER_HISTORY_WORKING_SET = 3000;
+
+// The shared one-standard-deviation motif gate, deliberately ONE constant for
+// three readings that must not drift apart: a problem's motif is DISPLAYED when
+// its loading clears this many corpus standard deviations (motif-bubble.js); a
+// user's weakness becomes a SERVE CATEGORY and a training-focus entry when its
+// centred-contrast posterior clears this many posterior standard errors
+// (weakness.js); and the stats pane ADMITS a finding past the same bar in
+// probability form, normCdf(MOTIF_Z) (stats-weaknesses.js). The three are
+// z-scores of different statistics (corpus salience vs posterior confidence),
+// so this lock is a deliberate coupling: retuning the gate for one reading
+// retunes all of them.
+export const MOTIF_Z = 1.0;

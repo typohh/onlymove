@@ -1,13 +1,21 @@
 // js/motif-bubble.js
 //
-// Review-mode "why this move" bubble. Reads the reviewed problem's correct-move
-// embedding (the K-dim, skew-ICA-oriented vector shipped per problem in
-// metadata.json) and surfaces its strongest motifs as human-readable reasons.
+// The motif bubble, with one content per mode. In review mode it is the "why
+// this move" bubble: it reads the reviewed problem's correct-move embedding
+// (the K-dim vector shipped per problem in metadata.json) and surfaces its
+// strongest motifs as human-readable reasons. In solving mode it is the
+// TRAINING FOCUS list: the user's flagged weaknesses — the same serve
+// categories selection draws from (weaknessServeCategories) — so it announces
+// what the served problems are being aimed at. Deliberately the STATIC flagged
+// list, never which category the current problem was drawn from: the list is
+// near-constant across a session and so leaks no per-problem hint, while the
+// drawn category would be one.
 //
-// Under skew-ICA the positive tail is "motif present" and scores are
-// unit-variance, so a component score is effectively a z-score: we include a
-// motif only above MIN_Z and show at most MAX_MOTIFS, highest first. Labels are
-// localized via the shared i18n resolver, falling back to English.
+// The axes are z-scored per axis over the corpus, so a component score is a
+// z-score: a problem motif is included only above the shared MOTIF_Z gate
+// (constants.js — the same constant gating serving and the stats pane), at
+// most MAX_MOTIFS, highest first. Labels are localized via the shared i18n
+// resolver, falling back to English.
 //
 // Layout (see style.css): in landscape the bubble is a plain in-flow block in
 // the controls column, below the buttons, always fully visible. In portrait it
@@ -17,15 +25,20 @@
 
 import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
-import { APP_MODES } from './constants.js';
+import { APP_MODES, MOTIF_Z } from './constants.js';
 import { appMetrics, layoutMode } from './viewport.js';
+import { weaknessServeCategories } from './weakness.js';
+import { onTrainingFocusShown } from './onboarding.js';
 
-const MIN_Z = 1.0;        // include a motif only if its component score >= 1 std
+const MIN_Z = MOTIF_Z;    // include a problem motif only past the shared gate
 const MAX_MOTIFS = 3;
 
-// Recomputed per problem in populateMotifBubble(); gates visibility in
-// syncMotifBubble() so we never show an empty bubble.
-let _hasMotifs = false;
+// Review-mode content, recomputed per problem in populateMotifBubble(). The
+// solving-mode training-focus content is derived fresh in syncMotifBubble()
+// (it depends on the weakness posterior, not on the shown problem). A cache
+// key of the last-rendered content keeps the per-repaint rebuild cheap.
+let _problemMotifs = [];
+let _renderedKey = null;
 
 const el = (id) => document.getElementById(id);
 
@@ -87,24 +100,68 @@ function topMotifs(embedding) {
 }
 
 /**
- * Fill the bubble from a problem (a history entry carrying `.embedding`) and
- * reset it to the parked position. Records whether there's anything to show;
- * actual visibility is decided by syncMotifBubble().
+ * The user's training focus: localized labels of the flagged serve categories
+ * (weaknessServeCategories — named tails whose centred-contrast posterior
+ * clears the shared gate), strongest first, same MAX_MOTIFS cap as the
+ * problem list. Empty whenever nothing is flagged or the model is absent,
+ * which is what keeps the bubble silent rather than showing a "none found".
+ */
+function trainingFocusMotifs() {
+    const labels = state.embeddingLabels;
+    if (!labels) return [];
+    const scored = [];
+    for (const { k, sign, z } of weaknessServeCategories()) {
+        const text = localizedMotif(labels[String(k)], sign > 0 ? 'positive' : 'negative');
+        if (text) scored.push({ z, text });
+    }
+    scored.sort((a, b) => b.z - a.z);
+    return scored.slice(0, MAX_MOTIFS).map((m) => m.text);
+}
+
+/**
+ * Fill the review-mode content from a problem (a history entry carrying
+ * `.embedding`) and reset the bubble to the parked position. Actual visibility
+ * and rendering are decided by syncMotifBubble().
  */
 export function populateMotifBubble(problem) {
     const bubble = el('motif-bubble');
+    if (!bubble) return;
+    _problemMotifs = topMotifs(problem && problem.embedding);
+    bubble.classList.remove('over-board');   // always (re)appear parked
+    syncMotifBubble();
+}
+
+/**
+ * Derive content and visibility from current state; safe to call on every UI
+ * refresh. Review mode shows the reviewed problem's motifs, and only at the
+ * root position (no motifs exist for deeper nodes). Solving mode shows the
+ * training-focus list. Linked play and empty lists show nothing — there is
+ * deliberately no empty-state text.
+ */
+export function syncMotifBubble() {
+    const bubble = el('motif-bubble');
     const content = el('motif-bubble-content');
     if (!bubble || !content) return;
+    const atRoot = !!state.kifuReader && state.kifuReader.node === state.initialAnalysisNode;
 
-    const motifs = topMotifs(problem && problem.embedding);
-    _hasMotifs = motifs.length > 0;
+    let motifs = [];
+    let titleKey = null;
+    if (state.appMode === APP_MODES.ANALYZING && atRoot) {
+        motifs = _problemMotifs;
+        titleKey = 'motifTitle';
+    } else if (state.appMode === APP_MODES.SOLVING) {
+        motifs = trainingFocusMotifs();
+        titleKey = 'trainingFocusTitle';
+    }
+    const show = motifs.length > 0;
 
-    // The title lives in the tab bar; set it here so it follows the language.
-    const tabLabel = el('motif-bubble-tab-label');
-    if (tabLabel) tabLabel.textContent = getTerm('motifTitle');
-
-    content.textContent = '';
-    if (_hasMotifs) {
+    // Rebuild the DOM only when the content actually changed — this runs on
+    // every repaint.
+    const key = show ? `${titleKey}|${motifs.join('|')}` : null;
+    if (show && key !== _renderedKey) {
+        const tabLabel = el('motif-bubble-tab-label');
+        if (tabLabel) tabLabel.textContent = getTerm(titleKey);
+        content.textContent = '';
         const ul = document.createElement('ul');
         ul.className = 'motif-bubble-list';
         for (const m of motifs) {
@@ -113,29 +170,18 @@ export function populateMotifBubble(problem) {
             ul.appendChild(li);
         }
         content.appendChild(ul);
+        _renderedKey = key;
     }
 
-    bubble.classList.remove('over-board');   // always (re)appear parked
-    syncMotifBubble();
-}
-
-/**
- * Show the bubble only while reviewing the problem's first move (the initial
- * analysis node); hide it everywhere else — in solving/linked play, or once a
- * variation is entered, since we have no motifs for deeper positions. Safe to
- * call on every UI refresh; visibility is derived purely from current state.
- */
-export function syncMotifBubble() {
-    const bubble = el('motif-bubble');
-    if (!bubble) return;
-    const atRoot = !!state.kifuReader && state.kifuReader.node === state.initialAnalysisNode;
-    const show = state.appMode === APP_MODES.ANALYZING && _hasMotifs && atRoot;
     bubble.classList.toggle('motif-bubble-hidden', !show);
     bubble.setAttribute('aria-hidden', show ? 'false' : 'true');
     if (!show) {
         bubble.classList.remove('over-board');
     } else {
         refreshMotifBubbleMetrics();   // (re)anchor below the buttons in portrait
+        // First-appearance announcement for the training-focus list; the hook
+        // is once-ever and self-gating, so calling it per repaint is fine.
+        if (titleKey === 'trainingFocusTitle') onTrainingFocusShown();
     }
 }
 

@@ -68,6 +68,7 @@ const markShown = (id) => lsSet(SHOWN_PREFIX + id, '1');
 // --- runtime state ----------------------------------------------------------
 
 let _ready = false;              // init() has run
+let _featureReady = false;       // init() has run; set even for suppressed users
 let _suppressed = true;          // until init() decides otherwise
 let _sessionCount = 1;
 let _shownThisSession = 0;
@@ -123,12 +124,16 @@ const anchors = {
     // menu-item bubbles point here and tell the user to open it, rather than
     // firing only once the menu is already open.
     menu: () => firstVisible(['menu-toggle-h', 'menu-toggle']),
+    motifBubble: () => el('motif-bubble'),
 };
 
 const isVisible = (node) => {
     if (!node) return false;
     const r = node.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && node.offsetParent !== null;
+    if (!(r.width > 0 && r.height > 0)) return false;
+    // offsetParent is null for position:fixed even while rendered (the motif
+    // bubble in portrait); display:none is already caught by the zero rect.
+    return node.offsetParent !== null || getComputedStyle(node).position === 'fixed';
 };
 
 // --- bubble catalogue --------------------------------------------------------
@@ -234,6 +239,18 @@ const BUBBLES = {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbBoardSize',
         eligible: () => (_sessionCount >= 2 || historyLen() >= 12) && isVisible(anchors.menu()),
     },
+    // A NEW-FEATURE announcement rather than a first-run tip: fires the first
+    // time the training-focus list (motif-bubble.js, solving mode) paints. The
+    // list appears only for a converged user with a trained weakness model —
+    // i.e. mostly EXISTING users — so this is the one bubble exempt from the
+    // existing-user suppression (bypassSuppression, honored in scheduleShow and
+    // entered via its own hook below). Once-ever, spacing, session cap and
+    // backoff all still apply.
+    trainingFocus: {
+        kind: 'trigger', anchor: 'motifBubble', placement: 'above', text: 'onbTrainingFocus',
+        bypassSuppression: true,
+        eligible: () => state.appMode === APP_MODES.SOLVING && isVisible(anchors.motifBubble()),
+    },
 };
 
 // --- gating ------------------------------------------------------------------
@@ -322,8 +339,12 @@ function scheduleShow(id, def) {
     let tries = 0;
     const attempt = () => {
         _pendingTimer = 0;
-        // Re-verify: the world may have moved on during the delay.
-        if (!_ready || _suppressed || _backedOff) { _pending = false; return; }
+        // Re-verify: the world may have moved on during the delay. Feature
+        // announcements (bypassSuppression) need init to have run but ignore
+        // the existing-user suppression.
+        const blocked = _backedOff ||
+            (def.bypassSuppression ? !_featureReady : (!_ready || _suppressed));
+        if (blocked) { _pending = false; return; }
         if (document.hidden || overlayBlocking() || !isVisible(anchors.board())) {
             if (tries++ < 30) { _pendingTimer = setTimeout(attempt, 300); return; }
             _pending = false; return;   // gave up waiting for a clear board
@@ -443,8 +464,10 @@ export function initOnboarding() {
     _sessionCount = lsNum(K_SESSION_COUNT) || 1;
     _suppressed = !!lsGet(K_SUPPRESSED);
     markActive();
+    // Feature-announcement bubbles (bypassSuppression) run for everyone.
+    _featureReady = true;
 
-    if (_suppressed) return;   // existing user — stay silent forever
+    if (_suppressed) return;   // existing user — no first-run bubbles, ever
     _ready = true;
 
     // Keep the push-subscription snapshot fresh for the notify gate.
@@ -480,6 +503,21 @@ export function onReviewScoreShown() {
 
 export function onScoreUnreliable() {
     tryShow(['reviewScoreUnreliable']);
+}
+
+// The training-focus list just painted (motif-bubble.js calls this on every
+// repaint that shows it). Feature announcement, so it bypasses the
+// existing-user suppression — the list is new to existing users too, and they
+// are exactly the users converged enough to have one — but keeps every other
+// gate: once-ever, anti-stacking, session cap, backoff.
+export function onTrainingFocusShown() {
+    if (!_featureReady || _backedOff || _pending) return;
+    if (document.hidden) return;
+    if (wasShown('trainingFocus')) return;
+    const def = BUBBLES.trainingFocus;
+    try { if (!def.eligible({})) return; } catch { return; }
+    if (!spacingOk(def.kind)) return;
+    scheduleShow('trainingFocus', def);
 }
 
 export function onResume() {
