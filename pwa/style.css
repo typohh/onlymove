@@ -588,7 +588,6 @@ body {
 
 .motif-bubble-tab-label {
     font-weight: bold;
-    text-transform: uppercase;
 }
 
 .motif-bubble-tab::before,
