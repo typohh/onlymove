@@ -302,23 +302,21 @@ const shared = {
     serveRank: readJSON('serveRank', null),
     displayRank: readJSON('displayRank', null),
     // Posterior SE of the window rank estimate (rank-index units), stored with
-    // each re-fit. Selection's two-regime switch reads it: information regime
-    // while se >= 2x the local floor, personalization (weakness) after.
+    // each re-fit. Selection reads it to decide ONE thing: whether the INFORMATION
+    // slot (slope prioritization) is in the serve draw, which it is while
+    // se >= 2x the local floor. The motif and neutral slots don't consult it.
     rankSe: readJSON('rankSe', null),
     modelParams: readJSON('modelParams', null),
-    // adamState / weaknessAdam are LEGACY blobs: neither fitter carries optimizer
-    // state across retrains any more (both converge from a cold start, so there is
-    // nothing to warm). The slots stay only so the clear/wipe paths keep removing
-    // what older versions persisted; nothing writes them.
+    // All five are LEGACY blobs; nothing writes them. The recall fitter no longer
+    // carries optimizer state across retrains (it converges from a cold start),
+    // and the weakness model they belonged to is gone entirely — the motif
+    // readings are now a pure function of the answer history, derived on demand
+    // by motif-stats.js with no trained parameters to persist. The slots stay
+    // only so the clear/wipe paths keep removing what older versions stored.
     adamState: readJSON('adamState', null),
     weaknessParams: readJSON('weaknessParams', null),
     weaknessAdam: readJSON('weaknessAdam', null),
     weaknessSe: readJSON('weaknessSe', null),
-    // Per-axis cov(β_correct[k], β_picked[k]) for the augmented model.
-    // Flat array of K floats. Combined with weaknessSe (for the diagonals)
-    // and weaknessParams, this is the minimum state needed to compute the
-    // posterior of the identified sum β_correct[k] + β_picked[k] per axis
-    // (the Weaknesses pane's level-1 detection) without retraining.
     weaknessAxisCov: readJSON('weaknessAxisCov', null),
 };
 
@@ -859,16 +857,6 @@ export function setStatsResults(results) {
 
 export function setModelParams(params) {
     state.modelParams = params;
-}
-
-// Drop the shared weakness model entirely (params + posterior SE/cov, plus the
-// legacy Adam blob). Used by the trainer on a non-finite blow-up and by the
-// embedding backfill when an embedding refit invalidates the trained axes.
-export function clearWeaknessModel() {
-    state.weaknessParams = null;
-    state.weaknessAdam = null;
-    state.weaknessSe = null;
-    state.weaknessAxisCov = null;
 }
 
 // Switch to another supported size. Resets the in-memory problem pool so the

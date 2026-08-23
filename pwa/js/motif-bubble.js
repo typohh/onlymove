@@ -27,7 +27,7 @@ import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { APP_MODES, MOTIF_Z } from './constants.js';
 import { appMetrics, layoutMode } from './viewport.js';
-import { weaknessServeCategories } from './weakness.js';
+import { flaggedMotifCategories } from './weakness.js';
 import { onTrainingFocusShown } from './onboarding.js';
 
 const MIN_Z = MOTIF_Z;    // include a problem motif only past the shared gate
@@ -101,8 +101,9 @@ function topMotifs(embedding) {
 
 /**
  * The user's training focus: localized labels of the flagged serve categories
- * (weaknessServeCategories — named tails whose centred-contrast posterior
- * clears the shared gate), strongest first, same MAX_MOTIFS cap as the
+ * (flaggedMotifCategories — named tails whose own-attempt reading clears the
+ * shared confidence gate, selection-excluded motifs included), minus the
+ * `strong` direction, strongest first, same MAX_MOTIFS cap as the
  * problem list. Empty whenever nothing is flagged or the model is absent,
  * which is what keeps the bubble silent rather than showing a "none found".
  */
@@ -110,14 +111,25 @@ function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
     if (!labels) return [];
     const scored = [];
-    for (const { k, tail, overplay, z } of weaknessServeCategories()) {
+    for (const { k, tail, kind, z } of flaggedMotifCategories()) {
+        // `strong` is a serve direction, not a training direction: it tells
+        // selection to spend LESS time on a motif the user already handles,
+        // which does not belong under a heading about what to work on.
+        if (kind === 'strong') continue;
         // `tail` is the NAMED tail describing the category, which for an
         // overplay is the opposite of its serve direction — an overplay of a
         // one-sided motif serves anti-motif problems but is described through
         // the motif's own name, with a "too much" qualifier.
         const name = localizedMotif(labels[String(k)], tail);
         if (!name) continue;
-        scored.push({ z, text: overplay ? getTerm('trainingFocusTooMuch', { motif: name }) : name });
+        // Each kind needs its own wording. A bare name reads as "weak at this",
+        // so a tendency finding must not use one — an underplay shown bare beside
+        // a POSITIVE strength reading in the stats table looks like a
+        // contradiction rather than two different statements about the motif.
+        const text = kind === 'overplay' ? getTerm('trainingFocusTooMuch', { motif: name })
+                   : kind === 'underplay' ? getTerm('trainingFocusTooLittle', { motif: name })
+                   : name;
+        scored.push({ z, text });
     }
     scored.sort((a, b) => b.z - a.z);
     return scored.slice(0, MAX_MOTIFS).map((m) => m.text);

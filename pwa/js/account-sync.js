@@ -58,7 +58,6 @@ import {
 } from './state.js';
 import { HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { calculateAndStoreStatsResults } from './recall-model.js';
-import { trainWeakness } from './weakness.js';
 import { reanchorRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
@@ -578,7 +577,6 @@ async function checkInSync(serverSeq, serverDigest) {
 //     predating it.
 function retrainAfterMerge(insertedEntries, mode) {
     try { calculateAndStoreStatsResults(); } catch (e) { console.warn('account-sync: recall retrain failed:', e); }
-    try { trainWeakness(); } catch (e) { console.warn('account-sync: weakness retrain failed:', e); }
     try {
         // Same call for both modes, because the estimate is a pure function of the
         // merged history: there is no warm start to seed differently and no loop

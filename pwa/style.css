@@ -1180,6 +1180,159 @@ body {
     opacity: 0.7;
 }
 
+/* --- Motif table (Weaknesses pane) ---------------------------------------
+   One row per shipped motif, always all of them. Each row carries two metric
+   cells: PERFORMANCE (weak <-> strong, in ranks) and TENDENCY (underplay <->
+   overplay, as a population percentile). Every cell is a track whose centre is
+   the population average, with the credible interval as a band and the point
+   estimate as a dot.
+
+   Colour is driven by --wk-weight, set per cell in JS from the posterior
+   z-score: 0 below the MOTIF_Z gate, 1 one SE past it. A row the model has not
+   resolved therefore renders in the body text colour with a band spanning most
+   of the track, so "we don't know" is visible without a sentence saying it.
+   The two columns use DIFFERENT palettes on purpose — performance is valenced
+   (weak is bad, strong is good) while tendency is not (both ends are training
+   directions), so tendency must not reuse the red/green pair. */
+.wk-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55em;
+    margin: 0.5em 0 0.6em;
+    padding-left: 1.5ch;
+}
+
+.wk-row {
+    display: grid;
+    grid-template-columns: minmax(7ch, 12ch) 1fr;
+    align-items: start;
+    column-gap: 1ch;
+    row-gap: 0.2em;
+}
+
+.wk-name {
+    overflow-wrap: anywhere;
+}
+
+.wk-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4em 1.2ch;
+    min-width: 0;
+}
+
+.wk-head {
+    opacity: 0.7;
+}
+
+/* Three columns so the arrow lands dead centre over the track regardless of how
+   wide the two pole labels are; `space-between` would only centre it when they
+   happen to match. */
+.wk-col-head {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: baseline;
+    gap: 0.5ch;
+    font-size: 0.85em;
+    line-height: 1.2;
+}
+
+.wk-col-head > span:last-child {
+    text-align: right;
+}
+
+.wk-metric {
+    min-width: 0;
+    /* Neutral until the posterior earns colour; the two tones below override. */
+    --wk-tone: currentColor;
+    --wk-weight: 0;
+}
+
+.wk-metric[data-tone="weak"]   { --wk-tone: #d9534f; }
+.wk-metric[data-tone="strong"] { --wk-tone: #46a06e; }
+.wk-metric[data-tone="under"]  { --wk-tone: #5b8fd6; }
+.wk-metric[data-tone="over"]   { --wk-tone: #d9903f; }
+
+.wk-track {
+    position: relative;
+    height: 0.75em;
+    border-radius: 0.4em;
+    background: rgba(128, 128, 128, 0.22);
+    overflow: hidden;
+}
+
+.wk-ci {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    /* The band fades to NEUTRAL GREY at weight 0, rather than to a faint tint of
+       its own tone: below the gate the pane makes no directional claim, and a
+       washed-out red still reads as one. The flat fallback covers a renderer
+       without color-mix. */
+    background: rgba(128, 128, 128, 0.5);
+    background: color-mix(in srgb, var(--wk-tone) calc(var(--wk-weight) * 100%), #808080);
+    opacity: 0.62;
+}
+
+.wk-mid {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    margin-left: -0.5px;
+    background: currentColor;
+    opacity: 0.55;
+}
+
+.wk-dot {
+    position: absolute;
+    top: 50%;
+    width: 0.5em;
+    height: 0.5em;
+    margin: -0.25em 0 0 -0.25em;
+    border-radius: 50%;
+    background: #808080;
+    background: color-mix(in srgb, var(--wk-tone) calc(var(--wk-weight) * 100%), #808080);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.wk-value {
+    margin-top: 0.15em;
+    line-height: 1.15;
+}
+
+.wk-ci-text {
+    opacity: 0.6;
+    font-size: 0.85em;
+    line-height: 1.2;
+}
+
+.wk-examples-toggle {
+    grid-column: 2;
+    justify-self: start;
+}
+
+.wk-examples-list {
+    grid-column: 2;
+    margin-left: 0;
+}
+
+/* Narrow modal: the two metric cells stack under a full-width motif name
+   rather than squeezing both tracks into half a cramped column. */
+@media (max-width: 30em) {
+    .wk-row {
+        grid-template-columns: 1fr;
+    }
+    .wk-metrics {
+        grid-template-columns: 1fr;
+    }
+    .wk-examples-toggle,
+    .wk-examples-list {
+        grid-column: 1;
+    }
+}
+
 @media (prefers-color-scheme: light) {
     .stats-modal-card {
         background-color: #f0f0f0;

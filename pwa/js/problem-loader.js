@@ -15,15 +15,9 @@ import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposit
 import { DATA_VERSION } from './data-version.js';
 import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
 
-// false disables the personalization regime outright, so selection stays on the
-// information criterion at every rank precision. The weakness model itself is
-// untouched — it still trains and the stats panel still reads it; only the serve
-// tilt is off.
-const WEAKNESS_TILT_ENABLED = true;
-
 // The best candidate by `scoreFn`, ties going to the earliest — which, because the
 // pool arrives sorted by distance from the serve rank, means the closest-to-rank of
-// equally good problems. Both selection regimes take the MAXIMUM rather than sampling
+// equally good problems. Every serve slot takes the MAXIMUM of its own criterion rather than sampling
 // in proportion to it: a proportional draw over 50 difficulty-matched candidates
 // barely departs from uniform (the weights span a narrow range, so the effective pool
 // stays near its full size), which spends the whole candidate set to move the served
@@ -130,73 +124,99 @@ function selectChallengeCandidate({ anchorToLoaded = false } = {}) {
     // user's rank — whatever put us in that mode has resolved.
     if (!anchorToLoaded) exitOffRankServing();
 
-    // TWO REGIMES. While the rank estimate is still converging, serve for
-    // INFORMATION: quality = the 4PL Fisher information at the 80%-clear anchor,
-    // slope²·anchorInfo(floor) — the pool is difficulty-matched so the anchor is
-    // the right common reference, but the floor factor varies across it. Once
-    // converged (rankConverged: se < 2× the local floor) the information criterion
-    // has done its job — extra rank information is worth less than personalization,
-    // and a user parked in a band depletes its sharp problems and converges to the
-    // band average regardless — so it does NOT persist as a criterion. Instead,
-    // serve CATEGORICALLY: one category per flagged weakness
-    // (weaknessServeCategories — a named axis tail whose centred-contrast posterior
-    // clears the serve gate; it returns [] unless the trained model AND its
-    // posterior are present and shaped for the current K, so it is the readiness
-    // gate too). Each serve decision picks ONE category uniformly and argmaxes its
-    // criterion alone over the pool. A lone flagged motif gets a NEUTRAL
-    // no-criterion slot beside it, so no motif ever takes more than half the
-    // serves; two or more flagged motifs already cap each other at half or less.
-    // The cap is the identification mixture that keeps "weak at the motif"
-    // separable from "generally weak" — a motif loading near-constant across the
-    // served history is collinear with the intercept, the fit shrinks the axis
-    // coefficient back to the prior, and the deficit launders into the rank
-    // estimate instead — so exclusive serving would yield LESS information about
-    // the weakness, not more. The neutral serve is the pool's nearest-to-rank
-    // candidate (the pool arrives sorted by closeness to the serve rank, so "no
-    // criterion" means its head), and it is also what a converged user with
-    // nothing flagged gets; pool turnover keeps it varied.
+    // ONE CATEGORICAL DRAW over a slot list, each slot carrying ONE criterion.
+    // Each serve decision picks a slot uniformly and argmaxes that slot's
+    // criterion alone over the pool. The slots are:
+    //
+    //   - one per FLAGGED WEAKNESS (weaknessServeCategories — a named axis tail
+    //     whose centred-contrast posterior clears the serve gate; it returns []
+    //     unless the trained model AND its posterior are present and shaped for
+    //     the current K, so it is the readiness gate too), argmaxing that tail's
+    //     loadings HINGED at zero in the category's serve direction;
+    //   - the INFORMATION slot, present only while the rank estimate is still
+    //     converging (see below);
+    //   - the NEUTRAL slot, present ALWAYS: no criterion at all, which resolves to
+    //     the pool's nearest-to-rank candidate (the pool arrives sorted by
+    //     closeness to the serve rank, so "no criterion" means its head).
+    //
+    // So n flagged motifs take 1/(n+1) of serves each once converged and 1/(n+2)
+    // before, no motif ever exceeds half, and some share of every user's serves is
+    // drawn under no criterion at all. That last part is the identification
+    // mixture, which keeps "weak at the motif" separable from "generally weak": a
+    // motif loading near-constant across the served history is collinear with the
+    // intercept, the fit shrinks the axis coefficient back to the prior, and the
+    // deficit launders into the rank estimate instead — so exclusive serving would
+    // yield LESS information about the weakness, not more. Being uncriterioned the
+    // neutral slot also draws motifs at the pool's OWN rate rather than from a
+    // tail, which is what bounds how far a motif's corpus abundance at the user's
+    // rank can carry into a served history.
+    //
+    // The neutral slot is UNCONDITIONAL rather than a lone-motif special case,
+    // because leaving two or more motifs to cap EACH OTHER assumes they select
+    // different problems, and flagged motifs need not: the rules are not chosen
+    // for orthogonality and their tails overlap in the corpus, so two correlated
+    // flags can both argmax into the same corner and leave the mixture with no
+    // un-criterioned component at all. Unconditional makes the mixture a property
+    // of the draw rather than of which motifs happen to be flagged.
+    //
+    // RANK CONVERGENCE DECIDES WHETHER THE INFORMATION SLOT IS IN THE DRAW, AND
+    // NOTHING ELSE. Its criterion is SLOPE PRIORITIZATION: quality = the 4PL
+    // Fisher information at the 80%-clear anchor, slope²·anchorInfo(floor) — the
+    // pool is difficulty-matched so the anchor is the right common reference, but
+    // the floor factor varies across it. Once converged (rankConverged: se < 2×
+    // the local floor) it has done its job — extra rank information is worth less
+    // than what the other slots serve, and a user parked in a band depletes its
+    // sharp problems and converges to the band average regardless — so the slot
+    // leaves the draw entirely.
+    //
+    // The MOTIF slots are NOT gated on convergence: a flag is a property of the
+    // weakness posterior, identified from the user's own picked-vs-correct
+    // contrast independently of how tight the rank posterior is, so withholding
+    // personalization until the rank converges would withhold it from exactly the
+    // users whose rank is still moving — while the training-focus list
+    // (motif-bubble.js reads the same weaknessServeCategories) already names those
+    // motifs as what the served problems are aimed at.
     //
     // Uniform one-at-a-time is deliberate: within a difficulty-matched pool the
     // criteria are near-orthogonal (measured — the argmax winners under different
     // criteria almost never coincide, and one criterion's winner is no better than
     // a random pool draw on any other), so a blended score has no joint value to
-    // harvest and picking one criterion forfeits nothing. The motif criterion is
-    // HINGED at zero in the category's serve direction: a DEFICIT category
-    // argmaxes the named tail's loadings, an OVERPLAY category (weakness.js —
-    // contrast credibly positive, strength vetoed on the sum) argmaxes the
-    // opposite direction, problems whose answer is NOT the motif, where the
-    // motif is stochastically tempting and wrong. A pool with nothing past the
-    // hinge on the drawn direction scores everyone 0 and selectBest degrades
-    // to the closest-to-rank problem — the same neutral serve.
+    // harvest and picking one criterion forfeits nothing. On the motif criterion a
+    // DEFICIT category argmaxes the named tail's loadings and an OVERPLAY category
+    // (weakness.js — contrast credibly positive, strength vetoed on the sum)
+    // argmaxes the opposite direction, problems whose answer is NOT the motif,
+    // where the motif is stochastically tempting and wrong. A pool with nothing
+    // past the hinge on the drawn direction scores everyone 0 and selectBest
+    // degrades to the closest-to-rank problem.
     //
-    // The category pick is DETERMINISTIC — hashed, not Math.random() — for the
-    // same reason as the recall gate: refreshShownProblemAfterSync re-derives serve
+    // The slot pick is DETERMINISTIC — hashed, not Math.random() — for the same
+    // reason as the recall gate: refreshShownProblemAfterSync re-derives serve
     // decisions on tab-visible resume, and an independent re-roll there would let
-    // an idle tab drift the category mix. Every recorded attempt moves lastDate,
-    // so consecutive serve decisions still draw independently.
+    // an idle tab drift the criterion mix. Every recorded attempt moves lastDate,
+    // so consecutive serve decisions still draw independently. The slot list goes
+    // into the seed, so the mix re-rolls when the slots themselves change.
     //
     // Boundary flapping between consecutive picks is harmless, all criteria being
     // applied to the same pool.
-    if (WEAKNESS_TILT_ENABLED && rankConverged()) {
-        const categories = weaknessServeCategories();
-        if (categories.length > 0) {
-            const merged = getMergedAnswerHistory();
-            const lastDate = (merged.length && merged[merged.length - 1].date) || 0;
-            const signature = categories.map(c => `${c.k}${c.sign > 0 ? '+' : '-'}`).join(',');
-            const draw = hashToUnit(`weakness-category|${lastDate}|${signature}`);
-            // At least two slots: a lone motif shares with the neutral slot.
-            const slots = Math.max(categories.length, 2);
-            const pick = Math.min(Math.floor(draw * slots), slots - 1);
-            if (pick < categories.length) {
-                const { k, sign } = categories[pick];
-                return selectBest(candidateProblems, p =>
-                    (p.embedding && p.embedding.length > k)
-                        ? Math.max(sign * p.embedding[k], 0) : 0);
-            }
-        }
-        return candidateProblems[0];
+    const categories = weaknessServeCategories();
+    const withInfo = !rankConverged();          // slope prioritization in the draw
+    const slots = categories.length + (withInfo ? 1 : 0) + 1;
+    const merged = getMergedAnswerHistory();
+    const lastDate = (merged.length && merged[merged.length - 1].date) || 0;
+    const signature = categories.map(c => `${c.k}${c.sign > 0 ? '+' : '-'}`).join(',')
+        + (withInfo ? ',i' : '');
+    const draw = hashToUnit(`weakness-category|${lastDate}|${signature}`);
+    const pick = Math.min(Math.floor(draw * slots), slots - 1);
+    if (pick < categories.length) {
+        const { k, sign } = categories[pick];
+        return selectBest(candidateProblems, p =>
+            (p.embedding && p.embedding.length > k)
+                ? Math.max(sign * p.embedding[k], 0) : 0);
     }
-    return selectBest(candidateProblems, p => Math.max(0, p.quality || 0));
+    if (withInfo && pick === categories.length) {
+        return selectBest(candidateProblems, p => Math.max(0, p.quality || 0));
+    }
+    return candidateProblems[0];   // NEUTRAL: the pool's nearest-to-rank head
 }
 
 // Turns a raw pool candidate into a ready-to-display problem object: fetches the

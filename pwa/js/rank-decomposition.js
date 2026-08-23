@@ -165,7 +165,7 @@ export function problemInfoWeight(slope, floor) {
     return slope * slope * anchorInfo(floor);
 }
 
-function curveForSize(size) {
+export function curveForSize(size) {
     const m = _ratingRankMap && _ratingRankMap[String(size)];
     return (m && Array.isArray(m.ratings) && Array.isArray(m.ranks)
             && m.ratings.length >= 2) ? m : null;

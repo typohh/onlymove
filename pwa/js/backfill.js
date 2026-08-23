@@ -31,10 +31,8 @@ import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory,
-    clearWeaknessModel,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
 } from './state.js';
-import { trainWeakness } from './weakness.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
@@ -266,15 +264,10 @@ export async function backfillMissingEmbeddings() {
         console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'}${allOk ? '' : '; INCOMPLETE — versions left un-stamped, retrying next load'})`);
     }
 
-    // Retrain the single shared weakness model if any size refreshed, a prune changed
-    // its training set, OR the model is missing — the last heals a device whose model
-    // was cleared by an interrupted embedding refit and then re-loaded after the stamp
-    // (so no refit re-fires). trainWeakness no-ops below its min training size, so a
-    // cold-start user just gets a cheap early return.
-    const weaknessUntrained = !state.weaknessParams || state.weaknessParams.length < 4;
-    if (sizesFilled.length > 0 || pruned || weaknessUntrained) {
-        setTimeout(() => trainWeakness(), 0);
-    }
+    // No model to retrain: the motif readings (motif-stats.js) are a pure
+    // function of the answer history, recomputed by their readers, so a refreshed
+    // or pruned history is picked up on the next read with nothing to keep in
+    // sync and nothing to heal after an interrupted refit.
 }
 
 // Strip model fields from answerHistory entries whose problem is no longer in
@@ -666,9 +659,8 @@ function wipeStaleEmbeddings(size, history, serverEmbeddingVersion) {
         if (deleteFields(a, EMBEDDING_VECTOR_FIELDS)) cleared++;
     }
     if (cleared > 0) {
-        // Wipe the single shared weakness model — it was trained on this
-        // size's now-stale embeddings (jointly with the other size's).
-        clearWeaknessModel();
+        // Nothing to wipe beside the embeddings: the motif readings are derived
+        // on demand from whatever entries still carry one.
         persistAnswerHistory(size, history);
         console.log(`backfill[${size}]: cleared ${cleared} stale embeddings (-> ${serverEmbeddingVersion})`);
     }

@@ -13,7 +13,6 @@ import { quantizeEmbedding } from './math-utils.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
 import { calculateAndStoreStatsResults, recallImpact, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
-import { trainWeakness } from './weakness.js';
 import { syncRecallNotification } from './notifications.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
 // EGD-leaderboard GoR refresh piggybacks on /report: the response advertises stale
@@ -377,7 +376,6 @@ export async function updateUserStats(isCorrect, {
         // overlay fade-in or the next-problem load.
         scheduleIdle(() => { calculateAndStoreStatsResults(); });
     }
-    scheduleIdle(trainWeakness);
     // NB: the recall schedule is deliberately NOT re-uploaded per attempt — an
     // active user is suppressed by the cron anyway, so per-attempt replace-all
     // writes would be pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,

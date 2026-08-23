@@ -31,18 +31,12 @@ export function loadPopulationConstants() {
     if (_loaded) return _loaded;
     const c = POPULATION_CONSTANTS;
     applyRetentionConstants(c.retention);   // throws on a bad/missing field
-    // The weakness centre the serve-category flag test subtracts (weakness.js).
-    // Asserted here, at boot, because that is the only place it CAN be wrong:
-    // package_for_pwa refuses to ship a vector whose length doesn't match the axis
-    // count, and a trained model whose K disagrees yields non-finite flag
-    // statistics the category loop skips. What remains is a malformed
-    // packaged blob, which is a build fault and should stop the app rather than
-    // quietly serve an uncentred contrast — the one failure that looks like working
-    // personalization while tilting every user identically.
-    if (!Array.isArray(c.weakness_contrast_mean) || c.weakness_contrast_mean.length === 0 ||
-        !c.weakness_contrast_mean.every(Number.isFinite)) {
-        throw new Error('population constants: weakness_contrast_mean missing or malformed');
-    }
+    // No weakness-centre assertion: the motif readings (motif-stats.js) are
+    // computed from the user's own attempts against their own neutral point — 0
+    // ranks for the strength reading, a 50/50 split of their own errors for the
+    // tendency one — so there is no population centre to ship, validate, or get
+    // wrong. weakness_axis_lambda / weakness_contrast_mean / weakness_axis_mean
+    // may still be present in an older packaged blob; nothing reads them.
     setTimeBias({ timePerMin: c.time_bias_per_min, reviewPerMin: c.review_bias_per_min });
     _loaded = c;
     return c;

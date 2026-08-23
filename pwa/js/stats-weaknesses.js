@@ -1,18 +1,40 @@
 // js/stats-weaknesses.js
 //
 // The Weaknesses pane of the detailed-stats modal (stats-ui.js is the
-// orchestrator): the "Likely issues" list derived from the augmented weakness
-// model's posterior, each issue expandable into links to past mistakes.
-// Rendering-only — the numeric example selection (findExamplesForIssue) and the
-// probit threshold live in stats-compute.js.
+// orchestrator): a row for EVERY shipped motif, always, carrying the two
+// readings motif-stats.js computes and their 95% intervals, plus links to past
+// mistakes on the motifs where a deficit is credible.
+//
+// Both numbers come from the user's OWN attempts and nothing else — see
+// motif-stats.js for why no population centre appears anywhere in this path.
+//
+//   weak <-> strong   the 3PL residual slope on the motif loading, in ranks.
+//                     0 = the motif costs you nothing beyond the problem's
+//                     difficulty.
+//   underplay <-> overplay
+//                     the share of your wrong answers that erred TOWARD the
+//                     motif rather than away from it. 50% = your mistakes lean
+//                     neither way, which is balance, not an average of other
+//                     players.
+//
+// Why all motifs rather than only the credible ones: a row carrying a visible
+// interval makes no claim the interval does not support, so an unresolved axis
+// renders as a dot at the neutral point inside a band spanning most of the
+// scale, which reads as "we don't know" without a sentence having to say so.
+// The claim-shaped affordances still gate on confidence: colour ramps from
+// neutral only past MOTIF_Z, and the mistake-example links appear only where the
+// strength reading is credibly negative.
+//
+// An axis with no named tail is skipped. A placeholder like "style #2" is not a
+// finding a user can act on, and the axis keeps steering selection either way.
 
 import { state, setAcceptClicks } from './state.js';
 import { MOTIF_Z } from './constants.js';
 import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
-import { findExamplesForIssue, probit, computeAxisDirections } from './stats-compute.js';
+import { findExamplesForIssue, probit } from './stats-compute.js';
 import { getRecallCandidates } from './recall-model.js';
-import { AXIS_SUM_MEAN } from './weakness.js';
+import { computeMotifStats, isFlagged } from './motif-stats.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
@@ -21,100 +43,27 @@ import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui
 // shard load — the second activation would nest a begin inside the first.
 let exampleOpenInFlight = false;
 
-// Builds the "Likely issues" DOM block consumed by showDetailedStats. Each
-// surfaced (axis k, category) issue is one row with a toggle that lazily
-// fetches matching past mistakes from answerHistory.
-//
-// Two-level detection:
-//   Level 1 — IS axis k a weakness? — from the augmented model's posterior on
-//   the SUM β_correct[k] + β_picked[k] (mean from weaknessParams, variance
-//   var_c + var_p + 2·cov from weaknessSe/weaknessAxisCov). The sum is the
-//   direction the training data identifies: ~80% of rows have picked = correct
-//   (the fallback + every correct attempt), so the correct/picked SPLIT is
-//   prior-dominated and must not drive detection. The old sign-quadrant
-//   scheme did exactly that, and its cov<0 gate (structural under the
-//   collinearity) left `badAt` as the only category that could ever render.
-//   Level 2 — WHICH WAY does the user err? — a paired sign test on the
-//   (picked − correct) axis loading over the user's own wrong attempts
-//   (computeAxisDirections in stats-compute.js): overshoot → tooMuch,
-//   undershoot → notEnough, inconclusive → badAt ("inconsistently") as the
-//   honest residual. Needs no model and no assumption about which moves are
-//   reasonable alternatives.
-// Level 1 screens every axis, so it carries the pane's multiplicity; the shown
-// set is capped by an error budget for it (see WEAK_FALSE_FLAG_BUDGET). Level 2
-// needs no such adjustment — it picks the phrasing of an issue level 1 already
-// admitted, so a wrong call there is a mislabel, not an extra issue.
+// Credible-interval width. 95% is what "CI" means unqualified, and it is wide
+// on purpose: the contrast is the direction the picked = correct collinearity
+// starves, so for most users that column's band SHOULD span most of the scale.
+// Full-scale of the ranks track each way. The numeric value is always printed
+// beside the bar, so a clamp costs the bar's precision and nothing else.
+const RANK_FULL_SCALE = 2.0;
+// Colour ramps from fully neutral at the MOTIF_Z gate to fully saturated one
+// further SE out, so a row below the gate carries no colour at all — the pane
+// makes no claim there, and a tinted row reads as one.
+const TONE_FULL_Z = MOTIF_Z + 1;
+
+// Builds the motif table consumed by showDetailedStats.
 export function buildLikelyIssuesElement(history = state.answerHistory) {
-    // P(β_correct + β_picked < 0) needed to flag an axis as a weakness. This is
-    // a one-sided posterior probability on a single identified quantity (a
-    // 50% bar would flag half the axes under a flat posterior), unlike the old
-    // 0.50 bar on four-way quadrant mass. The two bars are the 1-SD and 2-SD
-    // posterior gates: past the first the pane SUSPECTS the finding (hedged
-    // phrasing), past the second it declares it. The admission bar is the
-    // shared MOTIF_Z in probability form, so the pane, the serve gate and the
-    // problem-motif display move together (see constants.js). The tier is
-    // cosmetic — phrasing only; admission, the budget below, and serving
-    // (which gates on its own contrast statistic in weakness.js) all treat
-    // every flagged axis the same.
-    const WEAK_PROB_THRESHOLD = normCdf(MOTIF_Z);
-    const DECLARED_PROB_THRESHOLD = normCdf(2);
-    // Multiplicity control: the expected number of spurious issues the pane is
-    // willing to show a user, summed over the whole list (see the admission
-    // loop below). Must stay >= 1 - WEAK_PROB_THRESHOLD, else even the
-    // strongest admissible issue would be unaffordable and the pane could
-    // never fill.
-    const WEAK_FALSE_FLAG_BUDGET = 0.5;
-    // Sign-test posterior needed to call a direction, and the minimum number
-    // of attributed errors before a direction can be called at all.
-    const DIRECTION_PROB_THRESHOLD = 0.85;
-    const MIN_DIRECTION_N = 3;
-    const weaknessParams = state.weaknessParams;
-    const weaknessSe = state.weaknessSe;
-    const weaknessAxisCov = state.weaknessAxisCov;
     const labelMap = state.embeddingLabels || {};
-    // side: which TAIL of the bipolar axis the weakness sits on. EITHER tail
-    // may be unnamed (labels.json v4 — some axes carry a motif on one side
-    // only, and a freshly grown axis carries none until a human names it), and
-    // an unnamed tail returns null so the axis is skipped. Symmetric on
-    // purpose: a placeholder like "style #2" is not a finding a user can act
-    // on, and printing one is worse than the pane staying quiet about an axis
-    // it cannot describe. The axis still steers selection and detection.
-    const labelFor = (k, side = 'positive') => localizedMotif(labelMap[String(k)], side);
-    // Skill-noun templates (labels are nouns like "reading"/"shape", not move
-    // recipes): the level-2 direction picks one of three blunt sentences about
-    // the flagged motif — rely-too-much / don't-trust-enough / weak-at.
-    const PHRASES = {
-        tooMuch:   (l) => getTerm('statsIssueTooMuch', { motif: l }),
-        notEnough: (l) => getTerm('statsIssueNotEnough', { motif: l }),
-        badAt:     (l) => getTerm('statsIssueBadAt', { motif: l }),
-    };
+    const labelFor = (k, side) => localizedMotif(labelMap[String(k)], side);
 
     const root = document.createElement('div');
     root.className = 'stats-issues';
 
-    const heading = document.createElement('div');
-    heading.className = 'stats-issues-heading';
-    heading.textContent = getTerm('statsIssuesHeading');
-    root.appendChild(heading);
-
-    // weaknessAxisCov is length-checked like weaknessSe, and its entries are
-    // used with NO null default: the writer (weakness.js) already substitutes 0
-    // for a non-finite covariance, so a missing entry means the array is stale
-    // against the current K — and treating that as cov = 0 would silently
-    // change the flag set rather than fail. Under the picked/correct
-    // collinearity (~80% of rows have picked = correct) the cross-covariance is
-    // strongly negative and dominates the sum variance, so a zero default
-    // inflates it: it does not err on the safe side of a threshold, it moves
-    // the threshold.
-    const haveModel = (
-        Array.isArray(weaknessParams) && weaknessParams.length >= 4 &&
-        Array.isArray(weaknessSe) && weaknessSe.length === weaknessParams.length &&
-        Array.isArray(weaknessAxisCov) &&
-        weaknessAxisCov.length === (weaknessParams.length - 2) / 2 &&
-        Array.isArray(AXIS_SUM_MEAN) &&
-        AXIS_SUM_MEAN.length === (weaknessParams.length - 2) / 2
-    );
-    if (!haveModel) {
+    const stats = computeMotifStats(history);
+    if (!stats || stats.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
         empty.textContent = getTerm('statsIssuesNotEnough');
@@ -122,186 +71,225 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         return root;
     }
 
-    const K = (weaknessParams.length - 2) / 2;
-
-    // Level 1: flag axes whose identified sum coefficient is credibly non-zero
-    // in EITHER direction — the axes are BIPOLAR (residual skill axes,
-    // 2026-07-18): a credibly NEGATIVE sum = weak at the positive-tail motif,
-    // a credibly POSITIVE sum = weak at the NEGATIVE-tail motif. The weakness
-    // tail's own name is preferred; when it is unnamed and the OPPOSITE tail is
-    // named — the usual case, the shipped components being one-sided — the same
-    // evidence is reported as a STRENGTH of the named motif instead of being
-    // dropped (the sum is read symmetrically by the linear model, so the two
-    // statements are the same finding worded from the describable end). An axis
-    // named on neither tail still says nothing. The naming test sits HERE
-    // rather than at render time so an unshowable axis doesn't consume the
-    // error budget below and truncate the list ahead of an issue the user
-    // could have read.
-    const candidates = [];
-    for (let k = 0; k < K; k++) {
-        const mu_c = weaknessParams[2 + k];
-        const mu_p = weaknessParams[2 + K + k];
-        const var_c = weaknessSe[2 + k] * weaknessSe[2 + k];
-        const var_p = weaknessSe[2 + K + k] * weaknessSe[2 + K + k];
-        const cov = weaknessAxisCov[k];
-        if (![mu_c, mu_p, var_c, var_p, cov].every(Number.isFinite)) continue;
-        const varSum = var_c + var_p + 2 * cov;
-        if (!(varSum > 0)) continue;
-        // Tested against the POPULATION CENTRE, not against zero. The axes may
-        // carry a shared offset — a dimension everyone sits somewhere on — and
-        // measuring against zero would report that shared position as this
-        // user's finding, for every user at once. What is actionable is where
-        // this user sits RELATIVE to the population, which is what the shipped
-        // centre makes available.
-        const centre = AXIS_SUM_MEAN[k];
-        if (!Number.isFinite(centre)) continue;
-        const sumRel = mu_c + mu_p - centre;
-        const pWeakPos = normCdf(-sumRel / Math.sqrt(varSum));
-        // One rule, applied to whichever direction is credible: the weakness
-        // tail's own name is preferred, and when only the OPPOSITE tail is
-        // named — the usual case, all shipped components being one-sided — the
-        // same evidence is reported as a STRENGTH of that named motif instead
-        // of being dropped. The linear model reads the sum symmetrically, so
-        // "credibly better on positive-loading problems" is exactly a strength
-        // at the positive-tail motif; strengths compete for the same budget
-        // and carry the same suspected/declared tiers as weaknesses.
-        if (pWeakPos >= WEAK_PROB_THRESHOLD) {
-            // Credibly WORSE on positive-loading problems.
-            if (labelFor(k, 'positive')) {
-                candidates.push({ k, p: pWeakPos, side: 'positive' });
-            } else if (labelFor(k, 'negative')) {
-                candidates.push({ k, p: pWeakPos, side: 'negative', strength: true });
-            }
-        } else if (1 - pWeakPos >= WEAK_PROB_THRESHOLD) {
-            // Credibly BETTER on positive-loading problems.
-            if (labelFor(k, 'negative')) {
-                candidates.push({ k, p: 1 - pWeakPos, side: 'negative' });
-            } else if (labelFor(k, 'positive')) {
-                candidates.push({ k, p: 1 - pWeakPos, side: 'positive', strength: true });
-            }
-        }
+    const rows = [];
+    for (const st of stats) {
+        // Prefer the positive tail's name; an axis named only on its negative
+        // tail is described from that end, with both readings mirrored so
+        // "weak" and "overplay" keep meaning the named motif throughout.
+        const side = labelFor(st.k, 'positive') ? 'positive'
+                   : (labelFor(st.k, 'negative') ? 'negative' : null);
+        if (!side) continue;
+        const flip = side === 'negative';
+        const t = st.tendency, g = st.strength;
+        rows.push({
+            k: st.k,
+            side,
+            name: labelFor(st.k, side),
+            strength: g && {
+                ranks: flip ? -g.ranks : g.ranks,
+                lo: flip ? -g.hi : g.lo,
+                hi: flip ? -g.lo : g.hi,
+                z: flip ? -g.z : g.z,
+            },
+            // Mirroring a share reflects it about the 50% balance point.
+            tendency: t && {
+                share: flip ? 1 - t.share : t.share,
+                lo: flip ? 1 - t.hi : t.lo,
+                hi: flip ? 1 - t.lo : t.hi,
+                z: flip ? -t.z : t.z,
+                n: t.n,
+            },
+        });
     }
-
-    // MULTIPLICITY. WEAK_PROB_THRESHOLD bounds each issue's OWN error
-    // probability, not the pane's: every axis is screened for every user and K
-    // is whatever the current fit shipped (read from embedding_meta.json and
-    // free to change between refits), so a fixed
-    // per-axis bar lets the expected number of spurious issues grow linearly
-    // with the axis count — the pane would get noisier as the data improves.
-    // So the shown set spends an error BUDGET: strongest first, an issue is
-    // admitted while the running sum of (1 − p) — the posterior probability
-    // that its sign call is wrong — stays within WEAK_FALSE_FLAG_BUDGET.
-    // Expectation is linear, so that running sum IS the expected number of
-    // spurious issues in the list: the bound holds pathwise, for any K, with no
-    // independence assumption — which is what this pane needs, since the axes
-    // co-load on the same problems and their posteriors are correlated (a
-    // Bonferroni-style bar on K would have to assume that away and would also
-    // spend power on axes that never come close). Equivalently: the bar
-    // tightens with each issue already shown, so a lone strong issue is
-    // unaffected while a long borderline list truncates. The accounting is
-    // Bayesian — 1 − p is a posterior error probability, so it rests on the
-    // per-axis empirical-Bayes prior (weakness_axis_lambda) being the
-    // calibrating one, and that prior's shrinkage makes it conservative.
-    candidates.sort((a, b) => b.p - a.p);
-    const flagged = [];
-    let spent = 0;
-    for (const c of candidates) {
-        // Sorted descending by p, so a rejected issue is never followed by a
-        // cheaper one — stop rather than skip.
-        if (spent + (1 - c.p) > WEAK_FALSE_FLAG_BUDGET) break;
-        spent += 1 - c.p;
-        flagged.push(c);
-    }
-
-    // Level 2: qualify each flagged axis's direction from the paired
-    // picked-vs-correct contrast; inconclusive stays "inconsistently". Runs on
-    // the budget-truncated set, so each error is attributed among the axes the
-    // pane actually surfaces (the attribution is winner-take-all across the
-    // flagged axes — feeding it dropped axes would divert errors to rows the
-    // user never sees).
-    // pOver is P(picked loads HIGHER than correct on axis k) — overshoot
-    // toward the POSITIVE tail. For a negative-side weakness the named motif
-    // is the negative pole, so over/under invert.
-    const directions = computeAxisDirections(
-        history, flagged.filter(f => !f.strength).map(f => f.k));
-    const issues = flagged.map(({ k, p, side, strength }) => {
-        // Strengths get one plain sentence: the over/under direction phrasing
-        // qualifies a deficit, and mistake examples don't illustrate a
-        // strength, so level 2 doesn't run on them.
-        let quadrant = 'badAt';
-        if (!strength) {
-            const dir = directions.get(k);
-            if (dir && dir.nPos + dir.nNeg >= MIN_DIRECTION_N) {
-                const pOver = side === 'negative' ? 1 - dir.pOver : dir.pOver;
-                if (pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'tooMuch';
-                else if (1 - pOver >= DIRECTION_PROB_THRESHOLD) quadrant = 'notEnough';
-            }
-        }
-        const base = strength
-            ? getTerm('statsIssueStrong', { motif: labelFor(k, side) })
-            : PHRASES[quadrant](labelFor(k, side));
-        // Below the declared bar the finding is real enough to act on (it
-        // already cleared admission and the budget) but is phrased as a
-        // suspicion rather than a statement.
-        const sentence = p >= DECLARED_PROB_THRESHOLD
-            ? base : getTerm('statsIssueSuspected', { sentence: base });
-        return { k, side, quadrant, p, sentence, strength: !!strength };
-    });
-    // Already strongest-first: the budget loop consumed `candidates` in that
-    // order and preserved it.
-
-    if (issues.length === 0) {
+    if (rows.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = getTerm('statsIssuesNoneAbove', { percent: (WEAK_PROB_THRESHOLD * 100).toFixed(0) });
+        empty.textContent = getTerm('statsIssuesNotEnough');
         root.appendChild(empty);
         return root;
     }
 
-    // Problems currently in the user's recall window — withhold their links so
-    // a glance at the examples panel can't be used to ace an imminent recall.
-    const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
+    // Strongest evidence first, on the strength column — the one the headers
+    // lead with and the one the example links gate on.
+    rows.sort((a, b) => Math.abs(b.strength?.z ?? 0) - Math.abs(a.strength?.z ?? 0));
 
-    for (const issue of issues) {
-        root.appendChild(buildIssueRow(issue, recallSet, history));
-    }
+    const table = document.createElement('div');
+    table.className = 'wk-table';
+    table.appendChild(buildHeaderRow());
+
+    // Problems currently in the user's recall window — withhold their links so a
+    // glance at the examples panel can't be used to ace an imminent recall.
+    const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
+    for (const row of rows) table.appendChild(buildMotifRow(row, recallSet, history));
+    root.appendChild(table);
+
     return root;
 }
 
-// Renders one (axis k, quadrant) row: sentence + probability + an "examples"
-// toggle that expands a list of links to past attempts matching the issue.
-function buildIssueRow(issue, recallSet, history = state.answerHistory) {
-    const row = document.createElement('div');
-    row.className = 'stats-issue';
-
+function buildHeaderRow() {
     const head = document.createElement('div');
-    head.className = 'stats-issue-head';
+    head.className = 'wk-row wk-head';
+    head.appendChild(document.createElement('div')).className = 'wk-name';
+    const metrics = document.createElement('div');
+    metrics.className = 'wk-metrics';
+    // Each pole sits at its own end of the track it labels, arrow centred, so the
+    // header reads as the axis the bar below it is drawn on.
+    for (const [lo, hi] of [['statsMotifWeak', 'statsMotifStrong'],
+                            ['statsMotifUnder', 'statsMotifOver']]) {
+        const cell = document.createElement('div');
+        cell.className = 'wk-col-head';
+        for (const t of [getTerm(lo), '↔', getTerm(hi)]) {
+            const span = document.createElement('span');
+            span.textContent = t;
+            cell.appendChild(span);
+        }
+        metrics.appendChild(cell);
+    }
+    head.appendChild(metrics);
+    return head;
+}
 
-    const prob = document.createElement('span');
-    prob.className = 'stats-issue-prob';
-    prob.textContent = `${(issue.p * 100).toFixed(0)}%`;
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const rankFrac = (r) => clamp01(0.5 + r / (2 * RANK_FULL_SCALE));
 
-    const text = document.createElement('span');
-    text.className = 'stats-issue-text';
-    text.textContent = issue.sentence;
+// Colour weight for a statistic sitting z posterior SEs from the population
+// centre: nothing at all below the MOTIF_Z gate, ramping to full one SE past it.
+function toneWeight(z) {
+    if (!Number.isFinite(z)) return 0;
+    return clamp01((Math.abs(z) - MOTIF_Z) / (TONE_FULL_Z - MOTIF_Z));
+}
 
-    head.append(prob, text);
-    row.appendChild(head);
+// One metric cell: a track with the population centre marked, the credible
+// interval as a band, the point estimate as a dot, and the numbers beside it.
+// `tone` names the direction for CSS; `weight` is how strongly to paint it.
+function buildMetricCell({ frac, loFrac, hiFrac, valueText, ciText, tone, weight }) {
+    const cell = document.createElement('div');
+    cell.className = 'wk-metric';
+    cell.dataset.tone = tone;
+    cell.style.setProperty('--wk-weight', weight.toFixed(3));
 
-    // Strength rows carry no examples: the example finder surfaces past
-    // MISTAKES matching an issue, which is not what a strength is evidence of.
-    if (issue.strength) return row;
+    const track = document.createElement('div');
+    track.className = 'wk-track';
+
+    const band = document.createElement('span');
+    band.className = 'wk-ci';
+    const lo = Math.min(loFrac, hiFrac);
+    const hi = Math.max(loFrac, hiFrac);
+    band.style.left = `${(lo * 100).toFixed(2)}%`;
+    band.style.width = `${Math.max(0.5, (hi - lo) * 100).toFixed(2)}%`;
+    track.appendChild(band);
+
+    const mid = document.createElement('span');
+    mid.className = 'wk-mid';
+    track.appendChild(mid);
+
+    const dot = document.createElement('span');
+    dot.className = 'wk-dot';
+    dot.style.left = `${(frac * 100).toFixed(2)}%`;
+    track.appendChild(dot);
+
+    cell.appendChild(track);
+
+    const value = document.createElement('div');
+    value.className = 'wk-value';
+    value.textContent = valueText;
+    cell.appendChild(value);
+
+    const ci = document.createElement('div');
+    ci.className = 'wk-ci-text';
+    ci.textContent = ciText;
+    cell.appendChild(ci);
+    return cell;
+}
+
+const fmtRank = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
+// The tendency reading is stored as the SHARE of errors that lean toward the
+// motif, whose neutral point is 0.5 — but "42%" gives a reader no way to see
+// that 50 is the balance and 42 sits below it. Shown as a signed deviation
+// instead, and specifically as the SHARE OF THE USER'S ERRORS THAT WOULD HAVE TO
+// GO THE OTHER WAY to reach balance: 6 errors leaning toward the motif against 4
+// leaning away is one error out of ten, i.e. +10%. That is `share - 0.5`
+// exactly, undoubled — doubling would state the swing between the two sides
+// rather than the count of choices to change, which is not what the number is
+// read as. The bar geometry is unchanged (already centred on 0.5); only the
+// printed value moves.
+const fmtLean = (share) => {
+    const v = Math.round((share - 0.5) * 100);
+    return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}%`;
+};
+
+// A reading with no data renders as a neutral dot spanning the whole track —
+// visibly "we don't know" rather than a confident-looking zero.
+const EMPTY_CELL = { frac: 0.5, loFrac: 0, hiFrac: 1, tone: 'none', weight: 0 };
+
+function buildMotifRow(row, recallSet, history) {
+    const el = document.createElement('div');
+    el.className = 'wk-row';
+
+    const name = document.createElement('div');
+    name.className = 'wk-name';
+    name.textContent = row.name;
+    el.appendChild(name);
+
+    const metrics = document.createElement('div');
+    metrics.className = 'wk-metrics';
+    const g = row.strength;
+    metrics.appendChild(buildMetricCell(g ? {
+        frac: rankFrac(g.ranks),
+        loFrac: rankFrac(g.lo),
+        hiFrac: rankFrac(g.hi),
+        valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
+        ciText: `${fmtRank(g.lo)} … ${fmtRank(g.hi)}`,
+        // Valenced: worse on motif-heavy problems is bad, better is good.
+        tone: g.z < 0 ? 'weak' : 'strong',
+        weight: toneWeight(g.z),
+    } : { ...EMPTY_CELL, valueText: getTerm('statsMotifNoData'), ciText: '' }));
+    const t = row.tendency;
+    metrics.appendChild(buildMetricCell(t ? {
+        frac: t.share,
+        loFrac: t.lo,
+        hiFrac: t.hi,
+        valueText: fmtLean(t.share),
+        ciText: `${fmtLean(t.lo)} … ${fmtLean(t.hi)}`,
+        // NOT valenced: both ends are training directions, neither is a virtue,
+        // so this column must not reuse the weak/strong red-green pair.
+        tone: t.z > 0 ? 'over' : 'under',
+        weight: toneWeight(t.z),
+    } : { ...EMPTY_CELL, valueText: getTerm('statsMotifNoData'), ciText: '' }));
+    el.appendChild(metrics);
+
+    // Mistake examples are offered only where the strength reading is credibly
+    // negative — they illustrate a deficit, and there is nothing for them to
+    // show on an axis the data has not resolved or has resolved as a strength.
+    // WHICH mistakes is read from the tendency column, so the examples and the
+    // numbers above them tell one story.
+    if (!row.strength || !isFlagged(row.strength) || row.strength.z > 0) return el;
+    const t2 = row.tendency;
+    const quadrant = (t2 && isFlagged(t2))
+        ? (t2.z > 0 ? 'tooMuch' : 'notEnough')
+        : 'badAt';
+    const issue = {
+        k: row.k,
+        quadrant,
+        side: row.side,
+        // Per-attempt evidence is thresholded to match the row's own confidence
+        // (see findExamplesForIssue). Capped at the 99% probit: the figure
+        // saturates on a well-resolved axis, and probit(1) = Infinity would
+        // demand impossible evidence and blank the list for exactly the rows the
+        // user most wants examples from.
+        p: Math.min(normCdf(Math.abs(row.strength.z)), 0.99),
+    };
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
-    toggle.className = 'stats-issue-examples-toggle';
+    toggle.className = 'stats-issue-examples-toggle wk-examples-toggle';
     toggle.textContent = getTerm('statsExamples');
-    head.appendChild(toggle);
+    el.appendChild(toggle);
 
     const list = document.createElement('div');
-    list.className = 'stats-issue-examples-list';
+    list.className = 'stats-issue-examples-list wk-examples-list';
     list.hidden = true;
-    row.appendChild(list);
+    el.appendChild(list);
 
     let populated = false;
     toggle.addEventListener('click', () => {
@@ -312,16 +300,11 @@ function buildIssueRow(issue, recallSet, history = state.answerHistory) {
         list.hidden = !list.hidden;
         toggle.textContent = list.hidden ? getTerm('statsExamples') : getTerm('statsHide');
     });
-    return row;
+    return el;
 }
 
 function populateExamplesList(list, issue, recallSet, history = state.answerHistory) {
-    // Threshold per-attempt evidence strength to match the issue's posterior
-    // confidence — see findExamplesForIssue for the rationale. Capped at the
-    // 99% probit (~2.33σ): the level-1 posterior saturates to 1.0 on strong
-    // axes, and probit(1) = Infinity would demand impossible evidence and
-    // blank the examples list for exactly the most confident issues.
-    const threshold = probit(Math.min(issue.p, 0.99));
+    const threshold = probit(issue.p);
     const examples = findExamplesForIssue(history, issue.k, issue.quadrant, recallSet,
                                           threshold, issue.side === 'negative' ? -1 : 1);
     if (examples.length === 0) {
@@ -337,10 +320,10 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
         const link = document.createElement('a');
         link.className = 'stats-issue-example-link';
         // In-instance review: the example opens over this instance in analysis
-        // mode rather than spawning a second app instance. The stats
-        // modal hides (DOM intact) and reappears when the review exits via the
-        // analysis Exit button (main.js → endExampleReview). No href — every
-        // activation routes through this handler.
+        // mode rather than spawning a second app instance. The stats modal hides
+        // (DOM intact) and reappears when the review exits via the analysis Exit
+        // button (main.js → endExampleReview). No href — every activation routes
+        // through this handler.
         link.addEventListener('click', async (e) => {
             e.preventDefault();
             if (exampleOpenInFlight) return;
@@ -348,8 +331,8 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
             // entering a review over it would race the in-flight load.
             if (!state.acceptClicks) return;
             exampleOpenInFlight = true;
-            // Lock the board for the async shard load: once the modal hides,
-            // the problem underneath would otherwise take stray clicks until
+            // Lock the board for the async shard load: once the modal hides, the
+            // problem underneath would otherwise take stray clicks until
             // enterAnalysisMode (which re-enables clicks) takes over.
             setAcceptClicks(false);
             try {
@@ -381,13 +364,14 @@ function populateExamplesList(list, issue, recallSet, history = state.answerHist
 }
 
 // Compact per-quadrant signal-strength readout. Embeddings are unit-variance
-// z-scores along each axis, so values are reported in σ — sign included
-// because each quadrant's evidence shape involves a specific signed pattern.
+// z-scores along each axis, so values are reported in σ — sign included because
+// each quadrant's evidence shape involves a specific signed pattern.
 function formatSignalStrength(quadrant, ec, ep) {
     const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}σ`;
     // List the more-emphasized axis first per quadrant:
     //   tooMuch: motif in pick (positive ep) is the foreground signal
     //   notEnough/badAt: motif in correct (positive ec) is the foreground signal
-    if (quadrant === 'tooMuch') return `${fmt(ep)} vs ${fmt(ec)}`;
-    return `${fmt(ec)} vs ${fmt(ep)}`;
+    const vs = getTerm('statsSignalVs');
+    if (quadrant === 'tooMuch') return `${fmt(ep)} ${vs} ${fmt(ec)}`;
+    return `${fmt(ec)} ${vs} ${fmt(ep)}`;
 }
