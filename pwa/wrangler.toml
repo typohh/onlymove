@@ -41,7 +41,7 @@ crons = ["0 * * * *"]
 # stays un-acked and the durable outbox re-uploads it afterwards, so no attempt
 # is lost and there is nothing to coordinate on the client side.
 # Flip with a deploy: set "1", deploy, do the surgery, set "0", deploy.
-MAINTENANCE_MODE = "0"
+MAINTENANCE_MODE = "1"
 VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
 VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"
 
