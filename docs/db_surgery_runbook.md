@@ -16,7 +16,16 @@ The cost of the window is that attempts land late: they reach D1 on the next out
 
 ## The switch
 
-`MAINTENANCE_MODE` in `pwa/wrangler.toml` (`[vars]`). `"1"` makes every POST route return `503 {error: "maintenance"}` with `Retry-After`, and skips the cron. It is checked in the `fetch` dispatcher **before the rate limiter and before any handler touches D1** (`maintenanceFrozen` in `pwa/src/guards.js`), so a frozen request costs one Worker invocation and zero D1.
+`MAINTENANCE_MODE`, a wrangler **secret** (not a `[vars]` entry — see `pwa/wrangler.toml`). `"1"` makes every POST route return `503 {error: "maintenance"}` with `Retry-After`, and skips the cron; anything else, unset included, reads as open. It is checked in the `fetch` dispatcher **before the rate limiter and before any handler touches D1** (`maintenanceFrozen` in `pwa/src/guards.js`), so a frozen request costs one Worker invocation and zero D1.
+
+Flip it without a build, a commit or a deploy:
+
+```bash
+cd pwa && printf 1 | npx wrangler secret put MAINTENANCE_MODE   # freeze
+cd pwa && printf 0 | npx wrangler secret put MAINTENANCE_MODE   # thaw
+```
+
+`secret put` pushes a new Worker version reusing the deployed code bundle, so it propagates exactly like a deploy — which is the point: a version rollout replaces every colo, so a single probe confirming the state stands for all of them. It takes a few seconds, so confirm rather than assume (`node auxiliary/check_live_status.mjs --expect-frozen`, which retries). Two consequences worth holding onto: **the freeze no longer ships anything**, so it is fully orthogonal to what happens to be sitting in `pwa/dist`; and a secret's value cannot be read back, so "are we frozen?" is answered by probing, never by reading the repo.
 
 Coverage:
 
@@ -36,11 +45,11 @@ Steps 2–7 are the window. Do them back to back.
    ```
    The rehearsal must end in `post-verification PASSED`.
 
-2. **Freeze.** Set `MAINTENANCE_MODE = "1"` in `pwa/wrangler.toml`, then:
+2. **Freeze.**
    ```bash
-   cd pwa && npm run deploy
+   cd pwa && printf 1 | npx wrangler secret put MAINTENANCE_MODE
    ```
-   Confirm it took: `node auxiliary/check_live_status.mjs --expect-frozen`. It retries, which a bare `curl` does not — a deploy propagates over a few seconds, and until it does the previous version still answers, so a single probe can report the old state either way.
+   Confirm it took: `node auxiliary/check_live_status.mjs --expect-frozen`. It retries, which a bare `curl` does not — a version rollout propagates over a few seconds, and until it does the previous version still answers, so a single probe can report the old state either way.
 
 3. **Let in-flight requests drain.** A few seconds. Requests already inside a handler are not interrupted by the deploy.
 
@@ -80,9 +89,16 @@ Steps 2–7 are the window. Do them back to back.
    ```bash
    node auxiliary/update_leaderboard_ranks.mjs --remote
    ```
-   Its other ordering rule — run it only after the deploy carrying the new ratings, or the next `/report` recomputes on the old scale and overwrites the work — is satisfied twice over: the freeze deploy already shipped them, and no `/report` can run anyway. It reads the local `db/d1.sqlite` and the local `pwa/tsumegos/`, both of which are now the intended post-state, and it supersedes the purge's own leaderboard edits (which exist so the purge is correct when run standalone).
+   **Run inside this window it takes no ownership of the freeze**: it probes first, finds production already frozen, and therefore leaves the freeze ON at the end and does NOT re-fetch the local mirror — which is what you want here, because the post-surgery mirror is the intended state and `fetch_database`'s incremental pull cannot reproduce it (see *the local mirror cannot re-sync itself* below). Run standalone it does the opposite: freezes, fetches, applies, thaws.
 
-9. **Unfreeze and release.** Set `MAINTENANCE_MODE = "0"`, bump `CURRENT_STATE_EPOCH` if this release includes one, `npm run deploy`. Confirm the lift with `node auxiliary/check_live_status.mjs --expect-unfrozen` — `npm run deploy` already runs the same checks without the freeze assertion. Writes reopening is the one thing worth confirming rather than assuming: a lift that silently did not take leaves every client's outbox queuing behind a 503.
+   Its other ordering rule — run it only after the deploy carrying the new ratings, or the next `/report` recomputes on the old scale and overwrites the work — is satisfied twice over: step 1's packaging shipped in whatever deploy preceded the freeze, and no `/report` can run anyway. It reads the local `db/d1.sqlite` and the local `pwa/tsumegos/`, both of which are now the intended post-state, and it supersedes the purge's own leaderboard edits (which exist so the purge is correct when run standalone).
+
+9. **Thaw, then release.** In that order, and they are now two separate events rather than one deploy:
+   ```bash
+   cd pwa && printf 0 | npx wrangler secret put MAINTENANCE_MODE
+   node auxiliary/check_live_status.mjs --expect-unfrozen
+   ```
+   Then, if this release carries code or a `CURRENT_STATE_EPOCH` bump, `npm run deploy`. **Thaw first** — an epoch bump live while `/sync` is still frozen is the one combination to avoid (the epoch wipe routes init through the adopt path, which needs a full pull over `POST /sync`), and with the flag out of the bundle the release deploy no longer carries the lift with it. Writes reopening is the one thing worth confirming rather than assuming: a lift that silently did not take leaves every client's outbox queuing behind a 503.
 
 10. **After the window** — corpus and pipeline artifacts, if the ids are leaving the corpus for good and this was not already done as part of a larger release:
     ```bash
@@ -110,7 +126,7 @@ The common case: an epoch bump, a re-rate, a corpus removal and the DB purge all
 
 **Keep the heavy work outside the window.** Corpus surgery, the retrain chain and packaging need no freeze, and — importantly — they do **not** need the DB purge to have run first. Once `corpus_surgery` has taken the SGFs and per-id artifacts, the removed ids have no features and no rating, so the trainer never joins their attempts; leaving those rows in D1 for another day changes nothing about the fit.
 
-**Never ship the epoch bump while frozen.** The epoch wipe routes init through the adopt path, which needs a full pull over `POST /sync` — frozen, so it 503s. `accountSwitchPending` stays set and the device retries on the next boot, so nothing is corrupted, but until the freeze lifts the user sits on wiped local state. The bump belongs in the **unfreeze** deploy.
+**Never ship the epoch bump while frozen.** The epoch wipe routes init through the adopt path, which needs a full pull over `POST /sync` — frozen, so it 503s. `accountSwitchPending` stays set and the device retries on the next boot, so nothing is corrupted, but until the freeze lifts the user sits on wiped local state. So the bump ships **after** the thaw, not with it: the flag is a secret and no longer rides the bundle, so the two are independent and the ordering is just thaw → confirm → deploy.
 
 **Purge before the release deploy, not after.** The epoch re-adopt is a full history pull; if the purge has already landed, that single pull lands on the final state. Purging afterwards makes every device reconcile twice — once for the epoch, once for the digest divergence the purge creates.
 
@@ -123,9 +139,9 @@ Order:
    `package_for_pwa` is the long pole and there is no cheap path here: removing ids changes `lookup.txt`, which changes every shard's `metadata.json`, and a re-rate moves `ratings_version` and re-emits `problem_params.bin` + `lookup.embeddings.bin` — so the per-size change detection rebuilds everything rather than skipping. That cost is deliberately on this side of the freeze. It is also why the ordering matters: you want to pay it **once**, and nothing downstream invalidates it — the DB surgery reads `ratings/` rather than feeding it, and `update_leaderboard_ranks.mjs` consumes `problem_params.bin` rather than regenerating it.
 
    The retrain steps read `db/d1.sqlite` while it still holds the doomed rows, and that is fine: `corpus_surgery` ran first, so those ids are already absent from `ratings/` and `per_problem.csv` and every join drops them. The rows are inert until the purge.
-2. Freeze (step 2 above). This deploy ships whatever is in `pwa/dist` — including the newly packaged data, which is fine — but **not** the epoch bump.
+2. Freeze (step 2 above). A secret push, so it ships **nothing** — whatever sits in `pwa/dist` is irrelevant to it, and the newly packaged data goes out in step 4's deploy like any other release.
 3. Snapshot, surgery, apply, verify, leaderboard refresh (steps 4–8 above) — all inside the freeze.
-4. Unfreeze **and** release in one deploy: `MAINTENANCE_MODE = "0"` together with the epoch bump.
+4. Thaw, confirm, then deploy the release (epoch bump included) — step 9 above.
 
 One consequence worth planning for: **a trickle of attempts can still land on purged ids.** Clients keep serving the removed problems until they reload onto the new bundle, so between the purge and that reload a few attempts arrive for ids that no longer exist — plus whatever the outbox flushes from the frozen window. At ~3% of the corpus and current volume that is a handful of rows. They are harmless (the client strips rating fields for problems that left the corpus, and every estimate already skips rating-less rows), and a second, tiny purge pass mops them up whenever convenient. Note that those late arrivals also mean the local mirror needs a `--full` fetch before that mop-up pass, per the section above.
 

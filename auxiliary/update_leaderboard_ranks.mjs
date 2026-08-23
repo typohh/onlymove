@@ -49,37 +49,46 @@
 // ranks. The stored value is now genuinely an internal scalar, so fmtRank is right.)
 //
 // Order of operations for a re-rate: package_for_pwa -> `npm run deploy` (so the
-// Worker computes on the new scale too) -> fetch_database -> this script. If you
-// run it before deploying, the very next /report recomputes the user's current
-// rank on the OLD scale and overwrites it.
+// Worker computes on the new scale too) -> this script. If you run it before
+// deploying, the very next /report recomputes the user's current rank on the OLD
+// scale and overwrites it.
 //
-// RUN IT UNDER THE MAINTENANCE FREEZE. The `buffer` column is maintained
-// INCREMENTALLY in production: updateLeaderboardOnReport reads the stored
-// buffer, pushes the one new attempt and writes it back, and NOTHING rebuilds
-// it from tsumego_reports afterwards. So every attempt reported between this
-// script's snapshot and its write is silently truncated out of that user's
-// buffer when the UPDATE lands — permanently. Later reports append on top of
-// the shortened list rather than restoring it, and the only rebuild path is
-// createLeaderboardRow, which runs only for a user who has NO row at all. There
-// is no error and no recovery; the damage is a slightly wrong rank for anyone
-// who happened to be playing.
+// IT RUNS UNDER THE MAINTENANCE FREEZE, AND --remote OPENS AND CLOSES THAT WINDOW
+// ITSELF. The `buffer` column is maintained INCREMENTALLY in production:
+// updateLeaderboardOnReport reads the stored buffer, pushes the one new attempt
+// and writes it back, and NOTHING rebuilds it from tsumego_reports afterwards. So
+// every attempt reported between this script's snapshot and its write is silently
+// truncated out of that user's buffer when the UPDATE lands — permanently. Later
+// reports append on top of the shortened list rather than restoring it, and the
+// only rebuild path is createLeaderboardRow, which runs only for a user who has NO
+// row at all. There is no error and no recovery; the damage is a slightly wrong
+// rank for anyone who happened to be playing.
 //
-// With MAINTENANCE_MODE = "1" every POST 503s, so nothing can land in that gap
-// and the race is not merely unlikely but IMPOSSIBLE. That is why the refresh
-// belongs inside the surgery window (docs/db_surgery_runbook.md step 8), and it
-// applies to a standalone post-re-rate refresh too:
+// With MAINTENANCE_MODE = "1" every POST 503s, so nothing can land in that gap and
+// the race is not merely unlikely but IMPOSSIBLE. So `--remote` is one call:
 //
-//   1. set MAINTENANCE_MODE = "1" in pwa/wrangler.toml, `cd pwa && npm run deploy`
-//   2. ./.venv/bin/python3 -m pipeline.fetch_database
-//   3. node auxiliary/update_leaderboard_ranks.mjs --remote
-//   4. set MAINTENANCE_MODE = "0", `npm run deploy`
+//   freeze (wrangler secret put MAINTENANCE_MODE=1)  ->  wait for a probe to
+//   confirm it  ->  pipeline.fetch_database  ->  snapshot check  ->  recompute
+//   ->  apply  ->  postflight  ->  thaw (MAINTENANCE_MODE=0), verified.
 //
-// --remote ENFORCES this rather than trusting the operator (see preflightRemote):
-// it refuses unless production is actually frozen AND the local mirror's newest
-// tsumego_reports id equals production's, then re-checks both after the apply so
-// a freeze that lapsed mid-run is reported instead of silently corrupting rows.
-// `--allow-unfrozen` overrides deliberately; chaining the fetch into the apply
-// only NARROWS the window and is a fallback, never the guarantee.
+// MAINTENANCE_MODE is a wrangler SECRET rather than a [vars] entry precisely so
+// this script can flip it: `secret put` pushes a new Worker version reusing the
+// existing code bundle, so there is no build, no commit and no clean-tree gate,
+// while propagation stays a real version rollout — which is what lets a single
+// probe stand for every colo. It is a rollout, not an edge write, so it takes a
+// few seconds; waitForFreezeState polls rather than assuming the next read sees it.
+//
+// THE THAW RUNS ON EVERY EXIT PATH — a throw, a refusal, SIGINT — because the
+// failure mode of this script owning the freeze is leaving production frozen. If
+// the thaw itself cannot be confirmed the script says so loudly and exits non-zero;
+// lift it by hand with `printf 0 | npx wrangler secret put MAINTENANCE_MODE`.
+//
+// IF PRODUCTION IS ALREADY FROZEN when it starts, it does NOT take ownership: it
+// leaves the freeze ON at the end and does NOT re-fetch the local mirror. That is
+// the db_surgery_runbook step-8 case — an outer window whose step 9 does the thaw,
+// and whose local mirror is the intended POST-surgery state that an incremental
+// fetch cannot reproduce (fetch_database pulls `WHERE id > MAX(local id)` and never
+// re-reads the rows a purge rewrote).
 //
 // Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
@@ -91,7 +100,8 @@
 //                                                                 #     only adds them lazily on their next /report)
 //   node auxiliary/update_leaderboard_ranks.mjs --user <id>       # limit to one user (repeatable; also scopes populate)
 //   node auxiliary/update_leaderboard_ranks.mjs --remote --allow-unfrozen
-//                                                                 #     skip the freeze/snapshot preflight (see above)
+//                                                                 #     manage the freeze yourself: no freeze, no fetch,
+//                                                                 #     no snapshot check, no thaw (see above)
 //   node auxiliary/update_leaderboard_ranks.mjs --remote --origin https://…
 //                                                                 #     probe a different origin (default: the custom
 //                                                                 #     domain in pwa/wrangler.toml)
@@ -99,6 +109,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +118,16 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PWA_DIR = path.join(REPO, 'pwa');
 const DB_PATH = path.join(REPO, 'db', 'd1.sqlite');
 const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
+const VENV_PY = path.join(REPO, '.venv', 'bin', 'python3');
+// The freeze flag is a wrangler secret (see pwa/wrangler.toml) so it can be flipped
+// without a build or a deploy. "1" = frozen; anything else, including unset, = open.
+const FREEZE_SECRET = 'MAINTENANCE_MODE';
+// A secret push is a version rollout, so it propagates over seconds like a deploy.
+const FREEZE_PROBE_RETRIES = 15;
+const FREEZE_PROBE_DELAY_MS = 2000;
+// `wrangler dev`'s port. fetch_database overwrites the miniflare D1 file, and doing
+// that under a live workerd corrupts its view — so the in-window refresh refuses.
+const DEV_PORT = 8787;
 const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DAY_MS = 86400000;
 const STALE_WARN_MS = 6 * 3600 * 1000;
@@ -221,7 +242,11 @@ function productionOrigin() {
 // READ, and an empty body fails isValidUserId before any D1 access — so an unfrozen
 // probe costs nothing and writes nothing. Frozen returns 503 {error:'maintenance'},
 // which distinguishes the freeze from a generic edge 503.
-async function probeProductionFrozen(origin) {
+//
+// TRI-STATE on purpose. A network error is 'unknown', NOT 'open': this is polled to
+// confirm a thaw, and collapsing "we could not reach production" into "writes are
+// open" would report a freeze lifted that is still on.
+async function probeProductionFreeze(origin) {
     let res;
     try {
         res = await fetch(`${origin}/sync`, {
@@ -230,67 +255,162 @@ async function probeProductionFrozen(origin) {
             body: '{}',
         });
     } catch (err) {
-        return { frozen: false, detail: `request failed: ${err.message}` };
+        return { state: 'unknown', detail: `request failed: ${err.message}` };
     }
-    if (res.status !== 503) return { frozen: false, detail: `POST /sync -> ${res.status} (expected 503)` };
+    if (res.status !== 503) {
+        return res.status < 500
+            ? { state: 'open', detail: `POST /sync -> ${res.status}` }
+            : { state: 'unknown', detail: `POST /sync -> ${res.status} (edge error?)` };
+    }
     let body = null;
     try { body = await res.json(); } catch { /* non-JSON 503 = not our freeze */ }
     if (body?.error !== 'maintenance') {
-        return { frozen: false, detail: 'got a 503 that is not the maintenance freeze (edge error?)' };
+        return { state: 'unknown', detail: 'got a 503 that is not the maintenance freeze (edge error?)' };
     }
-    return { frozen: true, detail: 'POST /sync -> 503 {error:"maintenance"}' };
+    return { state: 'frozen', detail: 'POST /sync -> 503 {error:"maintenance"}' };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Flip the freeze. `secret put` reuses the deployed code bundle, so this is a version
+// rollout with no build and no commit — see the header and pwa/wrangler.toml.
+function setFreezeSecret(on) {
+    const res = spawnSync('npx', ['wrangler', 'secret', 'put', FREEZE_SECRET],
+        { cwd: PWA_DIR, encoding: 'utf8', input: on ? '1' : '0' });
+    if (res.status !== 0) {
+        throw new Error(`wrangler secret put ${FREEZE_SECRET} failed (${res.status}): `
+            + stripAnsi(res.stderr || res.stdout || '').trim());
+    }
+}
+
+// Poll until production actually reports the state we asked for. Fails CLOSED: an
+// 'unknown' probe keeps retrying and then throws, because "could not confirm" and
+// "confirmed" must not be the same outcome in either direction.
+async function waitForFreezeState(origin, want, label) {
+    let last = '';
+    for (let attempt = 1; attempt <= FREEZE_PROBE_RETRIES; attempt++) {
+        const { state, detail } = await probeProductionFreeze(origin);
+        last = detail;
+        if (state === want) return detail;
+        if (attempt < FREEZE_PROBE_RETRIES) await sleep(FREEZE_PROBE_DELAY_MS);
+    }
+    const waited = Math.round(FREEZE_PROBE_RETRIES * FREEZE_PROBE_DELAY_MS / 1000);
+    throw new Error(`${label}: production never reported writes ${want.toUpperCase()} `
+        + `after ${waited}s — last probe: ${last}`);
+}
+
+// --- the write freeze this run owns -------------------------------------------------
+// Set the moment we ASK for the freeze (not once it is confirmed), so an interrupt
+// during the confirmation poll still thaws. Null whenever we do not own one: a dry
+// run, --allow-unfrozen, or an outer window that was already frozen when we started.
+let heldFreeze = null;
+
+async function releaseFreeze() {
+    if (!heldFreeze) return true;
+    const { origin } = heldFreeze;
+    heldFreeze = null;
+    console.log(`\nthawing writes (${FREEZE_SECRET}=0)...`);
+    try {
+        setFreezeSecret(false);
+        console.log(`  freeze    OFF — ${await waitForFreezeState(origin, 'open', 'thaw')}`);
+        return true;
+    } catch (err) {
+        console.error(`\n*** PRODUCTION MAY STILL BE FROZEN — EVERY WRITE IS BEING REFUSED ***\n`
+            + `  ${err.message}\n`
+            + '  Lift it by hand, now:\n'
+            + `    cd pwa && printf 0 | npx wrangler secret put ${FREEZE_SECRET}\n`
+            + '    node auxiliary/check_live_status.mjs --expect-unfrozen');
+        return false;
+    }
+}
+
+// --- the in-window mirror refresh -----------------------------------------------------
+function devServerRunning() {
+    return new Promise((resolve) => {
+        const sock = net.connect({ host: '127.0.0.1', port: DEV_PORT });
+        const done = (v) => { sock.destroy(); resolve(v); };
+        sock.setTimeout(500);
+        sock.once('connect', () => done(true));
+        sock.once('timeout', () => done(false));
+        sock.once('error', () => done(false));
+    });
+}
+
+async function refreshLocalMirror() {
+    if (!fs.existsSync(VENV_PY)) {
+        throw new Error(`missing ${VENV_PY} — cannot refresh the local mirror inside the freeze`);
+    }
+    if (await devServerRunning()) {
+        throw new Error(`something is listening on 127.0.0.1:${DEV_PORT} (wrangler dev?).\n`
+            + '  pipeline.fetch_database overwrites the miniflare D1 file, and doing that under\n'
+            + '  a live workerd corrupts its view. Stop `npm run dev` and re-run.');
+    }
+    console.log('\nrefreshing the local mirror inside the freeze (pipeline.fetch_database)...');
+    const res = spawnSync(VENV_PY, ['-u', '-m', 'pipeline.fetch_database'],
+        { cwd: REPO, stdio: 'inherit' });
+    if (res.status !== 0) throw new Error(`pipeline.fetch_database failed (${res.status})`);
 }
 
 const localMaxReportId = () => sqliteJson('SELECT MAX(id) AS m FROM tsumego_reports')[0]?.m ?? null;
 const remoteMaxReportId = () => remoteQueryRows('SELECT MAX(id) AS m FROM tsumego_reports')[0]?.m ?? null;
 
-// Fails CLOSED: any error reaching production is a refusal, because "we could not
-// confirm the freeze" and "the freeze is on" must not be the same outcome here.
-async function preflightRemote() {
+// Open the window: freeze unless someone else already has, refresh the mirror inside
+// it, and refuse unless the snapshot matches production exactly. Throws rather than
+// exits so the caller's finally still thaws whatever we turned on.
+async function openWindow() {
     const origin = productionOrigin();
     console.log(`preflight: ${origin}`);
 
-    const { frozen, detail } = await probeProductionFrozen(origin);
-    console.log(`  freeze    ${frozen ? 'ON' : 'OFF'} — ${detail}`);
-    if (!frozen) {
-        console.error(
-            '\nREFUSING: production is not frozen.\n'
-            + '  This script rebuilds each row\'s buffer from a snapshot and writes it back;\n'
-            + '  an attempt landing in between is truncated out of that buffer permanently.\n'
-            + '  Freeze first: set MAINTENANCE_MODE = "1" in pwa/wrangler.toml, then\n'
-            + '  `cd pwa && npm run deploy`. Unfreeze the same way when done.\n'
-            + '  (--allow-unfrozen overrides this deliberately.)');
-        process.exit(1);
+    const before = await probeProductionFreeze(origin);
+    console.log(`  freeze    ${before.state.toUpperCase()} — ${before.detail}`);
+    if (before.state === 'unknown') {
+        throw new Error('could not determine whether production is frozen — refusing to write.\n'
+            + `  ${before.detail}`);
+    }
+
+    const wasAlreadyFrozen = before.state === 'frozen';
+    if (wasAlreadyFrozen) {
+        console.log('  production was ALREADY frozen — this is an outer surgery window, so\n'
+            + '  leaving it frozen on exit and trusting db/d1.sqlite as it stands (no fetch:\n'
+            + '  an incremental pull cannot see rows a purge rewrote).');
+    } else {
+        console.log(`  freezing writes (${FREEZE_SECRET}=1)...`);
+        heldFreeze = { origin };
+        setFreezeSecret(true);
+        console.log(`  freeze    ON — ${await waitForFreezeState(origin, 'frozen', 'freeze')}`);
+        await refreshLocalMirror();
     }
 
     const local = localMaxReportId();
     const remote = remoteMaxReportId();
-    console.log(`  snapshot  local MAX(id) ${local} vs remote ${remote}`);
+    console.log(`\n  snapshot  local MAX(id) ${local} vs remote ${remote}`);
     if (local !== remote) {
-        console.error(
-            `\nREFUSING: the local mirror is ${remote > local ? `${remote - local} row(s) behind` : 'ahead of'} production.\n`
-            + '  The buffers would be rebuilt from a stale snapshot. Re-fetch INSIDE the\n'
-            + '  freeze: ./.venv/bin/python3 -m pipeline.fetch_database\n'
+        throw new Error(
+            `the local mirror is ${remote > local ? `${remote - local} row(s) behind` : 'ahead of'} production.\n`
+            + '  The buffers would be rebuilt from a stale snapshot.\n'
+            + (wasAlreadyFrozen
+                ? '  Inside an outer window this script does not re-fetch — reconcile the mirror\n'
+                  + '  yourself (see docs/db_surgery_runbook.md) and re-run.\n'
+                : '  The in-window pipeline.fetch_database should have made these equal.\n')
             + '  (A purge changes rows without changing MAX(id) — after surgery, verify with\n'
             + '  the runbook\'s COUNT/SUM check rather than relying on this one.)');
-        process.exit(1);
     }
     return { origin, maxId: remote };
 }
 
 // Turns "the window was closed before we started" into "it stayed closed throughout".
 async function postflightRemote(before) {
-    const { frozen, detail } = await probeProductionFrozen(before.origin);
+    const { state, detail } = await probeProductionFreeze(before.origin);
     const remote = remoteMaxReportId();
-    const ok = frozen && remote === before.maxId;
-    console.log(`\npostflight: freeze ${frozen ? 'ON' : 'OFF'} (${detail}); MAX(id) ${before.maxId} -> ${remote}`);
+    const ok = state === 'frozen' && remote === before.maxId;
+    console.log(`\npostflight: freeze ${state.toUpperCase()} (${detail}); MAX(id) ${before.maxId} -> ${remote}`);
     if (ok) { console.log('window held — no attempt landed during the apply.'); return true; }
     console.error(
         '\nWARNING: the write freeze did not hold for the whole run.\n'
-        + `  ${frozen ? '' : 'Production accepted writes again before the apply finished.\n  '}`
+        + `  ${state === 'frozen' ? '' : 'Production was not confirmed frozen at the end of the apply.\n  '}`
         + `${remote === before.maxId ? '' : `${remote - before.maxId} attempt(s) landed, so those users' buffers may have been truncated.\n  `}`
-        + '  Re-freeze, re-run pipeline.fetch_database, and re-run this script to rebuild\n'
-        + '  every buffer from a clean snapshot — the rebuild is idempotent and repairs it.');
+        + '  Just re-run this script: it re-freezes, re-fetches and rebuilds every buffer\n'
+        + '  from a clean snapshot — the rebuild is idempotent and repairs it.');
     return false;
 }
 
@@ -354,22 +474,22 @@ function findMiniflareD1() {
 // --- main -------------------------------------------------------------------------------
 async function main() {
     if (!fs.existsSync(DB_PATH)) {
-        console.error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database`);
-        process.exit(1);
+        throw new Error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database --full`);
     }
     if (!fs.existsSync(PARAMS_BIN)) {
-        console.error(`missing ${PARAMS_BIN} — run: ./.venv/bin/python3 -m pipeline.package_for_pwa`);
-        process.exit(1);
+        throw new Error(`missing ${PARAMS_BIN} — run: ./.venv/bin/python3 -m pipeline.package_for_pwa`);
     }
 
-    // Preflight BEFORE the per-user recompute, so a missing freeze costs seconds
-    // rather than minutes of work thrown away.
+    // Open the window BEFORE the per-user recompute, so a refusal costs seconds
+    // rather than minutes of work thrown away. It also refreshes the local mirror,
+    // so everything below reads the in-window snapshot.
     let frozenWindow = null;
     if (applyRemote && !allowUnfrozen) {
-        frozenWindow = await preflightRemote();
+        frozenWindow = await openWindow();
     } else if (applyRemote) {
-        console.warn('WARNING: --allow-unfrozen — skipping the freeze/snapshot preflight.\n'
-            + '  Any attempt reported during this run is truncated out of that user\'s buffer.');
+        console.warn('WARNING: --allow-unfrozen — not freezing, not fetching, not checking the\n'
+            + '  snapshot, not thawing. Any attempt reported during this run is truncated out\n'
+            + '  of that user\'s buffer.');
     }
 
     const [{ m: latest }] = sqliteJson('SELECT MAX(created_at) AS m FROM tsumego_reports');
@@ -455,7 +575,7 @@ async function main() {
         console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);
     }
 
-    if (!statements.length) { console.log('\nnothing to write'); return; }
+    if (!statements.length) { console.log('\nnothing to write'); return 0; }
     fs.writeFileSync(sqlOut, statements.join('\n') + '\n');
     console.log(`\n${statements.length} statement(s) written to ${sqlOut}`);
 
@@ -463,10 +583,10 @@ async function main() {
         console.log('applying to REMOTE production D1...');
         const res = spawnSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--remote', '--yes', `--file=${sqlOut}`],
             { cwd: PWA_DIR, stdio: 'inherit' });
-        if (res.status !== 0) process.exit(res.status ?? 1);
+        if (res.status !== 0) throw new Error(`wrangler d1 execute failed (${res.status})`);
         // Re-check the window only if we established one; --allow-unfrozen opted out.
-        if (frozenWindow && !await postflightRemote(frozenWindow)) process.exit(1);
-        process.exit(0);
+        if (frozenWindow && !await postflightRemote(frozenWindow)) return 1;
+        return 0;
     } else if (applyLocal) {
         const dbPath = findMiniflareD1();
         console.log(`applying to local miniflare D1: ${dbPath} (stop npm run dev first)`);
@@ -474,6 +594,29 @@ async function main() {
     } else {
         console.log('dry run — re-run with --local (miniflare D1) or --remote (production D1) to write.');
     }
+    return 0;
 }
 
-await main();
+// The thaw has to survive every exit path, or a crash mid-run leaves production
+// refusing writes indefinitely. process.exit() skips finally blocks, so nothing
+// below main() may call it before releaseFreeze() has run.
+let interrupted = false;
+for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, async () => {
+        if (interrupted) process.exit(130);   // a second ^C gives up and leaves it frozen
+        interrupted = true;
+        console.error(`\n${sig} — releasing the write freeze before exiting...`);
+        process.exit(await releaseFreeze() ? 130 : 1);
+    });
+}
+
+let exitCode = 0;
+try {
+    exitCode = await main() ?? 0;
+} catch (err) {
+    console.error(`\nREFUSING: ${err.message}`);
+    exitCode = 1;
+} finally {
+    if (!await releaseFreeze()) exitCode = 1;
+}
+process.exit(exitCode);

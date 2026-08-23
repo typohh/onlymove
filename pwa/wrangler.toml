@@ -34,14 +34,28 @@ crons = ["0 * * * *"]
 # VAPID identity for Web Push. The private key is a wrangler secret:
 #   wrangler secret put VAPID_PRIVATE_KEY
 # Public key is non-secret (clients fetch it via GET /push/vapid-public-key).
+# Maintenance freeze. MAINTENANCE_MODE = "1" makes every POST route return 503 and
+# skips the cron, so a snapshot-relative operation (auxiliary/purge_tsumegos.mjs,
+# auxiliary/update_leaderboard_ranks.mjs) can run against tables that are standing
+# still. Clients treat the 503 exactly like being offline: the attempt stays un-acked
+# and the durable outbox re-uploads it afterwards, so no attempt is lost and there is
+# nothing to coordinate on the client side.
+#
+# It is a SECRET, deliberately NOT a [vars] entry, so it can be flipped without a
+# build, a commit or a deploy — `wrangler secret put` pushes a new version reusing the
+# existing code bundle, which propagates exactly like a deploy and so keeps the one
+# property the freeze depends on: once a probe confirms it, EVERY colo is frozen.
+# A [vars] entry of the same name would collide with the secret and win on the next
+# `wrangler deploy`, silently thawing an open window — so do not reintroduce one.
+# Unset reads as unfrozen (maintenanceFrozen tests === "1"), which is the right
+# default: enforcement lives in each script's preflight, not in this file.
+#   cd pwa && printf 1 | npx wrangler secret put MAINTENANCE_MODE   # freeze
+#   cd pwa && printf 0 | npx wrangler secret put MAINTENANCE_MODE   # thaw
+#   node auxiliary/check_live_status.mjs --expect-frozen|--expect-unfrozen
+# update_leaderboard_ranks.mjs --remote does all of this itself; for `wrangler dev`
+# put MAINTENANCE_MODE=1 in .dev.vars (gitignored) if you need to test the freeze.
+
 [vars]
-# Maintenance freeze. "1" makes every POST route return 503 and skips the cron,
-# so DB surgery (auxiliary/purge_tsumegos.mjs) can run against a table that is
-# standing still. Clients treat the 503 exactly like being offline: the attempt
-# stays un-acked and the durable outbox re-uploads it afterwards, so no attempt
-# is lost and there is nothing to coordinate on the client side.
-# Flip with a deploy: set "1", deploy, do the surgery, set "0", deploy.
-MAINTENANCE_MODE = "0"
 VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
 VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"
 

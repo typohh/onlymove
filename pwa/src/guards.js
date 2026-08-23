@@ -37,6 +37,12 @@ export const isValidUserId = (v) => typeof v === 'string' && USER_ID_RE.test(v);
 // the surgery runs. The one writer this does not cover is the lazy
 // server_stats recompute behind GET /server-stats, which only rewrites its own
 // cache row (the cron reconciles it) and never touches the tables under surgery.
+//
+// MAINTENANCE_MODE is a wrangler SECRET, not a [vars] entry, so the operating
+// scripts can flip it with `wrangler secret put` — a version rollout reusing the
+// deployed bundle, hence no build and no commit, while still propagating like a
+// deploy so one probe stands for every colo. Unset therefore has to read as open,
+// which it does: enforcement lives in each script's preflight, not here.
 export function maintenanceFrozen(env) {
   return String(env && env.MAINTENANCE_MODE || '') === '1';
 }
