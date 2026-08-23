@@ -20,7 +20,11 @@
 // Layout (see style.css): in landscape the bubble is a plain in-flow block in
 // the controls column, below the buttons, always fully visible. In portrait it
 // is a position:fixed overlay (out of the row flow, so it can never resize or
-// shift the board) parked below the controls; its tab lifts it over the board.
+// shift the board) parked below the controls; its tab lifts it over the board,
+// but only while the parked bubble actually runs off the bottom of the usable
+// band — a list short enough to be entirely visible where it parks gets the
+// landscape treatment instead (inert tab, no arrows), so the strip below the
+// buttons carries no target for an accidental tap that would do nothing.
 // The "why this move" title lives in the tab bar itself, not in the content.
 
 import { state } from './state.js';
@@ -32,6 +36,10 @@ import { onTrainingFocusShown } from './onboarding.js';
 
 const MIN_Z = MOTIF_Z;    // include a problem motif only past the shared gate
 const MAX_MOTIFS = 3;
+// Sub-pixel slack on the fits-on-screen comparison: both sides are fractional
+// CSS pixels, and a bubble whose last text row ends a rounding error past the
+// band is visible.
+const FIT_SLACK = 0.5;
 
 // Review-mode content, recomputed per problem in populateMotifBubble(). The
 // solving-mode training-focus content is derived fresh in syncMotifBubble()
@@ -52,8 +60,9 @@ const isPortrait = () => layoutMode() === 'portrait';
  * measure it here and feed the CSS via custom properties:
  *   --mb-park-top : viewport-y just below the buttons (parked top edge)
  *   --mb-lift     : translateY that lands the bubble's centre at screen centre
- * Landscape ignores both (the bubble is in-flow there). No-op unless the
- * bubble is currently visible in portrait.
+ * It also decides `.motif-bubble-fits` (see below). Landscape ignores all of
+ * it (the bubble is in-flow there). No-op unless the bubble is currently
+ * visible in portrait.
  */
 export function refreshMotifBubbleMetrics() {
     const bubble = el('motif-bubble');
@@ -74,6 +83,16 @@ export function refreshMotifBubbleMetrics() {
     const usableCentre = vp.safeTop + vp.h / 2;
     const lift = usableCentre - (parkTop + bubbleHeight / 2);
     bubble.style.setProperty('--mb-lift', `${lift}px`);
+    // A short list can end above the bottom of the usable band, in which case
+    // the lift reveals nothing and the tab is just a target for accidental
+    // taps in the strip below the buttons. `.motif-bubble-fits` then makes it
+    // inert and drops the arrows, which is the state landscape is in by
+    // construction. The test cannot flap: the arrows are the tallest thing in
+    // the tab, so dropping them can only SHRINK the bubble, and one that fits
+    // with them still fits without.
+    const fits = parkTop + bubbleHeight <= vp.safeTop + vp.h + FIT_SLACK;
+    bubble.classList.toggle('motif-bubble-fits', fits);
+    if (fits) bubble.classList.remove('over-board');
 }
 
 /**
@@ -209,6 +228,10 @@ export function initMotifBubble() {
     if (!tab || !bubble) return;
     tab.addEventListener('click', (e) => {
         e.preventDefault();
+        // Guarded in JS as well as by the stylesheet's pointer-events, because
+        // the tab is a <button>: it stays keyboard-focusable when
+        // pointer-events are off, and Enter would still fire this click.
+        if (bubble.classList.contains('motif-bubble-fits')) return;
         bubble.classList.toggle('over-board');
     });
 

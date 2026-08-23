@@ -524,6 +524,8 @@ body {
      can never resize or shift the board), parked below the controls; its
      title bar "tab" lifts the bubble over the board and back. Show/hide and
      slide are driven by JS toggling `.motif-bubble-hidden` and `.over-board`.
+     A bubble that ends on-screen where it parks gets `.motif-bubble-fits` and
+     with it the landscape treatment, there being nothing to lift into view.
    The tab carries the "why this move" title itself (no header line inside
    the content), flanked by arrows in portrait. */
 .motif-bubble {
@@ -641,6 +643,19 @@ body {
     .motif-bubble.over-board .motif-bubble-tab::before,
     .motif-bubble.over-board .motif-bubble-tab::after {
         transform: rotate(90deg);         /* over board: point back down */
+    }
+    /* Short enough to end inside the usable band where it parks, so nothing is
+       hidden and the lift would move it for no reason. JS measures that and
+       sets the class (refreshMotifBubbleMetrics in motif-bubble.js); the tab
+       then becomes the plain title bar it already is in landscape — arrows
+       gone, and inert, so the strip below the buttons stops catching taps that
+       would do nothing. */
+    .motif-bubble.motif-bubble-fits .motif-bubble-tab {
+        pointer-events: none;
+    }
+    .motif-bubble.motif-bubble-fits .motif-bubble-tab::before,
+    .motif-bubble.motif-bubble-fits .motif-bubble-tab::after {
+        display: none;
     }
 }
 
