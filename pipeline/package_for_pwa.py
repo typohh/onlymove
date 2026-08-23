@@ -423,94 +423,6 @@ def axis_count_to_ship(output_dir):
     return None, "no axes/ and no served embedding_meta.json"
 
 
-def check_axis_prior(output_dir):
-    """SHIP GATE: ratings/population_constants.json's per-axis weakness prior must
-    match the axis count about to be published, entry for entry.
-
-    The client's weakness model requires weakness_axis_lambda to be an array of
-    exactly K finite positive precisions and SKIPS TRAINING otherwise — there is
-    no scalar fallback by design (pwa/js/weakness.js). So an axis refit that
-    changes K without a following fit_population_constants ships perfectly valid
-    files that silently disable weakness detection for every user: an empty
-    findings pane and selection stuck in the information regime, with no error
-    anywhere. That ordering is a real data dependency (train_mirt →
-    fit_population_constants → package_for_pwa) and this is what enforces it.
-
-    A PRE-FLIGHT rather than a gate beside the axis-label check in
-    load_embeddings, for two reasons: it must abort before the FIRST shard is
-    written, not between sizes, and it must also cover the embeddings-absent
-    path, which returns before load_embeddings is ever called yet still
-    republishes population_constants.json onto frozen shards."""
-    K, source = axis_count_to_ship(output_dir)
-    if K is None:
-        return                                  # process_size raises on this run
-    path = os.path.join(PROJECT_ROOT, RATINGS_ROOT, "population_constants.json")
-    if not os.path.exists(path):
-        raise SystemExit(
-            f"REFUSING to package: no {RATINGS_ROOT}/population_constants.json "
-            f"— run pipeline.fit_population_constants")
-    with open(path, encoding="utf-8") as f:
-        _pop = json.load(f)
-    lam = _pop.get("weakness_axis_lambda")
-    con = _pop.get("weakness_contrast_mean")
-    amu = _pop.get("weakness_axis_mean")
-    if not isinstance(lam, list) or len(lam) != K:
-        raise SystemExit(
-            f"REFUSING to package: weakness_axis_lambda has "
-            f"{len(lam) if isinstance(lam, list) else 'no'} entries but K={K} "
-            f"(from {source}). The axis count changed without a matching "
-            f"population fit — re-run pipeline.fit_population_constants, then "
-            f"package again. Shipping as-is would disable weakness training on "
-            f"every client with no visible error.")
-    bad = [i for i, v in enumerate(lam)
-           if not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0]
-    if bad:
-        raise SystemExit(
-            f"REFUSING to package: weakness_axis_lambda entries {bad} are not "
-            f"finite positive precisions ({[lam[i] for i in bad]}). The client "
-            f"requires every entry positive and finite and skips training "
-            f"otherwise — re-run pipeline.fit_population_constants.")
-    # The contrast centre selection subtracts before scoring (pwa/js/weakness.js).
-    # Same K dependency and the same silent-failure shape as the precisions above, one
-    # regime over: a stale or missing centre doesn't disable weakness training, it
-    # drops selection back to the information regime — problems still get served, just
-    # never personalized, with nothing anywhere saying so.
-    if not isinstance(con, list) or len(con) != K:
-        raise SystemExit(
-            f"REFUSING to package: weakness_contrast_mean has "
-            f"{len(con) if isinstance(con, list) else 'no'} entries but K={K} "
-            f"(from {source}). Re-run pipeline.fit_population_constants, then package "
-            f"again. Shipping as-is would leave every client's selection stuck in the "
-            f"information regime with no visible error.")
-    bad = [i for i, v in enumerate(con)
-           if not isinstance(v, (int, float)) or not math.isfinite(v)]
-    if bad:
-        raise SystemExit(
-            f"REFUSING to package: weakness_contrast_mean entries {bad} are not "
-            f"finite ({[con[i] for i in bad]}) — re-run "
-            f"pipeline.fit_population_constants.")
-    # The SUM direction's centre, mandatory for the same reason the other two are:
-    # weakness.js centres its ridge on it and stats-weaknesses.js tests level one
-    # against it, and BOTH skip rather than substitute a value — so a constants
-    # file predating this vector ships a client that quietly trains nothing.
-    if not isinstance(amu, list) or len(amu) != K:
-        raise SystemExit(
-            f"REFUSING to package: weakness_axis_mean has "
-            f"{len(amu) if isinstance(amu, list) else 'no'} entries but K={K} "
-            f"(from {source}). Re-run pipeline.fit_population_constants — "
-            f"shipping as-is disables weakness training on every client with no "
-            f"visible error.")
-    bad_amu = [i for i, v in enumerate(amu)
-               if not isinstance(v, (int, float)) or not math.isfinite(v)]
-    if bad_amu:
-        raise SystemExit(
-            f"REFUSING to package: weakness_axis_mean entries {bad_amu} are not "
-            f"finite ({[amu[i] for i in bad_amu]}).")
-    print(f"  axis prior OK: weakness_axis_lambda has K={K} finite positive "
-          f"entries, weakness_contrast_mean and weakness_axis_mean K={K} finite "
-          f"(K from {source})")
-
-
 def _read_embedding_version(embed_dir):
     """The content-hash embedding_version stamped into axes.npz by
     pipeline.train_mirt (the PWA reads it to auto-invalidate localStorage on
@@ -1166,12 +1078,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[warn] couldn't read {MANIFEST_PATH}: {e}; rebuilding all")
     prev_sizes = prev_manifest.get("sizes", {})
-
-    # SHIP GATE, before the first byte is written: the per-axis weakness prior in
-    # ratings/ must match the axis count this run publishes. See check_axis_prior —
-    # a mismatch ships cleanly and silently disables weakness training everywhere.
-    print("--- preflight ---")
-    check_axis_prior(OUTPUT_DIR)
 
     joint_embedding_meta = None
     ratings_versions = {}

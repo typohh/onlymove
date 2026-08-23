@@ -5,7 +5,7 @@ of the hardcoded defaults in game-logic.js (time/review bias) and model.js
 (retention constants), so the constants track the real user population instead of
 drifting from a one-off manual fit.
 
-Five groups of constants:
+Three groups of constants:
 
 1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
    overlays gate on a per-user solving/review-time coefficient that is biased
@@ -36,48 +36,15 @@ Five groups of constants:
    unknown hidden reviews, so only post-cutoff chains give trustworthy gaps/r).
    Z0 = logit(0.7) is a fixed reference (LN_C is the base stability at p=0.7).
 
-4. WEAKNESS_AXIS_LAMBDA (weakness.js): a per-axis prior precision vector (length K) —
-   the L2 precision on each per-embedding-axis beta of the client's weakness logistic.
-   Fit by empirical Bayes: the between-user variance tau_k^2 of each axis's weakness
-   coefficient is a population variance component, estimated by EM with a Laplace
-   E-step — per-user MAP ridge fits under the current per-axis prior, then
-   tau_k^2 <- mean_u(beta_uk^2 + posterior var_uk). Axes along which users genuinely
-   differ get a loose prior (their coefficients can surface in the Weaknesses pane);
-   axes with no between-user signal stay pinned. The offline design is the client's own
-   AUGMENTED one ([1, problemRank, correct_emb, picked_emb], 2 + 2K columns, both of an
-   axis's slots sharing lambda_k), so the two are the same estimator and their
-   coefficients are directly comparable; tau_k^2 is taken from the SUM direction, which
-   makes the shipped per-coefficient lambda_k = 2 / tau_k^2 put exactly N(0, tau_k^2)
-   on beta_correct[k] + beta_picked[k]. This vector is MANDATORY — there is no scalar
-   fallback: if the population is too sparse to fit it, fit_population_constants RAISES
-   rather than shipping a fallback, and the client requires it.
-
-5. WEAKNESS_CONTRAST_MEAN (weakness.js): the population mean of
-   beta_correct[k] - beta_picked[k], length K, fit in the same pass as (4) and equally
-   mandatory. Selection scores candidates on that CONTRAST, not on the sum, and the
-   contrast is displaced from zero for everyone: across wrong attempts the played cell
-   differs from the answer by a systematic corpus offset — a description of what wrong
-   moves look like, not of who played them — which the likelihood routes into
-   beta_picked. Scoring the raw contrast therefore serves every user the same corner of
-   the corpus in the shape of personalisation. Consumers subtract this vector before
-   scoring, leaving the part that actually differs between users. Note the deliberate
-   asymmetry with (4): a shared SUM coefficient is residual difficulty and HALTS the
-   fit, because centring it would paper over a defect belonging upstream in the axis fit;
-   a shared CONTRAST is measured wrong-move geometry, and centring it removes a known
-   nuisance rather than hiding one.
-
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
 
 Needs the backend ratings/<size>/ 3PL params (tsumego_ratings.csv,
 tsumego_slopes.csv, tsumego_floors.csv — written by train_mirt)
-ratings/rating_to_rank.json (M, for the weakness ridge's problemRank feature),
-axes/per_problem.csv (the weakness ridge's correct-move embeddings),
-axes/per_cell/ (the picked-move block of the same design),
-and db/d1.sqlite. It reads the backend directly, NOT the served
-pwa/tsumegos/ shards: package_for_pwa is the only bridge into pwa/, so nothing
-upstream of it depends on the dist artifacts. No GPU, not part of the in-order
-pipeline.
+ratings/rating_to_rank.json (M, for the rank prior's grid), and db/d1.sqlite.
+It reads the backend directly, NOT the served pwa/tsumegos/ shards:
+package_for_pwa is the only bridge into pwa/, so nothing upstream of it depends
+on the dist artifacts. No GPU, not part of the in-order pipeline.
 
 Run:
   ./.venv/bin/python3 -m pipeline.fetch_database          # refresh db/d1.sqlite
@@ -87,7 +54,6 @@ Run:
 
 import argparse
 import bisect
-import csv
 import hashlib
 import json
 import math
@@ -134,9 +100,6 @@ DEFAULTS = {
     # mapping (pipeline.map_rating_to_rank fits α jointly with the curve + couplings) and
     # READ THROUGH here into population_constants.json — not fit here. Fallback only.
     "time_adjust": {"alpha_per_log10_min": -0.16, "center_log10_min": -0.64},
-    # NB: no weakness prior default. weakness_axis_lambda is fit here and is
-    # MANDATORY — if it can't be fit the run raises rather than shipping a
-    # fabricated fallback (there is no scalar weakness_ridge_lambda anymore).
 }
 MIN_RETENTION_EVENTS = 400             # below this, keep the retention defaults
 MIN_RECALL_HOURS = 6.0                 # pwa/js/model.js stability floor, in hours
@@ -181,66 +144,6 @@ PRIOR_GRID_SD = 4.0
 # satisfiable only while the fit emitted a pathological rating tail; a better-
 # behaved fit narrows that tail and fails it, which is the wrong way round.
 PRIOR_GRID_MUST_CONTAIN = (-20.0, 9.0)       # 20k .. 10d, M's own knot range
-
-# --- Weakness-model per-axis prior (pwa/js/weakness.js) — shared inputs ---
-# The per-axis L2 precision on the client's weakness betas is fit by empirical
-# Bayes (group 4 / fit_weakness_axis_priors). These are the shared inputs.
-# Board-independent (9x9+13x13 pooled), the embedding axes being joint.
-WEAKNESS_EMBED_CSV = os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
-# Per-CELL axis vectors, for the picked-move block of the client's design. Same
-# arrays package_for_pwa fans out into the per-shard .embeddings.bin sidecars, read
-# here straight from the axis fit's output (nothing upstream of packaging depends on
-# pwa/). Keyed in the extraction frame: xys is board-scan order with y counting from
-# the BOTTOM, so a reported "C7" is (x=2, y=6) — see _picked_xy.
-WEAKNESS_PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
-# tsumego_reports.move is written by toBoardNotation (pwa/js/sgf.js), whose column
-# alphabet skips I, and always in the CANONICAL orientation-0 frame — the client
-# inverse-transforms the click before reporting, so a repeat's random reorientation
-# never reaches the log and every row indexes the shard SGF directly.
-WEAKNESS_MOVE_COLS = "ABCDEFGHJKLMNOPQRST"
-
-
-def _weakness_k_embed():
-    """Axis count K, from the per_problem.csv header — the axis set grows with
-    data the shipped axis count is whatever the current fit wrote, so it is never hardcoded."""
-    with open(WEAKNESS_EMBED_CSV, newline="") as f:
-        header = csv.DictReader(f).fieldnames or []
-    return sum(1 for c in header if c.startswith("embed_"))
-
-# --- Per-axis weakness prior (weakness_axis_lambda; empirical Bayes, see group 5) ---
-WEAKNESS_EB_MAX_N = 500              # per-user window, mirrors the client's MODEL_INPUT_HISTORY_LENGTH
-WEAKNESS_EB_MIN_N = 100              # attempts a user needs to contribute
-WEAKNESS_EB_MIN_USERS = 30           # below this, the fit raises (no fallback — see main)
-WEAKNESS_EB_MAX_ITERS = 40
-WEAKNESS_EB_TOL = 1e-3               # max relative tau^2 change to declare convergence
-# Bounds on the SHIPPED client per-coefficient precision lambda_k = 2/tau_k^2:
-# the floor stops one outlier-driven axis from going near-unpenalized; the cap
-# keeps a zero-signal axis's precision finite (the client still trains on it).
-WEAKNESS_EB_LAMBDA_MIN = 20.0
-WEAKNESS_EB_LAMBDA_MAX = 5000.0
-# Halt if an axis's pooled per-user coefficient is this far from zero, measured as
-# mean^2 / second-moment — the share of what ships as between-user variance that is
-# really population displacement. Scale-free, and the only form that cannot be moved
-# by rescaling an axis (see the zero-mean check). NOT a significance test: with
-# hundreds of users a negligible mean is many standard errors from zero, so a p-value
-# would halt on nothing. This bar corresponds to a pooled mean a third of the
-# between-user spread, which displaces level one's credibility test by about a fifth
-# of its bar — borderline material, and the side to err on.
-# The bar is on whether the population mean EXCEEDS the between-user spread
-# (share > 0.5 <=> mu > sigma), not on whether a mean exists at all: a real
-# dimension may carry an offset, and the offset is shipped rather than refused.
-WEAKNESS_MEAN_SHARE_MAX = 0.50
-# Between-user variance must clear this multiple of the mean per-user estimation
-# variance. Below it, individual coefficients are not distinguishable from the
-# population's and "personalisation" on the axis is fitting noise.
-WEAKNESS_AXIS_MIN_VAR_RATIO = 0.25
-# Attempts whose resolvable picked cell differs from the answer, pooled over the fit.
-# Only these separate beta_correct from beta_picked, so below this the contrast is the
-# prior talking and its pooled mean is not a measurement — the fit raises rather than
-# shipping a centre that would tilt every client's selection on nothing. Sized so the
-# per-axis mean is many times its own standard error at the observed spread.
-WEAKNESS_CONTRAST_MIN_ROWS = 2000
-
 
 def sigmoid(x):
     return 0.5 * (1.0 + np.tanh(0.5 * x))
@@ -562,8 +465,7 @@ def read_time_adjust(ratings_dir):
 
 def load_rating_to_rank(ratings_dir):
     """rating→rank interpolator M from ratings/rating_to_rank.json (one shared
-    curve; the size-9 key stands in for either board), for the weakness ridge's
-    problemRank feature. None if absent/bad."""
+    curve; the size-9 key stands in for either board). None if absent/bad."""
     try:
         xs, ys = load_rating_rank_curve(ratings_dir)
     except (ValueError, OSError, KeyError, StopIteration):
@@ -716,388 +618,6 @@ def fit_first_success_step(events):
 # ---------------------------------------------------------------------------
 # Weakness-model per-axis prior (empirical Bayes).
 # ---------------------------------------------------------------------------
-def load_problem_embeddings(needed):
-    """{(size, tid): np.ndarray(K)} correct-move joint-ICA embedding from
-    axes/per_problem.csv, restricted to the attempted problems.
-    Empty if the CSV is absent — the per-axis fit then raises (no fallback)."""
-    if not os.path.exists(WEAKNESS_EMBED_CSV):
-        return {}
-    k_embed = _weakness_k_embed()
-    cols = [f"embed_{i}" for i in range(k_embed)]
-    out = {}
-    with open(WEAKNESS_EMBED_CSV, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                key = (int(row["size"]), row["tsumego_id"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            if key not in needed:
-                continue
-            try:
-                vec = np.array([float(row[c]) for c in cols], float)
-            except (TypeError, ValueError, KeyError):
-                continue
-            if vec.shape[0] == k_embed and np.all(np.isfinite(vec)):
-                out[key] = vec
-    return out
-
-
-def _picked_xy(move, size):
-    """Reported board notation -> (x, y) in the per_cell/activation frame, or None.
-
-    toBoardNotation is COL_LETTERS[x] + (size - y_sgf) and the extraction frame flips
-    the row (y_npz = size - 1 - y_sgf), so y_npz is just the printed row number minus
-    one. Verified against correct_idx vs the SGF solution move across the corpus."""
-    if not isinstance(move, str):
-        return None
-    m = move.strip().upper()
-    if len(m) < 2 or m[0] not in WEAKNESS_MOVE_COLS:
-        return None
-    try:
-        row = int(m[1:])
-    except ValueError:
-        return None
-    x, y = WEAKNESS_MOVE_COLS.index(m[0]), row - 1
-    if not (0 <= x < size and 0 <= y < size):
-        return None
-    return x, y
-
-
-def load_picked_embeddings(rows):
-    """{(size, tid, move): np.ndarray(K)} for the WRONG novel attempts — the axis
-    vector of the cell the user actually played.
-
-    This is the second half of the client's design (pwa/js/weakness.js): its logistic
-    carries a beta_correct block on the position's correct-move vector AND a
-    beta_picked block on the played cell, and only rows where the two DIFFER identify
-    them apart. Fitting the offline prior on the correct block alone therefore cannot
-    see the contrast beta_correct - beta_picked at all — which is the quantity
-    selection scores on (weaknessScore), so it is the quantity whose population
-    displacement has to be measured and shipped.
-
-    Resolved to one vector per (problem, move) pair actually attempted rather than a
-    whole per-cell table per problem: the corpus has ~150k problems with tens of legal
-    cells each, while the attempt log names only a few tens of thousands of pairs.
-    Missing entries are not an error — a row predating move logging (2026-05-15), a
-    pass, or a problem whose per_cell file is absent all fall back to picked = correct,
-    exactly as the client does when the sidecar fetch has not landed."""
-    if not os.path.isdir(WEAKNESS_PER_CELL_DIR):
-        return {}
-    wanted = defaultdict(set)
-    for r in rows:
-        if r["is_repeat"] or r["success"] or r["move"] is None:
-            continue
-        wanted[(int(r["size"]), r["problem"])].add(r["move"])
-    out = {}
-    for (size, tid), moves in wanted.items():
-        path = os.path.join(WEAKNESS_PER_CELL_DIR, str(size), f"{tid}.npz")
-        if not os.path.exists(path):
-            continue
-        try:
-            with np.load(path) as d:
-                cells = {(int(x), int(y)): i for i, (x, y) in enumerate(d["xys"])}
-                emb = d["embeddings"]
-                for mv in moves:
-                    xy = _picked_xy(mv, size)
-                    if xy is None or xy not in cells:
-                        continue
-                    vec = np.asarray(emb[cells[xy]], dtype=float)
-                    if np.all(np.isfinite(vec)):
-                        out[(size, tid, mv)] = vec
-        except (OSError, ValueError, KeyError):
-            continue
-    return out
-
-
-def _ridge_logistic(X, y, lam_vec, beta0=None):
-    """L-BFGS fit of an L2-penalized logistic regression. lam_vec is the per-
-    coefficient precision (0 = unpenalized). Returns (beta, success)."""
-    def nll_grad(beta):
-        z = X @ beta
-        nll = -np.sum(y * (-np.logaddexp(0.0, -z)) + (1 - y) * (-np.logaddexp(0.0, z)))
-        grad = X.T @ (sigmoid(z) - y) + lam_vec * beta
-        return nll + 0.5 * float(np.sum(lam_vec * beta * beta)), grad
-    if beta0 is None:
-        beta0 = np.zeros(X.shape[1])
-    res = minimize(nll_grad, beta0, jac=True, method="L-BFGS-B",
-                   options={"maxiter": 300, "ftol": 1e-10, "gtol": 1e-7})
-    return res.x, res.success
-
-
-def _weakness_user_datasets(by_user, rank_feat, embeddings, picked_embeddings):
-    """One (X, y) design per user for the empirical-Bayes variance fit: the most
-    recent WEAKNESS_EB_MAX_N novel rated+embedded attempts (mirroring the client's
-    MODEL_INPUT_HISTORY_LENGTH training window), users below WEAKNESS_EB_MIN_N or
-    with a degenerate outcome dropped.
-
-    X = [1, problemRank, correct_0..K-1, picked_0..K-1] — the client's AUGMENTED
-    design, column for column. The picked block repeats the correct block on a
-    solved attempt (picked == correct by definition) and on any wrong attempt whose
-    cell can't be resolved, which is the client's own fallback; such a row informs
-    only the sum direction, never the contrast."""
-    for urows in by_user.values():
-        ev = []
-        for r in urows:
-            if r["is_repeat"]:
-                continue
-            key = (r["size"], r["problem"])
-            if key not in rank_feat or key not in embeddings:
-                continue
-            corr = embeddings[key]
-            pick = corr
-            if not r["success"] and r["move"] is not None:
-                pick = picked_embeddings.get((int(r["size"]), r["problem"], r["move"]), corr)
-            ev.append((datetime.fromisoformat(r["created_at"].replace("Z", "+00:00")),
-                       1.0 if r["success"] else 0.0, rank_feat[key], corr, pick))
-        if len(ev) < WEAKNESS_EB_MIN_N:
-            continue
-        ev.sort(key=lambda e: e[0])
-        ev = ev[-WEAKNESS_EB_MAX_N:]
-        y = np.array([e[1] for e in ev], float)
-        if y.std() < 1e-3:
-            continue
-        X = np.column_stack([np.ones(len(ev)),
-                             np.array([e[2] for e in ev], float),
-                             np.vstack([e[3] for e in ev]),
-                             np.vstack([e[4] for e in ev])])
-        yield X, y
-
-
-def fit_weakness_axis_priors(by_user, params, embeddings, picked_embeddings, apply_m,
-                             allow_axis_mean=False):
-    """Per-axis prior precision vector for the client's weakness betas (group 5 in
-    the module docstring): empirical Bayes on the between-user variance component
-    tau_k^2 of each axis's weakness coefficient, by EM with a Laplace E-step —
-    per-user MAP ridge fits under the current per-axis prior, then
-    tau_k^2 <- mean_u(beta_uk^2 + posterior var_uk).
-
-    The design is the client's AUGMENTED one — [1, problemRank, correct, picked],
-    2 + 2K columns — not a single block on the correct-move vector. Both of an axis's
-    slots carry the same lambda_k, exactly as pwa/js/weakness.js penalises them, so
-    the offline fit and the client's are the same estimator and their coefficients are
-    directly comparable. tau_k^2 is still set from the SUM direction, keeping the
-    shipped contract (lambda_k = 2/tau_k^2 puts N(0, tau_k^2) on
-    beta_correct[k] + beta_picked[k]) unchanged.
-
-    Fitting the augmented design is what lets this step see the CONTRAST
-    beta_correct - beta_picked, which is the direction selection actually scores on
-    and which a single-block design cannot represent at all. Its population mean ships
-    as weakness_contrast_mean — see the note at the check below for why that one is
-    centred and the sum is not.
-
-    Returns (list of K lambdas, list of K contrast means, info), or (None, None, info)
-    when the data is too sparse."""
-    if apply_m is None:
-        return None, None, None, "no rating_to_rank.json — no per-axis prior"
-    if not embeddings:
-        return None, None, None, "no embeddings — no per-axis prior"
-    rank_feat = {k: apply_m(v[0]) for k, v in params.items()}
-    data = list(_weakness_user_datasets(by_user, rank_feat, embeddings, picked_embeddings))
-    if len(data) < WEAKNESS_EB_MIN_USERS:
-        return None, None, None, (f"only {len(data)} users with ≥{WEAKNESS_EB_MIN_N} usable "
-                            f"attempts (<{WEAKNESS_EB_MIN_USERS}) — no per-axis prior")
-    K = _weakness_k_embed()
-    d = 2 + 2 * K
-    # Rows where the played cell differs from the correct one are the ONLY rows that
-    # separate beta_correct from beta_picked. With too few of them the contrast is
-    # prior alone and its pooled mean would be an artefact of the shrinkage rather
-    # than a measurement, so refuse instead of shipping a fabricated centre.
-    splits = [int(np.count_nonzero(np.any(X[:, 2:2 + K] != X[:, 2 + K:], axis=1)))
-              for X, _ in data]
-    n_split = sum(splits)
-    if n_split < WEAKNESS_CONTRAST_MIN_ROWS:
-        return None, None, None, (f"only {n_split} attempts with a resolvable picked cell "
-                            f"distinct from the answer (<{WEAKNESS_CONTRAST_MIN_ROWS}) "
-                            f"— the beta_correct/beta_picked contrast is unidentified")
-    # tau^2 bounds in client-lambda terms (lambda_k = 2/tau_k^2).
-    tau2_lo, tau2_hi = 2.0 / WEAKNESS_EB_LAMBDA_MAX, 2.0 / WEAKNESS_EB_LAMBDA_MIN
-    # EM seed only (the iteration converges to the data-driven variance): the
-    # geometric mean of the bounds, so no scalar prior is needed to start.
-    tau2 = np.full(K, float(np.sqrt(tau2_lo * tau2_hi)))
-    betas = [np.zeros(d) for _ in data]   # warm starts across EM iterations
-    it = 0
-    for it in range(WEAKNESS_EB_MAX_ITERS):
-        # The SHIPPED lambda_k = 2/tau_k^2 on BOTH of axis k's slots — the client's own
-        # penalty lambda_k*(beta_correct_k^2 + beta_picked_k^2), so this loop is
-        # literally the fit the client runs. The factor of 2 is what keeps the M-step
-        # self-consistent: independent slots at precision 2/tau^2 give the sum variance
-        # tau^2, which is exactly the second moment tau^2 is then re-estimated from.
-        # Halving it (per-slot precision 1/tau^2) leaves the prior on the sum twice as
-        # loose as the quantity it is matched to, and the EM converges to an inflated
-        # tau^2 — a looser shipped prior with nothing in the data asking for it.
-        lam_vec = np.zeros(d)
-        lam_vec[2:2 + K] = 2.0 / tau2
-        lam_vec[2 + K:] = 2.0 / tau2
-        second_sum = np.zeros(K)          # Σ_u ((bc+bp)^2 + var(bc+bp)) — sets tau^2
-        first_sum = np.zeros(K)           # Σ_u (bc+bp) — the SHIPPED sum centre
-        var_sum = np.zeros(K)             # Σ_u var(bc+bp) — per-user estimation noise
-        # Contrast moments over POINT ESTIMATES only, and only over users whose
-        # contrast is identified at all. Both restrictions follow from what the number
-        # is for: selection scores the fitted contrast itself, so the posterior
-        # variance never reaches the score and does not belong in a statement about how
-        # much of the score is shared; and a user with no split row has bc and bp
-        # sitting on identical columns under one lambda, so their contrast is exactly
-        # zero by construction — averaging those in drags the shipped centre toward
-        # zero in proportion to how many such users there are, and the client would
-        # then under-subtract for everyone.
-        second_con = np.zeros(K)          # Σ_u (bc-bp)^2, identified users
-        first_con = np.zeros(K)           # Σ_u (bc-bp)  — the SHIPPED contrast centre
-        n_ok = n_con = 0
-        for i, (X, y) in enumerate(data):
-            beta, ok = _ridge_logistic(X, y, lam_vec, beta0=betas[i])
-            if not ok or not np.all(np.isfinite(beta)):
-                continue
-            betas[i] = beta
-            p = sigmoid(X @ beta)
-            w = np.clip(p * (1 - p), 1e-6, None)
-            H = (X * w[:, None]).T @ X + np.diag(np.maximum(lam_vec, 1e-6))
-            cov = np.linalg.inv(H)
-            bc, bp = beta[2:2 + K], beta[2 + K:]
-            vc, vp = np.diag(cov)[2:2 + K], np.diag(cov)[2 + K:]
-            # Off-diagonal of each axis's own 2x2 block. The two slots are strongly
-            # anti-correlated (most rows carry picked == correct, which moves them
-            # together), so dropping it would misstate BOTH directions' spread —
-            # understating the sum's and overstating the contrast's.
-            vcp = cov[np.arange(2, 2 + K), np.arange(2 + K, d)]
-            s, c = bc + bp, bc - bp
-            v_s = np.maximum(vc + vp + 2 * vcp, 0.0)
-            second_sum += s ** 2 + v_s
-            first_sum += s
-            var_sum += v_s
-            n_ok += 1
-            if splits[i]:
-                second_con += c ** 2
-                first_con += c
-                n_con += 1
-        if n_ok < WEAKNESS_EB_MIN_USERS:
-            return None, None, None, f"only {n_ok} converged per-user fits — no per-axis prior"
-        new_tau2 = np.clip(second_sum / n_ok, tau2_lo, tau2_hi)
-        rel = float(np.max(np.abs(new_tau2 - tau2) / np.maximum(tau2, 1e-12)))
-        tau2 = new_tau2
-        if rel < WEAKNESS_EB_TOL:
-            break
-    lam_axis = 2.0 / tau2
-
-    # ZERO-MEAN CHECK. The M-step above is the right one for the prior actually
-    # shipped, N(0, tau^2): it accumulates a second moment about ZERO, not a
-    # variance about the pooled mean. That is only the between-user variance if
-    # the pooled per-user coefficient really is zero on every axis, which
-    # nothing forces -- the client's coefficients are fit per user against the
-    # shipped loadings, and a population-level effect that the rank term cannot
-    # absorb lands in them. Where the mean is not zero the consequences run the
-    # same way on both sides: tau^2 absorbs mean^2 and overstates the spread, so
-    # the prior is looser and shrinks less than intended, AND the client shrinks
-    # toward a point that is not the population centre while level-one tests
-    # credibility against that same wrong point -- turning "everyone finds this
-    # axis hard" into a per-user finding. Reported per axis as a share of the
-    # second moment, which is the decision-relevant form: it says how much of
-    # what ships as variance is really displacement.
-    mu = first_sum / n_ok
-    raw2 = second_sum / n_ok
-    v_est = var_sum / n_ok                     # mean per-user estimation variance
-    # raw2 is a POSTERIOR second moment (beta^2 + var), so it already estimates
-    # E[theta^2] rather than the spread of point estimates. Subtracting mu^2
-    # therefore gives the between-user variance with estimation noise removed.
-    tau2_c = np.maximum(raw2 - mu ** 2, 0.0)
-    share = mu ** 2 / np.maximum(raw2, 1e-12)
-    resolve = tau2_c / np.maximum(v_est, 1e-12)
-    print("  weakness SUM direction (centre is SHIPPED as weakness_axis_mean):")
-    for k in range(K):
-        print(f"    axis {k}: pooled mean {mu[k]:+.4f}  between-user sd "
-              f"{np.sqrt(tau2_c[k]):.4f}  mean^2/second-moment {share[k]:6.1%}"
-              f"  var ratio {resolve[k]:5.1f}x")
-    print(f"    worst axis: {share.max():.1%} of the second moment is pooled mean; "
-          f"lowest between-user/estimation variance ratio {resolve.min():.1f}x")
-
-    # WHAT THIS REFUSES, AND WHAT IT NO LONGER REFUSES.
-    #
-    # The harm a non-zero population mean does is real but specific: the client's
-    # prior is centred at zero, so tau^2 is inflated by mu^2 (a looser prior than
-    # the data asks for) and level-one tests every user against zero, which flags a
-    # user holding the population-TYPICAL coefficient as having a finding. Both are
-    # removed by shipping the centre, which is what now happens — the same treatment
-    # the contrast direction already gets, and the sum/contrast asymmetry goes with
-    # it.
-    #
-    # So a non-zero mean is no longer sufficient to refuse. It cannot be: the
-    # statistic mu^2/(mu^2+sigma^2) at a 10% bar demands mu <= 0.33*sigma, and an
-    # ordinary between-user dimension is entitled to a population mean a third the
-    # size of its spread. Refusing there vetoes real axes — measured: an axis with
-    # between-user sd 0.26 against a mean of 0.11, i.e. 84% of its second moment
-    # surviving centring, was refused as "difficulty".
-    #
-    # What genuinely is difficulty in disguise is an axis on which users do not
-    # differ at all: every true coefficient equal, the apparent spread all fitting
-    # error. That is what tau2_c and the variance ratio measure, and it is what this
-    # refuses on. Two independent conditions, because they fail differently — an
-    # axis can be mostly offset while still resolvable, or well-centred while no
-    # individual coefficient is distinguishable from the population's.
-    bad_share = share > WEAKNESS_MEAN_SHARE_MAX
-    bad_resolve = resolve < WEAKNESS_AXIS_MIN_VAR_RATIO
-    if (bad_share | bad_resolve).any() and not allow_axis_mean:
-        k_bad = int(np.argmax(np.where(bad_share | bad_resolve, share, -1.0)))
-        why = ("its pooled mean EXCEEDS its between-user spread"
-               if bad_share[k_bad] else
-               "its between-user variance is not credibly above per-user "
-               "estimation noise")
-        raise RuntimeError(
-            f"axis {k_bad} is a population effect rather than a per-user one: {why} "
-            f"(mean {mu[k_bad]:+.4f}, between-user sd {np.sqrt(tau2_c[k_bad]):.4f}, "
-            f"mean^2/second-moment {share[k_bad]:.1%} against the "
-            f"{WEAKNESS_MEAN_SHARE_MAX:.0%} bar, variance ratio "
-            f"{resolve[k_bad]:.1f}x against {WEAKNESS_AXIS_MIN_VAR_RATIO:.1f}x).\n"
-            "An axis everyone responds to identically is residual difficulty, which "
-            "the rating factor carries and the axes must stay OUT of — "
-            "axes — so read this as that quarantine leaking and look there first. "
-            "Shipping a centre does NOT repair this case: centring an axis with no "
-            "between-user variation leaves nothing to personalise on, and the panel "
-            "would report the remaining noise as findings.\n"
-            "--allow-axis-mean ships anyway, deliberately.")
-
-    # CONTRAST DIRECTION. beta_correct - beta_picked is what problem-loader.js scores
-    # candidates on (weaknessScore), and it is displaced for a reason the sum check
-    # above cannot see and must not be read as: across wrong attempts the played cell
-    # differs from the answer by a systematic corpus offset
-    # delta = E[correct_emb - picked_emb | wrong], the same for every user, because it
-    # describes what wrong moves look like rather than who played them. The likelihood
-    # routes delta into beta_picked, so every user's contrast inherits a common -delta
-    # component and the score up-weights whichever problems sit furthest along +delta —
-    # the same corner of the corpus for everybody, dressed as personalisation.
-    #
-    # So this displacement is SHIPPED rather than halted on, and the asymmetry with the
-    # sum is the point, not an inconsistency. A shared SUM coefficient means an axis
-    # carries difficulty that belongs to the rating model, and centring it would hide
-    # that; a shared CONTRAST is a measured property of wrong-move geometry, and
-    # centring it removes a known nuisance so what remains is the part that differs
-    # between users. Consumers subtract this vector before scoring; the residual is
-    # zero-mean by construction, which is the condition the sum check enforces by
-    # refusing.
-    if n_con < WEAKNESS_EB_MIN_USERS:
-        return None, None, None, (f"only {n_con} users have an identified contrast "
-                            f"(<{WEAKNESS_EB_MIN_USERS}) — no contrast centre")
-    mu_con = first_con / n_con
-    raw2_con = second_con / n_con
-    share_con = mu_con ** 2 / np.maximum(raw2_con, 1e-12)
-    print("  weakness contrast direction (beta_correct - beta_picked; SHIPPED centre):")
-    for k in range(K):
-        print(f"    axis {k}: pooled mean {mu_con[k]:+.4f}  "
-              f"sd {np.sqrt(max(raw2_con[k] - mu_con[k] ** 2, 0.0)):.4f}"
-              f"  mean^2/second-moment {share_con[k]:6.1%}")
-    print(f"    worst axis: {share_con.max():.1%} of the scored contrast is a common "
-          f"offset — shipped as weakness_contrast_mean, from {n_con} users with an "
-          f"identified contrast over {n_split} attempts whose pick differs from the answer")
-
-    info = (f"{len(data)} users, {it + 1} EM iters; per-coefficient lambda "
-            f"min/median/max = {lam_axis.min():.0f}/{float(np.median(lam_axis)):.0f}/"
-            f"{lam_axis.max():.0f}; sum centre worst share {share.max():.1%}, "
-            f"lowest var ratio {resolve.min():.1f}x; "
-            f"contrast offset worst {share_con.max():.1%} ({n_con} users, {n_split} split rows)")
-    return ([round(float(l), 2) for l in lam_axis],
-            [round(float(m), 5) for m in mu_con],
-            [round(float(m), 5) for m in mu], info)
-
-
 # ---------------------------------------------------------------------------
 def _resort_to_default(field, reason, allow):
     """Called wherever the fit would otherwise fall back to the DEFAULTS value for
@@ -1121,10 +641,6 @@ def main():
     ap.add_argument("--allow-defaults", action="store_true",
                     help="ship the hardcoded DEFAULTS for any constant that can't be fit "
                          "(sparse/missing inputs) instead of crashing")
-    ap.add_argument("--allow-axis-mean", action="store_true",
-                    help="ship the zero-centred weakness prior even if an axis's pooled "
-                         "per-user coefficient breaches the zero-mean bar (normally a "
-                         "sign that population difficulty has leaked into that axis)")
     args = ap.parse_args()
 
     print(f"Loading attempts from {args.db} ...")
@@ -1208,43 +724,10 @@ def main():
                            args.allow_defaults)
         out["time_adjust"] = dict(DEFAULTS["time_adjust"])
 
-    # --- Per-axis weakness prior (empirical-Bayes between-user variance) ---
-    # The client's ONLY weakness prior. Mandatory: no scalar fallback, so if it
-    # can't be fit we RAISE rather than shipping population_constants.json without
-    # it (the client can't score weaknesses without this vector — a silent gap
-    # would go unnoticed forward, which is exactly what we refuse to do here).
-    apply_m = load_rating_to_rank(args.ratings_dir)   # for the weakness prior's problemRank
-    print("Fitting per-axis weakness prior (empirical-Bayes between-user variance) ...")
-    embeddings = load_problem_embeddings(needed)
-    picked_embeddings = load_picked_embeddings(rows)
-    print(f"  resolved {len(picked_embeddings)} picked-move cells from axes/per_cell/")
-    wa, wc, wm, wa_info = fit_weakness_axis_priors(by_user, params, embeddings,
-                                               picked_embeddings, apply_m,
-                                               args.allow_axis_mean)
-    if wa is None:
-        raise RuntimeError(
-            f"could not fit weakness_axis_lambda ({wa_info}). It is mandatory and has "
-            f"no fallback — fix the inputs (run map_rating_to_rank + train_mirt, "
-            f"or wait for more attempts) and re-run. Not shipping without it.")
-    out["weakness_axis_lambda"] = wa
-    # The centre for the direction selection scores on. Mandatory for the same reason
-    # as the precision vector: shipping the lambdas without it leaves consumers
-    # scoring an uncentred contrast, which is the whole defect this pair fixes.
-    out["weakness_contrast_mean"] = wc
-    # The SUM direction's population centre. Shipped for the same reason the
-    # contrast's is: the client's prior would otherwise sit at zero while the
-    # population sits elsewhere, which both loosens the prior (tau^2 inflated by
-    # mu^2) and makes level one test every user against a point the typical user
-    # does not occupy. An axis may legitimately carry an offset; what it may not
-    # carry is the absence of between-user variation, which the refusal above is
-    # what now guards.
-    out["weakness_axis_mean"] = wm
-    print(f"  {wa_info}")
-
     # --- Population rank prior (the window estimator's prior over user rank) ---
-    # Mandatory for the same reason as the weakness vector: without it the client's
-    # posterior has no anchor, and the failure is invisible — an unanchored estimator
-    # still returns a number, it just tracks wherever it last drifted.
+    # Mandatory and with no fallback: without it the client's posterior has no
+    # anchor, and the failure is invisible — an unanchored estimator still returns
+    # a number, it just tracks wherever it last drifted.
     print("Fitting population rank prior ...")
     # The raw curve file (both board keys), not apply_m: the grid derivation reads
     # per-size knots to map the corpus into rank space the way se_floor does.
