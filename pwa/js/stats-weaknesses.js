@@ -2,8 +2,11 @@
 //
 // The Weaknesses pane of the detailed-stats modal (stats-ui.js is the
 // orchestrator): a row for EVERY shipped motif, always, carrying the two
-// readings motif-stats.js computes and their 95% intervals, plus links to past
-// mistakes on the motifs where a deficit is credible.
+// readings motif-stats.js computes and their intervals, plus links to past
+// mistakes on the motifs where a deficit is credible. The intervals come from
+// motif-stats.js at the MOTIF_Z gate's own width, NOT at a conventional 95%:
+// locked that way, "band clear of the neutral line" and "flagged" are the same
+// statement, so a flagged row can never show a band straddling its neutral point.
 //
 // Both numbers come from the user's OWN attempts and nothing else — see
 // motif-stats.js for why no population centre appears anywhere in this path.
@@ -43,11 +46,9 @@ import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui
 // shard load — the second activation would nest a begin inside the first.
 let exampleOpenInFlight = false;
 
-// Credible-interval width. 95% is what "CI" means unqualified, and it is wide
-// on purpose: the contrast is the direction the picked = correct collinearity
-// starves, so for most users that column's band SHOULD span most of the scale.
-// Full-scale of the ranks track each way. The numeric value is always printed
-// beside the bar, so a clamp costs the bar's precision and nothing else.
+// Full-scale of the ranks track each way — the bar's clamp, not a statistic.
+// The numeric value is always printed beside the bar, so a clamp costs the bar's
+// precision and nothing else.
 const RANK_FULL_SCALE = 2.0;
 // Colour ramps from fully neutral at the MOTIF_Z gate to fully saturated one
 // further SE out, so a row below the gate carries no colour at all — the pane
