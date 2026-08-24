@@ -23,6 +23,7 @@
 // Baked at build time from the pipeline's output (pwa/tsumegos/embedding_meta.json);
 // build.mjs drops the served copy from dist since nothing fetches it anymore.
 import EMBEDDING_META from '../tsumegos/embedding_meta.json';
+import { EMBEDDING_VERSION_KEY } from './constants.js';
 
 export const EMBEDDING_META_INLINE = EMBEDDING_META || {};
 
@@ -45,3 +46,53 @@ export const RATINGS_VERSION = (() => {
     const parts = Object.keys(rv).sort().map((k) => rv[k]);
     return parts.length ? parts.join('-') : null;
 })();
+
+// The motif fit THIS BUILD ships. Compared against the device's stored value
+// (EMBEDDING_VERSION_KEY) to decide whether the vectors this build can produce are
+// the ones the device's stored history is made of.
+export const EMBEDDING_VERSION =
+    (EMBEDDING_META && typeof EMBEDDING_META.embedding_version === 'string')
+        ? EMBEDDING_META.embedding_version
+        : 'unknown';
+
+// Whether a stored-data generation this build ships IS the one the device's
+// stored history is made of — the question every writer of a derived field has to
+// ask, and the reason no field needs a version stamp of its own.
+//
+// The app is upgraded between problems, so an instance can be a release behind
+// while still running: its shards, its sidecars and its inlined constants are all
+// the PREVIOUS generation's, and anything it derives from them belongs to that
+// generation, not to the one the stored history is made of. Asked at the moment of
+// WRITING rather than at boot, this catches that instance — it has no way to know
+// it is behind, but it does know its own version, and the device's stored version
+// says what the history holds. A boot-time check cannot: the instance booted when
+// the two agreed, and once a newer instance re-stamps the device, no check
+// anywhere can fire again, every version by then agreeing.
+//
+// The mirror of it is the re-derivation: when they disagree the other way (the
+// build is AHEAD of the stored history), every stored value of that generation is
+// dropped or rewritten and the version recorded, so nothing from the previous one
+// outlives the change. That pair — refuse to write when behind, re-derive
+// everything when ahead — is what keeps a single device-level version honest with
+// no per-row bookkeeping at all.
+export function storedVersionMatches(key, version) {
+    if (version === null || version === undefined) return true;   // nothing to check against
+    try {
+        return localStorage.getItem(key) === version;
+    } catch (_) {
+        return false;   // no storage to vouch for anything
+    }
+}
+
+// The motif-fit generation: the axis vectors on an attempt and on a problem object.
+export function motifDataIsCurrent() {
+    return storedVersionMatches(EMBEDDING_VERSION_KEY, EMBEDDING_VERSION);
+}
+
+// The shipped axis count. A SHAPE fact, not a provenance test: it says how many
+// components a current vector has, so a per-axis loop cannot run off the end of
+// one. Which FIT a vector came from is the device-level version above.
+export const SHIPPED_K =
+    (EMBEDDING_META && Number.isInteger(EMBEDDING_META.K) && EMBEDDING_META.K > 0)
+        ? EMBEDDING_META.K
+        : null;

@@ -32,13 +32,16 @@ import {
     getAnswerHistoryForSize, setAnswerHistoryForSize,
     getMergedAnswerHistory,
     SUPPORTED_BOARD_SIZES, DEFAULT_BOARD_SIZE,
-    getPersistedProblemsForSize, persistProblemObjects,
+    getPersistedProblemsForSize, persistProblemObjects, clearResumeProblem,
+    clearChallengeProblemForSize,
 } from './state.js';
-import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS } from './constants.js';
+import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS,
+         EMBEDDING_VERSION_KEY, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
 import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
-import { DATA_VERSION, EMBEDDING_META_INLINE, RATINGS_VERSION } from './data-version.js';
+import { DATA_VERSION, EMBEDDING_META_INLINE, EMBEDDING_VERSION, RATINGS_VERSION,
+         motifDataIsCurrent, storedVersionMatches } from './data-version.js';
 import { detectRatingsCorrection } from './corrections-notice.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { getTail, updateTail, dropStoredEmbeddings } from './history-store.js';
@@ -52,15 +55,11 @@ const KEEP_EMBEDDING_LAST = MODEL_INPUT_HISTORY_LENGTH;
 // curve are each a single shared/joint artifact — a re-ship of any re-derives BOTH
 // boards, so there is no per-board version. The gate + stamp live in
 // backfillMissingEmbeddings (once, around the per-size work loop).
-const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
-const RATINGS_VERSION_KEY = 'ratingsVersion';
-const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
-// Set once the stored correct-move vectors have been re-read from the shipped
-// sidecar (reseedCorrectEmbeddings), and once the legacy cold-tail sweep beside
-// it has run. NOT versions: an absent flag is what makes either pass run, on
-// any boot. Both are TEMPORARY — see reseedCorrectEmbeddings for when they go.
+// Set once the legacy cold-tail sweep has run. NOT a version: an absent flag is
+// what makes that pass run, on any boot. TEMPORARY — see dropLegacyTailEmbeddings.
+// (`correctEmbeddingsReseeded_v1` is a retired key from a pass this one's sibling
+// audit replaces, left unread in whatever localStorage still holds it.)
 const TAIL_EMBEDDINGS_DROPPED_KEY = 'historyTailEmbeddingsDropped_v1';
-const CORRECT_EMBEDDINGS_RESEEDED_KEY = 'correctEmbeddingsReseeded_v1';
 
 // Removed-problem prune. Problems get dropped from the corpus on regeneration.
 // Their answerHistory entries keep the rating/rank stored at attempt time — the
@@ -279,22 +278,16 @@ export async function backfillMissingEmbeddings() {
         console.log(`backfill: complete in ${Math.round(performance.now() - t0)}ms (sizes rewritten: ${sizesFilled.join(',') || 'none'}${allOk ? '' : '; INCOMPLETE — versions left un-stamped, retrying next load'})`);
     }
 
-    // Two one-time repairs of damage stored BEFORE the permanent paths above
-    // existed. WHEN THEY RUN and WHEN THEY GO are unrelated:
-    //   runs   — on the first boot of any device carrying neither flag. Nothing
-    //            here is gated on a version, so shipping the bundle is the
-    //            whole trigger; the gated block above may have done nothing.
-    //   goes   — delete this block, reseedCorrectEmbeddings,
-    //            reseedProblemObjects, dropLegacyTailEmbeddings and the two
-    //            flags at the next embedding or ratings ship. From that ship
-    //            onward the ordinary gate repairs whoever never ran them: the
-    //            wipe+refill re-reads every in-window vector, and
-    //            sweepTailEmbeddings clears the tail.
+    // The one-time audit of what was stored before any writer respected the
+    // device version (skipped when the refit above just re-derived the window
+    // from the same sidecar), and then the repopulate: any row still missing a
+    // vector gets one — on this load, whether or not a version just changed.
     if (refitRefilledEmbeddings) {
-        try { localStorage.setItem(CORRECT_EMBEDDINGS_RESEEDED_KEY, '1'); } catch {}
+        try { localStorage.setItem(VECTORS_VERIFIED_KEY, '1'); } catch {}
     } else {
-        await reseedCorrectEmbeddings();
+        await verifyStoredVectorsOnce();
     }
+    await repopulateMissingFields();
     // A sweep that could not run leaves the flag unset, so the legacy pass
     // retries on the next load rather than being recorded as done.
     if (tailSwept) {
@@ -332,58 +325,42 @@ async function dropLegacyTailEmbeddings() {
     if (cleared > 0) console.log(`backfill: dropped stale embeddings from ${cleared} cold-tail rows`);
 }
 
-// TEMPORARY, retired with its only caller (see reseedCorrectEmbeddings).
-// Re-read the persisted problem objects' correct-move vectors from the sidecar,
-// overwriting in place (the on-screen problem is the same object, so a standing
-// challenge already painted this session is corrected too). Same
-// overwrite-never-clear rule as its caller.
-async function reseedProblemObjects(size) {
-    const problems = getPersistedProblemsForSize(size);
-    if (problems.length === 0) return;
-    const shims = problems.map((p) => ({ problemId: tsumegoIdOf(p.filename) }));
-    await fillCorrectEmbeddingsViaSidecar(shims);
-    let n = 0;
-    shims.forEach((shim, i) => {
-        if (Array.isArray(shim.embedding)) { problems[i].embedding = shim.embedding; n++; }
-    });
-    if (n > 0) {
-        persistProblemObjects();
-        console.log(`backfill[${size}]: re-read ${n} persisted problem embedding(s)`);
-    }
-}
+// TEMPORARY — delete with VECTORS_VERIFIED_KEY at the next embedding ship, when
+// the ordinary wipe has re-derived every device's window anyway.
+//
+// One-time audit of the vectors already stored when this scheme arrived. The
+// device-level version is only as good as the writers that respected it, and
+// until now none did: a build a release behind wrote its own fit's vectors into a
+// history the device had already stamped as current, and a stored problem object
+// carried a previous fit's vector past a wipe that never looked at it. Both left
+// rows that no version comparison can find, because the version says they are
+// fine.
+//
+// So this settles them against the source of truth once: the sidecar holds this
+// fit's correct-move vector for every problem, so a stored vector either matches
+// it — the row is this fit's — or does not, and is replaced. A mismatch also
+// condemns `pickedEmbedding`, which is dropped (`pickedCellIndex` is
+// fit-independent and kept, so a later fill restores it): the mistake-lean
+// reading compares the two vectors INSIDE one row, so a repaired correct vector
+// beside the previous fit's picked one would be a mixed pair — worse than a
+// missing half, because it reads as evidence.
+//
+// From here on the wipe keeps the history honest and this is dead weight: every
+// writer now asks motifDataIsCurrent() before writing a vector, and the wipe
+// reaches every holder.
+const VECTORS_VERIFIED_KEY = 'historyVectorsVerified_v1';
+const VECTOR_MATCH_TOLERANCE = 0.02;   // 2dp of an fp16 cast against 2dp of the
+                                       // shard's own float — a same-fit pair
+                                       // agrees far inside this, a different fit
+                                       // differs by order one per component.
+const sameVector = (a, b) =>
+    Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+    a.every((v, i) => Math.abs(v - b[i]) <= VECTOR_MATCH_TOLERANCE);
 
-// TEMPORARY — DELETE AT THE NEXT EMBEDDING OR RATINGS SHIP, with
-// reseedProblemObjects, CORRECT_EMBEDDINGS_RESEEDED_KEY and the call block in
-// backfillMissingEmbeddings. That is its retirement condition, NOT its trigger:
-// it runs off the absent flag on the next boot, whether or not any version
-// moved. It is deletable then because a refit's own wipe+refill re-reads every
-// in-window vector from this same sidecar, so from that ship onward the
-// ordinary gate repairs any device that never ran this pass. What is NOT
-// temporary is refreshPersistedProblems — that is the defect fix, and without
-// it every future refit re-creates this damage.
-//
-// One-time re-read of the stored correct-move vectors from the shipped sidecar.
-//
-// Until the persisted problem objects came under the version gate
-// (refreshPersistedProblems), a standing challenge kept its embedding across a
-// refit and the recorder stamped that superseded vector onto the next attempt
-// of it — one row from the previous fit inside a window from this one. Such a
-// row cannot be identified after the fact: a refit can keep K and move every
-// axis under it, so a stale vector has the right length and simply means
-// something else. So this does not go looking for them — it re-reads EVERY
-// in-window vector from the source of truth, which is cheap enough to be
-// unconditional (one memoized fetch per distinct problem, and the sidecar is
-// one file).
-//
-// OVERWRITE IN PLACE, never clear-then-refill: a device that cannot reach the
-// sidecar keeps exactly what it has instead of losing its weakness readings
-// until it is next online. `pickedEmbedding` is left alone — it is fetched at
-// click time from the shard the problem was served from, so it never rode a
-// persisted object, and refilling those means shard zips.
-async function reseedCorrectEmbeddings() {
-    if (localStorage.getItem(CORRECT_EMBEDDINGS_RESEEDED_KEY)) return;
-    let attempted = 0;
-    let reseeded = 0;
+async function verifyStoredVectorsOnce() {
+    if (localStorage.getItem(VECTORS_VERIFIED_KEY)) return;
+    let checked = 0;
+    let replaced = 0;
     for (const size of SUPPORTED_BOARD_SIZES) {
         try {
             const history = getAnswerHistoryForSize(size);
@@ -391,36 +368,138 @@ async function reseedCorrectEmbeddings() {
             const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
             const rows = history.slice(startIdx)
                 .filter((a) => a && a.problemId && Array.isArray(a.embedding));
-            // The persisted problem objects are re-read in the SAME pass: the
-            // standing challenge is where a superseded vector came from, so a
-            // repair that fixed only the history it already poisoned would let
-            // it poison the next attempt too.
-            await reseedProblemObjects(size);
             if (rows.length === 0) continue;
-            attempted += rows.length;
             // Shims rather than the rows themselves: the fill is fill-if-MISSING
             // by contract, and here every row already has a vector.
             const shims = rows.map((a) => ({ problemId: a.problemId }));
             await fillCorrectEmbeddingsViaSidecar(shims);
             let n = 0;
             shims.forEach((shim, i) => {
-                if (Array.isArray(shim.embedding)) { rows[i].embedding = shim.embedding; n++; }
+                if (!Array.isArray(shim.embedding)) return;   // no longer in the corpus
+                const row = rows[i];
+                if (!sameVector(row.embedding, shim.embedding)) {
+                    row.embedding = shim.embedding;
+                    delete row.pickedEmbedding;
+                    replaced++;
+                }
+                n++;
             });
             if (n > 0) {
                 persistAnswerHistory(size, history);
-                reseeded += n;
+                checked += n;
             }
         } catch (err) {
-            console.warn(`reseed[${size}] failed:`, err);
+            console.warn(`vector audit[${size}] failed:`, err);
             try { Sentry.captureException(err); } catch (_) {}
-            return;  // leave un-stamped; the next load retries
+            return;   // leave un-flagged; the next load retries
         }
     }
-    // Nothing came back while rows were waiting = the sidecar was unreachable.
-    // Retry on the next load rather than recording a repair that did nothing.
-    if (attempted > 0 && reseeded === 0) return;
-    try { localStorage.setItem(CORRECT_EMBEDDINGS_RESEEDED_KEY, '1'); } catch {}
-    if (reseeded > 0) console.log(`backfill: re-read ${reseeded} stored embeddings from the sidecar`);
+    try { localStorage.setItem(VECTORS_VERIFIED_KEY, '1'); } catch {}
+    if (checked > 0) {
+        console.log(`backfill: audited ${checked} stored vectors` +
+                    (replaced > 0 ? ` (${replaced} came from another fit and were replaced)` : ''));
+    }
+}
+
+// PERMANENT. The repopulate: give any in-window row still missing a derived field
+// its current value, on any load AND straight after a version change, for each
+// generation whose version this build agrees with the device on.
+//
+// That condition is the whole safety argument, so it is asserted here and not
+// assumed from the caller: filling under a mismatch is precisely how a build a
+// release behind would write the previous fit's vectors into a history that has
+// moved on. Under a match there is nothing to get wrong — the vector comes from
+// the same sidecar the wipe refills from.
+//
+// It is also what makes the wipe cheap to recover from: an interrupted refit
+// leaves rows wiped but unfilled, and rather than waiting for the next version
+// change to notice, the next load simply finishes the job. A row whose problem the
+// sidecar cannot supply is marked (`noEmb`) so the pass stops re-asking — and
+// because that mark clears with the vectors, a new fit gives every such row one
+// fresh attempt rather than writing it off for good.
+//
+// It covers BOTH halves. The correct-move vector is one range read per problem
+// against a single sidecar file; the played-move vector still means shard zips, so
+// it is done second and only for the rows that need it — a set that is empty in
+// the steady state (the live path fetches it at click time) and small when it is
+// not: a fetch that failed, an attempt a behind-build declined to write vectors
+// for, one the audit dropped. Nothing waits on any of this — main.js runs the
+// whole backfill in a detached chain — and every stage checkpoints.
+async function repopulateMissingFields() {
+    const motifOk = motifDataIsCurrent();
+    const ratingsOk = storedVersionMatches(RATINGS_VERSION_KEY, RATINGS_VERSION) &&
+                      storedVersionMatches(RANK_CURVE_VERSION_KEY,
+                                           ratingRankCurveVersion(DEFAULT_BOARD_SIZE));
+    if (!motifOk && !ratingsOk) return;
+    let filled = 0;
+    let filledPicked = 0;
+    let filledRatings = 0;
+    // problem_params.bin is 3+ MB, so it is fetched only if a row actually needs
+    // it — which in the steady state is never, the recorder having written the
+    // fields itself.
+    let problemParams;
+    const params = async () => {
+        if (problemParams === undefined) problemParams = await loadProblemParams();
+        return problemParams;
+    };
+    for (const size of SUPPORTED_BOARD_SIZES) {
+        try {
+            const history = getAnswerHistoryForSize(size);
+            if (!history || history.length === 0) continue;
+            const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
+            const rows = history.slice(startIdx);
+            const checkpoint = () => persistAnswerHistory(size, history);
+
+            if (motifOk) {
+                if (rows.some((a) => a && a.problemId && !a.embedding && !a.noEmb)) {
+                    filled += await fillCorrectEmbeddingsViaSidecar(rows, checkpoint);
+                    checkpoint();   // `noEmb` marks are worth persisting on their own
+                }
+                const pickedNeedIds = collectPickedNeedIds(history, startIdx);
+                if (pickedNeedIds.size > 0) {
+                    filledPicked += await walkPickedShards(size, history, startIdx,
+                                                           pickedNeedIds, checkpoint);
+                    checkpoint();
+                }
+            }
+
+            if (ratingsOk) {
+                // Same shape as the vectors: rows the recorder left without rating
+                // fields (a behind-build refused to write them), refilled from the
+                // set-wide sidecar at CURRENT values. A row whose problem left the
+                // corpus is not one of them — it has no rating anywhere, and
+                // pruneRemovedProblems is what stripped it — so the corpus list
+                // gates this exactly as it gates `noEmb`.
+                const needy = rows.filter((a) => a && a.problemId &&
+                                                 typeof a.problemRating !== 'number');
+                if (needy.length > 0) {
+                    const lines = await fetchLookupLines();
+                    const inSet = lines ? needy.filter((a) => inCorpus(lines, a.problemId)) : [];
+                    if (inSet.length > 0) {
+                        const map = await params();
+                        if (map) {
+                            let n = 0;
+                            for (const a of inSet) {
+                                const item = map.get(a.problemId);
+                                if (!item) continue;
+                                applyRatingFields(a, item, size);
+                                n++;
+                            }
+                            if (n > 0) { checkpoint(); filledRatings += n; }
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`repopulate[${size}] failed:`, err);
+            try { Sentry.captureException(err); } catch (_) {}
+            return;   // the next load retries
+        }
+    }
+    if (filled > 0 || filledPicked > 0 || filledRatings > 0) {
+        console.log(`backfill: repopulated ${filled} correct + ${filledPicked} picked vector(s)` +
+                    `, ${filledRatings} rating field set(s)`);
+    }
 }
 
 // Strip model fields from answerHistory entries whose problem is no longer in
@@ -634,8 +713,18 @@ function lookupLineIndex(lines, tsumegoId) {
 // place; returns the fill count. Fills that can't resolve (lookup/sidecar
 // unavailable, id gone from the corpus) are skipped; a later fill run retries.
 const CORRECT_FILL_CONCURRENCY = 8;
-async function fillCorrectEmbeddingsViaSidecar(entries) {
-    const needy = entries.filter((a) => a && a.problemId && !a.embedding);
+// Rows filled between two persists. Every pass below runs over a network walk
+// that can be killed at any moment — a backgrounded tab, a closed app, a dropped
+// connection — and work held only in memory is lost entirely when that happens.
+// Persisting in batches makes the progress DURABLE: a kill costs the batch in
+// flight instead of the walk, and the next load resumes from what landed, since
+// every fill is fill-if-missing and therefore idempotent. It cannot publish a
+// half-state either — a persisted row either has its vector or has not — and the
+// version stamps that mark the whole re-derivation done are still written last
+// and only on a clean finish.
+const FILL_CHECKPOINT_EVERY = 50;
+async function fillCorrectEmbeddingsViaSidecar(entries, checkpoint = null) {
+    const needy = entries.filter((a) => a && a.problemId && !a.embedding && !a.noEmb);
     if (needy.length === 0) return 0;
     const lines = await fetchLookupLines();
     if (!lines) return 0;
@@ -652,14 +741,34 @@ async function fillCorrectEmbeddingsViaSidecar(entries) {
         return vecByProblem.get(pid);
     };
     let filled = 0;
+    let sinceCheckpoint = 0;
     await mapWithConcurrency(needy, CORRECT_FILL_CONCURRENCY, async (a) => {
+        // The corpus list decides `noEmb`, and ONLY it: it is the authority on what
+        // can ever be filled, it is loaded here anyway, and its answer does not
+        // depend on whether a fetch happened to succeed. A read that comes back
+        // empty is the other case entirely — an offline load and a problem the fit
+        // published no vector for are indistinguishable at the reader — so nothing
+        // is marked from it, and those rows are simply retried (one range read
+        // each, against a file the service worker already holds).
+        if (!inCorpus(lines, a.problemId)) { a.noEmb = 1; return; }
         const vec = await vecFor(a.problemId);
         if (vec && !a.embedding) {
             a.embedding = vec.slice();
             filled++;
+            if (checkpoint && ++sinceCheckpoint >= FILL_CHECKPOINT_EVERY) {
+                sinceCheckpoint = 0;
+                checkpoint();
+            }
         }
     });
     return filled;
+}
+
+// Is this problem in the packaged corpus at all? lookup.txt is the authority the
+// whole client already reads (id -> shard), so membership is a binary search over
+// lines that are in hand — no fetch, no ambiguity.
+function inCorpus(lines, tsumegoId) {
+    return lookupLineIndex(lines, tsumegoId) >= 0;
 }
 
 // Load + decode the single problem_params.bin asset into
@@ -721,6 +830,12 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         // working-set-only by design) are gated on it.
         const hasWorkingSet = !!(history && history.length > 0);
 
+        // The on-screen problem is restored from this slot verbatim, fit-derived
+        // fields and all, and unlike the two localStorage objects it cannot be
+        // refreshed in place — it is serialized JSON in sessionStorage. So ANY
+        // generation that moved invalidates it, not just the motif one.
+        if (embeddingsChanged || ratingsChanged || curveChanged) clearResumeProblem();
+
         if (embeddingsChanged) {
             wipeStaleEmbeddings(size, history, serverEmbeddingVersion);
         }
@@ -751,9 +866,17 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             if (!problemParams) return { count: curveRankUpdated, ok: false };
         }
 
+        // Persist as each phase completes rather than once at the end. The two
+        // phases below are network walks of very different length, and holding
+        // the finished one in memory through the other means a kill during the
+        // slow one discards the fast one's work as well: the rating re-derive
+        // (which the rank chart reads) was being thrown away by an interrupted
+        // shard walk that has nothing to do with it.
+        const checkpoint = () => persistAnswerHistory(size, history);
         const totalRatingsUpdated = (ratingsChanged && hasWorkingSet)
             ? rewriteWorkingSetRatings(size, history, problemParams)
             : 0;
+        if (totalRatingsUpdated > 0) checkpoint();
 
         let totalFilled = 0;
         let totalFilledPicked = 0;
@@ -773,15 +896,17 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             // was given. So a corpus surgery that reorders variations either
             // rides a state-epoch bump or knowingly leaves those entries stale.
             // The zip walk shrinks to shards carrying such a need.
-            totalFilled = await fillCorrectEmbeddingsViaSidecar(history.slice(startIdx));
+            totalFilled = await fillCorrectEmbeddingsViaSidecar(history.slice(startIdx), checkpoint);
+            if (totalFilled > 0) checkpoint();
             const pickedNeedIds = collectPickedNeedIds(history, startIdx);
             if (pickedNeedIds.size > 0) {
-                totalFilledPicked = await walkPickedShards(size, history, startIdx, pickedNeedIds);
+                totalFilledPicked = await walkPickedShards(size, history, startIdx, pickedNeedIds,
+                                                           checkpoint);
             }
         }
 
         if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
-            persistAnswerHistory(size, history);
+            checkpoint();
             console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
 
@@ -819,7 +944,12 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
 // consumer already treats a missing embedding as "no embedding", while a
 // superseded one is indistinguishable from a current one.
 async function refreshPersistedProblems(size, { embeddingsChanged, ratingsChanged, curveChanged, problemParams }) {
-    const problems = getPersistedProblemsForSize(size);
+    // The on-screen problem rides along: it can be painted before this runs (see
+    // wipeStaleEmbeddings), it is not always one of the two persisted objects (a
+    // recall is built straight from the pool), and its rating, slope and floor
+    // reach the next attempt exactly as theirs do.
+    const live = (size === state.boardSize && state.currentProblem) ? [state.currentProblem] : [];
+    const problems = [...getPersistedProblemsForSize(size), ...live];
     if (problems.length === 0) return;
     let touched = false;
 
@@ -848,20 +978,12 @@ async function refreshPersistedProblems(size, { embeddingsChanged, ratingsChange
         }
     }
 
-    if (embeddingsChanged) {
-        const shims = problems.map((p) => ({ problemId: tsumegoIdOf(p.filename) }));
-        const filled = await fillCorrectEmbeddingsViaSidecar(shims);
-        if (filled > 0) {
-            shims.forEach((shim, i) => {
-                if (Array.isArray(shim.embedding)) problems[i].embedding = shim.embedding;
-            });
-            touched = true;
-        }
-    }
-
     if (touched) {
+        // Writes the two localStorage buckets; the on-screen object is refreshed
+        // in place and needs no write of its own (setCurrentProblem re-persists
+        // the resume slot on the next paint).
         persistProblemObjects();
-        console.log(`backfill[${size}]: refreshed ${problems.length} persisted problem object(s)`);
+        console.log(`backfill[${size}]: refreshed ${problems.length} problem object(s)`);
     }
 }
 
@@ -875,6 +997,34 @@ async function refreshPersistedProblems(size, { embeddingsChanged, ratingsChange
 // reaches the weakness fit through beta_picked — which the pane reads as part of
 // the SUM and selection reads as the CONTRAST, so one stale field moves both the
 // reported weakness and the problems served for it.
+// The wipe is what makes ONE device-level version enough, and it is only as good
+// as its reach: a vector that survives it is a vector no later check can catch,
+// because from then on every version agrees. So it clears EVERY holder, not just
+// the history —
+//
+//   the stored challenge   a whole problem object with the rating, slope, floor
+//                          and vector it was picked with. Discarded outright
+//                          rather than refreshed: the sidecar could give it a
+//                          current vector, but not current rating fields, which
+//                          came from the same superseded shard — so a refresh
+//                          would leave it half in each fit. A fresh challenge
+//                          costs one pick from the loaded pool.
+//   the previous problem   review and share only, so its vector alone is dropped
+//                          (the motif bubble then names nothing until the next
+//                          problem completes) and its rating fields are refreshed
+//                          by the ratings gate if that moved too.
+//   the resume slot        cleared by the caller for ANY generation change, not
+//                          only this one — it holds the whole object and cannot be
+//                          refreshed in place.
+//   the problem on screen  the backfill runs in a DETACHED chain so the first
+//                          problem does not wait for it (main.js), which means a
+//                          problem picked from the pre-wipe challenge or resume
+//                          slot can already be painted, holding a vector in
+//                          memory that clearing the stored copies cannot reach.
+//                          Its vector is dropped, so answering it records no
+//                          vector and the fill supplies the current one; its
+//                          rating fields are refreshed with the persisted
+//                          objects' below when the ratings gate is also open.
 function wipeStaleEmbeddings(size, history, serverEmbeddingVersion) {
     let cleared = 0;
     for (const a of history) {
@@ -885,6 +1035,13 @@ function wipeStaleEmbeddings(size, history, serverEmbeddingVersion) {
         // on demand from whatever entries still carry one.
         persistAnswerHistory(size, history);
         console.log(`backfill[${size}]: cleared ${cleared} stale embeddings (-> ${serverEmbeddingVersion})`);
+    }
+    if (clearChallengeProblemForSize(size)) {
+        console.log(`backfill[${size}]: discarded the standing challenge (picked under the previous fit)`);
+    }
+    if (size === state.boardSize && state.currentProblem &&
+        state.currentProblem.embedding !== undefined) {
+        delete state.currentProblem.embedding;
     }
     for (const k of STALE_FLAG_KEYS(size)) localStorage.removeItem(k);
 }
@@ -1003,7 +1160,7 @@ function stripOldEmbeddingFields(size, history, startIdx) {
 // bins live in each zip's embeddings_index.json, so this is the one embedding
 // fill still on the zips. The caller skips it entirely when nothing in the
 // keep window needs a fill.
-async function walkPickedShards(size, history, startIdx, pickedNeedIds) {
+async function walkPickedShards(size, history, startIdx, pickedNeedIds, checkpoint = null) {
     let filledPicked = 0;
     await walkShards(size, pickedNeedIds, async ({ zip, zipFilename }) => {
         const indexPayload = await parseEmbeddingsIndex(zip, (e) => {
@@ -1013,11 +1170,17 @@ async function walkPickedShards(size, history, startIdx, pickedNeedIds) {
         // Sequential per-entry WITHIN the shard: Range requests are cheap
         // (~256B), and with shards running SHARD_WALK_CONCURRENCY-wide this
         // bounds the total in-flight request count.
+        let filledHere = 0;
         for (let i = startIdx; i < history.length; i++) {
             if (await fillPickedEmbeddingFromSidecar(history[i], { indexPayload, zipFilename, size })) {
                 filledPicked++;
+                filledHere++;
             }
         }
+        // One shard is the natural checkpoint: it is the unit of work that just
+        // cost a multi-megabyte download, and losing it to a kill means paying
+        // for it again (see FILL_CHECKPOINT_EVERY).
+        if (filledHere > 0 && checkpoint) checkpoint();
     }, (zipFilename, err) => {
         console.warn(`backfill[${size}]: failed for ${zipFilename}:`, err);
     });
@@ -1188,6 +1351,7 @@ async function fillSyncedForSize(size, problemParams = null) {
         // picked-embedding fill below just skips (no console line).
         const indexPayload = await parseEmbeddingsIndex(zip);
         const idsHere = new Set(shardIds);
+        let touchedHere = 0;
 
         for (let i = startIdx; i < history.length; i++) {
             const a = history[i];
@@ -1196,19 +1360,25 @@ async function fillSyncedForSize(size, problemParams = null) {
             if (a.correct === false && typeof a.syncedMove === 'string' &&
                 typeof a.pickedCellIndex !== 'number') {
                 const idx = await cellIndexForMove(zip, a.problemId, a.syncedMove, size);
-                if (typeof idx === 'number' && idx >= 0) a.pickedCellIndex = idx;
+                if (typeof idx === 'number' && idx >= 0) { a.pickedCellIndex = idx; touchedHere++; }
             }
             if (a.correct === false && typeof a.syncedMove === 'string') {
                 // One-shot either way: an unresolvable move (illegal after a
                 // corpus change, parse failure) would otherwise re-walk this
                 // shard on every sync.
                 delete a.syncedMove;
+                touchedHere++;
             }
 
             if (await fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size })) {
                 filled++;
+                touchedHere++;
             }
         }
+        // Per shard, for the same reason the version-driven walk checkpoints:
+        // this is the adoption path, the heaviest walk the app makes, and an
+        // interruption used to cost every shard it had already paid for.
+        if (touchedHere > 0) persistAnswerHistory(size, history);
     }, (zipFilename, err) => {
         console.warn(`synced-fill[${size}]: failed for ${zipFilename}:`, err);
     });

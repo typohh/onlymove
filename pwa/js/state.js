@@ -747,6 +747,16 @@ export function getPersistedProblemsForSize(size) {
         .filter(p => p && typeof p === 'object');
 }
 
+// Discard one size's standing challenge. Per SIZE, not through the active-size
+// setter: the embedding wipe walks both boards, and clearing whichever happens to
+// be on screen instead would leave the other's superseded challenge standing.
+export function clearChallengeProblemForSize(size) {
+    if (!perSize.challengeProblem[size]) return false;
+    perSize.challengeProblem[size] = null;
+    writeJSON('challengeProblem', perSize.challengeProblem);
+    return true;
+}
+
 // Write both per-size buckets back after such an in-place refresh.
 export function persistProblemObjects() {
     writeJSON('challengeProblem', perSize.challengeProblem);
@@ -800,6 +810,15 @@ export function getResumeProblem() {
     } catch (_) {
         return null;
     }
+}
+
+// Drops the resume slot. Called by the embedding wipe: this slot holds a whole
+// problem object with the rating, slope, floor and motif vector it was picked
+// with, and it survives location.reload() — the very mechanism by which the app
+// takes an update — so without this a problem shown before a refit is restored
+// verbatim underneath the new build and answered against superseded numbers.
+export function clearResumeProblem() {
+    try { sessionStorage.removeItem(RESUME_PROBLEM_KEY); } catch (_) { /* unavailable */ }
 }
 
 export function setPreviousProblem(problem) {

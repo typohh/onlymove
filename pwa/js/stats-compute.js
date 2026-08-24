@@ -11,6 +11,7 @@ import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { rankToLabel, rankBand, clampRankBand } from '../shared/rank-math.js';
 import { RANK_START_MIN } from '../shared/rank-window.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
+import { SHIPPED_K } from './data-version.js';
 
 // Display bins in SECONDS over the server's fine-bucket histogram (the
 // Community pane's solving/review-time bar lists). Solving time is log-normal
@@ -237,8 +238,11 @@ export function findExamplesForIssue(answerHistory, k, quadrant, excludedIds, th
         if (a.ignored) continue;
         if (!a.problemId) continue;
         if (excludedIds && excludedIds.has(a.problemId)) continue;
-        if (!Array.isArray(a.embedding) || a.embedding.length <= k) continue;
-        if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length <= k) continue;
+        // Shape guard for the indexing below (provenance is settled by the wipe
+        // — see motif-stats.js). Against the SHIPPED axis count rather than `k`,
+        // so a vector of another length cannot be indexed at all.
+        if (!Array.isArray(a.embedding) || a.embedding.length !== SHIPPED_K) continue;
+        if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length !== SHIPPED_K) continue;
         const ec = sign * a.embedding[k];
         const ep = sign * a.pickedEmbedding[k];
         if (!Number.isFinite(ec) || !Number.isFinite(ep)) continue;

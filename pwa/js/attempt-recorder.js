@@ -10,7 +10,8 @@ import { state, updateAnswerHistory, getMergedAnswerHistory, addToAccumulatedSol
 import { updateAllUI } from './ui.js';
 import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
-import { RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
+import { motifDataIsCurrent, storedVersionMatches, RATINGS_VERSION } from './data-version.js';
+import { RECALL_CANDIDATE_HISTORY_LENGTH, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
 import { rankBand } from '../shared/rank-math.js';
 import { calculateAndStoreStatsResults, recallImpact, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
 import { syncRecallNotification } from './notifications.js';
@@ -21,7 +22,7 @@ import { takePendingGorUpdates, requestGorRefresh } from './gor-refresh.js';
 // The live rank is a linear-information window 4PL MLE over the recent first-time
 // history; the estimator lives in rank-decomposition.js alongside the per-attempt
 // slope/floor conversion it shares with the skill chart.
-import { reanchorRank } from './rank-decomposition.js';
+import { reanchorRank, ratingRankCurveVersion } from './rank-decomposition.js';
 import { postJson } from './worker-post.js';
 
 // --- Cross-tab duplicate guard --------------------------------------------
@@ -210,6 +211,10 @@ function patchPickedEmbedding(problemId, attemptDate, embedding) {
         const a = history[i];
         if (a.problemId === problemId && a.date === attemptDate) {
             if (a.pickedEmbedding) return;
+            // Re-asked here rather than trusted from the call site: this lands
+            // after an await, and the wipe that advances the device's fit could
+            // have run in between.
+            if (!motifDataIsCurrent()) return;
             a.pickedEmbedding = quantizeEmbedding(embedding);
             updateAnswerHistory(history);
             return;
@@ -268,21 +273,18 @@ export async function updateUserStats(isCorrect, {
     const prevs = state.answerHistory.filter(ans => ans.problemId === problemId);
     const accumulatedReview = prevs.reduce((sum, ans) => sum + (ans.reviewTime || 0), 0);
 
+    // Every field below that this build DERIVED from shipped data is written only
+    // when the generation it came from is the device's — the one rule, applied to
+    // each generation separately (storedVersionMatches). An instance a release
+    // behind is still serving problems out of its own shards and curve: what it
+    // would write is the previous fit's, and it cannot tell, but it can see its
+    // version and the device's disagree. Writing nothing is what the repopulate
+    // exists to complete, from set-wide data, at current values.
+    const ratingsCurrent =
+        storedVersionMatches(RATINGS_VERSION_KEY, RATINGS_VERSION) &&
+        storedVersionMatches(RANK_CURVE_VERSION_KEY, ratingRankCurveVersion(state.boardSize));
     const answer = {
         problemId,
-        // Raw black-box rating (rating-space skill decomposition reads this);
-        // problemRank is its normalized rank under M (recall + weakness
-        // models read this). Both captured at ingest from the served problem.
-        problemRating: currentProblem.rating,
-        problemRank: currentProblem.rank,
-        problemQuality: currentProblem.quality || 0,
-        // Raw 2PL discrimination a_p of the problem; the skill decomposition uses
-        // it as the per-attempt success-curve slope (see flattenAttempts).
-        problemSlope: currentProblem.slope,
-        // Per-problem 3PL guessing floor c_p (bot-derived); the skill decomposition
-        // uses it as the success-curve lower asymptote so a far-above-rank clear is
-        // correctly down-weighted (see flattenAttempts / poolLogistic).
-        problemFloor: currentProblem.floor,
         timeTaken,
         reviewTime: 0,
         accumulatedReview,
@@ -291,7 +293,30 @@ export async function updateUserStats(isCorrect, {
         successSinceFailure,
         isRepeat: isRepeatAttempt,
     };
-    if (Array.isArray(currentProblem.embedding)) {
+    if (ratingsCurrent) {
+        // Raw black-box rating (the rating-space skill decomposition reads this);
+        // problemRank is its normalized rank under M (recall + the motif readings
+        // read this). Both captured at ingest from the served problem.
+        answer.problemRating = currentProblem.rating;
+        answer.problemRank = currentProblem.rank;
+        answer.problemQuality = currentProblem.quality || 0;
+        // Raw 2PL discrimination a_p; the skill decomposition uses it as the
+        // per-attempt success-curve slope (see flattenAttempts).
+        answer.problemSlope = currentProblem.slope;
+        // Per-problem 3PL guessing floor c_p; the skill decomposition uses it as
+        // the success-curve lower asymptote so a far-above-rank clear is correctly
+        // down-weighted (see flattenAttempts / poolLogistic).
+        answer.problemFloor = currentProblem.floor;
+    }
+    // Vectors are recorded only when THIS BUILD's motif data is the device's
+    // current fit. An instance that is a release behind is still serving problems
+    // out of its own shards, and every vector it can produce belongs to the
+    // previous fit — it cannot know it is behind, but it can see that its version
+    // and the device's disagree, which is exactly this test. Recording no vector
+    // costs nothing: the row keeps `pickedCellIndex` below, and the fill pass
+    // gives it the current vector from the shipped sidecar.
+    const fitIsCurrent = motifDataIsCurrent();
+    if (fitIsCurrent && Array.isArray(currentProblem.embedding)) {
         // Quantize to 2 decimal places to keep localStorage footprint small.
         // PCA scores are unit-variance per component; 2 decimals = ±0.005
         // resolution, which is well under the noise floor for the ridge-
@@ -304,7 +329,11 @@ export async function updateUserStats(isCorrect, {
         // or hasn't returned by the time the answer is logged.
         answer.pickedCellIndex = pickedCellIndex;
     }
-    if (Array.isArray(pickedEmbedding)) {
+    // The picked vector comes from the same shard the problem did, so it is
+    // current exactly when the correct-move vector is — and the two must come from
+    // ONE fit in any case, the tendency reading being a comparison between them
+    // inside a single row.
+    if (fitIsCurrent && Array.isArray(pickedEmbedding)) {
         answer.pickedEmbedding = quantizeEmbedding(pickedEmbedding);
     }
 
@@ -313,7 +342,7 @@ export async function updateUserStats(isCorrect, {
     // Defer-patch from the in-flight fetch. Never blocks the caller — if the
     // fetch fails or the entry gets evicted later, the next app-load backfill
     // will pick this up using `pickedCellIndex`.
-    if (pickedEmbeddingPromise && !answer.pickedEmbedding) {
+    if (fitIsCurrent && pickedEmbeddingPromise && !answer.pickedEmbedding) {
         pickedEmbeddingPromise.then(emb => patchPickedEmbedding(problemId, answer.date, emb))
             .catch(_err => { /* swallowed; backfill handles retry */ });
     }

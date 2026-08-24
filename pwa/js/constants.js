@@ -50,8 +50,27 @@ export const ANSWER_HISTORY_WORKING_SET = 3000;
 //             removed-problem prune, the cold-tail eviction — drops it too.
 // Lives here rather than beside any one of those passes because state.js and
 // backfill.js both apply it and neither may import the other.
-export const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding'];
+// `noEmb` marks a row the sidecar cannot supply a vector for — its problem left
+// the corpus, or it was never in the axis fit. Without it the fill-as-you-go pass
+// re-asks for the same unfillable rows on every load, forever. It clears with the
+// vectors: a new fit (or a re-added problem) deserves a fresh attempt, and the
+// wipe is the moment that decision is re-made.
+export const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding', 'noEmb'];
 export const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex'];
+
+// The device-level record of WHICH motif fit the stored vectors came from. One
+// value for the whole history, which is what makes the scheme cheap: a vector is
+// current if this says so, so nothing is stored per row. It holds only while
+// every writer respects it — see motifDataIsCurrent (data-version.js) — and while
+// the wipe that advances it reaches every holder of a vector (backfill.js).
+// Lives here because the backfill writes it and the write-time check reads it.
+export const EMBEDDING_VERSION_KEY = 'weaknessEmbeddingVersion';
+// The same for the other two generations of derived per-attempt data: the rating
+// fit (rating, slope, floor, and the quality derived from them) and the rank curve
+// (problemRank, derived from the rating through M). Three generations, one rule —
+// see storedVersionMatches (data-version.js).
+export const RATINGS_VERSION_KEY = 'ratingsVersion';
+export const RANK_CURVE_VERSION_KEY = 'rankCurveVersion';
 
 // The shared one-standard-deviation motif gate, deliberately ONE constant for
 // three readings that must not drift apart: a problem's motif is DISPLAYED when

@@ -771,6 +771,15 @@ function challengeAlreadyAnswered() {
     return state.answerHistory.slice(-RECALL_CANDIDATE_HISTORY_LENGTH).some(a => a.problemId === id);
 }
 
+// The one test the three challenge call sites share, so a reason to replace the
+// standing challenge cannot be honoured in one of them and skipped in another.
+// A challenge from a superseded fit is not among those reasons — it cannot reach
+// this point, because the wipe that advances the device's fit discards the stored
+// challenge along with every other holder of a vector (backfill.js).
+function challengeNeedsReplacing() {
+    return !state.challengeProblem || challengeAlreadyAnswered();
+}
+
 // Deterministic uniform [0,1) from a string: FNV-1a 32-bit with a murmur3
 // finalizer mix (the raw FNV low bits are too regular for a threshold compare).
 function hashToUnit(str) {
@@ -867,7 +876,7 @@ async function selectNextProblem() {
     // challenge stays off-screen, ready for when recalls are exhausted. (This
     // also reselects a stale challenge left by a kill mid-completion; see
     // challengeAlreadyAnswered.)
-    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+    if (challengeNeedsReplacing()) await assignNewChallenge();
 
     const recall = recallGateAllows() ? await getDueRecallProblem() : null;
     return recall || state.challengeProblem;
@@ -1003,7 +1012,7 @@ export async function refreshShownProblemAfterSync() {
         if (!shown || shown.linked) return;
         if (state.appMode !== APP_MODES.SOLVING || !state.acceptClicks) return;
 
-        if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+        if (challengeNeedsReplacing()) await assignNewChallenge();
 
         // The gate applies only to INTRODUCING a recall over an idle novel — a
         // recall already on screen keeps its ungated re-selection (most-due may
@@ -1091,7 +1100,7 @@ export async function resumeCurrentProblem() {
 
 // Exits a linked/shared view back to the user's standing challenge.
 export async function returnToChallenge() {
-    if (!state.challengeProblem || challengeAlreadyAnswered()) await assignNewChallenge();
+    if (challengeNeedsReplacing()) await assignNewChallenge();
     if (!state.challengeProblem) return advanceToNextProblem();
     try { displayProblem(state.challengeProblem, APP_MODES.SOLVING); warnIfServedAnsweredChallenge(); }
     catch (error) { reportLoadError(error, 0); return advanceToNextProblem(); }

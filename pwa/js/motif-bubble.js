@@ -102,8 +102,9 @@ export function refreshMotifBubbleMetrics() {
  * negative-tail motif, not "no motif" — each side uses its own label, and a
  * side left unnamed in labels.json is skipped. Returns localized strings.
  */
-function topMotifs(embedding) {
+function topMotifs(problem) {
     const labels = state.embeddingLabels;
+    const embedding = problem && problem.embedding;
     if (!Array.isArray(embedding) || !labels) return [];
     const scored = [];
     for (let k = 0; k < embedding.length; k++) {
@@ -162,7 +163,7 @@ function trainingFocusMotifs() {
 export function populateMotifBubble(problem) {
     const bubble = el('motif-bubble');
     if (!bubble) return;
-    _problemMotifs = topMotifs(problem && problem.embedding);
+    _problemMotifs = topMotifs(problem);
     bubble.classList.remove('over-board');   // always (re)appear parked
     syncMotifBubble();
 }

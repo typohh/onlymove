@@ -33,6 +33,7 @@
 
 import { state, getMergedAnswerHistory } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, MOTIF_Z } from './constants.js';
+import { SHIPPED_K } from './data-version.js';
 import { sigmoid } from './math-utils.js';
 import { clearSpan } from './irt.js';
 import { flattenAttempt } from '../shared/rank-window.js';
@@ -100,16 +101,21 @@ export function computeMotifStats(history = null) {
     const theta = state.userRank;
     if (typeof theta !== 'number' || !Number.isFinite(theta)) return null;
 
+    // Every stored vector is from the device's current fit by construction — the
+    // wipe drops all of them when the fit changes, and no build writes one while
+    // its own fit and the device's disagree (motifDataIsCurrent). So provenance is
+    // settled before a reader sees a row, and this only has to check that a row
+    // HAS a vector of the right shape, so the per-axis loops stay in range.
+    const K = SHIPPED_K;
+    if (!K) return null;
+    const usable = a => Array.isArray(a.embedding) && a.embedding.length === K;
+
     const all = history || getMergedAnswerHistory();
     const rows = all
-        .filter(a => a && !a.isRepeat && !a.linked &&
-                     Array.isArray(a.embedding) &&
+        .filter(a => a && !a.isRepeat && !a.linked && usable(a) &&
                      typeof a.correct === 'boolean')
         .slice(-MODEL_INPUT_HISTORY_LENGTH);
     if (rows.length < MIN_ATTEMPTS) return null;
-
-    const K = rows[0].embedding.length;
-    if (rows.some(a => a.embedding.length !== K)) return null;
 
     // --- TENDENCY: sign test on d, over wrong attempts with a resolved pick ---
     const nOver = new Array(K).fill(0);
