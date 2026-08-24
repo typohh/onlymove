@@ -117,7 +117,7 @@ PREFIX_BINS = ((0, 30, "pfx 0-30"), (30, 100, "pfx 30-100"),
 
 
 def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
-                 k_axes=0):
+                 k_axes=0, on_row=None, prior_prec=None):
     """One-step-ahead logloss, split by whether training saw the problem.
 
     BOTH latent user quantities are estimated from the whole prefix, causally.
@@ -139,14 +139,32 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
     simply stops existing.
 
     K is read from the loadings; nothing here assumes a particular axis count,
-    since the two models select K independently."""
+    since the two models select K independently.
+
+    `on_row(user, tid, y, pos, th, v, g, a, c, r, kap, span, p)` is called once
+    per scored attempt, BEFORE the row is folded into either latent estimate, so
+    a caller sees exactly the state the prediction was made from. It exists so a
+    decomposition of the axis term — which axis, which tail — is read off THIS
+    walk rather than off a second copy of it that could drift. `v` is rebound
+    rather than mutated on update, so the array handed out stays this row's.
+
+    `prior_prec` overrides the v-space prior precision the loadings imply. The
+    default states the prior on the TOTAL contribution `g @ v` in prediction
+    space and derives the v-space precision as `mean|g|^2 / PRIOR_AX_SD^2`, which
+    is what makes two models with differently-scaled loadings comparable. That
+    same derivation makes an arm which SHRINKS the loadings — clipping an axis to
+    one side, say — score under a looser prior than the arm it is compared with,
+    so the difference would be part ablation and part re-tuned prior. Pass the
+    full model's value to every arm of such a comparison.
+    """
     from auxiliary.rating_dev.validate_ratings import clear_logit_vec
     if loadings:
         G = np.stack(list(loadings.values()))
         k_axes = G.shape[1]
         # prior in prediction space -> v-space; see PRIOR_AX_SD
-        g2 = float((G ** 2).sum(axis=1).mean())
-        prior_prec = max(g2, 1e-9) / (PRIOR_AX_SD ** 2)
+        if prior_prec is None:
+            g2 = float((G ** 2).sum(axis=1).mean())
+            prior_prec = max(g2, 1e-9) / (PRIOR_AX_SD ** 2)
     allr = np.array(list(rate.values()), float)
     grid = np.linspace(allr.min() - 2.0, allr.max() + 2.0, GRID_N)
     prior = -0.5 * ((grid - allr.mean()) / (allr.std() + 1e-9)) ** 2
@@ -188,6 +206,8 @@ def forward_walk(rate, slope, floor, lam, seqs, seen_problems, loadings=None,
             if pb is None:
                 pb = next(l for lo, hi, l in PREFIX_BINS if lo <= pos < hi)
                 bin_of[pos] = pb
+            if on_row is not None:
+                on_row(_u, tid, y, pos, th, v, g, a, c, r, kap, span, p)
             for key in ("all", "seen" if tid in seen_problems else "unseen", pb):
                 acc[key][0] += loss
                 acc[key][1] += 1
