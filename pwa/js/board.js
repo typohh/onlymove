@@ -97,7 +97,7 @@ export function initializeBoard(size) {
     const board = new WGo.Board(boardWrapper, {
         size,
         background: WGo.DIR + "wood_1024.jpg",
-        stoneHandler: WGo.Board.drawHandlers.REALISTIC
+        stoneHandler: WGo.Board.drawHandlers.SHELL
     });
 
     board.addEventListener('click', handleBoardClick);
@@ -313,7 +313,7 @@ export async function getBoardImageBlob() {
         const tempBoard = new WGo.Board(tempContainer, {
             size: startPosition ? startPosition.size : state.board.size,
             background: "", // We will draw the background manually
-            stoneHandler: WGo.Board.drawHandlers.REALISTIC,
+            stoneHandler: WGo.Board.drawHandlers.SHELL,
             width: width
         });
         tempBoard.addCustomObject(coordinateLabels);
