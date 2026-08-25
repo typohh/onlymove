@@ -200,6 +200,7 @@ const localization = {
     onbShare: '点击「分享」，即可把这道题以链接或图片的形式发给他人尝试。',
     onbStats: '打开「菜单」并点击「统计」，即可查看你的弱点、解题速度和进步情况。',
     onbAccount: '打开「菜单」并点击「账户」——你的进度会保存为一个代码，在其他设备上输入即可同步。',
+    onbLinkProfile: '在此关联您的欧洲（EGD）或美国（AGA）棋手身份——您的姓名和官方段位会出现在排行榜上，让其他人有了想要超越的目标。',
     onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。',
     onbTrainingFocus: '应用现在会针对您的弱项出题。此列表是它正在重点练习的弱点。详情请见菜单统计中的弱点页。'
   },
@@ -400,6 +401,7 @@ const localization = {
     onbShare: '「共有」をタップすると、この問題をリンクや画像で誰かに送って挑戦してもらえます。',
     onbStats: '「メニュー」を開いて「統計」をタップすると、弱点や解答スピード、上達具合を確認できます。',
     onbAccount: '「メニュー」を開いて「アカウント」をタップ——進捗はコードとして保存され、他の端末で入力すれば同期できます。',
+    onbLinkProfile: 'ここでヨーロッパ（EGD）またはアメリカ（AGA）の棋士登録を連携できます。名前と公式段級位がランキングに表示され、ほかの人にとって「倒したい相手」になります。',
     onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。',
     onbTrainingFocus: 'アプリはあなたの弱点に合わせて問題を出すようになりました。このリストは現在重点的に出題している弱点です。詳しくはメニューの統計の弱点タブへ。'
   },
@@ -600,6 +602,7 @@ const localization = {
     onbShare: '「공유」를 탭하면 이 문제를 링크나 이미지로 보내 다른 사람이 풀어보게 할 수 있습니다.',
     onbStats: '「메뉴」를 열고 「통계」를 탭하면 약점과 풀이 속도, 진척도를 확인할 수 있습니다.',
     onbAccount: '「메뉴」를 열고 「계정」을 탭하세요——진행 상황이 코드로 저장되어, 다른 기기에서 입력하면 동기화됩니다.',
+    onbLinkProfile: '여기에서 유럽(EGD) 또는 미국(AGA) 기사 등록을 연결할 수 있습니다. 이름과 공식 급/단이 순위표에 표시되어, 다른 사람들에게 이겨보고 싶은 상대가 됩니다.',
     onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.',
     onbTrainingFocus: '앱이 이제 약점에 맞춰 문제를 냅니다. 이 목록은 현재 집중적으로 출제 중인 약점입니다. 자세한 내용은 메뉴 통계의 약점 탭에서 확인하세요.'
   },
@@ -682,6 +685,7 @@ const localization = {
     onbShare: 'Tap Share to send this problem as a link or an image for others to try.',
     onbStats: 'Open the menu and tap Stats for your weaknesses, solving speed and progress.',
     onbAccount: 'Open the menu and tap Account — your progress saves to a code you can enter on another device to sync.',
+    onbLinkProfile: 'Link your European (EGD) or American (AGA) player record here — your name and official rank join the leaderboard, giving everyone else someone to try to beat.',
     onbBoardSize: 'Open the menu to switch between 9×9 and 13×13.',
     onbTrainingFocus: 'The app now aims some problems at your weak points. This list shows the weaknesses it is serving extra problems for. Details are under Weaknesses in the menu\'s stats.',
 

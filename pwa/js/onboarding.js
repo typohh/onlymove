@@ -128,6 +128,9 @@ const anchors = {
     // firing only once the menu is already open.
     menu: () => firstVisible(['menu-toggle-h', 'menu-toggle']),
     motifBubble: () => el('motif-bubble'),
+    // Inside the Account dialog, so it exists only while that dialog is open —
+    // which is exactly when its bubble fires (js/account-ui.js).
+    accountProfile: () => el('account-profile-cell'),
 };
 
 const isVisible = (node) => {
@@ -242,6 +245,19 @@ const BUBBLES = {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbBoardSize',
         eligible: () => (_sessionCount >= 2 || historyLen() >= 12) && isVisible(anchors.menu()),
     },
+    // The Account dialog's Profile row, on an account with nothing linked. The
+    // row already carries a "?" explaining what linking does; this is the
+    // unprompted version of it, for the majority who never tap a "?" — so it
+    // adds the reason a linked name is worth having rather than restating the
+    // mechanics. Like trainingFocus it is a feature announcement, and for the
+    // same reason: the users who HAVE an EGD or AGA record are established
+    // players, precisely the ones the first-run suppression silences.
+    // topLayer because it sits over a modal.
+    linkProfile: {
+        kind: 'trigger', anchor: 'accountProfile', placement: 'auto',
+        text: 'onbLinkProfile', bypassSuppression: true, topLayer: true,
+        eligible: (ctx) => ctx.unlinked === true && isVisible(anchors.accountProfile()),
+    },
     // A NEW-FEATURE announcement rather than a first-run tip: fires the first
     // time the training-focus list (motif-bubble.js, solving mode) paints. The
     // list appears only for a converged user with a trained weakness model —
@@ -279,7 +295,7 @@ function tryShow(ids, ctx = {}) {
         if (!def || wasShown(id)) continue;
         try { if (!def.eligible(ctx)) continue; } catch { continue; }
         if (!spacingOk(def.kind)) return;   // gate is global — don't fall through to a lower-priority one
-        scheduleShow(id, def);
+        scheduleShow(id, def, ctx);
         return;
     }
 }
@@ -337,7 +353,11 @@ function onReposition() {
 const overlayBlocking = () =>
     !!document.querySelector('.app-blocking-overlay, .loading-overlay');
 
-function scheduleShow(id, def) {
+// `ctx` is carried through the delay and re-checked with, NOT dropped: a gate
+// like recall's `ctx.isRepeat` is a fact about the problem on screen that
+// nothing on the page restates, so re-verifying against an empty context would
+// refuse every context-gated bubble unconditionally.
+function scheduleShow(id, def, ctx = {}) {
     _pending = true;
     let tries = 0;
     const attempt = () => {
@@ -353,7 +373,7 @@ function scheduleShow(id, def) {
             _pending = false; return;   // gave up waiting for a clear board
         }
         let target;
-        try { if (!def.eligible({})) { _pending = false; return; } } catch { _pending = false; return; }
+        try { if (!def.eligible(ctx)) { _pending = false; return; } } catch { _pending = false; return; }
         target = def.anchor === 'board' ? anchors.board() : anchors[def.anchor]();
         if (!isVisible(target)) { _pending = false; return; }
         render(id, def);
@@ -362,7 +382,8 @@ function scheduleShow(id, def) {
 }
 
 function render(id, def) {
-    const bubble = createBubble(getTerm(typeof def.text === 'function' ? def.text() : def.text));
+    const bubble = createBubble(getTerm(typeof def.text === 'function' ? def.text() : def.text),
+                                { topLayer: !!def.topLayer });
     document.body.appendChild(bubble);
     _bubbleEl = bubble;
     _repositionArgs = { def };
@@ -460,19 +481,35 @@ export function onScoreUnreliable() {
     tryShow(['reviewScoreUnreliable']);
 }
 
-// The training-focus list just painted (motif-bubble.js calls this on every
-// repaint that shows it). Feature announcement, so it bypasses the
-// existing-user suppression — the list is new to existing users too, and they
-// are exactly the users converged enough to have one — but keeps every other
-// gate: once-ever, anti-stacking, session cap, backoff.
-export function onTrainingFocusShown() {
+// tryShow for a FEATURE ANNOUNCEMENT: bypasses the existing-user suppression
+// (an announcement is new to existing users too, and they are usually the only
+// ones who reach its context at all) while keeping every other gate —
+// once-ever, anti-stacking, session cap, backoff.
+function tryShowFeature(id, ctx = {}) {
     if (!_featureReady || _backedOff || _pending) return;
     if (document.hidden) return;
-    if (wasShown('trainingFocus')) return;
-    const def = BUBBLES.trainingFocus;
-    try { if (!def.eligible({})) return; } catch { return; }
+    if (wasShown(id)) return;
+    const def = BUBBLES[id];
+    try { if (!def.eligible(ctx)) return; } catch { return; }
     if (!spacingOk(def.kind)) return;
-    scheduleShow('trainingFocus', def);
+    scheduleShow(id, def, ctx);
+}
+
+// The training-focus list just painted (motif-bubble.js calls this on every
+// repaint that shows it) — the users converged enough to have one are mostly
+// existing ones, hence the announcement path.
+export function onTrainingFocusShown() {
+    tryShowFeature('trainingFocus');
+}
+
+// The Account dialog's Profile row just painted with its server state in hand
+// (js/account-ui.js). `linked` is that row's value: the linked player, or null
+// for an account that has none. Only the second case has anything to say, and
+// the bubble anchors INSIDE the dialog, so it lives exactly as long as the
+// dialog does — a re-check after the show delay finds the anchor gone if the
+// user has moved on.
+export function onAccountProfileShown(linked) {
+    tryShowFeature('linkProfile', { unlinked: linked === null });
 }
 
 export function onResume() {

@@ -50,6 +50,7 @@ import { postJson } from './worker-post.js';
 import { searchIdentities } from './identity-search.js';
 import { bufferGorUpdate } from './gor-refresh.js';
 import { hintButton, closeHint } from './hint-bubble.js';
+import { onAccountProfileShown } from './onboarding.js';
 
 // Shown in place of a server value that hasn't arrived, and of one whose read
 // failed — the row stays clickable in the second case, which retries.
@@ -96,7 +97,9 @@ export function showAccountModal() {
 }
 
 // One row of the overview: a bold label, a clickable value, and its hint.
-function addRow(grid, labelTerm, hintTerm, valueEl) {
+// `cellId` is only for the Profile row: js/onboarding.js anchors its
+// link-your-record bubble to that cell by id, so don't drop it.
+function addRow(grid, labelTerm, hintTerm, valueEl, cellId) {
     const label = document.createElement('div');
     label.className = 'modal-rank-label';
     label.textContent = getTerm(labelTerm);
@@ -104,6 +107,7 @@ function addRow(grid, labelTerm, hintTerm, valueEl) {
 
     const cell = document.createElement('div');
     cell.className = 'account-cell';
+    if (cellId) cell.id = cellId;
     cell.appendChild(valueEl);
     cell.appendChild(hintButton(getTerm(hintTerm)));
     grid.appendChild(cell);
@@ -168,7 +172,15 @@ class AccountPanel {
         }
         // Only repaint if the overview is still what's on screen — a load that
         // lands while the user is mid-search must not throw their typing away.
-        if (this.view === 'overview') this.showOverview();
+        if (this.view === 'overview') {
+            this.showOverview();
+            // Offer the onboarding bubble here rather than from showOverview:
+            // the overview also repaints on an UNLINK, and "link your record"
+            // arriving the moment the user chose Anonymous is the one time it
+            // must not. This runs on opening the dialog (and on a retry), where
+            // the answer is genuinely news.
+            onAccountProfileShown(this.linked);
+        }
     }
 
     render(build, exitTerm, onExit) {
@@ -186,7 +198,7 @@ class AccountPanel {
             const grid = modalRankGrid();
             grid.classList.add('account-grid');
             addRow(grid, 'accountRowCode', 'accountHint', this.codeValue());
-            addRow(grid, 'accountProfile', 'accountLinkIntro', this.profileValue());
+            addRow(grid, 'accountProfile', 'accountLinkIntro', this.profileValue(), 'account-profile-cell');
             addRow(grid, 'accountAnonymous', 'accountHideLabel', this.anonymousValue());
             host.appendChild(grid);
             const note = document.createElement('div');
