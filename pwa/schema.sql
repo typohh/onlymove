@@ -230,6 +230,11 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
 -- invite-only and they lived on the claimed `invitation` row; see
 -- migrations/2026-08-25_self_link_identity.sql for the backfill.)
 --
+-- The player's GRADE is deliberately NOT duplicated here. It already lives on the
+-- machine heartbeat in `rank_surveys` — refreshed weekly, and the value the
+-- leaderboard's Declared column shows — so the Account dialog reads it from there
+-- too (readLinkedIdentity) and the two cannot disagree.
+--
 -- Everything else about a linked player lives elsewhere: rating history as
 -- machine-written heartbeat rows in `rank_surveys` (weekly, one row per linked
 -- player per week; 'EGD' = raw GoR digits e.g. '2145' from the client GoR

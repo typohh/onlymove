@@ -34,21 +34,39 @@
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import {
-    getProblemParams, buildRowStateFromReports, serializeBuffer, weekStartIso,
-    invalidateStaleGor,
+    getProblemParams, buildRowStateFromReports, serializeBuffer,
+    invalidateStaleGor, shortRankLabel, gorToRank, agaRatingToRank,
 } from '../leaderboard.js';
+import { rankToLabel, rankBand, clampRankBand } from '../../shared/rank-math.js';
 import { fetchAgaPlayer, isValidAgaId } from '../aga.js';
 
 const NAME_MAX = 100;
 
 // The account's current binding, or null. Shared with GET /profile so the Account
 // dialog reads its whole panel in one request.
+//
+// `rank` is read LIVE off the account's latest machine heartbeat rather than being
+// snapshotted onto the binding: the heartbeat is already the one place that rating
+// is kept, it is refreshed weekly, and it is what the leaderboard's Declared column
+// reads — so the dialog and the board cannot disagree, and a player who changes
+// grade does not have to be relinked to say so. Prefer the federation's OWN label
+// ('4d', the same precedence readLeaderboardRows uses for its activity tier) and
+// derive one from the raw rating only for a legacy heartbeat written before that
+// column existed. The scan is a scan of ~700 rows, on a route that fires when
+// somebody opens a dialog.
 export async function readLinkedIdentity(env, userId) {
     if (!env.DB || !isValidUserId(userId)) return null;
-    const row = await env.DB.prepare(
-        `SELECT egd_pin, aga_id, display_name, country_code
-           FROM external_ids WHERE user_id = ?1`
-    ).bind(userId).first();
+    const [row, beat] = await Promise.all([
+        env.DB.prepare(
+            `SELECT egd_pin, aga_id, display_name, country_code
+               FROM external_ids WHERE user_id = ?1`
+        ).bind(userId).first(),
+        env.DB.prepare(
+            `SELECT server, rank, rank_label FROM rank_surveys
+              WHERE user_id = ?1 AND server IN ('EGD', 'AGAR')
+              ORDER BY id DESC LIMIT 1`
+        ).bind(userId).first(),
+    ]);
     if (!row) return null;
     const isAga = row.aga_id != null;
     const id = isAga ? String(row.aga_id) : (row.egd_pin != null ? String(row.egd_pin) : '');
@@ -58,7 +76,24 @@ export async function readLinkedIdentity(env, userId) {
         id,
         name: row.display_name || '',
         country: row.country_code || '',
+        rank: heartbeatLabel(beat),
     };
+}
+
+// A heartbeat row -> the grade to show, or ''. The stored label wins; failing that
+// the raw value is mapped through that service's coupling and labelled on our own
+// ladder, which is a band-edge approximation of the federation's grade rather than
+// the grade itself — acceptable only because the rows without a label are legacy
+// ones that age out on their next weekly refresh.
+function heartbeatLabel(beat) {
+    if (!beat) return '';
+    const official = shortRankLabel(beat.rank_label);
+    if (official) return official;
+    const value = Number(beat.rank);
+    if (!Number.isFinite(value)) return '';
+    const rank = beat.server === 'AGAR' ? agaRatingToRank(value) : gorToRank(value);
+    if (!Number.isFinite(rank)) return '';
+    return rankToLabel(clampRankBand(rankBand(rank)));
 }
 
 // Every statement that removes a binding removes the machine rating heartbeats
@@ -157,9 +192,15 @@ export async function handleLink(request, env) {
         await env.DB.batch(stmts);
         if (!isAga) invalidateStaleGor();
 
+        // The AGA fetch above wrote a heartbeat, so its grade is already known here.
+        // An EGD link has none until the GoR piggyback lands on the next /report;
+        // the client fills that one render from the search result it just picked.
         return jsonResponse({
             ok: true,
-            linked: { service: isAga ? 'AGA' : 'EGD', id: idVal, name, country: country || '' },
+            linked: {
+                service: isAga ? 'AGA' : 'EGD', id: idVal, name,
+                country: country || '', rank: isAga ? agaPlayer.rankLabel : '',
+            },
         });
     } catch (e) {
         console.error('handleLink failed:', e);

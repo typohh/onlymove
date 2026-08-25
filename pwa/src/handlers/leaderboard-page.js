@@ -60,7 +60,6 @@ const STR = {
         empty: 'No players yet.',
         belowNoteOne: '1 more active player has fewer than {min} solves and isn\'t shown yet.',
         belowNoteMany: '{n} more active players have fewer than {min} solves and aren\'t shown yet.',
-        linkLine: 'Want your name shown instead of "Anonymous"? Open the app\u2019s menu → Account and link your EGD or AGA player. The same place has the opt-out that keeps you anonymous here.',
     },
     zh: {
         leaderboard: '每周排行榜',
@@ -73,7 +72,6 @@ const STR = {
         empty: '暂无玩家。',
         belowNoteOne: '还有 1 名活跃玩家的解题数不足 {min}，暂未显示。',
         belowNoteMany: '还有 {n} 名活跃玩家的解题数不足 {min}，暂未显示。',
-        linkLine: '想显示您的名字而不是「匿名」？请在应用的菜单 → 账户中关联您的 EGD 或 AGA 棋手身份。保持匿名的选项也在同一处。',
     },
     ja: {
         leaderboard: '週間ランキング',
@@ -86,7 +84,6 @@ const STR = {
         empty: 'まだプレイヤーがいません。',
         belowNoteOne: 'あと1人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
         belowNoteMany: 'あと{n}人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
-        linkLine: '「匿名」の代わりに名前を表示しますか？アプリのメニュー → アカウントで、EGD または AGA のプレイヤーを連携してください。ここで匿名のままにする設定も同じ場所にあります。',
     },
     ko: {
         leaderboard: '주간 순위표',
@@ -99,7 +96,6 @@ const STR = {
         empty: '아직 플레이어가 없습니다.',
         belowNoteOne: '해결한 문제가 {min}개 미만인 활동 플레이어가 1명 더 있으며 아직 표시되지 않습니다.',
         belowNoteMany: '해결한 문제가 {min}개 미만인 활동 플레이어가 {n}명 더 있으며 아직 표시되지 않습니다.',
-        linkLine: '"익명" 대신 이름을 표시하고 싶으신가요? 앱의 메뉴 → 계정에서 EGD 또는 AGA 선수를 연결하세요. 여기서 익명으로 남는 설정도 같은 곳에 있습니다.',
     },
 };
 
@@ -271,7 +267,6 @@ function renderPage(rows, belowMin) {
 </table>
 <footer>
   ${belowNote}
-  <p id="lbLink">Want your name shown instead of "Anonymous"? Open the app’s menu → Account and link your EGD or AGA player. The same place has the opt-out that keeps you anonymous here.</p>
 </footer>
 <script>
 // Localization prelude. Resolves the viewer's language on the CLIENT (see STR note
@@ -309,7 +304,6 @@ function renderPage(rows, belowMin) {
   setText('thPred', t('predicted'));
   var us = document.getElementById('unitsSel');
   if (us) us.setAttribute('aria-label', t('units'));   // the only remaining use of the units string
-  setText('lbLink', t('linkLine'));
   var below = document.getElementById('lbBelow');
   if (below && CFG.belowMin > 0) {
     below.textContent = t(CFG.belowMin === 1 ? 'belowNoteOne' : 'belowNoteMany',

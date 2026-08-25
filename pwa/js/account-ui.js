@@ -1,38 +1,64 @@
 // js/account-ui.js
 //
-// The Account dialog (hamburger menu → More), in two parts.
+// The Account dialog (hamburger menu → More). Three values, each one a thing the
+// user can change by clicking it:
 //
-// ACCOUNT — one editable field holds the account code, which IS the userId, the
-// credential every attempt is reported under. Untouched, it shows the current
-// account and Copy is active; edited, it becomes a login form and Log in is
-// active (the two buttons toggle in opposition). The actual switch (wipe +
-// reload + full history pull) lives in account-sync.switchAccount.
+//     Code       <user-id>            (?)
+//     Profile    Henry Hemming · 4d  (?)
+//     Anonymous  No                  (?)
 //
-// LEADERBOARD — the account's public identity on /leaderboard: which EGD or AGA
-// player it is linked to, and whether to appear anonymously. Both are server
-// state, read in ONE GET /profile when the dialog opens and written back only on
-// an actual change (the hide flag is also offered at the foot of the rank survey,
-// so writing it unconditionally would let one dialog silently undo the other).
+// The explanations live in hint bubbles rather than in the layout (see
+// js/hint-bubble.js): every one of these needs a sentence, and three sentences
+// on the page turn a short list of choices into something nobody reads. The
+// values are styled alike because they behave alike — click to change — and the
+// account code is not special among them.
 //
-// The search runs in the BROWSER (js/identity-search.js): the Worker cannot reach
-// EGD at all, so a client-side search is the only kind there is. Picking a row
-// POSTs /link, which is where exclusivity is enforced — nothing anywhere verifies
-// that the user IS that player, and the dialog does not pretend otherwise; what it
-// offers instead is Unlink, so a wrong pick is the user's own to undo.
+// Two things this deliberately does NOT have. There is no Copy button: the code
+// is selectable text and every platform already has a copy gesture for it. And
+// there is no Log in button — a disabled button beside a field the user has not
+// touched reads as "something is wrong", so the code field simply asks for
+// confirmation when the user finishes editing it. Committing on blur (rather
+// than on a button) is what makes "click the value to change it" true of all
+// three rows instead of only two.
+//
+// Nothing here raises a toast. A success needs none — the row the user just
+// changed is showing its new value, which is the report. A FAILURE does need
+// saying, because a value that quietly snaps back looks like a bug rather than a
+// refusal, so those go to a note line inside the dialog, where the user is
+// already looking, instead of a banner over the board.
+//
+// Code is local. Profile (which EGD/AGA player this account is) and Anonymous
+// (the leaderboard opt-out) are server state, read together in ONE
+// GET /profile and written only on an actual change — the rank survey offers the
+// same opt-out, so an unconditional write would let one dialog undo the other.
+//
+// The identity search runs in the BROWSER (js/identity-search.js): the Worker
+// cannot reach EGD at all, so a client-side search is the only kind there is.
+// Picking a result POSTs /link, which is where exclusivity is enforced — nothing
+// anywhere verifies that the user IS that player, and the dialog does not pretend
+// otherwise; what it offers instead is Unlink, so a wrong pick is the user's own
+// to undo.
 
 import { state } from './state.js';
 import { getTerm } from './i18n.js';
 import {
-    showModal, modalTitle, modalButton, modalButtonRow, showConfirm, showToast,
+    showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid,
+    showConfirm,
 } from './overlays.js';
 import { isValidAccountCode, switchAccount, accountExists } from './account-sync.js';
 import { postJson } from './worker-post.js';
 import { searchIdentities } from './identity-search.js';
 import { bufferGorUpdate } from './gor-refresh.js';
+import { hintButton, closeHint } from './hint-bubble.js';
+
+// Shown in place of a server value that hasn't arrived, and of one whose read
+// failed — the row stays clickable in the second case, which retries.
+const PENDING = '…';
+const UNKNOWN = '—';
 
 // POST /link rejections that name a cause the user can act on. Anything else —
 // 'server', a network failure, an unrecognized body — falls to the generic retry
-// line, same shape as the account-code errors above it.
+// line.
 function linkErrorTerm(error) {
     switch (error) {
         case 'id_taken':    return 'accountLinkTaken';
@@ -43,169 +69,88 @@ function linkErrorTerm(error) {
 
 export function showAccountModal() {
     showModal({
+        // A hint bubble is a child of <body>, not of the modal, so a click on one
+        // reaches the backdrop; without this the dialog would close under the user
+        // as they read an explanation.
+        onDismiss: closeHint,
         build: (modal, close) => {
             modal.appendChild(modalTitle(getTerm('accountTitle')));
 
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.maxLength = 8;
-            input.value = state.userId;
-            input.autocapitalize = 'off';
-            input.autocomplete = 'off';
-            input.spellcheck = false;
-            Object.assign(input.style, {
-                display: 'block',
-                margin: '0.119em auto',
-                padding: '0.119em 0.1905em',
-                borderRadius: 'var(--radius)',
-                background: '#444',
-                color: '#fff',
-                border: 'calc(0.2 * var(--u)) solid #555',
-                fontFamily: 'monospace',
-                fontSize: '1.2em',
-                letterSpacing: '0.15em',
-                width: '11ch',
-                textAlign: 'center',
-                boxSizing: 'content-box',
-            });
-            modal.appendChild(input);
+            // The dialog is one of two views: the three-row overview, or the
+            // identity search. One thing at a time — the search needs the width
+            // and a result list, and interleaving it with the other two rows is
+            // what made the previous version feel like a form.
+            const host = document.createElement('div');
+            modal.appendChild(host);
 
-            const hint = document.createElement('div');
-            hint.textContent = getTerm('accountHint');
-            Object.assign(hint.style, {
-                fontSize: '0.8em',
-                opacity: '0.8',
-                maxWidth: '34ch',
-                margin: '0 auto',
-            });
-            modal.appendChild(hint);
+            // ONE button, always in the same place, meaning "leave this view":
+            // Close from the overview, back to the overview from the search. A
+            // Cancel beside a Close is two ways out of one dialog, and the reader
+            // has to work out which is which.
+            const footer = document.createElement('div');
+            modal.appendChild(footer);
 
-            const copyCode = async () => {
-                try {
-                    await navigator.clipboard.writeText(state.userId);
-                    showToast(getTerm('accountCopied'));
-                } catch (_) {
-                    // Clipboard API unavailable — the code is right there in
-                    // the field for a manual copy.
-                }
-            };
-
-            let checking = false;
-            const login = async () => {
-                if (checking) return;
-                const newId = input.value.trim();
-                if (newId === state.userId) return;
-                if (!isValidAccountCode(newId)) {
-                    showToast(getTerm('accountInvalid'), { isError: true });
-                    return;
-                }
-                checking = true;
-                try {
-                    // Only adopt codes that exist server-side (≥1 report —
-                    // the only state an account can be rebuilt from), so a
-                    // typo can't strand the user on an empty account.
-                    if (await accountExists(newId) !== true) {
-                        showToast(getTerm('accountNotFound'), { isError: true });
-                        return;
-                    }
-                } finally {
-                    checking = false;
-                }
-                if (!await showConfirm(getTerm('accountSwitchConfirm', { code: newId }))) return;
-                close();
-                // Wipes local state, stores the new credential, reloads; init
-                // then pulls the account's full history from the server.
-                switchAccount(newId);
-            };
-
-            const copyBtn = modalButton(getTerm('accountCopy'), copyCode);
-            const loginBtn = modalButton(getTerm('accountLogin'), login);
-
-            // Copy applies to the account you HAVE, Log in to the one you
-            // typed — exactly one is meaningful at a time.
-            const refreshButtons = () => {
-                const unchanged = input.value.trim() === state.userId;
-                copyBtn.classList.toggle('disabled', !unchanged);
-                loginBtn.classList.toggle('disabled', unchanged);
-            };
-            refreshButtons();
-            input.addEventListener('input', refreshButtons);
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') login();
-            });
-
-            modal.appendChild(modalButtonRow([copyBtn, loginBtn]));
-            modal.appendChild(buildLeaderboardSection());
+            new AccountPanel(host, footer, close).showOverview();
         },
     });
 }
 
-// The Leaderboard half: the linked identity (search / link / unlink) and the
-// anonymity opt-out. Returns the section element immediately and fills it in when
-// GET /profile answers — the account half above must not wait on the network.
-function buildLeaderboardSection() {
-    const section = document.createElement('div');
-    section.className = 'account-section';
+// One row of the overview: a bold label, a clickable value, and its hint.
+function addRow(grid, labelTerm, hintTerm, valueEl) {
+    const label = document.createElement('div');
+    label.className = 'modal-rank-label';
+    label.textContent = getTerm(labelTerm);
+    grid.appendChild(label);
 
-    const heading = document.createElement('div');
-    heading.className = 'account-section-title';
-    heading.textContent = getTerm('accountLeaderboard');
-    section.appendChild(heading);
+    const cell = document.createElement('div');
+    cell.className = 'account-cell';
+    cell.appendChild(valueEl);
+    cell.appendChild(hintButton(getTerm(hintTerm)));
+    grid.appendChild(cell);
+}
 
-    // Everything below is server state, so nothing is offered until the read
-    // lands: a checkbox rendered unchecked before the answer arrives is a wrong
-    // answer the user may act on.
-    const status = document.createElement('div');
-    status.className = 'account-note';
-    status.textContent = getTerm('accountLoading');
-    section.appendChild(status);
-
-    const identity = document.createElement('div');
-    identity.style.display = 'none';
-    section.appendChild(identity);
-
-    const hideRow = document.createElement('label');
-    hideRow.className = 'account-check';
-    hideRow.style.display = 'none';
-    const hideBox = document.createElement('input');
-    hideBox.type = 'checkbox';
-    const hideText = document.createElement('span');
-    hideText.textContent = getTerm('accountHideLabel');
-    hideRow.appendChild(hideBox);
-    hideRow.appendChild(hideText);
-    section.appendChild(hideRow);
-
-    // Write only on a real change, and only from the state the server reported —
-    // the rank survey offers the same flag, so an unconditional write would
-    // un-hide whoever opted out there. On a failed write the box goes back, so
-    // what is shown is always what the server holds.
-    let hiddenOnServer = false;
-    hideBox.addEventListener('change', async () => {
-        const want = hideBox.checked;
-        if (want === hiddenOnServer) return;
-        hideBox.disabled = true;
-        try {
-            const res = await postJson('/profile/hide', { userId: state.userId, hidden: want });
-            const body = await res.json();
-            if (!body || body.hidden !== want) throw new Error('rejected');
-            hiddenOnServer = want;
-        } catch (_) {
-            hideBox.checked = hiddenOnServer;
-            showToast(getTerm('accountHideFailed'), { isError: true });
-        } finally {
-            hideBox.disabled = false;
-        }
+// A value the user can click to change. `muted` marks a value that isn't set
+// yet, so "not set" doesn't read as a name.
+// `onActivate` is handed its own element, so a handler that has to swap itself
+// out (the code editor) works off the node it was actually attached to rather
+// than re-finding it by position in the grid.
+function valueEl(text, onActivate, { muted = false } = {}) {
+    const el = document.createElement('span');
+    el.className = muted ? 'account-value account-value-muted' : 'account-value';
+    el.textContent = text;
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.addEventListener('click', () => onActivate(el));
+    el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(el); }
     });
+    return el;
+}
 
-    // --- identity: one of two faces, swapped in place by the link/unlink calls ---
-    const renderIdentity = (linked) => {
-        identity.textContent = '';
-        identity.style.display = '';
-        if (linked) renderLinked(identity, linked, renderIdentity);
-        else renderSearch(identity, renderIdentity);
-    };
+class AccountPanel {
+    constructor(host, footer, closeModal) {
+        this.host = host;
+        this.footer = footer;
+        this.closeModal = closeModal;
+        this.linked = undefined;   // undefined = not read yet, null = none
+        this.hidden = undefined;
+        this.loadFailed = false;
+        this.notice = '';          // the overview's one error line, '' when quiet
+        this.load();
+    }
 
-    (async () => {
+    // Say why something did not happen, on the overview. Stays up until the next
+    // action, so a user who looks away and back still finds out.
+    fail(term) {
+        this.notice = getTerm(term);
+        this.showOverview();
+    }
+
+    // Profile + Anonymous in one read. Re-runnable: clicking a failed row calls
+    // it again rather than making the user reopen the dialog. A retry that fails
+    // says so — the boot read can fail quietly into a '—' the user may not have
+    // been looking at, but a click they just made must answer them.
+    async load({ announceFailure = false } = {}) {
         let profile = null;
         try {
             const res = await fetch(`/profile?userId=${encodeURIComponent(state.userId)}`);
@@ -214,150 +159,304 @@ function buildLeaderboardSection() {
             profile = null;
         }
         if (!profile) {
-            // Offline or a failed read: say so and offer nothing, rather than
-            // showing an unchecked box and an empty link state that both read as
-            // facts about the account.
-            status.textContent = getTerm('accountLoadFailed');
+            this.loadFailed = true;
+            if (announceFailure) this.notice = getTerm('accountLoadFailed');
+        } else {
+            this.loadFailed = false;
+            this.linked = profile.linked || null;
+            this.hidden = !!profile.hidden;
+        }
+        // Only repaint if the overview is still what's on screen — a load that
+        // lands while the user is mid-search must not throw their typing away.
+        if (this.view === 'overview') this.showOverview();
+    }
+
+    render(build, exitTerm, onExit) {
+        closeHint();
+        this.host.textContent = '';
+        this.footer.textContent = '';
+        build(this.host);
+        this.footer.appendChild(modalButtonRow([modalButton(getTerm(exitTerm), onExit)]));
+    }
+
+    // --- the three-row overview ---------------------------------------------
+    showOverview() {
+        this.view = 'overview';
+        this.render((host) => {
+            const grid = modalRankGrid();
+            grid.classList.add('account-grid');
+            addRow(grid, 'accountRowCode', 'accountHint', this.codeValue());
+            addRow(grid, 'accountProfile', 'accountLinkIntro', this.profileValue());
+            addRow(grid, 'accountAnonymous', 'accountHideLabel', this.anonymousValue());
+            host.appendChild(grid);
+            const note = document.createElement('div');
+            note.className = 'account-note';
+            note.textContent = this.notice;
+            host.appendChild(note);
+        }, 'accountClose', () => { closeHint(); this.closeModal(); });
+    }
+
+    // Code: click swaps the value for an input; leaving the input is what asks.
+    codeValue() {
+        return valueEl(state.userId, (el) => this.editCode(el));
+    }
+
+    editCode(current) {
+        this.notice = '';
+        const cell = current.parentNode;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'account-value account-input';
+        input.maxLength = 8;
+        input.value = state.userId;
+        input.autocapitalize = 'off';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        cell.replaceChild(input, current);
+        input.focus();
+        input.select();
+
+        let settled = false;
+        const revert = () => {
+            if (settled) return;
+            settled = true;
+            if (input.parentNode === cell) cell.replaceChild(this.codeValue(), input);
+        };
+        // Blur is the commit: Enter blurs, Escape reverts first so the blur it
+        // causes finds nothing left to do.
+        input.addEventListener('blur', () => {
+            const typed = input.value.trim();
+            revert();
+            this.commitCode(typed);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+            if (e.key === 'Escape') { e.preventDefault(); input.value = state.userId; input.blur(); }
+        });
+    }
+
+    async commitCode(typed) {
+        if (!typed || typed === state.userId) return;
+        if (!isValidAccountCode(typed)) {
+            this.fail('accountInvalid');
             return;
         }
-        status.style.display = 'none';
-        hiddenOnServer = !!profile.hidden;
-        hideBox.checked = hiddenOnServer;
-        hideRow.style.display = '';
-        renderIdentity(profile.linked || null);
-    })();
+        // Only adopt codes that exist server-side (>= 1 report — the only state an
+        // account can be rebuilt from), so a typo can't strand the user on an
+        // empty account.
+        if (await accountExists(typed) !== true) {
+            this.fail('accountNotFound');
+            return;
+        }
+        if (!await showConfirm(getTerm('accountSwitchConfirm', { code: typed }))) return;
+        closeHint();
+        this.closeModal();
+        // Wipes local state, stores the new credential, reloads; init then pulls
+        // the account's full history from the server.
+        switchAccount(typed);
+    }
 
-    return section;
-}
+    // Profile: the linked player's own name and official grade, and nothing else
+    // — the grade is what tells two same-named players apart, while the member
+    // id, having done its job in the search, would only be noise.
+    profileValue() {
+        if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });
+        if (this.linked === undefined) return valueEl(PENDING, () => {}, { muted: true });
+        if (!this.linked) {
+            return valueEl(getTerm('accountNotLinked'), () => this.showSearch(), { muted: true });
+        }
+        const text = [this.linked.name, this.linked.rank].filter(Boolean).join(' · ');
+        return valueEl(text, () => this.showSearch());
+    }
 
-// Linked state: who this account is, and the one action that changes it.
-function renderLinked(host, linked, rerender) {
-    const line = document.createElement('div');
-    line.className = 'account-note';
-    line.textContent = getTerm('accountLinkedAs', {
-        name: linked.name, service: linked.service, id: linked.id,
-    });
-    host.appendChild(line);
+    anonymousValue() {
+        if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });
+        if (this.hidden === undefined) return valueEl(PENDING, () => {}, { muted: true });
+        return valueEl(getTerm(this.hidden ? 'accountYes' : 'accountNo'), () => this.toggleHidden());
+    }
 
-    const unlinkBtn = modalButton(getTerm('accountUnlink'), async () => {
-        if (unlinkBtn.classList.contains('disabled')) return;
-        if (!await showConfirm(getTerm('accountUnlinkConfirm', { name: linked.name }))) return;
-        unlinkBtn.classList.add('disabled');
+    retry() {
+        this.loadFailed = false;
+        this.linked = undefined;
+        this.hidden = undefined;
+        this.showOverview();
+        this.load({ announceFailure: true });
+    }
+
+    // Optimistic, then reconciled against what the server actually reports: what
+    // is shown is always what the server holds.
+    async toggleHidden() {
+        const want = !this.hidden;
+        this.notice = '';
+        this.hidden = want;
+        this.showOverview();
+        try {
+            const res = await postJson('/profile/hide', { userId: state.userId, hidden: want });
+            const body = await res.json();
+            if (!body || body.hidden !== want) throw new Error('rejected');
+        } catch (_) {
+            this.hidden = !want;
+            this.fail('accountHideFailed');
+        }
+    }
+
+    // --- the identity search -------------------------------------------------
+    showSearch() {
+        this.view = 'search';
+        this.notice = '';
+        this.render((host) => {
+            const row = document.createElement('div');
+            row.className = 'account-searchrow';
+            const query = document.createElement('input');
+            query.type = 'search';
+            query.className = 'account-search';
+            query.placeholder = getTerm('accountLinkPlaceholder');
+            query.autocapitalize = 'off';
+            query.autocomplete = 'off';
+            query.spellcheck = false;
+            row.appendChild(query);
+
+            const message = document.createElement('div');
+            message.className = 'account-note';
+            const results = document.createElement('div');
+            results.className = 'account-results';
+
+            // The list always ends with Anonymous — the answer for someone who is
+            // not in either database, and the way to take a linked name back off
+            // the board. It is one of the answers to "who are you", so it belongs
+            // among them rather than as a separate destructive-looking button.
+            const paint = (players) => {
+                results.textContent = '';
+                for (const p of players) results.appendChild(this.resultRow(p, message));
+                results.appendChild(this.anonymousRow(message));
+            };
+
+            let searching = false;
+            const run = async () => {
+                if (searching) return;
+                const q = query.value.trim();
+                if (!q) return;
+                searching = true;
+                searchBtn.classList.add('disabled');
+                results.textContent = '';
+                message.textContent = getTerm('accountLinkSearching');
+                let players = [];
+                try { players = await searchIdentities(q); } catch (_) { players = []; }
+                searching = false;
+                searchBtn.classList.remove('disabled');
+                message.textContent = players.length ? '' : getTerm('accountLinkNoResults');
+                paint(players);
+            };
+            const searchBtn = modalButton(getTerm('accountLinkSearch'), run);
+            searchBtn.classList.add('account-search-btn');
+            row.appendChild(searchBtn);
+            query.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); run(); }
+            });
+
+            host.appendChild(row);
+            host.appendChild(message);
+            host.appendChild(results);
+            paint([]);
+            query.focus();
+        }, 'accountCancel', () => this.showOverview());
+    }
+
+    // A clickable list line: the label, an optional detail, and what picking it
+    // does. No button inside — the line IS the control, which is both a bigger
+    // touch target and one fewer thing to explain.
+    static row(label, detail, onPick, { muted = false } = {}) {
+        const el = document.createElement('div');
+        el.className = muted ? 'account-result account-result-muted' : 'account-result';
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+
+        const name = document.createElement('span');
+        name.className = 'account-result-name';
+        name.textContent = label;
+        el.appendChild(name);
+
+        if (detail) {
+            const meta = document.createElement('span');
+            meta.className = 'account-result-meta';
+            meta.textContent = detail;
+            el.appendChild(meta);
+        }
+
+        const pick = () => {
+            if (el.classList.contains('is-busy')) return;
+            onPick(el);
+        };
+        el.addEventListener('click', pick);
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+        });
+        return el;
+    }
+
+    // "None of these" — unlinks if there is something to unlink, and otherwise
+    // simply confirms what is already true and returns.
+    anonymousRow(message) {
+        return AccountPanel.row(getTerm('accountAnonymous'), '', async () => {
+            if (!this.linked) { this.showOverview(); return; }
+            await this.unlink(message);
+        }, { muted: true });
+    }
+
+    // One search hit: who they are per their own database, and the pick that
+    // claims them. An EGD row also hands its already-fetched GoR to the piggyback
+    // buffer, so the account's first verified rating rides the next /report
+    // instead of waiting for some other client to be asked to fetch it.
+    resultRow(player, message) {
+        // The database's own grade and locality — what tells two people of the
+        // same name apart, which is this detail's whole job.
+        const detail = [player.service, player.rank, player.loc].filter(Boolean).join(' · ');
+        return AccountPanel.row(player.name, detail, async (el) => {
+            // The same question the Anonymous line asks, for the same reason: this
+            // is a claim to be somebody, made from a list where two people can share
+            // a name, and it is the one action here that is visible to strangers.
+            if (!await showConfirm(getTerm('accountLinkConfirm', { name: player.name, detail }))) return;
+            el.classList.add('is-busy');
+            message.textContent = '';
+            try {
+                const res = await postJson('/link', {
+                    userId: state.userId,
+                    service: player.service,
+                    id: player.id,
+                    name: player.name,
+                    country: player.country,
+                });
+                const body = await res.json();
+                if (!body || !body.ok) {
+                    message.textContent = getTerm(linkErrorTerm(body && body.error));
+                    el.classList.remove('is-busy');
+                    return;
+                }
+                if (player.egd && Number.isFinite(player.egd.gor)) bufferGorUpdate(player.egd);
+                // The server answers with a grade only where it has a heartbeat to
+                // read — AGA, which it fetched itself. An EGD link has none until
+                // the GoR piggyback lands on the next /report, so this render uses
+                // the grade the search just pulled out of EGD: the same fact from
+                // the same source, one hop earlier.
+                this.linked = { ...body.linked, rank: body.linked.rank || player.rank };
+                this.showOverview();
+            } catch (_) {
+                message.textContent = getTerm('accountLinkFailed');
+                el.classList.remove('is-busy');
+            }
+        });
+    }
+
+    async unlink(message) {
+        if (!await showConfirm(getTerm('accountUnlinkConfirm', { name: this.linked.name }))) return;
         try {
             const res = await postJson('/unlink', { userId: state.userId });
             const body = await res.json();
             if (!body || !body.ok) throw new Error('rejected');
-            showToast(getTerm('accountUnlinked'));
-            rerender(null);
-        } catch (_) {
-            unlinkBtn.classList.remove('disabled');
-            showToast(getTerm('accountLinkFailed'), { isError: true });
-        }
-    });
-    host.appendChild(modalButtonRow([unlinkBtn]));
-}
-
-// Unlinked state: the search box, its results, and the pick that links.
-function renderSearch(host, rerender) {
-    const intro = document.createElement('div');
-    intro.className = 'account-note';
-    intro.textContent = getTerm('accountLinkIntro');
-    host.appendChild(intro);
-
-    const query = document.createElement('input');
-    query.type = 'search';
-    query.className = 'account-search';
-    query.placeholder = getTerm('accountLinkPlaceholder');
-    query.autocapitalize = 'off';
-    query.autocomplete = 'off';
-    query.spellcheck = false;
-    host.appendChild(query);
-
-    const message = document.createElement('div');
-    message.className = 'account-note';
-    host.appendChild(message);
-
-    const results = document.createElement('div');
-    results.className = 'account-results';
-    host.appendChild(results);
-
-    let searching = false;
-    const runSearch = async () => {
-        if (searching) return;
-        const q = query.value.trim();
-        if (!q) return;
-        searching = true;
-        searchBtn.classList.add('disabled');
-        results.textContent = '';
-        message.textContent = getTerm('accountLinkSearching');
-        let players = [];
-        try {
-            players = await searchIdentities(q);
-        } catch (_) {
-            players = [];
-        }
-        searching = false;
-        searchBtn.classList.remove('disabled');
-        message.textContent = players.length ? '' : getTerm('accountLinkNoResults');
-        for (const p of players) results.appendChild(resultRow(p, message, rerender));
-    };
-
-    const searchBtn = modalButton(getTerm('accountLinkSearch'), runSearch);
-    query.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            runSearch();
-        }
-    });
-    host.insertBefore(modalButtonRow([searchBtn]), message);
-}
-
-// One search hit: who they are per their own database, and the button that claims
-// them. EGD rows also hand their already-fetched GoR to the piggyback buffer, so
-// the account's first verified rating rides the next /report instead of waiting
-// for some other client to be asked to fetch it.
-function resultRow(player, message, rerender) {
-    const row = document.createElement('div');
-    row.className = 'account-result';
-
-    const label = document.createElement('span');
-    label.className = 'account-result-name';
-    label.textContent = player.name;
-    row.appendChild(label);
-
-    const meta = document.createElement('span');
-    meta.className = 'account-result-meta';
-    // The database's own grade and locality — what tells two people of the same
-    // name apart, which is the whole job of this line.
-    meta.textContent = [player.service, player.rank, player.loc].filter(Boolean).join(' · ');
-    row.appendChild(meta);
-
-    const pick = modalButton(getTerm('accountLinkThisIsMe'), async () => {
-        if (pick.classList.contains('disabled')) return;
-        pick.classList.add('disabled');
-        message.textContent = '';
-        try {
-            const res = await postJson('/link', {
-                userId: state.userId,
-                service: player.service,
-                id: player.id,
-                name: player.name,
-                country: player.country,
-            });
-            const body = await res.json();
-            if (!body || !body.ok) {
-                message.textContent = getTerm(linkErrorTerm(body && body.error));
-                pick.classList.remove('disabled');
-                return;
-            }
-            if (player.egd && Number.isFinite(player.egd.gor)) bufferGorUpdate(player.egd);
-            showToast(getTerm('accountLinked', { name: body.linked.name }));
-            rerender(body.linked);
+            this.linked = null;
+            this.showOverview();
         } catch (_) {
             message.textContent = getTerm('accountLinkFailed');
-            pick.classList.remove('disabled');
         }
-    });
-    row.appendChild(pick);
-    return row;
+    }
 }

@@ -768,22 +768,73 @@ body {
     }
 }
 
-/* --- Account dialog: the Leaderboard half ---------------------------------
-   The account-code half above is styled inline in js/account-ui.js; this is
-   the identity/anonymity section, which needs a real layout because the
-   search results are a variable-length list. */
-.account-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2857em;
-    margin-top: 0.4286em;
-    padding-top: 0.4286em;
-    border-top: calc(0.2 * var(--u)) solid rgba(255, 255, 255, 0.18);
-    text-align: left;
+/* --- Account dialog (js/account-ui.js) -------------------------------------
+   A label/value list on the shared .modal-rank-grid, plus the identity search
+   it swaps to. Every value is the same control — click to change — so they all
+   carry the same box; the account code is not styled specially, which is the
+   point. The explanations live in hint bubbles, not here. */
+.account-grid {
+    row-gap: 0.4286em;
 }
-.account-section-title {
-    font-weight: bold;
+.account-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.2857em;
+}
+.account-value {
+    display: inline-block;
+    max-width: 20ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.119em 0.3571em;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.1);
+    border: calc(0.2 * var(--u)) solid rgba(255, 255, 255, 0.22);
+    cursor: pointer;
+}
+.account-value:hover,
+.account-value:focus-visible {
+    background: rgba(255, 255, 255, 0.18);
+}
+/* A value that isn't set yet, so "not set" can't be mistaken for a name. */
+.account-value-muted {
+    opacity: 0.6;
+}
+/* The code editor, swapped in over the value it replaces — same box, so the row
+   doesn't jump when editing starts. */
+.account-input {
+    font: inherit;
+    color: inherit;
+    width: 10ch;
     text-align: center;
+    box-sizing: content-box;
+}
+
+/* Query and its button on one line — the button acts on the field beside it, so
+   it belongs beside it. */
+.account-searchrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2857em;
+    margin-top: 0.2857em;
+}
+.account-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 20ch;
+    padding: 0.2381em 0.3571em;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border: calc(0.2 * var(--u)) solid rgba(255, 255, 255, 0.22);
+    font-size: inherit;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.account-search-btn {
+    flex: none;
 }
 .account-note {
     font-size: 0.8em;
@@ -793,31 +844,6 @@ body {
     text-align: center;
 }
 .account-note:empty { display: none; }
-/* The opt-out reads as one sentence the box belongs to, so the box is pinned to
-   the first line rather than centred against a wrapped paragraph. */
-.account-check {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.2857em;
-    font-size: 0.8em;
-    max-width: 34ch;
-    margin: 0.1429em auto 0;
-    cursor: pointer;
-}
-.account-check input { flex: none; margin: 0.2em 0 0; }
-.account-search {
-    display: block;
-    width: min(24ch, 100%);
-    margin: 0 auto;
-    padding: 0.2381em 0.3571em;
-    border-radius: var(--radius);
-    background: #444;
-    color: #fff;
-    border: calc(0.2 * var(--u)) solid #555;
-    font-size: inherit;
-    font-family: inherit;
-    box-sizing: border-box;
-}
 /* Capped and scrollable: a name search can return dozens of players, and the
    modal itself has no scroll of its own. */
 .account-results {
@@ -826,12 +852,35 @@ body {
     gap: 0.1429em;
     max-height: calc(0.35 * var(--app-h));
     overflow-y: auto;
+    text-align: left;
+    /* Clear of the button row underneath, so a mis-aimed tap at the end of the
+       list doesn't land on Cancel. */
+    margin-bottom: 0.2857em;
 }
+/* The whole line is the control — no button inside it — so it carries the
+   padding, the hover and the pointer. */
 .account-result {
     display: flex;
     align-items: center;
     gap: 0.2857em;
     font-size: 0.85em;
+    padding: 0.1905em 0.3571em;
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.account-result:hover,
+.account-result:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+}
+/* Mid-request: the row is inert but stays legible, so the user can see WHICH
+   line they picked while it lands. */
+.account-result.is-busy {
+    opacity: 0.5;
+    pointer-events: none;
+}
+/* The Anonymous line — an answer, but the "none of these" one. */
+.account-result-muted {
+    opacity: 0.7;
 }
 .account-result-name {
     flex: 1 1 auto;
@@ -845,10 +894,19 @@ body {
     opacity: 0.7;
     white-space: nowrap;
 }
-.account-result .btn { flex: none; }
 
 @media (prefers-color-scheme: light) {
-    .account-section { border-top-color: rgba(0, 0, 0, 0.18); }
+    .account-value,
+    .account-search {
+        background: rgba(0, 0, 0, 0.07);
+        border-color: rgba(0, 0, 0, 0.22);
+    }
+    .account-value:hover,
+    .account-value:focus-visible,
+    .account-result:hover,
+    .account-result:focus-visible {
+        background: rgba(0, 0, 0, 0.13);
+    }
 }
 
 /* --- Hamburger menu modal --- */
@@ -1657,13 +1715,15 @@ body {
             mask-image: url('../corners/corner_br.png');
 }
 
-/* --- First-run onboarding bubbles (js/onboarding.js) -----------------------
+/* --- Speech bubbles (js/bubble.js) -----------------------------------------
    A small floating callout anchored to a UI element, with an arrow pointing at
-   it. position:fixed and JS-placed. pointer-events:none on the CONTAINER is
-   load-bearing: a tap outside the painted box passes straight through to the
-   board / menu item underneath — the "click anywhere to continue" behaviour.
-   The painted parts take it back (see .onb-bubble-body), because a board-
-   anchored bubble covers live intersections and a tap on it must not play.
+   it. position:fixed and JS-placed. Shared by the first-run onboarding tips
+   (js/onboarding.js) and the "?" hint affordances (js/hint-bubble.js).
+   pointer-events:none on the CONTAINER is load-bearing: a tap outside the
+   painted box passes straight through to the board / menu item underneath —
+   the "click anywhere to continue" behaviour. The painted parts take it back
+   (see .ui-bubble-body), because a board-anchored bubble covers live
+   intersections and a tap on it must not play.
 
    Colour: ONE light-blue accent in both light and dark themes, on purpose. The
    bubble floats over unpredictable backgrounds — the wooden board, BLACK stones,
@@ -1672,11 +1732,13 @@ body {
    fill with dark text pops against black stones AND the dark chrome, while the
    defined border + drop shadow separate it from white stones / light chrome; the
    blue reads as an informational "tip". So it is theme-robust rather than
-   theme-swapped. Sits above the menu (z 2000), below the resume overlay/modals. */
-.onb-bubble {
-    --onb-bg: #d8e8fb;      /* light blue fill */
-    --onb-fg: #12243d;      /* dark navy text (>10:1 on the fill) */
-    --onb-border: #2f6fbf;  /* strong blue outline — the separator on pale backgrounds */
+   theme-swapped. Sits above the menu (z 2000), below the resume overlay/modals —
+   except .ui-bubble-top, which a hint opened from INSIDE a modal needs, since it
+   would otherwise render behind the dialog that asked for it. */
+.ui-bubble {
+    --ui-bubble-bg: #d8e8fb;      /* light blue fill */
+    --ui-bubble-fg: #12243d;      /* dark navy text (>10:1 on the fill) */
+    --ui-bubble-border: #2f6fbf;  /* strong blue outline — the separator on pale backgrounds */
     position: fixed;
     z-index: 8500;
     pointer-events: none;
@@ -1684,7 +1746,7 @@ body {
     transform: translateY(4px);
     transition: opacity 0.22s ease, transform 0.22s ease;
 }
-.onb-bubble.onb-visible {
+.ui-bubble.ui-bubble-visible {
     opacity: 1;
     transform: translateY(0);
 }
@@ -1694,7 +1756,7 @@ body {
    ON the bubble must be absorbed rather than reach the board intersection it is
    covering. Taps elsewhere still fall through to what's under them, which is the
    "tap anywhere to continue" behaviour. */
-.onb-bubble-body {
+.ui-bubble-body {
     position: relative;
     z-index: 1;
     pointer-events: auto;
@@ -1706,9 +1768,9 @@ body {
     max-width: min(32ch, calc(0.8 * var(--app-w)));
     padding: 0.6em 0.8em;
     border-radius: var(--radius);
-    background: var(--onb-bg);
-    color: var(--onb-fg);
-    border: 2px solid var(--onb-border);
+    background: var(--ui-bubble-bg);
+    color: var(--ui-bubble-fg);
+    border: 2px solid var(--ui-bubble-border);
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
     line-height: 1.35;
     -webkit-user-select: none;
@@ -1718,24 +1780,52 @@ body {
    inner half covered by the body — a border-triangle can't carry an outline, so
    it would disappear on same-tone backgrounds. JS sets its `left`; the transform
    centres it there. */
-.onb-bubble-arrow {
+.ui-bubble-arrow {
     position: absolute;
     left: 0;
     width: 20px;
     height: 20px;
     z-index: 0;
     pointer-events: auto;
-    background: var(--onb-bg);
-    border: 2px solid var(--onb-border);
+    background: var(--ui-bubble-bg);
+    border: 2px solid var(--ui-bubble-border);
 }
 /* Bubble BELOW its anchor → arrow at the body's top edge, pointing up. The 2px
    inset lets the body's border cover the arrow's base seam cleanly. */
-.onb-bubble.onb-arrow-top .onb-bubble-arrow {
+.ui-bubble.ui-arrow-top .ui-bubble-arrow {
     top: 2px;
     transform: translate(-50%, -50%) rotate(45deg);
 }
 /* Bubble ABOVE its anchor → arrow at the body's bottom edge, pointing down. */
-.onb-bubble.onb-arrow-bottom .onb-bubble-arrow {
+.ui-bubble.ui-arrow-bottom .ui-bubble-arrow {
     top: calc(100% - 2px);
     transform: translate(-50%, -50%) rotate(45deg);
+}
+/* Opened from inside a modal (z 10000), so it has to clear one. */
+.ui-bubble.ui-bubble-top {
+    z-index: 10500;
+}
+
+/* The "?" that opens a hint (js/hint-bubble.js). Deliberately quiet — it is an
+   offer, not a call to action — but a real tap target on a touchscreen, hence
+   the em-based box rather than a bare glyph. */
+.hint-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.35em;
+    height: 1.35em;
+    border-radius: 50%;
+    border: calc(0.2 * var(--u)) solid currentColor;
+    font-size: 0.8em;
+    line-height: 1;
+    opacity: 0.55;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.hint-btn:hover,
+.hint-btn:focus-visible {
+    opacity: 1;
 }

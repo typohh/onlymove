@@ -8,10 +8,13 @@
 -- After: a user picks their own EGD or AGA identity from the Account dialog
 -- (POST /link), so there is no invitation row to carry the name. The name and
 -- country now live on the binding itself, which is also where they belong: they
--- describe the linked identity, and they must survive an unlink/relink.
+-- describe the linked identity, and they must survive an unlink/relink. The
+-- player's GRADE is deliberately NOT copied here — it is already kept, and kept
+-- CURRENT, on their machine heartbeat in rank_surveys, which is what both the
+-- leaderboard and the Account dialog read.
 --
 -- ADD COLUMN (not a table rebuild): schema.sql appends both columns after
--- aga_id, so a plain ALTER already lands them in schema order — which matters
+-- aga_id, so plain ALTERs already land them in schema order — which matters
 -- because pipeline.fetch_database's regenerated dump is positional.
 ALTER TABLE external_ids ADD COLUMN display_name TEXT;
 ALTER TABLE external_ids ADD COLUMN country_code TEXT;

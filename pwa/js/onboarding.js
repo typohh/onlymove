@@ -10,13 +10,16 @@
 // Deliberately isolated: this is the ONLY file that knows about the bubbles.
 // The rest of the app calls the thin trigger hooks below (onSolvingProblemShown,
 // onEnterReview, onReviewScoreShown, onScoreUnreliable, onResume) at existing UI
-// seams; everything else — anchoring, arrow, gating, session and
-// progress counting — lives here. Styling is the `onb-*` block in style.css.
+// seams; everything else — anchoring, gating, session and progress counting —
+// lives here. The bubble itself (its DOM and its placement) is js/bubble.js,
+// shared with the hint affordances; styling is the `ui-bubble` block in
+// style.css.
 //
 // The whole system self-disables for anyone who isn't a genuinely new user when
 // it first runs (see initOnboarding): existing players never get "Black to move".
 
 import { state, getMergedAnswerHistory } from './state.js';
+import { createBubble, placeBubble } from './bubble.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
@@ -359,21 +362,13 @@ function scheduleShow(id, def) {
 }
 
 function render(id, def) {
-    const bubble = document.createElement('div');
-    bubble.className = 'onb-bubble';
-    const body = document.createElement('div');
-    body.className = 'onb-bubble-body';
-    body.textContent = getTerm(typeof def.text === 'function' ? def.text() : def.text);
-    const arrow = document.createElement('div');
-    arrow.className = 'onb-bubble-arrow';
-    bubble.appendChild(body);
-    bubble.appendChild(arrow);
+    const bubble = createBubble(getTerm(typeof def.text === 'function' ? def.text() : def.text));
     document.body.appendChild(bubble);
     _bubbleEl = bubble;
     _repositionArgs = { def };
 
     position(bubble, def);
-    requestAnimationFrame(() => bubble.classList.add('onb-visible'));
+    requestAnimationFrame(() => bubble.classList.add('ui-bubble-visible'));
 
     // Record + arm dismissal.
     markShown(id);
@@ -392,56 +387,16 @@ function render(id, def) {
     _pendingTimer = setTimeout(onDismiss, AUTO_DISMISS_MS);
 }
 
-// Place the bubble relative to the anchor, arrow pointing at the anchor's
-// centre. `def.placement` ('above'|'below'|'auto') is a preference; we flip if
-// there isn't room. For the board anchor the "anchor point" is its centre, so
-// the bubble sits over the board pointing inward.
+// Resolve this tip's anchor to a rect and hand it to the shared placer. The
+// 'board' anchor is the one that wants `overAnchor`: it is far too big to sit
+// clear of, so the bubble goes on top of it pointing inward.
 function position(bubble, def) {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const margin = 8;
-    const gap = 10;
-    const arrowH = 14;   // protrusion of the rotated-square arrow (see .onb-bubble-arrow)
-
     const target = def.anchor === 'board' ? anchors.board() : anchors[def.anchor]();
     if (!isVisible(target)) return;
-    const r = target.getBoundingClientRect();
-    const overBoard = def.anchor === 'board';
-    const anchorX = r.left + r.width / 2;
-    const anchorY = overBoard ? (r.top + r.height / 2) : (r.top + r.height / 2);
-
-    const bw = Math.min(bubble.offsetWidth, vw - 2 * margin);
-    const bh = bubble.offsetHeight;
-
-    // Decide above vs below the anchor edge (or centre, for the board).
-    const edgeTop = overBoard ? anchorY : r.top;
-    const edgeBottom = overBoard ? anchorY : r.bottom;
-    let below;
-    if (def.placement === 'below') below = true;
-    else if (def.placement === 'above') below = false;
-    else below = (edgeBottom + gap + bh + arrowH) <= (vh - margin);
-    // Flip if the preferred side overflows.
-    if (below && (edgeBottom + gap + bh + arrowH) > vh - margin && (edgeTop - gap - bh - arrowH) >= margin) below = false;
-    if (!below && (edgeTop - gap - bh - arrowH) < margin && (edgeBottom + gap + bh + arrowH) <= vh - margin) below = true;
-
-    let top = below ? (edgeBottom + gap + arrowH) : (edgeTop - gap - arrowH - bh);
-    top = Math.max(margin, Math.min(top, vh - margin - bh));
-
-    let left = anchorX - bw / 2;
-    left = Math.max(margin, Math.min(left, vw - margin - bw));
-
-    bubble.style.left = `${Math.round(left)}px`;
-    bubble.style.top = `${Math.round(top)}px`;
-    bubble.style.maxWidth = `${Math.round(vw - 2 * margin)}px`;
-
-    // Arrow: on the edge nearest the anchor, horizontally under the anchor centre.
-    const arrow = bubble.querySelector('.onb-bubble-arrow');
-    const arrowHalf = 14;   // half the rotated-square arrow's bounding width
-    let arrowLeft = anchorX - left;
-    arrowLeft = Math.max(arrowHalf + 4, Math.min(arrowLeft, bw - arrowHalf - 4));
-    arrow.style.left = `${Math.round(arrowLeft)}px`;
-    bubble.classList.toggle('onb-arrow-top', below);      // arrow on bubble's TOP edge when bubble is below
-    bubble.classList.toggle('onb-arrow-bottom', !below);
+    placeBubble(bubble, target.getBoundingClientRect(), {
+        placement: def.placement,
+        overAnchor: def.anchor === 'board',
+    });
 }
 
 // --- session / init ----------------------------------------------------------
