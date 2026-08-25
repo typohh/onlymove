@@ -38,7 +38,7 @@
 // Committing it by mistake fails LOUDLY rather than quietly — the dev client does
 // not authorize onlymove.net, so the button refuses to render in production
 // instead of working with a weaker audience.
-export const GOOGLE_CLIENT_ID = '';
+export const GOOGLE_CLIENT_ID = '214946937470-vc9vmlmdilmcim6b3f55q5v06psidtp0.apps.googleusercontent.com';
 
 export function googleSignInConfigured() {
     return typeof GOOGLE_CLIENT_ID === 'string' && GOOGLE_CLIENT_ID.length > 0;
