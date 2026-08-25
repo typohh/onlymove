@@ -38,6 +38,18 @@ TOKEN = os.environ.get("ONLYMOVE_WORKER_TOKEN") or ""
 # the point at which it goes back to answering requests itself — it is a
 # capacity statement, not a queue depth.
 POLL_THREADS = int(os.environ.get("ONLYMOVE_WORKER_THREADS") or 4)
+# THE POINT OF THIS MACHINE. The cloud box asks for one visit because that is
+# all it can afford — one visit is the raw policy, an opinion with no reading
+# behind it. A GPU can search properly in a time a person still reads as
+# instant, so the visit count the query arrives with is REPLACED here rather
+# than honoured. The answer's shape changes with it: a searched response
+# carries moveInfos, which is what the server reads in preference to policy.
+WORKER_VISITS = int(os.environ.get("ONLYMOVE_WORKER_VISITS") or 30)
+# Search threads per query. Visits are sequential within one query unless
+# several threads explore at once, so this is what decides whether 30 visits
+# feels instant; it is a LATENCY setting and unrelated to how many queries run
+# side by side, which is POLL_THREADS.
+SEARCH_THREADS = int(os.environ.get("ONLYMOVE_WORKER_SEARCH_THREADS") or 8)
 # Must exceed the server's own poll timeout, or every idle poll looks like a
 # network failure here and reconnects for nothing.
 POLL_READ_TIMEOUT = float(os.environ.get("ONLYMOVE_WORKER_READ_TIMEOUT") or 60.0)
@@ -118,6 +130,11 @@ def run_job(controller, job):
     """Runs one job and reports it back. The reply shape mirrors the server's."""
     job_id = job.get("jobId")
     query = dict(job.get("query") or {})
+    # includePolicy goes with the one-visit query it arrived as; a searched
+    # answer is read from moveInfos, and the policy array is ~n^2 floats of
+    # response body nobody looks at.
+    query["maxVisits"] = WORKER_VISITS
+    query["includePolicy"] = WORKER_VISITS == 1
     started = time.time()
     try:
         response = controller.send_query(query)
@@ -183,16 +200,19 @@ def main():
     # The pipeline never meets this because each of its runs is single-size; a
     # server takes both. Overridden per-caller, so the tuner's own file is
     # untouched.
-    controller.start_engine(get_model(DEFAULT_MODEL), max(ALL_BOARD_SIZES),
-                            extra_overrides="requireMaxBoardSize=false")
+    controller.start_engine(
+        get_model(DEFAULT_MODEL), max(ALL_BOARD_SIZES),
+        extra_overrides=(f"requireMaxBoardSize=false,"
+                         f"numAnalysisThreads={POLL_THREADS},"
+                         f"numSearchThreadsPerAnalysisThread={SEARCH_THREADS}"))
     try:
         warm_up(controller)
         threads = [threading.Thread(target=poll_loop, args=(controller,), daemon=True)
                    for _ in range(POLL_THREADS)]
         for thread in threads:
             thread.start()
-        log(f"Polling {SERVER_URL} with {POLL_THREADS} threads. Ctrl-C to hand "
-            f"analysis back to the cloud box.")
+        log(f"Polling {SERVER_URL} with {POLL_THREADS} threads at {WORKER_VISITS} "
+            f"visits. Ctrl-C to hand analysis back to the cloud box.")
         while any(thread.is_alive() for thread in threads):
             time.sleep(0.5)
     except KeyboardInterrupt:

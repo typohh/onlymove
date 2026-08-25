@@ -412,23 +412,32 @@ def run_analysis(query_data, request):
 
 
 def interpret_response(response, board_size):
-    """The KataGo answer as the PWA reads it. Shared by both backends."""
-    if PLAYOUTS == 1:
-        # When using 1 playout, use policy instead of moveInfos
-        policy = response.get("policy", [])
-        if not policy:
-            return {"bestMove": "pass", "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
-        # Find the move with the highest policy probability
-        best_move_idx = policy.index(max(policy))
-        gtp_move = get_move_from_idx(best_move_idx, board_size)
-        sgf_move = gtp_to_sgf_coords(gtp_move, board_size)
-        return {"bestMove": sgf_move, "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
-    if not response.get("moveInfos"):
-        return {"bestMove": "pass", "winrate": response.get('rootInfo', {}).get("winrate"), "score": response.get('rootInfo', {}).get('scoreLead')}
-    best_move_info = response["moveInfos"][0]
-    gtp_move = best_move_info.get("move")
-    sgf_move = gtp_to_sgf_coords(gtp_move, board_size)
-    return {"bestMove": sgf_move, "winrate": best_move_info.get("winrate"), "score": best_move_info.get("scoreLead")}
+    """The KataGo answer as the PWA reads it. Shared by both backends.
+
+    Branches on WHAT CAME BACK, never on this server's own PLAYOUTS: the two
+    backends deliberately search to different depths, so the local engine's
+    setting says nothing about the answer a worker produced. Reading the
+    constant instead sent a searched reply down the policy path — the raw
+    opinion, with the whole search discarded and no symptom anywhere.
+
+    `visits` rides along so the client can tell an opinion from a reading: one
+    visit is the policy alone and is shown with the unreliable marker, while a
+    searched answer has earned its number.
+    """
+    root = response.get("rootInfo") or {}
+    move_infos = response.get("moveInfos") or []
+    if move_infos:
+        best = move_infos[0]
+        return {"bestMove": gtp_to_sgf_coords(best.get("move"), board_size),
+                "winrate": best.get("winrate"), "score": best.get("scoreLead"),
+                "visits": root.get("visits") or best.get("visits") or 1}
+    policy = response.get("policy") or []
+    if not policy:
+        return {"bestMove": "pass", "winrate": root.get("winrate"),
+                "score": root.get("scoreLead"), "visits": 1}
+    gtp_move = get_move_from_idx(policy.index(max(policy)), board_size)
+    return {"bestMove": gtp_to_sgf_coords(gtp_move, board_size),
+            "winrate": root.get("winrate"), "score": root.get("scoreLead"), "visits": 1}
 
 
 def log(message):

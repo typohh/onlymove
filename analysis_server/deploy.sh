@@ -38,9 +38,18 @@ stamp=$(date -u +%Y%m%d-%H%M%S)
 ssh "$HOST" "cp -a '$DIR/server.py' '$DIR/server.py.bak-$stamp'"
 echo "==> backed up to server.py.bak-$stamp"
 
-rsync -c -e ssh "$HERE/server.py" "$HOST:$DIR/server.py"
-rsync -c -e ssh "$HERE/analysis.cfg" "$HOST:$DIR/analysis.cfg"
-echo "==> shipped server.py + analysis.cfg"
+# scp, not rsync: the box has no rsync and no root to install one. The md5
+# comparison that follows is the stronger check anyway — it verifies what
+# actually landed rather than what the transfer believed it sent.
+scp -q "$HERE/server.py" "$HOST:$DIR/server.py"
+scp -q "$HERE/analysis.cfg" "$HOST:$DIR/analysis.cfg"
+for f in server.py analysis.cfg; do
+  local_sum=$(md5sum "$HERE/$f" | cut -d' ' -f1)
+  remote_sum=$(ssh "$HOST" "md5sum '$DIR/$f'" | cut -d' ' -f1)
+  [ "$local_sum" = "$remote_sum" ] || {
+    echo "!! $f did not land intact: local $local_sum, remote $remote_sum" >&2; exit 1; }
+done
+echo "==> shipped server.py + analysis.cfg (md5 verified)"
 
 if [ "$install_token" = 1 ]; then
   [ -r "$TOKEN_ENV" ] || { echo "no token file at $TOKEN_ENV" >&2; exit 1; }
@@ -90,9 +99,17 @@ esac
 
 after=$(ssh "$HOST" "systemctl show katago.service -p MainPID --value")
 echo "==> pid $before -> $after"
+# Probed with a DELIBERATELY WRONG token, so 404 is the right answer whether or
+# not the feature is on — it distinguishes new code from old, nothing more. The
+# old server routed every POST into the SGF parser and answered 500.
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST -H 'Authorization: Bearer probe' "$URL/worker/poll" || true)
 case "$code" in
-  404) echo "==> /worker/poll 404: new code live, worker feature off (no token installed)" ;;
+  404) echo "==> /worker/poll rejects a bad token with 404: new code is live" ;;
   500) echo "!! /worker/poll 500: still the OLD code — the restart did not pick up the new file" >&2; exit 1 ;;
-  *)   echo "==> /worker/poll $code" ;;
+  *)   echo "==> /worker/poll answered $code to a bad token (expected 404)" ;;
+esac
+visits=$(curl -s --max-time 20 -X POST --data-binary "$sgf" "$URL/" | grep -o '"visits": *[0-9]*' | grep -o '[0-9]*$' || true)
+case "${visits:-}" in
+  ""|1) echo "==> serving 1 visit: the box's own engine is answering (no worker connected)" ;;
+  *)    echo "==> serving $visits visits: a worker is connected and searching" ;;
 esac

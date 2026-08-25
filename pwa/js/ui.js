@@ -636,7 +636,7 @@ export function updateAnalysisUI(score, bestMove) {
             let isUnreliable = false;
             if (bestMove) {
                 const child = currentNode.children.find(c => c.move && c.move.x === bestMove.x && c.move.y === bestMove.y);
-                if (child && child._origin === 'api') {
+                if (child && child._origin === 'api' && !child._searched) {
                     isUnreliable = true;
                 }
             }

@@ -290,12 +290,12 @@ async function requestAndDisplayAnalysis() {
         updateAnalysisUI(getTerm('analyzing'), null);
 
         const sgf = getCurrentSgf();
-        let { bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf);
+        let { bestMove: bestMoveSgf, score, visits } = await fetchAnalysis(sgf);
 
         if (score === ANALYSIS_STATUS.RETRY) {
             const currentSgfCheck = getCurrentSgf();
             if (currentSgfCheck === sgf) {
-                ({ bestMove: bestMoveSgf, score } = await fetchAnalysis(sgf));
+                ({ bestMove: bestMoveSgf, score, visits } = await fetchAnalysis(sgf));
             }
         }
 
@@ -321,9 +321,17 @@ async function requestAndDisplayAnalysis() {
                 // The early-return above guarantees no existing child has a %/ comment, so any
                 // matching existing child is a user-exploration node — safe to attach API data.
                 const existingChild = children.find(child => child.move && child.move.x === bestMove.x && child.move.y === bestMove.y);
+                // One visit is the raw policy — an opinion with no reading behind
+                // it, which is what the blinking-red marker warns about. More
+                // than one means the server actually searched, so the number has
+                // been earned and the warning would be misleading. _origin stays
+                // 'api' either way: the move-selection waterfall above keys on it
+                // to tell server answers from the SGF's own.
+                const searched = typeof visits === 'number' && visits > 1;
                 if (existingChild) {
                     existingChild.comment = `100%/${score}`;
                     existingChild._origin = 'api';
+                    existingChild._searched = searched;
                     const index = children.indexOf(existingChild);
                     if (index > 0) {
                         children.splice(index, 1);
@@ -335,6 +343,7 @@ async function requestAndDisplayAnalysis() {
                         comment: `100%/${score}`
                     });
                     newNode._origin = 'api';
+                    newNode._searched = searched;
                     currentNode.children.unshift(newNode);
                     newNode.parent = currentNode;
                 }
