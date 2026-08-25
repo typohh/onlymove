@@ -5,7 +5,7 @@
 //   https://aga-ratings-explorer.azurewebsites.net/api/ratings-explorer
 // It is a JSON API on Azure (NOT Cloudflare), so a Worker->origin fetch reaches it
 // (no orange-to-orange block like EGD), and it sends Access-Control-Allow-Origin: *
-// so the browser can hit it too (the invite tool searches it client-side).
+// so the browser can hit it too (the Account dialog's identity search runs client-side).
 //
 // Endpoints used:
 //   GET /players?last_name=&first_name=&agaid=&status=all&recent_activity_years=none&limit=25&page=0
@@ -59,8 +59,12 @@ function isoDate(s) {
 }
 
 // Fetch a member's current AGA rating + official rank by id. Returns
-// { rating, rankLabel, latestEventDate } (rankLabel = the SHORT "10d"/"3k" form,
-// latestEventDate = ISO date of the last tournament or null) or null on any failure.
+// { displayName, rating, rankLabel, latestEventDate } (rankLabel = the SHORT
+// "10d"/"3k" form, latestEventDate = ISO date of the last tournament or null) or
+// null on any failure. `displayName` is the Explorer's own name for the member,
+// which is what /link stores for an AGA identity — the Worker can reach this API,
+// so an AGA name is never taken on the client's word (EGD, which the Worker cannot
+// reach at all, has no such option).
 export async function fetchAgaPlayer(agaId) {
     const id = String(agaId || '');
     if (!isValidAgaId(id)) return null;
@@ -70,7 +74,10 @@ export async function fetchAgaPlayer(agaId) {
     const rating = Number(p.rating);
     const rankLabel = agaShortRankLabel(p.rank_label);
     if (!rankLabel) return null;          // no usable rank -> treat as absent
+    const name = typeof p.display_name === 'string' ? p.display_name.trim()
+        : `${p.first_name || ''} ${p.last_name || ''}`.trim();
     return {
+        displayName: name || null,
         rating: Number.isFinite(rating) ? rating : null,
         rankLabel,
         latestEventDate: isoDate(p.latest_event_date),

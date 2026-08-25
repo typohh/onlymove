@@ -2,14 +2,14 @@
 //
 // Leaderboard core (Cloudflare Worker side). ONE ROW PER USER, created lazily on
 // the first novel /report (seeded from tsumego_reports) — every row is
-// rebuildable, so the weekly cron prunes idle ones. Registration lives OUTSIDE
-// this table: the EGD binding in `external_ids` (identity only), the display
-// name/country on the claimed `invitation` row, and the GoR history as weekly
-// machine 'EGD' heartbeat rows in `rank_surveys` (rank = raw GoR digits; the
-// latest row is also the "checked this week" marker). Reuses the SHARED window
-// estimator so a user's leaderboard rank is computed by the SAME code as the
-// front-page rank, from the user's materialized 500-attempt buffer. Used by the
-// /report hot path, /register (claim seeding), and the cron.
+// rebuildable, so the weekly cron prunes idle ones. The federation identity lives
+// OUTSIDE this table: the EGD/AGA binding plus its display name and country in
+// `external_ids` (written by handlers/link.js when the user links themselves), and
+// the GoR history as weekly machine 'EGD' heartbeat rows in `rank_surveys` (rank =
+// raw GoR digits; the latest row is also the "checked this week" marker). Reuses the
+// SHARED window estimator so a user's leaderboard rank is computed by the SAME code
+// as the front-page rank, from the user's materialized 500-attempt buffer. Used by
+// the /report hot path, /link (seeding a freshly linked player), and the cron.
 
 import { interpExtrap } from '../shared/rank-math.js';
 import { rankLabelToRank } from '../shared/rank-math.js';
@@ -356,7 +356,11 @@ const GOR_MIN = 100, GOR_MAX = 3000;      // plausibility bound on a submitted G
 
 // Per-isolate cache of the PINs whose GoR hasn't been refreshed this week.
 let _staleGor = { pins: [], at: 0, weekStart: '' };
-function invalidateStaleGor() { _staleGor.at = 0; }
+// Drop the cache so the next /report re-scans. Called after a GoR write (the pin
+// is fresh now) and after a link/unlink (the set of pins itself changed — a
+// newly linked pin would otherwise wait out the TTL before any client is asked
+// to fetch its GoR).
+export function invalidateStaleGor() { _staleGor.at = 0; }
 
 // PINs still needing a GoR refresh this week, cached in memory (keeps the high-volume
 // /report path off D1 — the scan reads only external_ids + one pass of rank_surveys,
@@ -498,7 +502,7 @@ export async function refreshAgaRatings(env) {
 
 // --- seed a row's buffer + rank from tsumego_reports (the source of truth) -------
 // The user's last <= BUFFER_CAP novel attempts, newest first, + the derived rank.
-// Used by /register (seed an established player) and the cron reconcile.
+// Used by /link (seed a freshly linked established player) and the cron reconcile.
 export async function buildRowStateFromReports(env, userId, params) {
     const res = await env.DB.prepare(
         `SELECT problem AS p, success AS s, time_used AS t
@@ -745,14 +749,13 @@ export async function readActivePlayers(env, { activeDays = 7 } = {}) {
 // trailing `activeDays` window and returns { rows, belowMin }: `rows` are the
 // players AT OR ABOVE the uniform list-entry gate (>= RANK_START_MIN valid
 // in-corpus novel attempts — a real onlymove rank), `belowMin` is the count of
-// active players still under it. The gate is uniform: registration grants NO
-// bypass, so a sub-gate registered player is counted in `belowMin`, not shown,
+// active players still under it. The gate is uniform: a linked identity grants NO
+// bypass, so a sub-gate linked player is counted in `belowMin`, not shown,
 // and the page displays no sample count — only the aggregate tally. A hidden row
-// is filtered below. Registration display fields live OFF the leaderboard row:
-// name/country on the claimed invitation (frozen at invite time; bare-column +
-// MAX() subquery picks the newest claim — documented SQLite behavior), and
-// per-user external ranks from ONE latest-per-(user, server) pass over
-// rank_surveys, stitched in JS.
+// is filtered below. The identity's display fields live OFF the leaderboard row:
+// name/country on the `external_ids` binding (frozen at link time), and per-user
+// external ranks from ONE latest-per-(user, server) pass over rank_surveys,
+// stitched in JS.
 //
 // Each shown row carries two per-system maps keyed by RANK_SYSTEMS, so the page's
 // units selector can switch frames with no further server round trip:
@@ -770,14 +773,10 @@ export async function readActivePlayers(env, { activeDays = 7 } = {}) {
 //            A heartbeat that is inactive per the EGF activity criterion
 //            (isVerifiedActive; fail-open on a missing date) is dropped and the
 //            player's own declaration stands in its place if they made one.
-// `registered` (has an external_ids row; unregistered rows have name/country null)
+// `registered` (has an external_ids row; unlinked rows have name/country null)
 // completes the row.
 export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     if (!env.DB) return { rows: [], belowMin: 0 };
-    const JOINS = `
-        LEFT JOIN (SELECT claimed_by_user_id AS uid, egd_name, country_code, MAX(claimed_at)
-                     FROM invitation WHERE claimed_by_user_id IS NOT NULL
-                    GROUP BY claimed_by_user_id) i ON i.uid = u`;
     // buffer is shipped for EVERY row because a rank-less row (re)computes its rank from
     // it; a RANKED row no longer needs it, since the rank is stored in the frame this
     // page's default column shows and the dock rides along in its own column. Pulling it
@@ -785,20 +784,23 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // one-cycle post-migration recompute path fed. ALL active rows are pulled — no
     // registration/rank filter — so the sub-gate rows can be tallied for the footer;
     // they're dropped from the visible list in JS below.
+    // Name + country come off the BINDING (external_ids.display_name/country_code),
+    // snapshotted from EGD/AGA when the user linked. One join, and unlinking takes
+    // the name with it — which the claimed-invitation row this replaced could not do,
+    // since a claim is a historical fact rather than a current state.
     const stmt = env.DB.prepare(
-        `SELECT l.user_id, i.egd_name, i.country_code, l.pred_rank, l.time_delta_rating,
+        `SELECT l.user_id, x.display_name, x.country_code, l.pred_rank, l.time_delta_rating,
                 l.buffer, l.country,
                 (x.user_id IS NOT NULL) AS registered
            FROM (SELECT *, user_id AS u FROM leaderboard
                   WHERE last_active >= ?1) l
-           LEFT JOIN external_ids x ON x.user_id = u
-           ${JOINS}`
+           LEFT JOIN external_ids x ON x.user_id = u`
     ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     // Latest declaration per (user, server) — one pass over the (small)
     // rank_surveys table; stitched onto rows in JS below. `country`/`rank_label`/
     // `last_game_at` are bare columns alongside MAX(id), so SQLite returns them
-    // from the latest row (same documented bare-column behavior the invitation
-    // JOIN relies on): the 'EGD' heartbeat carries the EGD federation code, other
+    // from the latest row (documented SQLite behavior for a bare column beside an
+    // aggregate): the 'EGD' heartbeat carries the EGD federation code, other
     // servers the geo-IP country.
     const [res, declRes] = await Promise.all([
         stmt.all(),
@@ -836,8 +838,8 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     } catch (e) { console.error('hidden_profiles read failed:', e); }
     // Below-gate rows (< RANK_START_MIN valid in-corpus attempts) are COUNTED for the
     // footer tally and dropped; at-or-above-gate rows are stitched into display
-    // identities. The gate is uniform — registration gives no bypass — so an
-    // unregistered ranked player and a registered one are shown alike, and a registered
+    // identities. The gate is uniform — a linked identity gives no bypass — so an
+    // unlinked ranked player and a linked one are shown alike, and a linked
     // sub-gate player is not shown at all.
     let belowMin = 0;
     const visible = [];
@@ -932,13 +934,13 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
             const v = agaRatingToRank(aga.rating);
             if (Number.isFinite(v)) decl.AGA = { v, exact: true };
         }
-        // A hidden user is stripped of name/country and reported as unregistered, so the
+        // A hidden user is stripped of name/country and reported as unlinked, so the
         // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
-        // reliable) → invitation (EGD, frozen at invite) → leaderboard row (edge geo-IP,
+        // reliable) → the binding (EGD, frozen at link time) → leaderboard row (edge geo-IP,
         // stamped on every /report — the universal fallback that gives ANY active player a
         // flag) → survey (older geo-IP), so the flag shows for anyone with a country from
-        // any source, not just registered rows.
-        const name = isHidden ? null : r.egd_name;
+        // any source, not just linked rows.
+        const name = isHidden ? null : r.display_name;
         const country = isHidden ? null
             : (egdCountry || r.country_code || r.country || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;

@@ -6,20 +6,27 @@
 // src/leaderboard.js). A hidden player still appears on /leaderboard as an
 // anonymous row carrying only their predicted rank.
 //
-// Two entry points, one flag: the control at the foot of the /leaderboard page,
-// and the checkbox at the foot of the in-app rank survey (js/rank-survey-prompt.js),
-// which is where a declaration is made in the first place. The survey reads the
-// flag with GET before offering it, so it can write only on an actual change.
+// Two entry points, one flag: the checkbox in the app's Account dialog
+// (js/account-ui.js), which is also where the leaderboard identity is linked, and
+// the one at the foot of the in-app rank survey (js/rank-survey-prompt.js), which
+// is where a declaration is made in the first place. Both read the flag before
+// offering it, so each writes only on an actual change — unchecked-by-default plus
+// an unconditional write would silently un-hide whoever opted out in the other
+// place.
 //
-// Keyed by user_id and applying to ANY account — a never-registered player can
-// still have declared ranks (rank_surveys) that this hides — so the flag lives
-// in its own table, not on external_ids.
+// Keyed by user_id and applying to ANY account — a player who never linked a
+// federation identity can still have declared ranks (rank_surveys) that this
+// hides — so the flag lives in its own table, not on external_ids.
 //
 //   POST /profile/hide  { userId, hidden: bool }  -> { ok: true, hidden }
-//   GET  /profile/hide?userId=<id>                -> { hidden: bool } (no-store)
+//   GET  /profile?userId=<id>  -> { hidden: bool, linked: {...}|null } (no-store)
+//
+// The GET answers the Account dialog's whole panel — the flag AND the current
+// binding — in one request, so opening it costs one round trip rather than two.
 
 import { jsonResponse, CORS_HEADERS } from '../http.js';
 import { isValidUserId } from '../guards.js';
+import { readLinkedIdentity } from './link.js';
 
 // POST: set/clear the hidden flag. INSERT OR IGNORE to hide, DELETE to unhide —
 // idempotent either way. Format-validated (isValidUserId + boolean) before any
@@ -48,23 +55,26 @@ export async function handleProfileHide(request, env) {
   }
 }
 
-// GET: the current hidden state, so the leaderboard page renders its checkbox
-// correctly. A point lookup on the PK. no-store so the per-user answer is never
-// edge-cached against another user's request.
-export async function handleProfileHidden(request, env) {
+// GET: the account's leaderboard profile — the hidden flag and the linked
+// federation identity, so a dialog renders both controls in their true state
+// without guessing. Two point lookups on their PKs. no-store so the per-user
+// answer is never edge-cached against another user's request (the service worker
+// is told to skip this path too — see sw.js).
+export async function handleProfile(request, env) {
   const userId = new URL(request.url).searchParams.get('userId');
   if (!isValidUserId(userId)) return jsonResponse({ error: 'Invalid userId' }, 400);
   if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
   try {
-    const row = await env.DB.prepare(
-      `SELECT 1 AS x FROM hidden_profiles WHERE user_id = ?1`
-    ).bind(userId).first();
-    return new Response(JSON.stringify({ hidden: !!row }), {
+    const [row, linked] = await Promise.all([
+      env.DB.prepare(`SELECT 1 AS x FROM hidden_profiles WHERE user_id = ?1`).bind(userId).first(),
+      readLinkedIdentity(env, userId),
+    ]);
+    return new Response(JSON.stringify({ hidden: !!row, linked: linked || null }), {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   } catch (e) {
-    console.error('handleProfileHidden failed:', e);
+    console.error('handleProfile failed:', e);
     return jsonResponse({ error: 'Internal server error' }, 500);
   }
 }

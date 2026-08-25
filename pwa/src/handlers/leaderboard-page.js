@@ -4,7 +4,7 @@
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
 // cache bounds D1 reads under traffic. Lists every player active in the past week
 // who has at least RANK_START_MIN solves here (so their onlymove rank is known):
-// invite-registered players with their EGD/AGA name, everyone else as "Anonymous".
+// players who linked an EGD/AGA identity with their name, everyone else as "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // A UNITS selector — onlymove, or any ranking system we hold a coupling for
 // (RANK_SYSTEMS) — picks the frame both value columns speak. It reads `?units=`
@@ -35,7 +35,7 @@ import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
 
-// Shown when we can't resolve a country for a row (no GoR/invitation/geo-IP, or a
+// Shown when we can't resolve a country for a row (no GoR/binding/geo-IP, or a
 // hidden profile). The UN flag reads as "nation unspecified" and renders as a real
 // regional-indicator glyph like every other flag; swap to '🏴‍☠️' etc. here to taste.
 const UNKNOWN_FLAG = '🇺🇳';
@@ -45,10 +45,9 @@ const UNKNOWN_FLAG = '🇺🇳';
 // server split would cache one language and serve it to every viewer. The dict is
 // inlined into the page and applied by the prelude script; it mirrors the SPA's
 // getLang() prefix match (zh/ja/ko/en) and {param} interpolation (js/i18n.js).
-// `{discord}` in inviteLine is filled with the anchor at runtime. "onlymove" is a
-// brand name and stays untranslated (it names one of the units options). NOTE: the
-// tournament page (Finnish-only) and the invite page (English-only) are deliberate
-// exceptions and do NOT share this dict.
+// "onlymove" is a brand name and stays untranslated (it names one of the units
+// options). NOTE: the tournament page (Finnish-only) is a deliberate exception and
+// does NOT share this dict.
 const STR = {
     en: {
         leaderboard: 'Weekly Leaderboard',
@@ -61,12 +60,7 @@ const STR = {
         empty: 'No players yet.',
         belowNoteOne: '1 more active player has fewer than {min} solves and isn\'t shown yet.',
         belowNoteMany: '{n} more active players have fewer than {min} solves and aren\'t shown yet.',
-        inviteLine: 'Want your name shown instead of "Anonymous"? Registration is by invite — ask in {discord}.',
-        hideLabel: 'Hide my profile — withhold my name, country, and declared ranks from this board. My predicted rank still shows, but anonymously.',
-        saving: 'Saving…',
-        hiddenMsg: 'Your profile is hidden. The board updates within a minute.',
-        visibleMsg: 'Your profile is visible. The board updates within a minute.',
-        saveError: 'Could not save — please try again.',
+        linkLine: 'Want your name shown instead of "Anonymous"? Open the app\u2019s menu → Account and link your EGD or AGA player. The same place has the opt-out that keeps you anonymous here.',
     },
     zh: {
         leaderboard: '每周排行榜',
@@ -79,12 +73,7 @@ const STR = {
         empty: '暂无玩家。',
         belowNoteOne: '还有 1 名活跃玩家的解题数不足 {min}，暂未显示。',
         belowNoteMany: '还有 {n} 名活跃玩家的解题数不足 {min}，暂未显示。',
-        inviteLine: '想显示您的名字而不是「匿名」？注册需邀请——请在 {discord} 询问。',
-        hideLabel: '隐藏我的资料——不在此榜单显示我的名字、国家/地区和申报段位。我的预测段位仍会显示，但为匿名。',
-        saving: '正在保存…',
-        hiddenMsg: '您的资料已隐藏。榜单将在一分钟内更新。',
-        visibleMsg: '您的资料已公开。榜单将在一分钟内更新。',
-        saveError: '保存失败——请重试。',
+        linkLine: '想显示您的名字而不是「匿名」？请在应用的菜单 → 账户中关联您的 EGD 或 AGA 棋手身份。保持匿名的选项也在同一处。',
     },
     ja: {
         leaderboard: '週間ランキング',
@@ -97,12 +86,7 @@ const STR = {
         empty: 'まだプレイヤーがいません。',
         belowNoteOne: 'あと1人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
         belowNoteMany: 'あと{n}人、解答数が {min} 未満のアクティブなプレイヤーがいますが、まだ表示されていません。',
-        inviteLine: '「匿名」の代わりに名前を表示しますか？登録は招待制です——{discord} で聞いてください。',
-        hideLabel: 'プロフィールを隠す——このボードで名前・国・申告した段級位を表示しません。予測ランクは匿名で引き続き表示されます。',
-        saving: '保存中…',
-        hiddenMsg: 'プロフィールは非表示です。ボードは1分以内に更新されます。',
-        visibleMsg: 'プロフィールは表示されています。ボードは1分以内に更新されます。',
-        saveError: '保存できませんでした——もう一度お試しください。',
+        linkLine: '「匿名」の代わりに名前を表示しますか？アプリのメニュー → アカウントで、EGD または AGA のプレイヤーを連携してください。ここで匿名のままにする設定も同じ場所にあります。',
     },
     ko: {
         leaderboard: '주간 순위표',
@@ -115,12 +99,7 @@ const STR = {
         empty: '아직 플레이어가 없습니다.',
         belowNoteOne: '해결한 문제가 {min}개 미만인 활동 플레이어가 1명 더 있으며 아직 표시되지 않습니다.',
         belowNoteMany: '해결한 문제가 {min}개 미만인 활동 플레이어가 {n}명 더 있으며 아직 표시되지 않습니다.',
-        inviteLine: '"익명" 대신 이름을 표시하고 싶으신가요? 등록은 초대제입니다 — {discord}에서 문의하세요.',
-        hideLabel: '내 프로필 숨기기 — 이 보드에서 내 이름, 국가, 신고한 급/단을 표시하지 않습니다. 예측 랭크는 익명으로 계속 표시됩니다.',
-        saving: '저장 중…',
-        hiddenMsg: '프로필이 숨겨졌습니다. 보드는 1분 이내에 업데이트됩니다.',
-        visibleMsg: '프로필이 표시됩니다. 보드는 1분 이내에 업데이트됩니다.',
-        saveError: '저장하지 못했습니다 — 다시 시도해 주세요.',
+        linkLine: '"익명" 대신 이름을 표시하고 싶으신가요? 앱의 메뉴 → 계정에서 EGD 또는 AGA 선수를 연결하세요. 여기서 익명으로 남는 설정도 같은 곳에 있습니다.',
     },
 };
 
@@ -254,12 +233,6 @@ function renderPage(rows, belowMin) {
   footer { margin-top: 1.5rem; opacity: .55; font-size: .82rem; }
   footer p { margin: .35rem 0; }
   footer a { color: inherit; }
-  /* "Hide my profile" control — shown only to visitors with a userId. */
-  .hide-profile { margin-top: 1.1rem; padding-top: 1rem; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
-  .hide-profile label { display: inline-flex; align-items: flex-start; gap: .5rem; cursor: pointer; }
-  .hide-profile input { margin: .15rem 0 0; flex: none; }
-  .hide-profile input:disabled + span { opacity: .5; }
-  .hide-status { display: block; margin-top: .4rem; min-height: 1.2em; opacity: .85; }
   /* Units selector — a dropdown above the table. There are as many options as
      there are ranking systems we couple to, so this is a <select> rather than a
      segmented control: the list grows with rank_map.json without ever wrapping.
@@ -298,20 +271,13 @@ function renderPage(rows, belowMin) {
 </table>
 <footer>
   ${belowNote}
-  <p id="lbInvite">Want your name shown instead of "Anonymous"? Registration is by invite — ask in <a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>.</p>
-  <div id="hideProfile" class="hide-profile" hidden>
-    <label>
-      <input type="checkbox" id="hideChk" disabled>
-      <span id="hideLabel">Hide my profile — withhold my name, country, and declared ranks from this board. My predicted rank still shows, but anonymously.</span>
-    </label>
-    <span id="hideStatus" class="hide-status" role="status" aria-live="polite"></span>
-  </div>
+  <p id="lbLink">Want your name shown instead of "Anonymous"? Open the app’s menu → Account and link your EGD or AGA player. The same place has the opt-out that keeps you anonymous here.</p>
 </footer>
 <script>
 // Localization prelude. Resolves the viewer's language on the CLIENT (see STR note
 // in the module) and rewrites the static text; must run BEFORE the render script so
 // the localized column headers become each th's stored data-label. Exposes window.LB
-// for the render + hide-profile scripts.
+// for the render script.
 (function () {
   var STR = ${strJson};
   var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin}, activeDays: ${ACTIVE_DAYS} };
@@ -341,15 +307,9 @@ function renderPage(rows, belowMin) {
   setText('thPlayer', t('player'));
   setText('thDecl', t('declared'));
   setText('thPred', t('predicted'));
-  setText('hideLabel', t('hideLabel'));
   var us = document.getElementById('unitsSel');
   if (us) us.setAttribute('aria-label', t('units'));   // the only remaining use of the units string
-  var invite = document.getElementById('lbInvite');
-  if (invite) {
-    invite.innerHTML = t('inviteLine', {
-      discord: '<a href="https://discord.gg/ZU7jJNnkbB" target="_blank" rel="noopener">Discord</a>',
-    });
-  }
+  setText('lbLink', t('linkLine'));
   var below = document.getElementById('lbBelow');
   if (below && CFG.belowMin > 0) {
     below.textContent = t(CFG.belowMin === 1 ? 'belowNoteOne' : 'belowNoteMany',
@@ -522,49 +482,6 @@ function renderPage(rows, belowMin) {
 
   syncUrl();
   render();
-})();
-</script>
-<script>
-// "Hide my profile" control. This page doesn't boot the SPA, but it's same-origin
-// with it, so the account's userId is readable from localStorage. Shown only when
-// a userId exists (a visitor who never used the app has no profile to hide).
-(function () {
-  var uid = null;
-  try { uid = localStorage.getItem('userId'); } catch (e) {}
-  if (!uid || !/^[A-Za-z0-9_-]{1,40}$/.test(uid)) return;
-
-  var box = document.getElementById('hideProfile');
-  var chk = document.getElementById('hideChk');
-  var status = document.getElementById('hideStatus');
-  box.hidden = false;
-
-  // Reflect the current server state before enabling the checkbox.
-  fetch('/profile/hide?userId=' + encodeURIComponent(uid))
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (j) { if (j) chk.checked = !!j.hidden; })
-    .catch(function () {})
-    .then(function () { chk.disabled = false; });
-
-  chk.addEventListener('change', function () {
-    var want = chk.checked;
-    chk.disabled = true;
-    status.textContent = window.LB.t('saving');
-    fetch('/profile/hide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, hidden: want }),
-    })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(function (j) {
-        chk.checked = !!j.hidden;
-        status.textContent = window.LB.t(j.hidden ? 'hiddenMsg' : 'visibleMsg');
-      })
-      .catch(function () {
-        chk.checked = !want;   // revert on failure
-        status.textContent = window.LB.t('saveError');
-      })
-      .then(function () { chk.disabled = false; });
-  });
 })();
 </script>
 </body>

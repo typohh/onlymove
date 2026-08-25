@@ -17,6 +17,20 @@ const MAX_PER_RESPONSE = 20;   // cap EGD fetches kicked off per report response
 let pending = [];              // fetched {pin, gor, name, country, grade, lastAppearance} awaiting the next report
 const inFlight = new Set();    // PINs currently being fetched (dedupe within a session)
 
+// Buffer one already-fetched EGD record for the next /report. Used when the user
+// LINKS an EGD identity from the Account dialog: that search already pulled the
+// player's live GoR out of EGD, so their first weekly heartbeat costs no second
+// round trip and the leaderboard shows a verified rating on their next answer
+// rather than waiting for some other client to be asked. It goes through the same
+// `gorUpdates` body field as every refresh, so the Worker applies its usual
+// plausibility bound, week guard and pin-must-be-linked check — linking adds no
+// path by which a rating could be asserted.
+export function bufferGorUpdate(update) {
+    if (!update || !/^\d+$/.test(String(update.pin || ''))) return;
+    if (pending.some((u) => String(u.pin) === String(update.pin))) return;
+    pending.push({ ...update, pin: String(update.pin) });
+}
+
 // Take + clear the buffered updates to attach to a /report request body. Returns
 // null when there's nothing to send (so the report body stays unchanged).
 export function takePendingGorUpdates() {

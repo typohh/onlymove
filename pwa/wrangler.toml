@@ -59,12 +59,6 @@ crons = ["0 * * * *"]
 VAPID_SUBJECT = "mailto:typo.hh@gmail.com"
 VAPID_PUBLIC_KEY = "BJNAIIOg6WUBjq4Yj3DVSHDannFBUlcTKC4RL3XzNVX5y5dR4iGnx_EgKAW0eLm0GfCD9cTpQn0VxfS53ANDRpQ"
 
-# Admin gate for the /admin/invite page (the web equivalent of generate_invite.py).
-# It is the admin's own account code (the 8-char user_id), NOT hardcoded here — set
-# it as a secret so it never lands in the repo (a comma-separated list — one or more):
-#   wrangler secret put ADMIN_USER_IDS
-# The /admin/check and /admin/create-invite handlers fail CLOSED when it is unset.
-# For `wrangler dev`, put ADMIN_USER_IDS=<code>[,<code>...] in .dev.vars (gitignored).
 
 # --- Per-IP rate limiting (abuse / D1-quota defense) -------------------------
 # Native Workers rate-limiting bindings, enforced in src/index.js BEFORE any D1
@@ -111,7 +105,7 @@ simple = { limit = 50, period = 60 }
 #   Counting characteristic: ip.src   Period: 10s   Requests: 100
 #   Mitigation timeout: 10s
 # It matches ALL POSTs by METHOD alone (no path list), so every write endpoint —
-# /report, /sync, /schedule, /rank-survey, /share-event, /push/*, /register, and
+# /report, /sync, /schedule, /rank-survey, /share-event, /push/*, /link, and
 # any future POST route — is covered automatically; there is nothing to add per
 # endpoint. 100/10s is well above any legitimate burst (the heaviest real user
 # hit ~24 reports in a 60s window, far under 100 in any 10s), yet a scripted

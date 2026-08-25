@@ -768,6 +768,89 @@ body {
     }
 }
 
+/* --- Account dialog: the Leaderboard half ---------------------------------
+   The account-code half above is styled inline in js/account-ui.js; this is
+   the identity/anonymity section, which needs a real layout because the
+   search results are a variable-length list. */
+.account-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2857em;
+    margin-top: 0.4286em;
+    padding-top: 0.4286em;
+    border-top: calc(0.2 * var(--u)) solid rgba(255, 255, 255, 0.18);
+    text-align: left;
+}
+.account-section-title {
+    font-weight: bold;
+    text-align: center;
+}
+.account-note {
+    font-size: 0.8em;
+    opacity: 0.8;
+    max-width: 34ch;
+    margin: 0 auto;
+    text-align: center;
+}
+.account-note:empty { display: none; }
+/* The opt-out reads as one sentence the box belongs to, so the box is pinned to
+   the first line rather than centred against a wrapped paragraph. */
+.account-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.2857em;
+    font-size: 0.8em;
+    max-width: 34ch;
+    margin: 0.1429em auto 0;
+    cursor: pointer;
+}
+.account-check input { flex: none; margin: 0.2em 0 0; }
+.account-search {
+    display: block;
+    width: min(24ch, 100%);
+    margin: 0 auto;
+    padding: 0.2381em 0.3571em;
+    border-radius: var(--radius);
+    background: #444;
+    color: #fff;
+    border: calc(0.2 * var(--u)) solid #555;
+    font-size: inherit;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+/* Capped and scrollable: a name search can return dozens of players, and the
+   modal itself has no scroll of its own. */
+.account-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1429em;
+    max-height: calc(0.35 * var(--app-h));
+    overflow-y: auto;
+}
+.account-result {
+    display: flex;
+    align-items: center;
+    gap: 0.2857em;
+    font-size: 0.85em;
+}
+.account-result-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.account-result-meta {
+    flex: none;
+    opacity: 0.7;
+    white-space: nowrap;
+}
+.account-result .btn { flex: none; }
+
+@media (prefers-color-scheme: light) {
+    .account-section { border-top-color: rgba(0, 0, 0, 0.18); }
+}
+
 /* --- Hamburger menu modal --- */
 .menu-overlay {
     position: fixed;

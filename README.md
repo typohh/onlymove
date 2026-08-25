@@ -40,7 +40,7 @@ A GPU is a practical requirement for generation, bot benchmarking and activation
 
 ### Cloudflare (deployment only)
 
-Deploying the PWA needs a Wrangler login, a D1 database created from `pwa/schema.sql`, and two secrets — `VAPID_PRIVATE_KEY` for Web Push and `ADMIN_USER_IDS` for the invite tool — set with `wrangler secret put`. A gitignored `pwa/.dev.vars` supplies the same values to `wrangler dev`. None of this is needed to read the code or to run the generation half of the pipeline.
+Deploying the PWA needs a Wrangler login, a D1 database created from `pwa/schema.sql`, and one secret — `VAPID_PRIVATE_KEY` for Web Push — set with `wrangler secret put`. A gitignored `pwa/.dev.vars` supplies the same values to `wrangler dev`. None of this is needed to read the code or to run the generation half of the pipeline.
 
 ## What a fork can run
 

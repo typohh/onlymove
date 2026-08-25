@@ -60,7 +60,6 @@ Faithful offline ports of client code, for debugging one account against the loc
 
 ## Admin
 
-- **`generate_invite.py`** — mint an EGD-leaderboard invitation: validates an EGD PIN against the European Go Database, inserts the `invitation` row via wrangler, and prints the `/register?t=` link. A non-numeric argument is a name search instead (no DB write). The in-app equivalent is the `GET /invite` page (`pwa/src/handlers/invite-tool.js`). `<EGD_PIN>|<name...> [--local]`. Stdlib only.
 
 ## Skill-axis inspection
 

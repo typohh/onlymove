@@ -84,7 +84,7 @@ self.addEventListener('activate', event => {
       // Cross-origin and dynamic-API entries were cached by older SW versions (the
       // fetch handler no longer intercepts either) — drop the dead weight.
       if (url.origin !== self.location.origin
-          || ['/server-stats', '/push/vapid-public-key', '/invite'].includes(url.pathname)) {
+          || ['/server-stats', '/push/vapid-public-key', '/profile'].includes(url.pathname)) {
         console.log('Pruning no-longer-intercepted cache entry:', req.url);
         return runtimeCache.delete(req);
       }
@@ -331,13 +331,15 @@ self.addEventListener('fetch', event => {
     }
 
     // Same-origin dynamic Worker GETs: the response changes server-side while the
-    // URL doesn't (the hourly-recomputed community-stats blob, an invite's claim
-    // state, a rotated VAPID key), so cache-first would freeze the first response
-    // for the life of the cache entry (/server-stats?v=APP_VERSION survives the
-    // prune for the whole deploy; the other two have no ?v and survive forever).
-    // Let the browser hit the network directly — the Worker already sets the
-    // appropriate Cache-Control on these.
-    if (['/server-stats', '/push/vapid-public-key', '/invite'].includes(requestUrl.pathname)) {
+    // URL doesn't (the hourly-recomputed community-stats blob, the account's own
+    // leaderboard profile, a rotated VAPID key), so cache-first would freeze the
+    // first response for the life of the cache entry (/server-stats?v=APP_VERSION
+    // survives the prune for the whole deploy; the other two have no ?v and survive
+    // forever). /profile is the sharp one: its URL is the userId, so a cached copy
+    // would show the settings the Account dialog just changed as still un-changed,
+    // for good. Let the browser hit the network directly — the Worker already sets
+    // the appropriate Cache-Control on these.
+    if (['/server-stats', '/push/vapid-public-key', '/profile'].includes(requestUrl.pathname)) {
         return;
     }
 

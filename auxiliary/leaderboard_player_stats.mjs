@@ -39,8 +39,8 @@
 // is the 1k/1d boundary and every band is one unit wide (integers are band EDGES).
 //
 // Display identity comes from the same three tables the /leaderboard page stitches:
-// the rank buffer + edge geo-IP country off `leaderboard`, the name + invite country
-// off the claimed `invitation` row, and the verified ratings off the
+// the rank buffer + edge geo-IP country off `leaderboard`, the name + country off
+// the `external_ids` binding, and the verified ratings off the
 // latest-per-(user, server) machine heartbeats in `rank_surveys` ('EGD' rank = raw
 // GoR digits, 'AGAR' rank = raw AGA rating). Human survey declarations are NOT read
 // as ratings — they are calibration input, not ground truth about a player's
@@ -294,16 +294,11 @@ async function main() {
     // flag fallback, and the only country an anonymous row has.
     const lbRows = sqliteJson('SELECT user_id, buffer, country FROM leaderboard');
 
-    // Display name + invite country off the claimed invitation row (frozen at invite
-    // time) — the same source readLeaderboardRows stitches. MAX(claimed_at) with bare
-    // columns picks the newest claim (documented SQLite behavior).
-    const invRows = sqliteJson(
-        `SELECT claimed_by_user_id AS user_id, egd_name, country_code, MAX(claimed_at)
-           FROM invitation WHERE claimed_by_user_id IS NOT NULL
-          GROUP BY claimed_by_user_id`
-    );
-    const invBy = new Map(invRows.map((r) => [r.user_id, r]));
-    const linkedIds = new Set(sqliteJson('SELECT user_id FROM external_ids').map((r) => r.user_id));
+    // Display name + country off the `external_ids` binding, snapshotted from
+    // EGD/AGA when the user linked — the same source readLeaderboardRows stitches.
+    const idRows = sqliteJson('SELECT user_id, display_name, country_code FROM external_ids');
+    const idBy = new Map(idRows.map((r) => [r.user_id, r]));
+    const linkedIds = new Set(idRows.map((r) => r.user_id));
 
     // ONE latest-per-(user, server) pass over rank_surveys, exactly as
     // readLeaderboardRows does. Only the MACHINE heartbeats are read as RATINGS —
@@ -336,13 +331,13 @@ async function main() {
     // Default scope: players with a linked external account (the successor to the old
     // "everyone on the EGD leaderboard" — the table now holds one row per ACTIVE USER,
     // anonymous rows included). --with-unlinked appends every other leaderboard row.
-    const isLinked = (uid) => linkedIds.has(uid) || invBy.has(uid) || egdBy.has(uid) || agaBy.has(uid);
+    const isLinked = (uid) => linkedIds.has(uid) || egdBy.has(uid) || agaBy.has(uid);
     // The weekly cron PRUNES idle leaderboard rows, so a linked player who stopped
     // playing has no row (and no stored buffer) — they'd silently vanish from the
     // ground-truth set. Include every linked user regardless, rebuilding the missing
     // buffer from tsumego_reports below exactly as buildRowStateFromReports does.
     const byId = new Map(lbRows.map((r) => [r.user_id, { ...r, rebuilt: false }]));
-    for (const uid of new Set([...linkedIds, ...invBy.keys(), ...egdBy.keys(), ...agaBy.keys()])) {
+    for (const uid of new Set([...linkedIds, ...egdBy.keys(), ...agaBy.keys()])) {
         if (!byId.has(uid)) byId.set(uid, { user_id: uid, buffer: null, rebuilt: true });
     }
     // Naming a user with --user IS the request to see them, so it carries its own
@@ -482,16 +477,16 @@ async function main() {
             : !mod.isVerifiedActive(mod.verifiedTierRank(rec.rank_label, tierFallback), rec.last_game_at));
 
         // Country, on the page's own fallback chain: EGD federation code (from the 'EGD'
-        // heartbeat, the most reliable) -> the invitation row (EGD, frozen at invite) ->
+        // heartbeat, the most reliable) -> the binding (EGD, frozen at link time) ->
         // the leaderboard row's edge geo-IP (stamped on every /report — the universal
         // fallback that gives ANY active player, anonymous included, a flag) -> an older
         // survey's geo-IP. A rebuilt (pruned) row has no leaderboard geo-IP to offer.
-        const inv = invBy.get(r.user_id) || {};
-        const country = egdCountryBy.get(r.user_id) || inv.country_code || r.country
+        const ident = idBy.get(r.user_id) || {};
+        const country = egdCountryBy.get(r.user_id) || ident.country_code || r.country
             || surveyCountryBy.get(r.user_id) || null;
 
         return {
-            userId: r.user_id, name: inv.egd_name || r.user_id,
+            userId: r.user_id, name: ident.display_name || r.user_id,
             country,
             linked: isLinked(r.user_id),
             registered: linkedIds.has(r.user_id), rebuilt: !!r.rebuilt,
@@ -570,7 +565,7 @@ async function main() {
         + `median / sd = median and standard deviation of solve time over novel timed attempts `
         + `(the sd is raw, so a left-open tab inflates it — solve time is right-skewed); `
         + `buf = still-in-corpus attempts in the rank buffer.\n`
-        + `ctry = the flag the /leaderboard page would show: EGD federation code → invite → the row's edge geo-IP → survey geo-IP.\n`
+        + `ctry = the flag the /leaderboard page would show: EGD federation code → the binding → the row's edge geo-IP → survey geo-IP.\n`
         + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (the 7 days ${weekStart}→today); wk = that window's total.\n`
         + `onlymove  = the untimed rank the player is SHOWN (the front-page badge and the stored pred_rank).\n`
         + `est. EGF/AGA = that same shown rank, time-adjusted and mapped through the server's coupling (the frame a real rating speaks).\n`

@@ -262,25 +262,9 @@ function showDialog() {
     inputRow.appendChild(input);
     inputRow.appendChild(runBtn);
 
-    // Invite generator link. Opens in a new tab so the app/debug state isn't
-    // lost; the page verifies eligibility (admin or registered leaderboard member)
-    // from this browser's account code automatically and is inert otherwise.
-    const footer = document.createElement('div');
-    Object.assign(footer.style, {
-        marginTop: '10px', flexShrink: '0', fontSize: '12px', textAlign: 'right',
-    });
-    const adminLink = document.createElement('a');
-    adminLink.textContent = 'Invite generator →';
-    adminLink.href = '/invite';
-    adminLink.target = '_blank';
-    adminLink.rel = 'noopener';
-    Object.assign(adminLink.style, { color: '#8ab4f8', textDecoration: 'underline' });
-    footer.appendChild(adminLink);
-
     overlay.appendChild(header);
     overlay.appendChild(body);
     overlay.appendChild(inputRow);
-    overlay.appendChild(footer);
     document.body.appendChild(overlay);
 }
 

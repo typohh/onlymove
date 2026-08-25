@@ -9,11 +9,10 @@ import { handleRankSurvey } from './handlers/rank-survey.js';
 import { handleShareEvent } from './handlers/share-event.js';
 import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
-import { handleRegister, handleInvitePreview } from './handlers/register.js';
+import { handleLink, handleUnlink } from './handlers/link.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
-import { handleInvitePage, handleInviteEligible, handleInviteCreate } from './handlers/invite-tool.js';
-import { handleProfileHide, handleProfileHidden } from './handlers/profile.js';
+import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -31,14 +30,14 @@ const WRITE_ROUTES = [
   { path: '/schedule', method: 'POST', limiter: 'RL_WRITE', handler: handleSchedule },
   { path: '/rank-survey', method: 'POST', limiter: 'RL_WRITE', handler: handleRankSurvey },
   { path: '/share-event', method: 'POST', limiter: 'RL_WRITE', handler: handleShareEvent },
-  { path: '/register', method: 'POST', limiter: 'RL_WRITE', handler: handleRegister },
-  // Invite tool (account-code gated in the handler — admins + registered leaderboard
-  // members; EGD search is client-side). Rate-limited too, which bounds any
-  // code-guessing on top of the account-code check.
-  { path: '/invite/eligible', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteEligible },
-  { path: '/invite/create', method: 'POST', limiter: 'RL_WRITE', handler: handleInviteCreate },
-  // "Hide my profile" toggle for the leaderboard (bottom of the /leaderboard
-  // page). GET counterpart (read current state) is in GET_ROUTES.
+  // Leaderboard identity: the user binds their account to an EGD/AGA player they
+  // picked out of the Account dialog's search, or drops the binding again. The
+  // search itself is client-side (the Worker cannot reach EGD at all), so these
+  // only write. GET counterpart (read current binding + hide flag) is /profile.
+  { path: '/link', method: 'POST', limiter: 'RL_WRITE', handler: handleLink },
+  { path: '/unlink', method: 'POST', limiter: 'RL_WRITE', handler: handleUnlink },
+  // "Hide my profile" toggle for the leaderboard (Account dialog, and the foot of
+  // the rank survey). GET counterpart (read current state) is /profile.
   { path: '/profile/hide', method: 'POST', limiter: 'RL_WRITE', handler: handleProfileHide },
 ];
 
@@ -55,20 +54,10 @@ const GET_ROUTES = [
   // Static FINAL-RESULTS page for the concluded 2026 tournament (baked-in
   // standings, no D1 read).
   { path: '/tournament', handler: () => handleTournament() },
-  // /invite is dual-purpose on the same path: with ?t=<token> it's the invitation
-  // preview (JSON) for the /register confirmation dialog; without a token it's the
-  // invite generator page (HTML). (GET /register itself is a navigation and falls
-  // through to the SPA, which reads ?t= and POSTs.)
-  { path: '/invite', handler: (request, env) =>
-      new URL(request.url).searchParams.has('t')
-        ? handleInvitePreview(request, env)
-        : handleInvitePage(env) },
-  // Legacy alias for the invite generator page. Inert without an eligible account
-  // code, which the POST endpoints verify.
-  { path: '/admin/invite', handler: (request, env) => handleInvitePage(env) },
-  // Current "hide my profile" state for a user (reflects the leaderboard-page
-  // checkbox). Read; no limiter. no-store, set in the handler.
-  { path: '/profile/hide', handler: (request, env) => handleProfileHidden(request, env) },
+  // The account's leaderboard profile: the hide flag + the linked EGD/AGA identity,
+  // which is everything the Account dialog paints. Read; no limiter. no-store, set
+  // in the handler.
+  { path: '/profile', handler: (request, env) => handleProfile(request, env) },
 ];
 
 // Last-resort error boundary so a handler that throws (malformed JSON body, a

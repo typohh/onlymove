@@ -215,29 +215,48 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
     PRIMARY KEY (user_id, day)
 );
 
--- External-service player-id bindings: one row per REGISTERED user, identity
--- only. A general table — each supported service is a nullable column here
--- (egd_pin, aga_id, ...), hence not named after EGD. Everything else about a
--- registered player lives elsewhere: display name/country on their claimed
--- `invitation` row, rating history as machine-written heartbeat rows in
--- `rank_surveys` (weekly, one row per registered player per week; 'EGD' = raw
--- GoR digits e.g. '2145' from the client GoR piggyback, 'AGAR' = raw AGA rating
--- e.g. '3.2' from the Worker-side AGAGD fetch; the latest such row doubles as
--- the "checked this week" marker, and rank_to_scalar can't parse raw digits so
--- the rank-calibration pipeline ignores 'EGD'/'AGAR' rows until deliberately
--- enabled), and the rank/buffer state on the (prunable) `leaderboard` row.
--- Having a row here IS the "registered member" trust boundary the invite tool
--- gates on.
+-- External-service player-id bindings: one row per LINKED user. A general table
+-- — each supported service is a nullable column here (egd_pin, aga_id, ...),
+-- hence not named after EGD. A user creates their own row by picking themselves
+-- out of the EGD/AGA search in the app's Account dialog (POST /link,
+-- handlers/link.js) and deletes it again with Unlink, so the row is entirely
+-- user-owned and NOT a trust boundary: no verification against either database
+-- is possible, and none is claimed.
+--
+-- `display_name` and `country_code` are the identity's own display fields,
+-- snapshotted from the service at link time — the /leaderboard "Player" column.
+-- They live HERE rather than on a separate row precisely because they describe
+-- the binding and must go away with it. (Before 2026-08-25 registration was
+-- invite-only and they lived on the claimed `invitation` row; see
+-- migrations/2026-08-25_self_link_identity.sql for the backfill.)
+--
+-- Everything else about a linked player lives elsewhere: rating history as
+-- machine-written heartbeat rows in `rank_surveys` (weekly, one row per linked
+-- player per week; 'EGD' = raw GoR digits e.g. '2145' from the client GoR
+-- piggyback, 'AGAR' = raw AGA rating e.g. '3.2' from the Worker-side AGAGD
+-- fetch; the latest such row doubles as the "checked this week" marker, and
+-- rank_to_scalar can't parse raw digits so the rank-calibration pipeline ignores
+-- 'EGD'/'AGAR' rows until deliberately enabled), and the rank/buffer state on
+-- the (prunable) `leaderboard` row. Unlinking deletes this row AND the account's
+-- 'EGD'/'AGAR' heartbeats together — a heartbeat is keyed by user_id, so one
+-- left behind would keep showing the old player's verified rating.
 --
 -- The schema supports an egd_pin AND an aga_id on one row; the "one identity per
--- account" rule is enforced only as POLICY in handleRegister (register.js), NOT
--- as a DB constraint — so allowing both later is a code change with no migration.
+-- account" rule is enforced only as POLICY in handleLink (link.js), NOT as a DB
+-- constraint — so allowing both later is a code change with no migration.
 -- Because binding is restricted to one, the frontend assumes a single identity.
 CREATE TABLE IF NOT EXISTS external_ids (
-    user_id TEXT PRIMARY KEY,
-    egd_pin TEXT,
-    aga_id  TEXT
+    user_id      TEXT PRIMARY KEY,
+    egd_pin      TEXT,
+    aga_id       TEXT,
+    display_name TEXT,
+    country_code TEXT
 );
+-- MIGRATION for an existing deployment (the CREATE above already carries them for
+-- a fresh DB; the fetch_database dump is positional, so ALTERs must append in this
+-- order) — migrations/2026-08-25_self_link_identity.sql:
+--   ALTER TABLE external_ids ADD COLUMN display_name TEXT;
+--   ALTER TABLE external_ids ADD COLUMN country_code TEXT;
 -- Enforce a service-id <-> account binding is 1:1 (PK already gives account -> one
 -- of each id). NULLs are distinct in a UNIQUE index, so many egd_pin-NULL (AGA) or
 -- aga_id-NULL (EGD) rows coexist.
@@ -296,21 +315,14 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 -- and D1 reads are ~1000x cheaper than writes. Revisit only if the table is
 -- allowed to grow unbounded again.
 
--- Registration invitations, issued by an admin (generate_invite.py / the /invite
--- tool page) OR by any registered leaderboard member (the in-app Invite menu). A
--- random 8-char opaque token recorded alongside the target external id (no crypto).
--- The recipient opens /register?t=<token> in their PWA; the Worker looks the token
--- up, binds their user_id to that id, and marks it claimed (one-time use).
---
--- `service` selects the target database: 'EGD' (or NULL, the default/legacy) uses
--- `egd_pin` + `gor`; 'AGA' uses `aga_id` + `aga_rating`. `egd_name`/`country_code`
--- are the generic display name/country for either. The EGD fields are fetched from
--- EGD at creation (client-side); the AGA rating is snapshotted server-side at
--- creation — so the confirmation preview + claim need no live external call.
--- Never expires; deleted/revoked manually. created_by_user_id is the account that
--- minted the link — both the abuse-attribution key and the "who invited this person"
--- record (NULL for an admin CLI invite, which has no user context). See
--- docs/leaderboard_plan.md.
+-- RETIRED (2026-08-25). Registration invitations, from when reaching the
+-- leaderboard meant claiming a link an existing member minted for you. A user
+-- now picks their own EGD/AGA identity in the Account dialog, so nothing reads
+-- or writes this table: the display names it held were copied onto
+-- external_ids by migrations/2026-08-25_self_link_identity.sql, which is the
+-- last thing that needed it. The CREATE stays so a fresh DB still matches
+-- production; `DROP TABLE invitation` once the live leaderboard is confirmed
+-- showing names off external_ids.
 CREATE TABLE IF NOT EXISTS invitation (
     invite_token       TEXT PRIMARY KEY,
     egd_pin            TEXT,

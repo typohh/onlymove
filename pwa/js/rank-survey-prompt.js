@@ -11,11 +11,11 @@
 // A declaration is also SHOWN — it is what the /leaderboard page's Declared
 // column reads for every server without a linked federation account — so the
 // dialog states what the answers are for and carries the opt-out at the bottom.
-// That checkbox is the SAME hidden_profiles flag as the one at the foot of
-// /leaderboard (POST /profile/hide), not a second preference: it is read back on
-// open so an existing opt-out shows as already checked, and written only when the
-// user actually changes it, so submitting a survey can never silently un-hide
-// someone who opted out on the leaderboard page.
+// That checkbox is the SAME hidden_profiles flag as the one in the Account dialog
+// (GET /profile to read, POST /profile/hide to write), not a second preference: it
+// is read back on open so an existing opt-out shows as already checked, and written
+// only when the user actually changes it, so submitting a survey can never silently
+// un-hide someone who opted out in Account.
 
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
@@ -104,7 +104,7 @@ function showRankSurvey() {
     hideCheckbox.type = 'checkbox';
     let hiddenAtOpen = false;
     if (state.userId) {
-        fetch(`/profile/hide?userId=${encodeURIComponent(state.userId)}`)
+        fetch(`/profile?userId=${encodeURIComponent(state.userId)}`)
             .then(r => (r.ok ? r.json() : null))
             .then(j => {
                 if (j && typeof j.hidden === 'boolean') {
