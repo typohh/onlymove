@@ -1,0 +1,40 @@
+# Serves api.onlymove.net's analysis from this machine whenever it is running.
+#
+# A USER unit, not a system one: it needs this user's venv, the repo, the token
+# at ~/.config/onlymove/worker_token and the OpenCL tuning cache in ~/.katago,
+# and it needs no privilege at all. Lingering is what makes it start at boot
+# rather than at first login:
+#
+#   ln -s ~/Repositories/onlymove/analysis_server/onlymove-worker.service \
+#         ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now onlymove-worker
+#   sudo loginctl enable-linger $USER      # start at boot, not at login
+#
+#   journalctl --user -u onlymove-worker -f
+#
+# Stopping it is safe at any instant: the cloud box answers on its own, which is
+# the designed default rather than a failure.
+[Unit]
+Description=onlymove analysis worker (KataGo search for api.onlymove.net)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ootakamoku/Repositories/onlymove
+# -u so the journal gets each line as it happens rather than at exit.
+ExecStart=/home/ootakamoku/Repositories/onlymove/.venv/bin/python3 -u -m analysis_server.worker
+# SIGINT rather than the default SIGTERM: the worker catches it, so KataGo is
+# shut down through the controller instead of being reaped with the cgroup.
+KillSignal=SIGINT
+TimeoutStopSec=20
+# always, not on-failure, and the reason is BOOT: the preflight exits non-zero
+# when the server is unreachable, which is the normal state for the first
+# seconds after a cold start. It costs nothing to retry — the preflight runs
+# BEFORE the network is loaded, so a failed attempt never pays for the model.
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

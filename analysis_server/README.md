@@ -37,6 +37,20 @@ The shared secret is read from `~/.config/onlymove/worker_token` (0600, outside 
 
 A secret is never passed on a command line: `/proc` makes that world-readable for as long as the process runs.
 
+### As a service, starting at boot
+
+`onlymove-worker.service` here is a **user** unit — it needs this user's venv, the token, and the OpenCL tuning cache in `~/.katago`, and no privilege at all. Install it as a symlink so edits track git:
+
+```bash
+ln -s ~/Repositories/onlymove/analysis_server/onlymove-worker.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now onlymove-worker
+loginctl enable-linger $USER          # start at BOOT, not at first login
+journalctl --user -u onlymove-worker -f
+```
+
+Without the linger step a user unit waits for a login, which is not what "on boot" means on a machine nobody logs into. `systemctl --user stop onlymove-worker` hands analysis back to the box within a second; `Restart=always` with a 30 s delay covers the cold-boot case where the network is not up yet when the preflight runs.
+
 Useful environment overrides: `ONLYMOVE_WORKER_VISITS` (30), `ONLYMOVE_WORKER_THREADS` (4 parked polls), `ONLYMOVE_WORKER_SEARCH_THREADS` (8 — a *latency* setting, since visits are sequential within one query unless several threads explore at once), `ONLYMOVE_ANALYSIS_URL`.
 
 ## Deploying
