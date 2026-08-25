@@ -10,7 +10,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 - **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the rating artifacts reader, rank-curve fitting, surveys, the residual-axes model). The two families share no imports; `utils/constants.py` holds the handful of values both need.
 - **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
-- **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback.
+- **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback. `worker.py` lets a faster machine dial in and take that service's work over while it is running.
 - **`android/`** — the Bubblewrap TWA shell that wraps the PWA for the Play Store.
 - **`docs/`** — methodology and operational runbooks (authored); `docs/vendor/` holds third-party reference material, currently WGo.js's API docs.
 - **`data/`** — external rank reference inputs (`reference/`), corpus audit findings (`tsumego_audit/`), and gitignored real-user localStorage dumps (`user_dumps/`, which carry account credentials — see `data/README.md`).
