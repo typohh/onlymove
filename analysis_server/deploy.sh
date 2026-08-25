@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Ships analysis_server/server.py to the box that serves api.onlymove.net.
 #
-# There is no root on the far side: the service account owns its own working
-# directory but is not in google-sudoers, so this script edits nothing under
-# /etc. It restarts by killing the main process and letting the unit's
-# Restart=always bring it back, and it installs the worker token as a 0600 file
-# beside server.py rather than as a unit Environment= line.
+# This script edits nothing under /etc. It restarts through systemctl where the
+# account can sudo and by killing the main process where it cannot (the unit
+# sets Restart=always), and it installs the worker token as a 0600 file beside
+# server.py rather than as a unit Environment= line — which would be
+# world-readable through `systemctl show`.
 #
 # Usage:
 #   analysis_server/deploy.sh                 # ship server.py + analysis.cfg, restart, verify
@@ -78,8 +78,12 @@ before=$(ssh "$HOST" "systemctl show katago.service -p MainPID --value")
 case "$before" in
   ''|*[!0-9]*|0|1) echo "!! refusing to kill MainPID='$before'" >&2; exit 1 ;;
 esac
-ssh "$HOST" "kill $before" || true
-echo "==> killed pid $before, waiting for the unit to come back"
+# systemctl is the operation actually meant. The kill is the fallback for an
+# account that cannot sudo, and works only because the unit sets Restart=always
+# — so it stays as a fallback rather than the primary, where a unit change
+# would silently turn it into a no-restart.
+ssh "$HOST" "sudo -n systemctl restart katago.service 2>/dev/null || kill $before" || true
+echo "==> restarted (was pid $before), waiting for the unit to come back"
 
 start=$(date +%s)
 sgf='(;FF[4]GM[1]CA[UTF-8]SZ[9]RU[japanese]KM[6.5];B[gf];W[ef])'
