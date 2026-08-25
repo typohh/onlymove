@@ -18,13 +18,26 @@
 // deploying.
 //
 // To create one: Google Cloud Console -> APIs & Services -> Credentials -> Create
-// credentials -> OAuth client ID -> Web application. Add EVERY origin the button
-// is rendered on to "Authorized JavaScript origins" — https://onlymove.net,
-// https://www.onlymove.net, and http://localhost:8787 for `npm run dev` — since
-// Google refuses to render the button on an origin that is not listed. No
-// redirect URI is needed: this is the ID-token flow, which never leaves the page.
-// No client SECRET is needed either, and none should be created; verifying an ID
-// token needs only Google's public keys.
+// credentials -> OAuth client ID -> Web application. "Authorized JavaScript
+// origins" gets https://onlymove.net and https://www.onlymove.net, and NOTHING
+// ELSE — Google refuses to render the button on an unlisted origin, so that list
+// is the only thing deciding which pages can obtain a token bearing this
+// audience, and the audience is all the Worker checks. No redirect URI is needed:
+// this is the ID-token flow, which never leaves the page. No client SECRET is
+// needed either, and none should be created; verifying an ID token needs only
+// Google's public keys.
+//
+// LOCALHOST BELONGS TO A SEPARATE CLIENT, not to this one. `npm run dev` serves
+// on the wrangler DEFAULT port, so authorizing http://localhost:8787 here would
+// let any page another project happens to serve there mint a token this Worker
+// accepts — the client id is public, being in the shipped bundle, so knowing it
+// is no barrier. It is not remotely reachable (a page cannot claim localhost as
+// its origin), which makes the developer's own machine the realistic target
+// rather than a user's. So: a second "dev" OAuth client carries the localhost
+// origin, its id is pasted in here while testing and reverted before committing.
+// Committing it by mistake fails LOUDLY rather than quietly — the dev client does
+// not authorize onlymove.net, so the button refuses to render in production
+// instead of working with a weaker audience.
 export const GOOGLE_CLIENT_ID = '';
 
 export function googleSignInConfigured() {
