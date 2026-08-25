@@ -364,3 +364,24 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
     user_id    TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
 );
+-- Google sign-in: a second way back into an account CODE, never a second kind of
+-- account. Presence of a row means the Google account whose opaque subject id is
+-- `google_sub` can be used to look this account's code up again on a device that
+-- does not have it (POST /google/signin -> handlers/google.js).
+--
+-- What is stored is the SUBJECT ID AND NOTHING ELSE. The ID token also carries
+-- the address and the display name and neither is kept, so there is no email in
+-- this database to serve, to leak, or to have to describe in the privacy policy.
+-- The Account dialog names the address from the token it just received, on the
+-- linking device only.
+--
+-- The two keys are what make the binding EXCLUSIVE IN BOTH DIRECTIONS — one code
+-- per Google account (PRIMARY KEY) and one Google account per code (the UNIQUE
+-- index) — which is what lets a sign-in resolve to a single code rather than to a
+-- list. Deleting a row is Unlink: the account is untouched and keeps its code.
+CREATE TABLE IF NOT EXISTS google_accounts (
+    google_sub TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_google_accounts_user ON google_accounts(user_id);

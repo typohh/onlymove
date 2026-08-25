@@ -112,13 +112,14 @@
 
         <p>This policy covers onlymove.net and its installable app (including the Android app on Google Play, which is the same web app in a native wrapper). The short version: there are no user accounts in the traditional sense, no names, no email addresses, no advertising, and no third-party analytics. The app stores your solving history under a random account code so your progress can sync between your devices.</p>
 
-        <p><em>Effective date: July 13, 2026.</em></p>
+        <p><em>Effective date: August 25, 2026.</em></p>
 
         <h2>Your account code</h2>
         <ul>
-            <li>When you first use the app, it generates a <strong>random account code</strong> on your device. This code is the only identifier attached to your data — we never ask for or store your name, email address, or any other personal details.</li>
+            <li>When you first use the app, it generates a <strong>random account code</strong> on your device. Your data is stored under that code, and unless you link a Google account (below) it is the only identifier attached to it — we never store your name, email address, or any other personal details.</li>
             <li>The code is shown under the Account menu. Entering it on another device links that device to the same solving history.</li>
             <li>Treat the code like a password: anyone who has it can access and continue that solving history.</li>
+            <li><strong>Signing in with Google (optional):</strong> from the Account menu you can link a Google account to your code, so that a new device reaches your history without you typing the code. What is stored is an anonymous identifier Google issues for this app alone — it cannot be used to contact you, and it does not identify you on any other site. Signing in also hands us your address and your name; neither is kept, and the address stays in this browser's own storage so the Account screen can show which account is linked. Unlinking, from the same menu, deletes the identifier.</li>
         </ul>
 
         <h2>What we collect</h2>
@@ -133,7 +134,7 @@
 
         <h2>What we don't collect</h2>
         <ul>
-            <li>No names, email addresses, phone numbers, or payment details.</li>
+            <li>No names, email addresses, phone numbers, or payment details — Google sign-in included, which keeps only the anonymous identifier described above.</li>
             <li>No advertising identifiers, no ad networks, no third-party analytics or tracking scripts.</li>
             <li>No precise location. Only the country-level value mentioned above, and only for share-link events.</li>
         </ul>
@@ -158,6 +159,7 @@
             <li>The service runs on <strong>Cloudflare</strong> (Workers and the D1 database). Like any web host, Cloudflare processes IP addresses and request metadata to deliver the site and to protect it from abuse; see <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's privacy policy</a>.</li>
             <li>Board positions you analyze in review mode may be sent to our own analysis server to be evaluated by KataGo. Positions contain no personal data.</li>
             <li>Push notifications are delivered through your browser vendor's push service (e.g. Google's, for Chrome on Android).</li>
+            <li>Opening the Google sign-in screen makes your browser load Google's sign-in library from Google, which lets Google see that request. Nothing else in the app loads it, so it is never fetched unless you open that screen.</li>
         </ul>
 
         <h2>Data retention and deletion</h2>
@@ -180,13 +182,14 @@
 
         <p>本政策涵盖 onlymove.net 及其可安装的应用（包括 Google Play 上的安卓应用，它是同一款网页应用的原生封装版本）。简而言之：不存在传统意义上的用户账户，没有姓名，没有电子邮件地址，没有广告，也没有第三方分析。应用会在一个随机账号代码下存储你的解题记录，以便你的进度能在你的多台设备之间同步。</p>
 
-        <p><em>生效日期：2026 年 7 月 13 日。</em></p>
+        <p><em>生效日期：2026 年 8 月 25 日。</em></p>
 
         <h2>你的账号代码</h2>
         <ul>
-            <li>当你首次使用本应用时，它会在你的设备上生成一个<strong>随机账号代码</strong>。此代码是附加在你数据上的唯一标识——我们从不索取或存储你的姓名、电子邮件地址或任何其他个人信息。</li>
+            <li>当你首次使用本应用时，它会在你的设备上生成一个<strong>随机账号代码</strong>。你的数据存储在该代码之下；除非你关联了 Google 账号（见下文），否则它就是附加在你数据上的唯一标识——我们从不存储你的姓名、电子邮件地址或任何其他个人信息。</li>
             <li>该代码显示在“账号”菜单下。在另一台设备上输入它，即可将该设备关联到同一份解题记录。</li>
             <li>请像对待密码一样对待此代码：任何持有它的人都能访问并延续那份解题记录。</li>
+            <li><strong>使用 Google 登录（可选）：</strong>你可以在“账号”菜单中将一个 Google 账号关联到你的代码，这样在新设备上无需输入代码即可找回你的记录。我们存储的是 Google 专为本应用签发的匿名标识符——它无法用于联系你，也无法在其他任何网站上识别你。登录同时也会把你的邮箱地址和姓名交给我们；两者都不会被保存，邮箱地址仅留存在本浏览器自身的存储中，以便“账号”界面能显示当前关联的是哪个账号。在同一菜单中解除关联即可删除该标识符。</li>
         </ul>
 
         <h2>我们收集哪些信息</h2>
@@ -201,7 +204,7 @@
 
         <h2>我们不收集哪些信息</h2>
         <ul>
-            <li>没有姓名、电子邮件地址、电话号码或支付信息。</li>
+            <li>没有姓名、电子邮件地址、电话号码或支付信息——包括 Google 登录在内，它只保留上文所述的匿名标识符。</li>
             <li>没有广告标识符，没有广告网络，没有第三方分析或跟踪脚本。</li>
             <li>没有精确位置。仅有上文提到的国家级数值，且仅用于分享链接事件。</li>
         </ul>
@@ -226,6 +229,7 @@
             <li>本服务运行在 <strong>Cloudflare</strong> 上（Workers 和 D1 数据库）。与任何网络托管商一样，Cloudflare 会处理 IP 地址和请求元数据，以便提供本站点并保护其免受滥用；参见 <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare 的隐私政策</a>。</li>
             <li>你在复习模式中分析的棋盘局面可能会被发送到我们自己的分析服务器，由 KataGo 进行评估。局面中不含任何个人数据。</li>
             <li>推送通知通过你浏览器供应商的推送服务送达（例如安卓版 Chrome 使用 Google 的推送服务）。</li>
+            <li>打开 Google 登录界面时，你的浏览器会从 Google 加载其登录库，因而 Google 能看到该请求。应用的其他部分都不会加载它，所以除非你打开该界面，否则它绝不会被请求。</li>
         </ul>
 
         <h2>数据保留与删除</h2>
@@ -248,13 +252,14 @@
 
 <p>このポリシーは、onlymove.net およびそのインストール可能なアプリ（Google Play の Android アプリを含みます。これは同じウェブアプリをネイティブアプリで包んだものです）を対象とします。要点は次のとおりです。従来の意味でのユーザーアカウントはなく、氏名も、メールアドレスも、広告も、第三者による分析もありません。アプリはあなたの解答履歴をランダムなアカウントコードのもとに保存し、進捗をデバイス間で同期できるようにします。</p>
 
-<p><em>発効日：2026年7月13日。</em></p>
+<p><em>発効日：2026年8月25日。</em></p>
 
 <h2>あなたのアカウントコード</h2>
 <ul>
-    <li>アプリを初めて使用するとき、アプリはあなたのデバイス上で<strong>ランダムなアカウントコード</strong>を生成します。このコードは、あなたのデータに紐づく唯一の識別子です。私たちはあなたの氏名、メールアドレス、その他いかなる個人情報も尋ねたり保存したりすることはありません。</li>
+    <li>アプリを初めて使用するとき、アプリはあなたのデバイス上で<strong>ランダムなアカウントコード</strong>を生成します。あなたのデータはこのコードのもとに保存され、Google アカウントを連携しない限り（下記参照）、データに紐づく唯一の識別子です。私たちはあなたの氏名、メールアドレス、その他いかなる個人情報も保存しません。</li>
     <li>このコードは「アカウント」メニューに表示されます。別のデバイスでこれを入力すると、そのデバイスが同じ解答履歴に紐づけられます。</li>
     <li>このコードはパスワードのように扱ってください。これを持っている人は誰でも、その解答履歴にアクセスして続けることができます。</li>
+    <li><strong>Google でのログイン（任意）：</strong>「アカウント」メニューから Google アカウントをコードに連携できます。これにより、新しい端末でコードを入力しなくても履歴に戻れます。保存するのは Google がこのアプリ専用に発行する匿名の識別子だけで、これであなたに連絡することはできず、他のサイトであなたを識別することもできません。ログインの際にはメールアドレスと氏名も渡されますが、どちらも保存しません。メールアドレスはこのブラウザ自身の保存領域にとどまり、「アカウント」画面がどのアカウントを連携中か表示するためだけに使われます。同じメニューで連携を解除すると、その識別子は削除されます。</li>
 </ul>
 
 <h2>収集する情報</h2>
@@ -269,7 +274,7 @@
 
 <h2>収集しない情報</h2>
 <ul>
-    <li>氏名、メールアドレス、電話番号、支払い情報は収集しません。</li>
+    <li>氏名、メールアドレス、電話番号、支払い情報は収集しません。Google ログインも同様で、上記の匿名の識別子だけを保持します。</li>
     <li>広告識別子、広告ネットワーク、第三者による分析やトラッキングスクリプトはありません。</li>
     <li>正確な位置情報は収集しません。上記の国レベルの値のみで、それも共有リンクのイベントに限られます。</li>
 </ul>
@@ -294,6 +299,7 @@
     <li>このサービスは <strong>Cloudflare</strong>（Workers と D1 データベース）上で稼働しています。あらゆるウェブホストと同様に、Cloudflare はサイトを配信し不正利用から保護するために、IPアドレスとリクエストのメタデータを処理します。<a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare のプライバシーポリシー</a>をご覧ください。</li>
     <li>検討モードであなたが分析する盤面は、KataGo による評価のために私たち自身の分析サーバーに送信されることがあります。盤面には個人データは一切含まれません。</li>
     <li>プッシュ通知は、あなたのブラウザの提供元のプッシュサービス（例えば Android の Chrome の場合は Google のもの）を通じて配信されます。</li>
+    <li>Google のログイン画面を開くと、ブラウザが Google からログイン用のライブラリを読み込むため、Google はそのリクエストを認識します。アプリの他の部分はこれを一切読み込まないので、その画面を開かない限り取得されることはありません。</li>
 </ul>
 
 <h2>データの保持と削除</h2>
@@ -316,13 +322,14 @@
 
         <p>이 방침은 onlymove.net과 설치 가능한 앱(네이티브 래퍼에 담긴 동일한 웹 앱인 Google Play의 Android 앱 포함)에 적용됩니다. 요약하자면: 전통적인 의미의 사용자 계정도, 이름도, 이메일 주소도, 광고도, 제3자 분석도 없습니다. 앱은 여러분의 진행 상황이 기기 간에 동기화될 수 있도록 무작위 계정 코드로 여러분의 풀이 기록을 저장합니다.</p>
 
-        <p><em>시행일: 2026년 7월 13일.</em></p>
+        <p><em>시행일: 2026년 8월 25일.</em></p>
 
         <h2>여러분의 계정 코드</h2>
         <ul>
-            <li>앱을 처음 사용할 때, 앱은 여러분의 기기에서 <strong>무작위 계정 코드</strong>를 생성합니다. 이 코드는 여러분의 데이터에 연결된 유일한 식별자입니다 — 우리는 여러분의 이름, 이메일 주소, 그 밖의 어떤 개인 정보도 결코 요청하거나 저장하지 않습니다.</li>
+            <li>앱을 처음 사용할 때, 앱은 여러분의 기기에서 <strong>무작위 계정 코드</strong>를 생성합니다. 여러분의 데이터는 이 코드 아래에 저장되며, Google 계정을 연결하지 않는 한(아래 참조) 데이터에 연결된 유일한 식별자입니다 — 우리는 여러분의 이름, 이메일 주소, 그 밖의 어떤 개인 정보도 저장하지 않습니다.</li>
             <li>코드는 계정 메뉴에 표시됩니다. 다른 기기에서 이 코드를 입력하면 그 기기가 같은 풀이 기록에 연결됩니다.</li>
             <li>코드를 비밀번호처럼 다루세요: 그것을 가진 사람은 누구나 그 풀이 기록에 접근하고 이어갈 수 있습니다.</li>
+            <li><strong>Google로 로그인(선택):</strong> 계정 메뉴에서 Google 계정을 코드에 연결하면, 새 기기에서 코드를 입력하지 않고도 기록에 다시 접근할 수 있습니다. 저장하는 것은 Google이 이 앱에만 발급하는 익명 식별자뿐이며, 이것으로는 회원님께 연락할 수도, 다른 사이트에서 회원님을 식별할 수도 없습니다. 로그인 시 이메일 주소와 이름도 함께 전달되지만 어느 쪽도 보관하지 않으며, 이메일 주소는 계정 화면이 어떤 계정이 연결되어 있는지 보여주기 위해 이 브라우저의 저장소에만 남습니다. 같은 메뉴에서 연결을 해제하면 그 식별자는 삭제됩니다.</li>
         </ul>
 
         <h2>우리가 수집하는 것</h2>
@@ -337,7 +344,7 @@
 
         <h2>우리가 수집하지 않는 것</h2>
         <ul>
-            <li>이름, 이메일 주소, 전화번호, 결제 정보는 없습니다.</li>
+            <li>이름, 이메일 주소, 전화번호, 결제 정보는 없습니다. Google 로그인도 마찬가지로 위에서 설명한 익명 식별자만 보관합니다.</li>
             <li>광고 식별자도, 광고 네트워크도, 제3자 분석이나 추적 스크립트도 없습니다.</li>
             <li>정확한 위치는 없습니다. 위에서 언급한 국가 수준의 값만, 그리고 공유 링크 이벤트에 대해서만 있습니다.</li>
         </ul>
@@ -362,6 +369,7 @@
             <li>이 서비스는 <strong>Cloudflare</strong>(Workers 및 D1 데이터베이스)에서 실행됩니다. 여느 웹 호스트와 마찬가지로, Cloudflare는 사이트를 제공하고 남용으로부터 보호하기 위해 IP 주소와 요청 메타데이터를 처리합니다; <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare의 개인정보처리방침</a>을 참고하세요.</li>
             <li>여러분이 복습 모드에서 분석하는 판 국면은 KataGo가 평가하도록 우리 자체 분석 서버로 전송될 수 있습니다. 국면에는 개인 정보가 담겨 있지 않습니다.</li>
             <li>푸시 알림은 여러분의 브라우저 공급업체의 푸시 서비스(예: Android용 Chrome의 경우 Google)를 통해 전달됩니다.</li>
+            <li>Google 로그인 화면을 열면 브라우저가 Google에서 로그인 라이브러리를 불러오므로 Google이 그 요청을 보게 됩니다. 앱의 다른 부분은 이를 전혀 불러오지 않으므로, 그 화면을 열지 않는 한 요청되지 않습니다.</li>
         </ul>
 
         <h2>데이터 보관 및 삭제</h2>

@@ -844,6 +844,17 @@ body {
     text-align: center;
 }
 .account-note:empty { display: none; }
+/* Google's own rendered button, centred in the sign-in view. Its size and skin
+   are Google's (js/google-signin.js) and must stay that way for their branding
+   terms, so this only places it — an iframe of a fixed intrinsic width, which is
+   why nothing here tries to stretch it. */
+.account-google-button {
+    display: flex;
+    justify-content: center;
+    min-height: 2.2em;
+    margin: 0.5714em 0 0.2857em;
+}
+
 /* Capped and scrollable: a name search can return dozens of players, and the
    modal itself has no scroll of its own. */
 .account-results {

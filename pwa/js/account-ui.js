@@ -1,14 +1,21 @@
 // js/account-ui.js
 //
-// The Account dialog (hamburger menu → More). Three values, each one a thing the
+// The Account dialog (hamburger menu → More). Four values, each one a thing the
 // user can change by clicking it:
 //
 //     Code       <user-id>            (?)
+//     Google     you@gmail.com       (?)
 //     Profile    Henry Hemming · 4d  (?)
 //     Anonymous  No                  (?)
 //
+// Google sits under Code because it is ABOUT the code: linking one is how a
+// device that does not have the code gets back to the account without the user
+// having had to write it down. It is the only row that can be absent — with no
+// client id configured (shared/google-auth.js) the whole feature is off and the
+// row is not drawn, rather than drawn dead.
+//
 // The explanations live in hint bubbles rather than in the layout (see
-// js/hint-bubble.js): every one of these needs a sentence, and three sentences
+// js/hint-bubble.js): every one of these needs a sentence, and four sentences
 // on the page turn a short list of choices into something nobody reads. The
 // values are styled alike because they behave alike — click to change — and the
 // account code is not special among them.
@@ -50,6 +57,10 @@ import { postJson } from './worker-post.js';
 import { searchIdentities } from './identity-search.js';
 import { bufferGorUpdate } from './gor-refresh.js';
 import { hintButton, closeHint } from './hint-bubble.js';
+import {
+    googleSignInAvailable, renderGoogleButton, googleAccountEmail,
+    rememberGoogleEmail, readGoogleEmail, forgetGoogleEmail,
+} from './google-signin.js';
 import { onAccountProfileShown } from './onboarding.js';
 
 // Shown in place of a server value that hasn't arrived, and of one whose read
@@ -65,6 +76,18 @@ function linkErrorTerm(error) {
         case 'id_taken':    return 'accountLinkTaken';
         case 'unreachable': return 'accountLinkUnreachable';
         default:            return 'accountLinkFailed';
+    }
+}
+
+// POST /google/* rejections the user can act on. An invalid token is not among
+// them: it means the token expired while the dialog sat open, or the client id
+// and the Worker disagree — neither is something to explain mid-dialog, and both
+// are answered by trying again.
+function googleErrorTerm(error) {
+    switch (error) {
+        case 'google_taken':  return 'accountGoogleTaken';
+        case 'account_taken': return 'accountGoogleAccountTaken';
+        default:              return 'accountGoogleFailed';
     }
 }
 
@@ -138,6 +161,7 @@ class AccountPanel {
         this.closeModal = closeModal;
         this.linked = undefined;   // undefined = not read yet, null = none
         this.hidden = undefined;
+        this.google = undefined;   // undefined = not read yet, bool = binding
         this.loadFailed = false;
         this.notice = '';          // the overview's one error line, '' when quiet
         this.load();
@@ -169,6 +193,11 @@ class AccountPanel {
             this.loadFailed = false;
             this.linked = profile.linked || null;
             this.hidden = !!profile.hidden;
+            this.google = !!profile.google;
+            // The server holds the binding; this device holds the address that
+            // names it. When the two disagree the server wins and the local name
+            // goes — an unlink from another device is exactly that disagreement.
+            if (!this.google) forgetGoogleEmail();
         }
         // Only repaint if the overview is still what's on screen — a load that
         // lands while the user is mid-search must not throw their typing away.
@@ -191,13 +220,16 @@ class AccountPanel {
         this.footer.appendChild(modalButtonRow([modalButton(getTerm(exitTerm), onExit)]));
     }
 
-    // --- the three-row overview ---------------------------------------------
+    // --- the overview --------------------------------------------------------
     showOverview() {
         this.view = 'overview';
         this.render((host) => {
             const grid = modalRankGrid();
             grid.classList.add('account-grid');
             addRow(grid, 'accountRowCode', 'accountHint', this.codeValue());
+            if (googleSignInAvailable()) {
+                addRow(grid, 'accountRowGoogle', 'accountGoogleHint', this.googleValue());
+            }
             addRow(grid, 'accountProfile', 'accountLinkIntro', this.profileValue(), 'account-profile-cell');
             addRow(grid, 'accountAnonymous', 'accountHideLabel', this.anonymousValue());
             host.appendChild(grid);
@@ -268,6 +300,132 @@ class AccountPanel {
         switchAccount(typed);
     }
 
+    // --- Google sign-in ------------------------------------------------------
+    // Whether a Google account can reach this code, and the address that does —
+    // when THIS device is the one that linked it. A device that arrived by
+    // entering the code holds the binding but not the name, and says "Linked"
+    // rather than guessing: the server keeps an opaque id and no address, so
+    // there is nowhere else for a name to come from.
+    googleValue() {
+        if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });
+        if (this.google === undefined) return valueEl(PENDING, () => {}, { muted: true });
+        if (!this.google) {
+            return valueEl(getTerm('accountNotLinked'), () => this.showGoogleSignIn(), { muted: true });
+        }
+        const email = readGoogleEmail(state.userId);
+        return valueEl(email || getTerm('accountGoogleLinked'), () => this.unlinkGoogle());
+    }
+
+    // The sign-in view: Google's own button and nothing else to decide. It makes
+    // no claim about whether signing in is going to log the user in or attach the
+    // account they pick to this one, because that is not knowable until the token
+    // has been resolved against the server.
+    showGoogleSignIn() {
+        this.view = 'google';
+        this.notice = '';
+        this.render((host) => {
+            const intro = document.createElement('div');
+            intro.className = 'account-note';
+            intro.textContent = getTerm('accountGoogleIntro');
+            host.appendChild(intro);
+
+            const buttonHost = document.createElement('div');
+            buttonHost.className = 'account-google-button';
+            host.appendChild(buttonHost);
+
+            const message = document.createElement('div');
+            message.className = 'account-note';
+            message.textContent = PENDING;
+            host.appendChild(message);
+
+            renderGoogleButton(buttonHost, (credential) => {
+                message.textContent = getTerm('accountGoogleChecking');
+                this.resolveGoogle(credential, message);
+            }).then(() => { message.textContent = ''; })
+              .catch(() => { message.textContent = getTerm('accountGoogleUnavailable'); });
+        }, 'accountCancel', () => this.showOverview());
+    }
+
+    // One verified token, two possible meanings — log in as the account it is
+    // bound to, or bind it to the account in hand (src/handlers/google.js decides
+    // which case it is, and writes nothing). Both branches ask first, and both
+    // name the CODE in the question: the code is what is actually changing hands,
+    // and a returning user whose device just minted a fresh one needs to see that
+    // it is the wrong one before they attach their Google account to it.
+    async resolveGoogle(credential, message) {
+        let body = null;
+        try {
+            const res = await postJson('/google/signin', { credential, userId: state.userId });
+            body = await res.json();
+        } catch (_) {
+            body = null;
+        }
+        if (!body || !body.ok) {
+            message.textContent = getTerm(googleErrorTerm(body && body.error));
+            return;
+        }
+
+        if (body.status === 'self') {
+            this.google = true;
+            this.showOverview();
+            return;
+        }
+
+        if (body.status === 'login') {
+            if (!isValidAccountCode(body.userId)) {
+                message.textContent = getTerm('accountGoogleFailed');
+                return;
+            }
+            message.textContent = '';
+            if (!await showConfirm(getTerm('accountSwitchConfirm', { code: body.userId }))) return;
+            // Stored against the code being ADOPTED, so it survives that account's
+            // wipe and names the right account once the reload lands.
+            rememberGoogleEmail(body.userId, googleAccountEmail(credential));
+            closeHint();
+            this.closeModal();
+            switchAccount(body.userId);
+            return;
+        }
+
+        // 'unbound' — the Google account is free, so the offer is to attach it.
+        message.textContent = '';
+        if (!await showConfirm(getTerm('accountGoogleLinkConfirm', { code: state.userId }))) return;
+        message.textContent = getTerm('accountGoogleChecking');
+        let linked = null;
+        try {
+            const res = await postJson('/google/link', { credential, userId: state.userId });
+            linked = await res.json();
+        } catch (_) {
+            linked = null;
+        }
+        if (!linked || !linked.ok) {
+            message.textContent = getTerm(googleErrorTerm(linked && linked.error));
+            return;
+        }
+        rememberGoogleEmail(state.userId, googleAccountEmail(credential));
+        this.google = true;
+        this.showOverview();
+    }
+
+    // Unlinking removes the way back in for anyone who never wrote their code
+    // down, so the question NAMES the code: it is what they will need instead,
+    // and this dialog is the last place it is guaranteed to be in front of them.
+    async unlinkGoogle() {
+        this.notice = '';
+        if (!await showConfirm(getTerm('accountGoogleUnlinkConfirm', { code: state.userId }))) return;
+        try {
+            const res = await postJson('/google/unlink', { userId: state.userId });
+            const body = await res.json();
+            if (!body || !body.ok) throw new Error('rejected');
+        } catch (_) {
+            this.fail('accountGoogleFailed');
+            return;
+        }
+        forgetGoogleEmail();
+        this.google = false;
+        this.showOverview();
+    }
+
     // Profile: the linked player's own name and official grade, and nothing else
     // — the grade is what tells two same-named players apart, while the member
     // id, having done its job in the search, would only be noise.
@@ -291,6 +449,7 @@ class AccountPanel {
         this.loadFailed = false;
         this.linked = undefined;
         this.hidden = undefined;
+        this.google = undefined;
         this.showOverview();
         this.load({ announceFailure: true });
     }

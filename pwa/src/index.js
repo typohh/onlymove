@@ -13,6 +13,7 @@ import { handleLink, handleUnlink } from './handlers/link.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
+import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -39,6 +40,15 @@ const WRITE_ROUTES = [
   // "Hide my profile" toggle for the leaderboard (Account dialog, and the foot of
   // the rank survey). GET counterpart (read current state) is /profile.
   { path: '/profile/hide', method: 'POST', limiter: 'RL_WRITE', handler: handleProfileHide },
+  // Google sign-in: a way back into an account code on a device that does not
+  // have it. /google/signin only RESOLVES (which code, if any, this Google
+  // account is bound to) and the client decides between logging in and linking;
+  // the other two write. POST throughout — an ID token must never ride in a URL,
+  // where it would land in logs and in the Referer header. Whether a Google
+  // account is linked is read back through /profile with the rest of the panel.
+  { path: '/google/signin', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleSignIn },
+  { path: '/google/link', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleLink },
+  { path: '/google/unlink', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleUnlink },
 ];
 
 // GET routes, dispatched like WRITE_ROUTES (reads, so no limiter). Every entry
