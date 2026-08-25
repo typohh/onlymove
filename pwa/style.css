@@ -1726,6 +1726,49 @@ body {
             mask-image: url('../corners/corner_br.png');
 }
 
+/* --- Bottom-right corner mark (index.html) ---------------------------------
+   The app name and the privacy link set INTO the bottom-right ink-wash scene
+   rather than beside it: currentColor tint and the art's own 0.5 opacity, so it
+   reads as part of the painting — a signature in the corner — instead of as
+   chrome laid over one.
+
+   The z-index is what makes that safe in every layout. At 1 it sits above the
+   art (-1) and below the board (2) and the controls (6), so wherever the corner
+   is occupied the UI covers the mark rather than the mark covering a control:
+   the decoration is the thing that yields. `pointer-events` follows the same
+   rule — the container passes taps through to whatever is underneath, and only
+   the link itself takes them back.
+
+   Type is a fraction of the shell scale so it tracks every other font in the
+   app, with a floor because that scale is proportional to the board column and
+   would take this line under legibility on a small phone. */
+#corner-mark {
+    position: fixed;
+    right: calc(var(--safe-r) + 1.4 * var(--u));
+    bottom: calc(var(--safe-b) + 1.2 * var(--u));
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    line-height: 1.3;
+    font-size: max(10px, calc(0.62 * var(--type-shell)));
+    opacity: 0.5;
+    pointer-events: none;
+}
+#corner-brand {
+    letter-spacing: 0.08em;
+}
+#corner-privacy {
+    color: inherit;
+    text-decoration: none;
+    pointer-events: auto;
+}
+#corner-privacy:hover,
+#corner-privacy:focus-visible {
+    text-decoration: underline;
+}
+
 /* --- Speech bubbles (js/bubble.js) -----------------------------------------
    A small floating callout anchored to a UI element, with an arrow pointing at
    it. position:fixed and JS-placed. Shared by the first-run onboarding tips

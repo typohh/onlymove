@@ -57,6 +57,21 @@
     <div class="corner-piece bl"></div>
     <div class="corner-piece br"></div>
   </div>
+  <!-- Bottom-right corner mark, painted INTO the ink-wash scene (style.css).
+       Two jobs in one line of chrome. It is the standing link to the privacy
+       policy — until now reachable only from About, one level down. And it is
+       the app's NAME on its own home page: Google's OAuth consent screen checks
+       that the name shown while signing in appears here, and a board rendered
+       entirely by JS carries that name nowhere a fetch can find it.
+       BOTH STRINGS ARE IN THE MARKUP rather than filled in by the bundle, for
+       that same reason — a fetch that never runs the JS still finds them.
+       initCornerMark (js/ui.js) swaps the label to the active language at boot,
+       so the English here is a seed, not the final text. -->
+  <div id="corner-mark">
+    <span id="corner-brand">Only Move</span>
+    <a id="corner-privacy" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>
+  </div>
+
   <!-- New main container for Flexbox layout -->
   <div id="main-container">
     <div id="title-container">

@@ -31,7 +31,7 @@ try {
     console.error("Sentry initialization failed:", error);
 }
 
-import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState } from './ui.js';
+import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState, initCornerMark } from './ui.js';
 import { getRecallCandidates } from './recall-model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule, syncRecallNotification } from './notifications.js';
@@ -720,6 +720,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('resize', () => updateBoardSize());
 
     // Static UI wiring (persistent elements, registered once).
+    initCornerMark();
     wireMenu();
     wireRoleButtonKeys();
     initMotifBubble();

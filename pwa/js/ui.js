@@ -504,6 +504,17 @@ const updateAnalysisModeUI = () => {
     updateMenuItems();
 }
 
+// The corner mark's privacy label, localized ONCE at boot. It is static chrome
+// on a language that cannot change while the app runs (getLang reads the
+// browser's setting), so it does not belong in updateAllUI's per-repaint work.
+// index.html ships the English text so a fetch that never runs this bundle —
+// Google's consent-screen check on the home page, a crawler — still reads a
+// label rather than an empty element; this replaces it for everyone else.
+export function initCornerMark() {
+    const link = document.getElementById('corner-privacy');
+    if (link) link.textContent = getTerm('privacyPolicy');
+}
+
 const updateMenuItems = () => {
     const sizeItem = document.getElementById('menu-board-size');
     const pauseItem = document.getElementById('menu-pause-recalls');
