@@ -16,7 +16,7 @@ set -euo pipefail
 HOST="${ONLYMOVE_API_HOST:-typo_hh@api.onlymove.net}"
 DIR="${ONLYMOVE_API_DIR:-/home/typo_hh/server}"
 URL="${ONLYMOVE_API_URL:-https://api.onlymove.net}"
-TOKEN_ENV="${ONLYMOVE_WORKER_ENV_FILE:-$HOME/.config/onlymove/worker.env}"
+TOKEN_FILE="${ONLYMOVE_WORKER_TOKEN_FILE:-$HOME/.config/onlymove/worker_token}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 install_token=0
@@ -52,10 +52,11 @@ done
 echo "==> shipped server.py + analysis.cfg (md5 verified)"
 
 if [ "$install_token" = 1 ]; then
-  [ -r "$TOKEN_ENV" ] || { echo "no token file at $TOKEN_ENV" >&2; exit 1; }
-  # shellcheck disable=SC1090
-  token=$(. "$TOKEN_ENV"; printf '%s' "${ONLYMOVE_WORKER_TOKEN:-}")
-  [ -n "$token" ] || { echo "ONLYMOVE_WORKER_TOKEN empty in $TOKEN_ENV" >&2; exit 1; }
+  [ -r "$TOKEN_FILE" ] || { echo "no token file at $TOKEN_FILE" >&2; exit 1; }
+  # Read, not sourced: sourcing runs the file as shell, and this one only ever
+  # needs to hold a token. It is the same bare file both ends read.
+  token=$(tr -d '\r\n' < "$TOKEN_FILE")
+  [ -n "$token" ] || { echo "token file $TOKEN_FILE is empty" >&2; exit 1; }
   # Written by the shell on the far side so the token never appears in an
   # argument vector, which is world-readable through /proc while it runs.
   printf '%s\n' "$token" | ssh "$HOST" "umask 077; cat > '$DIR/worker_token'"

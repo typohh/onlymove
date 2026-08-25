@@ -12,12 +12,12 @@ also what makes stopping it safe at any instant: an unanswered job is one the
 cloud server answers itself once its own timeout passes.
 
 Usage:
-    ONLYMOVE_WORKER_TOKEN=<the cloud box's token> \
-        ./.venv/bin/python3 -m analysis_server.worker
+    ./.venv/bin/python3 -m analysis_server.worker
 
-The token must match ONLYMOVE_WORKER_TOKEN on the cloud box. It is the only
-thing separating this worker from anyone else on the internet, and the answers
-it returns are shown to users as ours.
+The shared secret is read from ~/.config/onlymove/worker_token and must match
+the `worker_token` file beside server.py on the box. It is the only thing
+separating this worker from anyone else on the internet, and the answers it
+returns are shown to users as ours.
 """
 import os
 import sys
@@ -32,7 +32,28 @@ from utils.katago.models import get_model
 
 # --- Configuration ---
 SERVER_URL = (os.environ.get("ONLYMOVE_ANALYSIS_URL") or "https://api.onlymove.net").rstrip("/")
-TOKEN = os.environ.get("ONLYMOVE_WORKER_TOKEN") or ""
+# Same rule as the server's end of this (analysis_server/server.py): the token
+# comes from a file, with the environment winning when it is set. A file is what
+# makes `python3 -m analysis_server.worker` the whole command — an env-only
+# token forces every caller to source something first, and a secret passed on a
+# command line is world-readable through /proc for as long as it runs. Outside
+# the repo so it cannot be committed.
+TOKEN_FILE = (os.environ.get("ONLYMOVE_WORKER_TOKEN_FILE")
+              or os.path.expanduser("~/.config/onlymove/worker_token"))
+
+
+def read_token():
+    token = os.environ.get("ONLYMOVE_WORKER_TOKEN")
+    if token:
+        return token.strip()
+    try:
+        with open(TOKEN_FILE) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+TOKEN = read_token()
 # Parked polls, and therefore the most jobs this machine can be running at once.
 # The cloud box hands a job only to an already-parked poll, so this number IS
 # the point at which it goes back to answering requests itself — it is a
@@ -185,7 +206,8 @@ def poll_loop(controller):
 
 def main():
     if not TOKEN:
-        log("ONLYMOVE_WORKER_TOKEN is not set. It must match the cloud box's value.")
+        log(f"No token: set ONLYMOVE_WORKER_TOKEN or write it to {TOKEN_FILE}. "
+            f"It must match the worker_token file on the box.")
         return 2
     if not preflight():
         return 1
