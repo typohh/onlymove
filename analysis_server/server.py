@@ -34,13 +34,46 @@ MODEL_PATH = "kata1-b18c384nbt-s9996604416-d4316597426.bin.gz"
 CONFIG_PATH = "analysis.cfg"
 SERVER_PORT = 8080
 PLAYOUTS = 1
+# Refused above this, because nothing larger is in the corpus: the app only ever
+# asks about 9x9 and 13x13, so a bigger board is either a mistake or someone
+# helping themselves to the engine. Refusing it in Python costs a comparison,
+# where the engine would pay a full evaluation on the largest input the caller
+# picks. It also keeps the refusal a clean 400 rather than an engine error: the
+# NN buffer is sized to this same bound (maxBoardXSizeForNNBuffer in
+# analysis.cfg), so an oversized board fails inside KataGo anyway, and the two
+# must stay in step — raise one and the other has to move with it.
+MAX_BOARD_SIZE = 13
 
 # --- Remote worker configuration ---
 # EMPTY TOKEN MEANS THE FEATURE IS OFF WITH NO SECOND SWITCH: the /worker routes
 # 404 and every request is served locally, so this file can be deployed before
 # any worker exists. The token is the only thing separating a worker from anyone
 # else on the internet, and a worker's answers are shown to users as ours.
-WORKER_TOKEN = os.environ.get("ONLYMOVE_WORKER_TOKEN") or ""
+WORKER_TOKEN_FILE = "worker_token"
+
+
+def read_worker_token():
+    """The shared secret, from a file beside this script.
+
+    A file rather than the unit's environment because both alternatives are
+    worse where this runs: a systemd `Environment=` line is world-readable
+    through `systemctl show`, and an `EnvironmentFile=` needs a unit edit, hence
+    root — which the account the service runs as does not have. A 0600 file in
+    the working directory needs neither and is readable only by that account.
+    The environment still wins when set, which is what local testing uses.
+    """
+    token = os.environ.get("ONLYMOVE_WORKER_TOKEN")
+    if token:
+        return token.strip()
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), WORKER_TOKEN_FILE)
+    try:
+        with open(path) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+WORKER_TOKEN = read_worker_token()
 # How long a parked poll waits for work before answering 204. Must stay under
 # the reverse proxy's read timeout, or the proxy kills the poll first.
 WORKER_POLL_TIMEOUT = float(os.environ.get("ONLYMOVE_WORKER_POLL_TIMEOUT") or 25.0)
@@ -442,6 +475,21 @@ class KataGoHandler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    def client_key(self):
+        """Who a request is superseded against.
+
+        EVERY request arrives from loopback behind the reverse proxy, so the
+        peer address is the same for all of them and superseding on it makes one
+        user's click cancel a stranger's analysis. nginx OVERWRITES X-Real-IP
+        with the true peer, so it cannot be spoofed from outside — and it is
+        trusted only when the connection is itself local, so a direct caller
+        cannot hand us one either.
+        """
+        peer = self.client_address[0]
+        if peer in ("127.0.0.1", "::1"):
+            return self.headers.get("X-Real-IP") or peer
+        return peer
+
     def worker_authorized(self):
         """No token configured reads as the feature being off, not as open."""
         if not WORKER_TOKEN:
@@ -510,10 +558,16 @@ class KataGoHandler(BaseHTTPRequestHandler):
         status_message = "Unknown"
         backend = "none"
         request = None
-        client_ip = self.client_address[0]
+        client_ip = self.client_key()
         try:
             sgf_data = self.read_body().decode('utf-8')
             moves, komi, rules, board_size = self.parse_sgf(sgf_data)
+            if board_size > MAX_BOARD_SIZE:
+                status_message = f"Refused {board_size}x{board_size}"
+                backend = "refused"
+                self.send_json(400, {"error": f"board larger than {MAX_BOARD_SIZE}x{MAX_BOARD_SIZE}"},
+                               cors=True)
+                return
             query_data = {
                 "moves": moves, "initialStones": [], "rules": rules,
                 "komi": komi, "boardXSize": board_size, "boardYSize": board_size, 
@@ -585,10 +639,11 @@ if __name__ == '__main__':
         httpd = ThreadingHTTPServer(server_address, KataGoHandler)
         print(f"Starting multi-threaded KataGo SGF server on http://127.0.0.1:{SERVER_PORT}")
         if WORKER_TOKEN:
-            print(f"Remote worker enabled: POST /worker/poll, /worker/result "
+            source = "environment" if os.environ.get("ONLYMOVE_WORKER_TOKEN") else WORKER_TOKEN_FILE
+            print(f"Remote worker enabled via {source}: POST /worker/poll, /worker/result "
                   f"(poll {WORKER_POLL_TIMEOUT:.0f}s, job timeout {WORKER_JOB_TIMEOUT:.0f}s).")
         else:
-            print("Remote worker disabled (ONLYMOVE_WORKER_TOKEN unset).")
+            print(f"Remote worker disabled (no ONLYMOVE_WORKER_TOKEN and no {WORKER_TOKEN_FILE}).")
         httpd.serve_forever()
     except Exception as e:
         print(f"FATAL ERROR: {e}")
