@@ -299,8 +299,19 @@ export async function handleRefit(request, env) {
         }
     }
 
-    for (const [key, wanted] of byShard) {
+    // Shards are read CONCURRENTLY. Each one costs two asset reads at tens of
+    // milliseconds apiece in production (a local disk read is sub-millisecond,
+    // which hides this completely), and a batch spans ~170 distinct shards
+    // because picked cells have almost no shard locality — so a sequential walk
+    // is ~20s of pure round-trip latency for work that is entirely independent
+    // per shard. The cap keeps the in-flight count well inside a Worker's
+    // simultaneous-connection budget.
+    const SHARD_CONCURRENCY = 10;
+    const shardKeys = [...byShard.keys()];
+    let nextShard = 0;
+    const runShard = async (key) => {
         const [size, zipHash] = key.split('/');
+        const wanted = byShard.get(key);
         // One map read per shard, not per move: several coordinates in one shard
         // share it, and a shard with nothing left to resolve reads none.
         const map = needsMap(wanted, size, zipHash)
@@ -323,9 +334,9 @@ export async function handleRefit(request, env) {
             if (hit) results[w.slot].pickedEmbedding = hit;
             else misses.push({ slot: w.slot, byteOffset });
         }
-        if (misses.length === 0) continue;
+        if (misses.length === 0) return;
         const bin = await shardAsset(env, size, zipHash, 'embeddings.bin');
-        if (!bin) continue;
+        if (!bin) return;
         for (const w of misses) {
             const vec = decodeVec(bin, w.byteOffset);
             // An all-zero cell is the pass placeholder, which no click can
@@ -336,7 +347,14 @@ export async function handleRefit(request, env) {
             }
         }
         // `bin` goes out of scope here — the cells are what we keep.
-    }
+    };
+    await Promise.all(
+        Array.from({ length: Math.min(SHARD_CONCURRENCY, shardKeys.length) }, async () => {
+            for (let i = nextShard++; i < shardKeys.length; i = nextShard++) {
+                await runShard(shardKeys[i]);
+            }
+        }),
+    );
 
     return new Response(JSON.stringify({
         K,
