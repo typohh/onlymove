@@ -7,17 +7,38 @@
 // centre averaged over users is really a statement about which problems that
 // user's rank gets served).
 //
-// Two independent readings per axis, answering different questions:
+// Three independent readings per axis, answering different questions. The two
+// error-composition readings stand against the AVAILABILITY NULL: what a
+// direction-blind error on each served problem would have looked like, computed
+// per problem from the alternatives its board actually offered (uniform over
+// the non-answer variations — computeAltStats). That null is still a property
+// of the user's own served problems and nobody else's play; without it, the
+// composition statistics report the problem MENU as a property of the player
+// (the answer to a tsumego is by construction not a tenuki, so nearly every
+// alternative loads higher on that axis — a fixed 50% balance point flags
+// almost everyone).
 //
 //   TENDENCY — of your wrong answers, what share erred TOWARD the motif rather
-//   than away from it? Per wrong attempt, d = correct_emb[k] - picked_emb[k]:
-//   d < 0 means the move you played loaded HIGHER on the motif than the answer
-//   did (you reached for it), d > 0 means it loaded lower (you missed it). The
-//   statistic is the share of errors with d < 0, and the null is 50% — no
-//   directional bias in your own mistakes. That null is a property of your
-//   errors, not a comparison against anyone: 50/50 is balance. It is a plain
-//   SIGN TEST, so it needs no model, no fitting and no prior, and its interval
-//   is binomial on your own error count.
+//   than away from it, against the share a typical error on the same problems
+//   would have? Per wrong attempt, d = correct_emb[k] - picked_emb[k]: d < 0
+//   means the move you played loaded HIGHER on the motif than the answer did
+//   (you reached for it), d > 0 means it loaded lower (you missed it). Each
+//   error contributes its problem's own null toward-probability
+//   (altAbove/(altAbove+altBelow)), so the test is Poisson-binomial: observed
+//   toward-count against the sum of those probabilities. Still a sign test —
+//   no model, no fitting, no prior — just with the balance point supplied by
+//   each problem instead of assumed at 50%.
+//
+//   JUDGMENT — does the direction of your errors FOLLOW the position, or run
+//   against it? Standardise each error's pick against its problem's null
+//   (t = (altMean - picked)/altSd, so t < 0 = leaned toward the motif more
+//   than a typical error), then regress t on the correct answer's own loading.
+//   A POSITIVE slope is the both-at-once deficit a single pooled share cannot
+//   represent: leaning toward the motif where it is NOT the answer AND away
+//   from it where it IS. A negative slope means the errors track the condition
+//   better than a typical error. The intercept is deliberately not reported —
+//   net lean is the tendency reading's job; fitting it here just keeps the
+//   slope orthogonal to it.
 //
 //   STRENGTH — does a problem loading on the motif cost you accuracy beyond
 //   what its DIFFICULTY already predicts? The shipped 3PL supplies the
@@ -28,7 +49,7 @@
 //   loading and outcome would score a user weak at whatever motif happens to
 //   live in hard problems.
 //
-// Both are read on the SAME window the rest of the client models use, and both
+// All are read on the SAME window the rest of the client models use, and all
 // are pure functions of that window, so two devices with the same history agree.
 
 import { state, getMergedAnswerHistory } from './state.js';
@@ -47,32 +68,40 @@ const MIN_ATTEMPTS = 20;
 // handful of errors is dominated by its own interval.
 const MIN_ERRORS = 10;
 
-// One-sided share of errors that erred TOWARD the motif, with the binomial z
-// against the 50% balance point. Ties (identical loading) carry no direction and
-// are dropped rather than split, so they neither inflate n nor pull toward 0.5.
-function signTest(nOver, nUnder) {
-    const n = nOver + nUnder;
+// Share of errors that erred TOWARD the motif, against the availability null:
+// each error carries its problem's own null toward-probability p, so the null
+// count is Sum(p) and its variance Sum(p(1-p)) — Poisson-binomial, normal-
+// approximated, which at MIN_ERRORS and interior p is the same approximation
+// the old fixed-null binomial made. Ties (pick loading identical to the
+// answer's) carry no direction and are dropped rather than split — and the
+// null drops them symmetrically, its counts being built from strict
+// comparisons only (computeAltStats).
+function tendencyTest(nOver, n, sumP, sumPQ) {
     if (n < MIN_ERRORS) return null;
+    // sumPQ can only be 0 when every problem's null was one-sided (p of 0 or
+    // 1); no variance means no test.
+    if (!(sumPQ > 0)) return null;
     const share = nOver / n;
-    // se of a proportion under the null p = 0.5 is sqrt(0.25/n), which is also
-    // the widest it can be — so the gate is the conservative one.
-    const z = (share - 0.5) / Math.sqrt(0.25 / n);
+    const nullShare = sumP / n;
+    const se = Math.sqrt(sumPQ) / n;
+    const z = (nOver - sumP) / Math.sqrt(sumPQ);
     // The band is the GATE's own width, not a conventional 95%: a reading is
     // flagged exactly when |z| > MOTIF_Z, so drawing the interval at any other
     // multiple lets a flagged row show a band straddling the neutral point — a
     // reported finding contradicting the number printed under it. Locked to
-    // MOTIF_Z so "band clear of the neutral line" IS "flagged", by construction.
-    const se = Math.sqrt(Math.max(share * (1 - share), 1e-9) / n);
-    return { share, n, z,
+    // MOTIF_Z, and drawn at the NULL's standard error, so "band clear of the
+    // null share" IS "flagged", by construction.
+    return { share, nullShare, n, z,
              lo: Math.max(0, share - MOTIF_Z * se), hi: Math.min(1, share + MOTIF_Z * se) };
 }
 
 // Ordinary least squares of `y` on `x` with an intercept, returning the slope
-// and its standard error. Used for the residual-accuracy regression, where x is
-// the motif loading and y the 3PL residual.
-function olsSlope(x, y) {
+// and its standard error. Used for the residual-accuracy regression (x = motif
+// loading, y = 3PL residual) and the judgment regression (x = the answer's
+// loading, y = the pick's standardised excess lean).
+function olsSlope(x, y, minN = MIN_ATTEMPTS) {
     const n = x.length;
-    if (n < MIN_ATTEMPTS) return null;
+    if (n < minN) return null;
     let sx = 0, sy = 0;
     for (let i = 0; i < n; i++) { sx += x[i]; sy += y[i]; }
     const mx = sx / n, my = sy / n;
@@ -96,7 +125,8 @@ function olsSlope(x, y) {
 
 // Per-axis statistics over the user's own window. Returns null when there is no
 // usable embedding data at all; otherwise an array of K entries, each of which
-// may carry a null `tendency` or `strength` if that half lacks data.
+// may carry a null `tendency`, `condition` or `strength` if that reading lacks
+// data.
 export function computeMotifStats(history = null) {
     const theta = state.userRank;
     if (typeof theta !== 'number' || !Number.isFinite(theta)) return null;
@@ -117,16 +147,43 @@ export function computeMotifStats(history = null) {
         .slice(-MODEL_INPUT_HISTORY_LENGTH);
     if (rows.length < MIN_ATTEMPTS) return null;
 
-    // --- TENDENCY: sign test on d, over wrong attempts with a resolved pick ---
+    // --- TENDENCY + JUDGMENT: error composition against the availability null.
+    // Rows without the null moments (a fill that hasn't landed yet) contribute
+    // nothing — no fixed-null fallback, which would mix two different neutral
+    // points into one statistic.
     const nOver = new Array(K).fill(0);
-    const nUnder = new Array(K).fill(0);
+    const nDir = new Array(K).fill(0);
+    const sumP = new Array(K).fill(0);
+    const sumPQ = new Array(K).fill(0);
+    const condX = Array.from({ length: K }, () => []);
+    const condT = Array.from({ length: K }, () => []);
+    const altUsable = (a) =>
+        Array.isArray(a.altMean) && a.altMean.length === K &&
+        Array.isArray(a.altSd) && a.altSd.length === K &&
+        Array.isArray(a.altAbove) && a.altAbove.length === K &&
+        Array.isArray(a.altBelow) && a.altBelow.length === K;
     for (const a of rows) {
         if (a.correct) continue;
         if (!Array.isArray(a.pickedEmbedding) || a.pickedEmbedding.length !== K) continue;
+        if (!altUsable(a)) continue;
         for (let k = 0; k < K; k++) {
             const d = a.embedding[k] - a.pickedEmbedding[k];
-            if (!Number.isFinite(d) || d === 0) continue;
-            if (d < 0) nOver[k]++; else nUnder[k]++;
+            const nAvail = a.altAbove[k] + a.altBelow[k];
+            if (Number.isFinite(d) && d !== 0 && nAvail > 0) {
+                const p = a.altAbove[k] / nAvail;   // null P(this error leans toward)
+                nDir[k]++;
+                sumP[k] += p;
+                sumPQ[k] += p * (1 - p);
+                if (d < 0) nOver[k]++;
+            }
+            // Judgment: the pick standardised against the problem's null.
+            // t < 0 = leaned toward the motif more than a typical error here.
+            const sd = a.altSd[k];
+            if (sd > 0 && Number.isFinite(a.pickedEmbedding[k]) &&
+                Number.isFinite(a.embedding[k])) {
+                condT[k].push((a.altMean[k] - a.pickedEmbedding[k]) / sd);
+                condX[k].push(a.embedding[k]);
+            }
         }
     }
 
@@ -156,7 +213,24 @@ export function computeMotifStats(history = null) {
 
     const out = [];
     for (let k = 0; k < K; k++) {
-        const tendency = signTest(nOver[k], nUnder[k]);
+        const tendency = tendencyTest(nOver[k], nDir[k], sumP[k], sumPQ[k]);
+        // Judgment: the standardised excess lean regressed on the answer's own
+        // loading. Positive slope = leans toward the motif where it is not the
+        // answer AND away where it is — the condition-inversion deficit.
+        // Mirror-invariant: negating the axis negates both t and x, so the
+        // slope (and its z) is the same whichever tail names the motif.
+        let condition = null;
+        const cfit = condT[k].length ? olsSlope(condX[k], condT[k], MIN_ERRORS) : null;
+        if (cfit) {
+            condition = {
+                slope: cfit.slope,
+                // Same gate-width band as the other readings, same reason.
+                lo: cfit.slope - MOTIF_Z * cfit.se,
+                hi: cfit.slope + MOTIF_Z * cfit.se,
+                z: cfit.slope / cfit.se,
+                n: cfit.n,
+            };
+        }
         let strength = null;
         const fit = resid.length ? olsSlope(xs[k], resid) : null;
         if (fit && dpPerRank > 0) {
@@ -171,7 +245,7 @@ export function computeMotifStats(history = null) {
                 n: fit.n,
             };
         }
-        out.push({ k, tendency, strength });
+        out.push({ k, tendency, condition, strength });
     }
     return out;
 }

@@ -171,6 +171,7 @@ function trainingFocusMotifs() {
         // contradiction rather than two statements about one motif.
         const text = kind === 'overplay' ? getTerm('trainingFocusTooMuch', { motif: name })
                    : kind === 'underplay' ? getTerm('trainingFocusTooLittle', { motif: name })
+                   : kind === 'condition' ? getTerm('trainingFocusWrongSituations', { motif: name })
                    : getTerm('trainingFocusBadTiming', { motif: name });
         scored.push({ z, text });
     }

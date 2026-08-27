@@ -1,9 +1,11 @@
 // js/picked-embedding.js
 //
-// Fetch the K-dim embedding for a specific (tsumego, picked-move) pair from
-// the per-shard .embeddings.bin sidecar. Used on wrong attempts so the answer
-// history records both what the user *should* have played (the correct-move
-// embedding in metadata.json) and what they actually picked.
+// Fetch a tsumego's per-cell K-dim embeddings from the per-shard
+// .embeddings.bin sidecar. Used on wrong attempts so the answer history
+// records what the user *should* have played (the correct-move embedding in
+// metadata.json), what they actually picked, and the availability null — the
+// motif profile a typical error on THIS problem would carry, computed from
+// the alternatives the board actually offered (computeAltStats below).
 //
 // Wire protocol:
 //   - .embeddings.bin holds raw fp16 little-endian floats, K per cell, with
@@ -26,6 +28,7 @@
 
 import { state, embeddingsIndexCache } from './state.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
+import { quantizeEmbedding } from './math-utils.js';
 
 // Convert one fp16 (uint16 representation) to a JS number, per IEEE 754 half-
 // precision. JS doesn't ship a native Float16Array yet (Stage 3 proposal), and
@@ -54,6 +57,20 @@ function decodeFp16Buffer(arrayBuffer, K) {
     const out = new Array(K);
     for (let i = 0; i < K; i++) out[i] = fp16ToFloat32(u16[i]);
     return out;
+}
+
+// Decode a whole problem's bin block into one K-vector per cell (SGF variation
+// order, pass placeholder rows included). Null on a short read.
+function decodeFp16Rows(arrayBuffer, K, nRows) {
+    const u16 = new Uint16Array(arrayBuffer);
+    if (u16.length < K * nRows) return null;
+    const rows = new Array(nRows);
+    for (let r = 0; r < nRows; r++) {
+        const row = new Array(K);
+        for (let i = 0; i < K; i++) row[i] = fp16ToFloat32(u16[r * K + i]);
+        rows[r] = row;
+    }
+    return rows;
 }
 
 // Parse a Content-Range header ("bytes <start>-<end>/<total>"). Returns
@@ -95,30 +112,102 @@ async function sliceRangeResponse(resp, byteStart, byteLength) {
     return buf;
 }
 
-// Internal: Range-fetch + decode given an already-resolved index entry. Used
-// by both the live (game-logic) and backfill paths so they share one network
-// + decode codepath.
-async function fetchCellEmbeddingFromIndexEntry({
-    boardSize, zipFilename, indexEntry, cellIndex, meta,
+// Internal: Range-fetch + decode a problem's WHOLE bin block (all variation
+// cells) given an already-resolved index entry. One request per problem —
+// n_cells x bytes_per_cell is under a kilobyte at K=5 — shared by the live
+// (game-logic) and backfill paths. Returns Array<K-vector> in SGF variation
+// order, or null.
+async function fetchProblemCellsFromIndexEntry({
+    boardSize, zipFilename, indexEntry, meta,
 }) {
-    if (typeof cellIndex !== 'number' || cellIndex < 0) return null;
-    if (cellIndex >= indexEntry.n_cells) {
-        console.warn(`picked-embedding: cellIndex ${cellIndex} >= n_cells ${indexEntry.n_cells}`);
-        return null;
-    }
-    const byteStart = indexEntry.offset + cellIndex * meta.bytes_per_cell;
-    const byteEnd = byteStart + meta.bytes_per_cell - 1;
+    const nCells = indexEntry.n_cells;
+    if (!Number.isInteger(nCells) || nCells <= 0) return null;
+    const byteLength = nCells * meta.bytes_per_cell;
+    const byteStart = indexEntry.offset;
+    const byteEnd = byteStart + byteLength - 1;
     const hash = zipFilename.replace(/\.zip$/, '');
     const url = `tsumegos/${boardSize}/${hash}.embeddings.bin`;
     try {
         const resp = await fetch(url, {
             headers: { Range: `bytes=${byteStart}-${byteEnd}` },
         });
-        const buf = await sliceRangeResponse(resp, byteStart, meta.bytes_per_cell);
-        return buf ? decodeFp16Buffer(buf, meta.K) : null;
+        const buf = await sliceRangeResponse(resp, byteStart, byteLength);
+        return buf ? decodeFp16Rows(buf, meta.K, nCells) : null;
     } catch (_err) {
         return null;
     }
+}
+
+// The uniform-over-available error null for one problem, from its bin block.
+//
+// The support is exactly the moves a click can pick: the problem's SGF
+// variations minus the pass placeholder (all-zeros row — a click cannot select
+// the pass) and minus the correct move itself. Per axis it returns, over those
+// alternatives:
+//
+//   altMean/altSd   mean and (population) standard deviation of the loading —
+//                   the null moments of a typical error's motif profile, which
+//                   the judgment reading standardises each pick against.
+//   altAbove/altBelow  how many alternatives load strictly above / below the
+//                   CORRECT move's loading. Their ratio is the null probability
+//                   that an error leans TOWARD the motif, which is what the
+//                   tendency test compares the observed direction against —
+//                   ties carry no direction and are outside both counts,
+//                   mirroring the observed-side tie drop.
+//
+// Everything is computed in quantizeEmbedding's own resolution so a stored
+// pick compared against a stored correct vector resolves ties exactly as the
+// counts here did. The correct row is excluded by index when the caller knows
+// it (live path) and by quantized-vector equality otherwise (backfill, where
+// only the stored correct-move embedding is in hand); the equality rule also
+// runs under a known index, which additionally drops any alternative that is
+// indistinguishable from the answer at this resolution — a row that could
+// carry no signal either way. Null when fewer than two alternatives remain.
+export function computeAltStats(rows, { correctIndex = null, correctVec = null } = {}) {
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const K = rows[0].length;
+    const source = Array.isArray(correctVec) && correctVec.length === K
+        ? correctVec
+        : (Number.isInteger(correctIndex) && Array.isArray(rows[correctIndex])
+            ? rows[correctIndex] : null);
+    if (!source) return null;
+    const correctQ = quantizeEmbedding(source);
+
+    const alts = [];
+    for (let i = 0; i < rows.length; i++) {
+        if (i === correctIndex) continue;
+        const q = quantizeEmbedding(rows[i]);
+        if (q.length !== K) continue;
+        if (q.every((v) => v === 0)) continue;                    // pass placeholder
+        if (q.every((v, k) => v === correctQ[k])) continue;       // the correct cell
+        alts.push(q);
+    }
+    if (alts.length < 2) return null;
+
+    const altMean = new Array(K).fill(0);
+    const altSd = new Array(K).fill(0);
+    const altAbove = new Array(K).fill(0);
+    const altBelow = new Array(K).fill(0);
+    for (let k = 0; k < K; k++) {
+        let s = 0;
+        for (const a of alts) s += a[k];
+        const m = s / alts.length;
+        let ss = 0;
+        for (const a of alts) {
+            const d = a[k] - m;
+            ss += d * d;
+            if (a[k] > correctQ[k]) altAbove[k]++;
+            else if (a[k] < correctQ[k]) altBelow[k]++;
+        }
+        altMean[k] = m;
+        altSd[k] = Math.sqrt(ss / alts.length);
+    }
+    return {
+        altMean: quantizeEmbedding(altMean),
+        altSd: quantizeEmbedding(altSd),
+        altAbove,
+        altBelow,
+    };
 }
 
 function getMeta() {
@@ -144,12 +233,15 @@ function getMeta() {
 }
 
 // Live path: called from game-logic on a wrong attempt. Looks up the shard's
-// in-memory embeddings_index (loaded alongside metadata.json by problem-loader)
-// and Range-fetches the picked cell. Returns Promise<Array<number> | null>;
-// never throws.
-export async function fetchPickedEmbedding({
+// in-memory embeddings_index (loaded alongside metadata.json by problem-loader),
+// Range-fetches the problem's whole bin block ONCE, and returns both what the
+// motif statistics need from it: the picked cell's vector and the
+// availability-null moments (computeAltStats). Returns
+// Promise<{ picked, alt } | null>; either half may be null; never throws.
+export async function fetchWrongAttemptStats({
     tsumegoId,
-    cellIndex,         // SGF variation index from handleBoardClick (children.indexOf)
+    pickedIndex,       // SGF variation index from handleBoardClick (children.indexOf)
+    correctIndex,      // same index space, the answer node — excluded from the null
     zipFilename,       // e.g. "00be9212.zip"; sidecar at "00be9212.embeddings.bin"
     boardSize,         // for URL composition: tsumegos/<size>/<zipFilename>
 }) {
@@ -159,9 +251,14 @@ export async function fetchPickedEmbedding({
     if (!indexPayload || !indexPayload.problems) return null;
     const indexEntry = indexPayload.problems[tsumegoId];
     if (!indexEntry) return null;
-    return fetchCellEmbeddingFromIndexEntry({
-        boardSize, zipFilename, indexEntry, cellIndex, meta,
+    const rows = await fetchProblemCellsFromIndexEntry({
+        boardSize, zipFilename, indexEntry, meta,
     });
+    if (!rows) return null;
+    const picked = (Number.isInteger(pickedIndex) && pickedIndex >= 0 && pickedIndex < rows.length)
+        ? rows[pickedIndex] : null;
+    const alt = computeAltStats(rows, { correctIndex });
+    return { picked, alt };
 }
 
 // Correct-move sidecar: tsumegos/lookup.embeddings.bin — row i is the K-dim
@@ -250,17 +347,17 @@ export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
 
 // Backfill path: called from backfill.js when iterating shards. The
 // caller has already parsed the shard's embeddings_index.json and passes the
-// entry directly — no cache dependency.
-export async function fetchPickedEmbeddingWithIndexEntry({
-    tsumegoId,
-    cellIndex,
+// entry directly — no cache dependency. Returns the problem's whole bin block
+// (Array<K-vector> in SGF variation order) so one fetch serves both the
+// picked-cell refill and the availability-null moments.
+export async function fetchProblemCellsWithIndexEntry({
     zipFilename,
     boardSize,
     indexEntry,
 }) {
     const meta = getMeta();
     if (!meta || !indexEntry) return null;
-    return fetchCellEmbeddingFromIndexEntry({
-        boardSize, zipFilename, indexEntry, cellIndex, meta,
+    return fetchProblemCellsFromIndexEntry({
+        boardSize, zipFilename, indexEntry, meta,
     });
 }

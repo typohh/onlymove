@@ -41,22 +41,31 @@ export const ANSWER_HISTORY_WORKING_SET = 3000;
 
 // The answer-history fields that carry an embedding fit's output. Split in two
 // because the passes that drop them want different halves:
-//   VECTOR  — what a refit invalidates and a refill can restore.
-//   ALL     — the vectors plus `pickedCellIndex`, which is NOT fit-derived (it
-//             addresses the SGF's root variations, so a refit cannot move it)
-//             and is the key the picked refill is looked up BY. A pass that
-//             intends to refill therefore keeps it, while a pass whose rows are
-//             never coming back into model range — the keep-window strip, the
-//             removed-problem prune, the cold-tail eviction — drops it too.
+//   VECTOR  — what a refit invalidates and a refill can restore. Besides the
+//             two per-move vectors this is the availability null of a wrong
+//             attempt's problem (altMean/altSd/altAbove/altBelow — the
+//             uniform-over-available error-null moments the tendency and
+//             judgment readings stand against), which is a function of the
+//             same per-cell bin and moves with the fit exactly as the vectors
+//             do.
+//   ALL     — the vectors plus `pickedCellIndex` and `correctCellIndex`, which
+//             are NOT fit-derived (they address the SGF's root variations, so
+//             a refit cannot move them) and are the keys the refill is looked
+//             up BY. A pass that intends to refill therefore keeps them, while
+//             a pass whose rows are never coming back into model range — the
+//             keep-window strip, the removed-problem prune, the cold-tail
+//             eviction — drops them too.
 // Lives here rather than beside any one of those passes because state.js and
 // backfill.js both apply it and neither may import the other.
 // `noEmb` marks a row the sidecar cannot supply a vector for — its problem left
 // the corpus, or it was never in the axis fit. Without it the fill-as-you-go pass
 // re-asks for the same unfillable rows on every load, forever. It clears with the
 // vectors: a new fit (or a re-added problem) deserves a fresh attempt, and the
-// wipe is the moment that decision is re-made.
-export const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding', 'noEmb'];
-export const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex'];
+// wipe is the moment that decision is re-made. (`altMean: []` is the analogous
+// computed-but-degenerate mark for the null — see computeAltStats.)
+export const EMBEDDING_VECTOR_FIELDS = ['embedding', 'pickedEmbedding',
+                                        'altMean', 'altSd', 'altAbove', 'altBelow', 'noEmb'];
+export const EMBEDDING_ALL_FIELDS = [...EMBEDDING_VECTOR_FIELDS, 'pickedCellIndex', 'correctCellIndex'];
 
 // The device-level record of WHICH motif fit the stored vectors came from. One
 // value for the whole history, which is what makes the scheme cheap: a vector is

@@ -200,23 +200,36 @@ function rankBandCrossing(oldRank, isCorrect) {
 }
 
 // Match (by problemId + creation date) the just-recorded answer entry and
-// fold a picked-move embedding into it after the network fetch resolves.
-// Idempotent — no-op if the entry already has one. Skipped if the entry has
-// been pruned away by the time the fetch lands (the user may have moved on
-// far enough that the trainer no longer cares).
-function patchPickedEmbedding(problemId, attemptDate, embedding) {
-    if (!Array.isArray(embedding) || embedding.length === 0) return;
+// fold the wrong-attempt embedding data into it after the network fetch
+// resolves: the picked-move vector and the availability-null moments
+// (computeAltStats), both from the same per-cell block. Idempotent — each
+// field is written only if absent. Skipped if the entry has been pruned away
+// by the time the fetch lands (the user may have moved on far enough that
+// the trainer no longer cares).
+function patchWrongAttemptStats(problemId, attemptDate, stats) {
+    if (!stats) return;
+    const { picked, alt } = stats;
     const history = state.answerHistory;
     for (let i = history.length - 1; i >= 0; i--) {
         const a = history[i];
         if (a.problemId === problemId && a.date === attemptDate) {
-            if (a.pickedEmbedding) return;
             // Re-asked here rather than trusted from the call site: this lands
             // after an await, and the wipe that advances the device's fit could
             // have run in between.
             if (!motifDataIsCurrent()) return;
-            a.pickedEmbedding = quantizeEmbedding(embedding);
-            updateAnswerHistory(history);
+            let touched = false;
+            if (!a.pickedEmbedding && Array.isArray(picked) && picked.length > 0) {
+                a.pickedEmbedding = quantizeEmbedding(picked);
+                touched = true;
+            }
+            if (a.altMean === undefined && alt) {
+                a.altMean = alt.altMean;
+                a.altSd = alt.altSd;
+                a.altAbove = alt.altAbove;
+                a.altBelow = alt.altBelow;
+                touched = true;
+            }
+            if (touched) updateAnswerHistory(history);
             return;
         }
     }
@@ -224,8 +237,9 @@ function patchPickedEmbedding(problemId, attemptDate, embedding) {
 
 export async function updateUserStats(isCorrect, {
     pickedCellIndex = null,
+    correctCellIndex = null,
     pickedEmbedding = null,
-    pickedEmbeddingPromise = null,
+    wrongStatsPromise = null,
     // The event time minted in the click handler — the SAME ms sendReport put
     // in the report's createdAt, so entry.date === the server row exactly.
     at = null,
@@ -329,6 +343,13 @@ export async function updateUserStats(isCorrect, {
         // or hasn't returned by the time the answer is logged.
         answer.pickedCellIndex = pickedCellIndex;
     }
+    if (typeof correctCellIndex === 'number' && correctCellIndex >= 0) {
+        // The answer node's variation index, same index space and same
+        // fit-independence as pickedCellIndex: a refill of the availability
+        // null needs to exclude the correct move from the alternatives, and
+        // this pins WHICH row that was without re-deriving it from the SGF.
+        answer.correctCellIndex = correctCellIndex;
+    }
     // The picked vector comes from the same shard the problem did, so it is
     // current exactly when the correct-move vector is — and the two must come from
     // ONE fit in any case, the tendency reading being a comparison between them
@@ -341,9 +362,9 @@ export async function updateUserStats(isCorrect, {
 
     // Defer-patch from the in-flight fetch. Never blocks the caller — if the
     // fetch fails or the entry gets evicted later, the next app-load backfill
-    // will pick this up using `pickedCellIndex`.
-    if (fitIsCurrent && pickedEmbeddingPromise && !answer.pickedEmbedding) {
-        pickedEmbeddingPromise.then(emb => patchPickedEmbedding(problemId, answer.date, emb))
+    // will pick this up using `pickedCellIndex`/`correctCellIndex`.
+    if (fitIsCurrent && wrongStatsPromise) {
+        wrongStatsPromise.then(stats => patchWrongAttemptStats(problemId, answer.date, stats))
             .catch(_err => { /* swallowed; backfill handles retry */ });
     }
     setCurrentSolvingStartTime(null);

@@ -6,14 +6,14 @@ import { state, setAcceptClicks, setAppMode, setReviewStartTime } from './state.
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
-import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
+import { isCorrectMove, findBestMoveFromChildren, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './recall-model.js';
 import { getTerm } from './i18n.js';
 import { sendReport, updateUserStats } from './attempt-recorder.js';
 import { completeCurrentProblem, advanceToNextProblem } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
-import { fetchPickedEmbedding } from './picked-embedding.js';
+import { fetchWrongAttemptStats } from './picked-embedding.js';
 
 const median = (values) => {
     if (!values.length) return 0;
@@ -109,19 +109,28 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     });
     const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
-    // Fire the picked-move embedding fetch in the background. We never block
-    // on it — the answer is recorded immediately with just the cell index,
-    // and updateUserStats attaches a defer-patch handler. Embedding-backfill
-    // also re-fetches missing pickedEmbeddings on the next app load, so a
-    // failed/slow live fetch is recoverable.
+    // Fire the wrong-attempt embedding fetch in the background — one Range
+    // request for the problem's whole per-cell block, from which both the
+    // picked-move vector and the availability-null moments come. We never
+    // block on it — the answer is recorded immediately with just the cell
+    // indices, and updateUserStats attaches a defer-patch handler.
+    // Embedding-backfill also re-fetches missing fields on the next app load,
+    // so a failed/slow live fetch is recoverable.
+    //
+    // The answer node's index is captured here, BEFORE the board advances:
+    // the null must exclude the correct move from the alternatives, and the
+    // stored index also lets a post-refit refill exclude it exactly.
     const currentProblem = state.currentProblem;
     const tsumegoId = tsumegoIdOf(currentProblem?.filename);
     const zipFilename = currentProblem?.zipFilename;
-    let pickedEmbeddingPromise = null;
+    const children = getCurrentNode()?.children || [];
+    const correctIndex = children.indexOf(findBestMoveFromChildren(children));
+    let wrongStatsPromise = null;
     if (tsumegoId && zipFilename && state.appMode === APP_MODES.SOLVING) {
-        pickedEmbeddingPromise = fetchPickedEmbedding({
+        wrongStatsPromise = fetchWrongAttemptStats({
             tsumegoId,
-            cellIndex: moveIndex,
+            pickedIndex: moveIndex,
+            correctIndex,
             zipFilename,
             boardSize: state.boardSize,
         });
@@ -138,7 +147,8 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     sendReport(buildReportPayload(false, x, y, at));
     const stats = await updateUserStats(false, {
         pickedCellIndex: moveIndex,
-        pickedEmbeddingPromise,
+        correctCellIndex: correctIndex,
+        wrongStatsPromise,
         at,
     });
 

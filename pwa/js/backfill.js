@@ -7,11 +7,12 @@
 //      Triggered by `embedding_version` change in embedding_meta.json.
 //      Wipes any stale embeddings, then fills `embedding` from the
 //      lookup-aligned correct-move sidecar (tsumegos/lookup.embeddings.bin,
-//      one ~130-byte Range per problem — no shard zips) and optional
-//      `pickedEmbedding` via each shard's per-cell bin (byte offsets live in
-//      the zip's embeddings_index.json, so only shards carrying a picked
-//      need are downloaded). Older entries get their embedding fields
-//      stripped to keep localStorage bounded.
+//      one ~130-byte Range per problem — no shard zips), plus, for wrong
+//      attempts, `pickedEmbedding` and the availability-null moments
+//      (altMean/altSd/altAbove/altBelow) via each shard's per-cell bin (byte
+//      offsets live in the zip's embeddings_index.json, so only shards
+//      carrying a need are downloaded). Older entries get their embedding
+//      fields stripped to keep localStorage bounded.
 //
 //   2. Rating refresh (all history entries, no keep-window cap)
 //      Triggered by `ratings_version` change. Reads the single
@@ -37,7 +38,7 @@ import {
 } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS,
          EMBEDDING_VERSION_KEY, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
-import { fetchPickedEmbeddingWithIndexEntry, fetchCorrectEmbedding } from './picked-embedding.js';
+import { fetchProblemCellsWithIndexEntry, fetchCorrectEmbedding, computeAltStats } from './picked-embedding.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, EMBEDDING_VERSION, RATINGS_VERSION,
@@ -663,30 +664,70 @@ async function parseEmbeddingsIndex(zip, onParseError) {
     }
 }
 
-// Fill one entry's `pickedEmbedding` from the shard's per-cell sidecar, when
-// it's an eligible wrong attempt (known pickedCellIndex, not yet filled, and
-// the shard's index knows the problem). Range-fetches one cell. Returns true
-// iff it filled — shared by the version-driven walk and the synced-entry fill,
-// which count fills differently but fill identically.
-async function fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size }) {
+// Does this wrong attempt still need the availability-null moments? Requires a
+// way to identify the correct move among the block's rows: the stored
+// `correctCellIndex` (rows recorded since it exists) or the stored correct-move
+// `embedding` for a quantized-vector match (older rows — so the correct fill
+// must run BEFORE this walk, which both callers already order). `altMean` is
+// the presence marker for the whole quartet; `[]` is computeAltStats's
+// computed-but-degenerate result, kept so the pass stops re-asking (it clears
+// with the vectors on a refit, like `noEmb`).
+function needsAltStats(a) {
+    return a.altMean === undefined &&
+        (typeof a.correctCellIndex === 'number' || Array.isArray(a.embedding));
+}
+
+// Fill one entry's wrong-attempt embedding fields from the shard's per-cell
+// sidecar, when it's an eligible wrong attempt (known pickedCellIndex, and the
+// shard's index knows the problem): `pickedEmbedding` if missing, and the
+// availability-null moments (altMean/altSd/altAbove/altBelow) if missing and
+// identifiable (needsAltStats). One Range fetch brings the problem's WHOLE
+// per-cell block, memoized in `blockCache` (per shard) so several attempts of
+// one problem pay for it once. Returns true iff anything was filled — shared
+// by the version-driven walk and the synced-entry fill, which count fills
+// differently but fill identically.
+async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache }) {
     if (a.correct !== false) return false;
     if (typeof a.pickedCellIndex !== 'number') return false;
-    if (a.pickedEmbedding) return false;
+    const needPicked = !a.pickedEmbedding;
+    const needAlt = needsAltStats(a);
+    if (!needPicked && !needAlt) return false;
     if (!indexPayload || !indexPayload.problems) return false;
     const indexEntry = indexPayload.problems[a.problemId];
     if (!indexEntry) return false;
-    const emb = await fetchPickedEmbeddingWithIndexEntry({
-        tsumegoId: a.problemId,
-        cellIndex: a.pickedCellIndex,
-        zipFilename,
-        boardSize: size,
-        indexEntry,
-    });
-    if (Array.isArray(emb)) {
-        a.pickedEmbedding = quantizeEmbedding(emb);
-        return true;
+    if (!blockCache.has(a.problemId)) {
+        blockCache.set(a.problemId, fetchProblemCellsWithIndexEntry({
+            zipFilename,
+            boardSize: size,
+            indexEntry,
+        }));
     }
-    return false;
+    const rows = await blockCache.get(a.problemId);
+    if (!Array.isArray(rows)) return false;
+    let touched = false;
+    if (needPicked && a.pickedCellIndex >= 0 && a.pickedCellIndex < rows.length) {
+        a.pickedEmbedding = quantizeEmbedding(rows[a.pickedCellIndex]);
+        touched = true;
+    }
+    if (needAlt) {
+        const alt = computeAltStats(rows, {
+            correctIndex: typeof a.correctCellIndex === 'number' ? a.correctCellIndex : null,
+            correctVec: Array.isArray(a.embedding) ? a.embedding : null,
+        });
+        if (alt) {
+            a.altMean = alt.altMean;
+            a.altSd = alt.altSd;
+            a.altAbove = alt.altAbove;
+            a.altBelow = alt.altBelow;
+        } else {
+            // Degenerate problem (fewer than two usable alternatives): mark so
+            // the fill stops re-asking; readers treat a non-K-length array as
+            // "no null available".
+            a.altMean = [];
+        }
+        touched = true;
+    }
+    return touched;
 }
 
 // Binary-search the id-sorted lookup.txt lines ("id zipHash size") for a
@@ -1124,17 +1165,19 @@ async function tailHasRowsForSize(size) {
     return false;
 }
 
-// Picked-embedding needs: in-window wrong attempts with a stored
-// pickedCellIndex but no pickedEmbedding. These are the only embedding fills
-// that still drive a shard-zip walk — the per-problem byte offsets live in the
-// zip's embeddings_index.json. (Correct-move embeddings come from the
+// Wrong-attempt embedding needs: in-window wrong attempts with a stored
+// pickedCellIndex that are missing the picked-move vector or the
+// availability-null moments. These are the only embedding fills that still
+// drive a shard-zip walk — the per-problem byte offsets live in the zip's
+// embeddings_index.json. (Correct-move embeddings come from the
 // lookup-aligned sidecar; ratings from problem_params.)
 function collectPickedNeedIds(history, startIdx) {
     const ids = new Set();
     for (let i = startIdx; i < history.length; i++) {
         const a = history[i];
         if (a && a.problemId && a.correct === false &&
-            typeof a.pickedCellIndex === 'number' && !a.pickedEmbedding) {
+            typeof a.pickedCellIndex === 'number' &&
+            (!a.pickedEmbedding || needsAltStats(a))) {
             ids.add(a.problemId);
         }
     }
@@ -1168,11 +1211,13 @@ async function walkPickedShards(size, history, startIdx, pickedNeedIds, checkpoi
         });
         if (!indexPayload || !indexPayload.problems) return;
         // Sequential per-entry WITHIN the shard: Range requests are cheap
-        // (~256B), and with shards running SHARD_WALK_CONCURRENCY-wide this
-        // bounds the total in-flight request count.
+        // (one per-cell block runs under a kilobyte, memoized per problem),
+        // and with shards running SHARD_WALK_CONCURRENCY-wide this bounds the
+        // total in-flight request count.
+        const blockCache = new Map();
         let filledHere = 0;
         for (let i = startIdx; i < history.length; i++) {
-            if (await fillPickedEmbeddingFromSidecar(history[i], { indexPayload, zipFilename, size })) {
+            if (await fillWrongAttemptFields(history[i], { indexPayload, zipFilename, size, blockCache })) {
                 filledPicked++;
                 filledHere++;
             }
@@ -1333,7 +1378,7 @@ async function fillSyncedForSize(size, problemParams = null) {
         if (!a || !a.synced || !a.problemId || a.correct !== false) continue;
         const needsPickedIndex =
             typeof a.syncedMove === 'string' && typeof a.pickedCellIndex !== 'number';
-        const needsPicked = !a.pickedEmbedding &&
+        const needsPicked = (!a.pickedEmbedding || needsAltStats(a)) &&
             (typeof a.pickedCellIndex === 'number' || needsPickedIndex);
         if (needsPickedIndex || needsPicked) {
             needIds.add(a.problemId);
@@ -1351,6 +1396,7 @@ async function fillSyncedForSize(size, problemParams = null) {
         // picked-embedding fill below just skips (no console line).
         const indexPayload = await parseEmbeddingsIndex(zip);
         const idsHere = new Set(shardIds);
+        const blockCache = new Map();
         let touchedHere = 0;
 
         for (let i = startIdx; i < history.length; i++) {
@@ -1370,7 +1416,7 @@ async function fillSyncedForSize(size, problemParams = null) {
                 touchedHere++;
             }
 
-            if (await fillPickedEmbeddingFromSidecar(a, { indexPayload, zipFilename, size })) {
+            if (await fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache })) {
                 filled++;
                 touchedHere++;
             }

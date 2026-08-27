@@ -17,9 +17,18 @@
 //                     difficulty.
 //   underplay <-> overplay
 //                     the share of your wrong answers that erred TOWARD the
-//                     motif rather than away from it. 50% = your mistakes lean
-//                     neither way, which is balance, not an average of other
-//                     players.
+//                     motif rather than away from it. The neutral point is the
+//                     AVAILABILITY NULL — the share a direction-blind error on
+//                     the same problems would have had (motif-stats.js) — so
+//                     the row's mid-mark sits at that null, per user, not at
+//                     50%: the menu's lean is subtracted before anything is
+//                     called a lean of the player's.
+//   aligned <-> inverted
+//                     the judgment reading: does the direction of the errors
+//                     FOLLOW the position (leaning toward the motif where it
+//                     is the answer) or run against it. Positive = inverted,
+//                     the both-directions-at-once deficit; 0 = errors lean the
+//                     way a typical error on those boards leans.
 //
 // Why all motifs rather than only the credible ones: a row carrying a visible
 // interval makes no claim the interval does not support, so an unresolved axis
@@ -51,17 +60,22 @@ let exampleOpenInFlight = false;
 // The numeric value is always printed beside the bar, so a clamp costs the bar's
 // precision and nothing else.
 const RANK_FULL_SCALE = 2.0;
+// Same for the judgment slope's track (standard deviations of lean per unit of
+// answer loading — a display clamp only, like RANK_FULL_SCALE above).
+const CONDITION_FULL_SCALE = 1.0;
 // Colour ramps from fully neutral at the MOTIF_Z gate to fully saturated one
 // further SE out, so a row below the gate carries no colour at all — the pane
 // makes no claim there, and a tinted row reads as one.
 const TONE_FULL_Z = MOTIF_Z + 1;
 
 // Builds the motif table consumed by showDetailedStats.
-// One pane per READING, not one pane carrying both. `kind` is 'strength'
-// (weak <-> strong: how the user SCORES on motif-heavy problems) or 'tendency'
-// (underplay <-> overplay: which way their mistakes LEAN). They answer different
-// questions and are read one at a time, so a reader comparing rows within a pane
-// is comparing like with like instead of scanning across two axes at once.
+// One pane per READING, not one pane carrying all. `kind` is 'strength'
+// (weak <-> strong: how the user SCORES on motif-heavy problems), 'tendency'
+// (underplay <-> overplay: which way their mistakes LEAN, against the
+// availability null) or 'condition' (aligned <-> inverted: whether that lean
+// FOLLOWS the position or runs against it). They answer different questions
+// and are read one at a time, so a reader comparing rows within a pane is
+// comparing like with like instead of scanning across several axes at once.
 export function buildMotifPane(kind, history = state.answerHistory) {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k, side) => localizedMotif(labelMap[String(k)], side);
@@ -87,7 +101,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
                    : (labelFor(st.k, 'negative') ? 'negative' : null);
         if (!side) continue;
         const flip = side === 'negative';
-        const t = st.tendency, g = st.strength;
+        const t = st.tendency, g = st.strength, c = st.condition;
         rows.push({
             k: st.k,
             side,
@@ -98,13 +112,24 @@ export function buildMotifPane(kind, history = state.answerHistory) {
                 hi: flip ? -g.lo : g.hi,
                 z: flip ? -g.z : g.z,
             },
-            // Mirroring a share reflects it about the 50% balance point.
+            // Mirroring a share reflects it — null share included — since
+            // "toward the named motif" flips with the tail that names it.
             tendency: t && {
                 share: flip ? 1 - t.share : t.share,
+                nullShare: flip ? 1 - t.nullShare : t.nullShare,
                 lo: flip ? 1 - t.hi : t.lo,
                 hi: flip ? 1 - t.lo : t.hi,
                 z: flip ? -t.z : t.z,
                 n: t.n,
+            },
+            // The judgment slope is mirror-invariant (motif-stats.js): negating
+            // the axis negates both regression variables, so nothing flips.
+            condition: c && {
+                slope: c.slope,
+                lo: c.lo,
+                hi: c.hi,
+                z: c.z,
+                n: c.n,
             },
         });
     }
@@ -138,6 +163,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
 const POLES = {
     strength: ['statsMotifWeak', 'statsMotifStrong'],
     tendency: ['statsMotifUnder', 'statsMotifOver'],
+    condition: ['statsMotifAligned', 'statsMotifInverted'],
 };
 
 function buildHeaderRow(kind) {
@@ -175,7 +201,7 @@ function toneWeight(z) {
 // read twice — and the row is a claim about a direction, not a measurement
 // anybody acts on to two decimals. The point estimate stays, on the label's own
 // line, because that is what names the size of the effect.
-function buildMetricCell({ frac, loFrac, hiFrac }) {
+function buildMetricCell({ frac, loFrac, hiFrac, midFrac }) {
     const cell = document.createElement('div');
     cell.className = 'wk-metric';
 
@@ -190,8 +216,12 @@ function buildMetricCell({ frac, loFrac, hiFrac }) {
     band.style.width = `${Math.max(0.5, (hi - lo) * 100).toFixed(2)}%`;
     track.appendChild(band);
 
+    // The neutral mark. Readings whose neutral point is data (the tendency
+    // pane's availability null) place it; the rest leave it at the CSS-default
+    // centre.
     const mid = document.createElement('span');
     mid.className = 'wk-mid';
+    if (Number.isFinite(midFrac)) mid.style.left = `${(clamp01(midFrac) * 100).toFixed(2)}%`;
     track.appendChild(mid);
 
     const dot = document.createElement('span');
@@ -205,17 +235,16 @@ function buildMetricCell({ frac, loFrac, hiFrac }) {
 
 const fmtRank = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
 // The tendency reading is stored as the SHARE of errors that lean toward the
-// motif, whose neutral point is 0.5 — but "42%" gives a reader no way to see
-// that 50 is the balance and 42 sits below it. Shown as a signed deviation
-// instead, and specifically as the SHARE OF THE USER'S ERRORS THAT WOULD HAVE TO
-// GO THE OTHER WAY to reach balance: 6 errors leaning toward the motif against 4
-// leaning away is one error out of ten, i.e. +10%. That is `share - 0.5`
-// exactly, undoubled — doubling would state the swing between the two sides
-// rather than the count of choices to change, which is not what the number is
-// read as. The bar geometry is unchanged (already centred on 0.5); only the
-// printed value moves.
-const fmtLean = (share) => {
-    const v = Math.round((share - 0.5) * 100);
+// motif — but "42%" gives a reader no way to see where balance sits. Shown as
+// a signed deviation from the NULL SHARE instead (the share a direction-blind
+// error on the same problems would have had), read as the share of the user's
+// errors that would have to go the other way to match a typical error's lean:
+// `share - nullShare` exactly, undoubled — doubling would state the swing
+// between the two sides rather than the count of choices to change, which is
+// not what the number is read as. The bar geometry marks the same null (the
+// row's mid-line), so the printed value and the dot-to-mark gap agree.
+const fmtLean = (share, nullShare) => {
+    const v = Math.round((share - nullShare) * 100);
     return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}%`;
 };
 
@@ -242,13 +271,29 @@ function cellFor(kind, row) {
             weight: toneWeight(g.z),
         };
     }
+    if (kind === 'condition') {
+        const c = row.condition;
+        if (!c) return null;
+        const condFrac = (v) => clamp01(0.5 + v / (2 * CONDITION_FULL_SCALE));
+        // Valenced like strength — following the position is good, running
+        // against it is a deficit — so it reuses the same tone pair.
+        return {
+            frac: condFrac(c.slope),
+            loFrac: condFrac(c.lo),
+            hiFrac: condFrac(c.hi),
+            valueText: fmtRank(c.slope),
+            tone: c.z > 0 ? 'weak' : 'strong',
+            weight: toneWeight(c.z),
+        };
+    }
     const t = row.tendency;
     if (!t) return null;
     return {
         frac: t.share,
         loFrac: t.lo,
         hiFrac: t.hi,
-        valueText: fmtLean(t.share),
+        midFrac: t.nullShare,
+        valueText: fmtLean(t.share, t.nullShare),
         tone: t.z > 0 ? 'over' : 'under',
         weight: toneWeight(t.z),
     };

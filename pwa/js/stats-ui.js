@@ -203,12 +203,13 @@ export async function showDetailedStats() {
         // a superseded fit's vector is not detectably wrong, since a refit can
         // keep K and move every axis under it. Nothing is lost: the readings
         // slice to MODEL_INPUT_HISTORY_LENGTH, six times inside this window.
-        // Two panes over ONE computation of the readings — the split is in the
-        // rendering, so the strength pane and the tendency pane can never
-        // disagree about a motif.
+        // Three panes over ONE computation of the readings — the split is in
+        // the rendering, so the strength, tendency and judgment panes can
+        // never disagree about a motif.
         const motifHistory = getMergedAnswerHistory();
         const weaknessPane = buildMotifPane('strength', motifHistory);
         const tendencyPane = buildMotifPane('tendency', motifHistory);
+        const judgmentPane = buildMotifPane('condition', motifHistory);
 
         // Activity pane: the problems-per-day chart above the review-queue
         // summary text.
@@ -257,6 +258,7 @@ export async function showDetailedStats() {
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: weaknessPane },
             { label: getTerm('statsTabTendencies'), content: tendencyPane },
+            { label: getTerm('statsTabJudgment'), content: judgmentPane },
             { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
             { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
             { label: getTerm('statsTabActivity'), content: activityPane, make: makeActivityPane },
