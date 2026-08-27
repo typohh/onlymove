@@ -122,7 +122,7 @@ function topMotifs(problem) {
 /**
  * The user's training focus: localized labels of the flagged serve categories
  * (flaggedMotifCategories — named tails whose own-attempt reading clears the
- * shared confidence gate, selection-excluded motifs included), minus the
+ * shared confidence gate), minus the
  * `strong` direction, strongest first, same MAX_MOTIFS cap as the
  * problem list. Empty whenever nothing is flagged or the model is absent,
  * which is what keeps the bubble silent rather than showing a "none found".

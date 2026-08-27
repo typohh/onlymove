@@ -42,32 +42,26 @@
 import { state } from './state.js';
 import { computeMotifStats, isFlagged } from './motif-stats.js';
 
-// Motifs barred from driving SELECTION, by their untranslated positive label.
-//
-// `tenuki` is excluded because under the FIXED 50% null it flagged for nearly
-// every user, and a category almost everyone carries makes the served pool
-// homogeneous and, being near-constant, is collinear with the intercept, so
-// the deficit it describes launders into the rank estimate instead of steering
-// anything. The availability null has since shown most of that universality
-// was the MENU, not the players — the answer to a tsumego is by construction
-// not a tenuki, so nearly every alternative loads higher — and under the
-// corrected test the flag rate drops to ordinary levels. The exclusion stays
-// until the flag-rate homogeneity argument is re-measured under the corrected
-// null; reporting was never affected either way.
-const SELECTION_EXCLUDED = new Set(['tenuki']);
+// No motif is barred from driving selection. The hazard to watch for if one
+// ever seems to deserve it: a category carried by most users at once makes the
+// served pool homogeneous and, being near-constant, is collinear with the
+// intercept, so the deficit it describes launders into the rank estimate
+// instead of steering anything. A fixed 50% tendency null realised exactly
+// that on `tenuki` (flagged for ~94% of users); the availability null
+// attributes that universality to the problem MENU — the answer to a tsumego
+// is by construction not a tenuki, so nearly every alternative loads higher —
+// and with the menu subtracted the flag rates are ordinary, so no category is
+// near-universal and there is nothing to bar.
 
 // One {k, sign, tail, kind, z} per (axis, direction) whose reading clears the
 // confidence gate. `sign` is the SERVE direction the selector argmaxes, hinged at
 // zero: +1 targets high loadings on the named tail, -1 targets low ones. `tail`
 // is the NAMED tail the category is DESCRIBED through, which for an overplay is
-// the opposite of its serve direction. `kind` says which of the four readings
+// the opposite of its serve direction. `kind` says which reading
 // produced it, so a consumer can treat them differently — the training-focus
-// bubble shows the three that are training directions and drops `strong`.
-// Every flagged (axis, direction), INCLUDING the selection-excluded motifs. This
-// is the reporting list: an excluded motif is barred from steering the pool, not
-// from being told to the user — the exclusion is about a category almost everyone
-// carries being useless as a serve tilt, which says nothing about whether the
-// finding is worth reading.
+// bubble shows the ones that are training directions and drops `strong`.
+// This is the reporting list, and selection draws from all of it — see
+// weaknessServeCategories below.
 export function flaggedMotifCategories() {
     const labels = state.embeddingLabels;
     if (!labels) return [];
@@ -85,13 +79,11 @@ export function flaggedMotifCategories() {
         if (!tail) continue;
         const flip = tail === 'negative';
         const dir = flip ? -1 : 1;
-        const excluded = SELECTION_EXCLUDED.has(comp.positive) ||
-                         SELECTION_EXCLUDED.has(comp.negative);
 
         if (strength && isFlagged(strength)) {
             const z = dir * strength.z;
             // Worse than predicted on motif-heavy problems -> more of them.
-            if (z < 0) categories.push({ k, sign: dir, tail, kind: 'weak', excluded, z: -z });
+            if (z < 0) categories.push({ k, sign: dir, tail, kind: 'weak', z: -z });
             // Better than predicted -> fewer of them.
             else categories.push({ k, sign: -dir, tail, kind: 'strong', z });
         }
@@ -100,24 +92,22 @@ export function flaggedMotifCategories() {
             // Errors reach FOR the motif -> serve where it is not the answer.
             if (z > 0) categories.push({ k, sign: -dir, tail, kind: 'overplay', z });
             // Errors MISS the motif -> serve where it is the answer.
-            else categories.push({ k, sign: dir, tail, kind: 'underplay', excluded, z: -z });
+            else categories.push({ k, sign: dir, tail, kind: 'underplay', z: -z });
         }
         // The judgment slope is mirror-invariant (motif-stats.js), so no dir
         // factor: positive is the deficit whichever tail names the axis. It is
-        // two-sided by construction, so it takes two slots — one per end. The
-        // motif-answer slot carries the exclusion (it would serve MORE of the
-        // barred motif); the anti-motif slot serves the norm and does not,
-        // matching how overplay escapes the exclusion.
+        // two-sided by construction, so it takes two slots — one per end.
         if (condition && isFlagged(condition) && condition.z > 0) {
-            categories.push({ k, sign: dir, tail, kind: 'condition', excluded, z: condition.z });
+            categories.push({ k, sign: dir, tail, kind: 'condition', z: condition.z });
             categories.push({ k, sign: -dir, tail, kind: 'condition', z: condition.z });
         }
     }
     return categories;
 }
 
-// The categories SELECTION may draw from — the flagged set minus the motifs
-// barred from steering the pool.
+// The categories SELECTION draws from. Today this is the flagged list whole;
+// the separate name marks the seam where a serve-side filter would live, so a
+// future bar on a category changes one function without touching reporting.
 export function weaknessServeCategories() {
-    return flaggedMotifCategories().filter(c => !c.excluded);
+    return flaggedMotifCategories();
 }
