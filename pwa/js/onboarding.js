@@ -22,6 +22,7 @@ import { state, getMergedAnswerHistory } from './state.js';
 import { createBubble, placeBubble } from './bubble.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
+import { flaggedMotifCategories } from './weakness.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
 
 // --- tunables ---------------------------------------------------------------
@@ -228,10 +229,15 @@ const BUBBLES = {
     // Menu-contained features. We do NOT open the menu for the user (intrusive);
     // instead these point at the Menu button and the text names the item, so the
     // bubble teaches both that the menu exists and what's inside it.
+    // Waits until the Weaknesses pane has a finding to show, so the bubble is
+    // pointing at something rather than at an empty tab. That is what the motif
+    // readings clearing their confidence gate means — a flagged (axis, tail),
+    // the SAME set the pane colours and the training-focus bubble names. The
+    // reporting list, not the serve list: Stats reports every flagged motif,
+    // including the ones barred from steering selection.
     stats: {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbStats',
-        eligible: () => Array.isArray(state.weaknessParams) && state.weaknessParams.length >= 4 &&
-            isVisible(anchors.menu()),
+        eligible: () => flaggedMotifCategories().length > 0 && isVisible(anchors.menu()),
     },
     account: {
         // Cross-device sync only matters to an invested, returning user — few
