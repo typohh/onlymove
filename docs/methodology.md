@@ -14,6 +14,8 @@ Chapters 1 and 2 describe the method. Chapter 3 maps it onto the actual modules,
 
 ## Scope — read this before editing
 
+**The tree-wide editing contract is `docs/contract.md`; the rules below are this document's own, and they are stricter.** Where the two overlap this section wins, and the two extra obligations it adds — being self-contained, and naming no code in the method chapters — come from this file being published on the site.
+
 **This document is self-contained, and it describes the system as it is now.** A reader who has never seen this project, and who has access to nothing else — no other document, no commit log, no prior conversation — must be able to read it start to finish and understand how ratings, ranks and motifs are built and consumed. Nothing here may lean on knowing what the system used to do, what an earlier version of this document said, or what was discussed when a decision was taken. If a passage only makes sense to someone who was there, it is broken.
 
 **Past findings belong here; history does not.** The distinction is what a fact is doing, not how old it is. A measurement earns its place when it is the *support for a present claim* — that a constant has the value it has, that an alternative was tried and lost, that a design choice is forced rather than arbitrary. It does not earn its place as narrative. The test to apply when editing: delete the historical sentence and ask whether some present statement is now unsupported. "This weight was chosen because the alternatives measured worse in these specific ways" survives the test. "First we did A, then we switched to B, and later to C" does not — only C is the system, and only the evidence for C is worth keeping.

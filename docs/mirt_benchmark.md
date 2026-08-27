@@ -1,5 +1,7 @@
 # MIRT benchmark: provenance and results
 
+<!-- Editing rules: docs/contract.md. Present tense, no changelog, rules here and evidence with them. -->
+
 The fixed reference point for judging whether a change to `auxiliary/rating_dev/train_joint_mirt.py` is progress. Every number below is reproducible from the provenance in the first section; a future run that changes any of it is measuring something else and must say so.
 
 The MIRT is now the production trainer (`pipeline.train_mirt`); this document is its development record, and is allowed history and alternatives where `docs/methodology.md` is not.

@@ -1,0 +1,127 @@
+# The corpus and the engine: file contracts and KataGo integration
+
+<!-- Editing rules: docs/contract.md. Present tense, no changelog, rules here and evidence with them. -->
+
+What a problem file guarantees, how those guarantees are enforced and re-verified, how the derived per-cell arrays line up against the SGF, and how KataGo is driven from both the pipeline and the analysis service. The *method* behind the two problem-set invariants is `methodology.md` §1.1 and §3.1; this document is the engineering that surrounds them. CLAUDE.md carries the short form and points here.
+
+## Identity
+
+**Tsumego identity is symmetry-aware.** Filenames come from `get_orientation_invariant_hash` (`pipeline/generate_tsumegos.py`) — SHA-256 taken over all eight D4 transforms of the board, with `min()` picking a canonical orientation. The dataset therefore cannot contain two problems that are rotations or reflections of each other, and `tsumego_id` is that canonical hash truncated to 8 hex characters.
+
+`auxiliary/check_corpus_ids.py` re-verifies the corpus against the rule, and `--emit-map` regenerates an id remap (`surgery/id_map.json`) if a defect ever needs one.
+
+### Retired ids are never reused
+
+**`tsumegos/retired_ids.txt` lists ids removed from the corpus but kept in the attempt log, and `generate_tsumegos` treats them as taken.** Removing a problem no longer deletes its `tsumego_reports` rows, so an id handed to a new problem would silently inherit a stranger's history — the one failure mode that raises nothing anywhere and cannot be untangled afterwards. `tsumego_id_taken` checks the file alongside the corpus.
+
+Format is one 8-hex id per line with `#` comments, appended in blocks that say when and why. Regenerate it from a fresh `pipeline.fetch_database` as *distinct `problem` in `tsumego_reports` not present in `tsumegos/`* — an id whose rows were deleted by an older purge is legitimately absent and reusable.
+
+## The single-solution invariant, and why order is load-bearing
+
+By generator design every problem has exactly one correct first move — the `solution` returned by `ProblemFinder.create_problem` — so downstream code can rely on "one canonical answer per problem".
+
+**That answer is also `variation_nodes[0]`, and generation enforces it rather than assuming it.** `promote_winning_first_move` (`utils/katago/add_variations.py`) reorders the decision node's children so the move the *shipped evaluation comments* name leads: highest winrate for the mover, score breaking exact ties — the same rule the client's `findBestMoveFromChildren` applies. The two can disagree at generation time, because the solution written first is what `ProblemFinder.is_valid` verified on a deeper re-read, while the candidates' comments come from later passes at their own playout budgets. **Reorder, don't discard** — such a position is still well-posed, and `first_move_is_well_formed`, the separate single-solution gate, passes it.
+
+**The invariant is load-bearing because the two kinds of consumer read the solution differently.** The client picks by evaluation and is order-blind. Every backend stage takes it **positionally** — `extract_activations`' `correct_idx`, `benchmark_bots`' grading — so a misordered file silently feeds a *losing* move's activations into the rating features and into the shipped per-problem axis vector, while still playing correctly in the app.
+
+`auxiliary/check_tsumego_sequences.py` re-verifies the corpus; `winner is NOT variation_nodes[0]` must be 0.
+
+## What a shipped SGF carries
+
+**Each branch comment is `"<winrate>%/<score>"`** (e.g. `"86.4%/3.1"`). `pwa/js/sgf.js` reads this directly, and only when it is missing does the client call the analysis service. Don't strip these comments when manipulating SGFs.
+
+### Resolved branches are marked, and the client must never deduce them again
+
+**A branch carries `TE[1]` when the generator drove it to a double pass.** `generate_variations_directly_to_sgf` (`utils/katago/add_variations.py`) returns whether a line at or under a node reached one, and marks each child that did — leaving branches abandoned at the `MIN_PLAYOUT_PERC` cutoff bare, so the two are distinguishable in the file. `analysis.js` prefers marked children and falls back to its older rule only where a node has none.
+
+**The retired deduction was `subtreeReachesPass` — a single pass ANYWHERE in the subtree — and that is not a conclusion.** The generator plays some low-visit branches out to a pass without the move quality to match, so the client offered continuations along which the solver's own recorded moves degrade into a loss. That is the whole cause of the corpus purges the audit produced; **don't reintroduce any weakened form of the test.**
+
+Two boundaries around the mark:
+
+- **Selection is unchanged and the mark only narrows the pool.** Black picks by `findBestMoveFromChildren`; white takes lowest winrate then lowest score, so two ghost moves still appear when those differ. **Correctness still reads the unrestricted `findBestMoveFromChildren`** — a data annotation must not redefine what counts as the right answer.
+- **At the decision node only the answer may be marked** (`mark_children=False` on the refuted-first-move call). A root mark reads as "this is the move to find", so if the answer's own lines failed to resolve, marked refuted moves would be offered as the solution.
+
+`auxiliary/mark_recommended_variations.py` is the retrofit that marked the existing corpus (idempotent; `--unmark` reverses). It approximates generator intent by minimax over the resolved branches and cannot observe it directly.
+
+## Corpus soundness
+
+**`auxiliary/audit_solution_lines.py` is the soundness check**: exact minimax over the branches that reach a double pass. The answer must hold the win, and no refuted first move may be winnable.
+
+**Only resolved branches count.** An abandoned stub is not evidence in either direction. The retired `depth >= 10` ply floor (whose findings are still listed in `auxiliary/broken_review_paths.txt`) was standing in for that and got it wrong in both directions — it scored abandoned lines, and its floor hid resolved short ones.
+
+Coverage differs by board and the difference matters when reading a result. **Answer coverage is complete on both boards. Refuted-move coverage is complete on 9×9 and a floor on 13×13**: `auxiliary/add_losing_lines.py` gave every 9×9 problem lacking one a losing line — the best refuted first move by the client's own rule, played out to a double pass — and the problems that could not get a sound one were purged. The generator still pursues refutations far less often on 13×13, so a refuted-move count there counts only what it happened to resolve.
+
+Note what the 9×9 pass cost to learn: **coverage is what makes the audit able to fail.** Thousands of problems whose refutation the corpus contradicted were invisible until they had a resolved line to judge.
+
+**Measured-rejected, don't re-attempt:** any rule that *prunes* a side's options and then judges it. Pruning to double-pass-reaching branches forces a side into a move it would never play — most visibly a forced pass whose score-it-now terminal reverses the whole line — and it manufactures both false positives and false negatives.
+
+## The three coordinate spaces, and how they map
+
+A problem exists in three different orderings, and crossing between them by index rather than by coordinate is the standing bug.
+
+**1. Activation npz — board-scan order, a superset.** `extract_activations.process_one_sgf` enumerates every legal cell for the player to move (the colour of `variation_nodes[0]`) sorted by `(y, x)`, and records `correct_idx` pointing at the correct move's scan position. `pipeline/extract_activations.py` runs the vendored PyTorch KataGo b18 (`utils/katago/vendor/`, bootstrapped via `utils/katago/torch_model.py`, so `import katago.…` resolves there) and captures the post-skip-add output of all 18 residual blocks (18 × 384 = 6912 floats) at every legal cell. Output per problem: `candidates (n_legal, 6912) fp16`, `xys (n_legal, 2) int32`, `correct_idx () int32`.
+
+The alternative — walking the SGF's pruned variations in document order with `correct_idx=0` — ships a non-superset cell set and does not match the on-disk corpus. `correct_idx` is non-zero in general (13×13 `00000f4c` has `correct_idx=38`; a re-extraction was verified byte-for-byte against the on-disk corpus).
+
+**2. SGF root variations — a pruned subset, plus a pass.** So npz ⊇ {SGF non-pass variations}: every move a user can actually click is embedded, but around a tenth of problems have extra embedded cells with no SGF variation, and **every** problem has a `pass` variation the npz never embeds.
+
+**3. The published per-cell sidecar — SGF-variation order.** Because the npz is scan-order and a superset, `package_for_pwa.project_cells_for_problem` re-parses each SGF and rebuilds the rows in SGF-variation order through an `(x, y) → npz row` map, dropping the extra scan-order cells and writing an **all-zeros placeholder row for the pass**, so that bin row *i* equals SGF child index *i* exactly. See `motif_axes_workflow.md` for the format revision that carries this.
+
+Two rules follow for every consumer:
+
+- **Pick the correct row by `correct_idx`, never positionally** — every consumer selects `candidates[int(correct_idx)]`; do not assume row 0.
+- **Map cells by `(x, y)` coordinate, not by index, when crossing the npz↔SGF boundary.**
+
+The sgfmill parse dominates packaging time, which is why shard building is parallelized across processes (`--workers`, default `os.cpu_count()`).
+
+## Board size on the pipeline side
+
+There is **no global `BOARD_SIZE`** and no in-process dual-size run. The three single-size generation steps — `tune_engine`, `generate_tsumegos`, `benchmark_bots` — take a **mandatory positional size** (`9` or `13`), threaded explicitly through the utils: `KatagoQueries(controller, board_size)` owns it as a public `board_size` attribute, `KatagoController.start_engine(model, board_size, …)` takes it, `ProblemFinder` reads `queries.board_size`, and the leaf helpers `construct_initial_sgf(…, board_size)` and `get_child_move(…, board_size)` take it explicitly.
+
+Every downstream step iterates `ALL_BOARD_SIZES` and takes no size argument. Artifact directories are keyed by size throughout. To refresh both boards, run each generation step once per size (`… generate_tsumegos 9` then `… generate_tsumegos 13`), then run the downstream steps once.
+
+The client-side view of board size — the URL hints, and how the two boards merge into one rank — is in `pwa_client.md`.
+
+## KataGo integration
+
+**Binary selection is by environment variable.** `utils/katago/controller.py` reads `KATAGO_PATH`, defaulting to `bots/katago` (an OpenCL build). `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda` and sets `KATAGO_PATH=bots/katago_cuda` on the remote. **Don't hardcode the binary path**; rely on the variable.
+
+**`KatagoController` is thread-safe by design.** A single master reader thread fans responses out via per-query `threading.Event`s keyed on query ids, so `send_query` is blocking from the caller's point of view. The worker threads in `generate_tsumegos` and `benchmark_bots` rely on this.
+
+**Models live outside git.** `models/` is gitignored; `utils.katago.models.get_model(filename)` lazily downloads from `media.katagotraining.org`, or from GitHub for the 9×9 and human models, on first use. The default is `MODEL_FULL` (`kata1-b18c384nbt-…`).
+
+**The PyTorch loader requires a `.ckpt`, not a `.bin.gz`.** The `.bin.gz` in `models/` is the binary export the C++ analysis engine reads and is not loadable via `torch.load`. Activation extraction expects `models/kata1-b18c384nbt-s9996604416-d4316597426/model.ckpt`, extracted from the corresponding checkpoint `.zip`, or a `--ckpt` pointing at one. Don't point `--ckpt` at a `.bin.gz` — KataGo's training code converts PyTorch → binary and not the other way, so one is not derivable from the other.
+
+**`bots/analysis.cfg` is hardware-tuned in place** by `pipeline.tune_engine`; see `pipeline_operations.md`.
+
+### The `requireMaxBoardSize` trap
+
+**`requireMaxBoardSize = true` in `bots/analysis.cfg` belongs to this repository's config only.** The deployed analysis service uses its own `analysis.cfg` on the box and passes no board-size override, so it has always served both sizes and is untouched by this.
+
+`maxBoardXSizeForNNBuffer` is a **maximum**; `requireMaxBoardSize` is what turns it into an exact requirement (KataGo names it `requireExactNNLen` at runtime, and the cfg's own comment says "EXCLUSIVELY for exactly the board size specified"). A query on any other size then kills KataGo's async bot thread with a message on stderr and **no response on stdout**, so the caller waits out its full query timeout on a request that can never be answered.
+
+Anything reaching KataGo through `utils.katago.controller` inherits the setting, since `start_engine` always emits the override. The pipeline never notices because each of its runs is single-size; a server takes both, so `worker.py` passes `requireMaxBoardSize=false` and runs one engine sized to the largest board. Verified: 9×9 answers on the padded buffer match a native 9×9 engine to float rounding.
+
+## The analysis service and its worker
+
+`analysis_server/server.py` runs on the cloud box — stdlib plus sgfmill only, since it is deployed with no repository beside it. It answers the PWA's analysis fallback when an SGF lacks embedded evaluation. Its own `analysis.cfg` is tracked at `analysis_server/analysis.cfg` and is **not** `bots/analysis.cfg`, which is the pipeline's and tuned for the opposite machine.
+
+**The board-size ceiling is stated twice and the two must move together**: `MAX_BOARD_SIZE` in `server.py` refuses anything larger with a 400 before any evaluation, and `maxBoardXSizeForNNBuffer` in that cfg sizes the NN buffer to the same bound, so an oversized board fails inside KataGo regardless.
+
+### What the worker buys is search, not speed
+
+`analysis_server/worker.py` (`./.venv/bin/python3 -m analysis_server.worker`) opens a few long polls against `api.onlymove.net` and runs whatever jobs come back down them; the server prefers a parked poll and otherwise answers with its own KataGo exactly as it always has. The PWA is not involved at all — `pwa/js/analysis-api.js` posts to the same URL either way — so there is no client version to keep in step, and no inbound port, DNS record or certificate on the worker's side.
+
+**The point is search depth.** Measured, the cloud box answers in about 200 ms of compute and a GPU in about 45, but reaching that GPU costs a round trip that spends nearly the whole saving — so at equal visits the two are a wash and the feature would be pointless. What the box *cannot* do is search: one visit is the raw policy, and 30 visits there would take seconds. The worker therefore **replaces the visit count** on every query it takes (`WORKER_VISITS`, 30), costing roughly a second end to end against the box's third of one, and returns a genuinely read answer instead of an opinion.
+
+Three consequences, all load-bearing:
+
+- **`interpret_response` branches on what came back** — `moveInfos` when present, policy otherwise — never on the server's own `PLAYOUTS` constant. The two backends deliberately search to different depths, so reading the constant sends a searched reply down the policy path, discarding the search with no symptom.
+- **The reply carries `visits`**, and the client shows its blinking-red unreliable marker only for a single-visit answer (`_searched` in `analysis.js`, tested in `ui.js`). `_origin` stays `'api'` either way, since the move-selection waterfall keys on it.
+- **`SEARCH_THREADS` is a latency setting, unrelated to `POLL_THREADS`.** Visits are sequential within one query unless several threads explore at once.
+
+**The pool's capacity is the number of parked polls.** A job is only ever handed to a poll that is already waiting, so a busy or absent worker degrades to local service rather than queueing behind itself, and stopping the worker at any instant is safe. Failure is bounded rather than absent: a worker that dies holding a poll is usually caught on the write and the job comes straight back, but a dropped network gives no such error, so one request pays `WORKER_JOB_TIMEOUT` before `WORKER_COOLDOWN` takes the worker out of rotation.
+
+**Both ends read the shared secret from a file** — `~/.config/onlymove/worker_token` locally, `worker_token` beside `server.py` on the box — with the environment winning when set, so starting either needs no wrapper and no secret on a command line where `/proc` would expose it. **An empty `ONLYMOVE_WORKER_TOKEN` on the box means the feature is off with no second switch**: the three `/worker` routes 404 and every request is served locally, so the server can be deployed before any worker exists. Turning it on is setting that variable and restarting. Token auth is the only thing separating a worker from anyone on the internet, and its answers are shown to users as ours.
+
+**Deploy with `analysis_server/deploy.sh`** (`--token` also installs the shared secret; `--no-restart` ships without one). It reaches `typo_hh@api.onlymove.net` over plain ssh and edits nothing under `/etc`: the account owns its working directory but is not in `google-sudoers`, so the script restarts by killing the main process and letting the unit's `Restart=always` bring it back, and installs the token as a 0600 file beside `server.py` rather than a unit `Environment=` line — which would need root **and** be world-readable through `systemctl show`. It ships by `scp` (the box has no rsync) and verifies by md5 what actually landed.

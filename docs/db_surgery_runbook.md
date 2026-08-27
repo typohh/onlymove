@@ -1,5 +1,7 @@
 # DB surgery runbook (freeze → operate → unfreeze)
 
+<!-- Editing rules: docs/contract.md. Present tense, no changelog, rules here and evidence with them. -->
+
 How to run a destructive change against the production D1 without the table moving underneath you. Written for `auxiliary/purge_tsumegos.mjs`, but the freeze applies to any surgery.
 
 ## Why a freeze is needed

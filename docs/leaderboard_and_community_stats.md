@@ -1,7 +1,6 @@
 # Leaderboard page and Community stats
 
-<!-- Extracted from CLAUDE.md. Same contract as docs/methodology.md's scope note:
-     this describes the system as it is now. Past findings belong here; history does not. -->
+<!-- Editing rules: docs/contract.md. Present tense, no changelog, rules here and evidence with them. -->
 
 Two read paths over the same small `leaderboard` table, both cost-sensitive because D1
 bills rows read. CLAUDE.md carries the short form and points here.

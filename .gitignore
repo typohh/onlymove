@@ -204,3 +204,11 @@ auxiliary/time_benefit_users.csv
 # from auxiliary/rating_dev arms. Multi-hundred-MB, reproducible from the
 # committed code plus a seed, and superseded as soon as the next arm runs.
 dev_runs/
+
+# Personal working notes, and the editor swap files they leave behind. Kept out
+# of version control because todo.md is a scratchpad rather than a record: it is
+# edited constantly, says nothing about the system that CLAUDE.md or docs/ does
+# not, and its churn shows up in every diff.
+todo.md
+.*.swp
+*.swp

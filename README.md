@@ -17,7 +17,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 - **`db/`** — the local snapshot of the production Cloudflare D1 (`d1.sqlite`, plus the `d1.sql` text dump beside it), pulled by `pipeline.fetch_database`. Gitignored and regenerable; query `d1.sqlite` for any local analysis. Distinct from `attempts/<size>/`, which holds the *tracked* bot benchmark results that feed the rating model.
 - **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
-Three documents go deeper: **`docs/methodology.md`** is the self-contained methodology — how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost; **`CLAUDE.md`** documents the subsystems and the cross-file invariants; **`pwa/README.md`** covers the front-end and the Worker.
+Where to go deeper: **`docs/overview.md`** describes what each subsystem is for and who owns what state, with no algorithms — start there. **`docs/methodology.md`** is the self-contained methodology: how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost. **`CLAUDE.md`** is the operating layer — the commands and the cross-file invariants — and its "Where the detail lives" table indexes the rest of `docs/`. **`pwa/README.md`** covers the front-end and the Worker, and **`docs/contract.md`** is the editing contract for all of the above.
 
 ## Prerequisites
 

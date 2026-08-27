@@ -1,11 +1,45 @@
-# Worker operations: write guards, the maintenance freeze, and the DB fetch
+# Worker operations: the HTTP surface, write guards, the maintenance freeze, and the DB fetch
 
-<!-- Extracted from CLAUDE.md. Same contract as docs/methodology.md's scope note:
-     this describes the system as it is now. Past findings belong here; history does not. -->
+<!-- Editing rules: docs/contract.md. Present tense, no changelog, rules here and evidence with them. -->
 
-What protects the D1 write path, and how the local database mirror is pulled. The
+What the Worker serves, what protects the D1 write path, and how the local database mirror is pulled. The
 surgery procedure that the freeze exists for is in `db_surgery_runbook.md`.
 CLAUDE.md carries the short form and points here.
+
+## The HTTP surface
+
+`pwa/src/index.js` is the entrypoint. Static assets ship via the `[assets]` binding in `wrangler.toml`, and an SPA fallback derives board size from `/9` or `/13`. Handlers live under `pwa/src/handlers/`.
+
+| Route | What it does |
+| --- | --- |
+| `POST /report` | Per-attempt logging. **`createdAt` is REQUIRED in the payload** — the CLIENT owns the event time: it mints one ms per attempt, stores it as the entry's `date`, and the row is inserted VERBATIM, so `row.created_at === entry.date` exactly and sync matching is exact. The server only sanity-bounds it, **REFUSING rather than rewriting** — `400 {error, serverNow}` on missing, future (+2 min) or stale (−7 d) — so the client can self-correct once and resend; a silent rewrite would recreate the duplicate-mint precondition. Responds `{serverId, userSeq, digest}` with no `createdAt` echo. `serverId` is the row id stamped on the matching history entry (its presence = acked, and it is the id-cursor and digest key), so sync pulls skip the device's own rows. `userSeq` is the per-profile attempt count and is the **digest sync signal**: a jump past the device's expected sequence means another device wrote, so pull. |
+| `POST /report-backfill` | Inserts historical attempts with their client event time, at the id frontier. This is why the fetch cursor must be `id`. |
+| `POST /sync` | Account sync. Pages the user's reports newer than the client's **`sinceId` AUTOINCREMENT-id cursor** — gap-free for rows inserted with a historical `created_at`, such as an offline flush — at 1000 rows. Every response also carries a `serverSeq`/`serverDigest`/`serverMaxId` summary for the cheap in-sync check. An optional `limit` shrinks the page; **`limit: 1` is the client's frontier/existence probe**. A request without a valid `sinceId` gets an empty no-op, so it just resyncs on reload. |
+| `GET /push/vapid-public-key`, `POST /push/subscribe`, `POST /push/unsubscribe` | Web Push registration. |
+| `POST /schedule` | Recall-reminder schedule, in **diff mode**: the client keeps a per-row hour-rounded snapshot in local storage and sends only changed rows plus explicit removals, because each upsert bills the row *plus its two partial indexes* and replace-all is the heaviest D1 write path. A legacy `{schedule}` replace-all is still accepted. **Every call, even an empty diff, bumps `push_subscriptions.last_seen_at`** — the cron's mid-session suppression watermark. |
+| `POST /rank-survey` | Per-server rank declarations → `rank_surveys`. |
+| `POST /share-event` | Share-link create/open analytics → `share_events`. The client sends user, problem and size and, for opens, `document.referrer`; the Worker stamps the Cloudflare edge geo-IP `country`. |
+| `POST /link`, `POST /unlink` | Bind or release this account's self-selected EGD or AGA player. See `leaderboard_and_community_stats.md`. |
+| `POST /google/signin`, `POST /google/link`, `POST /google/unlink` | Google sign-in. `signin` only RESOLVES which code a verified Google account is bound to and writes nothing. See `client_sync_and_cache.md`. |
+| `GET /profile` | The federation binding, the `hidden_profiles` flag and a `google` boolean, `no-store` — the Account dialog's whole panel in one read. Its URL is the userId and nothing else, so it **belongs in the service worker's dynamic-GET bypass list**. |
+| `GET /server-stats` | Serves the cached community-stats blob. |
+| `scheduled()` | Cron-driven: walks `recall_schedule` to deliver due Web Push notifications, **and** recomputes `server_stats` when it is ≥23 h old or the version changed. |
+
+## D1 schema
+
+Binding `DB` → database `tsumego-reports`. Schema lives in `pwa/schema.sql` (idempotent `CREATE … IF NOT EXISTS`); apply new tables and indexes to the remote with `npx wrangler d1 execute tsumego-reports --remote --file=schema.sql`.
+
+- **`tsumego_reports`** — the per-attempt log: `user_id, problem, success, created_at, size, move, time_used, review_time, is_repeat`, plus the per-profile sync-digest columns `user_seq` (attempt count) and `running_sum` (the exclusive-prefix sum of row hashes), lazy-seeded in the INSERT. **There is no `UNIQUE(user_id, problem)` constraint**, so repeat attempts produce their own rows. Two indexes, both load-bearing: **`idx_tsumego_reports_created`** on `created_at` for the server-stats window scan, and **`idx_tsumego_reports_user_id`** on `(user_id, id)` for the per-user id-cursor `/sync` scan and the digest's constant-time latest-row lookup. **When retiring an index, drop it — on the live D1 too — only AFTER the deploy that stops reading it.**
+- **`push_subscriptions`** — one row per device, `endpoint` PK with `user_id` indexed, so the recall cron fans each due reminder out to all of a user's devices. Carries the per-device throttle, dead-endpoint cleanup and per-account active-session suppression.
+- **`recall_schedule`** — what the cron walks.
+- **`rank_surveys`** — self-reported ranks per server.
+- **`share_events`** — share-link create/open analytics.
+- **`external_ids`** — the leaderboard identity binding, one row per LINKED account, holding the `egd_pin`/`aga_id` plus the `display_name`/`country_code` snapshotted at link time. The per-column UNIQUE indexes are what make a claim exclusive.
+- **`hidden_profiles`** — presence means leaderboard opt-out.
+- **`google_accounts`** — `google_sub` PK → `user_id` UNIQUE, which is the exclusivity in both directions. The opaque subject id ONLY, no address.
+- **`server_stats`** — single-row JSON cache, `key='latest'`.
+
+A `--full` export carries only tables that had rows at export time, whereas the incremental fetch's regenerated dump carries every table it discovered remotely — so an empty table such as `history_refresh_log` is present in one and absent from the other.
 
 ## Write-endpoint guards and the maintenance freeze
 
