@@ -2,8 +2,9 @@
 //
 // The Weaknesses pane of the detailed-stats modal (stats-ui.js is the
 // orchestrator): a row for EVERY shipped motif, always, carrying the two
-// readings motif-stats.js computes and their intervals, plus links to past
-// mistakes on the motifs where a deficit is credible. The intervals come from
+// readings motif-stats.js computes and their intervals, plus — behind an
+// unlabelled click on the row itself — links to past mistakes on the motifs
+// where a deficit is credible. The intervals come from
 // motif-stats.js at the MOTIF_Z gate's own width, NOT at a conventional 95%:
 // locked that way, "band clear of the neutral line" and "flagged" are the same
 // statement, so a flagged row can never show a band straddling its neutral point.
@@ -305,25 +306,28 @@ function buildMotifRow(kind, row, recallSet, history) {
         p: Math.min(normCdf(Math.abs(row.strength.z)), 0.99),
     };
 
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'stats-issue-examples-toggle wk-examples-toggle';
-    toggle.textContent = getTerm('statsExamples');
-    el.appendChild(toggle);
-
     const list = document.createElement('div');
     list.className = 'stats-issue-examples-list wk-examples-list';
     list.hidden = true;
     el.appendChild(list);
 
+    // The ROW ITSELF opens the list, and nothing says so: no label, no cursor
+    // change, no marker distinguishing a row that has examples from one that
+    // does not. The pane is a set of readings to be read, and a visible control
+    // on every credible row turned it into a menu of things to click; unlabelled,
+    // the examples stay there for a reader who tries the row and cost the layout
+    // nothing for everyone else.
+    //
+    // Clicks inside the list belong to the example links — letting them through
+    // would fold the list shut under the pointer as one is opened.
     let populated = false;
-    toggle.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+        if (list.contains(e.target)) return;
         if (!populated) {
             populateExamplesList(list, issue, recallSet, history);
             populated = true;
         }
         list.hidden = !list.hidden;
-        toggle.textContent = list.hidden ? getTerm('statsExamples') : getTerm('statsHide');
     });
     return el;
 }

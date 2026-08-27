@@ -1319,21 +1319,6 @@ body {
     flex: 1 1 auto;
 }
 
-.stats-issue-examples-toggle {
-    font: inherit;
-    color: inherit;
-    background: transparent;
-    border: none;
-    padding: 0;
-    text-decoration: underline;
-    cursor: pointer;
-    opacity: 0.85;
-}
-
-.stats-issue-examples-toggle:hover {
-    opacity: 1;
-}
-
 .stats-issue-examples-list {
     margin: 0.25em 0 0.5em 3ch;
     display: flex;
@@ -1491,21 +1476,10 @@ body {
     color: color-mix(in srgb, var(--wk-tone) calc(var(--wk-weight) * 100%), currentColor);
 }
 
-.wk-examples-toggle {
-    grid-column: 2;
-    justify-self: start;
-}
-
+/* The list is a third item in the row's single-column stack, under the track it
+   belongs to; the shared rule's left indent is for the old two-column pane. */
 .wk-examples-list {
-    grid-column: 2;
     margin-left: 0;
-}
-
-@media (max-width: 30em) {
-    .wk-examples-toggle,
-    .wk-examples-list {
-        grid-column: 1;
-    }
 }
 
 @media (prefers-color-scheme: light) {
