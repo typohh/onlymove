@@ -84,12 +84,25 @@ export async function renderGoogleButton(host, onCredential) {
         cancel_on_tap_outside: true,
         ux_mode: 'popup',
     });
+    // RECTANGULAR rather than a pill, and that is a dark-mode fix rather than a
+    // taste: GIS draws the personalized variant ("Sign in as <name>", once a
+    // Google session exists) inside a cross-origin iframe whose document paints
+    // an opaque WHITE background of its own. Nothing on this side can reach it —
+    // the iframe element is already transparent, `color-scheme: dark` does not
+    // apply to a child document that paints, and the frame cannot be hidden
+    // because it IS the button.
+    //
+    // What is left is how much of that white rectangle the button covers, and a
+    // rectangle covers it far better than a pill: measured against the live
+    // button, a pill leaves roughly 20px of white at each rounded end where the
+    // shape curves away from the frame, a rectangle a few px of uniform border.
+    // So the white becomes an outline on a button instead of a block behind one.
     window.google.accounts.id.renderButton(host, {
         type: 'standard',
         theme: buttonTheme(),
         size: 'large',
         text: 'signin_with',
-        shape: 'pill',
+        shape: 'rectangular',
         logo_alignment: 'left',
     });
 }

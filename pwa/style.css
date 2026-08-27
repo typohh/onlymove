@@ -854,27 +854,6 @@ body {
     min-height: 2.2em;
     margin: 0.5714em 0 0.2857em;
 }
-/* GIS renders the PERSONALIZED button ("Sign in as <name>", shown once a Google
-   session exists) as a cross-origin IFRAME rather than as markup in this
-   document — the plain button is markup and has no iframe, which is why only
-   returning users see this. That embedded document paints its OWN opaque white
-   background, so on the dark skin a white rectangle sits behind Google's dark
-   pill and reads as a rendering fault.
-   Nothing here can reach inside it: the iframe element's own background is
-   already transparent, and `color-scheme: dark` on it does not help because the
-   white is painted by the child document, not by the canvas default. Clipping
-   from outside is the only lever, so the frame is rounded to a pill and the
-   white becomes an outline around the button rather than a block behind it.
-   A radius far larger than any possible height, deliberately: the frame's size
-   is Google's and changes with the name it shows, so anything derived from the
-   measured box would be a number that only held for one render. Cropping the
-   white away entirely needs exactly that — the inset Google leaves inside the
-   frame — which is why it is not done here. */
-.account-google-button iframe {
-    border-radius: 999px;
-    overflow: hidden;
-}
-
 /* Capped and scrollable: a name search can return dozens of players, and the
    modal itself has no scroll of its own. */
 .account-results {
